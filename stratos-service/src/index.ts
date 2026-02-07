@@ -38,7 +38,7 @@ export class StratosServer {
   static async create(
     cfg: StratosServiceConfig,
     blobstore: BlobStoreCreator,
-    cborToRecord: (content: Buffer) => Record<string, unknown>,
+    cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
   ): Promise<StratosServer> {
     const ctx = await createAppContext({
       cfg,
@@ -180,8 +180,8 @@ export async function main(): Promise<void> {
 
   const blobstore = createBlobstore(cfg)
 
-  const cborToRecord = (bytes: Buffer): Record<string, unknown> => {
-    const data = cborDecode(bytes)
+  const cborToRecord = (bytes: Buffer | Uint8Array): Record<string, unknown> => {
+    const data = cborDecode(Buffer.from(bytes))
     if (isTypedLexMap(data)) return data
     throw new Error('Expected record with $type property')
   }

@@ -30,9 +30,9 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
 
   constructor(
     protected db: StratosDb,
-    protected cborToRecord: (content: Buffer) => Record<string, unknown>,
+    protected cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
   ) {
-    this.reader = new StratosRecordReader(db, cborToRecord)
+    this.reader = new StratosRecordReader(db, (content) => cborToRecord(Buffer.from(content)))
   }
 
   async recordCount(): Promise<number> {
@@ -116,10 +116,10 @@ export class SqliteRecordStoreWriter
 
   constructor(
     db: StratosDb,
-    cborToRecord: (content: Buffer) => Record<string, unknown>,
+    cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
   ) {
     super(db, cborToRecord)
-    this.transactor = new StratosRecordTransactor(db, cborToRecord)
+    this.transactor = new StratosRecordTransactor(db, (content) => cborToRecord(Buffer.from(content)))
   }
 
   async putRecord(record: {

@@ -5,7 +5,7 @@ import {CID} from 'multiformats/cid'
 import {fileExists, rmIfExists, chunkArray, aggregateErrors} from '@atproto/common'
 import {randomStr} from '@atproto/crypto'
 import {BlobStore, BlobStoreCreator, BlobNotFoundError} from '@northsky/stratos-core'
-import {readableToAsyncIterable, collectAsyncIterable} from './util.js'
+import {asyncIterableToReadable, readableToAsyncIterable, collectAsyncIterable} from './util.js'
 import {Readable} from "node:stream";
 
 /**
@@ -141,7 +141,7 @@ export class DiskBlobStore implements BlobStore {
     if (!exists) {
       throw new BlobNotFoundError()
     }
-    return readableToAsyncIterable(fsSync.createReadStream(filePath))
+    return asyncIterableToReadable(readableToAsyncIterable(fsSync.createReadStream(filePath)))
   }
 
   async delete(cid: CID): Promise<void> {

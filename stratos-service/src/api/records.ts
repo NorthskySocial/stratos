@@ -379,7 +379,7 @@ export async function listRecords(
 function encodeRecord(record: unknown): Buffer {
   // Use CBOR encoding for records
   // Cast to LexValue since we validate the record before calling this
-  return cborEncode(record as LexValue)
+  return Buffer.from(cborEncode(record as LexValue))
 }
 
 async function computeCid(record: unknown): Promise<CID> {

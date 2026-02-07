@@ -75,13 +75,13 @@ export class StratosActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
-  private readonly cborToRecord: (content: Buffer) => Record<string, unknown>
+  private readonly cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>
 
   constructor(opts: {
     dataDir: string
     blobstore: BlobStoreCreator
     logger?: Logger
-    cborToRecord: (content: Buffer) => Record<string, unknown>
+    cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>
   }) {
     this.dataDir = opts.dataDir
     this.blobstore = opts.blobstore
@@ -134,7 +134,7 @@ export class StratosActorStore {
     try {
       const store: StratosActorReader = {
         did,
-        record: new StratosRecordReader(db, this.cborToRecord, this.logger),
+        record: new StratosRecordReader(db, (content) => this.cborToRecord(Buffer.from(content)), this.logger),
         repo: new StratosSqlRepoReader(db),
         blob: new StratosBlobReader(db, blobStore, this.logger),
       }
@@ -161,7 +161,7 @@ export class StratosActorStore {
           did,
           db: tx as unknown as StratosDb,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          record: new StratosRecordTransactor(tx as any, this.cborToRecord, this.logger),
+          record: new StratosRecordTransactor(tx as any, (content) => this.cborToRecord(Buffer.from(content)), this.logger),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           repo: new StratosSqlRepoTransactor(tx as any),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -517,7 +517,7 @@ export interface AppContext {
 export interface AppContextOptions {
   cfg: StratosServiceConfig
   blobstore: BlobStoreCreator
-  cborToRecord: (content: Buffer) => Record<string, unknown>
+  cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>
   logger?: Logger
 }
 
