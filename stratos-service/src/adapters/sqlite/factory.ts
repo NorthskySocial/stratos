@@ -136,7 +136,8 @@ export class SqliteStorageFactory implements StorageFactory {
     const db = createStratosDb(dbLocation)
 
     try {
-      return await db.transaction(async (tx) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await db.transaction(async (tx: any) => {
         const stores: ActorStoreWriters = {
           record: new SqliteRecordStoreWriter(tx as unknown as StratosDb, this.cborToRecord),
           blobMetadata: new SqliteBlobMetadataWriter(tx as unknown as StratosDb),

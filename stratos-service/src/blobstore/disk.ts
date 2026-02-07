@@ -101,8 +101,9 @@ export class DiskBlobStore implements BlobStore {
     const quarantinePath = this.getQuarantinePath(cid)
     try {
       await fs.rename(storedPath, quarantinePath)
-    } catch (err) {
-      if (isErrnoException(err) && err.code === 'ENOENT') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
         throw new BlobNotFoundError()
       }
       throw err
@@ -115,8 +116,9 @@ export class DiskBlobStore implements BlobStore {
     const storedPath = this.getStoredPath(cid)
     try {
       await fs.rename(quarantinePath, storedPath)
-    } catch (err) {
-      if (isErrnoException(err) && err.code === 'ENOENT') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
         throw new BlobNotFoundError()
       }
       throw err
@@ -127,8 +129,9 @@ export class DiskBlobStore implements BlobStore {
     try {
       const buffer = await fs.readFile(this.getStoredPath(cid))
       return Buffer.from(buffer)
-    } catch (err) {
-      if (isErrnoException(err) && err.code === 'ENOENT') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
         throw new BlobNotFoundError()
       }
       throw err
@@ -183,9 +186,3 @@ export class DiskBlobStore implements BlobStore {
   }
 }
 
-/**
- * Type guard for Node.js errno exceptions
- */
-function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
-  return err instanceof Error && 'code' in err
-}

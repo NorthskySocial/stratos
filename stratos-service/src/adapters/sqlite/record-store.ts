@@ -32,7 +32,8 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
     protected db: StratosDb,
     protected cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
   ) {
-    this.reader = new StratosRecordReader(db, (content) => cborToRecord(Buffer.from(content)))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.reader = new StratosRecordReader(db, (content: any) => cborToRecord(Buffer.from(content)))
   }
 
   async recordCount(): Promise<number> {
@@ -41,7 +42,8 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
 
   async listAll(): Promise<RecordDescript[]> {
     const records = await this.reader.listAll()
-    return records.map((r) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return records.map((r: any) => ({
       uri: r.uri,
       cid: r.cid,
       collection: new AtUri(r.uri).collection,
@@ -60,7 +62,8 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
       includeSoftDeleted: options.includeSoftDeleted,
     })
 
-    return records.map((r) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return records.map((r: any) => ({
       uri: r.uri,
       cid: r.cid,
       value: r.value,
@@ -119,7 +122,8 @@ export class SqliteRecordStoreWriter
     cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
   ) {
     super(db, cborToRecord)
-    this.transactor = new StratosRecordTransactor(db, (content) => cborToRecord(Buffer.from(content)))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.transactor = new StratosRecordTransactor(db, (content: any) => cborToRecord(Buffer.from(content)))
   }
 
   async putRecord(record: {

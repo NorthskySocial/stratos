@@ -134,7 +134,8 @@ export class StratosActorStore {
     try {
       const store: StratosActorReader = {
         did,
-        record: new StratosRecordReader(db, (content) => this.cborToRecord(Buffer.from(content)), this.logger),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        record: new StratosRecordReader(db, (content: any) => this.cborToRecord(Buffer.from(content)), this.logger),
         repo: new StratosSqlRepoReader(db),
         blob: new StratosBlobReader(db, blobStore, this.logger),
       }
@@ -156,12 +157,13 @@ export class StratosActorStore {
     const blobStore = this.blobstore(did)
 
     try {
-      return await db.transaction(async (tx) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await db.transaction(async (tx: any) => {
         const store: StratosActorTransactor = {
           did,
           db: tx as unknown as StratosDb,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          record: new StratosRecordTransactor(tx as any, (content) => this.cborToRecord(Buffer.from(content)), this.logger),
+          record: new StratosRecordTransactor(tx as any, (content: any) => this.cborToRecord(Buffer.from(content)), this.logger),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           repo: new StratosSqlRepoTransactor(tx as any),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

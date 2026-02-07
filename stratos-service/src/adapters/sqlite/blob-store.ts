@@ -71,7 +71,8 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       .innerJoin(stratosBlob, eq(stratosBlob.cid, stratosRecordBlob.blobCid))
       .where(eq(stratosRecordBlob.recordUri, recordUri))
 
-    return rows.map((row) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((row: any) => ({
       cid: CID.parse(row.cid),
       mimeType: row.mimeType,
       size: row.size,
@@ -87,7 +88,8 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       .select({cid: stratosBlob.cid})
       .from(stratosBlob)
 
-    return rows.map((row) => CID.parse(row.cid))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((row: any) => CID.parse(row.cid))
   }
 }
 

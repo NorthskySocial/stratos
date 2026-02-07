@@ -88,7 +88,8 @@ export function createAuthVerifier(
         claims.sub,
         idResolver,
       )
-    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
       if (err instanceof EnrollmentDeniedError) {
         throw new InvalidRequestError(err.message, 'NotEnrolled')
       }

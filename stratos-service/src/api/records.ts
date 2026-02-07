@@ -1,17 +1,17 @@
-import { InvalidRequestError, AuthRequiredError } from '@atproto/xrpc-server'
-import { CID } from 'multiformats/cid'
-import { TID } from '@atproto/common-web'
-import { encode as cborEncode, cidForLex, type LexValue } from '@atproto/lex-cbor'
-import { AtUri } from '@atproto/syntax'
+import {AuthRequiredError, InvalidRequestError} from '@atproto/xrpc-server'
+import {CID} from 'multiformats/cid'
+import {TID} from '@atproto/common-web'
+import {cidForLex, encode as cborEncode, type LexValue} from '@atproto/lex-cbor'
+import {AtUri} from '@atproto/syntax'
 
 import {
   assertStratosValidation,
-  StratosValidationError,
   extractBoundaryDomains,
   stratosSeq,
+  StratosValidationError,
 } from '@northsky/stratos-core'
 
-import { AppContext, StratosActorTransactor } from '../context.js'
+import {AppContext, StratosActorTransactor} from '../context.js'
 
 /**
  * Record creation input
@@ -84,7 +84,8 @@ export async function createRecord(
     try {
       // Note: assertStratosValidation handles post-specific validation internally
       assertStratosValidation(record as Record<string, unknown>, collection, ctx.cfg.stratos)
-    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
       if (err instanceof StratosValidationError) {
         throw new InvalidRequestError(err.message, 'InvalidRecord')
       }
@@ -150,7 +151,8 @@ export async function createRecord(
       result.cid,
       createdAt,
     )
-  } catch (err) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
     ctx.logger?.warn(
       { err: err instanceof Error ? err.message : String(err), did: callerDid, collection, rkey },
       'failed to write stub to PDS',
@@ -274,7 +276,8 @@ export async function getRecord(
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
-  const result = await ctx.actorStore.read(repo, async (store) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return await ctx.actorStore.read(repo, async (store: any) => {
     const record = await store.record.getRecord(uri, cid ?? null)
     if (!record) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
@@ -284,7 +287,8 @@ export async function getRecord(
     if (callerDid !== repo) {
       const boundary = extractBoundaryDomains(record.value as Record<string, unknown>)
       if (boundary.length > 0 && callerDomains) {
-        const allowed = boundary.some((domain) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const allowed = boundary.some((domain: any) =>
           callerDomains.includes(domain),
         )
         if (!allowed) {
@@ -299,8 +303,6 @@ export async function getRecord(
       value: record.value,
     }
   })
-
-  return result
 }
 
 /**
@@ -334,7 +336,8 @@ export async function listRecords(
     return { records: [] }
   }
 
-  const result = await ctx.actorStore.read(repo, async (store) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return await ctx.actorStore.read(repo, async (store: any) => {
     const records = await store.record.listRecordsForCollection({
       collection,
       limit,
@@ -343,7 +346,11 @@ export async function listRecords(
     })
 
     // Filter by domain boundary if needed
-    const filtered = records.filter((record: { uri: string; cid: string; value: Record<string, unknown> }) => {
+    const filtered = records.filter((record: {
+      uri: string;
+      cid: string;
+      value: Record<string, unknown>
+    }) => {
       if (callerDid === repo) {
         return true // Owner sees everything
       }
@@ -353,7 +360,8 @@ export async function listRecords(
         return true // No boundary restriction
       }
 
-      return boundary.some((domain) => callerDomains.includes(domain))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return boundary.some((domain: any) => callerDomains.includes(domain))
     })
 
     const lastRecord = filtered[filtered.length - 1]
@@ -370,8 +378,6 @@ export async function listRecords(
       cursor: nextCursor,
     }
   })
-
-  return result
 }
 
 // Helper functions
