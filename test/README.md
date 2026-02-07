@@ -117,6 +117,26 @@ deno run -A test/scripts/run-all.ts
 
 Runs all five phases in order. On any phase failure the remaining phases (except teardown) are skipped.
 
+### Direct mode (bypass OAuth)
+
+If you cannot use Playwright browser automation (e.g., headless environment, PDS OAuth issues), use `--direct` to bypass OAuth enrollment:
+
+```bash
+deno run -A test/scripts/run-all.ts --direct
+```
+
+This mode:
+1. Skips Phase 2 (OAuth enrollment via Playwright)
+2. Instead runs `direct-enroll.ts` which:
+   - Inserts enrollment rows directly into `service.sqlite`
+   - Creates actor store directories and databases under `test-data/actors/`
+   - Authenticates via `Bearer <did>` header (enrollment check falls back to database lookup)
+
+Direct mode is useful when:
+- Playwright/Chromium setup is unavailable
+- PDS OAuth flow is broken or changed
+- You need faster iteration on boundary/record tests
+
 ### Individual phases
 
 Each script can be run independently. Phases 2–4 require the prior phases to have been run.
@@ -324,13 +344,14 @@ test/
     ├── deno.json                      # Deno config (isolates from project tsconfig)
     ├── setup.ts                       # Phase 1: PDS accounts + start Stratos
     ├── test-enrollment.ts             # Phase 2: OAuth enrollment via Playwright
+    ├── direct-enroll.ts               # Phase 2 alternative: Direct DB enrollment (--direct mode)
     ├── configure-boundaries.ts        # Phase 3: Per-user boundary assignment
     ├── test-posts.ts                  # Phase 4: CRUD + boundary access tests
     ├── teardown.ts                    # Phase 5: Cleanup
-    ├── run-all.ts                     # Orchestrator (all phases)
+    ├── run-all.ts                     # Orchestrator (all phases, supports --direct flag)
     └── lib/
         ├── config.ts                  # Test constants and user definitions
-        ├── db.ts                      # Direct SQLite boundary management
+        ├── db.ts                      # Direct SQLite access (enrollment + actor store creation)
         ├── log.ts                     # Colored test output helpers
         ├── pds.ts                     # PDS admin API (invite codes, accounts)
         ├── state.ts                   # Test state persistence between phases
@@ -349,7 +370,7 @@ Inspect screenshots in `test-data/screenshots/`. The PDS OAuth UI may have chang
 Ensure the container has written to `test-data/service.sqlite` (the SQLite DB is created on first request, not on startup). Verify the bind mount: `ls -la test-data/`.
 
 **"No valid session for user" on API calls**
-The `Bearer <did>` auth depends on stored OAuth sessions from Phase 2. Re-run enrollment if sessions are missing.
+The `Bearer <did>` auth validates against OAuth sessions first, then falls back to enrollment check. If using `--direct` mode, ensure enrollment rows exist in `service.sqlite`. Re-run enrollment (or `direct-enroll.ts`) if authentication fails.
 
 **Permission errors on test-data/**
 The Stratos container runs as uid 1001. The setup script sets `chmod 777` on the directory. If that fails, run `sudo chmod -R 777 test-data/` manually.
