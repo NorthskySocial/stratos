@@ -2,6 +2,7 @@
   "name": "stratos",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Stratos - Private namespace service for ATProtocol",
   "repository": {
     "type": "git",
@@ -11,7 +12,7 @@
   "scripts": {
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
-    "lint": "pnpm -r run lint",
+    "lint": "eslint test && pnpm -r run lint",
     "format": "prettier --write .",
     "test": "vitest",
     "codegen": "pnpm --filter stratos-service run codegen"
@@ -22,6 +23,7 @@
     "@typescript-eslint/parser": "^8.54.0",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.3.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

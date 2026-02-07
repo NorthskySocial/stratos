@@ -1,12 +1,11 @@
 #!/usr/bin/env -S deno run -A
 // Setup script — creates PDS accounts, starts Stratos via Docker Compose, waits for health.
 
-import { TEST_USERS, TEST_DATA_DIR, PROJECT_ROOT } from './lib/config.ts'
+import { TEST_USERS, PROJECT_ROOT } from './lib/config.ts'
 import { createInviteCode, createAccount, accountExists } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
-import { loadState, saveState, type TestState } from './lib/state.ts'
+import { saveState, type TestState } from './lib/state.ts'
 import { section, info, pass, fail, warn } from './lib/log.ts'
-import { error } from 'node:console'
 
 async function run() {
   section('Phase 1: Setup')
