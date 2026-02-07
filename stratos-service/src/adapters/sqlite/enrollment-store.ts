@@ -10,7 +10,7 @@ import type {
   EnrollmentStoreWriter,
   StoredEnrollment,
   ListEnrollmentsOptions,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import type { ServiceDb } from '../../db/index.js'
 import { enrollment, enrollmentBoundary } from '../../db/schema.js'
 

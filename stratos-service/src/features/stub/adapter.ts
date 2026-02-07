@@ -1,6 +1,6 @@
 import { CID } from 'multiformats/cid'
-import type { StubWriterService, WriteStubResult } from '@anthropic/stratos-core'
-import { generateStub, NotEnrolledError } from '@anthropic/stratos-core'
+import type { StubWriterService, WriteStubResult } from '@northsky/stratos-core'
+import { generateStub, NotEnrolledError } from '@northsky/stratos-core'
 
 /**
  * Agent interface for writing to user's PDS

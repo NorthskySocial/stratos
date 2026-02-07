@@ -51,6 +51,7 @@ export class StratosBlobReader {
         ...metadata,
         stream,
       }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
       return null
     }

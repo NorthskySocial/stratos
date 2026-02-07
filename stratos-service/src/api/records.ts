@@ -6,14 +6,10 @@ import { AtUri } from '@atproto/syntax'
 
 import {
   assertStratosValidation,
-  PreparedCreate,
-  PreparedUpdate,
-  PreparedDelete,
-  CommitData,
   StratosValidationError,
   extractBoundaryDomains,
   stratosSeq,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 
 import { AppContext, StratosActorTransactor } from '../context.js'
 

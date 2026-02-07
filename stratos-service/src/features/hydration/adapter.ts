@@ -8,11 +8,11 @@ import type {
   HydratedRecord,
   RecordResolver,
   BoundaryResolver,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import {
   canAccessRecord,
   extractBoundaryDomains,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import type { StratosActorStore } from '../../context.js'
 
 /**

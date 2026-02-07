@@ -5,7 +5,7 @@
  * Follows RFC 9449 for DPoP proof validation.
  */
 import { DpopManager, type DpopProof } from '@atproto/oauth-provider'
-import type { EnrollmentStoreReader, Logger } from '@anthropic/stratos-core'
+import type { EnrollmentStoreReader, Logger } from '@northsky/stratos-core'
 import {
   PdsTokenVerifier,
   type TokenVerificationResult,

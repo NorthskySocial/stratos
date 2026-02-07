@@ -1,13 +1,11 @@
-import { gt, asc, desc } from 'drizzle-orm'
+import {gt, asc, desc} from 'drizzle-orm'
 import {
   AuthRequiredError,
   InvalidRequestError,
 } from '@atproto/xrpc-server'
-import { IdResolver } from '@atproto/identity'
-import { StratosDb, stratosSeq } from '@anthropic/stratos-core'
+import {StratosDb, stratosSeq} from '@northsky/stratos-core'
 
-import { AppContext } from '../context.js'
-import { verifyServiceAuth } from '../auth/verifier.js'
+import {AppContext} from '../context.js'
 
 /**
  * Sequence event from stratos_seq table
@@ -88,7 +86,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
     },
     signal: AbortSignal,
   ): AsyncGenerator<CommitMessage | InfoMessage> {
-    const { did, cursor, domain } = params
+    const {did, cursor, domain} = params
 
     // Validate authentication
     const callerDid = auth?.credentials?.did
@@ -128,7 +126,9 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
     const catchUp = await getEventsSince(ctx, did, lastSeq)
 
     for (const event of catchUp) {
-      if (signal.aborted) return
+      if (signal.aborted) {
+        return
+      }
 
       // Filter by domain if specified
       if (domain && !matchesDomain(event, domain)) {
@@ -144,13 +144,17 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
       // Wait a bit before polling
       await sleep(500)
 
-      if (signal.aborted) return
+      if (signal.aborted) {
+        return
+      }
 
       // Check for new events
       const newEvents = await getEventsSince(ctx, did, lastSeq)
 
       for (const event of newEvents) {
-        if (signal.aborted) return
+        if (signal.aborted) {
+          return
+        }
 
         // Filter by domain if specified
         if (domain && !matchesDomain(event, domain)) {
@@ -171,7 +175,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
     const result = await ctx.actorStore.read(did, async (store) => {
       const db = (store as any).record.db as StratosDb
       const rows = await db
-        .select({ seq: stratosSeq.seq })
+        .select({seq: stratosSeq.seq})
         .from(stratosSeq)
         .orderBy(desc(stratosSeq.seq))
         .limit(1)
@@ -189,7 +193,7 @@ async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
     const result = await ctx.actorStore.read(did, async (store) => {
       const db = (store as any).record.db as StratosDb
       const rows = await db
-        .select({ seq: stratosSeq.seq })
+        .select({seq: stratosSeq.seq})
         .from(stratosSeq)
         .orderBy(asc(stratosSeq.seq))
         .limit(1)
@@ -295,7 +299,7 @@ export function registerSubscribeRecords(ctx: AppContext): void {
   const handler = createSubscribeRecordsHandler(ctx)
 
   ctx.xrpcServer.streamMethod('app.stratos.sync.subscribeRecords', {
-    handler: async function* ({ params, auth, signal }) {
+    handler: async function* ({params, auth, signal}) {
       const typedParams = params as unknown as SubscribeRecordsParams
       const typedAuth = auth as {
         credentials: {

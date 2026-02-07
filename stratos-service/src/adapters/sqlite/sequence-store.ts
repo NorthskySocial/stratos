@@ -14,8 +14,8 @@ import type {
   SequenceEventType,
   GetEventsSinceOptions,
   AppendEventInput,
-} from '@anthropic/stratos-core'
-import { StratosDb, stratosSeq } from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
+import { StratosDb, stratosSeq } from '@northsky/stratos-core'
 
 /**
  * Decoded event payload from CBOR blob
@@ -126,6 +126,7 @@ export class SqliteSequenceStoreReader implements SequenceStoreReader {
   async getEventsRange(
     startSeq: number,
     endSeq: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     options?: GetEventsSinceOptions,
   ): Promise<SequenceEvent[]> {
     const rows = await this.db
@@ -165,7 +166,7 @@ export class SqliteSequenceStoreWriter
   }
 
   async truncateBefore(seq: number): Promise<number> {
-    const result = await this.db
+    await this.db
       .delete(stratosSeq)
       .where(sql`${stratosSeq.seq} < ${seq}`)
 

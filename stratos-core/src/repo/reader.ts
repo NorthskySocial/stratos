@@ -1,4 +1,4 @@
-import { eq, gt, lt, inArray, desc, asc, sql, and } from 'drizzle-orm'
+import { eq, gt, inArray, desc, asc, sql, and } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { StratosDb, stratosRepoRoot, stratosRepoBlock, countAll } from '../db/index.js'
 import { Logger } from '../types.js'

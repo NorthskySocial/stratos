@@ -1,4 +1,4 @@
-import { eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { StratosDb, stratosBlob, stratosRecordBlob } from '../db/index.js'
 import { BlobStore, PreparedBlobRef, Logger } from '../types.js'

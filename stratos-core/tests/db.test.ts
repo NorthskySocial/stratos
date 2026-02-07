@@ -12,7 +12,6 @@ import {
   stratosRepoBlock,
   stratosRecord,
   stratosBlob,
-  stratosRecordBlob,
   stratosBacklink,
   stratosSeq,
 } from '../src/db/index.js'

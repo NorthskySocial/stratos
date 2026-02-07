@@ -14,13 +14,13 @@ import type {
   ActorStoreWriters,
   ServiceStores,
   BlobContentStore,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import {
   StratosDb,
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import { SqliteRecordStoreReader, SqliteRecordStoreWriter } from './record-store.js'
 import { SqliteBlobMetadataReader, SqliteBlobMetadataWriter } from './blob-store.js'
 import { SqliteRepoStoreReader, SqliteRepoStoreWriter } from './repo-store.js'

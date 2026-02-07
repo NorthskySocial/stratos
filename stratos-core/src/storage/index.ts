@@ -19,7 +19,6 @@ import type {
 } from './blob-store.js'
 import type { RepoStoreReader, RepoStoreWriter } from './repo-store.js'
 import type {
-  EnrollmentStoreReader,
   EnrollmentStoreWriter,
 } from './enrollment-store.js'
 import type { SequenceStoreReader, SequenceStoreWriter } from './sequence-store.js'

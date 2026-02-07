@@ -1,7 +1,7 @@
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../../context.js'
-import { createHydrationContext } from '@anthropic/stratos-core'
+import { createHydrationContext } from '@northsky/stratos-core'
 import {
   HydrationServiceImpl,
   ActorStoreRecordResolver,

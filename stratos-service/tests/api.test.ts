@@ -7,7 +7,7 @@ import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 
-import { BlobStore } from '@anthropic/stratos-core'
+import { BlobStore } from '@northsky/stratos-core'
 import {
   createServiceDb,
   migrateServiceDb,

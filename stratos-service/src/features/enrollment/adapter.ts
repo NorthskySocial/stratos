@@ -1,5 +1,5 @@
-import { eq } from 'drizzle-orm'
-import type { IdResolver, DidDocument } from '@atproto/identity'
+import {eq} from 'drizzle-orm'
+import type {IdResolver, DidDocument} from '@atproto/identity'
 import type {
   EnrollmentService,
   EnrollmentValidator,
@@ -10,15 +10,14 @@ import type {
   EnrollmentValidationResult,
   EnrollmentStoreReader,
   Logger,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import {
   extractPdsEndpoint,
   validateEnrollmentEligibility,
   NotEnrolledError,
-  EnrollmentDeniedError,
-} from '@anthropic/stratos-core'
-import type { ServiceDb } from '../../db/index.js'
-import { enrollment } from '../../db/index.js'
+} from '@northsky/stratos-core'
+import type {ServiceDb} from '../../db/index.js'
+import {enrollment} from '../../db/index.js'
 
 /**
  * Enrollment store for persistence
@@ -35,12 +34,13 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     private store: EnrollmentStore,
     private actorStoreCreator: (did: string) => Promise<void>,
     private logger?: Logger,
-  ) {}
+  ) {
+  }
 
   async enroll(did: string, boundaries: string[]): Promise<Enrollment> {
     const start = Date.now()
     const now = new Date()
-    
+
     await this.actorStoreCreator(did)
 
     await this.store.db.insert(enrollment).values({
@@ -50,7 +50,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     })
 
     this.logger?.info(
-      { did, boundaryCount: boundaries.length, durationMs: Date.now() - start },
+      {did, boundaryCount: boundaries.length, durationMs: Date.now() - start},
       'user enrolled',
     )
 
@@ -64,11 +64,11 @@ export class EnrollmentServiceImpl implements EnrollmentService {
 
   async isEnrolled(did: string): Promise<boolean> {
     const result = await this.store.db
-      .select({ did: enrollment.did })
+      .select({did: enrollment.did})
       .from(enrollment)
       .where(eq(enrollment.did, did))
       .limit(1)
-    
+
     return result.length > 0
   }
 
@@ -78,7 +78,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       .from(enrollment)
       .where(eq(enrollment.did, did))
       .limit(1)
-    
+
     if (result.length === 0) {
       return null
     }
@@ -97,7 +97,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       .delete(enrollment)
       .where(eq(enrollment.did, did))
 
-    this.logger?.info({ did }, 'user unenrolled')
+    this.logger?.info({did}, 'user unenrolled')
   }
 }
 
@@ -108,18 +108,19 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
   constructor(
     private config: EnrollmentConfig,
     private idResolver: IdResolver,
-  ) {}
+  ) {
+  }
 
   async validate(did: string): Promise<EnrollmentValidationResult> {
     let didDoc: DidDocument | null
     try {
       didDoc = await this.idResolver.did.resolve(did)
     } catch {
-      return { allowed: false, reason: 'DidNotResolved' }
+      return {allowed: false, reason: 'DidNotResolved'}
     }
 
     if (!didDoc) {
-      return { allowed: false, reason: 'DidNotResolved' }
+      return {allowed: false, reason: 'DidNotResolved'}
     }
 
     const pdsEndpoint = extractPdsEndpoint(didDoc)
@@ -134,7 +135,8 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
 export class ProfileRecordWriterImpl implements ProfileRecordWriter {
   constructor(
     private getAgent: (did: string) => Promise<{ api: any } | null>,
-  ) {}
+  ) {
+  }
 
   async writeEnrollmentRecord(
     did: string,
@@ -152,7 +154,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
       rkey: 'self',
       record: {
         service: serviceEndpoint,
-        boundaries: boundaries.map(value => ({ value })),
+        boundaries: boundaries.map(value => ({value})),
         createdAt: new Date().toISOString(),
       },
     })
@@ -177,7 +179,8 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
  * Resolves boundaries from storage (per-user boundaries)
  */
 export class EnrollmentBoundaryResolver implements BoundaryResolver {
-  constructor(private enrollmentStore: EnrollmentStoreReader) {}
+  constructor(private enrollmentStore: EnrollmentStoreReader) {
+  }
 
   async getBoundaries(did: string): Promise<string[]> {
     return this.enrollmentStore.getBoundaries(did)

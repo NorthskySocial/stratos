@@ -6,7 +6,6 @@ import {
   isBskyUri,
   isStratosCollection,
   extractBoundaryDomains,
-  StratosValidationErrorCode,
 } from '../src/validation/stratos-validation.js'
 import { StratosConfig, StratosValidationError } from '../src/types.js'
 

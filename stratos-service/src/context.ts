@@ -19,7 +19,6 @@ import {
   StratosSqlRepoTransactor,
   StratosBlobReader,
   StratosBlobTransactor,
-  BlobStore,
   BlobStoreCreator,
   type Logger,
   EnrollmentService,
@@ -28,7 +27,7 @@ import {
   type EnrollmentStoreReader,
   type StoredEnrollment,
   type ListEnrollmentsOptions,
-} from '@anthropic/stratos-core'
+} from '@northsky/stratos-core'
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
@@ -46,8 +45,8 @@ import {
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import { PdsTokenVerifier } from './auth/introspection-client.js'
-import { DpopVerifier } from './auth/dpop-verifier.js'
+import { PdsTokenVerifier } from './auth/index.js'
+import { DpopVerifier } from './auth/index.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -73,6 +72,7 @@ export interface StratosActorTransactor {
 /**
  * Enrolled actor database schema
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface EnrollmentTable {
   did: string
   enrolledAt: string
@@ -83,10 +83,10 @@ interface EnrollmentTable {
  * Actor store manager for Stratos
  */
 export class StratosActorStore {
-  private dataDir: string
-  private blobstore: BlobStoreCreator
-  private logger?: Logger
-  private cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private readonly dataDir: string
+  private readonly blobstore: BlobStoreCreator
+  private readonly logger?: Logger
+  private readonly cborToRecord: (content: Uint8Array) => Record<string, unknown>
 
   constructor(opts: {
     dataDir: string

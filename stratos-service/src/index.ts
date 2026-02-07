@@ -1,20 +1,18 @@
 import http from 'node:http'
 import express from 'express'
 import cors from 'cors'
-import { IdResolver } from '@atproto/identity'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
-import type { BlobStoreCreator } from '@anthropic/stratos-core'
+import type { BlobStoreCreator } from '@northsky/stratos-core'
 
 import {
   AppContext,
-  AppContextOptions,
   createAppContext,
   destroyAppContext,
 } from './context.js'
 import { StratosServiceConfig, envToConfig, parseEnv } from './config.js'
 import { registerHandlers } from './api/handlers.js'
-import { registerSubscribeRecords } from './subscription/subscribe-records.js'
+import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 import { registerEnrollmentHandlers } from './features/index.js'
@@ -97,6 +95,7 @@ export class StratosServer {
         err: Error,
         _req: express.Request,
         res: express.Response,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _next: express.NextFunction,
       ) => {
         ctx.logger?.error({ err: err.message, stack: cfg.stratos.devMode ? err.stack : undefined }, 'server error')

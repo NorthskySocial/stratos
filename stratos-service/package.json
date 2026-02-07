@@ -1,5 +1,5 @@
 {
-  "name": "@anthropic/stratos-service",
+  "name": "@northsky/stratos-service",
   "version": "0.1.0",
   "description": "Standalone Stratos private namespace service for ATProtocol",
   "main": "dist/index.js",
@@ -18,7 +18,7 @@
     "codegen": "lex gen-server ../lexicons --out ./src/lexicon"
   },
   "dependencies": {
-    "@anthropic/stratos-core": "workspace:*",
+    "@northsky/stratos-core": "workspace:*",
     "@atproto/api": "^0.18.20",
     "@atproto/aws": "^0.2.31",
     "@atproto/common": "^0.5.11",

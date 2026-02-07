@@ -7,4 +7,4 @@ export {
 } from './util.js'
 
 // Re-export types from stratos-core for convenience
-export type { BlobStore, BlobStoreCreator } from '@anthropic/stratos-core'
+export type { BlobStore, BlobStoreCreator } from '@northsky/stratos-core'

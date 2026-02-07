@@ -2,7 +2,7 @@ import express from 'express'
 import { Agent } from '@atproto/api'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
-import type { Logger } from '@anthropic/stratos-core'
+import type { Logger } from '@northsky/stratos-core'
 import {
   EnrollmentConfig,
   validateEnrollment,

@@ -75,7 +75,7 @@ importers:
 
   stratos-service:
     dependencies:
-      '@anthropic/stratos-core':
+      '@northsky/stratos-core':
         specifier: workspace:*
         version: link:../stratos-core
       '@atproto/api':
