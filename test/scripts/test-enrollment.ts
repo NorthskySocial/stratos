@@ -106,7 +106,7 @@ async function enrollUser(
 
     // Step 3: Wait for navigation — either to consent page or directly to callback
     await page.waitForURL(
-      (url) => {
+      (url: URL) => {
         const s = url.toString()
         return (
           s.includes('/oauth/callback') ||
@@ -141,9 +141,12 @@ async function enrollUser(
       }
 
       // Wait for final redirect to callback
-      await page.waitForURL((url) => url.toString().includes(STRATOS_URL), {
-        timeout: 15_000,
-      })
+      await page.waitForURL(
+        (url: URL) => url.toString().includes(STRATOS_URL),
+        {
+          timeout: 15_000,
+        },
+      )
     }
 
     dim(`${label}: Final URL: ${page.url()}`)

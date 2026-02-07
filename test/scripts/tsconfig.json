@@ -3,7 +3,8 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM"],
+    "types": ["deno", "node"],
     "strict": true,
     "allowImportingTsExtensions": true,
     "noEmit": true
