@@ -9,7 +9,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "build": "pnpm --filter ./packages/stratos-core... build && pnpm --filter ./packages/stratos-service... build",
+    "build": "pnpm --filter stratos-core... build && pnpm --filter stratos-service... build",
     "clean": "pnpm -r run clean",
     "lint": "pnpm -r run lint",
     "test": "vitest",
