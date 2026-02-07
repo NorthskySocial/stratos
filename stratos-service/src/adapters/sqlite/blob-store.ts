@@ -3,8 +3,8 @@
  *
  * Implements BlobMetadataReader/Writer for SQLite backend.
  */
-import { CID } from 'multiformats/cid'
-import { eq, isNull } from 'drizzle-orm'
+import {CID} from 'multiformats/cid'
+import {eq} from 'drizzle-orm'
 import type {
   BlobMetadataReader,
   BlobMetadataWriter,
@@ -20,7 +20,8 @@ import {
  * SQLite implementation of BlobMetadataReader
  */
 export class SqliteBlobMetadataReader implements BlobMetadataReader {
-  constructor(protected db: StratosDb) {}
+  constructor(protected db: StratosDb) {
+  }
 
   async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
     const rows = await this.db
@@ -30,7 +31,9 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       .limit(1)
 
     const row = rows[0]
-    if (!row) return null
+    if (!row) {
+      return null
+    }
 
     return {
       cid,
@@ -45,7 +48,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
 
   async hasBlob(cid: CID): Promise<boolean> {
     const rows = await this.db
-      .select({ cid: stratosBlob.cid })
+      .select({cid: stratosBlob.cid})
       .from(stratosBlob)
       .where(eq(stratosBlob.cid, cid.toString()))
       .limit(1)
@@ -81,7 +84,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
 
   async listAllBlobCids(): Promise<CID[]> {
     const rows = await this.db
-      .select({ cid: stratosBlob.cid })
+      .select({cid: stratosBlob.cid})
       .from(stratosBlob)
 
     return rows.map((row) => CID.parse(row.cid))
@@ -93,8 +96,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
  */
 export class SqliteBlobMetadataWriter
   extends SqliteBlobMetadataReader
-  implements BlobMetadataWriter
-{
+  implements BlobMetadataWriter {
   async trackBlob(blob: {
     cid: CID
     mimeType: string
@@ -144,14 +146,14 @@ export class SqliteBlobMetadataWriter
   async takedownBlob(cid: CID, takedownRef: string): Promise<void> {
     await this.db
       .update(stratosBlob)
-      .set({ takedownRef })
+      .set({takedownRef})
       .where(eq(stratosBlob.cid, cid.toString()))
   }
 
   async restoreBlob(cid: CID): Promise<void> {
     await this.db
       .update(stratosBlob)
-      .set({ takedownRef: null })
+      .set({takedownRef: null})
       .where(eq(stratosBlob.cid, cid.toString()))
   }
 }

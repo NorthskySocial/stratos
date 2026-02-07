@@ -1,15 +1,15 @@
 /**
  * Tests for blob storage adapters (DiskBlobStore, S3BlobStoreAdapter)
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, rm, readFile, writeFile } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
-import { sha256 } from 'multiformats/hashes/sha2'
+import {describe, it, expect, beforeEach, afterEach} from 'vitest'
+import {mkdir, rm} from 'fs/promises'
+import {join} from 'path'
+import {tmpdir} from 'os'
+import {randomBytes} from 'crypto'
+import {CID} from 'multiformats/cid'
+import {sha256} from 'multiformats/hashes/sha2'
 
-import { DiskBlobStore } from '../src/blobstore/disk.js'
+import {DiskBlobStore} from '../src/index.js'
 import {
   readableToAsyncIterable,
   asyncIterableToReadable,
@@ -30,9 +30,9 @@ describe('DiskBlobStore', () => {
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `stratos-blobstore-${randomBytes(8).toString('hex')}`)
-    await mkdir(testDir, { recursive: true })
+    await mkdir(testDir, {recursive: true})
 
-    // Create store using factory pattern
+    // Create a store using a factory pattern
     const creator = DiskBlobStore.creator(
       join(testDir, 'blobs'),
       join(testDir, 'blobs', 'temp'),
@@ -42,13 +42,13 @@ describe('DiskBlobStore', () => {
   })
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true })
+    await rm(testDir, {recursive: true, force: true})
   })
 
   describe('factory pattern', () => {
     it('should create per-DID blob stores', () => {
       const creator = DiskBlobStore.creator(join(testDir, 'blobs'))
-      
+
       const store1 = creator('did:plc:user1')
       const store2 = creator('did:plc:user2')
 
@@ -229,7 +229,7 @@ describe('Stream Utilities', () => {
 
   describe('readableToAsyncIterable', () => {
     it('should convert Readable to AsyncIterable', async () => {
-      const { Readable } = await import('stream')
+      const {Readable} = await import('stream')
       const readable = Readable.from([
         Buffer.from([1, 2, 3]),
         Buffer.from([4, 5, 6]),

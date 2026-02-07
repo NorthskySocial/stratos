@@ -1,12 +1,11 @@
 import express from 'express'
-import { Agent } from '@atproto/api'
-import { NodeOAuthClient } from '@atproto/oauth-client-node'
-import { IdResolver } from '@atproto/identity'
-import type { Logger } from '@northsky/stratos-core'
+import {Agent} from '@atproto/api'
+import {NodeOAuthClient} from '@atproto/oauth-client-node'
+import {IdResolver} from '@atproto/identity'
+import type {Logger} from '@northsky/stratos-core'
 import {
   EnrollmentConfig,
   validateEnrollment,
-  EnrollmentDeniedError,
 } from '../auth/enrollment.js'
 
 /**
@@ -24,8 +23,11 @@ export interface EnrollmentRecord {
  */
 export interface EnrollmentStore {
   isEnrolled(did: string): Promise<boolean>
+
   enroll(record: EnrollmentRecord): Promise<void>
+
   unenroll(did: string): Promise<void>
+
   getEnrollment(did: string): Promise<EnrollmentRecord | null>
 }
 
@@ -56,7 +58,6 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     enrollmentConfig,
     enrollmentStore,
     idResolver,
-    baseUrl,
     serviceEndpoint,
     defaultBoundaries = [],
     logger,
@@ -86,7 +87,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       res.redirect(authUrl.toString())
     } catch (err) {
       logger?.error(
-        { err: err instanceof Error ? err.message : String(err), handle: req.query.handle },
+        {err: err instanceof Error ? err.message : String(err), handle: req.query.handle},
         'OAuth authorize failed',
       )
       res.status(500).json({
@@ -105,7 +106,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       const params = new URLSearchParams(req.url.split('?')[1] || '')
 
       // Complete the OAuth flow
-      const { session } = await oauthClient.callback(params)
+      const {session} = await oauthClient.callback(params)
       const did = session.sub
 
       // Validate enrollment eligibility
@@ -148,20 +149,20 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         try {
           const oauthSession = await oauthClient.restore(did)
           const agent = new Agent(oauthSession)
-          
+
           await agent.com.atproto.repo.putRecord({
             repo: did,
             collection: 'app.stratos.actor.enrollment',
             rkey: 'self',
             record: {
               service: serviceEndpoint,
-              boundaries: defaultBoundaries.map(value => ({ value })),
+              boundaries: defaultBoundaries.map(value => ({value})),
               createdAt: new Date().toISOString(),
             },
           })
         } catch (profileErr) {
           logger?.warn(
-            { err: profileErr instanceof Error ? profileErr.message : String(profileErr), did },
+            {err: profileErr instanceof Error ? profileErr.message : String(profileErr), did},
             'failed to write profile record',
           )
         }
@@ -178,11 +179,11 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       })
 
       if (!alreadyEnrolled) {
-        logger?.info({ did, boundaryCount: defaultBoundaries.length }, 'user enrolled via OAuth')
+        logger?.info({did, boundaryCount: defaultBoundaries.length}, 'user enrolled via OAuth')
       }
     } catch (err) {
       logger?.error(
-        { err: err instanceof Error ? err.message : String(err) },
+        {err: err instanceof Error ? err.message : String(err)},
         'OAuth callback failed',
       )
       res.status(500).json({
@@ -231,7 +232,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
       // Check enrollment status
       const enrollment = await enrollmentStore.getEnrollment(did)
-      
+
       if (!enrollment) {
         return res.json({
           did,
@@ -247,7 +248,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       })
     } catch (err) {
       logger?.error(
-        { err: err instanceof Error ? err.message : String(err) },
+        {err: err instanceof Error ? err.message : String(err)},
         'status check failed',
       )
       res.status(500).json({
@@ -312,13 +313,13 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           await oauthClient.revoke(did)
         } catch (err) {
           logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
+            {err: err instanceof Error ? err.message : String(err), did},
             'failed to revoke OAuth session',
           )
         }
       }
 
-      logger?.info({ did }, 'user unenrolled via OAuth')
+      logger?.info({did}, 'user unenrolled via OAuth')
 
       res.json({
         did,
@@ -327,7 +328,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       })
     } catch (err) {
       logger?.error(
-        { err: err instanceof Error ? err.message : String(err) },
+        {err: err instanceof Error ? err.message : String(err)},
         'revoke failed',
       )
       res.status(500).json({

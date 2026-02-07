@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
-import { sha256 } from 'multiformats/hashes/sha2'
-import { AtUri } from '@atproto/syntax'
+import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest'
+import {mkdir, rm} from 'fs/promises'
+import {join} from 'path'
+import {tmpdir} from 'os'
+import {randomBytes} from 'crypto'
+import {CID} from 'multiformats/cid'
+import {sha256} from 'multiformats/hashes/sha2'
+import {AtUri} from '@atproto/syntax'
 
-import { BlobStore } from '@northsky/stratos-core'
+import {BlobStore} from '@northsky/stratos-core'
 import {
   createServiceDb,
   migrateServiceDb,
@@ -15,19 +15,13 @@ import {
   ServiceDb,
 } from '../src/db/index.js'
 
-import { StratosServiceConfig } from '../src/config.js'
 import {
   StratosActorStore,
   SqliteEnrollmentStore,
-  createAppContext,
-  destroyAppContext,
   AppContext,
 } from '../src/context.js'
 import {
   createRecord,
-  deleteRecord,
-  getRecord,
-  listRecords,
 } from '../src/api/records.js'
 
 // Create a deterministic CID from data
@@ -80,15 +74,21 @@ function createMockBlobStore(): BlobStore {
     }),
     getBytes: vi.fn().mockImplementation(async (cid: CID) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
+      if (!bytes) {
+        throw new Error('Blob not found')
+      }
       return bytes
     }),
     getStream: vi.fn().mockImplementation(async (cid: CID) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
+      if (!bytes) {
+        throw new Error('Blob not found')
+      }
+
       async function* generate() {
         yield bytes!
       }
+
       return generate()
     }),
   }
@@ -97,44 +97,6 @@ function createMockBlobStore(): BlobStore {
 // CBOR decoder mock (just JSON for testing)
 function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes))
-}
-
-// Create a minimal test config
-function createTestConfig(dataDir: string): StratosServiceConfig {
-  return {
-    service: {
-      did: 'did:web:stratos.test',
-      serviceFragment: 'atproto_pns',
-      port: 3100,
-      publicUrl: 'https://stratos.test',
-    },
-    storage: {
-      backend: 'sqlite',
-      dataDir,
-    },
-    blobstore: {
-      provider: 'disk',
-      location: `${dataDir}/blobs`,
-    },
-    stratos: {
-      allowedDomains: ['example.com', 'test.com'],
-      retentionDays: 30,
-    },
-    enrollment: {
-      mode: 'open',
-      allowedDids: [],
-      allowedPdsEndpoints: [],
-    },
-    identity: {
-      plcUrl: 'https://plc.directory',
-    },
-    logging: {
-      level: 'info',
-    },
-    dpop: {
-      requireNonce: false,
-    },
-  }
 }
 
 // Create minimal app context for testing API functions
@@ -154,7 +116,7 @@ describe('API Records', () => {
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `stratos-api-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(testDir, { recursive: true })
+    await mkdir(testDir, {recursive: true})
 
     testDid = 'did:plc:testuser'
 
@@ -184,7 +146,7 @@ describe('API Records', () => {
   })
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true })
+    await rm(testDir, {recursive: true, force: true})
   })
 
   describe('enrollment check', () => {
@@ -202,7 +164,7 @@ describe('API Records', () => {
             collection: 'app.stratos.feed.post',
             record: {
               text: 'Hello',
-              boundary: { values: [{ value: 'example.com' }] },
+              boundary: {values: [{value: 'example.com'}]},
               createdAt: new Date().toISOString(),
             },
           },
@@ -239,7 +201,7 @@ describe('API Records', () => {
           {
             repo: otherDid,
             collection: 'app.stratos.feed.post',
-            record: { text: 'test' },
+            record: {text: 'test'},
           },
           testDid,
         )
@@ -265,7 +227,7 @@ describe('API Records', () => {
           {
             repo: testDid,
             collection: 'app.bsky.feed.post', // Wrong namespace
-            record: { text: 'test' },
+            record: {text: 'test'},
           },
           testDid,
         )
@@ -281,7 +243,7 @@ describe('SqliteEnrollmentStore', () => {
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `stratos-enrollment-${randomBytes(8).toString('hex')}`)
-    await mkdir(testDir, { recursive: true })
+    await mkdir(testDir, {recursive: true})
     const dbPath = join(testDir, 'test.sqlite')
 
     db = createServiceDb(dbPath)
@@ -294,7 +256,7 @@ describe('SqliteEnrollmentStore', () => {
 
   afterEach(async () => {
     await closeServiceDb(db)
-    await rm(testDir, { recursive: true, force: true })
+    await rm(testDir, {recursive: true, force: true})
   })
 
   describe('isEnrolled', () => {
@@ -481,7 +443,7 @@ describe('StratosActorStore', () => {
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `stratos-actor-${randomBytes(8).toString('hex')}`)
-    await mkdir(testDir, { recursive: true })
+    await mkdir(testDir, {recursive: true})
 
     actorStore = new StratosActorStore({
       dataDir: testDir,
@@ -491,7 +453,7 @@ describe('StratosActorStore', () => {
   })
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true })
+    await rm(testDir, {recursive: true, force: true})
   })
 
   describe('exists', () => {
@@ -554,7 +516,7 @@ describe('StratosActorStore', () => {
         await store.record.indexRecord(
           uri,
           cid,
-          { text: 'Hello' },
+          {text: 'Hello'},
           'create',
           'rev1',
         )

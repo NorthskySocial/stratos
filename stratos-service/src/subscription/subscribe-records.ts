@@ -173,6 +173,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     const result = await ctx.actorStore.read(did, async (store) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (store as any).record.db as StratosDb
       const rows = await db
         .select({seq: stratosSeq.seq})
@@ -191,6 +192,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     const result = await ctx.actorStore.read(did, async (store) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (store as any).record.db as StratosDb
       const rows = await db
         .select({seq: stratosSeq.seq})
@@ -213,6 +215,7 @@ async function getEventsSince(
 ): Promise<SeqEvent[]> {
   try {
     const result = await ctx.actorStore.read(did, async (store) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (store as any).record.db as StratosDb
       const rows = await db
         .select()

@@ -66,6 +66,7 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
  */
 export async function closeServiceDb(db: ServiceDb): Promise<void> {
   // LibSQL client cleanup
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client = (db as any)._client
   if (client && typeof client.close === 'function') {
     client.close()

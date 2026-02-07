@@ -4,9 +4,9 @@
  * Implements RecordStoreReader/Writer by wrapping the existing
  * StratosRecordReader/Transactor from stratos-core.
  */
-import { CID } from 'multiformats/cid'
-import { AtUri } from '@atproto/syntax'
-import { eq, and, isNull } from 'drizzle-orm'
+import {CID} from 'multiformats/cid'
+import {AtUri} from '@atproto/syntax'
+import {eq} from 'drizzle-orm'
 import type {
   RecordStoreReader,
   RecordStoreWriter,
@@ -17,7 +17,6 @@ import type {
 } from '@northsky/stratos-core'
 import {
   StratosDb,
-  stratosRecord,
   stratosRepoBlock,
   StratosRecordReader,
   StratosRecordTransactor,
@@ -77,7 +76,9 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
       null,
       options.includeSoftDeleted,
     )
-    if (!record) return null
+    if (!record) {
+      return null
+    }
 
     return {
       uri: record.uri,
@@ -96,7 +97,7 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
 
   async getRecordContent(cid: CID): Promise<Uint8Array | null> {
     const rows = await this.db
-      .select({ content: stratosRepoBlock.content })
+      .select({content: stratosRepoBlock.content})
       .from(stratosRepoBlock)
       .where(eq(stratosRepoBlock.cid, cid.toString()))
       .limit(1)
@@ -110,8 +111,7 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
  */
 export class SqliteRecordStoreWriter
   extends SqliteRecordStoreReader
-  implements RecordStoreWriter
-{
+  implements RecordStoreWriter {
   protected transactor: StratosRecordTransactor
 
   constructor(
@@ -168,6 +168,6 @@ export class SqliteRecordStoreWriter
 
   async restoreRecord(uri: string): Promise<void> {
     const atUri = new AtUri(uri)
-    await this.transactor.updateRecordTakedown(atUri, { applied: false })
+    await this.transactor.updateRecordTakedown(atUri, {applied: false})
   }
 }

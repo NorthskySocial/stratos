@@ -1,12 +1,12 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import express from 'express'
-import { eq, gt, asc, sql } from 'drizzle-orm'
+import {eq, gt, asc, sql} from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
-import { IdResolver } from '@atproto/identity'
-import { NodeOAuthClient } from '@atproto/oauth-client-node'
-import { Server as XrpcServer } from '@atproto/xrpc-server'
-import { fileExists } from '@atproto/common'
+import {IdResolver} from '@atproto/identity'
+import {NodeOAuthClient} from '@atproto/oauth-client-node'
+import {Server as XrpcServer} from '@atproto/xrpc-server'
+import {fileExists} from '@atproto/common'
 
 import {
   createStratosDb,
@@ -32,21 +32,21 @@ import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
 } from './features/index.js'
-import { StubWriterServiceImpl } from './features/stub/index.js'
+import {StubWriterServiceImpl} from './features/index.ts'
 
-import { StratosServiceConfig, getServiceDidWithFragment } from './config.js'
-import { createOAuthClient } from './oauth/client.js'
-import { EnrollmentStore, EnrollmentRecord } from './oauth/routes.js'
-import { 
-  createServiceDb, 
-  migrateServiceDb, 
-  closeServiceDb, 
+import {StratosServiceConfig, getServiceDidWithFragment} from './config.js'
+import {createOAuthClient} from './oauth/client.js'
+import {EnrollmentStore, EnrollmentRecord} from './oauth/routes.js'
+import {
+  createServiceDb,
+  migrateServiceDb,
+  closeServiceDb,
   ServiceDb,
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import { PdsTokenVerifier } from './auth/index.js'
-import { DpopVerifier } from './auth/index.js'
+import {PdsTokenVerifier} from './auth/index.js'
+import {DpopVerifier} from './auth/index.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -68,17 +68,6 @@ export interface StratosActorTransactor {
   repo: StratosSqlRepoTransactor
   blob: StratosBlobTransactor
 }
-
-/**
- * Enrolled actor database schema
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-interface EnrollmentTable {
-  did: string
-  enrolledAt: string
-  pdsEndpoint: string | null
-}
-
 /**
  * Actor store manager for Stratos
  */
@@ -101,21 +90,10 @@ export class StratosActorStore {
   }
 
   /**
-   * Get file paths for an actor
-   */
-  private async getLocation(did: string) {
-    const didHash = await crypto.sha256Hex(did)
-    const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
-    const dbLocation = path.join(directory, 'stratos.sqlite')
-    const blobLocation = path.join(directory, 'blobs')
-    return { directory, dbLocation, blobLocation }
-  }
-
-  /**
    * Check if an actor database exists
    */
   async exists(did: string): Promise<boolean> {
-    const { dbLocation } = await this.getLocation(did)
+    const {dbLocation} = await this.getLocation(did)
     return fileExists(dbLocation)
   }
 
@@ -123,8 +101,8 @@ export class StratosActorStore {
    * Create a new actor database
    */
   async create(did: string): Promise<void> {
-    const { directory, dbLocation } = await this.getLocation(did)
-    await fs.mkdir(directory, { recursive: true })
+    const {directory, dbLocation} = await this.getLocation(did)
+    await fs.mkdir(directory, {recursive: true})
 
     const db = createStratosDb(dbLocation)
     try {
@@ -138,8 +116,8 @@ export class StratosActorStore {
    * Delete an actor database
    */
   async destroy(did: string): Promise<void> {
-    const { directory } = await this.getLocation(did)
-    await fs.rm(directory, { recursive: true, force: true })
+    const {directory} = await this.getLocation(did)
+    await fs.rm(directory, {recursive: true, force: true})
   }
 
   /**
@@ -149,7 +127,7 @@ export class StratosActorStore {
     did: string,
     fn: (store: StratosActorReader) => T | PromiseLike<T>,
   ): Promise<T> {
-    const { dbLocation } = await this.getLocation(did)
+    const {dbLocation} = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
     const blobStore = this.blobstore(did)
 
@@ -173,7 +151,7 @@ export class StratosActorStore {
     did: string,
     fn: (store: StratosActorTransactor) => T | PromiseLike<T>,
   ): Promise<T> {
-    const { dbLocation } = await this.getLocation(did)
+    const {dbLocation} = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
     const blobStore = this.blobstore(did)
 
@@ -182,8 +160,11 @@ export class StratosActorStore {
         const store: StratosActorTransactor = {
           did,
           db: tx as unknown as StratosDb,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           record: new StratosRecordTransactor(tx as any, this.cborToRecord, this.logger),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           repo: new StratosSqlRepoTransactor(tx as any),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           blob: new StratosBlobTransactor(tx as any, blobStore, this.logger),
         }
         return await fn(store)
@@ -192,6 +173,17 @@ export class StratosActorStore {
       await closeStratosDb(db)
     }
   }
+
+  /**
+   * Get file paths for an actor
+   */
+  private async getLocation(did: string) {
+    const didHash = await crypto.sha256Hex(did)
+    const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
+    const dbLocation = path.join(directory, 'stratos.sqlite')
+    const blobLocation = path.join(directory, 'blobs')
+    return {directory, dbLocation, blobLocation}
+  }
 }
 
 /**
@@ -199,7 +191,8 @@ export class StratosActorStore {
  * and stratos-core EnrollmentStoreReader interfaces
  */
 export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreReader {
-  constructor(private db: ServiceDb) {}
+  constructor(private db: ServiceDb) {
+  }
 
   async isEnrolled(did: string): Promise<boolean> {
     const rows = await this.db
@@ -233,7 +226,7 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
         .where(eq(enrollmentBoundary.did, record.did))
 
       await this.db.insert(enrollmentBoundary).values(
-        record.boundaries.map((boundary) => ({ did: record.did, boundary })),
+        record.boundaries.map((boundary) => ({did: record.did, boundary})),
       )
     }
   }
@@ -256,7 +249,9 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
       .limit(1)
 
     const row = rows[0]
-    if (!row) return null
+    if (!row) {
+      return null
+    }
 
     return {
       did: row.did,
@@ -286,7 +281,7 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
 
   async enrollmentCount(): Promise<number> {
     const rows = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({count: sql<number>`count(*)`})
       .from(enrollment)
 
     return rows[0]?.count ?? 0
@@ -294,7 +289,7 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
 
   async getBoundaries(did: string): Promise<string[]> {
     const rows = await this.db
-      .select({ boundary: enrollmentBoundary.boundary })
+      .select({boundary: enrollmentBoundary.boundary})
       .from(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
@@ -307,12 +302,16 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
  */
 export interface AuthVerifiers {
   /** Standard user auth (OAuth token) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   standard: (ctx: any) => Promise<{ credentials: { type: string; did: string } }>
   /** Service-to-service auth (inter-service JWT) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   service: (ctx: any) => Promise<{ credentials: { type: string; did: string; iss: string } }>
   /** Optional user auth */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   optionalStandard: (ctx: any) => Promise<{ credentials: { type: string; did?: string } }>
   /** Admin auth (basic auth or bearer token with admin password) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: (ctx: any) => Promise<{ credentials: { type: string } }>
 }
 
@@ -321,7 +320,7 @@ export interface AuthVerifiers {
  */
 function createAuthVerifiers(
   serviceDid: string,
-  idResolver: IdResolver,
+  _idResolver: IdResolver,
   oauthClient: NodeOAuthClient | undefined,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
@@ -363,20 +362,23 @@ function createAuthVerifiers(
             },
           )
           return {
-            credentials: { type: 'user', did: result.did },
+            credentials: {type: 'user', did: result.did},
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'DPoP verification failed'
-          throw new Error(message)
+          throw new Error(message, {cause: err})
         }
       }
 
       // Fall back to session-based auth for Bearer tokens
       const [scheme, token] = authHeader.split(' ')
+      if (!scheme) {
+        throw new Error('Invalid authorization header format')
+      }
       if (!token) {
         throw new Error('Invalid authorization header format')
       }
-      
+
       // For now, support DID in token position for session-based auth
       // In production, this would parse the JWT to extract the DID
       const did = token.startsWith('did:') ? token : null
@@ -391,7 +393,7 @@ function createAuthVerifiers(
       }
 
       return {
-        credentials: { type: 'user', did },
+        credentials: {type: 'user', did},
       }
     },
     service: async (ctx) => {
@@ -407,13 +409,13 @@ function createAuthVerifiers(
       // In production, would verify JWT signature and extract iss/aud
       // For now, trust service tokens (should be signed JWTs from AppViews)
       return {
-        credentials: { type: 'service', did: serviceDid, iss: token },
+        credentials: {type: 'service', did: serviceDid, iss: token},
       }
     },
     optionalStandard: async (ctx) => {
       const authHeader = ctx.req?.headers?.authorization
       if (!authHeader) {
-        return { credentials: { type: 'none' } }
+        return {credentials: {type: 'none'}}
       }
 
       // Try DPoP verification first
@@ -430,28 +432,28 @@ function createAuthVerifiers(
             },
           )
           return {
-            credentials: { type: 'user', did: result.did },
+            credentials: {type: 'user', did: result.did},
           }
         } catch {
           // DPoP verification failed, return unauthenticated
-          return { credentials: { type: 'none' } }
+          return {credentials: {type: 'none'}}
         }
       }
 
       // Fall back to session-based auth
       const [, token] = authHeader.split(' ')
       if (!token || !token.startsWith('did:')) {
-        return { credentials: { type: 'none' } }
+        return {credentials: {type: 'none'}}
       }
-      
+
       // Verify user has valid session (optional, so don't throw on failure)
       const hasSession = await validateSession(token)
       if (!hasSession) {
-        return { credentials: { type: 'none' } }
+        return {credentials: {type: 'none'}}
       }
-      
+
       return {
-        credentials: { type: 'user', did: token },
+        credentials: {type: 'user', did: token},
       }
     },
     admin: async (ctx) => {
@@ -462,7 +464,7 @@ function createAuthVerifiers(
       if (!adminPassword) {
         throw new Error('Admin auth not configured')
       }
-      
+
       if (authHeader.startsWith('Basic ')) {
         // Parse Basic auth: base64(admin:<password>)
         const encoded = authHeader.slice(6)
@@ -480,9 +482,9 @@ function createAuthVerifiers(
       } else {
         throw new Error('Unsupported authorization type')
       }
-      
+
       return {
-        credentials: { type: 'admin' },
+        credentials: {type: 'admin'},
       }
     },
   }
@@ -525,10 +527,10 @@ export interface AppContextOptions {
 export async function createAppContext(
   opts: AppContextOptions,
 ): Promise<AppContext> {
-  const { cfg, blobstore, cborToRecord, logger } = opts
+  const {cfg, blobstore, cborToRecord, logger} = opts
 
   const serviceDbPath = path.join(cfg.storage.dataDir, 'service.sqlite')
-  await fs.mkdir(cfg.storage.dataDir, { recursive: true })
+  await fs.mkdir(cfg.storage.dataDir, {recursive: true})
 
   const db = createServiceDb(serviceDbPath)
 
@@ -545,7 +547,7 @@ export async function createAppContext(
     const keyBytes = await fs.readFile(keyPath)
     signingKey = await crypto.Secp256k1Keypair.import(keyBytes)
   } else {
-    signingKey = await crypto.Secp256k1Keypair.create({ exportable: true })
+    signingKey = await crypto.Secp256k1Keypair.create({exportable: true})
     const exported = await (signingKey as crypto.ExportableKeypair).export()
     await fs.writeFile(keyPath, exported)
   }
@@ -575,7 +577,7 @@ export async function createAppContext(
   const enrollmentStore = new SqliteEnrollmentStore(db)
 
   const enrollmentService = new EnrollmentServiceImpl(
-    { db },
+    {db},
     async (did) => actorStore.create(did),
   )
 
@@ -609,7 +611,8 @@ export async function createAppContext(
       }
       try {
         const session = await oauthClient.restore(did)
-        return session ? { api: session } as any : null
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return session ? {api: session} as any : null
       } catch {
         return null
       }

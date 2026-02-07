@@ -1,12 +1,12 @@
-import { Server as XrpcServer, InvalidRequestError, AuthRequiredError } from '@atproto/xrpc-server'
-import { AppContext } from '../context.js'
+import {Server as XrpcServer, InvalidRequestError, AuthRequiredError} from '@atproto/xrpc-server'
+import {AppContext} from '../context.ts'
 import {
   createRecord,
   deleteRecord,
   getRecord,
   listRecords,
-} from './records.js'
-import { registerHydrationHandlers } from '../features/hydration/handler.js'
+} from './records.ts'
+import {registerHydrationHandlers} from '../features/index.ts'
 
 type HandlerAuth = {
   credentials: {
@@ -36,6 +36,7 @@ type HandlerFn = (ctx: HandlerContext) => Promise<HandlerResponse>
 
 // Type for accessing internal method - needed until lexicons are properly loaded
 type XrpcServerInternal = XrpcServer & {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   method(nsid: string, config: { auth?: (ctx: any) => Promise<any>; handler: HandlerFn }): void
 }
 
@@ -45,13 +46,13 @@ type XrpcServerInternal = XrpcServer & {
  */
 export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   const xrpc = server as unknown as XrpcServerInternal
-  const { authVerifier } = ctx
-  
+  const {authVerifier} = ctx
+
   xrpc.method('com.atproto.repo.createRecord', {
     auth: authVerifier.standard,
-    handler: async ({ input, auth }: HandlerContext) => {
+    handler: async ({input, auth}: HandlerContext) => {
       const start = Date.now()
-      const { did } = validateUserAuth(auth)
+      const {did} = validateUserAuth(auth)
       const body = input?.body as {
         repo: string
         collection: string
@@ -62,7 +63,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       ctx.logger?.debug(
-        { method: 'createRecord', repo: body.repo, collection: body.collection },
+        {method: 'createRecord', repo: body.repo, collection: body.collection},
         'handling request',
       )
 
@@ -81,7 +82,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         )
 
         ctx.logger?.info(
-          { uri: result.uri, durationMs: Date.now() - start },
+          {uri: result.uri, durationMs: Date.now() - start},
           'record created',
         )
 
@@ -91,7 +92,11 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         }
       } catch (err) {
         ctx.logger?.error(
-          { err: err instanceof Error ? err.message : String(err), repo: body.repo, collection: body.collection },
+          {
+            err: err instanceof Error ? err.message : String(err),
+            repo: body.repo,
+            collection: body.collection
+          },
           'createRecord failed',
         )
         throw err
@@ -101,9 +106,9 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
   xrpc.method('com.atproto.repo.deleteRecord', {
     auth: authVerifier.standard,
-    handler: async ({ input, auth }: HandlerContext) => {
+    handler: async ({input, auth}: HandlerContext) => {
       const start = Date.now()
-      const { did } = validateUserAuth(auth)
+      const {did} = validateUserAuth(auth)
       const body = input?.body as {
         repo: string
         collection: string
@@ -113,7 +118,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       ctx.logger?.debug(
-        { method: 'deleteRecord', repo: body.repo, collection: body.collection, rkey: body.rkey },
+        {method: 'deleteRecord', repo: body.repo, collection: body.collection, rkey: body.rkey},
         'handling request',
       )
 
@@ -131,7 +136,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         )
 
         ctx.logger?.info(
-          { repo: body.repo, collection: body.collection, rkey: body.rkey, durationMs: Date.now() - start },
+          {
+            repo: body.repo,
+            collection: body.collection,
+            rkey: body.rkey,
+            durationMs: Date.now() - start
+          },
           'record deleted',
         )
 
@@ -141,7 +151,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         }
       } catch (err) {
         ctx.logger?.error(
-          { err: err instanceof Error ? err.message : String(err), repo: body.repo, collection: body.collection, rkey: body.rkey },
+          {
+            err: err instanceof Error ? err.message : String(err),
+            repo: body.repo,
+            collection: body.collection,
+            rkey: body.rkey
+          },
           'deleteRecord failed',
         )
         throw err
@@ -152,7 +167,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   // Supports both user auth (owner) and service auth (AppView hydration)
   xrpc.method('com.atproto.repo.getRecord', {
     auth: authVerifier.optionalStandard,
-    handler: async ({ params, auth }: HandlerContext) => {
+    handler: async ({params, auth}: HandlerContext) => {
       const start = Date.now()
       const typedAuth = auth as HandlerAuth | undefined
       let callerDid: string | undefined
@@ -174,7 +189,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       ctx.logger?.debug(
-        { method: 'getRecord', repo: params.repo, collection: params.collection, rkey: params.rkey },
+        {method: 'getRecord', repo: params.repo, collection: params.collection, rkey: params.rkey},
         'handling request',
       )
 
@@ -191,7 +206,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       )
 
       ctx.logger?.debug(
-        { uri: result.uri, durationMs: Date.now() - start },
+        {uri: result.uri, durationMs: Date.now() - start},
         'record retrieved',
       )
 
@@ -204,17 +219,22 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
   xrpc.method('com.atproto.repo.listRecords', {
     auth: authVerifier.optionalStandard,
-    handler: async ({ params, auth }: HandlerContext) => {
+    handler: async ({params, auth}: HandlerContext) => {
       const start = Date.now()
       const callerDid = (auth as HandlerAuth | undefined)?.credentials?.did
       let callerDomains: string[] = []
-      
+
       if (callerDid) {
         callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)
       }
 
       ctx.logger?.debug(
-        { method: 'listRecords', repo: params.repo, collection: params.collection, limit: params.limit },
+        {
+          method: 'listRecords',
+          repo: params.repo,
+          collection: params.collection,
+          limit: params.limit
+        },
         'handling request',
       )
 
@@ -232,7 +252,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       )
 
       ctx.logger?.debug(
-        { count: result.records.length, durationMs: Date.now() - start },
+        {count: result.records.length, durationMs: Date.now() - start},
         'records listed',
       )
 
@@ -244,7 +264,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   })
 
   xrpc.method('app.stratos.enrollment.status', {
-    handler: async ({ params }: HandlerContext) => {
+    handler: async ({params}: HandlerContext) => {
       const did = params.did as string
       if (!did) {
         throw new InvalidRequestError('DID required', 'MissingDid')
@@ -263,6 +283,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   })
 
   xrpc.method('_health', {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     handler: async (_ctx: HandlerContext) => {
       return {
         encoding: 'application/json',
@@ -291,5 +312,5 @@ function validateUserAuth(auth: unknown): { did: string } {
     throw new AuthRequiredError('User authentication required')
   }
 
-  return { did: typed.credentials.did }
+  return {did: typed.credentials.did}
 }

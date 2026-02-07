@@ -127,7 +127,7 @@ export class SqliteSequenceStoreReader implements SequenceStoreReader {
     startSeq: number,
     endSeq: number,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    options?: GetEventsSinceOptions,
+    _options?: GetEventsSinceOptions,
   ): Promise<SequenceEvent[]> {
     const rows = await this.db
       .select()

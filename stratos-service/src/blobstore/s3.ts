@@ -5,7 +5,6 @@ import { BlobStore, BlobStoreCreator, BlobNotFoundError } from '@northsky/strato
 import {
   readableToAsyncIterable,
   asyncIterableToReadable,
-  collectAsyncIterable,
 } from './util.js'
 
 /**
