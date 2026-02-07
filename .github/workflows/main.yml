@@ -36,6 +36,8 @@ jobs:
           node-version: 20
           cache: 'pnpm'
       - run: pnpm install
+      - name: Build core package
+        run: pnpm --filter @northsky/stratos-core... build
       - run: pnpm test
 
   lint:
