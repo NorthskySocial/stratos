@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "description": "Shared library for Stratos private namespace service",
   "main": "dist/index.js",
+  "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.esm.js"
     },
     "./validation": {
       "types": "./dist/validation/index.d.ts",

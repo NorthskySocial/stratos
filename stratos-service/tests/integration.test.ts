@@ -127,6 +127,7 @@ function cborToRecord(bytes: Buffer): Record<string, unknown> {
 }
 
 // Mock IdResolver
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createMockIdResolver(didDoc: { id: string; service?: any[] } | null) {
   return {
     did: {
