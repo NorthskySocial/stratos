@@ -9,6 +9,9 @@ export const DOMAINS = {
   aekea: "aekea",
 } as const;
 
+// Random suffix to avoid handle conflicts with previously created accounts
+const TEST_RUN_ID = Math.floor(Math.random() * 100000).toString().padStart(5, "0");
+
 export interface TestUser {
   name: string;
   handle: string;
@@ -23,22 +26,22 @@ export interface TestUser {
 export const TEST_USERS: Record<string, TestUser> = {
   rei: {
     name: "Rei",
-    handle: "rei.pds.atverkackt.de",
-    email: "rei@test.stratos.local",
+    handle: `rei-${TEST_RUN_ID}.pds.atverkackt.de`,
+    email: `tachikoma+rei-${TEST_RUN_ID}@chipnick.com`,
     password: "test-rei-stratos-2026!",
     boundaries: [DOMAINS.swordsmith],
   },
   sakura: {
     name: "Sakura",
-    handle: "sakura.pds.atverkackt.de",
-    email: "sakura@test.stratos.local",
+    handle: `sakura-${TEST_RUN_ID}.pds.atverkackt.de`,
+    email: `tachikoma+sakura-${TEST_RUN_ID}@chipnick.com`,
     password: "test-sakura-stratos-2026!",
     boundaries: [DOMAINS.swordsmith],
   },
   kaoruko: {
     name: "kaoruko",
-    handle: "kaoruko.pds.atverkackt.de",
-    email: "kaoruko@test.stratos.local",
+    handle: `kaoruko-${TEST_RUN_ID}.pds.atverkackt.de`,
+    email: `tachikoma+kaoruko-${TEST_RUN_ID}@chipnick.com`,
     password: "test-kaoruko-stratos-2026!",
     boundaries: [DOMAINS.aekea],
   },
