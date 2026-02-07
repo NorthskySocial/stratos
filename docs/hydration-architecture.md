@@ -596,33 +596,6 @@ openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 
 ---
 
-## Implementation Phases
-
-### Phase 1: Core Refactoring ✅
-- [x] Restructure to feature-sliced architecture
-- [x] Define new lexicons (defs.json with source field)
-- [x] Update enrollment to write profile record
-
-### Phase 2: Source Field Implementation ✅
-- [x] Implement `StubWriterService` port/adapter
-- [x] Add dual-write logic (Stratos + PDS stub)
-- [x] Update `getRecord` for service auth with boundary-aware filtering
-- [x] Remove deprecated custom hydration endpoints
-
-### Phase 3: Integration ✅
-- [x] Integration tests for stub writing
-- [x] Unit tests for stub domain logic
-- [x] Documentation updates
-
-### Phase 4: Hydration Feature ✅
-- [x] Implement `HydrationService` port/adapter in stratos-core
-- [x] Add boundary-aware access control domain logic
-- [x] Implement batch hydration endpoints (`app.stratos.repo.hydrateRecords`)
-- [x] Add single record hydration endpoint (`app.stratos.repo.hydrateRecord`)
-- [x] Unit tests for hydration domain logic
-
----
-
 ## References
 
 - [ATProtocol Record Hydration (blog post)](https://blog.smokesignal.events/posts/3lvehxge7oo2a-atprotocol-record-hydration-building-privacy-aware-views)

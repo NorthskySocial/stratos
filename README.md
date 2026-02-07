@@ -7,18 +7,9 @@ Stratos provides isolated, private data storage within the ATProtocol ecosystem.
 - Scoped by configurable boundary domains
 - Excluded from public sync/export
 
-## Architecture
-
-```
-stratos/
-├── stratos-core/       # Shared library (validation, schema, storage abstractions)
-├── stratos-service/    # Standalone HTTP service
-└── lexicons/           # Lexicon definitions for app.stratos.*
-```
-
 ## Quick Start
 
-### Using Docker (Recommended)
+### Using Docker
 
 ```bash
 # Copy and configure environment
@@ -54,13 +45,6 @@ pnpm start
 
 ## Docker Configuration
 
-The Docker setup includes:
-
-- **Multi-stage build** for optimized image size
-- **Non-root user** for security
-- **Health checks** for container orchestration
-- **Volume mounting** for persistent data storage
-
 ### Environment Variables
 
 Create a `.env` file from the example:
@@ -74,7 +58,7 @@ Required variables:
 - `STRATOS_PUBLIC_URL` - Public URL where the service is accessible
 - `STRATOS_ALLOWED_DOMAINS` - Comma-separated boundary domains
 
-### S3 Storage (Optional)
+### Object Storage (Optional)
 
 To use S3-compatible storage instead of local disk:
 
@@ -88,16 +72,6 @@ STRATOS_S3_ACCESS_KEY=your-access-key
 STRATOS_S3_SECRET_KEY=your-secret-key
 ```
 
-Or use the included MinIO example (uncomment in docker-compose.yml):
-
-```bash
-# In .env
-STRATOS_BLOB_STORAGE=s3
-STRATOS_S3_BUCKET=stratos-blobs
-STRATOS_S3_ENDPOINT=http://minio:9000
-STRATOS_S3_ACCESS_KEY=minioadmin
-STRATOS_S3_SECRET_KEY=minioadmin
-```
 
 ## Configuration
 

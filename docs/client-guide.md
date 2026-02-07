@@ -32,13 +32,13 @@ Stratos enables **private, domain-scoped content** within ATProtocol. Users can 
 
 ### When to Use Stratos
 
-✅ **Good use cases:**
+**Good use cases:**
 - Organization-internal announcements
 - Team discussions
 - Gated community content
 - Enterprise collaboration
 
-❌ **Not suitable for:**
+**Not suitable for:**
 - Public social content (use `app.bsky` instead)
 - Encrypted DMs (Stratos is access-controlled, not encrypted)
 - Cross-organization messaging
