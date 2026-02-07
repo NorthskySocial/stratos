@@ -17,6 +17,7 @@ import {
   stratosRecord,
 } from '../src/db/index.js'
 import { BlobStore } from '../src/types.js'
+import {Readable} from "node:stream";
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Buffer): Promise<CID> => {
@@ -43,7 +44,7 @@ function createMockBlobStore(): BlobStore {
       }
     }),
     putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Buffer | Readable) => {
-      if (bytes instanceof Buffer) {
+      if (Buffer.isBuffer(bytes)) {
         storage.set(cid.toString(), bytes)
       } else {
         const chunks: Buffer[] = []

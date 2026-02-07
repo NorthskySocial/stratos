@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
-import { sha256 } from 'multiformats/hashes/sha2'
-import { AtUri } from '@atproto/syntax'
-import { eq } from 'drizzle-orm'
+import {describe, it, expect, beforeEach, afterEach} from 'vitest'
+import {mkdir, rm} from 'fs/promises'
+import {join} from 'path'
+import {tmpdir} from 'os'
+import {randomBytes} from 'crypto'
+import {CID} from 'multiformats/cid'
+import {sha256} from 'multiformats/hashes/sha2'
+import {AtUri} from '@atproto/syntax'
+import {eq} from 'drizzle-orm'
 
-import { StratosRecordReader, StratosRecordTransactor } from '../src/record/index.js'
+import {StratosRecordReader, StratosRecordTransactor} from '../src/record/index.js'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -20,7 +20,7 @@ import {
 
 // Simple encoding for tests (just use JSON for simplicity)
 const encodeRecord = (data: unknown): Buffer => {
-  return new TextEncoder().encode(JSON.stringify(data))
+  return Buffer.from(new TextEncoder().encode(JSON.stringify(data)))
 }
 
 const decodeRecord = (content: Buffer): Record<string, unknown> => {
@@ -42,7 +42,7 @@ describe('Record Reader', () => {
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `stratos-record-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(testDir, { recursive: true })
+    await mkdir(testDir, {recursive: true})
     dbPath = join(testDir, 'test.db')
 
     db = createStratosDb(dbPath)
@@ -52,7 +52,7 @@ describe('Record Reader', () => {
 
   afterEach(async () => {
     await closeStratosDb(db)
-    await rm(testDir, { recursive: true, force: true })
+    await rm(testDir, {recursive: true, force: true})
   })
 
   describe('recordCount', () => {
@@ -142,7 +142,7 @@ describe('Record Transactor', () => {
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `stratos-transact-test-${randomBytes(8).toString('hex')}`)
-    await mkdir(testDir, { recursive: true })
+    await mkdir(testDir, {recursive: true})
     dbPath = join(testDir, 'test.db')
 
     db = createStratosDb(dbPath)
@@ -152,14 +152,14 @@ describe('Record Transactor', () => {
 
   afterEach(async () => {
     await closeStratosDb(db)
-    await rm(testDir, { recursive: true, force: true })
+    await rm(testDir, {recursive: true, force: true})
   })
 
   describe('indexRecord', () => {
     it('should index a new record', async () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/3jqfcqzm3fv2p')
-      const cid = await createCid({ text: 'Hello' })
-      const record = { text: 'Hello', createdAt: new Date().toISOString() }
+      const cid = await createCid({text: 'Hello'})
+      const record = {text: 'Hello', createdAt: new Date().toISOString()}
 
       await transactor.indexRecord(uri, cid, record, 'create', 'rev1')
 
@@ -174,14 +174,14 @@ describe('Record Transactor', () => {
 
     it('should update existing record on conflict', async () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/testkey')
-      const cid1 = await createCid({ text: 'Original' })
-      const cid2 = await createCid({ text: 'Updated' })
+      const cid1 = await createCid({text: 'Original'})
+      const cid2 = await createCid({text: 'Updated'})
 
       // Create initial record
       await transactor.indexRecord(
         uri,
         cid1,
-        { text: 'Original' },
+        {text: 'Original'},
         'create',
         'rev1',
       )
@@ -190,7 +190,7 @@ describe('Record Transactor', () => {
       await transactor.indexRecord(
         uri,
         cid2,
-        { text: 'Updated' },
+        {text: 'Updated'},
         'update',
         'rev2',
       )
@@ -204,10 +204,10 @@ describe('Record Transactor', () => {
 
     it('should reject URI without DID', async () => {
       const uri = new AtUri('at://handle.example.com/app.stratos.feed.post/1')
-      const cid = await createCid({ text: 'Test' })
+      const cid = await createCid({text: 'Test'})
 
       await expect(
-        transactor.indexRecord(uri, cid, { text: 'Test' }, 'create', 'rev1'),
+        transactor.indexRecord(uri, cid, {text: 'Test'}, 'create', 'rev1'),
       ).rejects.toThrow('Expected indexed URI to contain DID')
     })
   })
@@ -215,9 +215,9 @@ describe('Record Transactor', () => {
   describe('deleteRecord', () => {
     it('should delete an existing record', async () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/todelete')
-      const cid = await createCid({ text: 'Delete me' })
+      const cid = await createCid({text: 'Delete me'})
 
-      await transactor.indexRecord(uri, cid, { text: 'Delete me' }, 'create', 'rev1')
+      await transactor.indexRecord(uri, cid, {text: 'Delete me'}, 'create', 'rev1')
       expect(await transactor.recordCount()).toBe(1)
 
       await transactor.deleteRecord(uri)
@@ -234,7 +234,7 @@ describe('Record Transactor', () => {
       await transactor.indexRecord(
         uri,
         cid,
-        { subject: 'did:plc:followed', createdAt: new Date().toISOString() },
+        {subject: 'did:plc:followed', createdAt: new Date().toISOString()},
         'create',
         'rev1',
       )
@@ -268,11 +268,11 @@ describe('Record Transactor', () => {
   describe('updateRecordTakedown', () => {
     it('should apply takedown to record', async () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/badcontent')
-      const cid = await createCid({ text: 'Bad content' })
+      const cid = await createCid({text: 'Bad content'})
 
-      await transactor.indexRecord(uri, cid, { text: 'Bad content' }, 'create', 'rev1')
+      await transactor.indexRecord(uri, cid, {text: 'Bad content'}, 'create', 'rev1')
 
-      await transactor.updateRecordTakedown(uri, { applied: true, ref: 'TAKEDOWN-123' })
+      await transactor.updateRecordTakedown(uri, {applied: true, ref: 'TAKEDOWN-123'})
 
       const records = await db
         .select()
@@ -286,13 +286,13 @@ describe('Record Transactor', () => {
 
     it('should remove takedown from record', async () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/restored')
-      const cid = await createCid({ text: 'Restored content' })
+      const cid = await createCid({text: 'Restored content'})
 
-      await transactor.indexRecord(uri, cid, { text: 'Restored' }, 'create', 'rev1')
-      await transactor.updateRecordTakedown(uri, { applied: true, ref: 'TD-456' })
+      await transactor.indexRecord(uri, cid, {text: 'Restored'}, 'create', 'rev1')
+      await transactor.updateRecordTakedown(uri, {applied: true, ref: 'TD-456'})
 
       // Now remove takedown
-      await transactor.updateRecordTakedown(uri, { applied: false })
+      await transactor.updateRecordTakedown(uri, {applied: false})
 
       const records = await db
         .select()
@@ -331,8 +331,8 @@ describe('Record Transactor', () => {
       const uri = 'at://did:plc:test/app.stratos.graph.follow/1'
 
       await transactor.addBacklinks([
-        { uri, path: 'subject', linkTo: 'did:plc:a' },
-        { uri, path: 'other', linkTo: 'did:plc:b' },
+        {uri, path: 'subject', linkTo: 'did:plc:a'},
+        {uri, path: 'other', linkTo: 'did:plc:b'},
       ])
 
       expect(

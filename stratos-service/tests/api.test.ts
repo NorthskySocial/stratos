@@ -39,7 +39,7 @@ function createMockBlobStore(): BlobStore {
   return {
     putTemp: vi.fn().mockImplementation(async (bytes: Buffer) => {
       const key = `temp-${randomBytes(8).toString('hex')}`
-      if (bytes instanceof Buffer) {
+      if (Buffer.isBuffer(bytes)) {
         tempStorage.set(key, bytes)
       }
       return key
@@ -52,7 +52,7 @@ function createMockBlobStore(): BlobStore {
       }
     }),
     putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Buffer) => {
-      if (bytes instanceof Buffer) {
+      if (Buffer.isBuffer(bytes)) {
         storage.set(cid.toString(), bytes)
       }
     }),

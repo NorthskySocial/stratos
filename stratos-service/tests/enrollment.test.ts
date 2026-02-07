@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import {describe, it, expect, vi} from 'vitest'
 import {
   validateEnrollment,
   assertEnrollment,
@@ -6,7 +6,7 @@ import {
   EnrollmentConfig,
   EnrollmentDeniedError,
 } from '../src/auth/index.js'
-import type { IdResolver, DidDocument } from '@atproto/identity'
+import type {IdResolver, DidDocument} from '@atproto/identity'
 
 // Mock IdResolver
 function createMockIdResolver(didDoc: DidDocument | null): IdResolver {
@@ -100,9 +100,9 @@ describe('enrollment', () => {
 
       it('should allow any user in open mode', async () => {
         const mockResolver = createMockIdResolver(null)
-        
+
         const result = await validateEnrollment(openConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(true)
         expect(result.reason).toBeUndefined()
       })
@@ -118,17 +118,17 @@ describe('enrollment', () => {
 
       it('should allow DID in allowlist', async () => {
         const mockResolver = createMockIdResolver(null)
-        
+
         const result = await validateEnrollment(didListConfig, allowedDid, mockResolver)
-        
+
         expect(result.allowed).toBe(true)
       })
 
       it('should deny DID not in allowlist', async () => {
         const mockResolver = createMockIdResolver(null)
-        
+
         const result = await validateEnrollment(didListConfig, 'did:plc:notallowed', mockResolver)
-        
+
         expect(result.allowed).toBe(false)
         expect(result.reason).toBe('NotInAllowlist')
       })
@@ -153,9 +153,9 @@ describe('enrollment', () => {
           ],
         }
         const mockResolver = createMockIdResolver(didDoc)
-        
+
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(true)
         expect(result.pdsEndpoint).toBe('https://pds.company.com')
       })
@@ -172,9 +172,9 @@ describe('enrollment', () => {
           ],
         }
         const mockResolver = createMockIdResolver(didDoc)
-        
+
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(true)
       })
 
@@ -190,18 +190,18 @@ describe('enrollment', () => {
           ],
         }
         const mockResolver = createMockIdResolver(didDoc)
-        
+
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(false)
         expect(result.reason).toBe('NotInAllowlist')
       })
 
       it('should return DidNotResolved when DID cannot be resolved', async () => {
         const mockResolver = createMockIdResolver(null)
-        
+
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(false)
         expect(result.reason).toBe('DidNotResolved')
       })
@@ -212,9 +212,9 @@ describe('enrollment', () => {
           service: [],
         }
         const mockResolver = createMockIdResolver(didDoc)
-        
+
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(false)
         expect(result.reason).toBe('PdsEndpointNotFound')
       })
@@ -225,9 +225,9 @@ describe('enrollment', () => {
             resolve: vi.fn().mockRejectedValue(new Error('Network error')),
           },
         } as unknown as IdResolver
-        
+
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
-        
+
         expect(result.allowed).toBe(false)
         expect(result.reason).toBe('DidNotResolved')
       })
@@ -242,9 +242,9 @@ describe('enrollment', () => {
 
       it('should allow VIP user regardless of PDS', async () => {
         const mockResolver = createMockIdResolver(null) // No resolution needed
-        
+
         const result = await validateEnrollment(combinedConfig, 'did:plc:vip-user', mockResolver)
-        
+
         expect(result.allowed).toBe(true)
         // DID check happens first, so resolver shouldn't be called
         expect(mockResolver.did.resolve).not.toHaveBeenCalled()
@@ -262,9 +262,9 @@ describe('enrollment', () => {
           ],
         }
         const mockResolver = createMockIdResolver(didDoc)
-        
+
         const result = await validateEnrollment(combinedConfig, 'did:plc:regular-user', mockResolver)
-        
+
         expect(result.allowed).toBe(true)
       })
 
@@ -280,9 +280,9 @@ describe('enrollment', () => {
           ],
         }
         const mockResolver = createMockIdResolver(didDoc)
-        
+
         const result = await validateEnrollment(combinedConfig, 'did:plc:outsider', mockResolver)
-        
+
         expect(result.allowed).toBe(false)
         expect(result.reason).toBe('NotInAllowlist')
       })
@@ -296,7 +296,7 @@ describe('enrollment', () => {
         allowedDids: [],
         allowedPdsEndpoints: ['https://pds.example.com'],
       }
-      
+
       const didDoc: DidDocument = {
         id: 'did:plc:test',
         service: [
@@ -308,9 +308,9 @@ describe('enrollment', () => {
         ],
       }
       const mockResolver = createMockIdResolver(didDoc)
-      
+
       const result = await assertEnrollment(config, 'did:plc:test', mockResolver)
-      
+
       expect(result.pdsEndpoint).toBe('https://pds.example.com')
     })
 
@@ -320,7 +320,7 @@ describe('enrollment', () => {
         allowedDids: [],
         allowedPdsEndpoints: ['https://pds.example.com'],
       }
-      
+
       const didDoc: DidDocument = {
         id: 'did:plc:test',
         service: [
@@ -332,7 +332,7 @@ describe('enrollment', () => {
         ],
       }
       const mockResolver = createMockIdResolver(didDoc)
-      
+
       await expect(
         assertEnrollment(config, 'did:plc:test', mockResolver)
       ).rejects.toThrow(EnrollmentDeniedError)
@@ -345,7 +345,7 @@ describe('enrollment', () => {
         allowedPdsEndpoints: ['https://pds.example.com'],
       }
       const mockResolver = createMockIdResolver(null)
-      
+
       try {
         await assertEnrollment(config, 'did:plc:test', mockResolver)
         expect.fail('Should have thrown')
