@@ -11,7 +11,7 @@ import type {
   BlobMetadata,
 } from '@northskysocial/stratos-core'
 import {
-  StratosDb,
+  type StratosDb,
   stratosBlob,
   stratosRecordBlob,
 } from '@northskysocial/stratos-core'

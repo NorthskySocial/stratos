@@ -1,7 +1,7 @@
 import type { Readable } from 'node:stream'
 import { CID } from 'multiformats/cid'
 import { S3BlobStore as AtprotoS3BlobStore, S3Config as AtprotoS3Config } from '@atproto/aws'
-import { BlobStore, BlobStoreCreator, BlobNotFoundError } from '@northskysocial/stratos-core'
+import { type BlobStore, type BlobStoreCreator, BlobNotFoundError } from '@northskysocial/stratos-core'
 import {
   readableToAsyncIterable,
   asyncIterableToReadable,

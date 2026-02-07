@@ -16,7 +16,7 @@ import type {
   GetRecordOptions,
 } from '@northskysocial/stratos-core'
 import {
-  StratosDb,
+  type StratosDb,
   stratosRecord,
   stratosRepoBlock,
   StratosRecordReader,

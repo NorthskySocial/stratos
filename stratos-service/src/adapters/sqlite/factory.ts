@@ -16,7 +16,7 @@ import type {
   BlobContentStore,
 } from '@northskysocial/stratos-core'
 import {
-  StratosDb,
+  type StratosDb,
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,

@@ -1,7 +1,7 @@
 import { IdResolver } from '@atproto/identity'
 import {
-  EnrollmentConfig,
-  EnrollmentDenialReason,
+  type EnrollmentConfig,
+  type EnrollmentDenialReason,
   EnrollmentDeniedError,
   extractPdsEndpoint,
   validateEnrollmentEligibility,
@@ -9,7 +9,7 @@ import {
 } from '@northskysocial/stratos-core'
 
 // Re-export for convenience
-export { EnrollmentConfig, EnrollmentDenialReason, EnrollmentDeniedError, extractPdsEndpoint }
+export { type EnrollmentConfig, type EnrollmentDenialReason, EnrollmentDeniedError, extractPdsEndpoint }
 
 /**
  * Result of enrollment validation

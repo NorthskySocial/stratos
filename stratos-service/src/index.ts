@@ -7,19 +7,19 @@ import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator } from '@northskysocial/stratos-core'
 
 import {
-  AppContext,
-  AppContextOptions,
+  type AppContext,
+  type AppContextOptions,
   createAppContext,
   destroyAppContext,
 } from './context.js'
-import { StratosServiceConfig, envToConfig, parseEnv } from './config.js'
+import { type StratosServiceConfig, envToConfig, parseEnv } from './config.js'
 import { registerHandlers } from './api/handlers.js'
 import { registerSubscribeRecords } from './subscription/subscribe-records.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 import { registerEnrollmentHandlers } from './features/index.js'
 
-export { StratosServiceConfig, AppContext }
+export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 
 /**

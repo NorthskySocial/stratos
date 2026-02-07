@@ -15,7 +15,7 @@ import type {
   GetEventsSinceOptions,
   AppendEventInput,
 } from '@northskysocial/stratos-core'
-import { StratosDb, stratosSeq } from '@northskysocial/stratos-core'
+import { type StratosDb, stratosSeq } from '@northskysocial/stratos-core'
 
 /**
  * Decoded event payload from CBOR blob

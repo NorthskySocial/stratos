@@ -1,5 +1,5 @@
 import { Server as XrpcServer, InvalidRequestError, AuthRequiredError } from '@atproto/xrpc-server'
-import { AppContext } from '../context.js'
+import type { AppContext } from '../context.js'
 import {
   createRecord,
   deleteRecord,

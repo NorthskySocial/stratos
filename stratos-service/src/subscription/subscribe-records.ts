@@ -4,9 +4,9 @@ import {
   InvalidRequestError,
 } from '@atproto/xrpc-server'
 import { IdResolver } from '@atproto/identity'
-import { StratosDb, stratosSeq } from '@northskysocial/stratos-core'
+import { type StratosDb, stratosSeq } from '@northskysocial/stratos-core'
 
-import { AppContext } from '../context.js'
+import type { AppContext } from '../context.js'
 import { verifyServiceAuth } from '../auth/verifier.js'
 
 /**

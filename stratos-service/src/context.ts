@@ -12,19 +12,19 @@ import {
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,
-  StratosDb,
+  type StratosDb,
   StratosRecordReader,
   StratosRecordTransactor,
   StratosSqlRepoReader,
   StratosSqlRepoTransactor,
   StratosBlobReader,
   StratosBlobTransactor,
-  BlobStore,
-  BlobStoreCreator,
+  type BlobStore,
+  type BlobStoreCreator,
   type Logger,
-  EnrollmentService,
-  BoundaryResolver,
-  StubWriterService,
+  type EnrollmentService,
+  type BoundaryResolver,
+  type StubWriterService,
   type EnrollmentStoreReader,
   type StoredEnrollment,
   type ListEnrollmentsOptions,
@@ -35,14 +35,14 @@ import {
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/stub/index.js'
 
-import { StratosServiceConfig, getServiceDidWithFragment } from './config.js'
+import { type StratosServiceConfig, getServiceDidWithFragment } from './config.js'
 import { createOAuthClient } from './oauth/client.js'
-import { EnrollmentStore, EnrollmentRecord } from './oauth/routes.js'
+import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import { 
   createServiceDb, 
   migrateServiceDb, 
   closeServiceDb, 
-  ServiceDb,
+  type ServiceDb,
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'

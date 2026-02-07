@@ -12,7 +12,7 @@ import type {
   RepoState,
 } from '@northskysocial/stratos-core'
 import {
-  StratosDb,
+  type StratosDb,
   stratosRepoBlock,
   stratosRepoRoot,
 } from '@northskysocial/stratos-core'
