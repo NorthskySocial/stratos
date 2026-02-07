@@ -3,11 +3,7 @@ import { Agent } from '@atproto/api'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
-import {
-  EnrollmentConfig,
-  validateEnrollment,
-  EnrollmentDeniedError,
-} from '../auth/enrollment.js'
+import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
 
 /**
  * Enrollment record stored in database
@@ -56,7 +52,6 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     enrollmentConfig,
     enrollmentStore,
     idResolver,
-    baseUrl,
     serviceEndpoint,
     defaultBoundaries = [],
     logger,
@@ -124,7 +119,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         await oauthClient.revoke(did)
 
         const messages: Record<string, string> = {
-          NotInAllowlist: 'Your account is not eligible for this Stratos service',
+          NotInAllowlist:
+            'Your account is not eligible for this Stratos service',
           DidNotResolved: 'Could not verify your identity',
           PdsEndpointNotFound: 'Could not find your PDS endpoint',
           ServiceClosed: 'This service is not accepting new enrollments',
@@ -152,20 +148,26 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         try {
           const oauthSession = await oauthClient.restore(did)
           const agent = new Agent(oauthSession)
-          
+
           await agent.com.atproto.repo.putRecord({
             repo: did,
             collection: 'app.stratos.actor.enrollment',
             rkey: 'self',
             record: {
               service: serviceEndpoint,
-              boundaries: defaultBoundaries.map(value => ({ value })),
+              boundaries: defaultBoundaries.map((value) => ({ value })),
               createdAt: new Date().toISOString(),
             },
           })
         } catch (profileErr) {
           logger?.warn(
-            { err: profileErr instanceof Error ? profileErr.message : String(profileErr), did },
+            {
+              err:
+                profileErr instanceof Error
+                  ? profileErr.message
+                  : String(profileErr),
+              did,
+            },
             'failed to write profile record',
           )
         }
@@ -182,7 +184,10 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       })
 
       if (!alreadyEnrolled) {
-        logger?.info({ did, boundaryCount: defaultBoundaries.length }, 'user enrolled via OAuth')
+        logger?.info(
+          { did, boundaryCount: defaultBoundaries.length },
+          'user enrolled via OAuth',
+        )
       }
     } catch (err) {
       logger?.error(
@@ -235,7 +240,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
       // Check enrollment status
       const enrollment = await enrollmentStore.getEnrollment(did)
-      
+
       if (!enrollment) {
         return res.json({
           did,

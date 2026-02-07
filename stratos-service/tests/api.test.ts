@@ -57,11 +57,13 @@ function createMockBlobStore(): BlobStore {
         tempStorage.delete(key)
       }
     }),
-    putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Uint8Array) => {
-      if (bytes instanceof Uint8Array) {
-        storage.set(cid.toString(), bytes)
-      }
-    }),
+    putPermanent: vi
+      .fn()
+      .mockImplementation(async (cid: CID, bytes: Uint8Array) => {
+        if (bytes instanceof Uint8Array) {
+          storage.set(cid.toString(), bytes)
+        }
+      }),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockImplementation(async (cid: CID) => {
@@ -142,7 +144,11 @@ interface TestContext {
   actorStore: StratosActorStore
   enrollmentStore: {
     isEnrolled: (did: string) => Promise<boolean>
-    enroll: (record: { did: string; enrolledAt: string; pdsEndpoint?: string }) => Promise<void>
+    enroll: (record: {
+      did: string
+      enrolledAt: string
+      pdsEndpoint?: string
+    }) => Promise<void>
   }
   stratosConfig: { allowedDomains: string[]; retentionDays: number }
 }
@@ -153,7 +159,10 @@ describe('API Records', () => {
   let testDid: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-api-test-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-api-test-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
 
     testDid = 'did:plc:testuser'
@@ -168,7 +177,11 @@ describe('API Records', () => {
     const enrolledDids = new Set<string>()
     const enrollmentStore = {
       isEnrolled: async (did: string) => enrolledDids.has(did),
-      enroll: async (record: { did: string; enrolledAt: string; pdsEndpoint?: string }) => {
+      enroll: async (record: {
+        did: string
+        enrolledAt: string
+        pdsEndpoint?: string
+      }) => {
         enrolledDids.add(record.did)
       },
     }
@@ -207,7 +220,7 @@ describe('API Records', () => {
             },
           },
           testDid,
-        )
+        ),
       ).rejects.toThrow('not enrolled')
     })
 
@@ -242,7 +255,7 @@ describe('API Records', () => {
             record: { text: 'test' },
           },
           testDid,
-        )
+        ),
       ).rejects.toThrow('another user')
     })
   })
@@ -268,7 +281,7 @@ describe('API Records', () => {
             record: { text: 'test' },
           },
           testDid,
-        )
+        ),
       ).rejects.toThrow('app.stratos')
     })
   })
@@ -280,7 +293,10 @@ describe('SqliteEnrollmentStore', () => {
   let testDir: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-enrollment-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-enrollment-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     const dbPath = join(testDir, 'test.sqlite')
 
@@ -527,7 +543,9 @@ describe('StratosActorStore', () => {
     })
 
     it('should not fail for non-existent actor', async () => {
-      await expect(actorStore.destroy('did:plc:notexist')).resolves.not.toThrow()
+      await expect(
+        actorStore.destroy('did:plc:notexist'),
+      ).resolves.not.toThrow()
     })
   })
 
@@ -550,7 +568,9 @@ describe('StratosActorStore', () => {
 
       await actorStore.transact(testDid, async (store) => {
         // Insert a record directly for testing
-        const uri = new AtUri('at://did:plc:testactor/app.stratos.feed.post/123')
+        const uri = new AtUri(
+          'at://did:plc:testactor/app.stratos.feed.post/123',
+        )
         await store.record.indexRecord(
           uri,
           cid,

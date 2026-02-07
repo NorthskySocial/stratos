@@ -5,7 +5,10 @@
  * Follows RFC 9449 for DPoP proof validation.
  */
 import { DpopManager, type DpopProof } from '@atproto/oauth-provider'
-import type { EnrollmentStoreReader, Logger } from '@northskysocial/stratos-core'
+import type {
+  EnrollmentStoreReader,
+  Logger,
+} from '@northskysocial/stratos-core'
 import {
   PdsTokenVerifier,
   type TokenVerificationResult,
@@ -97,7 +100,11 @@ export class DpopVerifier {
   constructor(config: DpopVerifierConfig) {
     this.config = config
     this.dpopManager = new DpopManager({
-      dpopSecret: config.dpopSecret as Uint8Array<ArrayBuffer> | string | false | undefined,
+      dpopSecret: config.dpopSecret as
+        | Uint8Array<ArrayBuffer>
+        | string
+        | false
+        | undefined,
       dpopRotationInterval: config.dpopRotationInterval,
     })
   }
@@ -122,7 +129,10 @@ export class DpopVerifier {
     res?: VerifyResponseContext,
   ): Promise<DpopAuthResult> {
     const start = Date.now()
-    this.config.logger?.debug({ method: req.method, url: req.url }, 'DPoP auth attempt')
+    this.config.logger?.debug(
+      { method: req.method, url: req.url },
+      'DPoP auth attempt',
+    )
 
     // Set DPoP-Nonce header for client
     const nonce = this.nextNonce()
@@ -133,7 +143,10 @@ export class DpopVerifier {
     // Parse Authorization header
     const authHeader = this.getHeader(req.headers, 'authorization')
     if (!authHeader) {
-      this.config.logger?.warn({ code: 'missing_auth' }, 'DPoP auth failed: missing authorization header')
+      this.config.logger?.warn(
+        { code: 'missing_auth' },
+        'DPoP auth failed: missing authorization header',
+      )
       throw new DpopVerificationError(
         'Authorization header required',
         'missing_auth',
@@ -143,7 +156,10 @@ export class DpopVerifier {
 
     // Must be DPoP scheme
     if (!authHeader.startsWith('DPoP ')) {
-      this.config.logger?.warn({ code: 'missing_auth' }, 'DPoP auth failed: non-DPoP scheme')
+      this.config.logger?.warn(
+        { code: 'missing_auth' },
+        'DPoP auth failed: non-DPoP scheme',
+      )
       throw new DpopVerificationError(
         'DPoP authorization required',
         'missing_auth',
@@ -174,7 +190,10 @@ export class DpopVerifier {
       )
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Invalid DPoP proof'
-      this.config.logger?.warn({ code: 'invalid_dpop_proof', error: message }, 'DPoP auth failed: invalid proof')
+      this.config.logger?.warn(
+        { code: 'invalid_dpop_proof', error: message },
+        'DPoP auth failed: invalid proof',
+      )
       throw new DpopVerificationError(
         message,
         'invalid_dpop_proof',
@@ -184,7 +203,10 @@ export class DpopVerifier {
 
     // DPoP proof is required for DPoP token type
     if (!dpopProof) {
-      this.config.logger?.warn({ code: 'invalid_dpop_proof' }, 'DPoP auth failed: proof missing')
+      this.config.logger?.warn(
+        { code: 'invalid_dpop_proof' },
+        'DPoP auth failed: proof missing',
+      )
       throw new DpopVerificationError(
         'DPoP proof required',
         'invalid_dpop_proof',
@@ -197,14 +219,21 @@ export class DpopVerifier {
     try {
       verificationResult = await this.config.tokenVerifier.verify(accessToken)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Token verification failed'
-      this.config.logger?.error({ code: 'verification_failed', error: message }, 'DPoP auth failed: token verification error')
+      const message =
+        err instanceof Error ? err.message : 'Token verification failed'
+      this.config.logger?.error(
+        { code: 'verification_failed', error: message },
+        'DPoP auth failed: token verification error',
+      )
       throw new DpopVerificationError(message, 'verification_failed')
     }
 
     // Check token is active/valid
     if (!verificationResult.active) {
-      this.config.logger?.warn({ code: 'token_inactive', error: verificationResult.error }, 'DPoP auth failed: token inactive')
+      this.config.logger?.warn(
+        { code: 'token_inactive', error: verificationResult.error },
+        'DPoP auth failed: token inactive',
+      )
       throw new DpopVerificationError(
         verificationResult.error ?? 'Token is not active',
         'token_inactive',
@@ -218,7 +247,10 @@ export class DpopVerifier {
     // Get subject (user DID)
     const did = claims.sub
     if (!did || !did.startsWith('did:')) {
-      this.config.logger?.warn({ code: 'invalid_token' }, 'DPoP auth failed: invalid subject')
+      this.config.logger?.warn(
+        { code: 'invalid_token' },
+        'DPoP auth failed: invalid subject',
+      )
       throw new DpopVerificationError(
         'Invalid subject in token',
         'invalid_token',
@@ -233,7 +265,10 @@ export class DpopVerifier {
     const tokenJkt = claims.cnf?.jkt
     if (tokenJkt) {
       if (tokenJkt !== dpopProof.jkt) {
-        this.config.logger?.warn({ did, code: 'key_binding_mismatch' }, 'DPoP auth failed: key binding mismatch')
+        this.config.logger?.warn(
+          { did, code: 'key_binding_mismatch' },
+          'DPoP auth failed: key binding mismatch',
+        )
         throw new DpopVerificationError(
           'DPoP key binding mismatch',
           'key_binding_mismatch',
@@ -245,14 +280,20 @@ export class DpopVerifier {
     // Check user is enrolled
     const isEnrolled = await this.config.enrollmentStore.isEnrolled(did)
     if (!isEnrolled) {
-      this.config.logger?.warn({ did, code: 'not_enrolled' }, 'DPoP auth failed: user not enrolled')
+      this.config.logger?.warn(
+        { did, code: 'not_enrolled' },
+        'DPoP auth failed: user not enrolled',
+      )
       throw new DpopVerificationError(
         `User ${did} is not enrolled`,
         'not_enrolled',
       )
     }
 
-    this.config.logger?.debug({ did, durationMs: Date.now() - start }, 'DPoP auth succeeded')
+    this.config.logger?.debug(
+      { did, durationMs: Date.now() - start },
+      'DPoP auth succeeded',
+    )
 
     return {
       type: 'dpop',

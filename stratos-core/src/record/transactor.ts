@@ -1,7 +1,12 @@
 import { eq } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { AtUri } from '@atproto/syntax'
-import { StratosDb, stratosRecord, stratosBacklink, StratosBacklink } from '../db/index.js'
+import {
+  StratosDb,
+  stratosRecord,
+  stratosBacklink,
+  StratosBacklink,
+} from '../db/index.js'
 import { Logger } from '../types.js'
 import { StratosRecordReader, getStratosBacklinks } from './reader.js'
 
@@ -72,11 +77,18 @@ export class StratosRecordTransactor extends StratosRecordReader {
   }
 
   async deleteRecord(uri: AtUri): Promise<void> {
-    this.logger?.debug({ uri: uri.toString() }, 'deleting indexed stratos record')
+    this.logger?.debug(
+      { uri: uri.toString() },
+      'deleting indexed stratos record',
+    )
 
     await Promise.all([
-      this.db.delete(stratosRecord).where(eq(stratosRecord.uri, uri.toString())),
-      this.db.delete(stratosBacklink).where(eq(stratosBacklink.uri, uri.toString())),
+      this.db
+        .delete(stratosRecord)
+        .where(eq(stratosRecord.uri, uri.toString())),
+      this.db
+        .delete(stratosBacklink)
+        .where(eq(stratosBacklink.uri, uri.toString())),
     ])
 
     this.logger?.info({ uri: uri.toString() }, 'deleted indexed stratos record')
@@ -102,7 +114,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
   ): Promise<void> {
     await this.db
       .update(stratosRecord)
-      .set({ takedownRef: takedown.applied ? takedown.ref ?? null : null })
+      .set({ takedownRef: takedown.applied ? (takedown.ref ?? null) : null })
       .where(eq(stratosRecord.uri, uri.toString()))
   }
 }

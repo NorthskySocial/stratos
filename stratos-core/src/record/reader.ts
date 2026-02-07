@@ -113,7 +113,9 @@ export class StratosRecordReader {
     return collections.map((row) => row.collection)
   }
 
-  async listRecordsForCollection(opts: ListRecordsOpts): Promise<RecordWithContent[]> {
+  async listRecordsForCollection(
+    opts: ListRecordsOpts,
+  ): Promise<RecordWithContent[]> {
     const {
       collection,
       limit,
@@ -328,7 +330,10 @@ export function getStratosBacklinks(
         // Not a valid reference
       }
     }
-  } else if (subject && typeof (subject as Record<string, unknown>)['uri'] === 'string') {
+  } else if (
+    subject &&
+    typeof (subject as Record<string, unknown>)['uri'] === 'string'
+  ) {
     try {
       const subjectUri = (subject as Record<string, unknown>)['uri'] as string
       syntax.ensureValidAtUri(subjectUri)

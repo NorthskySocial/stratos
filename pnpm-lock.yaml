@@ -20,6 +20,9 @@ importers:
       eslint:
         specifier: ^10.0.0
         version: 10.0.0
+      eslint-config-prettier:
+        specifier: ^10.1.8
+        version: 10.1.8(eslint@10.0.0)
       prettier:
         specifier: ^3.8.1
         version: 3.8.1

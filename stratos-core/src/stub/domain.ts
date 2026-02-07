@@ -53,7 +53,10 @@ export function extractSource(record: unknown): RecordSource | null {
  * Parse the service DID and fragment from a source.service field
  * @example "did:plc:abc123#atproto_pns" -> { did: "did:plc:abc123", fragment: "atproto_pns" }
  */
-export function parseServiceDid(serviceDid: string): { did: string; fragment: string | null } {
+export function parseServiceDid(serviceDid: string): {
+  did: string
+  fragment: string | null
+} {
   const hashIndex = serviceDid.indexOf('#')
   if (hashIndex === -1) {
     return { did: serviceDid, fragment: null }

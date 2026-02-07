@@ -1,6 +1,11 @@
 import { eq, gt, and, isNull, asc } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
-import { StratosDb, stratosBlob, stratosRecordBlob, stratosRecord } from '../db/index.js'
+import {
+  StratosDb,
+  stratosBlob,
+  stratosRecordBlob,
+  stratosRecord,
+} from '../db/index.js'
 import { StatusAttr, BlobStore, Logger } from '../types.js'
 
 /**
@@ -25,7 +30,12 @@ export class StratosBlobReader {
     const found = await this.db
       .select()
       .from(stratosBlob)
-      .where(and(eq(stratosBlob.cid, cid.toString()), isNull(stratosBlob.takedownRef)))
+      .where(
+        and(
+          eq(stratosBlob.cid, cid.toString()),
+          isNull(stratosBlob.takedownRef),
+        ),
+      )
       .limit(1)
     if (found.length === 0) {
       return null
@@ -51,6 +61,7 @@ export class StratosBlobReader {
         ...metadata,
         stream,
       }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
       return null
     }
@@ -62,7 +73,7 @@ export class StratosBlobReader {
     limit: number
   }): Promise<string[]> {
     const { since, cursor, limit } = opts
-    
+
     const conditions = []
     if (cursor) {
       conditions.push(gt(stratosRecordBlob.blobCid, cursor))
@@ -72,7 +83,10 @@ export class StratosBlobReader {
       const res = await this.db
         .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
         .from(stratosRecordBlob)
-        .innerJoin(stratosRecord, eq(stratosRecord.uri, stratosRecordBlob.recordUri))
+        .innerJoin(
+          stratosRecord,
+          eq(stratosRecord.uri, stratosRecordBlob.recordUri),
+        )
         .where(
           and(
             gt(stratosRecord.repoRev, since),

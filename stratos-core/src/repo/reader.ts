@@ -1,6 +1,11 @@
-import { eq, gt, lt, inArray, desc, asc, sql, and } from 'drizzle-orm'
+import { eq, gt, inArray, desc, asc, sql, and } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
-import { StratosDb, stratosRepoRoot, stratosRepoBlock, countAll } from '../db/index.js'
+import {
+  StratosDb,
+  stratosRepoRoot,
+  stratosRepoBlock,
+  countAll,
+} from '../db/index.js'
 import { Logger } from '../types.js'
 
 /**
@@ -214,14 +219,16 @@ export class StratosSqlRepoReader {
     cursor?: RevCursor,
   ): Promise<{ cid: string; repoRev: string; content: Uint8Array }[]> {
     const conditions = []
-    
+
     if (since) {
       conditions.push(gt(stratosRepoBlock.repoRev, since))
     }
-    
+
     if (cursor) {
       const { rev, cid } = cursor
-      conditions.push(sql`(${stratosRepoBlock.repoRev}, ${stratosRepoBlock.cid}) < (${rev}, ${cid})`)
+      conditions.push(
+        sql`(${stratosRepoBlock.repoRev}, ${stratosRepoBlock.cid}) < (${rev}, ${cid})`,
+      )
     }
 
     let query = this.db
@@ -239,7 +246,7 @@ export class StratosSqlRepoReader {
     }
 
     const res = await query
-    return res.map(row => ({
+    return res.map((row) => ({
       cid: row.cid,
       repoRev: row.repoRev,
       content: row.content as Uint8Array,
@@ -247,9 +254,7 @@ export class StratosSqlRepoReader {
   }
 
   async countBlocks(): Promise<number> {
-    const res = await this.db
-      .select({ count: countAll })
-      .from(stratosRepoBlock)
+    const res = await this.db.select({ count: countAll }).from(stratosRepoBlock)
     return res[0]?.count ?? 0
   }
 

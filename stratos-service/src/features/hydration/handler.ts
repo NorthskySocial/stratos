@@ -2,10 +2,7 @@ import { InvalidRequestError } from '@atproto/xrpc-server'
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../../context.js'
 import { createHydrationContext } from '@northskysocial/stratos-core'
-import {
-  HydrationServiceImpl,
-  ActorStoreRecordResolver,
-} from './adapter.js'
+import { HydrationServiceImpl, ActorStoreRecordResolver } from './adapter.js'
 
 type HandlerAuth = {
   credentials: {
@@ -67,7 +64,7 @@ export function registerHydrationHandlers(
   ctx: AppContext,
 ): void {
   const xrpc = server as unknown as XrpcServerInternal
-  
+
   const recordResolver = new ActorStoreRecordResolver(ctx.actorStore)
   const hydrationService = new HydrationServiceImpl(
     recordResolver,

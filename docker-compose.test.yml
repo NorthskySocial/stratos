@@ -2,9 +2,9 @@ services:
   nginx:
     image: nginx:alpine
     container_name: stratos-nginx
-    restart: "no"
+    restart: 'no'
     ports:
-      - "8443:443"
+      - '8443:443'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ssl-certs:/etc/nginx/ssl:ro
@@ -47,9 +47,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: stratos-test
-    restart: "no"
+    restart: 'no'
     ports:
-      - "3100:3100"
+      - '3100:3100'
     env_file:
       - .env.test
     environment:
@@ -59,7 +59,15 @@ services:
     volumes:
       - ./test-data:/app/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/health"]
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3100/health',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
