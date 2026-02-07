@@ -31,12 +31,12 @@ import {
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
-} from './features/index.ts'
-import {StubWriterServiceImpl} from './features/index.ts'
+} from './features/index.js'
+import {StubWriterServiceImpl} from './features/index.js'
 
-import {StratosServiceConfig, getServiceDidWithFragment} from './config.ts'
-import {createOAuthClient} from './oauth/client.ts'
-import {EnrollmentStore, EnrollmentRecord} from './oauth/routes.ts'
+import {StratosServiceConfig, getServiceDidWithFragment} from './config.js'
+import {createOAuthClient} from './oauth/client.js'
+import {EnrollmentStore, EnrollmentRecord} from './oauth/routes.js'
 import {
   createServiceDb,
   migrateServiceDb,
@@ -44,9 +44,9 @@ import {
   ServiceDb,
   enrollment,
   enrollmentBoundary,
-} from './db/index.ts'
-import {PdsTokenVerifier} from './auth/index.ts'
-import {DpopVerifier} from './auth/index.ts'
+} from './db/index.js'
+import {PdsTokenVerifier} from './auth/index.js'
+import {DpopVerifier} from './auth/index.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -229,7 +229,7 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
         .where(eq(enrollmentBoundary.did, record.did))
 
       await this.db.insert(enrollmentBoundary).values(
-        record.boundaries.map((boundary) => ({did: record.did, boundary})),
+        record.boundaries.map((boundary: string) => ({did: record.did, boundary})),
       )
     }
   }
@@ -275,7 +275,8 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
 
     const rows = await query.orderBy(asc(enrollment.did)).limit(limit)
 
-    return rows.map((row) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((row: any) => ({
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
@@ -296,7 +297,8 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
       .from(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    return rows.map((r) => r.boundary)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((r: any) => r.boundary)
   }
 }
 
@@ -581,7 +583,7 @@ export async function createAppContext(
 
   const enrollmentService = new EnrollmentServiceImpl(
     {db},
-    async (did) => actorStore.create(did),
+    async (did: string) => actorStore.create(did),
   )
 
   // Resolves per-user boundaries from storage
@@ -608,7 +610,7 @@ export async function createAppContext(
   const serviceDidWithFragment = getServiceDidWithFragment(cfg)
 
   const stubWriter = new StubWriterServiceImpl(
-    async (did) => {
+    async (did: string) => {
       if (!oauthClient) {
         return null
       }

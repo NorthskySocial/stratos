@@ -1,12 +1,12 @@
 import {Server as XrpcServer, InvalidRequestError, AuthRequiredError} from '@atproto/xrpc-server'
-import {AppContext} from '../context.ts'
+import {AppContext} from '../context.js'
 import {
   createRecord,
   deleteRecord,
   getRecord,
   listRecords,
-} from './records.ts'
-import {registerHydrationHandlers} from '../features/index.ts'
+} from './records.js'
+import {registerHydrationHandlers} from '../features/index.js'
 
 type HandlerAuth = {
   credentials: {

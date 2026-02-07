@@ -1,2 +1,2 @@
-export * from './records.ts'
-export * from './handlers.ts'
+export * from './records.js'
+export * from './handlers.js'

@@ -4,7 +4,6 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],
-    "allowImportingTsExtensions": true,
     "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,
@@ -12,19 +11,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
     "baseUrl": ".",
     "paths": {
-      "@northsky/stratos-core": ["../stratos-core/src"],
-      "@northsky/stratos-service": ["../stratos-service/src"]
+      "@northsky/stratos-core": ["./stratos-core/src"],
+      "@northsky/stratos-service": ["./stratos-service/src"]
     }
   },
   "exclude": ["node_modules", "dist"]
