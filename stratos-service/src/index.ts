@@ -4,7 +4,7 @@ import cors from 'cors'
 import { IdResolver } from '@atproto/identity'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
-import type { BlobStoreCreator } from '@anthropic/stratos-core'
+import type { BlobStoreCreator } from '@northskysocial/stratos-core'
 
 import {
   AppContext,

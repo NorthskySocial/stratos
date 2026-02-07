@@ -4,7 +4,7 @@ import path from 'node:path'
 import { CID } from 'multiformats/cid'
 import { fileExists, rmIfExists, chunkArray, aggregateErrors } from '@atproto/common'
 import { randomStr } from '@atproto/crypto'
-import { BlobStore, BlobStoreCreator, BlobNotFoundError } from '@anthropic/stratos-core'
+import { BlobStore, BlobStoreCreator, BlobNotFoundError } from '@northskysocial/stratos-core'
 import { readableToAsyncIterable, collectAsyncIterable } from './util.js'
 
 /**

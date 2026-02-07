@@ -9,12 +9,12 @@ import type {
   BlobMetadataReader,
   BlobMetadataWriter,
   BlobMetadata,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import {
   StratosDb,
   stratosBlob,
   stratosRecordBlob,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 /**
  * SQLite implementation of BlobMetadataReader

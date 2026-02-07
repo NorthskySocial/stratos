@@ -14,14 +14,14 @@ import type {
   RecordValue,
   ListRecordsOptions,
   GetRecordOptions,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import {
   StratosDb,
   stratosRecord,
   stratosRepoBlock,
   StratosRecordReader,
   StratosRecordTransactor,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 /**
  * SQLite implementation of RecordStoreReader

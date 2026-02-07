@@ -3,7 +3,7 @@
 # Uses tsx for TypeScript execution without compilation,
 # as the codebase uses dynamic imports and runtime transpilation.
 
-FROM node:22-alpine
+FROM node:24-alpine
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate

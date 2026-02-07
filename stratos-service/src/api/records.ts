@@ -13,7 +13,7 @@ import {
   StratosValidationError,
   extractBoundaryDomains,
   stratosSeq,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 import { AppContext, StratosActorTransactor } from '../context.js'
 

@@ -10,12 +10,12 @@ import type {
   RepoStoreWriter,
   RepoBlock,
   RepoState,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import {
   StratosDb,
   stratosRepoBlock,
   stratosRepoRoot,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 /**
  * SQLite implementation of RepoStoreReader

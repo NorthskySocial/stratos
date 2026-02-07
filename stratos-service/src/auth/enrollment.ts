@@ -6,7 +6,7 @@ import {
   extractPdsEndpoint,
   validateEnrollmentEligibility,
   isDidAllowed,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 // Re-export for convenience
 export { EnrollmentConfig, EnrollmentDenialReason, EnrollmentDeniedError, extractPdsEndpoint }

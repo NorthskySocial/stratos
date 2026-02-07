@@ -28,7 +28,7 @@ import {
   type EnrollmentStoreReader,
   type StoredEnrollment,
   type ListEnrollmentsOptions,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
