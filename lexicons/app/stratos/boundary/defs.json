@@ -1,0 +1,31 @@
+{
+  "lexicon": 1,
+  "id": "app.stratos.boundary.defs",
+  "defs": {
+    "Domain": {
+      "type": "object",
+      "description": "A specific domain to define exposure boundary.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "Domain identifier for boundary. Must be a valid domain name.",
+          "maxLength": 253
+        }
+      }
+    },
+    "Domains": {
+      "type": "object",
+      "description": "A collection of domains that define the exposure boundary for a record.",
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "description": "List of domains that can access this record.",
+          "items": { "type": "ref", "ref": "#Domain" },
+          "maxLength": 10
+        }
+      }
+    }
+  }
+}

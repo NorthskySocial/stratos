@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs (rebuilt in container)
+dist/
+*.js
+*.d.ts
+*.js.map
+
+# Development
+.git/
+.github/
+.vscode/
+*.log
+*.local
+
+# Test files
+coverage/
+.nyc_output/
+*.test.ts
+tests/
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Docker files
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Environment files (use docker-compose environment instead)
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+
+# IDE
+.idea/
+*.iml
+
+# Temporary files
+tmp/
+temp/
