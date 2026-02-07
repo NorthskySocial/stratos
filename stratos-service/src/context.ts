@@ -526,7 +526,7 @@ export interface AppContextOptions {
 /**
  * Load Stratos lexicon documents from the lexicons directory
  */
-function loadStratosLexicons(): LexiconDoc[] {
+export function loadStratosLexicons(): LexiconDoc[] {
   const __dirname = path.dirname(fileURLToPath(import.meta.url))
   // From stratos-service/src/context.ts, lexicons are at ../../lexicons (relative to stratos-service)
   // In Docker, we're in /app/stratos-service, lexicons are at /app/lexicons
