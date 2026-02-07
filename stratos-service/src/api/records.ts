@@ -6,16 +6,16 @@ import { AtUri } from '@atproto/syntax'
 
 import {
   assertStratosValidation,
-  PreparedCreate,
-  PreparedUpdate,
-  PreparedDelete,
-  CommitData,
+  type PreparedCreate,
+  type PreparedUpdate,
+  type PreparedDelete,
+  type CommitData,
   StratosValidationError,
   extractBoundaryDomains,
   stratosSeq,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
-import { AppContext, StratosActorTransactor } from '../context.js'
+import type { AppContext, StratosActorTransactor } from '../context.js'
 
 /**
  * Record creation input

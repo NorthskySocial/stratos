@@ -3,14 +3,10 @@
 # Uses tsx for TypeScript execution without compilation,
 # as the codebase uses dynamic imports and runtime transpilation.
 
-FROM node:22-alpine
+FROM node:24-alpine
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
-
-# Add non-root user for security
-RUN addgroup -g 1001 stratos && \
-    adduser -u 1001 -G stratos -s /bin/sh -D stratos
 
 WORKDIR /app
 
@@ -19,7 +15,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
 
-# Install all dependencies (tsx is a dev dependency needed for runtime)
+# Install all dependencies (tsx is a production dependency needed for runtime)
 RUN pnpm install --frozen-lockfile
 
 # Copy source files
@@ -29,10 +25,10 @@ COPY stratos-service/ ./stratos-service/
 COPY lexicons/ ./lexicons/
 
 # Create data directory
-RUN mkdir -p /app/data && chown -R stratos:stratos /app/data
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
 # Switch to non-root user
-USER stratos
+USER node
 
 # Expose default port
 EXPOSE 3100
@@ -46,5 +42,6 @@ ENV NODE_ENV=production
 ENV STRATOS_PORT=3100
 ENV STRATOS_DATA_DIR=/app/data
 
-# Run the service using tsx (TypeScript execution)
-CMD ["pnpm", "exec", "tsx", "stratos-service/src/bin/stratos.ts"]
+# Run the service using tsx from stratos-service (where it's installed)
+WORKDIR /app/stratos-service
+CMD ["pnpm", "exec", "tsx", "src/bin/stratos.ts"]

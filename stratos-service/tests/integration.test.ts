@@ -18,7 +18,7 @@ import {
   StratosRecordTransactor,
   BlobStore,
   BlobStoreCreator,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 import {
   assertStratosValidation,
@@ -27,7 +27,7 @@ import {
   isBskyUri,
   isStratosCollection,
   extractBoundaryDomains,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 
 import { StratosActorStore, SqliteEnrollmentStore } from '../src/context.js'
 import { validateEnrollment, assertEnrollment, EnrollmentConfig } from '../src/auth/enrollment.js'

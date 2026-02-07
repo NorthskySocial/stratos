@@ -1,48 +1,52 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { eq, gt, asc, sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
-import { Server as XrpcServer } from '@atproto/xrpc-server'
+import { Server as XrpcServer, XRPCError } from '@atproto/xrpc-server'
+import { schemas as atprotoSchemas } from '@atproto/api'
+import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
 
 import {
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,
-  StratosDb,
+  type StratosDb,
   StratosRecordReader,
   StratosRecordTransactor,
   StratosSqlRepoReader,
   StratosSqlRepoTransactor,
   StratosBlobReader,
   StratosBlobTransactor,
-  BlobStore,
-  BlobStoreCreator,
+  type BlobStore,
+  type BlobStoreCreator,
   type Logger,
-  EnrollmentService,
-  BoundaryResolver,
-  StubWriterService,
+  type EnrollmentService,
+  type BoundaryResolver,
+  type StubWriterService,
   type EnrollmentStoreReader,
   type StoredEnrollment,
   type ListEnrollmentsOptions,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/stub/index.js'
 
-import { StratosServiceConfig, getServiceDidWithFragment } from './config.js'
+import { type StratosServiceConfig, getServiceDidWithFragment } from './config.js'
 import { createOAuthClient } from './oauth/client.js'
-import { EnrollmentStore, EnrollmentRecord } from './oauth/routes.js'
+import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import { 
   createServiceDb, 
   migrateServiceDb, 
   closeServiceDb, 
-  ServiceDb,
+  type ServiceDb,
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
@@ -128,6 +132,7 @@ export class StratosActorStore {
 
     const db = createStratosDb(dbLocation)
     try {
+      await db._initialized
       await migrateStratosDb(db)
     } finally {
       await closeStratosDb(db)
@@ -151,6 +156,7 @@ export class StratosActorStore {
   ): Promise<T> {
     const { dbLocation } = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
+    await db._initialized
     const blobStore = this.blobstore(did)
 
     try {
@@ -175,6 +181,7 @@ export class StratosActorStore {
   ): Promise<T> {
     const { dbLocation } = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
+    await db._initialized
     const blobStore = this.blobstore(did)
 
     try {
@@ -338,19 +345,23 @@ function createAuthVerifiers(
       await oauthClient.restore(did, false)
       return true
     } catch {
-      return false
+      // Fall back to enrollment check for directly-enrolled users
+      return enrollmentStore.isEnrolled(did)
     }
   }
 
   return {
     standard: async (ctx) => {
       const authHeader = ctx.req?.headers?.authorization
+      console.log('[auth] standard auth called, header:', authHeader?.substring(0, 50))
       if (!authHeader) {
+        console.log('[auth] no auth header')
         throw new Error('Authorization required')
       }
 
       // Try DPoP verification first
       if (authHeader.startsWith('DPoP ') && dpopVerifier) {
+        console.log('[auth] trying DPoP verification')
         try {
           const result = await dpopVerifier.verify(
             {
@@ -362,18 +373,22 @@ function createAuthVerifiers(
               setHeader: (name, value) => ctx.res?.setHeader(name, value),
             },
           )
+          console.log('[auth] DPoP verified for:', result.did)
           return {
             credentials: { type: 'user', did: result.did },
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'DPoP verification failed'
+          console.log('[auth] DPoP failed:', message)
           throw new Error(message)
         }
       }
 
       // Fall back to session-based auth for Bearer tokens
       const [scheme, token] = authHeader.split(' ')
+      console.log('[auth] scheme:', scheme, 'token starts with did:', token?.startsWith('did:'))
       if (!token) {
+        console.log('[auth] no token in header')
         throw new Error('Invalid authorization header format')
       }
       
@@ -381,15 +396,19 @@ function createAuthVerifiers(
       // In production, this would parse the JWT to extract the DID
       const did = token.startsWith('did:') ? token : null
       if (!did) {
+        console.log('[auth] token is not a DID')
         throw new Error('Invalid token format: expected DID or DPoP token')
       }
 
       // Verify user has valid session
+      console.log('[auth] checking session for:', did)
       const hasSession = await validateSession(did)
+      console.log('[auth] hasSession:', hasSession)
       if (!hasSession) {
         throw new Error('No valid session for user')
       }
 
+      console.log('[auth] auth successful for:', did)
       return {
         credentials: { type: 'user', did },
       }
@@ -520,6 +539,34 @@ export interface AppContextOptions {
 }
 
 /**
+ * Load Stratos lexicon documents from the lexicons directory
+ */
+export function loadStratosLexicons(): LexiconDoc[] {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url))
+  // From stratos-service/src/context.ts, lexicons are at ../../lexicons (relative to stratos-service)
+  // In Docker, we're in /app/stratos-service, lexicons are at /app/lexicons
+  const lexiconsDir = path.resolve(__dirname, '../..', 'lexicons')
+  const lexicons: LexiconDoc[] = []
+
+  function loadFromDir(dir: string) {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        loadFromDir(fullPath)
+      } else if (entry.name.endsWith('.json')) {
+        const content = readFileSync(fullPath, 'utf-8')
+        const doc = JSON.parse(content) as LexiconDoc
+        lexicons.push(doc)
+      }
+    }
+  }
+
+  loadFromDir(lexiconsDir)
+  return lexicons
+}
+
+/**
  * Create application context
  */
 export async function createAppContext(
@@ -554,7 +601,7 @@ export async function createAppContext(
   if (cfg.oauth) {
     oauthClient = await createOAuthClient(
       {
-        clientId: cfg.oauth.clientId ?? cfg.service.publicUrl,
+        clientId: cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
         clientUri: cfg.service.publicUrl,
         redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
         privateKeyPem: cfg.oauth.clientSecret,
@@ -618,9 +665,21 @@ export async function createAppContext(
   )
 
   const app = express()
-  app.use(express.json())
+  // Note: express.json() is applied in index.ts with exclusion for /xrpc/ routes
 
-  const xrpcServer = new XrpcServer()
+  // Load Stratos lexicons from the lexicons directory
+  const stratosLexicons = loadStratosLexicons()
+  const allLexicons = [...atprotoSchemas, ...stratosLexicons]
+
+  const xrpcServer = new XrpcServer(allLexicons, {
+    errorParser: (err) => {
+      console.error('[xrpc] error caught:', err instanceof Error ? err.message : String(err))
+      if (err instanceof Error && err.stack) {
+        console.error('[xrpc] error stack:', err.stack)
+      }
+      return XRPCError.fromError(err)
+    },
+  })
 
   return {
     cfg,
