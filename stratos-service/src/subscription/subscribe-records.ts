@@ -1,8 +1,5 @@
-import {gt, asc, desc} from 'drizzle-orm'
-import {
-  AuthRequiredError,
-  InvalidRequestError,
-} from '@atproto/xrpc-server'
+import {asc, desc, gt} from 'drizzle-orm'
+import {AuthRequiredError, InvalidRequestError,} from '@atproto/xrpc-server'
 import {StratosDb, stratosSeq} from '@northsky/stratos-core'
 
 import {AppContext} from '../context.js'
@@ -172,7 +169,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
-    const result = await ctx.actorStore.read(did, async (store) => {
+    return await ctx.actorStore.read(did, async (store) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (store as any).record.db as StratosDb
       const rows = await db
@@ -183,7 +180,6 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 
       return rows[0]?.seq ?? 0
     })
-    return result
   } catch {
     return 0
   }
@@ -191,7 +187,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
-    const result = await ctx.actorStore.read(did, async (store) => {
+    return await ctx.actorStore.read(did, async (store) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (store as any).record.db as StratosDb
       const rows = await db
@@ -202,7 +198,6 @@ async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
 
       return rows[0]?.seq ?? 0
     })
-    return result
   } catch {
     return 0
   }
@@ -214,7 +209,7 @@ async function getEventsSince(
   cursor: number,
 ): Promise<SeqEvent[]> {
   try {
-    const result = await ctx.actorStore.read(did, async (store) => {
+    return await ctx.actorStore.read(did, async (store) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (store as any).record.db as StratosDb
       const rows = await db
@@ -243,7 +238,6 @@ async function getEventsSince(
         }
       })
     })
-    return result
   } catch {
     return []
   }
