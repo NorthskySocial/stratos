@@ -68,7 +68,10 @@ export class RecordNotFoundError extends StratosError {
  */
 export class BoundaryBlockedError extends StratosError {
   constructor(uri: string) {
-    super(`Access to record blocked by boundary restrictions: ${uri}`, 'BoundaryBlocked')
+    super(
+      `Access to record blocked by boundary restrictions: ${uri}`,
+      'BoundaryBlocked',
+    )
     this.name = 'BoundaryBlockedError'
   }
 }

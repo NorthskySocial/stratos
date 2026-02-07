@@ -1,4 +1,8 @@
-import { Server as XrpcServer, InvalidRequestError, AuthRequiredError } from '@atproto/xrpc-server'
+import {
+  Server as XrpcServer,
+  InvalidRequestError,
+  AuthRequiredError,
+} from '@atproto/xrpc-server'
 import type { AppContext } from '../context.js'
 import {
   createRecord,
@@ -6,7 +10,7 @@ import {
   getRecord,
   listRecords,
 } from './records.js'
-import { registerHydrationHandlers } from '../features/hydration/handler.js'
+import { registerHydrationHandlers } from '../features/index.js'
 
 type HandlerAuth = {
   credentials: {
@@ -36,7 +40,11 @@ type HandlerFn = (ctx: HandlerContext) => Promise<HandlerResponse>
 
 // Type for accessing internal method - needed until lexicons are properly loaded
 type XrpcServerInternal = XrpcServer & {
-  method(nsid: string, config: { auth?: (ctx: any) => Promise<any>; handler: HandlerFn }): void
+  method(
+    nsid: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    config: { auth?: (ctx: any) => Promise<any>; handler: HandlerFn },
+  ): void
 }
 
 /**
@@ -46,7 +54,7 @@ type XrpcServerInternal = XrpcServer & {
 export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   const xrpc = server as unknown as XrpcServerInternal
   const { authVerifier } = ctx
-  
+
   xrpc.method('com.atproto.repo.createRecord', {
     auth: authVerifier.standard,
     handler: async ({ input, auth }: HandlerContext) => {
@@ -63,9 +71,16 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         swapCommit?: string
       }
 
-      console.log('[createRecord] body:', JSON.stringify(body).substring(0, 200))
+      console.log(
+        '[createRecord] body:',
+        JSON.stringify(body).substring(0, 200),
+      )
       ctx.logger?.debug(
-        { method: 'createRecord', repo: body.repo, collection: body.collection },
+        {
+          method: 'createRecord',
+          repo: body.repo,
+          collection: body.collection,
+        },
         'handling request',
       )
 
@@ -93,12 +108,19 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           body: result,
         }
       } catch (err) {
-        console.error('createRecord failed:', err instanceof Error ? err.message : String(err))
+        console.error(
+          'createRecord failed:',
+          err instanceof Error ? err.message : String(err),
+        )
         if (err instanceof Error && err.stack) {
           console.error(err.stack)
         }
         ctx.logger?.error(
-          { err: err instanceof Error ? err.message : String(err), repo: body.repo, collection: body.collection },
+          {
+            err: err instanceof Error ? err.message : String(err),
+            repo: body.repo,
+            collection: body.collection,
+          },
           'createRecord failed',
         )
         throw err
@@ -120,7 +142,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       ctx.logger?.debug(
-        { method: 'deleteRecord', repo: body.repo, collection: body.collection, rkey: body.rkey },
+        {
+          method: 'deleteRecord',
+          repo: body.repo,
+          collection: body.collection,
+          rkey: body.rkey,
+        },
         'handling request',
       )
 
@@ -138,7 +165,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         )
 
         ctx.logger?.info(
-          { repo: body.repo, collection: body.collection, rkey: body.rkey, durationMs: Date.now() - start },
+          {
+            repo: body.repo,
+            collection: body.collection,
+            rkey: body.rkey,
+            durationMs: Date.now() - start,
+          },
           'record deleted',
         )
 
@@ -148,7 +180,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         }
       } catch (err) {
         ctx.logger?.error(
-          { err: err instanceof Error ? err.message : String(err), repo: body.repo, collection: body.collection, rkey: body.rkey },
+          {
+            err: err instanceof Error ? err.message : String(err),
+            repo: body.repo,
+            collection: body.collection,
+            rkey: body.rkey,
+          },
           'deleteRecord failed',
         )
         throw err
@@ -181,7 +218,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       ctx.logger?.debug(
-        { method: 'getRecord', repo: params.repo, collection: params.collection, rkey: params.rkey },
+        {
+          method: 'getRecord',
+          repo: params.repo,
+          collection: params.collection,
+          rkey: params.rkey,
+        },
         'handling request',
       )
 
@@ -215,13 +257,18 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       const start = Date.now()
       const callerDid = (auth as HandlerAuth | undefined)?.credentials?.did
       let callerDomains: string[] = []
-      
+
       if (callerDid) {
         callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)
       }
 
       ctx.logger?.debug(
-        { method: 'listRecords', repo: params.repo, collection: params.collection, limit: params.limit },
+        {
+          method: 'listRecords',
+          repo: params.repo,
+          collection: params.collection,
+          limit: params.limit,
+        },
         'handling request',
       )
 

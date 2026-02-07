@@ -18,11 +18,11 @@ import type {
   BlobContentStore,
 } from './blob-store.js'
 import type { RepoStoreReader, RepoStoreWriter } from './repo-store.js'
+import type { EnrollmentStoreWriter } from './enrollment-store.js'
 import type {
-  EnrollmentStoreReader,
-  EnrollmentStoreWriter,
-} from './enrollment-store.js'
-import type { SequenceStoreReader, SequenceStoreWriter } from './sequence-store.js'
+  SequenceStoreReader,
+  SequenceStoreWriter,
+} from './sequence-store.js'
 
 /**
  * Combined reader interfaces for an actor's data

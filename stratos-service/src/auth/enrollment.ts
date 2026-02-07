@@ -9,7 +9,12 @@ import {
 } from '@northskysocial/stratos-core'
 
 // Re-export for convenience
-export { type EnrollmentConfig, type EnrollmentDenialReason, EnrollmentDeniedError, extractPdsEndpoint }
+export {
+  type EnrollmentConfig,
+  type EnrollmentDenialReason,
+  EnrollmentDeniedError,
+  extractPdsEndpoint,
+}
 
 /**
  * Result of enrollment validation
@@ -89,10 +94,7 @@ export async function assertEnrollment(
       ServiceClosed: 'This Stratos service is not accepting new enrollments',
     }
 
-    throw new EnrollmentDeniedError(
-      messages[result.reason!],
-      result.reason!,
-    )
+    throw new EnrollmentDeniedError(messages[result.reason!], result.reason!)
   }
 
   return { pdsEndpoint: result.pdsEndpoint }

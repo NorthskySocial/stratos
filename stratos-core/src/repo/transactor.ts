@@ -8,10 +8,7 @@ import { StratosSqlRepoReader, BlockMap } from './reader.js'
  * Transactor for stratos repo - extends reader with write capabilities
  */
 export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
-  constructor(
-    db: StratosDb,
-    logger?: Logger,
-  ) {
+  constructor(db: StratosDb, logger?: Logger) {
     super(db, logger)
   }
 
@@ -71,10 +68,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
     // Insert in batches to avoid SQLite limits
     for (let i = 0; i < values.length; i += 100) {
       const batch = values.slice(i, i + 100)
-      await this.db
-        .insert(stratosRepoBlock)
-        .values(batch)
-        .onConflictDoNothing()
+      await this.db.insert(stratosRepoBlock).values(batch).onConflictDoNothing()
     }
   }
 

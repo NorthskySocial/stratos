@@ -21,10 +21,19 @@ import {
   migrateStratosDb,
   closeStratosDb,
 } from '@northskysocial/stratos-core'
-import { SqliteRecordStoreReader, SqliteRecordStoreWriter } from './record-store.js'
-import { SqliteBlobMetadataReader, SqliteBlobMetadataWriter } from './blob-store.js'
+import {
+  SqliteRecordStoreReader,
+  SqliteRecordStoreWriter,
+} from './record-store.js'
+import {
+  SqliteBlobMetadataReader,
+  SqliteBlobMetadataWriter,
+} from './blob-store.js'
 import { SqliteRepoStoreReader, SqliteRepoStoreWriter } from './repo-store.js'
-import { SqliteSequenceStoreReader, SqliteSequenceStoreWriter } from './sequence-store.js'
+import {
+  SqliteSequenceStoreReader,
+  SqliteSequenceStoreWriter,
+} from './sequence-store.js'
 import { SqliteEnrollmentStoreWriter } from './enrollment-store.js'
 import type { ServiceDb } from '../../db/index.js'
 
@@ -141,8 +150,13 @@ export class SqliteStorageFactory implements StorageFactory {
     try {
       return await db.transaction(async (tx) => {
         const stores: ActorStoreWriters = {
-          record: new SqliteRecordStoreWriter(tx as unknown as StratosDb, this.cborToRecord),
-          blobMetadata: new SqliteBlobMetadataWriter(tx as unknown as StratosDb),
+          record: new SqliteRecordStoreWriter(
+            tx as unknown as StratosDb,
+            this.cborToRecord,
+          ),
+          blobMetadata: new SqliteBlobMetadataWriter(
+            tx as unknown as StratosDb,
+          ),
           blobContent: this.blobContentStoreCreator(did),
           repo: new SqliteRepoStoreWriter(tx as unknown as StratosDb),
           sequence: new SqliteSequenceStoreWriter(tx as unknown as StratosDb),

@@ -29,7 +29,10 @@ describe('DiskBlobStore', () => {
   const testDid = 'did:plc:blobtest123'
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-blobstore-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-blobstore-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
 
     // Create store using factory pattern
@@ -48,7 +51,7 @@ describe('DiskBlobStore', () => {
   describe('factory pattern', () => {
     it('should create per-DID blob stores', () => {
       const creator = DiskBlobStore.creator(join(testDir, 'blobs'))
-      
+
       const store1 = creator('did:plc:user1')
       const store2 = creator('did:plc:user2')
 

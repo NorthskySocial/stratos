@@ -18,7 +18,7 @@ const DEFAULT_PRAGMAS: Record<string, string> = {}
 
 /**
  * Creates a connection to a stratos SQLite database.
- * Note: The returned database has async initialization. Call `await db._initialized` 
+ * Note: The returned database has async initialization. Call `await db._initialized`
  * before using if you need WAL mode guaranteed, or it will be applied lazily.
  */
 export function createStratosDb(
@@ -39,13 +39,13 @@ export function createStratosDb(
   db._client = client
 
   // Build pragma statements
-  const pragmaStatements = Object.entries(pragmas).map(
-    ([pragma, value]) => sql.raw(`PRAGMA ${pragma} = ${value}`)
+  const pragmaStatements = Object.entries(pragmas).map(([pragma, value]) =>
+    sql.raw(`PRAGMA ${pragma} = ${value}`),
   )
-  
+
   // Enable WAL mode for better concurrency
   pragmaStatements.push(sql.raw('PRAGMA journal_mode = WAL'))
-  
+
   // Initialize pragmas - store the promise so callers can await if needed
   db._initialized = (async () => {
     for (const stmt of pragmaStatements) {
@@ -104,9 +104,15 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
     )
   `)
 
-  await db.run(sql`CREATE INDEX IF NOT EXISTS stratos_record_cid_idx ON stratos_record(cid)`)
-  await db.run(sql`CREATE INDEX IF NOT EXISTS stratos_record_collection_idx ON stratos_record(collection)`)
-  await db.run(sql`CREATE INDEX IF NOT EXISTS stratos_record_repo_rev_idx ON stratos_record(repoRev)`)
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_record_cid_idx ON stratos_record(cid)`,
+  )
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_record_collection_idx ON stratos_record(collection)`,
+  )
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_record_repo_rev_idx ON stratos_record(repoRev)`,
+  )
 
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_blob (
@@ -121,7 +127,9 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
     )
   `)
 
-  await db.run(sql`CREATE INDEX IF NOT EXISTS stratos_blob_tempkey_idx ON stratos_blob(tempKey)`)
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_blob_tempkey_idx ON stratos_blob(tempKey)`,
+  )
 
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_record_blob (
@@ -156,8 +164,12 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
     )
   `)
 
-  await db.run(sql`CREATE INDEX IF NOT EXISTS stratos_seq_did_idx ON stratos_seq(did)`)
-  await db.run(sql`CREATE INDEX IF NOT EXISTS stratos_seq_sequenced_at_idx ON stratos_seq(sequencedAt)`)
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_seq_did_idx ON stratos_seq(did)`,
+  )
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_seq_sequenced_at_idx ON stratos_seq(sequencedAt)`,
+  )
 }
 
 /**
@@ -166,4 +178,3 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
 export async function closeStratosDb(db: StratosDb): Promise<void> {
   db._client.close()
 }
-

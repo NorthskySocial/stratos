@@ -67,7 +67,10 @@ export interface BlobStore {
   /** Move a temporary blob to permanent storage */
   makePermanent(key: string, cid: CID): Promise<void>
   /** Upload bytes directly to permanent storage */
-  putPermanent(cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<void>
+  putPermanent(
+    cid: CID,
+    bytes: Uint8Array | AsyncIterable<Uint8Array>,
+  ): Promise<void>
   /** Move a blob to quarantine (for takedowns) */
   quarantine(cid: CID): Promise<void>
   /** Restore a blob from quarantine */

@@ -1,12 +1,15 @@
 import type { Readable } from 'node:stream'
 import { CID } from 'multiformats/cid'
-import { S3BlobStore as AtprotoS3BlobStore, S3Config as AtprotoS3Config } from '@atproto/aws'
-import { type BlobStore, type BlobStoreCreator, BlobNotFoundError } from '@northskysocial/stratos-core'
 import {
-  readableToAsyncIterable,
-  asyncIterableToReadable,
-  collectAsyncIterable,
-} from './util.js'
+  S3BlobStore as AtprotoS3BlobStore,
+  S3Config as AtprotoS3Config,
+} from '@atproto/aws'
+import {
+  type BlobStore,
+  type BlobStoreCreator,
+  BlobNotFoundError,
+} from '@northskysocial/stratos-core'
+import { readableToAsyncIterable, asyncIterableToReadable } from './util.js'
 
 /**
  * S3 configuration for stratos blob storage
@@ -74,8 +77,11 @@ export class S3BlobStoreAdapter implements BlobStore {
     return (did: string) => new S3BlobStoreAdapter(did, cfg)
   }
 
-  async putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string> {
-    const input = bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
+  async putTemp(
+    bytes: Uint8Array | AsyncIterable<Uint8Array>,
+  ): Promise<string> {
+    const input =
+      bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
     return this.inner.putTemp(input)
   }
 
@@ -87,7 +93,8 @@ export class S3BlobStoreAdapter implements BlobStore {
     cid: CID,
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<void> {
-    const input = bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
+    const input =
+      bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
     return this.inner.putPermanent(cid, input)
   }
 

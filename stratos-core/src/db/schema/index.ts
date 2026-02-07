@@ -23,4 +23,3 @@ export const schema = {
   stratosBacklink,
   stratosSeq,
 }
-

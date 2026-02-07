@@ -90,9 +90,17 @@ export class SqliteRepoStoreReader implements RepoStoreReader {
     for (let i = 0; i < cidStrings.length; i += batchSize) {
       const batch = cidStrings.slice(i, i + batchSize)
       const rows = await this.db
-        .select({ cid: stratosRepoBlock.cid, content: stratosRepoBlock.content })
+        .select({
+          cid: stratosRepoBlock.cid,
+          content: stratosRepoBlock.content,
+        })
         .from(stratosRepoBlock)
-        .where(sql`${stratosRepoBlock.cid} IN (${sql.join(batch.map(c => sql`${c}`), sql`,`)})`)
+        .where(
+          sql`${stratosRepoBlock.cid} IN (${sql.join(
+            batch.map((c) => sql`${c}`),
+            sql`,`,
+          )})`,
+        )
 
       for (const row of rows) {
         result.set(row.cid, row.content)
@@ -175,9 +183,12 @@ export class SqliteRepoStoreWriter
     if (cids.length === 0) return
 
     const cidStrings = cids.map((c) => c.toString())
-    await this.db
-      .delete(stratosRepoBlock)
-      .where(sql`${stratosRepoBlock.cid} IN (${sql.join(cidStrings.map(c => sql`${c}`), sql`,`)})`)
+    await this.db.delete(stratosRepoBlock).where(
+      sql`${stratosRepoBlock.cid} IN (${sql.join(
+        cidStrings.map((c) => sql`${c}`),
+        sql`,`,
+      )})`,
+    )
   }
 
   async clearBlocks(): Promise<void> {

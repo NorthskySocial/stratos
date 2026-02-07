@@ -1,4 +1,4 @@
-import { eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { StratosDb, stratosBlob, stratosRecordBlob } from '../db/index.js'
 import { BlobStore, PreparedBlobRef, Logger } from '../types.js'
@@ -8,11 +8,7 @@ import { StratosBlobReader } from './reader.js'
  * Transactor for stratos blob metadata
  */
 export class StratosBlobTransactor extends StratosBlobReader {
-  constructor(
-    db: StratosDb,
-    blobstore: BlobStore,
-    logger?: Logger,
-  ) {
+  constructor(db: StratosDb, blobstore: BlobStore, logger?: Logger) {
     super(db, blobstore, logger)
   }
 
@@ -39,7 +35,10 @@ export class StratosBlobTransactor extends StratosBlobReader {
       .onConflictDoNothing()
   }
 
-  async associateBlobWithRecord(blobCid: CID, recordUri: string): Promise<void> {
+  async associateBlobWithRecord(
+    blobCid: CID,
+    recordUri: string,
+  ): Promise<void> {
     await this.db
       .insert(stratosRecordBlob)
       .values({
@@ -81,7 +80,7 @@ export class StratosBlobTransactor extends StratosBlobReader {
   ): Promise<void> {
     await this.db
       .update(stratosBlob)
-      .set({ takedownRef: takedown.applied ? takedown.ref ?? null : null })
+      .set({ takedownRef: takedown.applied ? (takedown.ref ?? null) : null })
       .where(eq(stratosBlob.cid, cid.toString()))
   }
 
@@ -102,9 +101,7 @@ export class StratosBlobTransactor extends StratosBlobReader {
       if (associations.length === 0) {
         const cidObj = CID.parse(cid)
         await this.blobstore.delete(cidObj)
-        await this.db
-          .delete(stratosBlob)
-          .where(eq(stratosBlob.cid, cid))
+        await this.db.delete(stratosBlob).where(eq(stratosBlob.cid, cid))
         deletedCids.push(cidObj)
       }
     }

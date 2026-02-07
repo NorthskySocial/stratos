@@ -66,7 +66,9 @@ const envSchema = z.object({
   STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
 
   // Logging
-  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
+  LOG_LEVEL: z
+    .enum(['trace', 'debug', 'info', 'warn', 'error'])
+    .default('info'),
 
   // Admin auth (optional)
   STRATOS_ADMIN_PASSWORD: z.string().optional(),
@@ -170,7 +172,9 @@ export interface StratosServiceConfig {
 function buildBlobstoreConfig(env: Env): BlobstoreConfig {
   if (env.STRATOS_BLOB_STORAGE === 's3') {
     if (!env.STRATOS_S3_BUCKET) {
-      throw new Error('STRATOS_S3_BUCKET is required when STRATOS_BLOB_STORAGE=s3')
+      throw new Error(
+        'STRATOS_S3_BUCKET is required when STRATOS_BLOB_STORAGE=s3',
+      )
     }
     return {
       provider: 's3',
@@ -242,6 +246,8 @@ export function envToConfig(env: Env): StratosServiceConfig {
  * Get the full service DID with fragment for use in source.service field
  * @example "did:plc:abc123#atproto_pns"
  */
-export function getServiceDidWithFragment(config: StratosServiceConfig): string {
+export function getServiceDidWithFragment(
+  config: StratosServiceConfig,
+): string {
   return `${config.service.did}#${config.service.serviceFragment}`
 }

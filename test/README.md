@@ -16,11 +16,11 @@ npx playwright install chromium
 
 ## Test Users
 
-| User     | Handle                        | Boundaries   |
-|----------|-------------------------------|--------------|
-| Rei      | rei.pds.atverkackt.de         | `swordsmith` |
-| Sakura   | sakura.pds.atverkackt.de      | `swordsmith` |
-| kaoruko  | kaoruko.pds.atverkackt.de     | `aekea`      |
+| User    | Handle                    | Boundaries   |
+| ------- | ------------------------- | ------------ |
+| Rei     | rei.pds.atverkackt.de     | `swordsmith` |
+| Sakura  | sakura.pds.atverkackt.de  | `swordsmith` |
+| kaoruko | kaoruko.pds.atverkackt.de | `aekea`      |
 
 Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
@@ -30,16 +30,16 @@ Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 The test suite uses `.env.test` at the project root. This file is created for you and ships with the repo (gitignored). Key variables:
 
-| Variable | Value | Purpose |
-|----------|-------|---------|
-| `STRATOS_SERVICE_DID` | `did:web:localhost` | Service identity for local testing |
-| `STRATOS_PUBLIC_URL` | `http://localhost:3100` | Public URL; also used as the OAuth `client_id` (ATProto loopback client) |
-| `STRATOS_ALLOWED_DOMAINS` | `swordsmith,aekea` | Boundary domains available in this Stratos instance |
-| `STRATOS_ENROLLMENT_MODE` | `open` | Allows any DID from the allowed PDS to enroll |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | `https://pds.atverkackt.de` | Restricts enrollment to accounts on this PDS |
-| `STRATOS_OAUTH_ISSUER` | `https://pds.atverkackt.de` | Enables the OAuth client — required for the Playwright enrollment flow |
-| `STRATOS_ADMIN_PASSWORD` | `stratos-test-admin` | Admin auth (available but not used by the test scripts directly) |
-| `LOG_LEVEL` | `debug` | Verbose logging for troubleshooting |
+| Variable                        | Value                       | Purpose                                                                  |
+| ------------------------------- | --------------------------- | ------------------------------------------------------------------------ |
+| `STRATOS_SERVICE_DID`           | `did:web:localhost`         | Service identity for local testing                                       |
+| `STRATOS_PUBLIC_URL`            | `http://localhost:3100`     | Public URL; also used as the OAuth `client_id` (ATProto loopback client) |
+| `STRATOS_ALLOWED_DOMAINS`       | `swordsmith,aekea`          | Boundary domains available in this Stratos instance                      |
+| `STRATOS_ENROLLMENT_MODE`       | `open`                      | Allows any DID from the allowed PDS to enroll                            |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` | `https://pds.atverkackt.de` | Restricts enrollment to accounts on this PDS                             |
+| `STRATOS_OAUTH_ISSUER`          | `https://pds.atverkackt.de` | Enables the OAuth client — required for the Playwright enrollment flow   |
+| `STRATOS_ADMIN_PASSWORD`        | `stratos-test-admin`        | Admin auth (available but not used by the test scripts directly)         |
+| `LOG_LEVEL`                     | `debug`                     | Verbose logging for troubleshooting                                      |
 
 If you need to point at a different PDS, update `STRATOS_OAUTH_ISSUER`, `STRATOS_ALLOWED_PDS_ENDPOINTS`, and the user handles in `test/scripts/lib/config.ts`.
 
@@ -54,18 +54,18 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: stratos-test
-    restart: "no"
+    restart: 'no'
     ports:
-      - "3100:3100"        # Stratos XRPC + HTTP
+      - '3100:3100' # Stratos XRPC + HTTP
     env_file:
-      - .env.test          # All config from the file above
+      - .env.test # All config from the file above
     environment:
       STRATOS_DATA_DIR: /app/data
       STRATOS_BLOB_STORAGE: local
     volumes:
-      - ./test-data:/app/data   # Bind mount — gives host access to SQLite DBs
+      - ./test-data:/app/data # Bind mount — gives host access to SQLite DBs
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:3100/health"]
+      test: ['CMD', 'wget', '--spider', 'http://localhost:3100/health']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -126,6 +126,7 @@ deno run -A test/scripts/run-all.ts --direct
 ```
 
 This mode:
+
 1. Skips Phase 2 (OAuth enrollment via Playwright)
 2. Instead runs `direct-enroll.ts` which:
    - Inserts enrollment rows directly into `service.sqlite`
@@ -133,6 +134,7 @@ This mode:
    - Authenticates via `Bearer <did>` header (enrollment check falls back to database lookup)
 
 Direct mode is useful when:
+
 - Playwright/Chromium setup is unavailable
 - PDS OAuth flow is broken or changed
 - You need faster iteration on boundary/record tests
@@ -156,12 +158,14 @@ deno run -A test/scripts/teardown.ts
 Creates the test environment from scratch.
 
 **What it does:**
+
 1. Cleans and recreates the `test-data/` directory.
 2. Creates three PDS accounts on `pds.atverkackt.de` via the admin API (generating invite codes, since the PDS requires them). Skips accounts that already exist.
 3. Builds and starts Stratos via `docker compose -f docker-compose.test.yml up -d --build`.
 4. Polls `GET /health` until the service reports `{"status":"ok"}` (up to 60 s).
 
 **Expected output:**
+
 ```
 Phase 1: Setup
   ℹ Preparing test-data directory...
@@ -190,6 +194,7 @@ Starting Stratos
 Enrolls all three users via the real PDS OAuth authorization flow.
 
 **What it does:**
+
 1. Launches headless Chromium via Playwright.
 2. For each user:
    - Navigates to `http://localhost:3100/oauth/authorize?handle=<handle>`.
@@ -201,6 +206,7 @@ Enrolls all three users via the real PDS OAuth authorization flow.
 3. Saves screenshots to `test-data/screenshots/` at each step (useful for debugging selector issues).
 
 **Expected output:**
+
 ```
 Phase 2: OAuth Enrollment
   ℹ Launching headless browser...
@@ -226,6 +232,7 @@ Adjusts per-user boundaries in the Stratos service database.
 By default, OAuth enrollment assigns all configured domains (`swordsmith` + `aekea`) to every user. This phase narrows them to create the asymmetric test scenario.
 
 **What it does:**
+
 1. Opens `test-data/service.sqlite` directly from the host (bind-mounted volume).
 2. Replaces each user's `enrollment_boundary` rows:
    - Rei → `[swordsmith]`
@@ -234,6 +241,7 @@ By default, OAuth enrollment assigns all configured domains (`swordsmith` + `aek
 3. Reads back and verifies the boundaries match expectations.
 
 **Expected output:**
+
 ```
 Phase 3: Configure Boundaries
   ℹ Setting boundaries for Rei: [swordsmith]
@@ -257,24 +265,25 @@ All API calls use `Authorization: Bearer <did>` for authentication, which works 
 
 **Tests:**
 
-| # | Test | Endpoint | Expected |
-|---|------|----------|----------|
-| 1 | Rei creates a post with `swordsmith` boundary | `POST com.atproto.repo.createRecord` | 200 — returns `uri` and `cid` |
-| 2 | Rei reads own post | `GET com.atproto.repo.getRecord` as Rei | 200 — full record with text and boundary |
-| 3 | Sakura reads Rei's post (shared boundary) | `GET com.atproto.repo.getRecord` as Sakura | 200 — record returned |
-| 4 | kaoruko denied Rei's post (no boundary intersection) | `GET com.atproto.repo.getRecord` as kaoruko | 400 `RecordNotFound` (opaque denial) |
-| 5 | Unauthenticated caller denied | `GET com.atproto.repo.getRecord` no auth | 400 `RecordNotFound` |
-| 6a | Sakura `listRecords` sees Rei's post | `GET com.atproto.repo.listRecords` as Sakura | records array length > 0 |
-| 6b | kaoruko `listRecords` filtered out | `GET com.atproto.repo.listRecords` as kaoruko | empty records array |
-| 6c | Unauthenticated `listRecords` filtered out | `GET com.atproto.repo.listRecords` no auth | empty records array |
-| 7a | kaoruko creates an `aekea` post | `POST com.atproto.repo.createRecord` | 200 — returns `uri` and `cid` |
-| 7b | Rei denied kaoruko's `aekea` post | `GET com.atproto.repo.getRecord` as Rei | 400 `RecordNotFound` |
-| 7c | kaoruko reads own `aekea` post | `GET com.atproto.repo.getRecord` as kaoruko | 200 — record returned |
-| 8a | Rei deletes own post | `POST com.atproto.repo.deleteRecord` | 200 |
-| 8b | Deleted post no longer retrievable | `GET com.atproto.repo.getRecord` as Rei | 400 `RecordNotFound` |
-| 8c | kaoruko deletes own post | `POST com.atproto.repo.deleteRecord` | 200 |
+| #   | Test                                                 | Endpoint                                      | Expected                                 |
+| --- | ---------------------------------------------------- | --------------------------------------------- | ---------------------------------------- |
+| 1   | Rei creates a post with `swordsmith` boundary        | `POST com.atproto.repo.createRecord`          | 200 — returns `uri` and `cid`            |
+| 2   | Rei reads own post                                   | `GET com.atproto.repo.getRecord` as Rei       | 200 — full record with text and boundary |
+| 3   | Sakura reads Rei's post (shared boundary)            | `GET com.atproto.repo.getRecord` as Sakura    | 200 — record returned                    |
+| 4   | kaoruko denied Rei's post (no boundary intersection) | `GET com.atproto.repo.getRecord` as kaoruko   | 400 `RecordNotFound` (opaque denial)     |
+| 5   | Unauthenticated caller denied                        | `GET com.atproto.repo.getRecord` no auth      | 400 `RecordNotFound`                     |
+| 6a  | Sakura `listRecords` sees Rei's post                 | `GET com.atproto.repo.listRecords` as Sakura  | records array length > 0                 |
+| 6b  | kaoruko `listRecords` filtered out                   | `GET com.atproto.repo.listRecords` as kaoruko | empty records array                      |
+| 6c  | Unauthenticated `listRecords` filtered out           | `GET com.atproto.repo.listRecords` no auth    | empty records array                      |
+| 7a  | kaoruko creates an `aekea` post                      | `POST com.atproto.repo.createRecord`          | 200 — returns `uri` and `cid`            |
+| 7b  | Rei denied kaoruko's `aekea` post                    | `GET com.atproto.repo.getRecord` as Rei       | 400 `RecordNotFound`                     |
+| 7c  | kaoruko reads own `aekea` post                       | `GET com.atproto.repo.getRecord` as kaoruko   | 200 — record returned                    |
+| 8a  | Rei deletes own post                                 | `POST com.atproto.repo.deleteRecord`          | 200                                      |
+| 8b  | Deleted post no longer retrievable                   | `GET com.atproto.repo.getRecord` as Rei       | 400 `RecordNotFound`                     |
+| 8c  | kaoruko deletes own post                             | `POST com.atproto.repo.deleteRecord`          | 200                                      |
 
 **Expected output:**
+
 ```
 Phase 4: Post CRUD & Boundary Tests
 
@@ -320,12 +329,14 @@ Results: 15/15 passed
 Cleans up the test environment.
 
 **What it does:**
+
 1. Runs `docker compose -f docker-compose.test.yml down --volumes --remove-orphans`.
 2. Removes the `test-data/` directory.
 
 PDS accounts on `pds.atverkackt.de` are **not** deleted (the PDS admin API doesn't expose account deletion). They persist but are harmless test accounts.
 
 **Expected output:**
+
 ```
 Teardown
   ℹ Stopping Stratos container...
