@@ -10,13 +10,13 @@ import type {
   EnrollmentValidationResult,
   EnrollmentStoreReader,
   Logger,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import {
   extractPdsEndpoint,
   validateEnrollmentEligibility,
   NotEnrolledError,
   EnrollmentDeniedError,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'
 import type { ServiceDb } from '../../db/index.js'
 import { enrollment } from '../../db/index.js'
 

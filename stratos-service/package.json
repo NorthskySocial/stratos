@@ -1,5 +1,5 @@
 {
-  "name": "@anthropic/stratos-service",
+  "name": "@northskysocial/stratos-service",
   "version": "0.1.0",
   "description": "Standalone Stratos private namespace service for ATProtocol",
   "main": "dist/index.js",
@@ -18,7 +18,7 @@
     "codegen": "lex gen-server ../lexicons --out ./src/lexicon"
   },
   "dependencies": {
-    "@anthropic/stratos-core": "workspace:*",
+    "@northskysocial/stratos-core": "workspace:*",
     "@atproto/api": "^0.18.20",
     "@atproto/aws": "^0.2.31",
     "@atproto/common": "^0.5.11",
@@ -47,7 +47,8 @@
     "pino": "^10.3.0",
     "pino-http": "^11.0.0",
     "ws": "^8.19.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@atproto/lex-cli": "^0.9.8",
@@ -55,7 +56,6 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.1",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },

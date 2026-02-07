@@ -18,4 +18,4 @@ export type {
   ActorStoreReaders,
   ActorStoreWriters,
   ServiceStores,
-} from '@anthropic/stratos-core'
+} from '@northskysocial/stratos-core'

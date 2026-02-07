@@ -5,7 +5,7 @@ import {
 } from '@atproto/xrpc-server'
 import { IdResolver, getDidKeyFromMultibase } from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
-import { EnrollmentConfig, assertEnrollment, EnrollmentDeniedError } from './enrollment.js'
+import { type EnrollmentConfig, assertEnrollment, EnrollmentDeniedError } from './enrollment.js'
 
 export type XrpcAuthVerifier = MethodAuthVerifier
 

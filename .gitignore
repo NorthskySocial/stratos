@@ -34,6 +34,10 @@ Thumbs.db
 tmp/
 temp/
 
+# E2E test artifacts
+test-data/
+.env.test
+
 .session-context.md
 docs/*-prompt.md
 .github/*-instructions.md

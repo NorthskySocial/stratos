@@ -2,7 +2,7 @@ import { NodeOAuthClient, NodeSavedSession } from '@atproto/oauth-client-node'
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
 import { eq } from 'drizzle-orm'
-import { ServiceDb, oauthSession, oauthState } from '../db/index.js'
+import { type ServiceDb, oauthSession, oauthState } from '../db/index.js'
 
 /**
  * Database schema for OAuth session storage

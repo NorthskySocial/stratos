@@ -8,6 +8,7 @@ export * from './util.js'
 
 export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
   _client: Client
+  _initialized: Promise<void>
 }
 
 /**
@@ -16,7 +17,9 @@ export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
 const DEFAULT_PRAGMAS: Record<string, string> = {}
 
 /**
- * Creates a connection to a stratos SQLite database
+ * Creates a connection to a stratos SQLite database.
+ * Note: The returned database has async initialization. Call `await db._initialized` 
+ * before using if you need WAL mode guaranteed, or it will be applied lazily.
  */
 export function createStratosDb(
   location: string,
@@ -35,7 +38,7 @@ export function createStratosDb(
   const db = baseDb as unknown as StratosDb
   db._client = client
 
-  // Apply pragmas synchronously via batch
+  // Build pragma statements
   const pragmaStatements = Object.entries(pragmas).map(
     ([pragma, value]) => sql.raw(`PRAGMA ${pragma} = ${value}`)
   )
@@ -43,15 +46,20 @@ export function createStratosDb(
   // Enable WAL mode for better concurrency
   pragmaStatements.push(sql.raw('PRAGMA journal_mode = WAL'))
   
-  // Execute pragmas - they're applied when the db is first used
-  if (pragmaStatements.length > 0) {
-    // Run pragmas asynchronously - they'll be applied before any other queries
-    Promise.resolve().then(async () => {
-      for (const stmt of pragmaStatements) {
+  // Initialize pragmas - store the promise so callers can await if needed
+  db._initialized = (async () => {
+    for (const stmt of pragmaStatements) {
+      try {
         await db.run(stmt)
+      } catch (err) {
+        // Ignore SQLITE_BUSY errors for WAL pragma - another connection may have set it
+        const errCode = (err as { code?: string })?.code
+        if (errCode !== 'SQLITE_BUSY') {
+          throw err
+        }
       }
-    })
-  }
+    }
+  })()
 
   return db
 }

@@ -123,14 +123,14 @@ Users enroll via OAuth authentication. The service validates enrollment based on
 
 ## Packages
 
-### @anthropic/stratos-core
+### @northskysocial/stratos-core
 
 Shared library containing:
 - Validation logic for stratos records
 - Database schema and migrations
 - Storage abstractions (repo, record, blob)
 
-### @anthropic/stratos-service
+### @northskysocial/stratos-service
 
 Standalone HTTP service providing:
 - OAuth authorization server

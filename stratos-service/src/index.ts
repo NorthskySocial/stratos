@@ -4,22 +4,23 @@ import cors from 'cors'
 import { IdResolver } from '@atproto/identity'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
-import type { BlobStoreCreator } from '@anthropic/stratos-core'
+import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
 
 import {
-  AppContext,
-  AppContextOptions,
+  type AppContext,
+  type AppContextOptions,
   createAppContext,
   destroyAppContext,
 } from './context.js'
-import { StratosServiceConfig, envToConfig, parseEnv } from './config.js'
+import { createLogger } from './logger.js'
+import { type StratosServiceConfig, envToConfig, parseEnv } from './config.js'
 import { registerHandlers } from './api/handlers.js'
 import { registerSubscribeRecords } from './subscription/subscribe-records.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 import { registerEnrollmentHandlers } from './features/index.js'
 
-export { StratosServiceConfig, AppContext }
+export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 
 /**
@@ -41,16 +42,24 @@ export class StratosServer {
     cfg: StratosServiceConfig,
     blobstore: BlobStoreCreator,
     cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    logger?: Logger,
   ): Promise<StratosServer> {
     const ctx = await createAppContext({
       cfg,
       blobstore,
       cborToRecord,
+      logger,
     })
 
     const app = ctx.app
     app.use(cors())
-    app.use(express.json({ limit: '100kb' }))
+    // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/xrpc/')) {
+        return next()
+      }
+      express.json({ limit: '100kb' })(req, res, next)
+    })
 
     app.get('/health', (_req, res) => {
       res.json({ status: 'ok', version: '0.1.0' })
@@ -99,6 +108,8 @@ export class StratosServer {
         res: express.Response,
         _next: express.NextFunction,
       ) => {
+        console.error('Express error:', err.message)
+        console.error(err.stack)
         ctx.logger?.error({ err: err.message, stack: cfg.stratos.devMode ? err.stack : undefined }, 'server error')
         res.status(500).json({
           error: 'InternalServerError',
@@ -179,6 +190,8 @@ function createBlobstore(cfg: StratosServiceConfig): BlobStoreCreator {
 export async function main(): Promise<void> {
   const cfg = envToConfig(parseEnv())
 
+  const logger = createLogger(cfg.logging.level)
+
   const blobstore = createBlobstore(cfg)
 
   const cborToRecord = (bytes: Uint8Array): Record<string, unknown> => {
@@ -187,7 +200,7 @@ export async function main(): Promise<void> {
     throw new Error('Expected record with $type property')
   }
 
-  const server = await StratosServer.create(cfg, blobstore, cborToRecord)
+  const server = await StratosServer.create(cfg, blobstore, cborToRecord, logger)
   await server.start()
 
   process.on('SIGTERM', async () => {
