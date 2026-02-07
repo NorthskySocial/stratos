@@ -75,9 +75,6 @@ importers:
 
   stratos-service:
     dependencies:
-      '@northsky/stratos-core':
-        specifier: workspace:*
-        version: link:../stratos-core
       '@atproto/api':
         specifier: ^0.18.20
         version: 0.18.20
@@ -132,6 +129,9 @@ importers:
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
+      '@northsky/stratos-core':
+        specifier: workspace:*
+        version: link:../stratos-core
       cors:
         specifier: ^2.8.6
         version: 2.8.6
@@ -695,8 +695,8 @@ packages:
     resolution: {integrity: sha512-EriSTlt5OC9/7SXkRSCAhfSxxoSUgBm33OH+IkwbdpgoqsSsUg7y3uh+IICI/Qg4BBWr3U2i39RpmycbxMq4ew==}
     engines: {node: ^12.0.0 || ^14.0.0 || >=16.0.0}
 
-  '@eslint/config-array@0.23.0':
-    resolution: {integrity: sha512-T5Swqd+PZxBekRuMsIFCySM3NUE8GjuqyksIIsXgkF2GCuiDaqpxKyPkv9VMEKpq5D7r5DLss1tM8tCsvRSjeg==}
+  '@eslint/config-array@0.23.1':
+    resolution: {integrity: sha512-uVSdg/V4dfQmTjJzR0szNczjOH/J+FyUMMjYtr07xFRXR7EDf9i1qdxrD0VusZH9knj1/ecxzCQQxyic5NzAiA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
   '@eslint/config-helpers@0.5.2':
@@ -716,8 +716,8 @@ packages:
       eslint:
         optional: true
 
-  '@eslint/object-schema@3.0.0':
-    resolution: {integrity: sha512-nWl20RtHQP2A2yvKU6Fee62Xo1AoNRqBLixtyg45zJhU8ljPFCyBK90d8e8XTnPns1RggSf4HH3bM8AhevkPVg==}
+  '@eslint/object-schema@3.0.1':
+    resolution: {integrity: sha512-P9cq2dpr+LU8j3qbLygLcSZrl2/ds/pUpfnHNNuk5HW7mnngHs+6WSq5C9mO3rqRX8A1poxqLTC9cu0KOyJlBg==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
   '@eslint/plugin-kit@0.6.0':
@@ -2581,7 +2581,7 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  Buffers@3.0.0:
+  uint8arrays@3.0.0:
     resolution: {integrity: sha512-HRCx0q6O9Bfbp+HHSfQQKD7wU70+lydKVt4EghkdOvlK/NlrF90z+eXV34mUd48rNvVJXwkrMSPpCATkct8fJA==}
 
   undici-types@7.16.0:
@@ -2814,7 +2814,7 @@ snapshots:
       '@noble/curves': 1.9.7
       key-encoder: 2.0.3
       multiformats: 9.9.0
-      Buffers: 3.0.0
+      uint8arrays: 3.0.0
     transitivePeerDependencies:
       - aws-crt
 
@@ -2838,7 +2838,7 @@ snapshots:
     dependencies:
       '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
-      Buffers: 3.0.0
+      uint8arrays: 3.0.0
 
   '@atproto/did@0.3.0':
     dependencies:
@@ -2897,14 +2897,14 @@ snapshots:
     dependencies:
       multiformats: 9.9.0
       tslib: 2.8.1
-      Buffers: 3.0.0
+      uint8arrays: 3.0.0
       unicode-segmenter: 0.14.5
 
   '@atproto/lex-data@0.0.9':
     dependencies:
       multiformats: 9.9.0
       tslib: 2.8.1
-      Buffers: 3.0.0
+      uint8arrays: 3.0.0
       unicode-segmenter: 0.14.5
 
   '@atproto/lex-document@0.0.13':
@@ -3043,7 +3043,7 @@ snapshots:
       '@atproto/lexicon': 0.6.1
       '@ipld/dag-cbor': 7.0.3
       multiformats: 9.9.0
-      Buffers: 3.0.0
+      uint8arrays: 3.0.0
       varint: 6.0.0
       zod: 3.25.76
 
@@ -3755,9 +3755,9 @@ snapshots:
 
   '@eslint-community/regexpp@4.12.2': {}
 
-  '@eslint/config-array@0.23.0':
+  '@eslint/config-array@0.23.1':
     dependencies:
-      '@eslint/object-schema': 3.0.0
+      '@eslint/object-schema': 3.0.1
       debug: 4.4.3
       minimatch: 10.1.2
     transitivePeerDependencies:
@@ -3775,7 +3775,7 @@ snapshots:
     optionalDependencies:
       eslint: 10.0.0
 
-  '@eslint/object-schema@3.0.0': {}
+  '@eslint/object-schema@3.0.1': {}
 
   '@eslint/plugin-kit@0.6.0':
     dependencies:
@@ -4855,7 +4855,7 @@ snapshots:
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@10.0.0)
       '@eslint-community/regexpp': 4.12.2
-      '@eslint/config-array': 0.23.0
+      '@eslint/config-array': 0.23.1
       '@eslint/config-helpers': 0.5.2
       '@eslint/core': 1.1.0
       '@eslint/plugin-kit': 0.6.0
@@ -5840,7 +5840,7 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  Buffers@3.0.0:
+  uint8arrays@3.0.0:
     dependencies:
       multiformats: 9.9.0
 
