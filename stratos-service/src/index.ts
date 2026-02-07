@@ -53,7 +53,13 @@ export class StratosServer {
 
     const app = ctx.app
     app.use(cors())
-    app.use(express.json({ limit: '100kb' }))
+    // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/xrpc/')) {
+        return next()
+      }
+      express.json({ limit: '100kb' })(req, res, next)
+    })
 
     app.get('/health', (_req, res) => {
       res.json({ status: 'ok', version: '0.1.0' })

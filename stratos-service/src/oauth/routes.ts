@@ -85,13 +85,17 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       // Redirect user to their PDS for authorization
       res.redirect(authUrl.toString())
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      const errorStack = err instanceof Error ? err.stack : undefined
       logger?.error(
-        { err: err instanceof Error ? err.message : String(err), handle: req.query.handle },
+        { err: errorMsg, stack: errorStack, handle: req.query.handle },
         'OAuth authorize failed',
       )
+      console.error('OAuth authorize failed:', errorMsg, errorStack)
       res.status(500).json({
         error: 'AuthorizationError',
         message: 'Failed to start authorization flow',
+        detail: errorMsg,
       })
     }
   })

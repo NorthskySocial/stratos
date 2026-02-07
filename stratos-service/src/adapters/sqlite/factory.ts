@@ -104,6 +104,7 @@ export class SqliteStorageFactory implements StorageFactory {
     // Create and migrate database
     const db = createStratosDb(dbLocation)
     try {
+      await db._initialized
       await migrateStratosDb(db)
     } finally {
       await closeStratosDb(db)
@@ -118,6 +119,7 @@ export class SqliteStorageFactory implements StorageFactory {
   async getActorReaders(did: string): Promise<ActorStoreReaders> {
     const { dbLocation } = await this.getActorLocation(did)
     const db = createStratosDb(dbLocation)
+    await db._initialized
 
     return {
       record: new SqliteRecordStoreReader(db, this.cborToRecord),
@@ -134,6 +136,7 @@ export class SqliteStorageFactory implements StorageFactory {
   ): Promise<T> {
     const { dbLocation } = await this.getActorLocation(did)
     const db = createStratosDb(dbLocation)
+    await db._initialized
 
     try {
       return await db.transaction(async (tx) => {

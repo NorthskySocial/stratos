@@ -6,21 +6,22 @@ import { createInviteCode, createAccount, accountExists } from "./lib/pds.ts";
 import { waitForHealthy } from "./lib/stratos.ts";
 import { loadState, saveState, type TestState } from "./lib/state.ts";
 import { section, info, pass, fail, warn } from "./lib/log.ts";
+import { error } from "node:console";
 
 async function run() {
   section("Phase 1: Setup");
 
-  // 1. Ensure test-data directory exists and is writable by the container (uid 1001)
-  info("Preparing test-data directory...");
-  try {
-    await Deno.remove(TEST_DATA_DIR, { recursive: true });
-  } catch {
-    // doesn't exist yet — fine
-  }
-  await Deno.mkdir(TEST_DATA_DIR, { recursive: true });
-  // Make writable by the stratos container user (uid 1001)
-  const chmod = new Deno.Command("chmod", { args: ["777", TEST_DATA_DIR] });
-  await chmod.output();
+  // 1. Ensure test-data directory exists and is writable by the container (uid 1000)
+  // info("Preparing test-data directory...");
+  // try {
+  //   await Deno.remove(TEST_DATA_DIR, { recursive: true });
+  // } catch {
+  //   error("Failed to remove existing test-data directory (may not exist)", { error: String(err) });
+  // }
+  // await Deno.mkdir(TEST_DATA_DIR, { recursive: true });
+
+  // const chmod = new Deno.Command("chmod", { args: ["777", TEST_DATA_DIR] });
+  // await chmod.output();
 
   // 2. Create PDS accounts
   section("Creating PDS accounts");

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run -A
 // Enrollment test — drives the PDS OAuth flow via Playwright to enroll each user.
 
-import { chromium, type Page, type Browser } from "npm:playwright@1.50.0";
+import { chromium, type Page, type Browser } from "npm:playwright@1.58.2";
 import { TEST_USERS, STRATOS_URL } from "./lib/config.ts";
 import { enrollmentStatus } from "./lib/stratos.ts";
 import { loadState, saveState } from "./lib/state.ts";

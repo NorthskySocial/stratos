@@ -4,9 +4,11 @@ import { STRATOS_URL } from "./config.ts";
 
 /** Check Stratos health endpoint */
 export async function checkHealth(): Promise<{ status: string; version: string }> {
-  const res = await fetch(`${STRATOS_URL}/health`);
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-  return (await res.json()) as { status: string; version: string };
+  const url = `${STRATOS_URL}/health`;
+  const res = await fetch(url);
+  const body = await res.text();
+  if (!res.ok) throw new Error(`Health check failed: ${res.status} - ${body}`);
+  return JSON.parse(body) as { status: string; version: string };
 }
 
 /** Poll health endpoint until ready (or timeout) */
@@ -15,16 +17,20 @@ export async function waitForHealthy(
   intervalMs = 2_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  console.log(`[health] Checking ${STRATOS_URL}/health (timeout: ${timeoutMs}ms)`);
   while (Date.now() < deadline) {
+    attempt++;
     try {
       const health = await checkHealth();
+      console.log(`[health] Attempt ${attempt}: status=${health.status}, version=${health.version}`);
       if (health.status === "ok") return;
-    } catch {
-      // not ready yet
+    } catch (err) {
+      console.log(`[health] Attempt ${attempt}: ${err instanceof Error ? err.message : String(err)}`);
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  throw new Error(`Stratos did not become healthy within ${timeoutMs}ms`);
+  throw new Error(`Stratos did not become healthy within ${timeoutMs}ms (${attempt} attempts)`);
 }
 
 /** Check enrollment status (no auth required) */

@@ -50,8 +50,10 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   xrpc.method('com.atproto.repo.createRecord', {
     auth: authVerifier.standard,
     handler: async ({ input, auth }: HandlerContext) => {
+      console.log('[createRecord] handler entered')
       const start = Date.now()
       const { did } = validateUserAuth(auth)
+      console.log('[createRecord] auth validated, did:', did)
       const body = input?.body as {
         repo: string
         collection: string
@@ -61,6 +63,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         swapCommit?: string
       }
 
+      console.log('[createRecord] body:', JSON.stringify(body).substring(0, 200))
       ctx.logger?.debug(
         { method: 'createRecord', repo: body.repo, collection: body.collection },
         'handling request',
@@ -90,6 +93,10 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           body: result,
         }
       } catch (err) {
+        console.error('createRecord failed:', err instanceof Error ? err.message : String(err))
+        if (err instanceof Error && err.stack) {
+          console.error(err.stack)
+        }
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err), repo: body.repo, collection: body.collection },
           'createRecord failed',

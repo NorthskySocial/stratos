@@ -1,10 +1,13 @@
 #!/usr/bin/env -S deno run -A
 // Run all E2E test phases sequentially.
-// Usage: deno run -A test/scripts/run-all.ts
+// Usage: deno run -A test/scripts/run-all.ts [--direct]
+//
+// Options:
+//   --direct  Bypass OAuth and enroll users directly in the database
 //
 // Phases:
 //   1. setup       — create PDS accounts, start Stratos
-//   2. enrollment  — OAuth enrollment via Playwright
+//   2. enrollment  — OAuth enrollment via Playwright (or direct DB enrollment with --direct)
 //   3. boundaries  — configure per-user boundaries
 //   4. posts       — post CRUD + boundary access control
 //   5. teardown    — stop Stratos, clean up
@@ -12,6 +15,9 @@
 import { section, info, pass, fail, summary } from "./lib/log.ts";
 
 const SCRIPTS_DIR = new URL(".", import.meta.url).pathname;
+
+// Parse command line args
+const directMode = Deno.args.includes("--direct");
 
 interface Phase {
   name: string;
@@ -22,7 +28,9 @@ interface Phase {
 
 const phases: Phase[] = [
   { name: "Setup", script: "setup.ts" },
-  { name: "OAuth Enrollment", script: "test-enrollment.ts" },
+  directMode
+    ? { name: "Direct Enrollment", script: "direct-enroll.ts" }
+    : { name: "OAuth Enrollment", script: "test-enrollment.ts" },
   { name: "Configure Boundaries", script: "configure-boundaries.ts" },
   { name: "Post CRUD & Boundaries", script: "test-posts.ts" },
   { name: "Teardown", script: "teardown.ts", always: true },
@@ -52,6 +60,10 @@ async function run() {
   console.log("\n╔══════════════════════════════════════════╗");
   console.log("║   Stratos E2E Test Suite                 ║");
   console.log("╚══════════════════════════════════════════╝\n");
+
+  if (directMode) {
+    info("Running in DIRECT MODE (bypassing OAuth)");
+  }
 
   let phasesRun = 0;
   let phasesPassed = 0;

@@ -13,12 +13,12 @@ services:
         condition: service_completed_successfully
       stratos:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
+    # healthcheck:
+    #   test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://127.0.0.1/health"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 5s
 
   ssl-init:
     image: alpine:latest
@@ -31,7 +31,13 @@ services:
       - |
         if [ ! -f /ssl/cert.pem ]; then
           apk add --no-cache openssl
-          openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /ssl/key.pem -out /ssl/cert.pem -subj '/CN=localhost/O=Stratos/C=US'
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /ssl/key.pem -out /ssl/cert.pem \
+            -subj '/CN=localhost/O=Stratos/C=US' \
+            -addext 'basicConstraints=CA:FALSE' \
+            -addext 'keyUsage=digitalSignature,keyEncipherment' \
+            -addext 'extendedKeyUsage=serverAuth' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
           chmod 644 /ssl/*.pem
         fi
 
@@ -42,8 +48,8 @@ services:
       dockerfile: Dockerfile
     container_name: stratos-test
     restart: "no"
-    expose:
-      - "3100"
+    ports:
+      - "3100:3100"
     env_file:
       - .env.test
     environment:

@@ -8,10 +8,6 @@ FROM node:24-alpine
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Add non-root user for security
-RUN addgroup -g 1001 stratos && \
-    adduser -u 1001 -G stratos -s /bin/sh -D stratos
-
 WORKDIR /app
 
 # Copy package files first for better layer caching
@@ -29,10 +25,10 @@ COPY stratos-service/ ./stratos-service/
 COPY lexicons/ ./lexicons/
 
 # Create data directory
-RUN mkdir -p /app/data && chown -R stratos:stratos /app/data
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
 # Switch to non-root user
-USER stratos
+USER node
 
 # Expose default port
 EXPOSE 3100

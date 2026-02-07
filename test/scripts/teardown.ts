@@ -32,7 +32,7 @@ async function run() {
       args: [
         "compose",
         "-f", "docker-compose.test.yml",
-        "down", "--volumes", "--remove-orphans",
+        "stop",
       ],
       cwd: PROJECT_ROOT,
       stdout: "piped",
@@ -49,18 +49,18 @@ async function run() {
     fail("Failed to stop container", String(err));
   }
 
-  // Clean up test data
-  info("Removing test-data directory...");
-  try {
-    await Deno.remove(TEST_DATA_DIR, { recursive: true });
-    pass("test-data removed");
-  } catch (err) {
-    if (err instanceof Deno.errors.NotFound) {
-      info("test-data directory already absent");
-    } else {
-      warn(`Could not remove test-data: ${err}`);
-    }
-  }
+  // // Clean up test data
+  // info("Removing test-data directory...");
+  // try {
+  //   await Deno.remove(TEST_DATA_DIR, { recursive: true });
+  //   pass("test-data removed");
+  // } catch (err) {
+  //   if (err instanceof Deno.errors.NotFound) {
+  //     info("test-data directory already absent");
+  //   } else {
+  //     warn(`Could not remove test-data: ${err}`);
+  //   }
+  // }
 
   info("Teardown complete");
 }
