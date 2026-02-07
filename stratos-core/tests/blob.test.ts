@@ -42,23 +42,29 @@ function createMockBlobStore(): BlobStore {
         storage.delete(key)
       }
     }),
-    putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-      if (bytes instanceof Uint8Array) {
-        storage.set(cid.toString(), bytes)
-      } else {
-        const chunks: Uint8Array[] = []
-        for await (const chunk of bytes) {
-          chunks.push(chunk)
-        }
-        const total = new Uint8Array(chunks.reduce((sum, c) => sum + c.length, 0))
-        let offset = 0
-        for (const chunk of chunks) {
-          total.set(chunk, offset)
-          offset += chunk.length
-        }
-        storage.set(cid.toString(), total)
-      }
-    }),
+    putPermanent: vi
+      .fn()
+      .mockImplementation(
+        async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
+          if (bytes instanceof Uint8Array) {
+            storage.set(cid.toString(), bytes)
+          } else {
+            const chunks: Uint8Array[] = []
+            for await (const chunk of bytes) {
+              chunks.push(chunk)
+            }
+            const total = new Uint8Array(
+              chunks.reduce((sum, c) => sum + c.length, 0),
+            )
+            let offset = 0
+            for (const chunk of chunks) {
+              total.set(chunk, offset)
+              offset += chunk.length
+            }
+            storage.set(cid.toString(), total)
+          }
+        },
+      ),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockImplementation(async (cid: CID) => {
@@ -98,7 +104,10 @@ describe('Blob Reader', () => {
   let testDir: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-blob-test-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-blob-test-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     const dbPath = join(testDir, 'test.db')
 
@@ -286,7 +295,10 @@ describe('Blob Transactor', () => {
   let testDir: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-blob-tx-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-blob-tx-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     const dbPath = join(testDir, 'test.db')
 
@@ -329,11 +341,13 @@ describe('Blob Transactor', () => {
       })
 
       // Track again - should not throw
-      await expect(transactor.trackBlob({
-        cid,
-        mimeType: 'image/png',
-        size: 1000,
-      })).resolves.not.toThrow()
+      await expect(
+        transactor.trackBlob({
+          cid,
+          mimeType: 'image/png',
+          size: 1000,
+        }),
+      ).resolves.not.toThrow()
     })
   })
 
@@ -354,7 +368,7 @@ describe('Blob Transactor', () => {
 
       await transactor.associateBlobWithRecord(cid, uri)
       await expect(
-        transactor.associateBlobWithRecord(cid, uri)
+        transactor.associateBlobWithRecord(cid, uri),
       ).resolves.not.toThrow()
 
       const records = await transactor.getRecordsForBlob(cid)
@@ -424,8 +438,16 @@ describe('Blob Transactor', () => {
       const uri = 'at://did:plc:test/app.stratos.feed.post/1'
 
       // Track both blobs
-      await transactor.trackBlob({ cid: orphanCid, mimeType: 'image/png', size: 50 })
-      await transactor.trackBlob({ cid: usedCid, mimeType: 'image/png', size: 50 })
+      await transactor.trackBlob({
+        cid: orphanCid,
+        mimeType: 'image/png',
+        size: 50,
+      })
+      await transactor.trackBlob({
+        cid: usedCid,
+        mimeType: 'image/png',
+        size: 50,
+      })
 
       // Only associate one
       await transactor.associateBlobWithRecord(usedCid, uri)
@@ -445,7 +467,11 @@ describe('Blob Transactor', () => {
 
     it('should call blobstore.delete for orphan blobs', async () => {
       const orphanCid = await createCid('orphan to delete')
-      await transactor.trackBlob({ cid: orphanCid, mimeType: 'image/png', size: 50 })
+      await transactor.trackBlob({
+        cid: orphanCid,
+        mimeType: 'image/png',
+        size: 50,
+      })
 
       await transactor.deleteOrphanBlobs()
 

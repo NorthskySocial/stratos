@@ -5,7 +5,11 @@ import {
 } from '@atproto/xrpc-server'
 import { IdResolver, getDidKeyFromMultibase } from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
-import { type EnrollmentConfig, assertEnrollment, EnrollmentDeniedError } from './enrollment.js'
+import {
+  type EnrollmentConfig,
+  assertEnrollment,
+  EnrollmentDeniedError,
+} from './enrollment.js'
 
 export type XrpcAuthVerifier = MethodAuthVerifier
 
@@ -83,11 +87,7 @@ export function createAuthVerifier(
 
     // Check enrollment
     try {
-      await assertEnrollment(
-        config.enrollmentConfig,
-        claims.sub,
-        idResolver,
-      )
+      await assertEnrollment(config.enrollmentConfig, claims.sub, idResolver)
     } catch (err) {
       if (err instanceof EnrollmentDeniedError) {
         throw new InvalidRequestError(err.message, 'NotEnrolled')
@@ -131,6 +131,11 @@ export async function verifyServiceAuth(
   const header = JSON.parse(headerStr)
   const payload = JSON.parse(payloadStr)
 
+  // Validate header
+  if (!header) {
+    throw new InvalidRequestError('Missing JWT header')
+  }
+
   // Validate claims
   if (!payload.iss) {
     throw new InvalidRequestError('Missing iss claim')
@@ -161,10 +166,13 @@ export async function verifyServiceAuth(
   for (const vm of verificationMethods) {
     try {
       // Get public key from verification method
-      let publicKeyBytes: Uint8Array | null = null
+      // let publicKeyBytes: Uint8Array | null = null
 
       if (vm.publicKeyMultibase && vm.type) {
-        const didKey = getDidKeyFromMultibase({ type: vm.type, publicKeyMultibase: vm.publicKeyMultibase })
+        const didKey = getDidKeyFromMultibase({
+          type: vm.type,
+          publicKeyMultibase: vm.publicKeyMultibase,
+        })
         if (didKey) {
           // Verify signature using did:key format
           const signingInput = `${parts[0]}.${parts[1]}`
@@ -178,7 +186,6 @@ export async function verifyServiceAuth(
             if (verified) break
           } catch {
             // Try next verification method
-            continue
           }
         }
       }
@@ -186,7 +193,6 @@ export async function verifyServiceAuth(
       // Verification already handled above via didKey
     } catch {
       // Try next verification method
-      continue
     }
   }
 

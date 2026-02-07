@@ -12,7 +12,6 @@ import {
   stratosRepoBlock,
   stratosRecord,
   stratosBlob,
-  stratosRecordBlob,
   stratosBacklink,
   stratosSeq,
 } from '../src/db/index.js'
@@ -44,7 +43,7 @@ describe('stratos-db', () => {
       `)
 
       const tableNames = tables.map((r) => r.name).sort()
-      
+
       expect(tableNames).toContain('stratos_repo_root')
       expect(tableNames).toContain('stratos_repo_block')
       expect(tableNames).toContain('stratos_record')
@@ -60,7 +59,7 @@ describe('stratos-db', () => {
       `)
 
       const columnNames = columns.map((r) => r.name)
-      
+
       expect(columnNames).toContain('uri')
       expect(columnNames).toContain('cid')
       expect(columnNames).toContain('collection')
@@ -76,7 +75,9 @@ describe('stratos-db', () => {
       await db.insert(stratosSeq).values({
         did: 'did:plc:test',
         eventType: 'append',
-        event: Buffer.from(new TextEncoder().encode(JSON.stringify({ action: 'create' }))),
+        event: Buffer.from(
+          new TextEncoder().encode(JSON.stringify({ action: 'create' })),
+        ),
         invalidated: 0,
         sequencedAt: now,
       })
@@ -85,7 +86,9 @@ describe('stratos-db', () => {
       await db.insert(stratosSeq).values({
         did: 'did:plc:test',
         eventType: 'append',
-        event: Buffer.from(new TextEncoder().encode(JSON.stringify({ action: 'update' }))),
+        event: Buffer.from(
+          new TextEncoder().encode(JSON.stringify({ action: 'update' })),
+        ),
         invalidated: 0,
         sequencedAt: now,
       })
@@ -103,7 +106,7 @@ describe('stratos-db', () => {
     it('should insert and retrieve a record', async () => {
       const now = new Date().toISOString()
       const uri = 'at://did:plc:test/app.stratos.feed.post/123'
-      
+
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafytest123',
@@ -114,7 +117,10 @@ describe('stratos-db', () => {
         takedownRef: null,
       })
 
-      const rows = await db.select().from(stratosRecord).where(eq(stratosRecord.uri, uri))
+      const rows = await db
+        .select()
+        .from(stratosRecord)
+        .where(eq(stratosRecord.uri, uri))
       const retrieved = rows[0]
 
       expect(retrieved).toBeDefined()
@@ -125,7 +131,7 @@ describe('stratos-db', () => {
     it('should update a record', async () => {
       const now = new Date().toISOString()
       const uri = 'at://did:plc:test/app.stratos.feed.post/123'
-      
+
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafyold',
@@ -136,11 +142,15 @@ describe('stratos-db', () => {
         takedownRef: null,
       })
 
-      await db.update(stratosRecord)
+      await db
+        .update(stratosRecord)
         .set({ cid: 'bafynew', repoRev: 'rev2' })
         .where(eq(stratosRecord.uri, uri))
 
-      const rows = await db.select().from(stratosRecord).where(eq(stratosRecord.uri, uri))
+      const rows = await db
+        .select()
+        .from(stratosRecord)
+        .where(eq(stratosRecord.uri, uri))
       const updated = rows[0]
 
       expect(updated?.cid).toBe('bafynew')
@@ -150,7 +160,7 @@ describe('stratos-db', () => {
     it('should delete a record', async () => {
       const now = new Date().toISOString()
       const uri = 'at://did:plc:test/app.stratos.feed.post/123'
-      
+
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafytest',
@@ -163,7 +173,10 @@ describe('stratos-db', () => {
 
       await db.delete(stratosRecord).where(eq(stratosRecord.uri, uri))
 
-      const rows = await db.select().from(stratosRecord).where(eq(stratosRecord.uri, uri))
+      const rows = await db
+        .select()
+        .from(stratosRecord)
+        .where(eq(stratosRecord.uri, uri))
 
       expect(rows.length).toBe(0)
     })
@@ -171,7 +184,7 @@ describe('stratos-db', () => {
     it('should enforce unique uri constraint', async () => {
       const now = new Date().toISOString()
       const uri = 'at://did:plc:test/app.stratos.feed.post/123'
-      
+
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafyfirst',
@@ -191,7 +204,7 @@ describe('stratos-db', () => {
           repoRev: 'rev2',
           indexedAt: now,
           takedownRef: null,
-        })
+        }),
       ).rejects.toThrow()
     })
   })
@@ -200,7 +213,7 @@ describe('stratos-db', () => {
     it('should insert and retrieve a blob', async () => {
       const cid = 'bafyblob123'
       const now = new Date().toISOString()
-      
+
       await db.insert(stratosBlob).values({
         cid,
         mimeType: 'image/jpeg',
@@ -209,7 +222,10 @@ describe('stratos-db', () => {
         takedownRef: null,
       })
 
-      const rows = await db.select().from(stratosBlob).where(eq(stratosBlob.cid, cid))
+      const rows = await db
+        .select()
+        .from(stratosBlob)
+        .where(eq(stratosBlob.cid, cid))
       const retrieved = rows[0]
 
       expect(retrieved).toBeDefined()
@@ -221,7 +237,7 @@ describe('stratos-db', () => {
   describe('stratos_backlink operations', () => {
     it('should insert and query backlinks', async () => {
       const uri = 'at://did:plc:test/app.stratos.feed.post/123'
-      
+
       await db.insert(stratosBacklink).values({
         uri,
         path: 'reply.parent.uri',
@@ -234,27 +250,47 @@ describe('stratos-db', () => {
         linkTo: 'at://did:plc:other/app.stratos.feed.post/789',
       })
 
-      const backlinks = await db.select().from(stratosBacklink).where(eq(stratosBacklink.uri, uri))
+      const backlinks = await db
+        .select()
+        .from(stratosBacklink)
+        .where(eq(stratosBacklink.uri, uri))
 
       expect(backlinks).toHaveLength(2)
     })
 
     it('should find records linking to a target', async () => {
       const targetUri = 'at://did:plc:target/app.stratos.feed.post/100'
-      
+
       await db.insert(stratosBacklink).values([
-        { uri: 'at://did:plc:a/app.stratos.feed.post/1', path: 'reply.parent.uri', linkTo: targetUri },
-        { uri: 'at://did:plc:b/app.stratos.feed.post/2', path: 'reply.parent.uri', linkTo: targetUri },
-        { uri: 'at://did:plc:c/app.stratos.feed.post/3', path: 'reply.parent.uri', linkTo: 'at://other' },
+        {
+          uri: 'at://did:plc:a/app.stratos.feed.post/1',
+          path: 'reply.parent.uri',
+          linkTo: targetUri,
+        },
+        {
+          uri: 'at://did:plc:b/app.stratos.feed.post/2',
+          path: 'reply.parent.uri',
+          linkTo: targetUri,
+        },
+        {
+          uri: 'at://did:plc:c/app.stratos.feed.post/3',
+          path: 'reply.parent.uri',
+          linkTo: 'at://other',
+        },
       ])
 
-      const linking = await db.select({ uri: stratosBacklink.uri })
+      const linking = await db
+        .select({ uri: stratosBacklink.uri })
         .from(stratosBacklink)
         .where(eq(stratosBacklink.linkTo, targetUri))
 
       expect(linking).toHaveLength(2)
-      expect(linking.map(r => r.uri)).toContain('at://did:plc:a/app.stratos.feed.post/1')
-      expect(linking.map(r => r.uri)).toContain('at://did:plc:b/app.stratos.feed.post/2')
+      expect(linking.map((r) => r.uri)).toContain(
+        'at://did:plc:a/app.stratos.feed.post/1',
+      )
+      expect(linking.map((r) => r.uri)).toContain(
+        'at://did:plc:b/app.stratos.feed.post/2',
+      )
     })
   })
 
@@ -262,7 +298,7 @@ describe('stratos-db', () => {
     it('should store and retrieve repo blocks', async () => {
       const cid = 'bafyblock123'
       const content = new Uint8Array([1, 2, 3, 4, 5])
-      
+
       await db.insert(stratosRepoBlock).values({
         cid,
         repoRev: 'rev1',
@@ -270,7 +306,10 @@ describe('stratos-db', () => {
         content: Buffer.from(content),
       })
 
-      const rows = await db.select().from(stratosRepoBlock).where(eq(stratosRepoBlock.cid, cid))
+      const rows = await db
+        .select()
+        .from(stratosRepoBlock)
+        .where(eq(stratosRepoBlock.cid, cid))
       const retrieved = rows[0]
 
       expect(retrieved).toBeDefined()

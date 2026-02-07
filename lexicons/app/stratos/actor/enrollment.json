@@ -18,7 +18,10 @@
           "boundaries": {
             "type": "array",
             "description": "List of boundaries the user has access to on this Stratos service.",
-            "items": { "type": "ref", "ref": "app.stratos.boundary.defs#Domain" },
+            "items": {
+              "type": "ref",
+              "ref": "app.stratos.boundary.defs#Domain"
+            },
             "maxLength": 50
           },
           "createdAt": {

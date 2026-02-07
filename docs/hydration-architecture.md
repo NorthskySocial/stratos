@@ -23,18 +23,19 @@ The source field enables self-describing hydration. When a user creates a record
 
 ```typescript
 interface RecordSource {
-  vary: 'authenticated' | 'unauthenticated'  // How hydration varies
+  vary: 'authenticated' | 'unauthenticated' // How hydration varies
   subject: {
-    uri: string   // at:// URI of the full record
-    cid: string   // CID of the full record content
+    uri: string // at:// URI of the full record
+    cid: string // CID of the full record content
   }
-  service: string  // DID with fragment, e.g., "did:web:stratos.example.com#atproto_pns"
+  service: string // DID with fragment, e.g., "did:web:stratos.example.com#atproto_pns"
 }
 ```
 
 ### Example Records
 
 **Full record (in Stratos)**:
+
 ```json
 {
   "$type": "app.stratos.feed.post",
@@ -47,6 +48,7 @@ interface RecordSource {
 ```
 
 **Stub record (on user's PDS)**:
+
 ```json
 {
   "$type": "app.stratos.feed.post",
@@ -159,12 +161,14 @@ Instead of modifying user DID documents (requires PLC signing), users publish an
 async function resolveStratosEndpoint(did: string): Promise<string | null> {
   // Resolve DID to find PDS
   const didDoc = await resolveDid(did)
-  const pdsEndpoint = didDoc.service.find(s => s.id === '#atproto_pds')?.serviceEndpoint
+  const pdsEndpoint = didDoc.service.find(
+    (s) => s.id === '#atproto_pds',
+  )?.serviceEndpoint
 
   // Fetch enrollment record from user's PDS
   const enrollment = await fetch(
     `${pdsEndpoint}/xrpc/com.atproto.repo.getRecord?` +
-    `repo=${did}&collection=app.stratos.actor.enrollment&rkey=self`
+      `repo=${did}&collection=app.stratos.actor.enrollment&rkey=self`,
   )
 
   if (!enrollment.ok) return null
@@ -181,6 +185,7 @@ async function resolveStratosEndpoint(did: string): Promise<string | null> {
 ### Principle
 
 AppViews use the source field to determine hydration:
+
 1. Index stub records from PDS firehose (via `app.stratos.sync.subscribeRecords`)
 2. Detect `source` field → record needs hydration
 3. Resolve `source.service` DID to get service endpoint
@@ -202,6 +207,7 @@ X-Stratos-Viewer: did:plc:viewer
 ```
 
 **Response (authorized viewer)**:
+
 ```json
 {
   "uri": "at://did:plc:alice/app.stratos.feed.post/abc123",
@@ -218,6 +224,7 @@ X-Stratos-Viewer: did:plc:viewer
 ```
 
 **Response (unauthorized viewer)**:
+
 ```json
 {
   "error": "RecordNotFound",
@@ -290,10 +297,12 @@ async function getViewerBoundaries(viewerDid: string): Promise<string[]> {
     .from(boundaryMember)
     .where(eq(boundaryMember.did, viewerDid))
 
-  return [...new Set([
-    ...writtenBoundaries.map(b => b.boundary),
-    ...memberships.map(m => m.boundary)
-  ])]
+  return [
+    ...new Set([
+      ...writtenBoundaries.map((b) => b.boundary),
+      ...memberships.map((m) => m.boundary),
+    ]),
+  ]
 }
 ```
 
@@ -302,10 +311,10 @@ async function getViewerBoundaries(viewerDid: string): Promise<string[]> {
 ```typescript
 function isAuthorized(
   recordBoundaries: string[],
-  viewerBoundaries: string[]
+  viewerBoundaries: string[],
 ): boolean {
   // Viewer must have at least one overlapping boundary
-  return recordBoundaries.some(b => viewerBoundaries.includes(b))
+  return recordBoundaries.some((b) => viewerBoundaries.includes(b))
 }
 ```
 
@@ -382,7 +391,7 @@ After enrollment, clients authenticate using DPoP (Demonstration of Proof-of-Pos
 
 5. Stratos fetches PDS OAuth metadata:
    GET https://user-pds.example.com/.well-known/oauth-authorization-server
-   
+
    Response includes:
    {
      "issuer": "https://user-pds.example.com",
@@ -392,7 +401,7 @@ After enrollment, clients authenticate using DPoP (Demonstration of Proof-of-Pos
 
 6. Stratos fetches and caches JWKS:
    GET https://user-pds.example.com/oauth/jwks
-   
+
    Response includes public signing keys
 
 7. Stratos verifies access token:
@@ -510,35 +519,35 @@ stratos/
 
 ### Enrollment
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/oauth/authorize` | GET | None | Initiate OAuth enrollment |
-| `/oauth/callback` | GET | None | OAuth callback handler |
-| `app.stratos.enrollment.status` | Query | User | Check enrollment status |
-| `app.stratos.enrollment.unenroll` | Procedure | User | Remove enrollment |
+| Endpoint                          | Method    | Auth | Description               |
+| --------------------------------- | --------- | ---- | ------------------------- |
+| `/oauth/authorize`                | GET       | None | Initiate OAuth enrollment |
+| `/oauth/callback`                 | GET       | None | OAuth callback handler    |
+| `app.stratos.enrollment.status`   | Query     | User | Check enrollment status   |
+| `app.stratos.enrollment.unenroll` | Procedure | User | Remove enrollment         |
 
 ### Records
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `com.atproto.repo.createRecord` | Procedure | User | Create record (writes stub to PDS) |
-| `com.atproto.repo.getRecord` | Query | User/Service | Get record (boundary-aware for service auth) |
-| `com.atproto.repo.listRecords` | Query | User/Service | List records |
-| `com.atproto.repo.deleteRecord` | Procedure | User | Delete record (deletes stub from PDS) |
+| Endpoint                        | Method    | Auth         | Description                                  |
+| ------------------------------- | --------- | ------------ | -------------------------------------------- |
+| `com.atproto.repo.createRecord` | Procedure | User         | Create record (writes stub to PDS)           |
+| `com.atproto.repo.getRecord`    | Query     | User/Service | Get record (boundary-aware for service auth) |
+| `com.atproto.repo.listRecords`  | Query     | User/Service | List records                                 |
+| `com.atproto.repo.deleteRecord` | Procedure | User         | Delete record (deletes stub from PDS)        |
 
 ### Hydration
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `app.stratos.repo.hydrateRecord` | Query | User/Service | Hydrate single record with boundary filtering |
-| `app.stratos.repo.hydrateRecords` | Procedure | User/Service | Batch hydrate up to 100 records |
+| Endpoint                          | Method    | Auth         | Description                                   |
+| --------------------------------- | --------- | ------------ | --------------------------------------------- |
+| `app.stratos.repo.hydrateRecord`  | Query     | User/Service | Hydrate single record with boundary filtering |
+| `app.stratos.repo.hydrateRecords` | Procedure | User/Service | Batch hydrate up to 100 records               |
 
 ### Sync
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `app.stratos.sync.subscribeRecords` | Subscription | Service | WebSocket firehose |
-| `app.stratos.sync.getRepo` | Query | User/Service | Export CAR file |
+| Endpoint                            | Method       | Auth         | Description        |
+| ----------------------------------- | ------------ | ------------ | ------------------ |
+| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose |
+| `app.stratos.sync.getRepo`          | Query        | User/Service | Export CAR file    |
 
 ---
 
@@ -546,17 +555,17 @@ stratos/
 
 ### Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `STRATOS_PORT` | No | `3100` | HTTP server port |
-| `STRATOS_PUBLIC_URL` | Yes | - | Public URL for OAuth callbacks |
-| `STRATOS_DID` | Yes | - | Service DID |
-| `STRATOS_SERVICE_FRAGMENT` | No | `atproto_pns` | Service fragment for source field |
-| `STRATOS_SIGNING_KEY` | Yes | - | Service signing key (secp256k1) |
-| `STRATOS_ALLOWED_BOUNDARIES` | No | `[]` | Valid boundary values |
-| `STRATOS_ALLOWED_APPVIEWS` | No | `[]` | AppView DIDs allowed to call getRecord with service auth |
-| `STRATOS_DATA_DIR` | No | `./data` | Per-actor SQLite storage |
-| `STRATOS_BLOB_STORAGE` | No | `local` | `local` or `s3` |
+| Variable                     | Required | Default       | Description                                              |
+| ---------------------------- | -------- | ------------- | -------------------------------------------------------- |
+| `STRATOS_PORT`               | No       | `3100`        | HTTP server port                                         |
+| `STRATOS_PUBLIC_URL`         | Yes      | -             | Public URL for OAuth callbacks                           |
+| `STRATOS_DID`                | Yes      | -             | Service DID                                              |
+| `STRATOS_SERVICE_FRAGMENT`   | No       | `atproto_pns` | Service fragment for source field                        |
+| `STRATOS_SIGNING_KEY`        | Yes      | -             | Service signing key (secp256k1)                          |
+| `STRATOS_ALLOWED_BOUNDARIES` | No       | `[]`          | Valid boundary values                                    |
+| `STRATOS_ALLOWED_APPVIEWS`   | No       | `[]`          | AppView DIDs allowed to call getRecord with service auth |
+| `STRATOS_DATA_DIR`           | No       | `./data`      | Per-actor SQLite storage                                 |
+| `STRATOS_BLOB_STORAGE`       | No       | `local`       | `local` or `s3`                                          |
 
 ### Service DID Configuration
 
@@ -586,35 +595,39 @@ openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 
 ## Security Considerations
 
-| Concern | Mitigation |
-|---------|------------|
-| Boundary spoofing | Stratos validates boundaries at write time |
-| Unauthorized hydration | AppView allowlist, inter-service JWT verification |
-| Profile record tampering | User controls their PDS, signed commits |
-| Data leakage | Hydration respects boundaries, no full data in subscription |
-| Cross-service correlation | Boundaries are service-local by default |
+| Concern                   | Mitigation                                                  |
+| ------------------------- | ----------------------------------------------------------- |
+| Boundary spoofing         | Stratos validates boundaries at write time                  |
+| Unauthorized hydration    | AppView allowlist, inter-service JWT verification           |
+| Profile record tampering  | User controls their PDS, signed commits                     |
+| Data leakage              | Hydration respects boundaries, no full data in subscription |
+| Cross-service correlation | Boundaries are service-local by default                     |
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Core Refactoring ✅
+
 - [x] Restructure to feature-sliced architecture
 - [x] Define new lexicons (defs.json with source field)
 - [x] Update enrollment to write profile record
 
 ### Phase 2: Source Field Implementation ✅
+
 - [x] Implement `StubWriterService` port/adapter
 - [x] Add dual-write logic (Stratos + PDS stub)
 - [x] Update `getRecord` for service auth with boundary-aware filtering
 - [x] Remove deprecated custom hydration endpoints
 
 ### Phase 3: Integration ✅
+
 - [x] Integration tests for stub writing
 - [x] Unit tests for stub domain logic
 - [x] Documentation updates
 
 ### Phase 4: Hydration Feature ✅
+
 - [x] Implement `HydrationService` port/adapter in stratos-core
 - [x] Add boundary-aware access control domain logic
 - [x] Implement batch hydration endpoints (`app.stratos.repo.hydrateRecords`)

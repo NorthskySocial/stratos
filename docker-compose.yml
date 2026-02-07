@@ -6,7 +6,7 @@ services:
     container_name: stratos
     restart: unless-stopped
     ports:
-      - "${STRATOS_PORT:-3100}:3100"
+      - '${STRATOS_PORT:-3100}:3100'
     environment:
       # Service identity (required)
       STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
@@ -45,7 +45,15 @@ services:
     volumes:
       - stratos-data:/app/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/health"]
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3100/health',
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

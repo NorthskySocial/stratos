@@ -1,4 +1,4 @@
-name: Run Tests on PR and Push
+name: Run Lint, Prettier, and Tests on PR and Push
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,12 +45,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build packages
-        run: pnpm run build
+      - name: Run check format
+        run: pnpm prettier --check .
 
       - name: Run linter
         run: pnpm run lint
-        continue-on-error: true
+
+      - name: Build packages
+        run: pnpm run build
 
       - name: Run tests
         run: pnpm test

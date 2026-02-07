@@ -8,7 +8,10 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { eq } from 'drizzle-orm'
 
-import { StratosRecordReader, StratosRecordTransactor } from '../src/record/index.js'
+import {
+  StratosRecordReader,
+  StratosRecordTransactor,
+} from '../src/record/index.js'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -41,7 +44,10 @@ describe('Record Reader', () => {
   let dbPath: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-record-test-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-record-test-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     dbPath = join(testDir, 'test.db')
 
@@ -141,7 +147,10 @@ describe('Record Transactor', () => {
   let dbPath: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-transact-test-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-transact-test-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     dbPath = join(testDir, 'test.db')
 
@@ -157,7 +166,9 @@ describe('Record Transactor', () => {
 
   describe('indexRecord', () => {
     it('should index a new record', async () => {
-      const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/3jqfcqzm3fv2p')
+      const uri = new AtUri(
+        'at://did:plc:test/app.stratos.feed.post/3jqfcqzm3fv2p',
+      )
       const cid = await createCid({ text: 'Hello' })
       const record = { text: 'Hello', createdAt: new Date().toISOString() }
 
@@ -217,7 +228,13 @@ describe('Record Transactor', () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/todelete')
       const cid = await createCid({ text: 'Delete me' })
 
-      await transactor.indexRecord(uri, cid, { text: 'Delete me' }, 'create', 'rev1')
+      await transactor.indexRecord(
+        uri,
+        cid,
+        { text: 'Delete me' },
+        'create',
+        'rev1',
+      )
       expect(await transactor.recordCount()).toBe(1)
 
       await transactor.deleteRecord(uri)
@@ -249,30 +266,37 @@ describe('Record Transactor', () => {
       ])
 
       // Verify backlink exists
-      const backlinksBefore = await db
-        .select()
-        .from(stratosBacklink)
+      const backlinksBefore = await db.select().from(stratosBacklink)
       expect(backlinksBefore).toHaveLength(1)
 
       // Delete record
       await transactor.deleteRecord(uri)
 
       // Verify backlink removed
-      const backlinksAfter = await db
-        .select()
-        .from(stratosBacklink)
+      const backlinksAfter = await db.select().from(stratosBacklink)
       expect(backlinksAfter).toHaveLength(0)
     })
   })
 
   describe('updateRecordTakedown', () => {
     it('should apply takedown to record', async () => {
-      const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/badcontent')
+      const uri = new AtUri(
+        'at://did:plc:test/app.stratos.feed.post/badcontent',
+      )
       const cid = await createCid({ text: 'Bad content' })
 
-      await transactor.indexRecord(uri, cid, { text: 'Bad content' }, 'create', 'rev1')
+      await transactor.indexRecord(
+        uri,
+        cid,
+        { text: 'Bad content' },
+        'create',
+        'rev1',
+      )
 
-      await transactor.updateRecordTakedown(uri, { applied: true, ref: 'TAKEDOWN-123' })
+      await transactor.updateRecordTakedown(uri, {
+        applied: true,
+        ref: 'TAKEDOWN-123',
+      })
 
       const records = await db
         .select()
@@ -288,8 +312,17 @@ describe('Record Transactor', () => {
       const uri = new AtUri('at://did:plc:test/app.stratos.feed.post/restored')
       const cid = await createCid({ text: 'Restored content' })
 
-      await transactor.indexRecord(uri, cid, { text: 'Restored' }, 'create', 'rev1')
-      await transactor.updateRecordTakedown(uri, { applied: true, ref: 'TD-456' })
+      await transactor.indexRecord(
+        uri,
+        cid,
+        { text: 'Restored' },
+        'create',
+        'rev1',
+      )
+      await transactor.updateRecordTakedown(uri, {
+        applied: true,
+        ref: 'TD-456',
+      })
 
       // Now remove takedown
       await transactor.updateRecordTakedown(uri, { applied: false })
@@ -320,9 +353,7 @@ describe('Record Transactor', () => {
         },
       ])
 
-      const backlinks = await db
-        .select()
-        .from(stratosBacklink)
+      const backlinks = await db.select().from(stratosBacklink)
 
       expect(backlinks).toHaveLength(2)
     })
@@ -335,15 +366,11 @@ describe('Record Transactor', () => {
         { uri, path: 'other', linkTo: 'did:plc:b' },
       ])
 
-      expect(
-        await db.select().from(stratosBacklink),
-      ).toHaveLength(2)
+      expect(await db.select().from(stratosBacklink)).toHaveLength(2)
 
       await transactor.removeBacklinksByUri(new AtUri(uri))
 
-      expect(
-        await db.select().from(stratosBacklink),
-      ).toHaveLength(0)
+      expect(await db.select().from(stratosBacklink)).toHaveLength(0)
     })
 
     it('should not duplicate backlinks on conflict', async () => {
@@ -356,9 +383,7 @@ describe('Record Transactor', () => {
       await transactor.addBacklinks([backlink])
       await transactor.addBacklinks([backlink]) // Same again
 
-      const backlinks = await db
-        .select()
-        .from(stratosBacklink)
+      const backlinks = await db.select().from(stratosBacklink)
 
       expect(backlinks).toHaveLength(1)
     })

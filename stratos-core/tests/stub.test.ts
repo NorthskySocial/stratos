@@ -4,7 +4,12 @@
 import { describe, it, expect } from 'vitest'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
-import { generateStub, isStubRecord, extractSource, parseServiceDid } from '../src/stub/index.js'
+import {
+  generateStub,
+  isStubRecord,
+  extractSource,
+  parseServiceDid,
+} from '../src/stub/index.js'
 
 // Helper to create deterministic CID
 async function createCid(data: string): Promise<CID> {
@@ -29,9 +34,13 @@ describe('Stub Domain', () => {
       expect(stub.createdAt).toBe('2024-01-01T00:00:00.000Z')
       expect(stub.source).toBeDefined()
       expect(stub.source.vary).toBe('authenticated')
-      expect(stub.source.subject.uri).toBe('at://did:plc:abc123/app.stratos.feed.post/123')
+      expect(stub.source.subject.uri).toBe(
+        'at://did:plc:abc123/app.stratos.feed.post/123',
+      )
       expect(stub.source.subject.cid).toBe(cid.toString())
-      expect(stub.source.service).toBe('did:web:stratos.example.com#atproto_pns')
+      expect(stub.source.service).toBe(
+        'did:web:stratos.example.com#atproto_pns',
+      )
     })
 
     it('should preserve recordType as $type', async () => {
@@ -54,7 +63,10 @@ describe('Stub Domain', () => {
         $type: 'app.stratos.feed.post',
         source: {
           vary: 'authenticated',
-          subject: { uri: 'at://did:plc:test/app.stratos.feed.post/1', cid: 'bafytest' },
+          subject: {
+            uri: 'at://did:plc:test/app.stratos.feed.post/1',
+            cid: 'bafytest',
+          },
           service: 'did:plc:service#atproto_pns',
         },
         createdAt: '2024-01-01T00:00:00.000Z',
@@ -106,7 +118,10 @@ describe('Stub Domain', () => {
         $type: 'app.stratos.feed.post',
         source: {
           vary: 'authenticated',
-          subject: { uri: 'at://did:plc:test/app.stratos.feed.post/1', cid: 'bafytest' },
+          subject: {
+            uri: 'at://did:plc:test/app.stratos.feed.post/1',
+            cid: 'bafytest',
+          },
           service: 'did:plc:service#atproto_pns',
         },
         createdAt: '2024-01-01T00:00:00.000Z',
@@ -115,7 +130,9 @@ describe('Stub Domain', () => {
       const source = extractSource(stub)
       expect(source).toBeDefined()
       expect(source?.vary).toBe('authenticated')
-      expect(source?.subject.uri).toBe('at://did:plc:test/app.stratos.feed.post/1')
+      expect(source?.subject.uri).toBe(
+        'at://did:plc:test/app.stratos.feed.post/1',
+      )
       expect(source?.service).toBe('did:plc:service#atproto_pns')
     })
 
