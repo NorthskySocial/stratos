@@ -19,7 +19,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
 
-# Install all dependencies (tsx is a dev dependency needed for runtime)
+# Install all dependencies (tsx is a production dependency needed for runtime)
 RUN pnpm install --frozen-lockfile
 
 # Copy source files
@@ -46,5 +46,6 @@ ENV NODE_ENV=production
 ENV STRATOS_PORT=3100
 ENV STRATOS_DATA_DIR=/app/data
 
-# Run the service using tsx (TypeScript execution)
-CMD ["pnpm", "exec", "tsx", "stratos-service/src/bin/stratos.ts"]
+# Run the service using tsx from stratos-service (where it's installed)
+WORKDIR /app/stratos-service
+CMD ["pnpm", "exec", "tsx", "src/bin/stratos.ts"]
