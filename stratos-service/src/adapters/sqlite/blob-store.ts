@@ -4,7 +4,7 @@
  * Implements BlobMetadataReader/Writer for SQLite backend.
  */
 import { CID } from 'multiformats/cid'
-import { eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type {
   BlobMetadataReader,
   BlobMetadataWriter,

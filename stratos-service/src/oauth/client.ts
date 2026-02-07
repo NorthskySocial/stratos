@@ -65,9 +65,7 @@ export class SqliteSessionStore {
   }
 
   async del(key: string): Promise<void> {
-    await this.db
-      .delete(oauthSession)
-      .where(eq(oauthSession.key, key))
+    await this.db.delete(oauthSession).where(eq(oauthSession.key, key))
   }
 }
 
@@ -104,9 +102,7 @@ export class SqliteStateStore {
   }
 
   async del(key: string): Promise<void> {
-    await this.db
-      .delete(oauthState)
-      .where(eq(oauthState.key, key))
+    await this.db.delete(oauthState).where(eq(oauthState.key, key))
   }
 }
 
@@ -179,7 +175,7 @@ export async function createOAuthClient(
       },
     },
 
-    // Use our identity resolver for handle resolution  
+    // Use our identity resolver for handle resolution
     handleResolver: {
       resolve: async (handle: string) => {
         const result = await idResolver.handle.resolve(handle)

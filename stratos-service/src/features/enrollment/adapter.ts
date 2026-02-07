@@ -15,7 +15,6 @@ import {
   extractPdsEndpoint,
   validateEnrollmentEligibility,
   NotEnrolledError,
-  EnrollmentDeniedError,
 } from '@northskysocial/stratos-core'
 import type { ServiceDb } from '../../db/index.js'
 import { enrollment } from '../../db/index.js'
@@ -40,7 +39,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   async enroll(did: string, boundaries: string[]): Promise<Enrollment> {
     const start = Date.now()
     const now = new Date()
-    
+
     await this.actorStoreCreator(did)
 
     await this.store.db.insert(enrollment).values({
@@ -68,7 +67,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       .from(enrollment)
       .where(eq(enrollment.did, did))
       .limit(1)
-    
+
     return result.length > 0
   }
 
@@ -78,7 +77,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       .from(enrollment)
       .where(eq(enrollment.did, did))
       .limit(1)
-    
+
     if (result.length === 0) {
       return null
     }
@@ -93,9 +92,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   }
 
   async unenroll(did: string): Promise<void> {
-    await this.store.db
-      .delete(enrollment)
-      .where(eq(enrollment.did, did))
+    await this.store.db.delete(enrollment).where(eq(enrollment.did, did))
 
     this.logger?.info({ did }, 'user unenrolled')
   }
@@ -133,6 +130,7 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
  */
 export class ProfileRecordWriterImpl implements ProfileRecordWriter {
   constructor(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private getAgent: (did: string) => Promise<{ api: any } | null>,
   ) {}
 
@@ -152,7 +150,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
       rkey: 'self',
       record: {
         service: serviceEndpoint,
-        boundaries: boundaries.map(value => ({ value })),
+        boundaries: boundaries.map((value) => ({ value })),
         createdAt: new Date().toISOString(),
       },
     })

@@ -2,9 +2,18 @@ import fsSync from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { CID } from 'multiformats/cid'
-import { fileExists, rmIfExists, chunkArray, aggregateErrors } from '@atproto/common'
+import {
+  fileExists,
+  rmIfExists,
+  chunkArray,
+  aggregateErrors,
+} from '@atproto/common'
 import { randomStr } from '@atproto/crypto'
-import { type BlobStore, type BlobStoreCreator, BlobNotFoundError } from '@northskysocial/stratos-core'
+import {
+  type BlobStore,
+  type BlobStoreCreator,
+  BlobNotFoundError,
+} from '@northskysocial/stratos-core'
 import { readableToAsyncIterable, collectAsyncIterable } from './util.js'
 
 /**
@@ -77,10 +86,13 @@ export class DiskBlobStore implements BlobStore {
     return fileExists(this.getStoredPath(cid))
   }
 
-  async putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string> {
+  async putTemp(
+    bytes: Uint8Array | AsyncIterable<Uint8Array>,
+  ): Promise<string> {
     await this.ensureTemp()
     const key = this.genKey()
-    const data = bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
+    const data =
+      bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
     await fs.writeFile(this.getTmpPath(key), data)
     return key
   }
@@ -107,7 +119,8 @@ export class DiskBlobStore implements BlobStore {
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<void> {
     await this.ensureDir()
-    const data = bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
+    const data =
+      bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
     await fs.writeFile(this.getStoredPath(cid), data)
   }
 

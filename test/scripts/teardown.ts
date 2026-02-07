@@ -1,52 +1,48 @@
 #!/usr/bin/env -S deno run -A
 // Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
-import { PROJECT_ROOT, TEST_DATA_DIR } from "./lib/config.ts";
-import { section, info, pass, fail, warn } from "./lib/log.ts";
-import { loadState } from "./lib/state.ts";
-import { deleteAccount } from "./lib/pds.ts";
+import { PROJECT_ROOT, TEST_DATA_DIR } from './lib/config.ts'
+import { section, info, pass, fail, warn } from './lib/log.ts'
+import { loadState } from './lib/state.ts'
+import { deleteAccount } from './lib/pds.ts'
 
 async function run() {
-  section("Teardown");
+  section('Teardown')
 
   // Delete test accounts from PDS
-  info("Deleting test accounts from PDS...");
-  const state = await loadState();
+  info('Deleting test accounts from PDS...')
+  const state = await loadState()
   for (const [name, user] of Object.entries(state.users)) {
     if (!user.did) {
-      info(`Skipping ${name} (no DID recorded)`);
-      continue;
+      info(`Skipping ${name} (no DID recorded)`)
+      continue
     }
     try {
-      await deleteAccount(user.did);
-      pass(`Deleted ${name} (${user.did})`);
+      await deleteAccount(user.did)
+      pass(`Deleted ${name} (${user.did})`)
     } catch (err) {
-      warn(`Failed to delete ${name}: ${err}`);
+      warn(`Failed to delete ${name}: ${err}`)
     }
   }
 
   // Stop Docker Compose
-  info("Stopping Stratos container...");
+  info('Stopping Stratos container...')
   try {
-    const compose = new Deno.Command("docker", {
-      args: [
-        "compose",
-        "-f", "docker-compose.test.yml",
-        "stop",
-      ],
+    const compose = new Deno.Command('docker', {
+      args: ['compose', '-f', 'docker-compose.test.yml', 'stop'],
       cwd: PROJECT_ROOT,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const result = await compose.output();
+      stdout: 'piped',
+      stderr: 'piped',
+    })
+    const result = await compose.output()
     if (result.success) {
-      pass("Container stopped");
+      pass('Container stopped')
     } else {
-      const stderr = new TextDecoder().decode(result.stderr);
-      warn(`Docker compose down returned non-zero: ${stderr}`);
+      const stderr = new TextDecoder().decode(result.stderr)
+      warn(`Docker compose down returned non-zero: ${stderr}`)
     }
   } catch (err) {
-    fail("Failed to stop container", String(err));
+    fail('Failed to stop container', String(err))
   }
 
   // // Clean up test data
@@ -62,10 +58,10 @@ async function run() {
   //   }
   // }
 
-  info("Teardown complete");
+  info('Teardown complete')
 }
 
 run().catch((err) => {
-  console.error("\nTeardown failed:", err);
-  Deno.exit(1);
-});
+  console.error('\nTeardown failed:', err)
+  Deno.exit(1)
+})

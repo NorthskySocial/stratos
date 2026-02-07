@@ -47,7 +47,9 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
     }
   }
 
-  async listEnrollments(options?: ListEnrollmentsOptions): Promise<StoredEnrollment[]> {
+  async listEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
     const limit = options?.limit ?? 100
     const cursor = options?.cursor
 
@@ -113,7 +115,9 @@ export class SqliteEnrollmentStoreWriter
   }
 
   async unenroll(did: string): Promise<void> {
-    await this.db.delete(enrollmentBoundary).where(eq(enrollmentBoundary.did, did))
+    await this.db
+      .delete(enrollmentBoundary)
+      .where(eq(enrollmentBoundary.did, did))
     await this.db.delete(enrollment).where(eq(enrollment.did, did))
   }
 
@@ -144,9 +148,9 @@ export class SqliteEnrollmentStoreWriter
       .where(eq(enrollmentBoundary.did, did))
 
     if (boundaries.length > 0) {
-      await this.db.insert(enrollmentBoundary).values(
-        boundaries.map((boundary) => ({ did, boundary })),
-      )
+      await this.db
+        .insert(enrollmentBoundary)
+        .values(boundaries.map((boundary) => ({ did, boundary })))
     }
   }
 

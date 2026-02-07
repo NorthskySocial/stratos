@@ -2,10 +2,8 @@ import type {
   BatchHydrationResult,
   HydrationContext,
   HydrationRequest,
-  HydratedRecord,
   HydrationResult,
 } from './types.js'
-import type { BoundaryResolver } from '../enrollment/port.js'
 
 // Re-export BoundaryResolver for convenience when using hydration module
 export type { BoundaryResolver } from '../enrollment/port.js'

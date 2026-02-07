@@ -10,7 +10,10 @@ import {
   isLocalService,
   createHydrationContext,
 } from '../src/hydration/index.js'
-import type { HydrationContext, AccessCheckInput } from '../src/hydration/index.js'
+import type {
+  HydrationContext,
+  AccessCheckInput,
+} from '../src/hydration/index.js'
 
 describe('Hydration Domain', () => {
   describe('canAccessRecord', () => {
@@ -104,8 +107,16 @@ describe('Hydration Domain', () => {
   describe('filterAccessibleRecords', () => {
     it('should filter records based on viewer access', () => {
       const records = [
-        { uri: 'at://did:plc:a/post/1', boundaries: ['team-a.example.com'], ownerDid: 'did:plc:a' },
-        { uri: 'at://did:plc:b/post/2', boundaries: ['team-b.example.com'], ownerDid: 'did:plc:b' },
+        {
+          uri: 'at://did:plc:a/post/1',
+          boundaries: ['team-a.example.com'],
+          ownerDid: 'did:plc:a',
+        },
+        {
+          uri: 'at://did:plc:b/post/2',
+          boundaries: ['team-b.example.com'],
+          ownerDid: 'did:plc:b',
+        },
         { uri: 'at://did:plc:c/post/3', boundaries: [], ownerDid: 'did:plc:c' },
       ]
 
@@ -123,7 +134,11 @@ describe('Hydration Domain', () => {
 
     it('should include records owned by viewer regardless of boundaries', () => {
       const records = [
-        { uri: 'at://did:plc:viewer/post/1', boundaries: ['secret.example.com'], ownerDid: 'did:plc:viewer' },
+        {
+          uri: 'at://did:plc:viewer/post/1',
+          boundaries: ['secret.example.com'],
+          ownerDid: 'did:plc:viewer',
+        },
       ]
 
       const context: HydrationContext = {
@@ -138,7 +153,11 @@ describe('Hydration Domain', () => {
 
     it('should return empty array for unauthenticated viewer', () => {
       const records = [
-        { uri: 'at://did:plc:a/post/1', boundaries: ['team.example.com'], ownerDid: 'did:plc:a' },
+        {
+          uri: 'at://did:plc:a/post/1',
+          boundaries: ['team.example.com'],
+          ownerDid: 'did:plc:a',
+        },
       ]
 
       const context: HydrationContext = {
@@ -160,7 +179,9 @@ describe('Hydration Domain', () => {
     })
 
     it('should handle URLs with ports', () => {
-      expect(parseServiceEndpoint('http://localhost:3000')).toBe('did:web:localhost')
+      expect(parseServiceEndpoint('http://localhost:3000')).toBe(
+        'did:web:localhost',
+      )
     })
 
     it('should return null for invalid URLs', () => {
@@ -191,7 +212,9 @@ describe('Hydration Domain', () => {
 
   describe('createHydrationContext', () => {
     it('should create context with viewer info', () => {
-      const context = createHydrationContext('did:plc:viewer123', ['team.example.com'])
+      const context = createHydrationContext('did:plc:viewer123', [
+        'team.example.com',
+      ])
 
       expect(context.viewerDid).toBe('did:plc:viewer123')
       expect(context.viewerDomains).toEqual(['team.example.com'])

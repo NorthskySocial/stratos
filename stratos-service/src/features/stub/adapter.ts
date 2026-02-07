@@ -1,5 +1,8 @@
 import { CID } from 'multiformats/cid'
-import type { StubWriterService, WriteStubResult } from '@northskysocial/stratos-core'
+import type {
+  StubWriterService,
+  WriteStubResult,
+} from '@northskysocial/stratos-core'
 import { generateStub, NotEnrolledError } from '@northskysocial/stratos-core'
 
 /**
@@ -72,7 +75,11 @@ export class StubWriterServiceImpl implements StubWriterService {
     }
   }
 
-  async deleteStub(did: string, collection: string, rkey: string): Promise<void> {
+  async deleteStub(
+    did: string,
+    collection: string,
+    rkey: string,
+  ): Promise<void> {
     const agent = await this.getAgent(did)
     if (!agent) {
       throw new NotEnrolledError(did)

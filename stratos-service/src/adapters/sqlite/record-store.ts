@@ -6,7 +6,7 @@
  */
 import { CID } from 'multiformats/cid'
 import { AtUri } from '@atproto/syntax'
-import { eq, and, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type {
   RecordStoreReader,
   RecordStoreWriter,
@@ -17,7 +17,6 @@ import type {
 } from '@northskysocial/stratos-core'
 import {
   type StratosDb,
-  stratosRecord,
   stratosRepoBlock,
   StratosRecordReader,
   StratosRecordTransactor,
