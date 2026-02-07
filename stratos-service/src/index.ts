@@ -4,7 +4,7 @@ import cors from 'cors'
 import { IdResolver } from '@atproto/identity'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
-import type { BlobStoreCreator } from '@northskysocial/stratos-core'
+import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
 
 import {
   type AppContext,
@@ -12,6 +12,7 @@ import {
   createAppContext,
   destroyAppContext,
 } from './context.js'
+import { createLogger } from './logger.js'
 import { type StratosServiceConfig, envToConfig, parseEnv } from './config.js'
 import { registerHandlers } from './api/handlers.js'
 import { registerSubscribeRecords } from './subscription/subscribe-records.js'
@@ -41,11 +42,13 @@ export class StratosServer {
     cfg: StratosServiceConfig,
     blobstore: BlobStoreCreator,
     cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    logger?: Logger,
   ): Promise<StratosServer> {
     const ctx = await createAppContext({
       cfg,
       blobstore,
       cborToRecord,
+      logger,
     })
 
     const app = ctx.app
@@ -99,6 +102,8 @@ export class StratosServer {
         res: express.Response,
         _next: express.NextFunction,
       ) => {
+        console.error('Express error:', err.message)
+        console.error(err.stack)
         ctx.logger?.error({ err: err.message, stack: cfg.stratos.devMode ? err.stack : undefined }, 'server error')
         res.status(500).json({
           error: 'InternalServerError',
@@ -179,6 +184,8 @@ function createBlobstore(cfg: StratosServiceConfig): BlobStoreCreator {
 export async function main(): Promise<void> {
   const cfg = envToConfig(parseEnv())
 
+  const logger = createLogger(cfg.logging.level)
+
   const blobstore = createBlobstore(cfg)
 
   const cborToRecord = (bytes: Uint8Array): Record<string, unknown> => {
@@ -187,7 +194,7 @@ export async function main(): Promise<void> {
     throw new Error('Expected record with $type property')
   }
 
-  const server = await StratosServer.create(cfg, blobstore, cborToRecord)
+  const server = await StratosServer.create(cfg, blobstore, cborToRecord, logger)
   await server.start()
 
   process.on('SIGTERM', async () => {
