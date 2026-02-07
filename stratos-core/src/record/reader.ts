@@ -69,7 +69,7 @@ export interface RecordWithMeta {
 export class StratosRecordReader {
   constructor(
     protected db: StratosDb,
-    protected cborToRecord: (content: Buffer) => Record<string, unknown>,
+    protected cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
     protected logger?: Logger,
   ) {
   }

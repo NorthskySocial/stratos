@@ -23,7 +23,7 @@ const encodeRecord = (data: unknown): Buffer => {
   return Buffer.from(new TextEncoder().encode(JSON.stringify(data)))
 }
 
-const decodeRecord = (content: Buffer): Record<string, unknown> => {
+const decodeRecord = (content: Buffer | Uint8Array): Record<string, unknown> => {
   return JSON.parse(new TextDecoder().decode(content))
 }
 

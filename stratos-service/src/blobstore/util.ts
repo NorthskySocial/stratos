@@ -24,7 +24,7 @@ export function asyncIterableToReadable(
  * Collect an AsyncIterable into a Buffer
  */
 export async function collectAsyncIterable(
-  iterable: Readable,
+  iterable: AsyncIterable<Uint8Array>,
 ): Promise<Buffer> {
   const chunks: Uint8Array[] = []
   for await (const chunk of iterable) {

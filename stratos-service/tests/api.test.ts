@@ -95,8 +95,8 @@ function createMockBlobStore(): BlobStore {
 }
 
 // CBOR decoder mock (just JSON for testing)
-function cborToRecord(bytes: Buffer): Record<string, unknown> {
-  return JSON.parse(bytes.toString('utf8'))
+function cborToRecord(bytes: Buffer | Uint8Array): Record<string, unknown> {
+  return JSON.parse(Buffer.from(bytes).toString('utf8'))
 }
 
 // Create minimal app context for testing API functions

@@ -33,7 +33,7 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
     protected cborToRecord: (content: Buffer | Uint8Array) => Record<string, unknown>,
   ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.reader = new StratosRecordReader(db, (content: any) => cborToRecord(Buffer.from(content)))
+    this.reader = new StratosRecordReader(db, (content: any) => cborToRecord(content))
   }
 
   async recordCount(): Promise<number> {
@@ -123,7 +123,7 @@ export class SqliteRecordStoreWriter
   ) {
     super(db, cborToRecord)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.transactor = new StratosRecordTransactor(db, (content: any) => cborToRecord(Buffer.from(content)))
+    this.transactor = new StratosRecordTransactor(db, (content: any) => cborToRecord(content))
   }
 
   async putRecord(record: {

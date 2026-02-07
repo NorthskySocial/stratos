@@ -74,12 +74,12 @@ describe('DiskBlobStore', () => {
     })
 
     it('should handle async iterable input', async () => {
-      async function* generateChunks() {
+      async function* generateChunks(): AsyncGenerator<Uint8Array> {
         yield new TextEncoder().encode('chunk1')
         yield new TextEncoder().encode('chunk2')
       }
 
-      const key = await store.putTemp(generateChunks())
+      const key = await store.putTemp(asyncIterableToReadable(generateChunks()))
       expect(key).toBeDefined()
       expect(await store.hasTemp(key)).toBe(true)
     })
@@ -118,11 +118,11 @@ describe('DiskBlobStore', () => {
       const content = 'iterable permanent content'
       const cid = await createCid(content)
 
-      async function* generateContent() {
+      async function* generateContent(): AsyncGenerator<Uint8Array> {
         yield new TextEncoder().encode(content)
       }
 
-      await store.putPermanent(cid, generateContent())
+      await store.putPermanent(cid, asyncIterableToReadable(generateContent()))
 
       expect(await store.hasStored(cid)).toBe(true)
       const retrieved = await store.getBytes(cid)
@@ -217,14 +217,14 @@ describe('DiskBlobStore', () => {
 describe('Stream Utilities', () => {
   describe('collectAsyncIterable', () => {
     it('should collect chunks into single Buffer', async () => {
-      async function* generate() {
-        yield new Buffer([1, 2, 3])
-        yield new Buffer([4, 5])
-        yield new Buffer([6, 7, 8, 9])
+      async function* generate(): AsyncGenerator<Uint8Array> {
+        yield new Uint8Array([1, 2, 3])
+        yield new Uint8Array([4, 5])
+        yield new Uint8Array([6, 7, 8, 9])
       }
 
       const result = await collectAsyncIterable(generate())
-      expect(result).toEqual(new Buffer([1, 2, 3, 4, 5, 6, 7, 8, 9]))
+      expect(result).toEqual(Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9]))
     })
   })
 

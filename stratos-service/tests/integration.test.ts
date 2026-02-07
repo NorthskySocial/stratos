@@ -26,7 +26,7 @@ import {
 } from '@northsky/stratos-core'
 
 import {StratosActorStore, SqliteEnrollmentStore} from '../src/context.js'
-import {validateEnrollment, EnrollmentConfig} from '../src/auth/index.ts'
+import {validateEnrollment, EnrollmentConfig} from '../src/auth/index.js'
 import {createServiceDb, migrateServiceDb, closeServiceDb, ServiceDb} from '../src/db/index.js'
 import {Readable} from "node:stream";
 
@@ -122,7 +122,7 @@ function createMockBlobStoreCreator(): BlobStoreCreator {
 }
 
 // CBOR decoder mock
-function cborToRecord(bytes: Buffer): Record<string, unknown> {
+function cborToRecord(bytes: Buffer | Uint8Array): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
