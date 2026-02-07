@@ -262,18 +262,6 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  xrpc.method('_health', {
-    handler: async (_ctx: HandlerContext) => {
-      return {
-        encoding: 'application/json',
-        body: {
-          version: '0.1.0',
-          status: 'ok',
-        },
-      }
-    },
-  })
-
   registerHydrationHandlers(server, ctx)
 }
 

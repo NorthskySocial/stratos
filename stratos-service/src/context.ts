@@ -1,11 +1,15 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { eq, gt, asc, sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
+import { schemas as atprotoSchemas } from '@atproto/api'
+import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
 
 import {
@@ -520,6 +524,34 @@ export interface AppContextOptions {
 }
 
 /**
+ * Load Stratos lexicon documents from the lexicons directory
+ */
+function loadStratosLexicons(): LexiconDoc[] {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url))
+  // From stratos-service/src/context.ts, lexicons are at ../../lexicons (relative to stratos-service)
+  // In Docker, we're in /app/stratos-service, lexicons are at /app/lexicons
+  const lexiconsDir = path.resolve(__dirname, '../..', 'lexicons')
+  const lexicons: LexiconDoc[] = []
+
+  function loadFromDir(dir: string) {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        loadFromDir(fullPath)
+      } else if (entry.name.endsWith('.json')) {
+        const content = readFileSync(fullPath, 'utf-8')
+        const doc = JSON.parse(content) as LexiconDoc
+        lexicons.push(doc)
+      }
+    }
+  }
+
+  loadFromDir(lexiconsDir)
+  return lexicons
+}
+
+/**
  * Create application context
  */
 export async function createAppContext(
@@ -554,7 +586,7 @@ export async function createAppContext(
   if (cfg.oauth) {
     oauthClient = await createOAuthClient(
       {
-        clientId: cfg.oauth.clientId ?? cfg.service.publicUrl,
+        clientId: cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
         clientUri: cfg.service.publicUrl,
         redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
         privateKeyPem: cfg.oauth.clientSecret,
@@ -620,7 +652,11 @@ export async function createAppContext(
   const app = express()
   app.use(express.json())
 
-  const xrpcServer = new XrpcServer()
+  // Load Stratos lexicons from the lexicons directory
+  const stratosLexicons = loadStratosLexicons()
+  const allLexicons = [...atprotoSchemas, ...stratosLexicons]
+
+  const xrpcServer = new XrpcServer(allLexicons)
 
   return {
     cfg,
