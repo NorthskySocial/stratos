@@ -1,11 +1,29 @@
 #!/usr/bin/env -S deno run -A
-// Teardown — stops Stratos container and cleans up test data.
+// Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
 import { PROJECT_ROOT, TEST_DATA_DIR } from "./lib/config.ts";
 import { section, info, pass, fail, warn } from "./lib/log.ts";
+import { loadState } from "./lib/state.ts";
+import { deleteAccount } from "./lib/pds.ts";
 
 async function run() {
   section("Teardown");
+
+  // Delete test accounts from PDS
+  info("Deleting test accounts from PDS...");
+  const state = await loadState();
+  for (const [name, user] of Object.entries(state.users)) {
+    if (!user.did) {
+      info(`Skipping ${name} (no DID recorded)`);
+      continue;
+    }
+    try {
+      await deleteAccount(user.did);
+      pass(`Deleted ${name} (${user.did})`);
+    } catch (err) {
+      warn(`Failed to delete ${name}: ${err}`);
+    }
+  }
 
   // Stop Docker Compose
   info("Stopping Stratos container...");

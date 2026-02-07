@@ -107,3 +107,23 @@ export async function accountExists(
     return { exists: false };
   }
 }
+
+/** Delete an account via the PDS admin API */
+export async function deleteAccount(did: string): Promise<void> {
+  const res = await fetch(
+    `${PDS_URL}/xrpc/com.atproto.admin.deleteAccount`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: adminAuth,
+      },
+      body: JSON.stringify({ did }),
+    },
+  );
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to delete account ${did}: ${res.status} ${body}`);
+  }
+}

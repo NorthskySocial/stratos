@@ -75,9 +75,8 @@ async function run() {
   section("Starting Stratos");
   info("Building and starting container...");
 
-  const compose = new Deno.Command("docker", {
+  const compose = new Deno.Command("docker-compose", {
     args: [
-      "compose",
       "-f", "docker-compose.test.yml",
       "up", "-d", "--build",
     ],
