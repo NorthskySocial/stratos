@@ -1,0 +1,75 @@
+services:
+  stratos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stratos
+    restart: unless-stopped
+    ports:
+      - "${STRATOS_PORT:-3100}:3100"
+    environment:
+      # Service identity (required)
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
+      STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL}
+      STRATOS_PORT: 3100
+
+      # Service fragment for DID document
+      STRATOS_SERVICE_FRAGMENT: ${STRATOS_SERVICE_FRAGMENT:-atproto_pns}
+
+      # Storage
+      STRATOS_DATA_DIR: /app/data
+      STRATOS_BLOB_STORAGE: ${STRATOS_BLOB_STORAGE:-local}
+
+      # Stratos namespace config (required)
+      STRATOS_ALLOWED_DOMAINS: ${STRATOS_ALLOWED_DOMAINS}
+      STRATOS_RETENTION_DAYS: ${STRATOS_RETENTION_DAYS:-30}
+
+      # Enrollment
+      STRATOS_ENROLLMENT_MODE: ${STRATOS_ENROLLMENT_MODE:-allowlist}
+      STRATOS_ALLOWED_DIDS: ${STRATOS_ALLOWED_DIDS:-}
+      STRATOS_ALLOWED_PDS_ENDPOINTS: ${STRATOS_ALLOWED_PDS_ENDPOINTS:-}
+
+      # Identity
+      STRATOS_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+
+      # Signing key (optional - generated if not provided)
+      STRATOS_SIGNING_KEY_HEX: ${STRATOS_SIGNING_KEY_HEX:-}
+
+      # OAuth (optional)
+      STRATOS_OAUTH_ISSUER: ${STRATOS_OAUTH_ISSUER:-}
+      STRATOS_OAUTH_CLIENT_ID: ${STRATOS_OAUTH_CLIENT_ID:-}
+      STRATOS_OAUTH_CLIENT_SECRET: ${STRATOS_OAUTH_CLIENT_SECRET:-}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - stratos-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Uncomment to use with S3-compatible storage (e.g., MinIO)
+  # minio:
+  #   image: minio/minio:latest
+  #   container_name: stratos-minio
+  #   command: server /data --console-address ":9001"
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   volumes:
+  #     - minio-data:/data
+  #   healthcheck:
+  #     test: ["CMD", "mc", "ready", "local"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+volumes:
+  stratos-data:
+  # minio-data:

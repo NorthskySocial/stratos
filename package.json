@@ -1,0 +1,27 @@
+{
+  "name": "stratos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stratos - Private namespace service for ATProtocol",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example/stratos.git"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "clean": "pnpm -r run clean",
+    "test": "vitest",
+    "lint": "eslint --ext .ts src",
+    "codegen": "pnpm --filter stratos-service run codegen"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^10.0.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@anthropic/stratos-core",
+  "version": "0.1.0",
+  "description": "Shared library for Stratos private namespace service",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./validation": {
+      "types": "./src/validation/index.ts",
+      "import": "./src/validation/index.ts"
+    },
+    "./db": {
+      "types": "./src/db/index.ts",
+      "import": "./src/db/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "lint": "eslint --ext .ts src"
+  },
+  "dependencies": {
+    "@atproto/lexicon": "^0.6.1",
+    "@atproto/syntax": "^0.4.3",
+    "@libsql/client": "^0.17.0",
+    "drizzle-orm": "^0.45.1",
+    "multiformats": "^13.4.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "license": "MIT"
+}
