@@ -19,11 +19,11 @@ import {
 } from '../src/db/index.js'
 
 // Simple encoding for tests (just use JSON for simplicity)
-const encodeRecord = (data: unknown): Uint8Array => {
+const encodeRecord = (data: unknown): Buffer => {
   return new TextEncoder().encode(JSON.stringify(data))
 }
 
-const decodeRecord = (content: Uint8Array): Record<string, unknown> => {
+const decodeRecord = (content: Buffer): Record<string, unknown> => {
   return JSON.parse(new TextDecoder().decode(content))
 }
 

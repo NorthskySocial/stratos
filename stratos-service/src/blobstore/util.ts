@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream'
+import {Readable} from 'node:stream'
 
 /**
  * Convert a Node.js Readable stream to an AsyncIterable
@@ -7,15 +7,7 @@ export async function* readableToAsyncIterable(
   readable: Readable,
 ): AsyncIterable<Uint8Array> {
   for await (const chunk of readable) {
-    if (chunk instanceof Buffer) {
-      yield new Uint8Array(chunk)
-    } else if (chunk instanceof Uint8Array) {
-      yield chunk
-    } else if (typeof chunk === 'string') {
-      yield new TextEncoder().encode(chunk)
-    } else {
-      throw new Error(`Unexpected chunk type: ${typeof chunk}`)
-    }
+    yield new Uint8Array(chunk)
   }
 }
 
@@ -25,45 +17,19 @@ export async function* readableToAsyncIterable(
 export function asyncIterableToReadable(
   iterable: AsyncIterable<Uint8Array>,
 ): Readable {
-  const iterator = iterable[Symbol.asyncIterator]()
-
-  return new Readable({
-    async read() {
-      try {
-        const { value, done } = await iterator.next()
-        if (done) {
-          this.push(null)
-        } else {
-          this.push(Buffer.from(value))
-        }
-      } catch (err) {
-        this.destroy(err instanceof Error ? err : new Error(String(err)))
-      }
-    },
-  })
+  return Readable.from(iterable)
 }
 
 /**
- * Collect an AsyncIterable into a Uint8Array
+ * Collect an AsyncIterable into a Buffer
  */
 export async function collectAsyncIterable(
-  iterable: AsyncIterable<Uint8Array>,
-): Promise<Uint8Array> {
+  iterable: Readable,
+): Promise<Buffer> {
   const chunks: Uint8Array[] = []
   for await (const chunk of iterable) {
     chunks.push(chunk)
   }
 
-  // Calculate total length
-  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
-
-  // Concatenate
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.length
-  }
-
-  return result
+  return Buffer.concat(chunks)
 }

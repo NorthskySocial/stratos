@@ -260,7 +260,7 @@ describe('stratos-db', () => {
   describe('stratos_repo_block operations', () => {
     it('should store and retrieve repo blocks', async () => {
       const cid = 'bafyblock123'
-      const content = new Uint8Array([1, 2, 3, 4, 5])
+      const content = new Buffer([1, 2, 3, 4, 5])
       
       await db.insert(stratosRepoBlock).values({
         cid,

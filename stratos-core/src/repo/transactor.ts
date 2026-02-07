@@ -34,7 +34,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
       })
   }
 
-  async putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void> {
+  async putBlock(cid: CID, bytes: Buffer, rev: string): Promise<void> {
     await this.db
       .insert(stratosRepoBlock)
       .values({

@@ -19,7 +19,7 @@ import {
 import { BlobStore } from '../src/types.js'
 
 // Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
+const createCid = async (data: string | Buffer): Promise<CID> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
@@ -27,10 +27,10 @@ const createCid = async (data: string | Uint8Array): Promise<CID> => {
 
 // Mock blob store
 function createMockBlobStore(): BlobStore {
-  const storage = new Map<string, Uint8Array>()
+  const storage = new Map<string, Buffer>()
 
   return {
-    putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
+    putTemp: vi.fn().mockImplementation(async (bytes: Buffer) => {
       const key = `temp-${randomBytes(8).toString('hex')}`
       storage.set(key, bytes)
       return key
@@ -42,15 +42,15 @@ function createMockBlobStore(): BlobStore {
         storage.delete(key)
       }
     }),
-    putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-      if (bytes instanceof Uint8Array) {
+    putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Buffer | Readable) => {
+      if (bytes instanceof Buffer) {
         storage.set(cid.toString(), bytes)
       } else {
-        const chunks: Uint8Array[] = []
+        const chunks: Buffer[] = []
         for await (const chunk of bytes) {
           chunks.push(chunk)
         }
-        const total = new Uint8Array(chunks.reduce((sum, c) => sum + c.length, 0))
+        const total = new Buffer(chunks.reduce((sum, c) => sum + c.length, 0))
         let offset = 0
         for (const chunk of chunks) {
           total.set(chunk, offset)

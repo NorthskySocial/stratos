@@ -30,7 +30,7 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
 
   constructor(
     protected db: StratosDb,
-    protected cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    protected cborToRecord: (content: Buffer) => Record<string, unknown>,
   ) {
     this.reader = new StratosRecordReader(db, cborToRecord)
   }
@@ -95,7 +95,7 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
     return record !== null
   }
 
-  async getRecordContent(cid: CID): Promise<Uint8Array | null> {
+  async getRecordContent(cid: CID): Promise<Buffer | null> {
     const rows = await this.db
       .select({content: stratosRepoBlock.content})
       .from(stratosRepoBlock)
@@ -116,7 +116,7 @@ export class SqliteRecordStoreWriter
 
   constructor(
     db: StratosDb,
-    cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    cborToRecord: (content: Buffer) => Record<string, unknown>,
   ) {
     super(db, cborToRecord)
     this.transactor = new StratosRecordTransactor(db, cborToRecord)
@@ -126,7 +126,7 @@ export class SqliteRecordStoreWriter
     uri: string
     cid: CID
     value: Record<string, unknown>
-    content: Uint8Array
+    content: Buffer
     indexedAt?: string
   }): Promise<void> {
     const uri = new AtUri(record.uri)

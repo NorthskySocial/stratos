@@ -15,7 +15,7 @@ export interface SequenceEvent {
   uri: string
   cid: string | null
   rev: string
-  event: Uint8Array // CBOR-encoded event payload
+  event: Buffer // CBOR-encoded event payload
   sequencedAt: string
 }
 
@@ -62,7 +62,7 @@ export interface AppendEventInput {
   uri: string
   cid: string | null
   rev: string
-  event: Uint8Array
+  event: Buffer
 }
 
 /**

@@ -75,13 +75,13 @@ export class StratosActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
-  private readonly cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private readonly cborToRecord: (content: Buffer) => Record<string, unknown>
 
   constructor(opts: {
     dataDir: string
     blobstore: BlobStoreCreator
     logger?: Logger
-    cborToRecord: (content: Uint8Array) => Record<string, unknown>
+    cborToRecord: (content: Buffer) => Record<string, unknown>
   }) {
     this.dataDir = opts.dataDir
     this.blobstore = opts.blobstore
@@ -517,7 +517,7 @@ export interface AppContext {
 export interface AppContextOptions {
   cfg: StratosServiceConfig
   blobstore: BlobStoreCreator
-  cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  cborToRecord: (content: Buffer) => Record<string, unknown>
   logger?: Logger
 }
 

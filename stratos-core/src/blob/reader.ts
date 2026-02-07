@@ -1,7 +1,8 @@
-import { eq, gt, and, isNull, asc } from 'drizzle-orm'
-import { CID } from 'multiformats/cid'
-import { StratosDb, stratosBlob, stratosRecordBlob, stratosRecord } from '../db/index.js'
-import { StatusAttr, BlobStore, Logger } from '../types.js'
+import {eq, gt, and, isNull, asc} from 'drizzle-orm'
+import {CID} from 'multiformats/cid'
+import {StratosDb, stratosBlob, stratosRecordBlob, stratosRecord} from '../db/index.js'
+import {StatusAttr, BlobStore, Logger} from '../types.js'
+import {Readable} from "node:stream";
 
 /**
  * Blob metadata from the database
@@ -19,7 +20,8 @@ export class StratosBlobReader {
     protected db: StratosDb,
     protected blobstore: BlobStore,
     protected logger?: Logger,
-  ) {}
+  ) {
+  }
 
   async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
     const found = await this.db
@@ -39,7 +41,7 @@ export class StratosBlobReader {
   async getBlob(cid: CID): Promise<{
     size: number
     mimeType?: string
-    stream: AsyncIterable<Uint8Array>
+    stream: Readable
   } | null> {
     const metadata = await this.getBlobMetadata(cid)
     if (!metadata) {
@@ -62,8 +64,8 @@ export class StratosBlobReader {
     cursor?: string
     limit: number
   }): Promise<string[]> {
-    const { since, cursor, limit } = opts
-    
+    const {since, cursor, limit} = opts
+
     const conditions = []
     if (cursor) {
       conditions.push(gt(stratosRecordBlob.blobCid, cursor))
@@ -71,7 +73,7 @@ export class StratosBlobReader {
 
     if (since) {
       const res = await this.db
-        .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
+        .selectDistinct({blobCid: stratosRecordBlob.blobCid})
         .from(stratosRecordBlob)
         .innerJoin(stratosRecord, eq(stratosRecord.uri, stratosRecordBlob.recordUri))
         .where(
@@ -86,7 +88,7 @@ export class StratosBlobReader {
     }
 
     const res = await this.db
-      .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
+      .selectDistinct({blobCid: stratosRecordBlob.blobCid})
       .from(stratosRecordBlob)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(asc(stratosRecordBlob.blobCid))
@@ -96,14 +98,16 @@ export class StratosBlobReader {
 
   async getBlobTakedownStatus(cid: CID): Promise<StatusAttr | null> {
     const res = await this.db
-      .select({ takedownRef: stratosBlob.takedownRef })
+      .select({takedownRef: stratosBlob.takedownRef})
       .from(stratosBlob)
       .where(eq(stratosBlob.cid, cid.toString()))
       .limit(1)
-    if (res.length === 0) return null
+    if (res.length === 0) {
+      return null
+    }
     return res[0].takedownRef
-      ? { applied: true, ref: res[0].takedownRef }
-      : { applied: false }
+      ? {applied: true, ref: res[0].takedownRef}
+      : {applied: false}
   }
 
   async getRecordsForBlob(cid: CID): Promise<string[]> {
@@ -116,7 +120,7 @@ export class StratosBlobReader {
 
   async hasBlob(cid: CID): Promise<boolean> {
     const res = await this.db
-      .select({ cid: stratosBlob.cid })
+      .select({cid: stratosBlob.cid})
       .from(stratosBlob)
       .where(eq(stratosBlob.cid, cid.toString()))
       .limit(1)

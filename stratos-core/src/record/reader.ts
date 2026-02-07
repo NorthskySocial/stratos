@@ -1,7 +1,7 @@
-import { CID } from 'multiformats/cid'
-import { AtUri } from '@atproto/syntax'
+import {CID} from 'multiformats/cid'
+import {AtUri} from '@atproto/syntax'
 import * as syntax from '@atproto/syntax'
-import { eq, and, gt, lt, asc, desc, isNull } from 'drizzle-orm'
+import {eq, and, gt, lt, asc, desc, isNull} from 'drizzle-orm'
 import {
   StratosDb,
   StratosBacklink,
@@ -10,7 +10,7 @@ import {
   stratosRepoBlock,
   stratosBacklink,
 } from '../db/index.js'
-import { StatusAttr, Logger } from '../types.js'
+import {StatusAttr, Logger} from '../types.js'
 
 /**
  * Descriptor for a stratos record
@@ -69,13 +69,14 @@ export interface RecordWithMeta {
 export class StratosRecordReader {
   constructor(
     protected db: StratosDb,
-    protected cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    protected cborToRecord: (content: Buffer) => Record<string, unknown>,
     protected logger?: Logger,
-  ) {}
+  ) {
+  }
 
   async recordCount(): Promise<number> {
     const res = await this.db
-      .select({ count: countAll })
+      .select({count: countAll})
       .from(stratosRecord)
       .limit(1)
     return res[0]?.count ?? 0
@@ -86,7 +87,7 @@ export class StratosRecordReader {
     let cursor: string | undefined = ''
     while (cursor !== undefined) {
       const res = await this.db
-        .select({ uri: stratosRecord.uri, cid: stratosRecord.cid })
+        .select({uri: stratosRecord.uri, cid: stratosRecord.cid})
         .from(stratosRecord)
         .where(gt(stratosRecord.uri, cursor))
         .orderBy(asc(stratosRecord.uri))
@@ -106,7 +107,7 @@ export class StratosRecordReader {
 
   async listCollections(): Promise<string[]> {
     const collections = await this.db
-      .select({ collection: stratosRecord.collection })
+      .select({collection: stratosRecord.collection})
       .from(stratosRecord)
       .groupBy(stratosRecord.collection)
 
@@ -195,7 +196,9 @@ export class StratosRecordReader {
       .limit(1)
 
     const record = res[0]
-    if (!record) return null
+    if (!record) {
+      return null
+    }
     return {
       uri: record.uri,
       cid: record.cid,
@@ -220,7 +223,7 @@ export class StratosRecordReader {
     }
 
     const res = await this.db
-      .select({ uri: stratosRecord.uri })
+      .select({uri: stratosRecord.uri})
       .from(stratosRecord)
       .where(and(...conditions))
       .limit(1)
@@ -230,20 +233,22 @@ export class StratosRecordReader {
 
   async getRecordTakedownStatus(uri: AtUri): Promise<StatusAttr | null> {
     const res = await this.db
-      .select({ takedownRef: stratosRecord.takedownRef })
+      .select({takedownRef: stratosRecord.takedownRef})
       .from(stratosRecord)
       .where(eq(stratosRecord.uri, uri.toString()))
       .limit(1)
 
-    if (res.length === 0) return null
+    if (res.length === 0) {
+      return null
+    }
     return res[0].takedownRef
-      ? { applied: true, ref: res[0].takedownRef }
-      : { applied: false }
+      ? {applied: true, ref: res[0].takedownRef}
+      : {applied: false}
   }
 
   async getCurrentRecordCid(uri: AtUri): Promise<CID | null> {
     const res = await this.db
-      .select({ cid: stratosRecord.cid })
+      .select({cid: stratosRecord.cid})
       .from(stratosRecord)
       .where(eq(stratosRecord.uri, uri.toString()))
       .limit(1)
@@ -252,8 +257,8 @@ export class StratosRecordReader {
   }
 
   async getRecordBacklinks(opts: GetBacklinksOpts) {
-    const { collection, path, linkTo } = opts
-    return await this.db
+    const {collection, path, linkTo} = opts
+    return this.db
       .select({
         uri: stratosRecord.uri,
         cid: stratosRecord.cid,
@@ -271,7 +276,7 @@ export class StratosRecordReader {
           eq(stratosBacklink.linkTo, linkTo),
           eq(stratosRecord.collection, collection),
         ),
-      )
+      );
   }
 
   async getBacklinkConflicts(
@@ -287,7 +292,7 @@ export class StratosRecordReader {
         linkTo: backlink.linkTo,
       })
 
-      for (const { rkey } of backlinks) {
+      for (const {rkey} of backlinks) {
         conflicts.push(AtUri.make(uri.hostname, uri.collection, rkey))
       }
     }

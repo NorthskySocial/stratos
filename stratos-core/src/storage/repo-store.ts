@@ -5,7 +5,7 @@ import { CID } from 'multiformats/cid'
  */
 export interface RepoBlock {
   cid: CID
-  content: Uint8Array
+  content: Buffer
 }
 
 /**
@@ -30,13 +30,13 @@ export interface RepoStoreReader {
   getState(): Promise<RepoState | null>
 
   /** Get a block by CID */
-  getBlock(cid: CID): Promise<Uint8Array | null>
+  getBlock(cid: CID): Promise<Buffer | null>
 
   /** Check if block exists */
   hasBlock(cid: CID): Promise<boolean>
 
   /** Get multiple blocks by CIDs */
-  getBlocks(cids: CID[]): Promise<Map<string, Uint8Array>>
+  getBlocks(cids: CID[]): Promise<Map<string, Buffer>>
 
   /** Count total blocks */
   blockCount(): Promise<number>
@@ -50,7 +50,7 @@ export interface RepoStoreWriter extends RepoStoreReader {
   updateRoot(root: CID, rev: string): Promise<void>
 
   /** Store a single block */
-  putBlock(cid: CID, content: Uint8Array): Promise<void>
+  putBlock(cid: CID, content: Buffer): Promise<void>
 
   /** Store multiple blocks */
   putBlocks(blocks: RepoBlock[]): Promise<void>

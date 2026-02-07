@@ -1,11 +1,12 @@
 import fsSync from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { CID } from 'multiformats/cid'
-import { fileExists, rmIfExists, chunkArray, aggregateErrors } from '@atproto/common'
-import { randomStr } from '@atproto/crypto'
-import { BlobStore, BlobStoreCreator, BlobNotFoundError } from '@northsky/stratos-core'
-import { readableToAsyncIterable, collectAsyncIterable } from './util.js'
+import {CID} from 'multiformats/cid'
+import {fileExists, rmIfExists, chunkArray, aggregateErrors} from '@atproto/common'
+import {randomStr} from '@atproto/crypto'
+import {BlobStore, BlobStoreCreator, BlobNotFoundError} from '@northsky/stratos-core'
+import {readableToAsyncIterable, collectAsyncIterable} from './util.js'
+import {Readable} from "node:stream";
 
 /**
  * Disk-based blob storage adapter.
@@ -22,7 +23,8 @@ export class DiskBlobStore implements BlobStore {
     public location: string,
     public tmpLocation: string,
     public quarantineLocation: string,
-  ) {}
+  ) {
+  }
 
   /**
    * Factory function for creating per-DID blob stores
@@ -37,24 +39,6 @@ export class DiskBlobStore implements BlobStore {
       const quarantine = quarantineLocation ?? path.join(location, 'quarantine')
       return new DiskBlobStore(did, location, tmp, quarantine)
     }
-  }
-
-  private async ensureDir(): Promise<void> {
-    await fs.mkdir(path.join(this.location, this.did), { recursive: true })
-  }
-
-  private async ensureTemp(): Promise<void> {
-    await fs.mkdir(path.join(this.tmpLocation, this.did), { recursive: true })
-  }
-
-  private async ensureQuarantine(): Promise<void> {
-    await fs.mkdir(path.join(this.quarantineLocation, this.did), {
-      recursive: true,
-    })
-  }
-
-  private genKey(): string {
-    return randomStr(32, 'base32')
   }
 
   getTmpPath(key: string): string {
@@ -77,10 +61,10 @@ export class DiskBlobStore implements BlobStore {
     return fileExists(this.getStoredPath(cid))
   }
 
-  async putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string> {
+  async putTemp(bytes: Buffer | Readable): Promise<string> {
     await this.ensureTemp()
     const key = this.genKey()
-    const data = bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
+    const data = Buffer.isBuffer(bytes) ? bytes : await collectAsyncIterable(bytes)
     await fs.writeFile(this.getTmpPath(key), data)
     return key
   }
@@ -104,10 +88,10 @@ export class DiskBlobStore implements BlobStore {
 
   async putPermanent(
     cid: CID,
-    bytes: Uint8Array | AsyncIterable<Uint8Array>,
+    bytes: Buffer | Readable,
   ): Promise<void> {
     await this.ensureDir()
-    const data = bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
+    const data = Buffer.isBuffer(bytes) ? bytes : await collectAsyncIterable(bytes)
     await fs.writeFile(this.getStoredPath(cid), data)
   }
 
@@ -139,10 +123,10 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
-  async getBytes(cid: CID): Promise<Uint8Array> {
+  async getBytes(cid: CID): Promise<Buffer> {
     try {
       const buffer = await fs.readFile(this.getStoredPath(cid))
-      return new Uint8Array(buffer)
+      return Buffer.from(buffer)
     } catch (err) {
       if (isErrnoException(err) && err.code === 'ENOENT') {
         throw new BlobNotFoundError()
@@ -151,7 +135,7 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
-  async getStream(cid: CID): Promise<AsyncIterable<Uint8Array>> {
+  async getStream(cid: CID): Promise<Readable> {
     const filePath = this.getStoredPath(cid)
     const exists = await fileExists(filePath)
     if (!exists) {
@@ -178,6 +162,24 @@ export class DiskBlobStore implements BlobStore {
     if (errors.length > 0) {
       throw aggregateErrors(errors)
     }
+  }
+
+  private async ensureDir(): Promise<void> {
+    await fs.mkdir(path.join(this.location, this.did), {recursive: true})
+  }
+
+  private async ensureTemp(): Promise<void> {
+    await fs.mkdir(path.join(this.tmpLocation, this.did), {recursive: true})
+  }
+
+  private async ensureQuarantine(): Promise<void> {
+    await fs.mkdir(path.join(this.quarantineLocation, this.did), {
+      recursive: true,
+    })
+  }
+
+  private genKey(): string {
+    return randomStr(32, 'base32')
   }
 }
 

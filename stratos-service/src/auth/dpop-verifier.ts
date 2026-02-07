@@ -36,7 +36,7 @@ export interface DpopVerifierConfig {
   /** Enrollment store for checking enrollment status */
   enrollmentStore: EnrollmentStoreReader
   /** DPoP secret for nonce generation (false to disable, undefined for random) */
-  dpopSecret?: Uint8Array | string | false
+  dpopSecret?: Buffer | string | false
   /** DPoP nonce rotation interval in ms */
   dpopRotationInterval?: number
   /** Logger for auth events */
@@ -97,7 +97,7 @@ export class DpopVerifier {
   constructor(config: DpopVerifierConfig) {
     this.config = config
     this.dpopManager = new DpopManager({
-      dpopSecret: config.dpopSecret as Uint8Array<ArrayBuffer> | string | false | undefined,
+      dpopSecret: config.dpopSecret as Buffer<ArrayBuffer> | string | false | undefined,
       dpopRotationInterval: config.dpopRotationInterval,
     })
   }

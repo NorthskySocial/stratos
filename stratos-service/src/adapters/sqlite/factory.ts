@@ -49,7 +49,7 @@ export interface SqliteStorageFactoryConfig {
   /** Service-level database */
   serviceDb: ServiceDb
   /** CBOR decoder function */
-  cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  cborToRecord: (content: Buffer) => Record<string, unknown>
   /** Blob content store creator (for filesystem/S3 storage) */
   blobContentStoreCreator: (did: string) => BlobContentStore
 }
@@ -62,7 +62,7 @@ export class SqliteStorageFactory implements StorageFactory {
 
   private dataDir: string
   private serviceDb: ServiceDb
-  private cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private cborToRecord: (content: Buffer) => Record<string, unknown>
   private blobContentStoreCreator: (did: string) => BlobContentStore
 
   constructor(config: SqliteStorageFactoryConfig) {

@@ -1,11 +1,7 @@
-import type { Readable } from 'node:stream'
-import { CID } from 'multiformats/cid'
-import { S3BlobStore as AtprotoS3BlobStore, S3Config as AtprotoS3Config } from '@atproto/aws'
-import { BlobStore, BlobStoreCreator, BlobNotFoundError } from '@northsky/stratos-core'
-import {
-  readableToAsyncIterable,
-  asyncIterableToReadable,
-} from './util.js'
+import {Readable} from 'node:stream'
+import {CID} from 'multiformats/cid'
+import {S3BlobStore as AtprotoS3BlobStore, S3Config as AtprotoS3Config} from '@atproto/aws'
+import {BlobNotFoundError, BlobStore, BlobStoreCreator} from '@northsky/stratos-core'
 
 /**
  * S3 configuration for stratos blob storage
@@ -35,7 +31,7 @@ export interface S3Config {
  * S3-based blob storage adapter.
  *
  * Wraps @atproto/aws S3BlobStore to provide the stratos BlobStore interface.
- * Converts between Node.js Readable streams and AsyncIterable<Uint8Array>.
+ * Converts between Node.js Readable streams and Readable.
  *
  * Blobs are stored in the S3 bucket with the following key structure:
  * - {pathPrefix}blocks/{did}/{cid} - permanent blobs
@@ -58,9 +54,9 @@ export class S3BlobStoreAdapter implements BlobStore {
       credentials:
         cfg.accessKeyId && cfg.secretAccessKey
           ? {
-              accessKeyId: cfg.accessKeyId,
-              secretAccessKey: cfg.secretAccessKey,
-            }
+            accessKeyId: cfg.accessKeyId,
+            secretAccessKey: cfg.secretAccessKey,
+          }
           : undefined,
     }
     this.inner = new AtprotoS3BlobStore(did, atprotoConfig)
@@ -73,8 +69,8 @@ export class S3BlobStoreAdapter implements BlobStore {
     return (did: string) => new S3BlobStoreAdapter(did, cfg)
   }
 
-  async putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string> {
-    const input = bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
+  async putTemp(bytes: Buffer | Readable): Promise<string> {
+    const input = Buffer.isBuffer(bytes) ? Readable.from(bytes) : bytes
     return this.inner.putTemp(input)
   }
 
@@ -84,9 +80,9 @@ export class S3BlobStoreAdapter implements BlobStore {
 
   async putPermanent(
     cid: CID,
-    bytes: Uint8Array | AsyncIterable<Uint8Array>,
+    bytes: Buffer | Readable,
   ): Promise<void> {
-    const input = bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
+    const input = Buffer.isBuffer(bytes) ? Readable.from(bytes) : bytes
     return this.inner.putPermanent(cid, input)
   }
 
@@ -113,9 +109,10 @@ export class S3BlobStoreAdapter implements BlobStore {
     }
   }
 
-  async getBytes(cid: CID): Promise<Uint8Array> {
+  async getBytes(cid: CID): Promise<Buffer> {
     try {
-      return await this.inner.getBytes(cid)
+      const bytes = await this.inner.getBytes(cid)
+      return Buffer.from(bytes) // Ensure it's a Buffer
     } catch (err) {
       if (isBlobNotFoundError(err)) {
         throw new BlobNotFoundError()
@@ -124,10 +121,9 @@ export class S3BlobStoreAdapter implements BlobStore {
     }
   }
 
-  async getStream(cid: CID): Promise<AsyncIterable<Uint8Array>> {
+  async getStream(cid: CID): Promise<Readable> {
     try {
-      const readable = await this.inner.getStream(cid)
-      return readableToAsyncIterable(readable as Readable)
+      return await this.inner.getStream(cid)
     } catch (err) {
       if (isBlobNotFoundError(err)) {
         throw new BlobNotFoundError()

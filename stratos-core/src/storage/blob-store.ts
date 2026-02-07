@@ -1,4 +1,5 @@
-import { CID } from 'multiformats/cid'
+import {CID} from 'multiformats/cid'
+import type {Readable} from 'node:stream'
 
 /**
  * Blob metadata stored in the database
@@ -66,13 +67,13 @@ export interface BlobMetadataWriter extends BlobMetadataReader {
  */
 export interface BlobContentStore {
   /** Store blob bytes temporarily */
-  putTemp(bytes: Uint8Array): Promise<string>
+  putTemp(bytes: Buffer | Readable): Promise<string>
 
   /** Make a temporary blob permanent */
   makePermanent(tempKey: string, cid: CID): Promise<void>
 
   /** Get blob bytes by CID */
-  getBytes(cid: CID): Promise<Uint8Array | null>
+  getBytes(cid: CID): Promise<Buffer | null>
 
   /** Check if blob content exists */
   hasStored(cid: CID): Promise<boolean>
@@ -81,5 +82,5 @@ export interface BlobContentStore {
   deleteContent(cid: CID): Promise<void>
 
   /** Get blob content as a stream */
-  getStream(cid: CID): Promise<ReadableStream<Uint8Array> | null>
+  getStream(cid: CID): Promise<ReadableStream<Buffer> | null>
 }

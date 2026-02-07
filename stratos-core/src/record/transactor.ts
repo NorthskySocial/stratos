@@ -11,7 +11,7 @@ import { StratosRecordReader, getStratosBacklinks } from './reader.js'
 export class StratosRecordTransactor extends StratosRecordReader {
   constructor(
     db: StratosDb,
-    cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    cborToRecord: (content: Buffer) => Record<string, unknown>,
     logger?: Logger,
   ) {
     super(db, cborToRecord, logger)

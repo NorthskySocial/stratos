@@ -62,7 +62,7 @@ export interface RecordStoreReader {
   hasRecord(uri: string): Promise<boolean>
 
   /** Get record content bytes by CID */
-  getRecordContent(cid: CID): Promise<Uint8Array | null>
+  getRecordContent(cid: CID): Promise<Buffer | null>
 }
 
 /**
@@ -74,7 +74,7 @@ export interface RecordStoreWriter extends RecordStoreReader {
     uri: string
     cid: CID
     value: Record<string, unknown>
-    content: Uint8Array
+    content: Buffer
     indexedAt?: string
   }): Promise<void>
 

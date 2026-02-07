@@ -1,4 +1,5 @@
-import { CID } from 'multiformats/cid'
+import {CID} from 'multiformats/cid'
+import {Readable} from "node:stream";
 
 /**
  * Configuration for stratos domain validation
@@ -42,8 +43,11 @@ export interface BackgroundQueue {
  */
 export interface Logger {
   debug(obj: object | string, msg?: string): void
+
   info(obj: object | string, msg?: string): void
+
   warn(obj: object | string, msg?: string): void
+
   error(obj: object | string, msg?: string): void
 }
 
@@ -63,27 +67,37 @@ export class BlobNotFoundError extends Error {
  */
 export interface BlobStore {
   /** Upload bytes to temporary storage, returns a key for later reference */
-  putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string>
+  putTemp(bytes: Buffer | Readable): Promise<string>
+
   /** Move a temporary blob to permanent storage */
   makePermanent(key: string, cid: CID): Promise<void>
+
   /** Upload bytes directly to permanent storage */
-  putPermanent(cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<void>
+  putPermanent(cid: CID, bytes: Buffer | Readable): Promise<void>
+
   /** Move a blob to quarantine (for takedowns) */
   quarantine(cid: CID): Promise<void>
+
   /** Restore a blob from quarantine */
   unquarantine(cid: CID): Promise<void>
+
   /** Delete a blob from storage */
   delete(cid: CID): Promise<void>
+
   /** Delete multiple blobs from storage */
   deleteMany(cids: CID[]): Promise<void>
+
   /** Check if a temporary blob exists */
   hasTemp(key: string): Promise<boolean>
+
   /** Check if a permanent blob exists */
   hasStored(cid: CID): Promise<boolean>
+
   /** Get blob contents as bytes */
-  getBytes(cid: CID): Promise<Uint8Array>
+  getBytes(cid: CID): Promise<Buffer>
+
   /** Get blob contents as a stream */
-  getStream(cid: CID): Promise<AsyncIterable<Uint8Array>>
+  getStream(cid: CID): Promise<Readable>
 }
 
 /**
@@ -180,8 +194,8 @@ export interface CommitData {
   rev: string
   since: string | null
   prev: CID | null
-  newBlocks: Map<string, Uint8Array>
-  relevantBlocks: Map<string, Uint8Array>
+  newBlocks: Map<string, Buffer>
+  relevantBlocks: Map<string, Buffer>
   removedCids: Set<string>
 }
 

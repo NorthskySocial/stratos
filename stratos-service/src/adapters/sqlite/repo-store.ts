@@ -59,7 +59,7 @@ export class SqliteRepoStoreReader implements RepoStoreReader {
     }
   }
 
-  async getBlock(cid: CID): Promise<Uint8Array | null> {
+  async getBlock(cid: CID): Promise<Buffer | null> {
     const rows = await this.db
       .select({ content: stratosRepoBlock.content })
       .from(stratosRepoBlock)
@@ -79,11 +79,11 @@ export class SqliteRepoStoreReader implements RepoStoreReader {
     return rows.length > 0
   }
 
-  async getBlocks(cids: CID[]): Promise<Map<string, Uint8Array>> {
+  async getBlocks(cids: CID[]): Promise<Map<string, Buffer>> {
     if (cids.length === 0) return new Map()
 
     const cidStrings = cids.map((c) => c.toString())
-    const result = new Map<string, Uint8Array>()
+    const result = new Map<string, Buffer>()
 
     // Query in batches to avoid too many parameters
     const batchSize = 100
@@ -137,7 +137,7 @@ export class SqliteRepoStoreWriter
       })
   }
 
-  async putBlock(cid: CID, content: Uint8Array): Promise<void> {
+  async putBlock(cid: CID, content: Buffer): Promise<void> {
     await this.db
       .insert(stratosRepoBlock)
       .values({

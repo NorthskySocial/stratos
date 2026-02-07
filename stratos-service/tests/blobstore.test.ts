@@ -17,7 +17,7 @@ import {
 } from '../src/blobstore/util.js'
 
 // Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
+const createCid = async (data: string | Buffer): Promise<CID> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
@@ -61,7 +61,7 @@ describe('DiskBlobStore', () => {
 
   describe('putTemp', () => {
     it('should store bytes temporarily and return key', async () => {
-      const bytes = new TextEncoder().encode('test blob content')
+      const bytes = Buffer.from(new TextEncoder().encode('test blob content'))
       const key = await store.putTemp(bytes)
 
       expect(key).toBeDefined()
@@ -88,8 +88,9 @@ describe('DiskBlobStore', () => {
   describe('makePermanent', () => {
     it('should move temp blob to permanent storage', async () => {
       const content = new TextEncoder().encode('permanent content')
-      const cid = await createCid(content)
-      const key = await store.putTemp(content)
+      const buffer = Buffer.from(content)
+      const cid = await createCid(buffer)
+      const key = await store.putTemp(buffer)
 
       expect(await store.hasTemp(key)).toBe(true)
       expect(await store.hasStored(cid)).toBe(false)
@@ -103,7 +104,7 @@ describe('DiskBlobStore', () => {
 
   describe('putPermanent', () => {
     it('should store bytes directly as permanent', async () => {
-      const content = new TextEncoder().encode('direct permanent')
+      const content = Buffer.from(new TextEncoder().encode('direct permanent'))
       const cid = await createCid(content)
 
       await store.putPermanent(cid, content)
@@ -131,7 +132,7 @@ describe('DiskBlobStore', () => {
 
   describe('getBytes', () => {
     it('should retrieve stored blob bytes', async () => {
-      const content = new TextEncoder().encode('retrievable content')
+      const content = Buffer.from(new TextEncoder().encode('retrievable content'))
       const cid = await createCid(content)
       await store.putPermanent(cid, content)
 
@@ -147,7 +148,7 @@ describe('DiskBlobStore', () => {
 
   describe('getStream', () => {
     it('should return async iterable of blob bytes', async () => {
-      const content = new TextEncoder().encode('streamable content')
+      const content = Buffer.from(new TextEncoder().encode('streamable content'))
       const cid = await createCid(content)
       await store.putPermanent(cid, content)
 
@@ -159,7 +160,7 @@ describe('DiskBlobStore', () => {
 
   describe('quarantine/unquarantine', () => {
     it('should move blob to quarantine', async () => {
-      const content = new TextEncoder().encode('to be quarantined')
+      const content = Buffer.from(new TextEncoder().encode('to be quarantined'))
       const cid = await createCid(content)
       await store.putPermanent(cid, content)
 
@@ -169,7 +170,7 @@ describe('DiskBlobStore', () => {
     })
 
     it('should restore blob from quarantine', async () => {
-      const content = new TextEncoder().encode('to be restored')
+      const content = Buffer.from(new TextEncoder().encode('to be restored'))
       const cid = await createCid(content)
       await store.putPermanent(cid, content)
 
@@ -186,7 +187,7 @@ describe('DiskBlobStore', () => {
 
   describe('delete/deleteMany', () => {
     it('should delete a blob', async () => {
-      const content = new TextEncoder().encode('to be deleted')
+      const content = Buffer.from(new TextEncoder().encode('to be deleted'))
       const cid = await createCid(content)
       await store.putPermanent(cid, content)
 
@@ -200,9 +201,9 @@ describe('DiskBlobStore', () => {
       const cid2 = await createCid('blob2')
       const cid3 = await createCid('blob3')
 
-      await store.putPermanent(cid1, new TextEncoder().encode('blob1'))
-      await store.putPermanent(cid2, new TextEncoder().encode('blob2'))
-      await store.putPermanent(cid3, new TextEncoder().encode('blob3'))
+      await store.putPermanent(cid1, Buffer.from(new TextEncoder().encode('blob1')))
+      await store.putPermanent(cid2, Buffer.from(new TextEncoder().encode('blob2')))
+      await store.putPermanent(cid3, Buffer.from(new TextEncoder().encode('blob3')))
 
       await store.deleteMany([cid1, cid2])
 
@@ -215,15 +216,15 @@ describe('DiskBlobStore', () => {
 
 describe('Stream Utilities', () => {
   describe('collectAsyncIterable', () => {
-    it('should collect chunks into single Uint8Array', async () => {
+    it('should collect chunks into single Buffer', async () => {
       async function* generate() {
-        yield new Uint8Array([1, 2, 3])
-        yield new Uint8Array([4, 5])
-        yield new Uint8Array([6, 7, 8, 9])
+        yield new Buffer([1, 2, 3])
+        yield new Buffer([4, 5])
+        yield new Buffer([6, 7, 8, 9])
       }
 
       const result = await collectAsyncIterable(generate())
-      expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]))
+      expect(result).toEqual(new Buffer([1, 2, 3, 4, 5, 6, 7, 8, 9]))
     })
   })
 
@@ -235,7 +236,7 @@ describe('Stream Utilities', () => {
         Buffer.from([4, 5, 6]),
       ])
 
-      const chunks: Uint8Array[] = []
+      const chunks = []
       for await (const chunk of readableToAsyncIterable(readable)) {
         chunks.push(chunk)
       }
@@ -249,8 +250,8 @@ describe('Stream Utilities', () => {
   describe('asyncIterableToReadable', () => {
     it('should convert AsyncIterable to Readable', async () => {
       async function* generate() {
-        yield new Uint8Array([1, 2])
-        yield new Uint8Array([3, 4])
+        yield new Buffer([1, 2])
+        yield new Buffer([3, 4])
       }
 
       const readable = asyncIterableToReadable(generate())

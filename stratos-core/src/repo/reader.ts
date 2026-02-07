@@ -8,20 +8,20 @@ import { Logger } from '../types.js'
  */
 export interface CarBlock {
   cid: CID
-  bytes: Uint8Array
+  bytes: Buffer
 }
 
 /**
  * Block map utility
  */
 export class BlockMap {
-  private map: Map<string, Uint8Array> = new Map()
+  private map: Map<string, Buffer> = new Map()
 
-  set(cid: CID, bytes: Uint8Array): void {
+  set(cid: CID, bytes: Buffer): void {
     this.map.set(cid.toString(), bytes)
   }
 
-  get(cid: CID): Uint8Array | undefined {
+  get(cid: CID): Buffer | undefined {
     return this.map.get(cid.toString())
   }
 
@@ -53,7 +53,7 @@ export class BlockMap {
     }
   }
 
-  entries(): IterableIterator<[string, Uint8Array]> {
+  entries(): IterableIterator<[string, Buffer]> {
     return this.map.entries()
   }
 
@@ -138,7 +138,7 @@ export class StratosSqlRepoReader {
     }
   }
 
-  async getBytes(cid: CID): Promise<Uint8Array | null> {
+  async getBytes(cid: CID): Promise<Buffer | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
     const found = await this.db
@@ -147,7 +147,7 @@ export class StratosSqlRepoReader {
       .where(eq(stratosRepoBlock.cid, cid.toString()))
       .limit(1)
     if (found.length === 0) return null
-    const content = found[0].content as Uint8Array
+    const content = found[0].content as Buffer
     this.cache.set(cid, content)
     return content
   }
@@ -176,7 +176,7 @@ export class StratosSqlRepoReader {
         .where(inArray(stratosRepoBlock.cid, batch))
       for (const row of res) {
         const cid = CID.parse(row.cid)
-        blocks.set(cid, row.content as Uint8Array)
+        blocks.set(cid, row.content as Buffer)
         missing.delete(cid)
       }
     }
@@ -193,7 +193,7 @@ export class StratosSqlRepoReader {
       for (const row of res) {
         yield {
           cid: CID.parse(row.cid),
-          bytes: row.content as Uint8Array,
+          bytes: row.content as Buffer,
         }
       }
       const lastRow = res.at(-1)
@@ -212,7 +212,7 @@ export class StratosSqlRepoReader {
   async getBlockRange(
     since?: string,
     cursor?: RevCursor,
-  ): Promise<{ cid: string; repoRev: string; content: Uint8Array }[]> {
+  ): Promise<{ cid: string; repoRev: string; content: Buffer }[]> {
     const conditions = []
     
     if (since) {
@@ -242,7 +242,7 @@ export class StratosSqlRepoReader {
     return res.map(row => ({
       cid: row.cid,
       repoRev: row.repoRev,
-      content: row.content as Uint8Array,
+      content: row.content as Buffer,
     }))
   }
 

@@ -18,7 +18,7 @@ import {
 } from '../src/db/index.js'
 
 // Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
+const createCid = async (data: string | Buffer): Promise<CID> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
@@ -28,7 +28,7 @@ describe('BlockMap', () => {
   it('should set and get bytes', async () => {
     const map = new BlockMap()
     const cid = await createCid('test')
-    const bytes = new Uint8Array([1, 2, 3])
+    const bytes = new Buffer([1, 2, 3])
 
     map.set(cid, bytes)
 
@@ -40,7 +40,7 @@ describe('BlockMap', () => {
   it('should delete entries', async () => {
     const map = new BlockMap()
     const cid = await createCid('deleteme')
-    const bytes = new Uint8Array([4, 5, 6])
+    const bytes = new Buffer([4, 5, 6])
 
     map.set(cid, bytes)
     expect(map.has(cid)).toBe(true)
@@ -56,8 +56,8 @@ describe('BlockMap', () => {
     const cid2 = await createCid('two')
     const cid3 = await createCid('three')
 
-    map.set(cid1, new Uint8Array([1]))
-    map.set(cid2, new Uint8Array([2]))
+    map.set(cid1, new Buffer([1]))
+    map.set(cid2, new Buffer([2]))
 
     const { blocks, missing } = map.getMany([cid1, cid2, cid3])
 
@@ -73,8 +73,8 @@ describe('BlockMap', () => {
     const cid1 = await createCid('a')
     const cid2 = await createCid('b')
 
-    map1.set(cid1, new Uint8Array([1]))
-    map2.set(cid2, new Uint8Array([2]))
+    map1.set(cid1, new Buffer([1]))
+    map2.set(cid2, new Buffer([2]))
 
     map1.addMap(map2)
 
@@ -222,7 +222,7 @@ describe('Repo Reader', () => {
 
     it('should return block content', async () => {
       const cid = await createCid('block content')
-      const content = new Uint8Array([10, 20, 30])
+      const content = new Buffer([10, 20, 30])
 
       await db.insert(stratosRepoBlock).values({
         cid: cid.toString(),
@@ -238,7 +238,7 @@ describe('Repo Reader', () => {
 
     it('should cache retrieved blocks', async () => {
       const cid = await createCid('cached block')
-      const content = new Uint8Array([40, 50, 60])
+      const content = new Buffer([40, 50, 60])
 
       await db.insert(stratosRepoBlock).values({
         cid: cid.toString(),
@@ -352,7 +352,7 @@ describe('Repo Transactor', () => {
   describe('putBlock', () => {
     it('should store a block', async () => {
       const cid = await createCid('stored block')
-      const bytes = new Uint8Array([1, 2, 3, 4, 5])
+      const bytes = new Buffer([1, 2, 3, 4, 5])
 
       await transactor.putBlock(cid, bytes, 'rev1')
 
@@ -363,7 +363,7 @@ describe('Repo Transactor', () => {
 
     it('should cache stored blocks', async () => {
       const cid = await createCid('cached stored')
-      const bytes = new Uint8Array([6, 7, 8])
+      const bytes = new Buffer([6, 7, 8])
 
       await transactor.putBlock(cid, bytes, 'rev1')
 
@@ -375,7 +375,7 @@ describe('Repo Transactor', () => {
 
     it('should not fail on duplicate insert', async () => {
       const cid = await createCid('duplicate block')
-      const bytes = new Uint8Array([9, 10, 11])
+      const bytes = new Buffer([9, 10, 11])
 
       await transactor.putBlock(cid, bytes, 'rev1')
       await expect(transactor.putBlock(cid, bytes, 'rev1')).resolves.not.toThrow()
@@ -387,8 +387,8 @@ describe('Repo Transactor', () => {
       const cid1 = await createCid('multi1')
       const cid2 = await createCid('multi2')
       const blocks = new BlockMap()
-      blocks.set(cid1, new Uint8Array([1]))
-      blocks.set(cid2, new Uint8Array([2]))
+      blocks.set(cid1, new Buffer([1]))
+      blocks.set(cid2, new Buffer([2]))
 
       await transactor.putBlocks(blocks, 'rev1')
 
@@ -405,7 +405,7 @@ describe('Repo Transactor', () => {
   describe('deleteBlock', () => {
     it('should delete a block', async () => {
       const cid = await createCid('deleteme')
-      await transactor.putBlock(cid, new Uint8Array([1, 2, 3]), 'rev1')
+      await transactor.putBlock(cid, new Buffer([1, 2, 3]), 'rev1')
 
       expect(await transactor.has(cid)).toBe(true)
 
@@ -422,7 +422,7 @@ describe('Repo Transactor', () => {
 
     it('should remove from cache', async () => {
       const cid = await createCid('cache delete')
-      await transactor.putBlock(cid, new Uint8Array([1]), 'rev1')
+      await transactor.putBlock(cid, new Buffer([1]), 'rev1')
 
       expect(transactor.cache.has(cid)).toBe(true)
 
@@ -438,9 +438,9 @@ describe('Repo Transactor', () => {
       const cid2 = await createCid('del2')
       const cid3 = await createCid('keep1')
 
-      await transactor.putBlock(cid1, new Uint8Array([1]), 'rev1')
-      await transactor.putBlock(cid2, new Uint8Array([2]), 'rev1')
-      await transactor.putBlock(cid3, new Uint8Array([3]), 'rev1')
+      await transactor.putBlock(cid1, new Buffer([1]), 'rev1')
+      await transactor.putBlock(cid2, new Buffer([2]), 'rev1')
+      await transactor.putBlock(cid3, new Buffer([3]), 'rev1')
 
       await transactor.deleteBlocks([cid1, cid2])
 
@@ -462,9 +462,9 @@ describe('Repo Transactor', () => {
       const cid2 = await createCid('rev1-block2')
       const cid3 = await createCid('rev2-block1')
 
-      await transactor.putBlock(cid1, new Uint8Array([1]), 'rev1')
-      await transactor.putBlock(cid2, new Uint8Array([2]), 'rev1')
-      await transactor.putBlock(cid3, new Uint8Array([3]), 'rev2')
+      await transactor.putBlock(cid1, new Buffer([1]), 'rev1')
+      await transactor.putBlock(cid2, new Buffer([2]), 'rev1')
+      await transactor.putBlock(cid3, new Buffer([3]), 'rev2')
 
       await transactor.deleteBlocksForRev('rev1')
 
@@ -479,7 +479,7 @@ describe('Repo Transactor', () => {
   describe('clearCache', () => {
     it('should clear the cache', async () => {
       const cid = await createCid('cached')
-      await transactor.putBlock(cid, new Uint8Array([1]), 'rev1')
+      await transactor.putBlock(cid, new Buffer([1]), 'rev1')
 
       expect(transactor.cache.size()).toBe(1)
 

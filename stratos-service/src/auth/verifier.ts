@@ -181,7 +181,7 @@ export async function verifyServiceAuth(
             verified = await crypto.verifySignature(
               didKey,
               new TextEncoder().encode(signingInput),
-              new Uint8Array(signature),
+              new Buffer(signature),
             )
             if (verified) {
               break

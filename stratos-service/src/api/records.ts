@@ -376,7 +376,7 @@ export async function listRecords(
 
 // Helper functions
 
-function encodeRecord(record: unknown): Uint8Array {
+function encodeRecord(record: unknown): Buffer {
   // Use CBOR encoding for records
   // Cast to LexValue since we validate the record before calling this
   return cborEncode(record as LexValue)
