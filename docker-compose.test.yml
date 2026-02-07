@@ -1,0 +1,62 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: stratos-nginx
+    restart: "no"
+    ports:
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ssl-certs:/etc/nginx/ssl:ro
+    depends_on:
+      ssl-init:
+        condition: service_completed_successfully
+      stratos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  ssl-init:
+    image: alpine:latest
+    container_name: stratos-ssl-init
+    volumes:
+      - ssl-certs:/ssl
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -f /ssl/cert.pem ]; then
+          apk add --no-cache openssl
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /ssl/key.pem -out /ssl/cert.pem -subj '/CN=localhost/O=Stratos/C=US'
+          chmod 644 /ssl/*.pem
+        fi
+
+  stratos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stratos-test
+    restart: "no"
+    expose:
+      - "3100"
+    env_file:
+      - .env.test
+    environment:
+      STRATOS_PORT: 3100
+      STRATOS_DATA_DIR: /app/data
+      STRATOS_BLOB_STORAGE: local
+    volumes:
+      - ./test-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  ssl-certs:
