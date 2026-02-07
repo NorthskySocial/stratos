@@ -7,7 +7,12 @@ import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { eq } from 'drizzle-orm'
 
-import { StratosSqlRepoReader, StratosSqlRepoTransactor, BlockMap, CidSet } from '../src/repo/index.js'
+import {
+  StratosSqlRepoReader,
+  StratosSqlRepoTransactor,
+  BlockMap,
+  CidSet,
+} from '../src/repo/index.js'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -125,8 +130,8 @@ describe('CidSet', () => {
     const list = set.toList()
 
     expect(list).toHaveLength(2)
-    expect(list.map(c => c.toString())).toContain(cid1.toString())
-    expect(list.map(c => c.toString())).toContain(cid2.toString())
+    expect(list.map((c) => c.toString())).toContain(cid1.toString())
+    expect(list.map((c) => c.toString())).toContain(cid2.toString())
   })
 })
 
@@ -136,7 +141,10 @@ describe('Repo Reader', () => {
   let testDir: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-repo-test-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-repo-test-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     const dbPath = join(testDir, 'test.db')
 
@@ -252,7 +260,9 @@ describe('Repo Reader', () => {
       expect(result1).not.toBeNull()
 
       // Delete from DB
-      await db.delete(stratosRepoBlock).where(eq(stratosRepoBlock.cid, cid.toString()))
+      await db
+        .delete(stratosRepoBlock)
+        .where(eq(stratosRepoBlock.cid, cid.toString()))
 
       // Should still return from cache
       const result2 = await reader.getBytes(cid)
@@ -289,8 +299,18 @@ describe('Repo Reader', () => {
       const cid3 = await createCid('missing')
 
       await db.insert(stratosRepoBlock).values([
-        { cid: cid1.toString(), repoRev: 'rev1', size: 1, content: Buffer.from([1]) },
-        { cid: cid2.toString(), repoRev: 'rev1', size: 1, content: Buffer.from([2]) },
+        {
+          cid: cid1.toString(),
+          repoRev: 'rev1',
+          size: 1,
+          content: Buffer.from([1]),
+        },
+        {
+          cid: cid2.toString(),
+          repoRev: 'rev1',
+          size: 1,
+          content: Buffer.from([2]),
+        },
       ])
 
       const { blocks, missing } = await reader.getBlocks([cid1, cid2, cid3])
@@ -311,7 +331,10 @@ describe('Repo Transactor', () => {
   const testDid = 'did:plc:test'
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-repo-tx-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-repo-tx-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
     const dbPath = join(testDir, 'test.db')
 
@@ -378,7 +401,9 @@ describe('Repo Transactor', () => {
       const bytes = new Uint8Array([9, 10, 11])
 
       await transactor.putBlock(cid, bytes, 'rev1')
-      await expect(transactor.putBlock(cid, bytes, 'rev1')).resolves.not.toThrow()
+      await expect(
+        transactor.putBlock(cid, bytes, 'rev1'),
+      ).resolves.not.toThrow()
     })
   })
 

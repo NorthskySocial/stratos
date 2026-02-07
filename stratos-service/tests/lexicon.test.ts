@@ -60,19 +60,25 @@ describe('Stratos Lexicons', () => {
     })
 
     it('app.stratos.repo.hydrateRecord should be a query', () => {
-      const lex = lexicons.find((l) => l.id === 'app.stratos.repo.hydrateRecord')
+      const lex = lexicons.find(
+        (l) => l.id === 'app.stratos.repo.hydrateRecord',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
 
     it('app.stratos.repo.hydrateRecords should be a procedure', () => {
-      const lex = lexicons.find((l) => l.id === 'app.stratos.repo.hydrateRecords')
+      const lex = lexicons.find(
+        (l) => l.id === 'app.stratos.repo.hydrateRecords',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('procedure')
     })
 
     it('app.stratos.sync.subscribeRecords should be a subscription', () => {
-      const lex = lexicons.find((l) => l.id === 'app.stratos.sync.subscribeRecords')
+      const lex = lexicons.find(
+        (l) => l.id === 'app.stratos.sync.subscribeRecords',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('subscription')
     })
@@ -154,7 +160,11 @@ describe('Stratos Lexicons', () => {
         server.method('app.stratos.repo.hydrateRecord', {
           handler: async () => ({
             encoding: 'application/json',
-            body: { uri: 'at://test/app.stratos.feed.post/123', cid: 'abc', value: {} },
+            body: {
+              uri: 'at://test/app.stratos.feed.post/123',
+              cid: 'abc',
+              value: {},
+            },
           }),
         })
       }).not.toThrow()

@@ -1,18 +1,18 @@
-import { InvalidRequestError, AuthRequiredError } from '@atproto/xrpc-server'
+import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { CID } from 'multiformats/cid'
 import { TID } from '@atproto/common-web'
-import { encode as cborEncode, cidForLex, type LexValue } from '@atproto/lex-cbor'
+import {
+  cidForLex,
+  encode as cborEncode,
+  type LexValue,
+} from '@atproto/lex-cbor'
 import { AtUri } from '@atproto/syntax'
 
 import {
   assertStratosValidation,
-  type PreparedCreate,
-  type PreparedUpdate,
-  type PreparedDelete,
-  type CommitData,
-  StratosValidationError,
   extractBoundaryDomains,
   stratosSeq,
+  StratosValidationError,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext, StratosActorTransactor } from '../context.js'
@@ -87,7 +87,11 @@ export async function createRecord(
   if (validate) {
     try {
       // Note: assertStratosValidation handles post-specific validation internally
-      assertStratosValidation(record as Record<string, unknown>, collection, ctx.cfg.stratos)
+      assertStratosValidation(
+        record as Record<string, unknown>,
+        collection,
+        ctx.cfg.stratos,
+      )
     } catch (err) {
       if (err instanceof StratosValidationError) {
         throw new InvalidRequestError(err.message, 'InvalidRecord')
@@ -108,7 +112,13 @@ export async function createRecord(
     const rev = TID.nextStr()
 
     // Index the record
-    await store.record.indexRecord(uri, cid, record as Record<string, unknown>, 'create', rev)
+    await store.record.indexRecord(
+      uri,
+      cid,
+      record as Record<string, unknown>,
+      'create',
+      rev,
+    )
 
     // Store in repo
     await store.repo.putBlock(cid, recordBytes, rev)
@@ -137,13 +147,13 @@ export async function createRecord(
 
   // Write stub to user's PDS
   const recordObj = record as Record<string, unknown>
-  const createdAt = typeof recordObj.createdAt === 'string'
-    ? recordObj.createdAt
-    : new Date().toISOString()
-  
-  const recordType = typeof recordObj.$type === 'string'
-    ? recordObj.$type
-    : collection
+  const createdAt =
+    typeof recordObj.createdAt === 'string'
+      ? recordObj.createdAt
+      : new Date().toISOString()
+
+  const recordType =
+    typeof recordObj.$type === 'string' ? recordObj.$type : collection
 
   try {
     await ctx.stubWriter.writeStub(
@@ -156,7 +166,12 @@ export async function createRecord(
     )
   } catch (err) {
     ctx.logger?.warn(
-      { err: err instanceof Error ? err.message : String(err), did: callerDid, collection, rkey },
+      {
+        err: err instanceof Error ? err.message : String(err),
+        did: callerDid,
+        collection,
+        rkey,
+      },
       'failed to write stub to PDS',
     )
   }
@@ -237,7 +252,12 @@ export async function deleteRecord(
     await ctx.stubWriter.deleteStub(callerDid, collection, rkey)
   } catch (err) {
     ctx.logger?.warn(
-      { err: err instanceof Error ? err.message : String(err), did: callerDid, collection, rkey },
+      {
+        err: err instanceof Error ? err.message : String(err),
+        did: callerDid,
+        collection,
+        rkey,
+      },
       'failed to delete stub from PDS',
     )
   }
@@ -278,7 +298,7 @@ export async function getRecord(
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
-  const result = await ctx.actorStore.read(repo, async (store) => {
+  return await ctx.actorStore.read(repo, async (store) => {
     const record = await store.record.getRecord(uri, cid ?? null)
     if (!record) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
@@ -286,7 +306,9 @@ export async function getRecord(
 
     // Check domain boundary if caller is not owner
     if (callerDid !== repo) {
-      const boundary = extractBoundaryDomains(record.value as Record<string, unknown>)
+      const boundary = extractBoundaryDomains(
+        record.value as Record<string, unknown>,
+      )
       if (boundary.length > 0 && callerDomains) {
         const allowed = boundary.some((domain) =>
           callerDomains.includes(domain),
@@ -303,8 +325,6 @@ export async function getRecord(
       value: record.value,
     }
   })
-
-  return result
 }
 
 /**
@@ -338,7 +358,7 @@ export async function listRecords(
     return { records: [] }
   }
 
-  const result = await ctx.actorStore.read(repo, async (store) => {
+  return await ctx.actorStore.read(repo, async (store) => {
     const records = await store.record.listRecordsForCollection({
       collection,
       limit,
@@ -347,18 +367,24 @@ export async function listRecords(
     })
 
     // Filter by domain boundary if needed
-    const filtered = records.filter((record: { uri: string; cid: string; value: Record<string, unknown> }) => {
-      if (callerDid === repo) {
-        return true // Owner sees everything
-      }
+    const filtered = records.filter(
+      (record: {
+        uri: string
+        cid: string
+        value: Record<string, unknown>
+      }) => {
+        if (callerDid === repo) {
+          return true // Owner sees everything
+        }
 
-      const boundary = extractBoundaryDomains(record.value)
-      if (boundary.length === 0 || !callerDomains) {
-        return true // No boundary restriction
-      }
+        const boundary = extractBoundaryDomains(record.value)
+        if (boundary.length === 0 || !callerDomains) {
+          return true // No boundary restriction
+        }
 
-      return boundary.some((domain) => callerDomains.includes(domain))
-    })
+        return boundary.some((domain) => callerDomains.includes(domain))
+      },
+    )
 
     const lastRecord = filtered[filtered.length - 1]
     const nextCursor = lastRecord
@@ -366,16 +392,16 @@ export async function listRecords(
       : undefined
 
     return {
-      records: filtered.map((r: { uri: string; cid: string; value: Record<string, unknown> }) => ({
-        uri: r.uri,
-        cid: r.cid,
-        value: r.value,
-      })),
+      records: filtered.map(
+        (r: { uri: string; cid: string; value: Record<string, unknown> }) => ({
+          uri: r.uri,
+          cid: r.cid,
+          value: r.value,
+        }),
+      ),
       cursor: nextCursor,
     }
   })
-
-  return result
 }
 
 // Helper functions

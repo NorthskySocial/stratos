@@ -1,26 +1,26 @@
 // Direct SQLite access to the Stratos service database for boundary management.
 // Uses Deno's FFI-based SQLite via jsr:@db/sqlite.
 
-import { Database } from "jsr:@db/sqlite@0.12";
-import { TEST_DATA_DIR } from "./config.ts";
-import { createHash } from "node:crypto";
+import { Database } from 'jsr:@db/sqlite@0.12'
+import { TEST_DATA_DIR } from './config.ts'
+import { createHash } from 'node:crypto'
 
-const SERVICE_DB_PATH = `${TEST_DATA_DIR}/service.sqlite`;
-const ACTORS_DIR = `${TEST_DATA_DIR}/actors`;
+const SERVICE_DB_PATH = `${TEST_DATA_DIR}/service.sqlite`
+const ACTORS_DIR = `${TEST_DATA_DIR}/actors`
 
 function openDb(): Database {
-  return new Database(SERVICE_DB_PATH);
+  return new Database(SERVICE_DB_PATH)
 }
 
 /** Compute SHA-256 hex hash of a string */
 function sha256Hex(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
+  return createHash('sha256').update(input).digest('hex')
 }
 
 /** Get the actor directory path for a DID */
 function getActorDir(did: string): string {
-  const hash = sha256Hex(did);
-  return `${ACTORS_DIR}/${hash.slice(0, 2)}/${did}`;
+  const hash = sha256Hex(did)
+  return `${ACTORS_DIR}/${hash.slice(0, 2)}/${did}`
 }
 
 /** Enroll a user directly in the database */
@@ -29,48 +29,48 @@ export function enrollUser(
   pdsEndpoint?: string,
   boundaries?: string[],
 ): void {
-  const db = openDb();
+  const db = openDb()
   try {
-    const enrolledAt = new Date().toISOString();
+    const enrolledAt = new Date().toISOString()
     db.exec(
       `INSERT INTO enrollment (did, enrolledAt, pdsEndpoint) VALUES (?, ?, ?)
        ON CONFLICT(did) DO UPDATE SET enrolledAt = excluded.enrolledAt, pdsEndpoint = excluded.pdsEndpoint`,
       [did, enrolledAt, pdsEndpoint ?? null],
-    );
+    )
 
     if (boundaries && boundaries.length > 0) {
-      db.exec("DELETE FROM enrollment_boundary WHERE did = ?", [did]);
+      db.exec('DELETE FROM enrollment_boundary WHERE did = ?', [did])
       const stmt = db.prepare(
-        "INSERT INTO enrollment_boundary (did, boundary) VALUES (?, ?)",
-      );
+        'INSERT INTO enrollment_boundary (did, boundary) VALUES (?, ?)',
+      )
       for (const boundary of boundaries) {
-        stmt.run(did, boundary);
+        stmt.run(did, boundary)
       }
-      stmt.finalize();
+      stmt.finalize()
     }
   } finally {
-    db.close();
+    db.close()
   }
 }
 
 /** Create the actor store directory and initialize the SQLite database */
 export async function createActorStore(did: string): Promise<void> {
-  const actorDir = getActorDir(did);
-  const dbPath = `${actorDir}/stratos.sqlite`;
+  const actorDir = getActorDir(did)
+  const dbPath = `${actorDir}/stratos.sqlite`
 
   // Create directory
-  await Deno.mkdir(actorDir, { recursive: true });
+  await Deno.mkdir(actorDir, { recursive: true })
 
   // Check if database already exists
   try {
-    await Deno.stat(dbPath);
-    return; // Already exists
+    await Deno.stat(dbPath)
+    return // Already exists
   } catch {
     // Does not exist, create it
   }
 
   // Create and initialize the actor database with schema
-  const db = new Database(dbPath);
+  const db = new Database(dbPath)
   try {
     db.exec(`
       -- Repo root (current state)
@@ -149,64 +149,64 @@ export async function createActorStore(did: string): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS stratos_seq_did_idx ON stratos_seq(did);
       CREATE INDEX IF NOT EXISTS stratos_seq_sequenced_at_idx ON stratos_seq(sequencedAt);
-    `);
+    `)
   } finally {
-    db.close();
+    db.close()
   }
 }
 
 /** Replace all boundaries for a user */
 export function setBoundaries(did: string, boundaries: string[]): void {
-  const db = openDb();
+  const db = openDb()
   try {
-    db.exec("DELETE FROM enrollment_boundary WHERE did = ?", [did]);
+    db.exec('DELETE FROM enrollment_boundary WHERE did = ?', [did])
     const stmt = db.prepare(
-      "INSERT INTO enrollment_boundary (did, boundary) VALUES (?, ?)",
-    );
+      'INSERT INTO enrollment_boundary (did, boundary) VALUES (?, ?)',
+    )
     for (const boundary of boundaries) {
-      stmt.run(did, boundary);
+      stmt.run(did, boundary)
     }
-    stmt.finalize();
+    stmt.finalize()
   } finally {
-    db.close();
+    db.close()
   }
 }
 
 /** Get all boundaries for a user */
 export function getBoundaries(did: string): string[] {
-  const db = openDb();
+  const db = openDb()
   try {
-    const rows = db.prepare(
-      "SELECT boundary FROM enrollment_boundary WHERE did = ?",
-    ).all(did) as Array<{ boundary: string }>;
-    return rows.map((r) => r.boundary);
+    const rows = db
+      .prepare('SELECT boundary FROM enrollment_boundary WHERE did = ?')
+      .all(did) as Array<{ boundary: string }>
+    return rows.map((r) => r.boundary)
   } finally {
-    db.close();
+    db.close()
   }
 }
 
 /** Check if a user is enrolled */
 export function isEnrolled(did: string): boolean {
-  const db = openDb();
+  const db = openDb()
   try {
-    const rows = db.prepare(
-      "SELECT did FROM enrollment WHERE did = ?",
-    ).all(did) as Array<{ did: string }>;
-    return rows.length > 0;
+    const rows = db
+      .prepare('SELECT did FROM enrollment WHERE did = ?')
+      .all(did) as Array<{ did: string }>
+    return rows.length > 0
   } finally {
-    db.close();
+    db.close()
   }
 }
 
 /** List all enrolled users */
 export function listEnrolled(): Array<{ did: string; enrolledAt: string }> {
-  const db = openDb();
+  const db = openDb()
   try {
-    return db.prepare("SELECT did, enrolledAt FROM enrollment").all() as Array<{
-      did: string;
-      enrolledAt: string;
-    }>;
+    return db.prepare('SELECT did, enrolledAt FROM enrollment').all() as Array<{
+      did: string
+      enrolledAt: string
+    }>
   } finally {
-    db.close();
+    db.close()
   }
 }

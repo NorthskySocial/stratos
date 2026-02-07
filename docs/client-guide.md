@@ -23,22 +23,24 @@ Stratos enables **private, domain-scoped content** within ATProtocol. Users can 
 
 ### Key Concepts
 
-| Concept | Description |
-|---------|-------------|
-| **Stratos Service** | A server that stores private records (separate from PDS) |
-| **Enrollment** | User must enroll with a Stratos service to create private content |
-| **Domain Boundary** | Specifies which organization domains can view a record |
-| **Private Post** | An `app.stratos.feed.post` record with boundary restrictions |
+| Concept             | Description                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| **Stratos Service** | A server that stores private records (separate from PDS)          |
+| **Enrollment**      | User must enroll with a Stratos service to create private content |
+| **Domain Boundary** | Specifies which organization domains can view a record            |
+| **Private Post**    | An `app.stratos.feed.post` record with boundary restrictions      |
 
 ### When to Use Stratos
 
 ✅ **Good use cases:**
+
 - Organization-internal announcements
 - Team discussions
 - Gated community content
 - Enterprise collaboration
 
 ❌ **Not suitable for:**
+
 - Public social content (use `app.bsky` instead)
 - Encrypted DMs (Stratos is access-controlled, not encrypted)
 - Cross-organization messaging
@@ -76,28 +78,31 @@ const STRATOS_ENDPOINT = 'https://stratos.example.com'
 ### 3. Create a Private Post
 
 ```typescript
-const response = await fetch(`${STRATOS_ENDPOINT}/xrpc/com.atproto.repo.createRecord`, {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    repo: userDid,
-    collection: 'app.stratos.feed.post',
-    record: {
-      $type: 'app.stratos.feed.post',
-      text: 'This is a private post for my organization!',
-      boundary: {
-        $type: 'app.stratos.boundary.defs#Domains',
-        values: [
-          { $type: 'app.stratos.boundary.defs#Domain', value: 'example.com' }
-        ]
+const response = await fetch(
+  `${STRATOS_ENDPOINT}/xrpc/com.atproto.repo.createRecord`,
+  {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      repo: userDid,
+      collection: 'app.stratos.feed.post',
+      record: {
+        $type: 'app.stratos.feed.post',
+        text: 'This is a private post for my organization!',
+        boundary: {
+          $type: 'app.stratos.boundary.defs#Domains',
+          values: [
+            { $type: 'app.stratos.boundary.defs#Domain', value: 'example.com' },
+          ],
+        },
+        createdAt: new Date().toISOString(),
       },
-      createdAt: new Date().toISOString(),
-    }
-  })
-})
+    }),
+  },
+)
 
 const result = await response.json()
 console.log('Created:', result.uri)
@@ -112,9 +117,12 @@ Before users can create Stratos records, they must **enroll** with the Stratos s
 ### Checking Enrollment Status
 
 ```typescript
-async function isUserEnrolled(stratosEndpoint: string, did: string): Promise<boolean> {
+async function isUserEnrolled(
+  stratosEndpoint: string,
+  did: string,
+): Promise<boolean> {
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/app.stratos.enrollment.status?did=${encodeURIComponent(did)}`
+    `${stratosEndpoint}/xrpc/app.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
   )
   const data = await response.json()
   return data.enrolled === true
@@ -135,14 +143,18 @@ function startEnrollment(stratosEndpoint: string, handle: string) {
 ### Complete Flow
 
 ```typescript
-async function ensureEnrolled(stratosEndpoint: string, userHandle: string, userDid: string) {
+async function ensureEnrolled(
+  stratosEndpoint: string,
+  userHandle: string,
+  userDid: string,
+) {
   // Check if already enrolled
   const enrolled = await isUserEnrolled(stratosEndpoint, userDid)
-  
+
   if (enrolled) {
     return true
   }
-  
+
   // Start enrollment flow (redirects to OAuth)
   startEnrollment(stratosEndpoint, userHandle)
   return false
@@ -157,12 +169,12 @@ After enrollment completes, the user is redirected back to your app. Handle the 
 // On your callback page (e.g., /stratos-callback)
 async function handleEnrollmentCallback() {
   const urlParams = new URLSearchParams(window.location.search)
-  
+
   if (urlParams.get('error')) {
     console.error('Enrollment failed:', urlParams.get('error_description'))
     return { success: false, error: urlParams.get('error') }
   }
-  
+
   // Enrollment successful
   return { success: true }
 }
@@ -180,7 +192,7 @@ interface StratosPost {
   text: string
   boundary: {
     $type: 'app.stratos.boundary.defs#Domains'
-    values: Array<{ $type: 'app.stratos.boundary.defs#Domain', value: string }>
+    values: Array<{ $type: 'app.stratos.boundary.defs#Domain'; value: string }>
   }
   createdAt: string
   facets?: RichTextFacet[]
@@ -201,44 +213,47 @@ async function createPrivatePost(
   accessToken: string,
   userDid: string,
   text: string,
-  domains: string[]
+  domains: string[],
 ) {
   // Process rich text (mentions, links, etc.)
   const rt = new RichText({ text })
-  await rt.detectFacets(agent)  // Your atproto agent
-  
+  await rt.detectFacets(agent) // Your atproto agent
+
   const record: StratosPost = {
     $type: 'app.stratos.feed.post',
     text: rt.text,
     facets: rt.facets,
     boundary: {
       $type: 'app.stratos.boundary.defs#Domains',
-      values: domains.map(domain => ({
+      values: domains.map((domain) => ({
         $type: 'app.stratos.boundary.defs#Domain',
-        value: domain
-      }))
+        value: domain,
+      })),
     },
     createdAt: new Date().toISOString(),
   }
-  
-  const response = await fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+
+  const response = await fetch(
+    `${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        repo: userDid,
+        collection: 'app.stratos.feed.post',
+        record,
+      }),
     },
-    body: JSON.stringify({
-      repo: userDid,
-      collection: 'app.stratos.feed.post',
-      record,
-    })
-  })
-  
+  )
+
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.message || 'Failed to create post')
   }
-  
+
   return response.json()
 }
 ```
@@ -251,25 +266,28 @@ async function createPostWithImages(
   accessToken: string,
   userDid: string,
   text: string,
-  images: Array<{ blob: Blob, alt: string }>,
-  domains: string[]
+  images: Array<{ blob: Blob; alt: string }>,
+  domains: string[],
 ) {
   // Upload images first
   const uploadedImages = await Promise.all(
     images.map(async ({ blob, alt }) => {
-      const uploadRes = await fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': blob.type,
+      const uploadRes = await fetch(
+        `${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': blob.type,
+          },
+          body: blob,
         },
-        body: blob,
-      })
+      )
       const { blob: blobRef } = await uploadRes.json()
       return { image: blobRef, alt }
-    })
+    }),
   )
-  
+
   const record: StratosPost = {
     $type: 'app.stratos.feed.post',
     text,
@@ -279,27 +297,27 @@ async function createPostWithImages(
     },
     boundary: {
       $type: 'app.stratos.boundary.defs#Domains',
-      values: domains.map(domain => ({
+      values: domains.map((domain) => ({
         $type: 'app.stratos.boundary.defs#Domain',
-        value: domain
-      }))
+        value: domain,
+      })),
     },
     createdAt: new Date().toISOString(),
   }
-  
+
   // Create post with embed
   return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${accessToken}`,
+      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       repo: userDid,
       collection: 'app.stratos.feed.post',
       record,
-    })
-  }).then(r => r.json())
+    }),
+  }).then((r) => r.json())
 }
 ```
 
@@ -311,9 +329,9 @@ async function createReply(
   accessToken: string,
   userDid: string,
   text: string,
-  replyTo: { uri: string, cid: string },
-  rootPost: { uri: string, cid: string },
-  domains: string[]
+  replyTo: { uri: string; cid: string },
+  rootPost: { uri: string; cid: string },
+  domains: string[],
 ) {
   const record: StratosPost = {
     $type: 'app.stratos.feed.post',
@@ -324,26 +342,26 @@ async function createReply(
     },
     boundary: {
       $type: 'app.stratos.boundary.defs#Domains',
-      values: domains.map(domain => ({
+      values: domains.map((domain) => ({
         $type: 'app.stratos.boundary.defs#Domain',
-        value: domain
-      }))
+        value: domain,
+      })),
     },
     createdAt: new Date().toISOString(),
   }
-  
+
   return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${accessToken}`,
+      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       repo: userDid,
       collection: 'app.stratos.feed.post',
       record,
-    })
-  }).then(r => r.json())
+    }),
+  }).then((r) => r.json())
 }
 ```
 
@@ -385,30 +403,30 @@ async function getRecord(
   accessToken: string,
   repo: string,
   collection: string,
-  rkey: string
+  rkey: string,
 ) {
   const params = new URLSearchParams({
     repo,
     collection,
     rkey,
   })
-  
+
   const response = await fetch(
     `${stratosEndpoint}/xrpc/com.atproto.repo.getRecord?${params}`,
     {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
       },
-    }
+    },
   )
-  
+
   if (!response.ok) {
     if (response.status === 404) {
       return null
     }
     throw new Error('Failed to get record')
   }
-  
+
   return response.json()
 }
 ```
@@ -422,7 +440,7 @@ async function listRecords(
   repo: string,
   collection: string,
   limit = 50,
-  cursor?: string
+  cursor?: string,
 ) {
   const params = new URLSearchParams({
     repo,
@@ -430,16 +448,16 @@ async function listRecords(
     limit: limit.toString(),
   })
   if (cursor) params.set('cursor', cursor)
-  
+
   const response = await fetch(
     `${stratosEndpoint}/xrpc/com.atproto.repo.listRecords?${params}`,
     {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
       },
-    }
+    },
   )
-  
+
   return response.json()
 }
 ```
@@ -461,24 +479,27 @@ const authorFeed = await agent.api.app.bsky.feed.getAuthorFeed({
 })
 
 // For direct client access to Stratos
-async function hydrateFromSource(source: RecordSource, viewer: string): Promise<Record | null> {
+async function hydrateFromSource(
+  source: RecordSource,
+  viewer: string,
+): Promise<Record | null> {
   // 1. Resolve service DID to endpoint
   const endpoint = await resolveServiceEndpoint(source.service)
-  
+
   // 2. Parse URI from subject
   const { repo, collection, rkey } = parseAtUri(source.subject.uri)
-  
+
   // 3. Call getRecord at Stratos
   const response = await fetch(
     `${endpoint}/xrpc/com.atproto.repo.getRecord?` +
-    `repo=${repo}&collection=${collection}&rkey=${rkey}`,
+      `repo=${repo}&collection=${collection}&rkey=${rkey}`,
     {
       headers: {
-        'Authorization': `Bearer ${viewerToken}`,
+        Authorization: `Bearer ${viewerToken}`,
       },
-    }
+    },
   )
-  
+
   if (!response.ok) return null
   return response.json()
 }
@@ -506,12 +527,12 @@ Every Stratos record must include a `boundary` specifying which domains can acce
 
 ### Domain Visibility Rules
 
-| Viewer | Can See Record? |
-|--------|-----------------|
-| Record owner | ✅ Always |
-| User with matching domain | ✅ Yes |
-| User without matching domain | ❌ No |
-| Unauthenticated | ❌ No |
+| Viewer                       | Can See Record? |
+| ---------------------------- | --------------- |
+| Record owner                 | ✅ Always       |
+| User with matching domain    | ✅ Yes          |
+| User without matching domain | ❌ No           |
+| Unauthenticated              | ❌ No           |
 
 ### Multi-Domain Posts
 
@@ -524,8 +545,8 @@ const crossTeamPost = {
   boundary: {
     values: [
       { value: 'engineering.example.com' },
-      { value: 'design.example.com' }
-    ]
+      { value: 'design.example.com' },
+    ],
   },
   createdAt: new Date().toISOString(),
 }
@@ -536,7 +557,7 @@ const crossTeamPost = {
 ```typescript
 async function getUserDomains(agent: Agent): Promise<string[]> {
   const profile = await agent.getProfile({ actor: agent.session.did })
-  
+
   // AppView returns domains the user has access to
   return profile.data.associated?.stratosDomains ?? []
 }
@@ -556,9 +577,7 @@ function StratosEnrollmentPrompt({ handle, onEnroll }) {
       <p>
         Connect to Stratos to create posts visible only to your organization.
       </p>
-      <button onClick={() => onEnroll(handle)}>
-        Enable Private Posts
-      </button>
+      <button onClick={() => onEnroll(handle)}>Enable Private Posts</button>
     </div>
   )
 }
@@ -571,14 +590,14 @@ function DomainSelector({ availableDomains, selected, onChange }) {
   return (
     <div className="domain-selector">
       <label>Visible to:</label>
-      <select 
+      <select
         multiple
         value={selected}
-        onChange={(e) => onChange(
-          Array.from(e.target.selectedOptions, o => o.value)
-        )}
+        onChange={(e) =>
+          onChange(Array.from(e.target.selectedOptions, (o) => o.value))
+        }
       >
-        {availableDomains.map(domain => (
+        {availableDomains.map((domain) => (
           <option key={domain} value={domain}>
             {domain}
           </option>
@@ -596,7 +615,7 @@ function StratosComposer({ agent, stratosDomains }) {
   const [text, setText] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
   const [selectedDomains, setSelectedDomains] = useState([])
-  
+
   const handleSubmit = async () => {
     if (isPrivate) {
       await createPrivatePost(
@@ -604,24 +623,26 @@ function StratosComposer({ agent, stratosDomains }) {
         accessToken,
         agent.session.did,
         text,
-        selectedDomains
+        selectedDomains,
       )
     } else {
       await agent.post({ text })
     }
   }
-  
+
   return (
     <div className="composer">
-      <textarea 
-        value={text} 
+      <textarea
+        value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={isPrivate ? "Write a private post..." : "What's happening?"}
+        placeholder={
+          isPrivate ? 'Write a private post...' : "What's happening?"
+        }
       />
-      
+
       <div className="privacy-toggle">
         <label>
-          <input 
+          <input
             type="checkbox"
             checked={isPrivate}
             onChange={(e) => setIsPrivate(e.target.checked)}
@@ -629,7 +650,7 @@ function StratosComposer({ agent, stratosDomains }) {
           Private post
         </label>
       </div>
-      
+
       {isPrivate && stratosDomains.length > 0 && (
         <DomainSelector
           availableDomains={stratosDomains}
@@ -637,8 +658,8 @@ function StratosComposer({ agent, stratosDomains }) {
           onChange={setSelectedDomains}
         />
       )}
-      
-      <button 
+
+      <button
         onClick={handleSubmit}
         disabled={isPrivate && selectedDomains.length === 0}
       >
@@ -654,19 +675,15 @@ function StratosComposer({ agent, stratosDomains }) {
 ```tsx
 function PostCard({ post }) {
   const isStratos = post.uri.includes('app.stratos.')
-  const domains = post.record?.boundary?.values?.map(d => d.value) ?? []
-  
+  const domains = post.record?.boundary?.values?.map((d) => d.value) ?? []
+
   return (
     <div className={`post ${isStratos ? 'private' : ''}`}>
       {isStratos && (
-        <div className="privacy-badge">
-          🔒 {domains.join(', ')}
-        </div>
+        <div className="privacy-badge">🔒 {domains.join(', ')}</div>
       )}
-      
-      <div className="content">
-        {post.record.text}
-      </div>
+
+      <div className="content">{post.record.text}</div>
     </div>
   )
 }
@@ -679,6 +696,7 @@ function PostCard({ post }) {
 ### Endpoints
 
 #### Create Record
+
 ```
 POST /xrpc/com.atproto.repo.createRecord
 Authorization: Bearer <access_token>
@@ -691,18 +709,21 @@ Authorization: Bearer <access_token>
 ```
 
 #### Get Record
+
 ```
 GET /xrpc/com.atproto.repo.getRecord?repo=<did>&collection=<collection>&rkey=<rkey>
 Authorization: Bearer <access_token>
 ```
 
 #### List Records
+
 ```
 GET /xrpc/com.atproto.repo.listRecords?repo=<did>&collection=<collection>&limit=50
 Authorization: Bearer <access_token>
 ```
 
 #### Delete Record
+
 ```
 POST /xrpc/com.atproto.repo.deleteRecord
 Authorization: Bearer <access_token>
@@ -715,6 +736,7 @@ Authorization: Bearer <access_token>
 ```
 
 #### Check Enrollment
+
 ```
 GET /xrpc/app.stratos.enrollment.status?did=<user-did>
 ```
@@ -726,37 +748,37 @@ GET /xrpc/app.stratos.enrollment.status?did=<user-did>
 ```typescript
 interface AppStratosFeedPost {
   $type: 'app.stratos.feed.post'
-  text: string                    // Required, max 3000 chars
-  boundary: Boundary              // Required
-  createdAt: string               // Required, ISO datetime
-  facets?: Facet[]                // Rich text annotations
-  reply?: ReplyRef                // If this is a reply
-  embed?: Embed                   // Images, video, external links
-  langs?: string[]                // Language tags, max 3
-  labels?: SelfLabels             // Content warnings
-  tags?: string[]                 // Additional hashtags, max 8
+  text: string // Required, max 3000 chars
+  boundary: Boundary // Required
+  createdAt: string // Required, ISO datetime
+  facets?: Facet[] // Rich text annotations
+  reply?: ReplyRef // If this is a reply
+  embed?: Embed // Images, video, external links
+  langs?: string[] // Language tags, max 3
+  labels?: SelfLabels // Content warnings
+  tags?: string[] // Additional hashtags, max 8
 }
 
 interface Boundary {
   $type: 'app.stratos.boundary.defs#Domains'
-  values: Domain[]                // Max 10 domains
+  values: Domain[] // Max 10 domains
 }
 
 interface Domain {
   $type: 'app.stratos.boundary.defs#Domain'
-  value: string                   // Domain name, max 253 chars
+  value: string // Domain name, max 253 chars
 }
 ```
 
 ### Error Codes
 
-| Error | Description |
-|-------|-------------|
-| `NotEnrolled` | User hasn't enrolled with this Stratos service |
-| `InvalidCollection` | Collection is not a valid stratos namespace |
-| `InvalidRecord` | Record failed validation (e.g., missing boundary) |
-| `RecordNotFound` | Record doesn't exist or user doesn't have access |
-| `AuthRequired` | Endpoint requires authentication |
+| Error               | Description                                       |
+| ------------------- | ------------------------------------------------- |
+| `NotEnrolled`       | User hasn't enrolled with this Stratos service    |
+| `InvalidCollection` | Collection is not a valid stratos namespace       |
+| `InvalidRecord`     | Record failed validation (e.g., missing boundary) |
+| `RecordNotFound`    | Record doesn't exist or user doesn't have access  |
+| `AuthRequired`      | Endpoint requires authentication                  |
 
 ---
 
@@ -795,7 +817,7 @@ const defaultDomains = userDomains.length > 0 ? [userDomains[0]] : []
 
 ```typescript
 // Ensure selected domains are actually available to user
-const validDomains = selectedDomains.filter(d => userDomains.includes(d))
+const validDomains = selectedDomains.filter((d) => userDomains.includes(d))
 if (validDomains.length === 0) {
   throw new Error('Select at least one valid domain')
 }
@@ -804,6 +826,7 @@ if (validDomains.length === 0) {
 ### 5. Clear Visual Distinction
 
 Always make it visually clear when content is private:
+
 - Different background color
 - Lock icon
 - Domain badges

@@ -61,7 +61,7 @@ function rowToEvent(row: {
   }
 
   const { collection, rkey } = decoded?.path
-    ? parsePath(decoded.path)
+    ? parsePath(decoded!.path)
     : { collection: '', rkey: '' }
 
   return {
@@ -126,7 +126,8 @@ export class SqliteSequenceStoreReader implements SequenceStoreReader {
   async getEventsRange(
     startSeq: number,
     endSeq: number,
-    options?: GetEventsSinceOptions,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _options?: GetEventsSinceOptions,
   ): Promise<SequenceEvent[]> {
     const rows = await this.db
       .select()
@@ -165,9 +166,7 @@ export class SqliteSequenceStoreWriter
   }
 
   async truncateBefore(seq: number): Promise<number> {
-    const result = await this.db
-      .delete(stratosSeq)
-      .where(sql`${stratosSeq.seq} < ${seq}`)
+    await this.db.delete(stratosSeq).where(sql`${stratosSeq.seq} < ${seq}`)
 
     // drizzle-orm doesn't have a clean way to get affected rows count for SQLite
     // so we return 0 (caller can check latestSeq before/after if needed)

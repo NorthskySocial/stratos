@@ -209,7 +209,8 @@ export class PdsTokenVerifier implements TokenVerifier {
     if (cached) {
       const age = now - cached.fetchedAt
       const isExpired = age >= this.jwksCacheMaxAge
-      const shouldRefresh = age >= this.jwksCacheMaxAge - this.jwksRefreshBeforeExpiry
+      const shouldRefresh =
+        age >= this.jwksCacheMaxAge - this.jwksRefreshBeforeExpiry
 
       // If not expired, return cached value
       // If approaching expiry, trigger background refresh
@@ -254,7 +255,9 @@ export class PdsTokenVerifier implements TokenVerifier {
     })
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch JWKS from ${jwksUri}: ${response.status}`)
+      throw new Error(
+        `Failed to fetch JWKS from ${jwksUri}: ${response.status}`,
+      )
     }
 
     const jwks = (await response.json()) as jose.JSONWebKeySet
@@ -366,7 +369,10 @@ export class PdsTokenVerifier implements TokenVerifier {
         return { active: false, error: 'Token expired' }
       }
       if (err instanceof jose.errors.JWTClaimValidationFailed) {
-        return { active: false, error: `Claim validation failed: ${err.message}` }
+        return {
+          active: false,
+          error: `Claim validation failed: ${err.message}`,
+        }
       }
       if (err instanceof jose.errors.JWSSignatureVerificationFailed) {
         return { active: false, error: 'Invalid signature' }
@@ -376,7 +382,8 @@ export class PdsTokenVerifier implements TokenVerifier {
       }
       return {
         active: false,
-        error: err instanceof Error ? err.message : 'Unknown verification error',
+        error:
+          err instanceof Error ? err.message : 'Unknown verification error',
       }
     }
   }

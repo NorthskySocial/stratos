@@ -30,8 +30,17 @@ import {
 } from '@northskysocial/stratos-core'
 
 import { StratosActorStore, SqliteEnrollmentStore } from '../src/context.js'
-import { validateEnrollment, assertEnrollment, EnrollmentConfig } from '../src/auth/enrollment.js'
-import { createServiceDb, migrateServiceDb, closeServiceDb, ServiceDb } from '../src/db/index.js'
+import {
+  validateEnrollment,
+  assertEnrollment,
+  EnrollmentConfig,
+} from '../src/auth/enrollment.js'
+import {
+  createServiceDb,
+  migrateServiceDb,
+  closeServiceDb,
+  ServiceDb,
+} from '../src/db/index.js'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {
@@ -57,23 +66,29 @@ function createMockBlobStore(): BlobStore {
         storage.delete(key)
       }
     }),
-    putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-      if (bytes instanceof Uint8Array) {
-        storage.set(cid.toString(), bytes)
-      } else {
-        const chunks: Uint8Array[] = []
-        for await (const chunk of bytes) {
-          chunks.push(chunk)
-        }
-        const total = new Uint8Array(chunks.reduce((sum, c) => sum + c.length, 0))
-        let offset = 0
-        for (const chunk of chunks) {
-          total.set(chunk, offset)
-          offset += chunk.length
-        }
-        storage.set(cid.toString(), total)
-      }
-    }),
+    putPermanent: vi
+      .fn()
+      .mockImplementation(
+        async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
+          if (bytes instanceof Uint8Array) {
+            storage.set(cid.toString(), bytes)
+          } else {
+            const chunks: Uint8Array[] = []
+            for await (const chunk of bytes) {
+              chunks.push(chunk)
+            }
+            const total = new Uint8Array(
+              chunks.reduce((sum, c) => sum + c.length, 0),
+            )
+            let offset = 0
+            for (const chunk of chunks) {
+              total.set(chunk, offset)
+              offset += chunk.length
+            }
+            storage.set(cid.toString(), total)
+          }
+        },
+      ),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockImplementation(async (cid: CID) => {
@@ -142,7 +157,10 @@ describe('Integration: Full Stratos Flow', () => {
   const testPds = 'https://pds.example.com'
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `stratos-integration-${randomBytes(8).toString('hex')}`)
+    testDir = join(
+      tmpdir(),
+      `stratos-integration-${randomBytes(8).toString('hex')}`,
+    )
     await mkdir(testDir, { recursive: true })
 
     // Set up enrollment store
@@ -272,7 +290,13 @@ describe('Integration: Full Stratos Flow', () => {
 
       // Create record
       await actorStore.transact(testDid, async (store) => {
-        await store.record.indexRecord(new AtUri(uri), cid, record, 'create', 'rev1')
+        await store.record.indexRecord(
+          new AtUri(uri),
+          cid,
+          record,
+          'create',
+          'rev1',
+        )
       })
 
       // Read record
@@ -324,16 +348,26 @@ describe('Integration: Full Stratos Flow', () => {
       const cid = await createCid('delete me')
 
       await actorStore.transact(testDid, async (store) => {
-        await store.record.indexRecord(new AtUri(uri), cid, { text: 'Delete me' }, 'create', 'rev1')
+        await store.record.indexRecord(
+          new AtUri(uri),
+          cid,
+          { text: 'Delete me' },
+          'create',
+          'rev1',
+        )
       })
 
-      expect(await actorStore.read(testDid, (s) => s.record.recordCount())).toBe(1)
+      expect(
+        await actorStore.read(testDid, (s) => s.record.recordCount()),
+      ).toBe(1)
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.deleteRecord(new AtUri(uri))
       })
 
-      expect(await actorStore.read(testDid, (s) => s.record.recordCount())).toBe(0)
+      expect(
+        await actorStore.read(testDid, (s) => s.record.recordCount()),
+      ).toBe(0)
     })
 
     it('should manage backlinks', async () => {
@@ -341,12 +375,18 @@ describe('Integration: Full Stratos Flow', () => {
       const cid = await createCid('post with links')
 
       await actorStore.transact(testDid, async (store) => {
-        await store.record.indexRecord(new AtUri(postUri), cid, {
-          text: 'Replying to someone',
-          reply: {
-            parent: { uri: 'at://did:plc:other/app.stratos.feed.post/123' },
+        await store.record.indexRecord(
+          new AtUri(postUri),
+          cid,
+          {
+            text: 'Replying to someone',
+            reply: {
+              parent: { uri: 'at://did:plc:other/app.stratos.feed.post/123' },
+            },
           },
-        }, 'create', 'rev1')
+          'create',
+          'rev1',
+        )
 
         await store.record.addBacklinks([
           {
@@ -381,10 +421,7 @@ describe('Integration: Full Stratos Flow', () => {
         $type: 'app.stratos.feed.post',
         text: 'This is a valid stratos post',
         boundary: {
-          values: [
-            { value: 'example.com' },
-            { value: 'corp.example.com' },
-          ],
+          values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
         },
         createdAt: new Date().toISOString(),
       }
@@ -399,8 +436,14 @@ describe('Integration: Full Stratos Flow', () => {
         text: 'Replying to stratos',
         boundary: { values: [{ value: 'example.com' }] },
         reply: {
-          parent: { uri: 'at://did:plc:abc/app.stratos.feed.post/123', cid: 'bafyabc' },
-          root: { uri: 'at://did:plc:abc/app.stratos.feed.post/100', cid: 'bafyroot' },
+          parent: {
+            uri: 'at://did:plc:abc/app.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/app.stratos.feed.post/100',
+            cid: 'bafyroot',
+          },
         },
         createdAt: new Date().toISOString(),
       }
@@ -415,8 +458,14 @@ describe('Integration: Full Stratos Flow', () => {
         text: 'Cross-namespace reply',
         boundary: { values: [{ value: 'example.com' }] },
         reply: {
-          parent: { uri: 'at://did:plc:abc/app.bsky.feed.post/123', cid: 'bafyabc' },
-          root: { uri: 'at://did:plc:abc/app.bsky.feed.post/123', cid: 'bafyabc' },
+          parent: {
+            uri: 'at://did:plc:abc/app.bsky.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/app.bsky.feed.post/123',
+            cid: 'bafyabc',
+          },
         },
         createdAt: new Date().toISOString(),
       }
@@ -432,7 +481,10 @@ describe('Integration: Full Stratos Flow', () => {
         boundary: { values: [{ value: 'example.com' }] },
         embed: {
           $type: 'app.bsky.embed.record',
-          record: { uri: 'at://did:plc:abc/app.bsky.feed.post/123', cid: 'bafyabc' },
+          record: {
+            uri: 'at://did:plc:abc/app.bsky.feed.post/123',
+            cid: 'bafyabc',
+          },
         },
         createdAt: new Date().toISOString(),
       }
@@ -458,10 +510,7 @@ describe('Integration: Full Stratos Flow', () => {
     it('should extract boundary domains from record', () => {
       const record = {
         boundary: {
-          values: [
-            { value: 'example.com' },
-            { value: 'test.com' },
-          ],
+          values: [{ value: 'example.com' }, { value: 'test.com' }],
         },
       }
 
@@ -472,15 +521,25 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('URI Classification', () => {
     it('should correctly identify stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(true)
-      expect(isStratosUri('at://did:plc:abc/app.stratos.graph.follow/456')).toBe(true)
-      expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(false)
+      expect(isStratosUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(
+        true,
+      )
+      expect(
+        isStratosUri('at://did:plc:abc/app.stratos.graph.follow/456'),
+      ).toBe(true)
+      expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(
+        false,
+      )
     })
 
     it('should correctly identify bsky URIs', () => {
       expect(isBskyUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(true)
-      expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(true)
-      expect(isBskyUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(false)
+      expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
+        true,
+      )
+      expect(isBskyUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(
+        false,
+      )
     })
 
     it('should correctly identify stratos collections', () => {
@@ -520,7 +579,9 @@ describe('Integration: Full Stratos Flow', () => {
       })
 
       // 4. Verify records exist
-      const count = await actorStore.read(actorDid, (s) => s.record.recordCount())
+      const count = await actorStore.read(actorDid, (s) =>
+        s.record.recordCount(),
+      )
       expect(count).toBe(1)
 
       // 5. Unenroll

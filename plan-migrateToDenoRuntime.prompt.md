@@ -6,7 +6,7 @@
 
 1. **Create root [deno.json](deno.json)** for workspace configuration
    - Configure `"nodeModulesDir": "auto"` for npm package compatibility (needed for `@libsql/client`, `@atproto/*` packages)
-   - Define workspace members for `stratos-core` and `stratos-service`  
+   - Define workspace members for `stratos-core` and `stratos-service`
    - Configure TypeScript `compilerOptions` matching existing settings
    - Set up tasks: `test`, `lint`, `dev`, etc.
    - Add `imports` for standard library (`@std/testing`, `@std/expect`, `@std/assert`)
@@ -20,7 +20,7 @@
    - `'path'` → `'node:path'`
    - `'os'` → `'node:os'`
    - `'crypto'` → `'node:crypto'`
-   
+
    Files: [stratos-core/tests/blob.test.ts](stratos-core/tests/blob.test.ts), [stratos-core/tests/record.test.ts](stratos-core/tests/record.test.ts), [stratos-core/tests/repo.test.ts](stratos-core/tests/repo.test.ts), [stratos-service/tests/integration.test.ts](stratos-service/tests/integration.test.ts), [stratos-service/tests/blobstore.test.ts](stratos-service/tests/blobstore.test.ts), [stratos-service/tests/api.test.ts](stratos-service/tests/api.test.ts)
 
 4. **Migrate test files from Vitest to Deno's native test runner**
@@ -30,7 +30,7 @@
      - `import { stub, spy } from '@std/testing/mock'` (for `vi.fn()` replacements)
    - Update mock/spy patterns: `vi.fn()` → `spy()` or `stub()`
    - Ensure test file naming follows Deno conventions (already using `*.test.ts`)
-   
+
    Files to update (12 total):
    - [stratos-core/tests/blob.test.ts](stratos-core/tests/blob.test.ts)
    - [stratos-core/tests/db.test.ts](stratos-core/tests/db.test.ts)
@@ -53,7 +53,7 @@
    - Update `CMD` to `["deno", "run", "-A", "stratos-service/src/bin/stratos.ts"]`
    - Update healthcheck using `deno eval`
 
-6. **Update [docker-compose.yml](docker-compose.yml)** and [docker-compose.test.yml](docker-compose.test.yml)**
+6. **Update [docker-compose.yml](docker-compose.yml)** and [docker-compose.test.yml](docker-compose.test.yml)\*\*
    - Update health check commands if needed (current wget-based approach should still work)
 
 7. **Remove [vitest.config.ts](vitest.config.ts)** (no longer needed)
@@ -74,6 +74,7 @@
 5. Verify health endpoint: `curl http://localhost:3100/health`
 
 **Decisions**
+
 - Use Deno's native test runner with `@std/testing/bdd` + `@std/expect` (user preference)
 - Keep `package.json` files for npm dependency declarations (Deno's package.json support)
 - Use `nodeModulesDir: "auto"` for npm packages with native bindings (`@libsql/client`)

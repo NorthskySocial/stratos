@@ -23,7 +23,6 @@ import {
   StratosSqlRepoTransactor,
   StratosBlobReader,
   StratosBlobTransactor,
-  type BlobStore,
   type BlobStoreCreator,
   type Logger,
   type EnrollmentService,
@@ -37,21 +36,23 @@ import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
 } from './features/index.js'
-import { StubWriterServiceImpl } from './features/stub/index.js'
+import { StubWriterServiceImpl } from './features/index.js'
 
-import { type StratosServiceConfig, getServiceDidWithFragment } from './config.js'
+import {
+  type StratosServiceConfig,
+  getServiceDidWithFragment,
+} from './config.js'
 import { createOAuthClient } from './oauth/client.js'
 import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
-import { 
-  createServiceDb, 
-  migrateServiceDb, 
-  closeServiceDb, 
+import {
+  createServiceDb,
+  migrateServiceDb,
+  closeServiceDb,
   type ServiceDb,
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import { PdsTokenVerifier } from './auth/introspection-client.js'
-import { DpopVerifier } from './auth/dpop-verifier.js'
+import { PdsTokenVerifier, DpopVerifier } from './auth/index.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -77,6 +78,7 @@ export interface StratosActorTransactor {
 /**
  * Enrolled actor database schema
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface EnrollmentTable {
   did: string
   enrolledAt: string
@@ -87,10 +89,12 @@ interface EnrollmentTable {
  * Actor store manager for Stratos
  */
 export class StratosActorStore {
-  private dataDir: string
-  private blobstore: BlobStoreCreator
-  private logger?: Logger
-  private cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private readonly dataDir: string
+  private readonly blobstore: BlobStoreCreator
+  private readonly logger?: Logger
+  private readonly cborToRecord: (
+    content: Uint8Array,
+  ) => Record<string, unknown>
 
   constructor(opts: {
     dataDir: string
@@ -102,17 +106,6 @@ export class StratosActorStore {
     this.blobstore = opts.blobstore
     this.logger = opts.logger
     this.cborToRecord = opts.cborToRecord
-  }
-
-  /**
-   * Get file paths for an actor
-   */
-  private async getLocation(did: string) {
-    const didHash = await crypto.sha256Hex(did)
-    const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
-    const dbLocation = path.join(directory, 'stratos.sqlite')
-    const blobLocation = path.join(directory, 'blobs')
-    return { directory, dbLocation, blobLocation }
   }
 
   /**
@@ -189,15 +182,34 @@ export class StratosActorStore {
         const store: StratosActorTransactor = {
           did,
           db: tx as unknown as StratosDb,
-          record: new StratosRecordTransactor(tx as any, this.cborToRecord, this.logger),
+
+          record: new StratosRecordTransactor(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            tx as any,
+            this.cborToRecord,
+            this.logger,
+          ),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           repo: new StratosSqlRepoTransactor(tx as any),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           blob: new StratosBlobTransactor(tx as any, blobStore, this.logger),
         }
-        return await fn(store)
+        return fn(store)
       })
     } finally {
       await closeStratosDb(db)
     }
+  }
+
+  /**
+   * Get file paths for an actor
+   */
+  private async getLocation(did: string) {
+    const didHash = await crypto.sha256Hex(did)
+    const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
+    const dbLocation = path.join(directory, 'stratos.sqlite')
+    const blobLocation = path.join(directory, 'blobs')
+    return { directory, dbLocation, blobLocation }
   }
 }
 
@@ -205,7 +217,9 @@ export class StratosActorStore {
  * SQLite enrollment store implements both OAuth EnrollmentStore
  * and stratos-core EnrollmentStoreReader interfaces
  */
-export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreReader {
+export class SqliteEnrollmentStore
+  implements EnrollmentStore, EnrollmentStoreReader
+{
   constructor(private db: ServiceDb) {}
 
   async isEnrolled(did: string): Promise<boolean> {
@@ -239,9 +253,11 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
         .delete(enrollmentBoundary)
         .where(eq(enrollmentBoundary.did, record.did))
 
-      await this.db.insert(enrollmentBoundary).values(
-        record.boundaries.map((boundary) => ({ did: record.did, boundary })),
-      )
+      await this.db
+        .insert(enrollmentBoundary)
+        .values(
+          record.boundaries.map((boundary) => ({ did: record.did, boundary })),
+        )
     }
   }
 
@@ -250,9 +266,7 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    await this.db
-      .delete(enrollment)
-      .where(eq(enrollment.did, did))
+    await this.db.delete(enrollment).where(eq(enrollment.did, did))
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -263,7 +277,9 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
       .limit(1)
 
     const row = rows[0]
-    if (!row) return null
+    if (!row) {
+      return null
+    }
 
     return {
       did: row.did,
@@ -272,7 +288,9 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
     }
   }
 
-  async listEnrollments(options?: ListEnrollmentsOptions): Promise<StoredEnrollment[]> {
+  async listEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
     const limit = options?.limit ?? 100
     const cursor = options?.cursor
 
@@ -314,12 +332,22 @@ export class SqliteEnrollmentStore implements EnrollmentStore, EnrollmentStoreRe
  */
 export interface AuthVerifiers {
   /** Standard user auth (OAuth token) */
-  standard: (ctx: any) => Promise<{ credentials: { type: string; did: string } }>
+  standard: (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ctx: any,
+  ) => Promise<{ credentials: { type: string; did: string } }>
   /** Service-to-service auth (inter-service JWT) */
-  service: (ctx: any) => Promise<{ credentials: { type: string; did: string; iss: string } }>
+  service: (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ctx: any,
+  ) => Promise<{ credentials: { type: string; did: string; iss: string } }>
   /** Optional user auth */
-  optionalStandard: (ctx: any) => Promise<{ credentials: { type: string; did?: string } }>
+  optionalStandard: (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ctx: any,
+  ) => Promise<{ credentials: { type: string; did?: string } }>
   /** Admin auth (basic auth or bearer token with admin password) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: (ctx: any) => Promise<{ credentials: { type: string } }>
 }
 
@@ -328,7 +356,7 @@ export interface AuthVerifiers {
  */
 function createAuthVerifiers(
   serviceDid: string,
-  idResolver: IdResolver,
+  _idResolver: IdResolver,
   oauthClient: NodeOAuthClient | undefined,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
@@ -353,7 +381,10 @@ function createAuthVerifiers(
   return {
     standard: async (ctx) => {
       const authHeader = ctx.req?.headers?.authorization
-      console.log('[auth] standard auth called, header:', authHeader?.substring(0, 50))
+      console.log(
+        '[auth] standard auth called, header:',
+        authHeader?.substring(0, 50),
+      )
       if (!authHeader) {
         console.log('[auth] no auth header')
         throw new Error('Authorization required')
@@ -367,7 +398,10 @@ function createAuthVerifiers(
             {
               method: ctx.req.method || 'GET',
               url: ctx.req.url || '/',
-              headers: ctx.req.headers as Record<string, string | string[] | undefined>,
+              headers: ctx.req.headers as Record<
+                string,
+                string | string[] | undefined
+              >,
             },
             {
               setHeader: (name, value) => ctx.res?.setHeader(name, value),
@@ -378,20 +412,26 @@ function createAuthVerifiers(
             credentials: { type: 'user', did: result.did },
           }
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'DPoP verification failed'
+          const message =
+            err instanceof Error ? err.message : 'DPoP verification failed'
           console.log('[auth] DPoP failed:', message)
-          throw new Error(message)
+          throw new Error(message, { cause: err })
         }
       }
 
       // Fall back to session-based auth for Bearer tokens
       const [scheme, token] = authHeader.split(' ')
-      console.log('[auth] scheme:', scheme, 'token starts with did:', token?.startsWith('did:'))
+      console.log(
+        '[auth] scheme:',
+        scheme,
+        'token starts with did:',
+        token?.startsWith('did:'),
+      )
       if (!token) {
         console.log('[auth] no token in header')
         throw new Error('Invalid authorization header format')
       }
-      
+
       // For now, support DID in token position for session-based auth
       // In production, this would parse the JWT to extract the DID
       const did = token.startsWith('did:') ? token : null
@@ -442,7 +482,10 @@ function createAuthVerifiers(
             {
               method: ctx.req.method || 'GET',
               url: ctx.req.url || '/',
-              headers: ctx.req.headers as Record<string, string | string[] | undefined>,
+              headers: ctx.req.headers as Record<
+                string,
+                string | string[] | undefined
+              >,
             },
             {
               setHeader: (name, value) => ctx.res?.setHeader(name, value),
@@ -462,13 +505,13 @@ function createAuthVerifiers(
       if (!token || !token.startsWith('did:')) {
         return { credentials: { type: 'none' } }
       }
-      
+
       // Verify user has valid session (optional, so don't throw on failure)
       const hasSession = await validateSession(token)
       if (!hasSession) {
         return { credentials: { type: 'none' } }
       }
-      
+
       return {
         credentials: { type: 'user', did: token },
       }
@@ -481,7 +524,7 @@ function createAuthVerifiers(
       if (!adminPassword) {
         throw new Error('Admin auth not configured')
       }
-      
+
       if (authHeader.startsWith('Basic ')) {
         // Parse Basic auth: base64(admin:<password>)
         const encoded = authHeader.slice(6)
@@ -499,7 +542,7 @@ function createAuthVerifiers(
       } else {
         throw new Error('Unsupported authorization type')
       }
-      
+
       return {
         credentials: { type: 'admin' },
       }
@@ -601,7 +644,8 @@ export async function createAppContext(
   if (cfg.oauth) {
     oauthClient = await createOAuthClient(
       {
-        clientId: cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
+        clientId:
+          cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
         clientUri: cfg.service.publicUrl,
         redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
         privateKeyPem: cfg.oauth.clientSecret,
@@ -621,9 +665,8 @@ export async function createAppContext(
 
   const enrollmentStore = new SqliteEnrollmentStore(db)
 
-  const enrollmentService = new EnrollmentServiceImpl(
-    { db },
-    async (did) => actorStore.create(did),
+  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) =>
+    actorStore.create(did),
   )
 
   // Resolves per-user boundaries from storage
@@ -643,26 +686,31 @@ export async function createAppContext(
     })
   }
 
-  const authVerifier = createAuthVerifiers(cfg.service.did, idResolver, oauthClient, enrollmentStore, cfg.admin?.password, dpopVerifier)
+  const authVerifier = createAuthVerifiers(
+    cfg.service.did,
+    idResolver,
+    oauthClient,
+    enrollmentStore,
+    cfg.admin?.password,
+    dpopVerifier,
+  )
 
   const serviceDid = cfg.service.did
   // Fragment added for record source fields (e.g., did:plc:abc#atproto_pns)
   const serviceDidWithFragment = getServiceDidWithFragment(cfg)
 
-  const stubWriter = new StubWriterServiceImpl(
-    async (did) => {
-      if (!oauthClient) {
-        return null
-      }
-      try {
-        const session = await oauthClient.restore(did)
-        return session ? { api: session } as any : null
-      } catch {
-        return null
-      }
-    },
-    serviceDidWithFragment,
-  )
+  const stubWriter = new StubWriterServiceImpl(async (did) => {
+    if (!oauthClient) {
+      return null
+    }
+    try {
+      const session = await oauthClient.restore(did)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return session ? ({ api: session } as any) : null
+    } catch {
+      return null
+    }
+  }, serviceDidWithFragment)
 
   const app = express()
   // Note: express.json() is applied in index.ts with exclusion for /xrpc/ routes
@@ -673,7 +721,10 @@ export async function createAppContext(
 
   const xrpcServer = new XrpcServer(allLexicons, {
     errorParser: (err) => {
-      console.error('[xrpc] error caught:', err instanceof Error ? err.message : String(err))
+      console.error(
+        '[xrpc] error caught:',
+        err instanceof Error ? err.message : String(err),
+      )
       if (err instanceof Error && err.stack) {
         console.error('[xrpc] error stack:', err.stack)
       }

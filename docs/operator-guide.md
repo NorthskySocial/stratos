@@ -22,17 +22,17 @@ Stratos is a **private namespace service** for ATProtocol that enables users to 
 
 ### Key Concepts
 
-| Concept | Description |
-|---------|-------------|
-| **Domain Boundary** | A list of domains (e.g., `example.com`) that defines who can see a record |
-| **Enrollment** | The process of a user registering with a Stratos service via OAuth |
-| **Service DID** | The decentralized identifier for the Stratos service itself |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content |
+| Concept              | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| **Domain Boundary**  | A list of domains (e.g., `example.com`) that defines who can see a record |
+| **Enrollment**       | The process of a user registering with a Stratos service via OAuth        |
+| **Service DID**      | The decentralized identifier for the Stratos service itself               |
+| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content         |
 
 ### Use Cases
 
 - **Organization-private feeds**: Company internal social feeds
-- **Gated communities**: Content visible only to verified domain members  
+- **Gated communities**: Content visible only to verified domain members
 - **Multi-tenant applications**: SaaS apps with per-organization data isolation
 
 ---
@@ -66,6 +66,7 @@ Stratos is a **private namespace service** for ATProtocol that enables users to 
 ### Data Flow
 
 #### 1. User Enrollment
+
 ```
 User ──▶ Stratos /oauth/authorize?handle=user.bsky.social
          │
@@ -86,6 +87,7 @@ Creates enrollment record + per-user SQLite database
 ```
 
 #### 2. Record Creation
+
 ```
 Client ──▶ Stratos com.atproto.repo.createRecord
            { collection: "app.stratos.feed.post",
@@ -106,6 +108,7 @@ Sequences event to stratos_seq table
 ```
 
 #### 3. AppView Indexing
+
 ```
 AppView ──▶ Stratos app.stratos.sync.subscribeRecords (WebSocket)
             { did: "<user-did>", cursor: 0 }
@@ -127,6 +130,7 @@ AppView indexes records with boundary metadata
 Each enrolled user gets an isolated SQLite database. Blobs can be stored either on the local filesystem or in S3-compatible storage (see [Blob Storage](#blob-storage) configuration).
 
 **With local blob storage:**
+
 ```
 /data/stratos/
 ├── service.sqlite          # Service-level (enrollment, OAuth sessions)
@@ -145,6 +149,7 @@ Each enrolled user gets an isolated SQLite database. Blobs can be stored either 
 ```
 
 **With S3 blob storage:**
+
 ```
 /data/stratos/
 ├── service.sqlite          # Service-level (enrollment, OAuth sessions)
@@ -158,13 +163,14 @@ Each enrolled user gets an isolated SQLite database. Blobs can be stored either 
 
 S3 Bucket (e.g., my-stratos-blobs):
 ├── stratos/blocks/{did}/{cid}     # Permanent blobs
-├── stratos/tmp/{did}/{key}        # Temporary uploads  
+├── stratos/tmp/{did}/{key}        # Temporary uploads
 └── stratos/quarantine/{did}/{cid} # Taken-down blobs
 ```
 
 ### Database Schema
 
 **stratos_record** - Record metadata
+
 ```sql
 CREATE TABLE stratos_record (
   uri TEXT PRIMARY KEY,
@@ -178,6 +184,7 @@ CREATE TABLE stratos_record (
 ```
 
 **stratos_seq** - Event sequencing for subscriptions
+
 ```sql
 CREATE TABLE stratos_seq (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,17 +223,21 @@ For `did:web`, create a `.well-known/did.json` at your domain:
 {
   "@context": ["https://www.w3.org/ns/did/v1"],
   "id": "did:web:stratos.example.com",
-  "verificationMethod": [{
-    "id": "did:web:stratos.example.com#atproto",
-    "type": "Multikey",
-    "controller": "did:web:stratos.example.com",
-    "publicKeyMultibase": "zQ3shXjHeiBuRCKmM36cuYnm7YEMzhGnCmCyW92sRJ9pribSF"
-  }],
-  "service": [{
-    "id": "#stratos",
-    "type": "StratosService",
-    "serviceEndpoint": "https://stratos.example.com"
-  }]
+  "verificationMethod": [
+    {
+      "id": "did:web:stratos.example.com#atproto",
+      "type": "Multikey",
+      "controller": "did:web:stratos.example.com",
+      "publicKeyMultibase": "zQ3shXjHeiBuRCKmM36cuYnm7YEMzhGnCmCyW92sRJ9pribSF"
+    }
+  ],
+  "service": [
+    {
+      "id": "#stratos",
+      "type": "StratosService",
+      "serviceEndpoint": "https://stratos.example.com"
+    }
+  ]
 }
 ```
 
@@ -338,19 +349,21 @@ curl https://stratos.example.com/xrpc/app.stratos.enrollment.status?did=did:plc:
 
 ### Enrollment Modes
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `open` | Any ATProto user can enroll | Public services, testing |
+| Mode        | Description                       | Use Case                 |
+| ----------- | --------------------------------- | ------------------------ |
+| `open`      | Any ATProto user can enroll       | Public services, testing |
 | `allowlist` | Only approved users/PDS endpoints | Organization deployments |
 
 ### Allowlist Configuration
 
 **By DID** - Explicitly allow specific users:
+
 ```bash
 STRATOS_ALLOWED_DIDS="did:plc:user1,did:plc:user2,did:plc:user3"
 ```
 
 **By PDS Endpoint** - Allow all users from specific PDS instances:
+
 ```bash
 STRATOS_ALLOWED_PDS_ENDPOINTS="https://company-pds.example.com"
 ```
@@ -371,21 +384,22 @@ Records with boundaries outside this list will be rejected.
 
 Stratos supports two blob storage backends using a hexagonal (ports & adapters) architecture:
 
-| Provider | Description | Use Case |
-|----------|-------------|----------|
-| `local` (default) | Stores blobs on local filesystem | Single-node deployments, development |
-| `s3` | Stores blobs in S3-compatible storage | Production, multi-node, scalability |
+| Provider          | Description                           | Use Case                             |
+| ----------------- | ------------------------------------- | ------------------------------------ |
+| `local` (default) | Stores blobs on local filesystem      | Single-node deployments, development |
+| `s3`              | Stores blobs in S3-compatible storage | Production, multi-node, scalability  |
 
 ### Database Storage Backend
 
 Stratos supports multiple database backends for metadata storage:
 
-| Backend | Description | Use Case |
-|---------|-------------|----------|
-| `sqlite` (default) | Per-actor SQLite databases | Single-node deployments, development |
-| `postgres` | PostgreSQL with per-actor schemas | Production, multi-node, high availability |
+| Backend            | Description                       | Use Case                                  |
+| ------------------ | --------------------------------- | ----------------------------------------- |
+| `sqlite` (default) | Per-actor SQLite databases        | Single-node deployments, development      |
+| `postgres`         | PostgreSQL with per-actor schemas | Production, multi-node, high availability |
 
 Configuration:
+
 ```bash
 # Use SQLite (default)
 STRATOS_STORAGE_BACKEND="sqlite"
@@ -402,6 +416,7 @@ With PostgreSQL, each enrolled actor gets their own schema within the database, 
 Stratos supports DPoP (Demonstration of Proof-of-Possession) token verification. This provides stronger authentication than simple Bearer tokens by requiring cryptographic proof that the client possesses the private key associated with the token.
 
 When DPoP is enabled:
+
 1. Clients send `Authorization: DPoP <token>` + `DPoP: <proof>` headers
 2. Stratos validates the DPoP proof structure
 3. Stratos fetches the PDS's OAuth metadata from `/.well-known/oauth-authorization-server`
@@ -428,6 +443,7 @@ Blobs are stored in the filesystem under the data directory:
 ```
 
 Configuration:
+
 ```bash
 STRATOS_BLOB_STORAGE="local"
 STRATOS_DATA_DIR="/var/lib/stratos/data"
@@ -454,6 +470,7 @@ STRATOS_S3_ENDPOINT="http://minio.local:9000"
 ```
 
 S3 key structure:
+
 ```
 stratos/blocks/{did}/{cid}       # Permanent blobs
 stratos/tmp/{did}/{key}          # Temporary uploads
@@ -489,10 +506,10 @@ AppViews authenticate using **service auth** - a signed JWT proving their identi
 import { createServiceAuthHeaders } from '@atproto/xrpc-server'
 
 const headers = await createServiceAuthHeaders({
-  iss: appviewDid,           // AppView's DID
-  aud: stratosServiceDid,    // Stratos service DID
+  iss: appviewDid, // AppView's DID
+  aud: stratosServiceDid, // Stratos service DID
   lxm: 'app.stratos.sync.subscribeRecords',
-  keypair: signingKey,       // AppView's signing key
+  keypair: signingKey, // AppView's signing key
 })
 ```
 
@@ -503,18 +520,18 @@ import WebSocket from 'ws'
 
 async function subscribeToUser(did: string, cursor?: number) {
   const authHeaders = await createServiceAuthHeaders({...})
-  
+
   const url = new URL('wss://stratos.example.com/xrpc/app.stratos.sync.subscribeRecords')
   url.searchParams.set('did', did)
   if (cursor) url.searchParams.set('cursor', cursor.toString())
-  
+
   const ws = new WebSocket(url.toString(), {
     headers: authHeaders
   })
-  
+
   ws.on('message', (data) => {
     const frame = decodeFrame(data)
-    
+
     if (frame.$type === 'app.stratos.sync.subscribeRecords#commit') {
       for (const op of frame.ops) {
         if (op.action === 'create' || op.action === 'update') {
@@ -523,7 +540,7 @@ async function subscribeToUser(did: string, cursor?: number) {
           await deleteRecord(frame.did, op.path)
         }
       }
-      
+
       // Persist cursor for resume
       await saveCursor(did, frame.seq)
     }
@@ -539,11 +556,12 @@ Store the boundary domains with each record for filtering:
 async function indexRecord(did: string, path: string, record: unknown) {
   const [collection, rkey] = path.split('/')
   const uri = `at://${did}/${collection}/${rkey}`
-  
+
   // Extract boundary domains
-  const boundary = record.boundary?.values?.map(d => d.value) ?? []
-  
-  await db.insertInto('stratos_posts')
+  const boundary = record.boundary?.values?.map((d) => d.value) ?? []
+
+  await db
+    .insertInto('stratos_posts')
     .values({
       uri,
       did,
@@ -554,10 +572,12 @@ async function indexRecord(did: string, path: string, record: unknown) {
       created_at: record.createdAt,
       indexed_at: new Date().toISOString(),
     })
-    .onConflict(oc => oc.column('uri').doUpdateSet({
-      text: record.text,
-      boundary_domains: JSON.stringify(boundary),
-    }))
+    .onConflict((oc) =>
+      oc.column('uri').doUpdateSet({
+        text: record.text,
+        boundary_domains: JSON.stringify(boundary),
+      }),
+    )
     .execute()
 }
 ```
@@ -569,20 +589,23 @@ When serving content, filter by the viewer's domain membership:
 ```typescript
 async function getAuthorFeed(authorDid: string, viewerDomains: string[]) {
   // Get posts where viewer has access
-  const posts = await db.selectFrom('stratos_posts')
+  const posts = await db
+    .selectFrom('stratos_posts')
     .where('did', '=', authorDid)
-    .where(eb => eb.or([
-      // Viewer is the author (sees all their own posts)
-      eb('did', '=', viewerDid),
-      // Viewer's domain is in the boundary
-      ...viewerDomains.map(domain =>
-        eb.raw('boundary_domains LIKE ?', [`%"${domain}"%`])
-      )
-    ]))
+    .where((eb) =>
+      eb.or([
+        // Viewer is the author (sees all their own posts)
+        eb('did', '=', viewerDid),
+        // Viewer's domain is in the boundary
+        ...viewerDomains.map((domain) =>
+          eb.raw('boundary_domains LIKE ?', [`%"${domain}"%`]),
+        ),
+      ]),
+    )
     .orderBy('created_at', 'desc')
     .limit(50)
     .execute()
-    
+
   return posts
 }
 ```
@@ -597,11 +620,12 @@ Users with Stratos posts are assumed to be members of those post boundaries:
 ```typescript
 async function getViewerDomains(viewerDid: string): Promise<string[]> {
   // Get unique domains from viewer's own posts
-  const result = await db.selectFrom('stratos_posts')
+  const result = await db
+    .selectFrom('stratos_posts')
     .select('boundary_domains')
     .where('did', '=', viewerDid)
     .execute()
-    
+
   const domains = new Set<string>()
   for (const row of result) {
     const boundaries = JSON.parse(row.boundary_domains)
@@ -609,7 +633,7 @@ async function getViewerDomains(viewerDid: string): Promise<string[]> {
       domains.add(domain)
     }
   }
-  
+
   return [...domains]
 }
 ```
@@ -625,26 +649,26 @@ import { Kysely } from 'kysely'
 
 class StratosIndexer {
   private cursors = new Map<string, number>()
-  
+
   constructor(
     private db: Kysely<AppViewDb>,
     private idResolver: IdResolver,
     private stratosEndpoint: string,
   ) {}
-  
+
   async startIndexing(enrolledDids: string[]) {
     for (const did of enrolledDids) {
       const cursor = await this.loadCursor(did)
       this.subscribeToUser(did, cursor)
     }
   }
-  
+
   private async subscribeToUser(did: string, cursor?: number) {
     const ws = await this.connectWithAuth(did, cursor)
-    
+
     ws.on('message', async (data) => {
       const event = this.decodeEvent(data)
-      
+
       if (event.$type === 'app.stratos.sync.subscribeRecords#commit') {
         await this.db.transaction().execute(async (tx) => {
           for (const op of event.ops) {
@@ -654,22 +678,23 @@ class StratosIndexer {
         })
       }
     })
-    
+
     ws.on('close', () => {
       // Reconnect after delay
       setTimeout(() => this.subscribeToUser(did, this.cursors.get(did)), 5000)
     })
   }
-  
+
   private async processOp(tx: any, did: string, op: RecordOp) {
     const uri = `at://${did}/${op.path}`
-    
+
     if (op.action === 'delete') {
       await tx.deleteFrom('stratos_posts').where('uri', '=', uri).execute()
     } else {
-      const boundaries = op.record?.boundary?.values?.map(d => d.value) ?? []
-      
-      await tx.insertInto('stratos_posts')
+      const boundaries = op.record?.boundary?.values?.map((d) => d.value) ?? []
+
+      await tx
+        .insertInto('stratos_posts')
         .values({
           uri,
           did,
@@ -679,10 +704,12 @@ class StratosIndexer {
           boundary_domains: JSON.stringify(boundaries),
           indexed_at: new Date().toISOString(),
         })
-        .onConflict(oc => oc.column('uri').doUpdateSet({
-          record: JSON.stringify(op.record),
-          boundary_domains: JSON.stringify(boundaries),
-        }))
+        .onConflict((oc) =>
+          oc.column('uri').doUpdateSet({
+            record: JSON.stringify(op.record),
+            boundary_domains: JSON.stringify(boundaries),
+          }),
+        )
         .execute()
     }
   }
@@ -726,17 +753,18 @@ For high-traffic deployments:
 
 ### Authentication
 
-| Endpoint | Auth Required | Auth Type |
-|----------|--------------|-----------|
-| `/oauth/*` | No | Public enrollment flow |
-| `createRecord`, `deleteRecord` | Yes | OAuth access token |
-| `getRecord`, `listRecords` | Optional | Used for boundary filtering |
-| `subscribeRecords` | Yes | Service auth JWT |
-| `/_health` | No | Public health check |
+| Endpoint                       | Auth Required | Auth Type                   |
+| ------------------------------ | ------------- | --------------------------- |
+| `/oauth/*`                     | No            | Public enrollment flow      |
+| `createRecord`, `deleteRecord` | Yes           | OAuth access token          |
+| `getRecord`, `listRecords`     | Optional      | Used for boundary filtering |
+| `subscribeRecords`             | Yes           | Service auth JWT            |
+| `/_health`                     | No            | Public health check         |
 
 ### Boundary Enforcement
 
 Records are validated on write:
+
 - Boundary domains must be in `STRATOS_ALLOWED_DOMAINS`
 - Cross-namespace embeds are rejected (no `app.bsky` references in stratos records)
 
@@ -744,11 +772,11 @@ Records are validated on write:
 
 Recommended rate limits:
 
-| Endpoint | Limit |
-|----------|-------|
-| `createRecord` | 100/minute per user |
-| `getRecord` | 1000/minute per IP |
-| OAuth authorize | 10/minute per IP |
+| Endpoint        | Limit               |
+| --------------- | ------------------- |
+| `createRecord`  | 100/minute per user |
+| `getRecord`     | 1000/minute per IP  |
+| OAuth authorize | 10/minute per IP    |
 
 ---
 
@@ -757,14 +785,17 @@ Recommended rate limits:
 ### Common Issues
 
 **"NotEnrolled" error when creating records**
+
 - User hasn't completed OAuth enrollment
 - Enrollment was rejected (check allowlist configuration)
 
 **Empty subscription stream**
+
 - Verify service auth is configured correctly
 - Check cursor isn't ahead of latest sequence
 
 **OAuth callback fails**
+
 - Verify `redirect_uris` in client metadata matches configuration
 - Check PDS is reachable for token exchange
 

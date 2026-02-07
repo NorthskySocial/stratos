@@ -1,4 +1,4 @@
-import type { Enrollment, EnrollmentConfig, EnrollmentValidationResult } from './types.js'
+import type { Enrollment, EnrollmentValidationResult } from './types.js'
 
 /**
  * Port interface for enrollment service.

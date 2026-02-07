@@ -11,8 +11,9 @@
   "scripts": {
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write .",
     "test": "vitest",
-    "lint": "eslint --ext .ts src",
     "codegen": "pnpm --filter stratos-service run codegen"
   },
   "devDependencies": {
@@ -20,6 +21,7 @@
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
     "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

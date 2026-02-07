@@ -6,7 +6,6 @@ import {
   isBskyUri,
   isStratosCollection,
   extractBoundaryDomains,
-  StratosValidationErrorCode,
 } from '../src/validation/stratos-validation.js'
 import { StratosConfig, StratosValidationError } from '../src/types.js'
 
@@ -19,7 +18,7 @@ describe('stratos-validation', () => {
   describe('assertStratosValidation', () => {
     it('should pass for non-stratos collections', () => {
       const record = { text: 'hello' }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.bsky.feed.post', validConfig)
       }).not.toThrow()
@@ -30,7 +29,7 @@ describe('stratos-validation', () => {
         text: 'test',
         boundary: { values: [{ value: 'example.com' }] },
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', undefined)
       }).toThrow(StratosValidationError)
@@ -41,8 +40,11 @@ describe('stratos-validation', () => {
         text: 'test',
         boundary: { values: [{ value: 'example.com' }] },
       }
-      const emptyConfig: StratosConfig = { allowedDomains: [], retentionDays: 90 }
-      
+      const emptyConfig: StratosConfig = {
+        allowedDomains: [],
+        retentionDays: 90,
+      }
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', emptyConfig)
       }).toThrow(StratosValidationError)
@@ -54,7 +56,7 @@ describe('stratos-validation', () => {
         boundary: { values: [{ value: 'example.com' }] },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).not.toThrow()
@@ -64,14 +66,11 @@ describe('stratos-validation', () => {
       const record = {
         text: 'test',
         boundary: {
-          values: [
-            { value: 'example.com' },
-            { value: 'corp.example.com' },
-          ],
+          values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
         },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).not.toThrow()
@@ -82,7 +81,7 @@ describe('stratos-validation', () => {
         text: 'test',
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).toThrow('must have a boundary')
@@ -94,7 +93,7 @@ describe('stratos-validation', () => {
         boundary: { values: [] },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).toThrow('must have a boundary')
@@ -106,7 +105,7 @@ describe('stratos-validation', () => {
         boundary: { values: [{ value: 'other.com' }] },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).toThrow('not allowed')
@@ -117,12 +116,18 @@ describe('stratos-validation', () => {
         text: 'test',
         boundary: { values: [{ value: 'example.com' }] },
         reply: {
-          parent: { uri: 'at://did:plc:abc/app.bsky.feed.post/123', cid: 'bafyabc' },
-          root: { uri: 'at://did:plc:abc/app.bsky.feed.post/123', cid: 'bafyabc' },
+          parent: {
+            uri: 'at://did:plc:abc/app.bsky.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/app.bsky.feed.post/123',
+            cid: 'bafyabc',
+          },
         },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).toThrow('cannot reply to a non-stratos record')
@@ -133,12 +138,18 @@ describe('stratos-validation', () => {
         text: 'test',
         boundary: { values: [{ value: 'example.com' }] },
         reply: {
-          parent: { uri: 'at://did:plc:abc/app.stratos.feed.post/123', cid: 'bafyabc' },
-          root: { uri: 'at://did:plc:abc/app.stratos.feed.post/456', cid: 'bafydef' },
+          parent: {
+            uri: 'at://did:plc:abc/app.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/app.stratos.feed.post/456',
+            cid: 'bafydef',
+          },
         },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).not.toThrow()
@@ -150,11 +161,14 @@ describe('stratos-validation', () => {
         boundary: { values: [{ value: 'example.com' }] },
         embed: {
           $type: 'app.bsky.embed.record',
-          record: { uri: 'at://did:plc:abc/app.bsky.feed.post/123', cid: 'bafyabc' },
+          record: {
+            uri: 'at://did:plc:abc/app.bsky.feed.post/123',
+            cid: 'bafyabc',
+          },
         },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).toThrow('cannot embed bsky content')
@@ -166,11 +180,14 @@ describe('stratos-validation', () => {
         boundary: { values: [{ value: 'example.com' }] },
         embed: {
           $type: 'app.bsky.embed.record',
-          record: { uri: 'at://did:plc:abc/app.stratos.feed.post/123', cid: 'bafyabc' },
+          record: {
+            uri: 'at://did:plc:abc/app.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
         },
         createdAt: new Date().toISOString(),
       }
-      
+
       expect(() => {
         assertStratosValidation(record, 'app.stratos.feed.post', validConfig)
       }).not.toThrow()
@@ -184,7 +201,7 @@ describe('stratos-validation', () => {
           record: { uri: 'at://did:plc:abc/app.stratos.feed.post/123' },
         },
       }
-      
+
       expect(() => {
         assertBskyNoCrossNamespaceEmbed(record, 'app.stratos.feed.post')
       }).not.toThrow()
@@ -192,7 +209,7 @@ describe('stratos-validation', () => {
 
     it('should pass for bsky post without embed', () => {
       const record = { text: 'hello' }
-      
+
       expect(() => {
         assertBskyNoCrossNamespaceEmbed(record, 'app.bsky.feed.post')
       }).not.toThrow()
@@ -205,7 +222,7 @@ describe('stratos-validation', () => {
           record: { uri: 'at://did:plc:abc/app.bsky.feed.post/123' },
         },
       }
-      
+
       expect(() => {
         assertBskyNoCrossNamespaceEmbed(record, 'app.bsky.feed.post')
       }).not.toThrow()
@@ -218,7 +235,7 @@ describe('stratos-validation', () => {
           record: { uri: 'at://did:plc:abc/app.stratos.feed.post/123' },
         },
       }
-      
+
       expect(() => {
         assertBskyNoCrossNamespaceEmbed(record, 'app.bsky.feed.post')
       }).toThrow('cannot embed stratos content')
@@ -227,13 +244,21 @@ describe('stratos-validation', () => {
 
   describe('isStratosUri', () => {
     it('should return true for stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(true)
-      expect(isStratosUri('at://did:plc:abc/app.stratos.actor.profile/self')).toBe(true)
+      expect(isStratosUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(
+        true,
+      )
+      expect(
+        isStratosUri('at://did:plc:abc/app.stratos.actor.profile/self'),
+      ).toBe(true)
     })
 
     it('should return false for non-stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(false)
-      expect(isStratosUri('at://did:plc:abc/com.atproto.repo.record/123')).toBe(false)
+      expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(
+        false,
+      )
+      expect(isStratosUri('at://did:plc:abc/com.atproto.repo.record/123')).toBe(
+        false,
+      )
     })
 
     it('should return false for invalid URIs', () => {
@@ -246,12 +271,18 @@ describe('stratos-validation', () => {
   describe('isBskyUri', () => {
     it('should return true for bsky URIs', () => {
       expect(isBskyUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(true)
-      expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(true)
+      expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
+        true,
+      )
     })
 
     it('should return false for non-bsky URIs', () => {
-      expect(isBskyUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(false)
-      expect(isBskyUri('at://did:plc:abc/com.atproto.repo.record/123')).toBe(false)
+      expect(isBskyUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(
+        false,
+      )
+      expect(isBskyUri('at://did:plc:abc/com.atproto.repo.record/123')).toBe(
+        false,
+      )
     })
 
     it('should return false for invalid URIs', () => {
@@ -264,7 +295,9 @@ describe('stratos-validation', () => {
     it('should return true for stratos collections', () => {
       expect(isStratosCollection('app.stratos.feed.post')).toBe(true)
       expect(isStratosCollection('app.stratos.actor.profile')).toBe(true)
-      expect(isStratosCollection('app.stratos.some.future.collection')).toBe(true)
+      expect(isStratosCollection('app.stratos.some.future.collection')).toBe(
+        true,
+      )
     })
 
     it('should return false for non-stratos collections', () => {
@@ -278,14 +311,14 @@ describe('stratos-validation', () => {
     it('should extract domains from valid boundary', () => {
       const record = {
         boundary: {
-          values: [
-            { value: 'example.com' },
-            { value: 'corp.example.com' },
-          ],
+          values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
         },
       }
-      
-      expect(extractBoundaryDomains(record)).toEqual(['example.com', 'corp.example.com'])
+
+      expect(extractBoundaryDomains(record)).toEqual([
+        'example.com',
+        'corp.example.com',
+      ])
     })
 
     it('should return empty array for missing boundary', () => {

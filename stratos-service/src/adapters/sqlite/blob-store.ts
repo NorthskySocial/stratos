@@ -4,7 +4,7 @@
  * Implements BlobMetadataReader/Writer for SQLite backend.
  */
 import { CID } from 'multiformats/cid'
-import { eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type {
   BlobMetadataReader,
   BlobMetadataWriter,
@@ -30,7 +30,9 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       .limit(1)
 
     const row = rows[0]
-    if (!row) return null
+    if (!row) {
+      return null
+    }
 
     return {
       cid,

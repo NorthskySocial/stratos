@@ -1,21 +1,19 @@
 import http from 'node:http'
 import express from 'express'
 import cors from 'cors'
-import { IdResolver } from '@atproto/identity'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
 
 import {
   type AppContext,
-  type AppContextOptions,
   createAppContext,
   destroyAppContext,
 } from './context.js'
 import { createLogger } from './logger.js'
 import { type StratosServiceConfig, envToConfig, parseEnv } from './config.js'
 import { registerHandlers } from './api/handlers.js'
-import { registerSubscribeRecords } from './subscription/subscribe-records.js'
+import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 import { registerEnrollmentHandlers } from './features/index.js'
@@ -106,11 +104,18 @@ export class StratosServer {
         err: Error,
         _req: express.Request,
         res: express.Response,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _next: express.NextFunction,
       ) => {
         console.error('Express error:', err.message)
         console.error(err.stack)
-        ctx.logger?.error({ err: err.message, stack: cfg.stratos.devMode ? err.stack : undefined }, 'server error')
+        ctx.logger?.error(
+          {
+            err: err.message,
+            stack: cfg.stratos.devMode ? err.stack : undefined,
+          },
+          'server error',
+        )
         res.status(500).json({
           error: 'InternalServerError',
           message: cfg.stratos.devMode ? err.message : 'Internal server error',
@@ -196,11 +201,18 @@ export async function main(): Promise<void> {
 
   const cborToRecord = (bytes: Uint8Array): Record<string, unknown> => {
     const data = cborDecode(bytes)
-    if (isTypedLexMap(data)) return data
+    if (isTypedLexMap(data)) {
+      return data
+    }
     throw new Error('Expected record with $type property')
   }
 
-  const server = await StratosServer.create(cfg, blobstore, cborToRecord, logger)
+  const server = await StratosServer.create(
+    cfg,
+    blobstore,
+    cborToRecord,
+    logger,
+  )
   await server.start()
 
   process.on('SIGTERM', async () => {

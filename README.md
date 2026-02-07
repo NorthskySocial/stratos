@@ -70,6 +70,7 @@ cp .env.example .env
 ```
 
 Required variables:
+
 - `STRATOS_SERVICE_DID` - Unique identifier for your Stratos instance
 - `STRATOS_PUBLIC_URL` - Public URL where the service is accessible
 - `STRATOS_ALLOWED_DOMAINS` - Comma-separated boundary domains
@@ -103,16 +104,16 @@ STRATOS_S3_SECRET_KEY=minioadmin
 
 The Stratos service is configured via environment variables:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `STRATOS_SERVICE_DID` | Service DID (e.g., `did:web:stratos.example.com`) | Required |
-| `STRATOS_PORT` | HTTP port | `3100` |
-| `STRATOS_PUBLIC_URL` | Public URL for the service | Required |
-| `STRATOS_DATA_DIR` | Directory for SQLite databases | `./data` |
-| `STRATOS_ALLOWED_DOMAINS` | Comma-separated list of valid boundary domains | Required |
-| `STRATOS_ENROLLMENT_MODE` | `open` or `allowlist` | `allowlist` |
-| `STRATOS_ALLOWED_DIDS` | Comma-separated list of allowed DIDs | `[]` |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs | `[]` |
+| Variable                        | Description                                       | Default     |
+| ------------------------------- | ------------------------------------------------- | ----------- |
+| `STRATOS_SERVICE_DID`           | Service DID (e.g., `did:web:stratos.example.com`) | Required    |
+| `STRATOS_PORT`                  | HTTP port                                         | `3100`      |
+| `STRATOS_PUBLIC_URL`            | Public URL for the service                        | Required    |
+| `STRATOS_DATA_DIR`              | Directory for SQLite databases                    | `./data`    |
+| `STRATOS_ALLOWED_DOMAINS`       | Comma-separated list of valid boundary domains    | Required    |
+| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist` |
+| `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`        |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`        |
 
 ## Enrollment
 
@@ -126,6 +127,7 @@ Users enroll via OAuth authentication. The service validates enrollment based on
 ### @northskysocial/stratos-core
 
 Shared library containing:
+
 - Validation logic for stratos records
 - Database schema and migrations
 - Storage abstractions (repo, record, blob)
@@ -133,6 +135,7 @@ Shared library containing:
 ### @northskysocial/stratos-service
 
 Standalone HTTP service providing:
+
 - OAuth authorization server
 - XRPC endpoints for record CRUD
 - WebSocket subscription for AppView indexing
