@@ -17,12 +17,15 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-
-    /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "@northsky/stratos-core": ["../stratos-core/src"],
+      "@northsky/stratos-service": ["../stratos-service/src"]
+    }
   },
   "exclude": ["node_modules", "dist"]
 }

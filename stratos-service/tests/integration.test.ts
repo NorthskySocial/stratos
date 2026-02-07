@@ -28,6 +28,7 @@ import {
 import {StratosActorStore, SqliteEnrollmentStore} from '../src/context.js'
 import {validateEnrollment, EnrollmentConfig} from '../src/auth/index.ts'
 import {createServiceDb, migrateServiceDb, closeServiceDb, ServiceDb} from '../src/db/index.js'
+import {Readable} from "node:stream";
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Buffer): Promise<CID> => {
@@ -54,7 +55,7 @@ function createMockBlobStore(): BlobStore {
       }
     }),
     putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Buffer | Readable) => {
-      if (bytes instanceof Buffer) {
+      if (Buffer.isBuffer(bytes)) {
         storage.set(cid.toString(), bytes)
       } else {
         const chunks: Buffer[] = []
@@ -131,6 +132,7 @@ function createMockIdResolver(didDoc: { id: string; service?: any[] } | null) {
     did: {
       resolve: vi.fn().mockResolvedValue(didDoc),
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any
 }
 

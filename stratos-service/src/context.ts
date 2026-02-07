@@ -31,12 +31,12 @@ import {
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
-} from './features/index.js'
+} from './features/index.ts'
 import {StubWriterServiceImpl} from './features/index.ts'
 
-import {StratosServiceConfig, getServiceDidWithFragment} from './config.js'
-import {createOAuthClient} from './oauth/client.js'
-import {EnrollmentStore, EnrollmentRecord} from './oauth/routes.js'
+import {StratosServiceConfig, getServiceDidWithFragment} from './config.ts'
+import {createOAuthClient} from './oauth/client.ts'
+import {EnrollmentStore, EnrollmentRecord} from './oauth/routes.ts'
 import {
   createServiceDb,
   migrateServiceDb,
@@ -44,9 +44,9 @@ import {
   ServiceDb,
   enrollment,
   enrollmentBoundary,
-} from './db/index.js'
-import {PdsTokenVerifier} from './auth/index.js'
-import {DpopVerifier} from './auth/index.js'
+} from './db/index.ts'
+import {PdsTokenVerifier} from './auth/index.ts'
+import {DpopVerifier} from './auth/index.ts'
 
 /**
  * Per-actor Stratos store for reading
@@ -68,6 +68,7 @@ export interface StratosActorTransactor {
   repo: StratosSqlRepoTransactor
   blob: StratosBlobTransactor
 }
+
 /**
  * Actor store manager for Stratos
  */
