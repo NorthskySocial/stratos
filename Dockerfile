@@ -46,5 +46,6 @@ ENV NODE_ENV=production
 ENV STRATOS_PORT=3100
 ENV STRATOS_DATA_DIR=/app/data
 
-# Run the service using tsx (TypeScript execution)
-CMD ["pnpm", "exec", "tsx", "stratos-service/src/bin/stratos.ts"]
+# Run the service using tsx from stratos-service (where it's installed)
+WORKDIR /app/stratos-service
+CMD ["pnpm", "exec", "tsx", "src/bin/stratos.ts"]
