@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run -A
 // Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
-import { PROJECT_ROOT } from './lib/config.ts'
+import { PROJECT_ROOT, TEST_DATA_DIR } from './lib/config.ts'
 import { section, info, pass, fail, warn } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
@@ -46,17 +46,17 @@ async function run() {
   }
 
   // // Clean up test data
-  // info("Removing test-data directory...");
-  // try {
-  //   await Deno.remove(TEST_DATA_DIR, { recursive: true });
-  //   pass("test-data removed");
-  // } catch (err) {
-  //   if (err instanceof Deno.errors.NotFound) {
-  //     info("test-data directory already absent");
-  //   } else {
-  //     warn(`Could not remove test-data: ${err}`);
-  //   }
-  // }
+  info("Removing test-data directory...");
+  try {
+    await Deno.remove(TEST_DATA_DIR, { recursive: true });
+    pass("test-data removed");
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      info("test-data directory already absent");
+    } else {
+      warn(`Could not remove test-data: ${err}`);
+    }
+  }
 
   info('Teardown complete')
 }
