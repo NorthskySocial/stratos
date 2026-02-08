@@ -39,9 +39,9 @@ interface RecordSource {
 ```json
 {
   "$type": "app.stratos.feed.post",
-  "text": "Private message for my team",
+  "text": "Private message for my community",
   "boundary": {
-    "values": [{ "value": "engineering.example.com" }]
+    "values": [{ "value": "fanart" }]
   },
   "createdAt": "2024-01-15T12:00:00.000Z"
 }
@@ -76,19 +76,19 @@ interface RecordSource {
 ┌──────────────┐     ┌──────────────────┐     ┌─────────────────────────────┐
 │    CLIENT    │     │     APPVIEW      │     │     STRATOS SERVICE         │
 │              │     │                  │     │                             │
-│  Write post  │────▶│                  │     │  1. Store full record       │
+│  Write post  │───▶│                  │     │  1. Store full record       │
 │              │     │                  │     │  2. Write stub to PDS       │
 │              │     │                  │     │                             │
-│              │     │  Index stubs     │◀────│  subscribeRecords firehose  │
+│              │     │  Index stubs     │◀───│  subscribeRecords firehose  │
 │              │     │  (detects source │     │  (streams commits)          │
 │              │     │   field)         │     │                             │
 │              │     │                  │     │                             │
-│  Get feed    │────▶│  Generate        │     │                             │
+│  Get feed    │───▶│  Generate        │     │                             │
 │              │     │  skeleton        │     │                             │
-│              │◀────│       │          │     │                             │
+│              │◀───│       │          │     │                             │
 │              │     │       ▼          │     │                             │
-│              │     │  getRecord()  ───┼────▶│  com.atproto.repo.getRecord │
-│              │     │  from source     │◀────│  (boundary-filtered)        │
+│              │     │  getRecord()  ───┼───▶│  com.atproto.repo.getRecord │
+│              │     │  from source     │◀───│  (boundary-filtered)        │
 └──────────────┘     └──────────────────┘     └─────────────────────────────┘
                               │
                               │ Resolve service DID
@@ -216,7 +216,7 @@ X-Stratos-Viewer: did:plc:viewer
     "$type": "app.stratos.feed.post",
     "text": "Full private content",
     "boundary": {
-      "values": [{ "value": "engineering.example.com" }]
+      "values": [{ "value": "fanart" }]
     },
     "createdAt": "2024-01-15T12:00:00.000Z"
   }
@@ -326,11 +326,11 @@ function isAuthorized(
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    ENROLLMENT WITH PROFILE RECORD                            │
+│                    ENROLLMENT WITH PROFILE RECORD                           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 1. User initiates enrollment at Stratos service
-   GET https://stratos.corp.example.com/oauth/authorize?handle=alice.bsky.social
+   GET https://stratos.community.example.com/oauth/authorize?handle=alice.bsky.social
 
 2. Stratos redirects to user's PDS OAuth
    - Requests scopes: atproto, transition:generic
@@ -339,7 +339,7 @@ function isAuthorized(
 3. User authorizes on PDS
 
 4. PDS redirects back with auth code
-   GET https://stratos.corp.example.com/oauth/callback?code=...
+   GET https://stratos.community.example.com/oauth/callback?code=...
 
 5. Stratos exchanges code for tokens
 
@@ -354,8 +354,8 @@ function isAuthorized(
      "record": {
        "$type": "app.stratos.actor.enrollment",
        "services": [{
-         "endpoint": "https://stratos.corp.example.com",
-         "boundaries": ["engineering", "all-hands"],
+         "endpoint": "https://stratos.community.example.com",
+         "boundaries": ["fanart", "cosplay"],
          "enrolledAt": "2026-02-06T12:00:00Z"
        }],
        "createdAt": "2026-02-06T12:00:00Z"
@@ -375,7 +375,7 @@ After enrollment, clients authenticate using DPoP (Demonstration of Proof-of-Pos
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         DPOP AUTHENTICATION FLOW                             │
+│                         DPOP AUTHENTICATION FLOW                            │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 1. Client generates DPoP proof (JWT signed with ephemeral key)
@@ -587,7 +587,7 @@ openssl ecparam -name secp256k1 -genkey -noout -out stratos-key.pem
 openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 
 # Create did:web for service
-# DID: did:web:stratos.corp.example.com
+# DID: did:web:stratos.community.example.com
 # Host /.well-known/did.json with service verification methods
 ```
 
@@ -603,36 +603,6 @@ openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 | Data leakage              | Hydration respects boundaries, no full data in subscription |
 | Cross-service correlation | Boundaries are service-local by default                     |
 
----
-
-## Implementation Phases
-
-### Phase 1: Core Refactoring ✅
-
-- [x] Restructure to feature-sliced architecture
-- [x] Define new lexicons (defs.json with source field)
-- [x] Update enrollment to write profile record
-
-### Phase 2: Source Field Implementation ✅
-
-- [x] Implement `StubWriterService` port/adapter
-- [x] Add dual-write logic (Stratos + PDS stub)
-- [x] Update `getRecord` for service auth with boundary-aware filtering
-- [x] Remove deprecated custom hydration endpoints
-
-### Phase 3: Integration ✅
-
-- [x] Integration tests for stub writing
-- [x] Unit tests for stub domain logic
-- [x] Documentation updates
-
-### Phase 4: Hydration Feature ✅
-
-- [x] Implement `HydrationService` port/adapter in stratos-core
-- [x] Add boundary-aware access control domain logic
-- [x] Implement batch hydration endpoints (`app.stratos.repo.hydrateRecords`)
-- [x] Add single record hydration endpoint (`app.stratos.repo.hydrateRecord`)
-- [x] Unit tests for hydration domain logic
 
 ---
 
