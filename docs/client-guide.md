@@ -29,9 +29,8 @@ only to members of specific groups or communities.
 | ------------------- | ----------------------------------------------------------------- |
 | **Stratos Service** | A server that stores private records (separate from PDS)          |
 | **Enrollment**      | User must enroll with a Stratos service to create private content |
-| **Domain Boundary**        | Specifies which community boundaries can view a record            |
+| **Domain Boundary** | Specifies which community boundaries can view a record            |
 | **Private Post**    | An `app.stratos.feed.post` record with boundary restrictions      |
-
 
 ## Quick Start
 
@@ -77,7 +76,7 @@ const response = await fetch(
       collection: 'app.stratos.feed.post',
       record: {
         $type: 'app.stratos.feed.post',
-        text: 'This is a private post for my community!',        
+        text: 'This is a private post for my community!',
         boundary: {
           $type: 'app.stratos.boundary.defs#Domains',
           values: [
@@ -532,10 +531,7 @@ const crossDomainPost = {
   $type: 'app.stratos.feed.post',
   text: 'Announcement for both groups',
   boundary: {
-    values: [
-      { value: 'fanart' },
-      { value: 'cosplay' },
-    ],
+    values: [{ value: 'fanart' }, { value: 'cosplay' }],
   },
   createdAt: new Date().toISOString(),
 }
@@ -563,9 +559,7 @@ function StratosEnrollmentPrompt({ handle, onEnroll }) {
   return (
     <div className="enrollment-prompt">
       <h3>Enable Private Posts</h3>
-      <p>
-        Connect to Stratos to create posts visible only to your community.
-      </p>
+      <p>Connect to Stratos to create posts visible only to your community.</p>
       <button onClick={() => onEnroll(handle)}>Enable Private Posts</button>
     </div>
   )

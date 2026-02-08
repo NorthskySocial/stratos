@@ -603,7 +603,6 @@ openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 | Data leakage              | Hydration respects boundaries, no full data in subscription |
 | Cross-service correlation | Boundaries are service-local by default                     |
 
-
 ---
 
 ## References
