@@ -20,23 +20,23 @@ with an AppView for domain-scoped private content.
 ### What is Stratos?
 
 Stratos is a **private namespace service** for ATProtocol that enables users to store content
-visible only within specific organization domains. Unlike public `app.bsky` records that are
+visible only within specific community domains. Unlike public `app.bsky` records that are
 globally visible, Stratos records have **domain boundaries** that restrict visibility.
 
 ### Key Concepts
 
-| Concept              | Description                                                               |
-| -------------------- | ------------------------------------------------------------------------- |
-| **Domain Boundary**  | A list of domains (e.g., `example.com`) that defines who can see a record |
-| **Enrollment**       | The process of a user registering with a Stratos service via OAuth        |
-| **Service DID**      | The decentralized identifier for the Stratos service itself               |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content         |
+| Concept              | Description                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| **Domain Boundary**  | A list of Domain boundary names (e.g., `fanart`) that defines who can see a record |
+| **Enrollment**       | The process of a user registering with a Stratos service via OAuth                 |
+| **Service DID**      | The decentralized identifier for the Stratos service itself                        |
+| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content                  |
 
 ### Use Cases
 
-- **Organization-private feeds**: Company internal social feeds
+- **Community-private feeds**: Fandom and community social feeds
 - **Gated communities**: Content visible only to verified domain members
-- **Multi-tenant applications**: SaaS apps with per-organization data isolation
+- **Multi-community platforms**: Apps with per-community data isolation
 
 ---
 
@@ -50,7 +50,7 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
-│  │  User's PDS  │◀──▶│  Stratos Service │◀──▶│     AppView      │  │
+│  │  User's PDS  │◀──▶│Stratos Service │◀──▶│     AppView      │  │
 │  └──────────────┘    └──────────────────┘    └──────────────────┘  │
 │         │                     │                       │             │
 │         │ OAuth               │ Per-user              │ Indexed     │
@@ -94,7 +94,7 @@ Creates enrollment record + per-user SQLite database
 ```
 Client ──▶ Stratos com.atproto.repo.createRecord
            { collection: "app.stratos.feed.post",
-             record: { text: "...", boundary: { values: [{ value: "example.com" }] } }
+             record: { text: "...", boundary: { values: [{ value: "fanart" }] } }
            }
          │
          ▼
@@ -291,7 +291,7 @@ STRATOS_OAUTH_CLIENT_URI="https://stratos.example.com"
 STRATOS_OAUTH_REDIRECT_URI="https://stratos.example.com/oauth/callback"
 
 # Allowed boundary domains (records can only have these domains)
-STRATOS_ALLOWED_DOMAINS="example.com,subsidiary.example.com"
+STRATOS_ALLOWED_DOMAINS="general,writers"
 
 # Service Auth (AppViews that can call getRecord with viewer header)
 STRATOS_ALLOWED_APPVIEWS="did:web:appview.example.com"
@@ -358,7 +358,7 @@ curl https://stratos.example.com/xrpc/app.stratos.enrollment.status?did=did:plc:
 | Mode        | Description                       | Use Case                 |
 | ----------- | --------------------------------- | ------------------------ |
 | `open`      | Any ATProto user can enroll       | Public services, testing |
-| `allowlist` | Only approved users/PDS endpoints | Organization deployments |
+| `allowlist` | Only approved users/PDS endpoints | Community deployments    |
 
 ### Allowlist Configuration
 
@@ -371,7 +371,7 @@ STRATOS_ALLOWED_DIDS="did:plc:user1,did:plc:user2,did:plc:user3"
 **By PDS Endpoint** - Allow all users from specific PDS instances:
 
 ```bash
-STRATOS_ALLOWED_PDS_ENDPOINTS="https://company-pds.example.com"
+STRATOS_ALLOWED_PDS_ENDPOINTS="https://community-pds.example.com"
 ```
 
 Both can be combined - a user is allowed if they match **either** list.
@@ -381,7 +381,7 @@ Both can be combined - a user is allowed if they match **either** list.
 Restrict which domains can appear in record boundaries:
 
 ```bash
-STRATOS_ALLOWED_DOMAINS="example.com,corp.example.com"
+STRATOS_ALLOWED_DOMAINS="general,fanart"
 ```
 
 Records with boundaries outside this list will be rejected.
@@ -649,8 +649,8 @@ async function getViewerDomains(viewerDid: string): Promise<string[]> {
 }
 ```
 
-**Option B: Organization directory lookup**
-Query an organization service for verified domain membership.
+**Option B: Community registry lookup**
+Query a community service for verified domain membership.
 
 ### Complete Integration Example
 
