@@ -68,6 +68,7 @@ export function filterAccessibleRecords<
  */
 export function parseServiceEndpoint(serviceEndpoint: string): string | null {
   try {
+    console.debug(`Parsing service endpoint: ${serviceEndpoint}`)
     const url = new URL(serviceEndpoint)
     // Convert hostname to did:web format
     // e.g., stratos.example.com -> did:web:stratos.example.com

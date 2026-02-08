@@ -15,7 +15,8 @@
     "lint": "eslint test && pnpm -r run lint",
     "format": "prettier --write .",
     "test": "vitest",
-    "codegen": "pnpm --filter stratos-service run codegen"
+    "codegen": "pnpm --filter stratos-service run codegen",
+    "e2etest": "deno run -A test/scripts/run-all.ts --direct"
   },
   "devDependencies": {
     "@types/deno": "^2.5.0",

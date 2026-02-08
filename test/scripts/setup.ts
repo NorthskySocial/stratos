@@ -1,26 +1,34 @@
 #!/usr/bin/env -S deno run -A
 // Setup script — creates PDS accounts, starts Stratos via Docker Compose, waits for health.
 
-import { TEST_USERS, PROJECT_ROOT } from './lib/config.ts'
+import { TEST_USERS, PROJECT_ROOT, TEST_DATA_DIR } from './lib/config.ts'
 import { createInviteCode, createAccount, accountExists } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { saveState, type TestState } from './lib/state.ts'
-import { section, info, pass, fail, warn } from './lib/log.ts'
+import { section, info, pass, fail, warn, error } from './lib/log.ts'
 
 async function run() {
   section('Phase 1: Setup')
 
-  // 1. Ensure test-data directory exists and is writable by the container (uid 1000)
-  // info("Preparing test-data directory...");
-  // try {
-  //   await Deno.remove(TEST_DATA_DIR, { recursive: true });
-  // } catch {
-  //   error("Failed to remove existing test-data directory (may not exist)", { error: String(err) });
-  // }
-  // await Deno.mkdir(TEST_DATA_DIR, { recursive: true });
+  // 1. Ensure the test-data directory exists and is writable by the container (uid 1000)
+  info('Preparing test-data directory...')
+  try {
 
-  // const chmod = new Deno.Command("chmod", { args: ["777", TEST_DATA_DIR] });
-  // await chmod.output();
+    await Deno.remove(TEST_DATA_DIR, { recursive: true })
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) {
+      error('Failed to remove existing test-data directory (may not exist)', {
+        error: String(err),
+      })
+    } else {
+      info('test-data directory already absent')
+    }
+
+  }
+  await Deno.mkdir(TEST_DATA_DIR, { recursive: true })
+
+  const chmod = new Deno.Command('chmod', { args: ['777', TEST_DATA_DIR] })
+  await chmod.output()
 
   // 2. Create PDS accounts
   section('Creating PDS accounts')
@@ -29,7 +37,7 @@ async function run() {
   for (const [key, user] of Object.entries(TEST_USERS)) {
     info(`Checking account: ${user.handle}`)
 
-    // Check if account already exists
+    // Check if the account already exists
     const existing = await accountExists(user.handle, user.password)
     if (existing.exists && existing.did) {
       warn(`Account ${user.handle} already exists (${existing.did})`)

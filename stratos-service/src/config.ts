@@ -9,7 +9,7 @@ const envSchema = z.object({
   /** Fragment for service entry in DID document (e.g., 'atproto_pns') */
   STRATOS_SERVICE_FRAGMENT: z.string().default('atproto_pns'),
   STRATOS_PORT: z.coerce.number().int().positive().default(3100),
-  STRATOS_PUBLIC_URL: z.string().url(),
+  STRATOS_PUBLIC_URL: z.url(),
 
   // Storage
   STRATOS_DATA_DIR: z.string().default('./data'),

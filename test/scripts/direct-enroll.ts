@@ -51,7 +51,7 @@ async function run() {
       await createActorStore(user.did)
       dim(`  Actor store created`)
 
-      // Enroll in service database with boundaries
+      // Enroll in the service database with boundaries
       enrollUser(user.did, pdsEndpoint, testUser.boundaries)
       dim(`  Enrolled with boundaries: ${testUser.boundaries.join(', ')}`)
 
