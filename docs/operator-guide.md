@@ -25,12 +25,12 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ### Key Concepts
 
-| Concept              | Description                                                               |
-| -------------------- | ------------------------------------------------------------------------- |
+| Concept              | Description                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------- |
 | **Domain Boundary**  | A list of Domain boundary names (e.g., `fanart`) that defines who can see a record |
-| **Enrollment**       | The process of a user registering with a Stratos service via OAuth        |
-| **Service DID**      | The decentralized identifier for the Stratos service itself               |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content         |
+| **Enrollment**       | The process of a user registering with a Stratos service via OAuth                 |
+| **Service DID**      | The decentralized identifier for the Stratos service itself                        |
+| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content                  |
 
 ### Use Cases
 
@@ -358,7 +358,7 @@ curl https://stratos.example.com/xrpc/app.stratos.enrollment.status?did=did:plc:
 | Mode        | Description                       | Use Case                 |
 | ----------- | --------------------------------- | ------------------------ |
 | `open`      | Any ATProto user can enroll       | Public services, testing |
-| `allowlist` | Only approved users/PDS endpoints | Community deployments |
+| `allowlist` | Only approved users/PDS endpoints | Community deployments    |
 
 ### Allowlist Configuration
 

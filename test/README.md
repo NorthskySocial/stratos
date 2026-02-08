@@ -16,11 +16,11 @@ npx playwright install chromium
 
 ## Test Users
 
-| User    | Handle pattern                    | Boundaries   |
-| ------- | --------------------------------- | ------------ |
-| Rei     | `rei-{id}.{PDS_HOST}`             | `swordsmith` |
-| Sakura  | `sakura-{id}.{PDS_HOST}`          | `swordsmith` |
-| kaoruko | `kaoruko-{id}.{PDS_HOST}`         | `aekea`      |
+| User    | Handle pattern            | Boundaries   |
+| ------- | ------------------------- | ------------ |
+| Rei     | `rei-{id}.{PDS_HOST}`     | `swordsmith` |
+| Sakura  | `sakura-{id}.{PDS_HOST}`  | `swordsmith` |
+| kaoruko | `kaoruko-{id}.{PDS_HOST}` | `aekea`      |
 
 Handles include a random 5-digit suffix (`{id}`) to avoid collisions with previous test runs. `{PDS_HOST}` comes from `test/scripts/.env`.
 
@@ -32,11 +32,11 @@ Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 The Deno test scripts load their own `.env` from `test/scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
 
-| Variable             | Example                  | Purpose                                          |
-| -------------------- | ------------------------ | ------------------------------------------------ |
-| `PDS_HOST`           | `pds.example.com`        | PDS hostname (without protocol) — used for handle construction and API calls |
-| `PDS_ADMIN_PASSWORD` | `your-admin-password`    | PDS admin password for account creation/deletion |
-| `STRATOS_URL`        | `http://localhost:3100`  | Stratos service URL the scripts call             |
+| Variable             | Example                 | Purpose                                                                      |
+| -------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PDS_HOST`           | `pds.example.com`       | PDS hostname (without protocol) — used for handle construction and API calls |
+| `PDS_ADMIN_PASSWORD` | `your-admin-password`   | PDS admin password for account creation/deletion                             |
+| `STRATOS_URL`        | `http://localhost:3100` | Stratos service URL the scripts call                                         |
 
 If you need to point at a different PDS, update these variables and the user handles in `test/scripts/lib/config.ts`.
 

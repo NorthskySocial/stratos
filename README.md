@@ -99,4 +99,3 @@ Standalone HTTP service providing:
 - OAuth authorization server
 - XRPC endpoints for record CRUD
 - WebSocket subscription for AppView indexing
-
