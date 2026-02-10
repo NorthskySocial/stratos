@@ -5,9 +5,13 @@ import { PROJECT_ROOT, TEST_DATA_DIR } from './lib/config.ts'
 import { section, info, pass, fail, warn } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
+import { stopNgrok } from './lib/ngrok.ts'
 
 async function run() {
   section('Teardown')
+
+  // Stop ngrok if running
+  await stopNgrok()
 
   // Delete test accounts from PDS
   info('Deleting test accounts from PDS...')

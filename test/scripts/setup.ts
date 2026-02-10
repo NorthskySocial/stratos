@@ -4,7 +4,7 @@
 import { TEST_USERS, PROJECT_ROOT, TEST_DATA_DIR } from './lib/config.ts'
 import { createInviteCode, createAccount, accountExists } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
-import { saveState, type TestState } from './lib/state.ts'
+import { saveState, loadState, type TestState } from './lib/state.ts'
 import { section, info, pass, fail, warn, error } from './lib/log.ts'
 
 async function run() {
@@ -12,6 +12,9 @@ async function run() {
 
   // 1. Ensure the test-data directory exists and is writable by the container (uid 1000)
   info('Preparing test-data directory...')
+  // We MUST load state BEFORE potentially removing the TEST_DATA_DIR where state is stored!
+  const state: TestState = await loadState()
+
   try {
     await Deno.remove(TEST_DATA_DIR, { recursive: true })
   } catch (err) {
@@ -30,7 +33,6 @@ async function run() {
 
   // 2. Create PDS accounts
   section('Creating PDS accounts')
-  const state: TestState = { users: {}, stratosRunning: false }
 
   for (const [key, user] of Object.entries(TEST_USERS)) {
     info(`Checking account: ${user.handle}`)
@@ -85,11 +87,37 @@ async function run() {
   section('Starting Stratos')
   info('Building and starting container...')
 
+  const envVars: Record<string, string> = {}
+  if (state.ngrokUrl) {
+    info(`Using ngrok URL: ${state.ngrokUrl}`)
+    envVars['STRATOS_PUBLIC_URL'] = state.ngrokUrl
+    envVars['STRATOS_SERVICE_DID'] = `did:web:${state.ngrokUrl.replace(/^https?:\/\//, '')}`
+    envVars['STRATOS_OAUTH_CLIENT_ID'] = `${state.ngrokUrl}/client-metadata.json`
+    envVars['STRATOS_OAUTH_CLIENT_URI'] = state.ngrokUrl
+    envVars['STRATOS_OAUTH_REDIRECT_URI'] = `${state.ngrokUrl}/oauth/callback`
+  } else if (Deno.env.get('USE_NGROK') === 'true') {
+    throw new Error('No ngrok URL found in state, but USE_NGROK=true')
+  } else {
+    // When not using ngrok, we must satisfy strict OAuth library requirements (RFC 8252):
+    // 1. redirect_uris must use loopback IP (127.0.0.1) instead of 'localhost'
+    // 2. client_id must be a valid URL. If it's http, some libraries (atproto) 
+    //    forbid using an IP address in the hostname.
+    // 3. For local testing, using 'localhost' for client_id and '127.0.0.1' for redirect_uri
+    //    is the standard way to bypass these restrictions.
+
+    envVars['STRATOS_PUBLIC_URL'] = 'http://localhost:3100'
+    envVars['STRATOS_SERVICE_DID'] = 'did:web:localhost'
+    envVars['STRATOS_OAUTH_CLIENT_ID'] = 'http://localhost:3100/client-metadata.json'
+    envVars['STRATOS_OAUTH_CLIENT_URI'] = 'http://localhost:3100'
+    envVars['STRATOS_OAUTH_REDIRECT_URI'] = 'http://127.0.0.1:3100/oauth/callback'
+  }
+
   const compose = new Deno.Command('docker-compose', {
     args: ['-f', 'docker-compose.test.yml', 'up', '-d', '--build'],
     cwd: PROJECT_ROOT,
     stdout: 'piped',
     stderr: 'piped',
+    env: envVars,
   })
 
   const composeResult = await compose.output()
