@@ -72,7 +72,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         })
       }
 
-      // Start authorization flow
+      // Start the authorization flow
       const authUrl = await oauthClient.authorize(handle, {
         scope: 'atproto transition:generic',
       })

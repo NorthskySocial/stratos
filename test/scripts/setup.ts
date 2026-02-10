@@ -13,7 +13,6 @@ async function run() {
   // 1. Ensure the test-data directory exists and is writable by the container (uid 1000)
   info('Preparing test-data directory...')
   try {
-
     await Deno.remove(TEST_DATA_DIR, { recursive: true })
   } catch (err) {
     if (!(err instanceof Deno.errors.NotFound)) {
@@ -23,7 +22,6 @@ async function run() {
     } else {
       info('test-data directory already absent')
     }
-
   }
   await Deno.mkdir(TEST_DATA_DIR, { recursive: true })
 
