@@ -624,6 +624,48 @@ export async function createAppContext(
     plcUrl: cfg.identity.plcUrl,
   })
 
+  const originalResolve = idResolver.handle.resolve.bind(idResolver.handle)
+  idResolver.handle.resolve = async (handle: string) => {
+    try {
+      // 1. Try standard resolution first
+      const result = await originalResolve(handle)
+      if (result) return result
+    } catch (err) {
+      logger?.debug(
+        { handle, err: err instanceof Error ? err.message : String(err) },
+        'standard handle resolution failed, trying PDS fallback',
+      )
+    }
+
+    // 2. Fallback: Try resolving via PDS API if standard resolution fails
+    // This is useful for PDSs with dynamic handles that don't support .well-known/atproto-did on subdomains
+    try {
+      const domain = handle.split('.').slice(1).join('.')
+      if (domain) {
+        const pdsUrl = `https://${domain}`
+        const resolveUrl = `${pdsUrl}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
+        const resp = await fetch(resolveUrl)
+        if (resp.ok) {
+          const data = await resp.json()
+          if (data.did) {
+            logger?.info(
+              { handle, did: data.did, pdsUrl },
+              'resolved handle via PDS API fallback',
+            )
+            return data.did
+          }
+        }
+      }
+    } catch (err) {
+      logger?.debug(
+        { handle, err: err instanceof Error ? err.message : String(err) },
+        'PDS handle resolution fallback failed',
+      )
+    }
+
+    return null
+  }
+
   const keyPath = path.join(cfg.storage.dataDir, 'signing_key')
   let signingKey: crypto.Keypair
 
