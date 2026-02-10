@@ -1,31 +1,25 @@
 import { info, pass, fail, warn } from './log.ts'
 import { loadState, saveState } from './state.ts'
 
-export async function startNgrok(port: number): Promise<string> {
-  info(`Starting ngrok tunnel to port ${port}...`)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function startNgrok(_port: number): Promise<string> {
+  info('Starting ngrok via Docker Compose...')
 
-  const authToken = Deno.env.get('NGROK_AUTHTOKEN')
-  if (authToken) {
-    const authCmd = new Deno.Command('ngrok', {
-      args: ['config', 'add-authtoken', authToken],
-    })
-    await authCmd.output()
-  }
-
-  const cmd = new Deno.Command('ngrok', {
-    args: ['http', port.toString(), '--log=stdout'],
-    stdout: 'null',
-    stderr: 'null',
-    stdin: 'null',
+  const cmd = new Deno.Command('docker-compose', {
+    args: ['-f', 'docker-compose.test.yml', 'up', '-d', 'ngrok'],
+    stdout: 'piped',
+    stderr: 'piped',
   })
 
-  const child = cmd.spawn()
-  child.unref()
-  
-  // Give it a moment to start and fetch the tunnel URL
-  // ngrok has an API on localhost:4040
+  const { success, stderr } = await cmd.output()
+  if (!success) {
+    fail('Failed to start ngrok container', new TextDecoder().decode(stderr))
+    throw new Error('ngrok container failed to start')
+  }
+
+  // Retrieve the public URL via the ngrok container's local API
   let url = ''
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 30; i++) {
     try {
       const resp = await fetch('http://localhost:4040/api/tunnels')
       const data = await resp.json()
@@ -33,22 +27,20 @@ export async function startNgrok(port: number): Promise<string> {
         url = data.tunnels[0].public_url
         break
       }
-    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_err) {
       // Ignore and retry
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await new Promise((resolve) => setTimeout(resolve, 2000))
   }
 
   if (!url) {
-    // If we couldn't get it from the API, try to parse it from the process output if needed
-    // But API is more reliable
-    fail('Failed to start ngrok or get public URL')
-    child.kill()
-    throw new Error('ngrok failed to start')
+    fail('Failed to get ngrok public URL from container API')
+    throw new Error('ngrok URL retrieval failed')
   }
 
   pass('ngrok started', url)
-  
+
   const state = await loadState()
   state.ngrokUrl = url
   await saveState(state)
@@ -57,14 +49,14 @@ export async function startNgrok(port: number): Promise<string> {
 }
 
 export async function stopNgrok(): Promise<void> {
-  info('Stopping ngrok...')
-  const pkill = new Deno.Command('pkill', {
-    args: ['ngrok'],
+  info('Stopping ngrok container...')
+  const cmd = new Deno.Command('docker-compose', {
+    args: ['-f', 'docker-compose.test.yml', 'stop', 'ngrok'],
   })
   try {
-    await pkill.output()
-    pass('ngrok stopped')
+    await cmd.output()
+    pass('ngrok container stopped')
   } catch (err) {
-    warn(`Failed to stop ngrok: ${err}`)
+    warn(`Failed to stop ngrok container: ${err}`)
   }
 }

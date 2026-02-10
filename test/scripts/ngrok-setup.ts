@@ -4,7 +4,7 @@ import { section, info } from './lib/log.ts'
 
 async function run() {
   section('Phase: Ngrok Setup')
-  
+
   const useNgrok = Deno.env.get('USE_NGROK') === 'true'
   if (!useNgrok) {
     info('USE_NGROK not set to true, skipping ngrok setup')
