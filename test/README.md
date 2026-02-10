@@ -4,9 +4,9 @@ End-to-end tests for the Stratos private namespace service. Exercises OAuth enro
 
 ## Prerequisites
 
-- **Deno** ≥ 2.x
-- **Docker** with Compose v2+
-- **Playwright Chromium** (for OAuth browser automation)
+- Deno ≥ 2.x
+- Docker Compose
+- Playwright Chromium (for OAuth browser automation)
 
 Install Playwright's Chromium browser (one-time):
 
@@ -16,66 +16,54 @@ npx playwright install chromium
 
 ## Test Users
 
-| User    | Handle                    | Boundaries   |
+| User    | Handle pattern            | Boundaries   |
 | ------- | ------------------------- | ------------ |
-| Rei     | rei.pds.atverkackt.de     | `swordsmith` |
-| Sakura  | sakura.pds.atverkackt.de  | `swordsmith` |
-| kaoruko | kaoruko.pds.atverkackt.de | `aekea`      |
+| Rei     | `rei-{id}.{PDS_HOST}`     | `swordsmith` |
+| Sakura  | `sakura-{id}.{PDS_HOST}`  | `swordsmith` |
+| kaoruko | `kaoruko-{id}.{PDS_HOST}` | `aekea`      |
+
+Handles include a random 5-digit suffix (`{id}`) to avoid collisions with previous test runs. `{PDS_HOST}` comes from `test/scripts/.env`.
 
 Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 ## Configuration
 
-### Environment (`.env.test`)
+### Test scripts environment (`test/scripts/.env`)
 
-The test suite uses `.env.test` at the project root. This file is created for you and ships with the repo (gitignored). Key variables:
+The Deno test scripts load their own `.env` from `test/scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
 
-| Variable                        | Value                       | Purpose                                                                  |
-| ------------------------------- | --------------------------- | ------------------------------------------------------------------------ |
-| `STRATOS_SERVICE_DID`           | `did:web:localhost`         | Service identity for local testing                                       |
-| `STRATOS_PUBLIC_URL`            | `http://localhost:3100`     | Public URL; also used as the OAuth `client_id` (ATProto loopback client) |
-| `STRATOS_ALLOWED_DOMAINS`       | `swordsmith,aekea`          | Boundary domains available in this Stratos instance                      |
-| `STRATOS_ENROLLMENT_MODE`       | `open`                      | Allows any DID from the allowed PDS to enroll                            |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | `https://pds.atverkackt.de` | Restricts enrollment to accounts on this PDS                             |
-| `STRATOS_OAUTH_ISSUER`          | `https://pds.atverkackt.de` | Enables the OAuth client — required for the Playwright enrollment flow   |
-| `STRATOS_ADMIN_PASSWORD`        | `stratos-test-admin`        | Admin auth (available but not used by the test scripts directly)         |
-| `LOG_LEVEL`                     | `debug`                     | Verbose logging for troubleshooting                                      |
+| Variable             | Example                 | Purpose                                                                      |
+| -------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PDS_HOST`           | `pds.example.com`       | PDS hostname (without protocol) — used for handle construction and API calls |
+| `PDS_ADMIN_PASSWORD` | `your-admin-password`   | PDS admin password for account creation/deletion                             |
+| `STRATOS_URL`        | `http://localhost:3100` | Stratos service URL the scripts call                                         |
 
-If you need to point at a different PDS, update `STRATOS_OAUTH_ISSUER`, `STRATOS_ALLOWED_PDS_ENDPOINTS`, and the user handles in `test/scripts/lib/config.ts`.
+If you need to point at a different PDS, update these variables and the user handles in `test/scripts/lib/config.ts`.
+
+### Stratos container environment (`.env.test`)
+
+The Docker Compose file (`docker-compose.test.yml`) loads `.env.test` from the project root into the Stratos container via `env_file`. Create it by copying `.env.example` and adjusting for testing:
+
+```bash
+cp .env.example .env.test
+```
+
+For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`, and point `STRATOS_ALLOWED_PDS_ENDPOINTS` / `STRATOS_OAUTH_ISSUER` at your PDS. See the [project README](../README.md) for the full list of available variables.
 
 ### Docker Compose (`docker-compose.test.yml`)
 
 A standalone compose file (does **not** inherit from `docker-compose.yml`) that builds and runs Stratos for testing:
 
-```yaml
-services:
-  stratos:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: stratos-test
-    restart: 'no'
-    ports:
-      - '3100:3100' # Stratos XRPC + HTTP
-    env_file:
-      - .env.test # All config from the file above
-    environment:
-      STRATOS_DATA_DIR: /app/data
-      STRATOS_BLOB_STORAGE: local
-    volumes:
-      - ./test-data:/app/data # Bind mount — gives host access to SQLite DBs
-    healthcheck:
-      test: ['CMD', 'wget', '--spider', 'http://localhost:3100/health']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-```
+The compose file defines three services:
+
+- ssl-init — one-shot Alpine container that generates a self-signed TLS certificate (stored in a `ssl-certs` volume).
+- nginx — reverse proxy that terminates TLS on port `8443` and forwards to Stratos.
+- stratos — the Stratos service itself, built from the project `Dockerfile`.
 
 Key design choices:
 
-- **Bind mount** (`./test-data:/app/data`): The Stratos SQLite databases are written to `test-data/` on the host. This allows Phase 3 to modify `service.sqlite` directly (for boundary configuration) without `docker exec`.
-- **No named volumes**: Everything is local to the project directory for easy cleanup.
+- **Bind mount** (`./test-data:/app/data`): The Stratos SQLite databases are written to `test-data/` on the host. This allows Stage 3 to modify `service.sqlite` directly (for boundary configuration) without `docker exec`.
+- **`ssl-certs` named volume**: Shared between `ssl-init` and `nginx` for TLS certificates.
 - **`restart: "no"`**: The container won't auto-restart after `teardown.ts` stops it.
 
 ### Starting Docker Compose manually
@@ -100,12 +88,7 @@ rm -rf test-data/
 
 ### PDS Configuration
 
-The tests use `pds.atverkackt.de` as the AT Protocol PDS. The PDS admin password is configured in `test/scripts/lib/config.ts` and is used to:
-
-1. **Create invite codes** — this PDS requires invite codes for account creation.
-2. **Create test accounts** — three accounts with `.pds.atverkackt.de` handles.
-
-The PDS admin credentials are only used during Phase 1 (setup). After that, all authentication goes through OAuth and the Stratos API.
+The tests require a running PDS. The PDS host and admin password are configured in `test/scripts/.env` and are used to create invite codes then three test accounts with randomized handles. The PDS admin credentials are only used during setup and teardown (to delete the users). After that, all authentication goes through OAuth and the Stratos API.
 
 ## Running
 
@@ -115,7 +98,7 @@ The PDS admin credentials are only used during Phase 1 (setup). After that, all 
 deno run -A test/scripts/run-all.ts
 ```
 
-Runs all five phases in order. On any phase failure the remaining phases (except teardown) are skipped.
+Runs all five stages in order. On any stage failure the remaining stages (except teardown) are skipped.
 
 ### Direct mode (bypass OAuth)
 
@@ -127,7 +110,7 @@ deno run -A test/scripts/run-all.ts --direct
 
 This mode:
 
-1. Skips Phase 2 (OAuth enrollment via Playwright)
+1. Skips Stage 2 (OAuth enrollment via Playwright)
 2. Instead runs `direct-enroll.ts` which:
    - Inserts enrollment rows directly into `service.sqlite`
    - Creates actor store directories and databases under `test-data/actors/`
@@ -139,9 +122,9 @@ Direct mode is useful when:
 - PDS OAuth flow is broken or changed
 - You need faster iteration on boundary/record tests
 
-### Individual phases
+### Individual stages
 
-Each script can be run independently. Phases 2–4 require the prior phases to have been run.
+Each script can be run independently. Stages 2–4 require the prior stages to have been run.
 
 ```bash
 deno run -A test/scripts/setup.ts
@@ -151,30 +134,27 @@ deno run -A test/scripts/test-posts.ts
 deno run -A test/scripts/teardown.ts
 ```
 
-## Phases
+## Stages
 
-### Phase 1 — Setup (`setup.ts`)
+### Stage 1 — Setup (`setup.ts`)
 
 Creates the test environment from scratch.
 
 **What it does:**
 
-1. Cleans and recreates the `test-data/` directory.
-2. Creates three PDS accounts on `pds.atverkackt.de` via the admin API (generating invite codes, since the PDS requires them). Skips accounts that already exist.
-3. Builds and starts Stratos via `docker compose -f docker-compose.test.yml up -d --build`.
-4. Polls `GET /health` until the service reports `{"status":"ok"}` (up to 60 s).
+1. Creates three PDS accounts on the configured PDS via the admin API (generating invite codes, since the PDS requires them). Skips accounts that already exist.
+2. Builds and starts Stratos via `docker-compose -f docker-compose.test.yml up -d --build`.
+3. Polls `GET /health` until the service reports `{"status":"ok"}` (up to 60 s).
 
 **Expected output:**
 
 ```
 Phase 1: Setup
-  ℹ Preparing test-data directory...
-
 Creating PDS accounts
-  ℹ Checking account: rei.pds.atverkackt.de
-  ℹ Creating invite code for rei.pds.atverkackt.de...
-  ℹ Creating account rei.pds.atverkackt.de...
-  ✓ Created rei.pds.atverkackt.de — did:plc:...
+  ℹ Checking account: rei-12345.pds.example.com
+  ℹ Creating invite code for rei-12345.pds.example.com...
+  ℹ Creating account rei-12345.pds.example.com...
+  ✓ Created rei-12345.pds.example.com — did:plc:...
   ...same for sakura and kaoruko...
 
 Starting Stratos
@@ -189,7 +169,7 @@ Starting Stratos
 
 ---
 
-### Phase 2 — OAuth Enrollment (`test-enrollment.ts`)
+### Stage 2 — OAuth Enrollment (`test-enrollment.ts`)
 
 Enrolls all three users via the real PDS OAuth authorization flow.
 
@@ -210,11 +190,11 @@ Enrolls all three users via the real PDS OAuth authorization flow.
 ```
 Phase 2: OAuth Enrollment
   ℹ Launching headless browser...
-  ℹ Enrolling Rei (rei.pds.atverkackt.de)...
+  ℹ Enrolling Rei (rei-12345.pds.example.com)...
   ✓ Rei enrolled successfully — did:plc:...
-  ℹ Enrolling Sakura (sakura.pds.atverkackt.de)...
+  ℹ Enrolling Sakura (sakura-12345.pds.example.com)...
   ✓ Sakura enrolled successfully — did:plc:...
-  ℹ Enrolling kaoruko (kaoruko.pds.atverkackt.de)...
+  ℹ Enrolling kaoruko (kaoruko-12345.pds.example.com)...
   ✓ kaoruko enrolled successfully — did:plc:...
 
 Enrollment Summary
@@ -225,11 +205,11 @@ Enrollment Summary
 
 ---
 
-### Phase 3 — Configure Boundaries (`configure-boundaries.ts`)
+### Stage 3 — Configure Boundaries (`configure-boundaries.ts`)
 
 Adjusts per-user boundaries in the Stratos service database.
 
-By default, OAuth enrollment assigns all configured domains (`swordsmith` + `aekea`) to every user. This phase narrows them to create the asymmetric test scenario.
+By default, OAuth enrollment assigns all configured domains (`swordsmith` + `aekea`) to every user. This stage narrows them to create the asymmetric test scenario.
 
 **What it does:**
 
@@ -257,11 +237,11 @@ Boundary Configuration Summary
 
 ---
 
-### Phase 4 — Post CRUD & Boundary Tests (`test-posts.ts`)
+### Stage 4 — Post CRUD & Boundary Tests (`test-posts.ts`)
 
-The main test phase. Validates record creation, retrieval, boundary filtering, and deletion.
+The main test stage. Validates record creation, retrieval, boundary filtering, and deletion.
 
-All API calls use `Authorization: Bearer <did>` for authentication, which works because the OAuth sessions from Phase 2 are stored in Stratos's database.
+All API calls use `Authorization: Bearer <did>` for authentication, which works because the OAuth sessions from Stage 2 are stored in Stratos's database.
 
 **Tests:**
 
@@ -324,25 +304,25 @@ Results: 15/15 passed
 
 ---
 
-### Phase 5 — Teardown (`teardown.ts`)
+### Stage 5 — Teardown (`teardown.ts`)
 
 Cleans up the test environment.
 
 **What it does:**
 
-1. Runs `docker compose -f docker-compose.test.yml down --volumes --remove-orphans`.
-2. Removes the `test-data/` directory.
-
-PDS accounts on `pds.atverkackt.de` are **not** deleted (the PDS admin API doesn't expose account deletion). They persist but are harmless test accounts.
+1. Deletes the three test accounts from the PDS via the admin API.
+2. Runs `docker compose -f docker-compose.test.yml stop` to stop the containers.
 
 **Expected output:**
 
 ```
 Teardown
+  ℹ Deleting test accounts from PDS...
+  ✓ Deleted rei-12345.pds.example.com (did:plc:...)
+  ✓ Deleted sakura-12345.pds.example.com (did:plc:...)
+  ✓ Deleted kaoruko-12345.pds.example.com (did:plc:...)
   ℹ Stopping Stratos container...
   ✓ Container stopped
-  ℹ Removing test-data directory...
-  ✓ test-data removed
   ℹ Teardown complete
 ```
 
@@ -350,22 +330,22 @@ Teardown
 
 ```
 test/
-├── README.md                          # This file
 └── scripts/
+    ├── .env.example                   # Template for test scripts environment
     ├── deno.json                      # Deno config (isolates from project tsconfig)
-    ├── setup.ts                       # Phase 1: PDS accounts + start Stratos
-    ├── test-enrollment.ts             # Phase 2: OAuth enrollment via Playwright
-    ├── direct-enroll.ts               # Phase 2 alternative: Direct DB enrollment (--direct mode)
-    ├── configure-boundaries.ts        # Phase 3: Per-user boundary assignment
-    ├── test-posts.ts                  # Phase 4: CRUD + boundary access tests
-    ├── teardown.ts                    # Phase 5: Cleanup
-    ├── run-all.ts                     # Orchestrator (all phases, supports --direct flag)
+    ├── setup.ts                       # Stage 1: PDS accounts + start Stratos
+    ├── test-enrollment.ts             # Stage 2: OAuth enrollment via Playwright
+    ├── direct-enroll.ts               # Stage 2 alternative: Direct DB enrollment (--direct mode)
+    ├── configure-boundaries.ts        # Stage 3: Per-user boundary assignment
+    ├── test-posts.ts                  # Stage 4: CRUD + boundary access tests
+    ├── teardown.ts                    # Stage 5: Cleanup
+    ├── run-all.ts                     # Orchestrator (all stages, supports --direct flag)
     └── lib/
         ├── config.ts                  # Test constants and user definitions
         ├── db.ts                      # Direct SQLite access (enrollment + actor store creation)
         ├── log.ts                     # Colored test output helpers
         ├── pds.ts                     # PDS admin API (invite codes, accounts)
-        ├── state.ts                   # Test state persistence between phases
+        ├── state.ts                   # Test state persistence between stages
         └── stratos.ts                 # Stratos XRPC API helpers
 ```
 
@@ -382,6 +362,3 @@ Ensure the container has written to `test-data/service.sqlite` (the SQLite DB is
 
 **"No valid session for user" on API calls**
 The `Bearer <did>` auth validates against OAuth sessions first, then falls back to enrollment check. If using `--direct` mode, ensure enrollment rows exist in `service.sqlite`. Re-run enrollment (or `direct-enroll.ts`) if authentication fails.
-
-**Permission errors on test-data/**
-The Stratos container runs as uid 1001. The setup script sets `chmod 777` on the directory. If that fails, run `sudo chmod -R 777 test-data/` manually.

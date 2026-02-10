@@ -21,7 +21,7 @@ applications.
 ### What is Stratos?
 
 Stratos enables **private, domain-scoped content** within ATProtocol. Users can create posts visible
-only to members of specific organizations or communities.
+only to members of specific groups or communities.
 
 ### Key Concepts
 
@@ -29,25 +29,8 @@ only to members of specific organizations or communities.
 | ------------------- | ----------------------------------------------------------------- |
 | **Stratos Service** | A server that stores private records (separate from PDS)          |
 | **Enrollment**      | User must enroll with a Stratos service to create private content |
-| **Domain Boundary** | Specifies which organization domains can view a record            |
+| **Domain Boundary** | Specifies which community boundaries can view a record            |
 | **Private Post**    | An `app.stratos.feed.post` record with boundary restrictions      |
-
-### When to Use Stratos
-
-✅ **Good use cases:**
-
-- Organization-internal announcements
-- Team discussions
-- Gated community content
-- Enterprise collaboration
-
-❌ **Not suitable for:**
-
-- Public social content (use `app.bsky` instead)
-- Encrypted DMs (Stratos is access-controlled, not encrypted)
-- Cross-organization messaging
-
----
 
 ## Quick Start
 
@@ -93,11 +76,11 @@ const response = await fetch(
       collection: 'app.stratos.feed.post',
       record: {
         $type: 'app.stratos.feed.post',
-        text: 'This is a private post for my organization!',
+        text: 'This is a private post for my community!',
         boundary: {
           $type: 'app.stratos.boundary.defs#Domains',
           values: [
-            { $type: 'app.stratos.boundary.defs#Domain', value: 'example.com' },
+            { $type: 'app.stratos.boundary.defs#Domain', value: 'general' },
           ],
         },
         createdAt: new Date().toISOString(),
@@ -514,7 +497,7 @@ async function hydrateFromSource(
 
 ### Understanding Boundaries
 
-Every Stratos record must include a `boundary` specifying which domains can access it:
+Every Stratos record must include a `boundary` specifying which boundaries can access it:
 
 ```typescript
 {
@@ -523,8 +506,8 @@ Every Stratos record must include a `boundary` specifying which domains can acce
       values
   :
     [
-      {$type: 'app.stratos.boundary.defs#Domain', value: 'example.com'},
-      {$type: 'app.stratos.boundary.defs#Domain', value: 'subsidiary.example.com'}
+      {$type: 'app.stratos.boundary.defs#Domain', value: 'general'},
+      {$type: 'app.stratos.boundary.defs#Domain', value: 'writers'}
     ]
   }
 }
@@ -544,14 +527,11 @@ Every Stratos record must include a `boundary` specifying which domains can acce
 Posts can be visible to multiple domains:
 
 ```typescript
-const crossTeamPost = {
+const crossDomainPost = {
   $type: 'app.stratos.feed.post',
-  text: 'Announcement for both teams',
+  text: 'Announcement for both groups',
   boundary: {
-    values: [
-      { value: 'engineering.example.com' },
-      { value: 'design.example.com' },
-    ],
+    values: [{ value: 'fanart' }, { value: 'cosplay' }],
   },
   createdAt: new Date().toISOString(),
 }
@@ -579,9 +559,7 @@ function StratosEnrollmentPrompt({ handle, onEnroll }) {
   return (
     <div className="enrollment-prompt">
       <h3>Enable Private Posts</h3>
-      <p>
-        Connect to Stratos to create posts visible only to your organization.
-      </p>
+      <p>Connect to Stratos to create posts visible only to your community.</p>
       <button onClick={() => onEnroll(handle)}>Enable Private Posts</button>
     </div>
   )

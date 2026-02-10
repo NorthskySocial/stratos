@@ -8,59 +8,17 @@ namespaces like `app.bsky`, stratos records and blobs are:
 - Scoped by configurable boundary domains
 - Excluded from public sync/export
 
-## Architecture
-
-```
-stratos/
-├── stratos-core/       # Shared library (validation, schema, storage abstractions)
-├── stratos-service/    # Standalone HTTP service
-└── lexicons/           # Lexicon definitions for app.stratos.*
-```
-
 ## Quick Start
-
-### Using Docker (Recommended)
-
-```bash
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Build and run
-docker compose up -d
-
-# View logs
-docker compose logs -f stratos
-
-# Stop
-docker compose down
-```
 
 ### Local Development
 
 ```bash
-# Install dependencies
 pnpm install
-
-# Build all packages
 pnpm build
-
-# Run tests
 pnpm test
-
-# Start the service
 cd stratos-service
 pnpm start
 ```
-
-## Docker Configuration
-
-The Docker setup includes:
-
-- **Multi-stage build** for optimized image size
-- **Non-root user** for security
-- **Health checks** for container orchestration
-- **Volume mounting** for persistent data storage
 
 ### Environment Variables
 
@@ -76,7 +34,7 @@ Required variables:
 - `STRATOS_PUBLIC_URL` - Public URL where the service is accessible
 - `STRATOS_ALLOWED_DOMAINS` - Comma-separated boundary domains
 
-### S3 Storage (Optional)
+### S3 Storage
 
 To use S3-compatible storage instead of local disk:
 
@@ -141,7 +99,3 @@ Standalone HTTP service providing:
 - OAuth authorization server
 - XRPC endpoints for record CRUD
 - WebSocket subscription for AppView indexing
-
-## License
-
-MIT
