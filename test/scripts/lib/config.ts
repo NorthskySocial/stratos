@@ -3,8 +3,12 @@
 
 import { load } from 'jsr:@std/dotenv'
 
+import { loadState } from './state.ts'
+
 const envPath = new URL('../.env', import.meta.url).pathname
 await load({ envPath, export: true })
+
+const state = await loadState()
 
 function requireEnv(key: string): string {
   const value = Deno.env.get(key)
@@ -17,7 +21,7 @@ function requireEnv(key: string): string {
 export const PDS_HOST = requireEnv('PDS_HOST')
 export const PDS_URL = `https://${PDS_HOST}`
 export const PDS_ADMIN_PASSWORD = requireEnv('PDS_ADMIN_PASSWORD')
-export const STRATOS_URL = requireEnv('STRATOS_URL')
+export const STRATOS_URL = state.ngrokUrl || Deno.env.get('STRATOS_URL') || 'http://localhost:3100'
 
 export const DOMAINS = {
   swordsmith: 'swordsmith',

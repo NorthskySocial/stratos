@@ -19,6 +19,7 @@ export interface UserState {
 export interface TestState {
   users: Record<string, UserState>
   stratosRunning: boolean
+  ngrokUrl?: string
 }
 
 export function emptyState(): TestState {

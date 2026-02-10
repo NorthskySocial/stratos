@@ -27,6 +27,7 @@ interface Phase {
 }
 
 const phases: Phase[] = [
+  { name: 'Ngrok', script: 'ngrok-setup.ts' },
   { name: 'Setup', script: 'setup.ts' },
   directMode
     ? { name: 'Direct Enrollment', script: 'direct-enroll.ts' }
