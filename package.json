@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "test": "vitest",
     "codegen": "pnpm --filter stratos-service run codegen",
-    "e2etest": "deno run -A test/scripts/run-all.ts --direct"
+    "e2etest": "deno run -A test/scripts/run-all.ts",
+    "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct"
   },
   "devDependencies": {
     "@types/deno": "^2.5.0",

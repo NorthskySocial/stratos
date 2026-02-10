@@ -46,15 +46,15 @@ async function run() {
   }
 
   // // Clean up test data
-  info("Removing test-data directory...");
+  info('Removing test-data directory...')
   try {
-    await Deno.remove(TEST_DATA_DIR, { recursive: true });
-    pass("test-data removed");
+    await Deno.remove(TEST_DATA_DIR, { recursive: true })
+    pass('test-data removed')
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) {
-      info("test-data directory already absent");
+      info('test-data directory already absent')
     } else {
-      warn(`Could not remove test-data: ${err}`);
+      warn(`Could not remove test-data: ${err}`)
     }
   }
 
