@@ -32,6 +32,7 @@ const phases: Phase[] = [
   directMode
     ? { name: 'Direct Enrollment', script: 'direct-enroll.ts' }
     : { name: 'OAuth Enrollment', script: 'test-enrollment.ts' },
+  { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
   { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
   { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },
