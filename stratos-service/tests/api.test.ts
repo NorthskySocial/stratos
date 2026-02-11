@@ -13,22 +13,16 @@ import {
   migrateServiceDb,
   closeServiceDb,
   ServiceDb,
-} from '../src/db/index.js'
+} from '../src/db'
 
-import { StratosServiceConfig } from '../src/config.js'
+import { StratosServiceConfig } from '../src'
 import {
   StratosActorStore,
   SqliteEnrollmentStore,
-  createAppContext,
-  destroyAppContext,
   AppContext,
 } from '../src/context.js'
-import {
-  createRecord,
-  deleteRecord,
-  getRecord,
-  listRecords,
-} from '../src/api/records.js'
+import { createRecord } from '../src/api'
+import { Did } from '@atproto/api'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {
@@ -156,7 +150,7 @@ interface TestContext {
 describe('API Records', () => {
   let testDir: string
   let testContext: TestContext
-  let testDid: string
+  let testDid: Did
 
   beforeEach(async () => {
     testDir = join(
