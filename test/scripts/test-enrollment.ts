@@ -20,6 +20,7 @@ async function screenshotOnFailure(page: Page, name: string) {
     dim(`Screenshot saved: test-data/screenshots/${name}.png`)
   } catch {
     // best effort
+    dim(`Failed to save screenshot: ${name}.png`)
   }
 }
 
@@ -62,7 +63,7 @@ async function enrollUser(
       'ngrok-skip-browser-warning': 'true',
     })
 
-    // Stratos will redirect to PDS OAuth page — may take a moment
+    // Stratos will redirect to the PDS OAuth page — may take a moment
     await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
 
     dim(`${label}: Current URL: ${page.url()}`)
@@ -133,7 +134,7 @@ async function enrollUser(
 
     dim(`${label}: Sign-in form detected`)
 
-    // If username IS required (not pre-filled), fill it
+    // If a username IS required (not pre-filled), fill it
     const usernameInput =
       (await page.$(
         'input[name="username"]:not([readonly]):not([disabled])',
@@ -156,7 +157,7 @@ async function enrollUser(
     dim(`${label}: Credentials entered, submitting...`)
     await screenshotOnFailure(page, `${label}-02-credentials-filled`)
 
-    // Submit sign-in form — try multiple strategies
+    // Submit the sign-in form — try multiple strategies
     const signInButton =
       (await page.$('button[type="submit"]')) ??
       (await page.$('button:has-text("Sign in")'))

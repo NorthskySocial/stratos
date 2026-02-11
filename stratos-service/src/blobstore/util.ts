@@ -7,15 +7,7 @@ export async function* readableToAsyncIterable(
   readable: Readable,
 ): AsyncIterable<Uint8Array> {
   for await (const chunk of readable) {
-    if (chunk instanceof Buffer) {
-      yield new Uint8Array(chunk)
-    } else if (chunk instanceof Uint8Array) {
-      yield chunk
-    } else if (typeof chunk === 'string') {
-      yield new TextEncoder().encode(chunk)
-    } else {
-      throw new Error(`Unexpected chunk type: ${typeof chunk}`)
-    }
+    yield new Uint8Array(chunk)
   }
 }
 

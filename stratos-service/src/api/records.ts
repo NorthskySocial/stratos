@@ -1,27 +1,28 @@
-import { InvalidRequestError, AuthRequiredError } from '@atproto/xrpc-server'
+import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { CID } from 'multiformats/cid'
 import { TID } from '@atproto/common-web'
 import {
-  encode as cborEncode,
   cidForLex,
+  encode as cborEncode,
   type LexValue,
 } from '@atproto/lex-cbor'
 import { AtUri } from '@atproto/syntax'
 
 import {
   assertStratosValidation,
-  StratosValidationError,
   extractBoundaryDomains,
   stratosSeq,
+  StratosValidationError,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext, StratosActorTransactor } from '../context.js'
+import { Did } from '@atproto/api'
 
 /**
  * Record creation input
  */
 export interface CreateRecordInput {
-  repo: string // DID
+  repo: Did
   collection: string
   rkey?: string
   record: unknown
@@ -65,7 +66,7 @@ export async function createRecord(
     )
   }
 
-  // Generate record key if not provided
+  // Generate the record key if not provided
   const rkey = input.rkey ?? TID.nextStr()
 
   // Check if enrolled
@@ -178,7 +179,7 @@ export async function createRecord(
 
   return {
     uri: result.uri.toString(),
-    cid: result.cidStr,
+    cid: result.cid.toString(),
     commit: result.commit,
   }
 }
@@ -298,13 +299,13 @@ export async function getRecord(
     throw new InvalidRequestError('Record not found', 'RecordNotFound')
   }
 
-  const result = await ctx.actorStore.read(repo, async (store) => {
+  return await ctx.actorStore.read(repo, async (store) => {
     const record = await store.record.getRecord(uri, cid ?? null)
     if (!record) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 
-    // Check domain boundary if caller is not owner
+    // Check domain boundary if caller is not the owner
     if (callerDid !== repo) {
       const boundary = extractBoundaryDomains(
         record.value as Record<string, unknown>,
@@ -325,8 +326,6 @@ export async function getRecord(
       value: record.value,
     }
   })
-
-  return result
 }
 
 /**
@@ -360,7 +359,7 @@ export async function listRecords(
     return { records: [] }
   }
 
-  const result = await ctx.actorStore.read(repo, async (store) => {
+  return await ctx.actorStore.read(repo, async (store) => {
     const records = await store.record.listRecordsForCollection({
       collection,
       limit,
@@ -404,8 +403,6 @@ export async function listRecords(
       cursor: nextCursor,
     }
   })
-
-  return result
 }
 
 // Helper functions

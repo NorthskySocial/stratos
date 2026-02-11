@@ -1,7 +1,7 @@
 import { eq, gt, and, isNull, asc } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import {
-  StratosDb,
+  StratosDbOrTx,
   stratosBlob,
   stratosRecordBlob,
   stratosRecord,
@@ -21,7 +21,7 @@ export interface BlobMetadata {
  */
 export class StratosBlobReader {
   constructor(
-    protected db: StratosDb,
+    protected db: StratosDbOrTx,
     protected blobstore: BlobStore,
     protected logger?: Logger,
   ) {}

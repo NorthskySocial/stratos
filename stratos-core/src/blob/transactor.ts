@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
-import { StratosDb, stratosBlob, stratosRecordBlob } from '../db/index.js'
+import { StratosDbOrTx, stratosBlob, stratosRecordBlob } from '../db/index.js'
 import { BlobStore, PreparedBlobRef, Logger } from '../types.js'
 import { StratosBlobReader } from './reader.js'
 
@@ -8,7 +8,7 @@ import { StratosBlobReader } from './reader.js'
  * Transactor for stratos blob metadata
  */
 export class StratosBlobTransactor extends StratosBlobReader {
-  constructor(db: StratosDb, blobstore: BlobStore, logger?: Logger) {
+  constructor(db: StratosDbOrTx, blobstore: BlobStore, logger?: Logger) {
     super(db, blobstore, logger)
   }
 

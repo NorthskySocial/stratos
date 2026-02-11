@@ -3,14 +3,14 @@
 // Usage: deno run -A test/scripts/run-all.ts [--direct]
 //
 // Options:
-//   --direct  Bypass OAuth and enroll users directly in the database
+//   --direct Bypass OAuth and enroll users directly in the database
 //
 // Phases:
-//   1. setup       — create PDS accounts, start Stratos
-//   2. enrollment  — OAuth enrollment via Playwright (or direct DB enrollment with --direct)
-//   3. boundaries  — configure per-user boundaries
-//   4. posts       — post CRUD + boundary access control
-//   5. teardown    — stop Stratos, clean up
+//   1. setup — create PDS accounts, start Stratos
+//   2. enrollment — OAuth enrollment via Playwright (or direct DB enrollment with --direct)
+//   3. boundaries — configure per-user boundaries
+//   4. posts — post CRUD + boundary access control
+//   5. teardown — stop Stratos, clean up
 
 import { section, info, pass, fail, summary } from './lib/log.ts'
 
