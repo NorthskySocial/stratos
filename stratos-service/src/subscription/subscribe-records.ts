@@ -164,7 +164,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const db = (store as unknown).record.db as StratosDb
+      const db = (store.record as any).db as StratosDb
       const rows = await db
         .select({ seq: stratosSeq.seq })
         .from(stratosSeq)
@@ -181,7 +181,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const db = (store as unknown).record.db as StratosDb
+      const db = (store.record as any).db as StratosDb
       const rows = await db
         .select({ seq: stratosSeq.seq })
         .from(stratosSeq)
@@ -202,7 +202,7 @@ async function getEventsSince(
 ): Promise<SeqEvent[]> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const db = (store as unknown).record.db as StratosDb
+      const db = (store.record as any).db as StratosDb
       const rows = await db
         .select()
         .from(stratosSeq)
