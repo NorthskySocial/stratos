@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { AtUri } from '@atproto/syntax'
 import {
-  StratosDb,
+  StratosDbOrTx,
   stratosRecord,
   stratosBacklink,
   StratosBacklink,
@@ -15,7 +15,7 @@ import { StratosRecordReader, getStratosBacklinks } from './reader.js'
  */
 export class StratosRecordTransactor extends StratosRecordReader {
   constructor(
-    db: StratosDb,
+    db: StratosDbOrTx,
     cborToRecord: (content: Uint8Array) => Record<string, unknown>,
     logger?: Logger,
   ) {

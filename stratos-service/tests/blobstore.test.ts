@@ -2,19 +2,19 @@
  * Tests for blob storage adapters (DiskBlobStore, S3BlobStoreAdapter)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, rm, readFile, writeFile } from 'fs/promises'
+import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 
-import { DiskBlobStore } from '../src/blobstore/disk.js'
+import { DiskBlobStore } from '../src'
 import {
   readableToAsyncIterable,
   asyncIterableToReadable,
   collectAsyncIterable,
-} from '../src/blobstore/util.js'
+} from '../src/blobstore'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {
@@ -35,7 +35,7 @@ describe('DiskBlobStore', () => {
     )
     await mkdir(testDir, { recursive: true })
 
-    // Create store using factory pattern
+    // Create store using a factory pattern
     const creator = DiskBlobStore.creator(
       join(testDir, 'blobs'),
       join(testDir, 'blobs', 'temp'),

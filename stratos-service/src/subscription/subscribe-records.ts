@@ -164,8 +164,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = (store as any).record.db as StratosDb
+      const db = (store as unknown).record.db as StratosDb
       const rows = await db
         .select({ seq: stratosSeq.seq })
         .from(stratosSeq)
@@ -182,8 +181,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = (store as any).record.db as StratosDb
+      const db = (store as unknown).record.db as StratosDb
       const rows = await db
         .select({ seq: stratosSeq.seq })
         .from(stratosSeq)
@@ -204,8 +202,7 @@ async function getEventsSince(
 ): Promise<SeqEvent[]> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = (store as any).record.db as StratosDb
+      const db = (store as unknown).record.db as StratosDb
       const rows = await db
         .select()
         .from(stratosSeq)
@@ -215,7 +212,7 @@ async function getEventsSince(
 
       // Transform database rows to SeqEvent format
       return rows.map((row: SeqRow): SeqEvent => {
-        // Parse the event to extract rev, or use empty string
+        // Parse the event to extract the rev or use empty string
         let rev = ''
         try {
           const parsed = JSON.parse(row.event.toString('utf-8'))
@@ -275,7 +272,7 @@ function matchesDomain(event: SeqEvent, domain: string): boolean {
 
     return false
   } catch {
-    return true // Include if we can't parse
+    return true // Include it if we can't parse
   }
 }
 
