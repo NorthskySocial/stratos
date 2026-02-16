@@ -4,8 +4,8 @@ import {
   type EnrollmentDenialReason,
   EnrollmentDeniedError,
   extractPdsEndpoint,
-  validateEnrollmentEligibility,
   isDidAllowed,
+  validateEnrollmentEligibility,
 } from '@northskysocial/stratos-core'
 
 // Re-export for convenience
@@ -71,8 +71,7 @@ export async function validateEnrollment(
   }
 
   // Use the pure domain function for PDS allowlist validation
-  const result = validateEnrollmentEligibility(config, did, pdsEndpoint)
-  return result
+  return validateEnrollmentEligibility(config, did, pdsEndpoint)
 }
 
 /**

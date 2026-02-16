@@ -3,8 +3,20 @@
 
 import { load } from 'jsr:@std/dotenv'
 
+import { loadState } from './state.ts'
+export { loadState }
+
 const envPath = new URL('../.env', import.meta.url).pathname
 await load({ envPath, export: true })
+
+const state = await loadState()
+
+// Use the ngrok URL from state if available, otherwise fall back to environment or default.
+// This is critical because some scripts (like run-all.ts) might be imported by others
+// before the Ngrok phase has completed. However, since each phase runs in its own
+// process, this `loadState()` will re-run and pick up the correct URL.
+export const STRATOS_URL =
+  state.ngrokUrl || Deno.env.get('STRATOS_URL') || 'http://localhost:3100'
 
 function requireEnv(key: string): string {
   const value = Deno.env.get(key)
@@ -17,7 +29,6 @@ function requireEnv(key: string): string {
 export const PDS_HOST = requireEnv('PDS_HOST')
 export const PDS_URL = `https://${PDS_HOST}`
 export const PDS_ADMIN_PASSWORD = requireEnv('PDS_ADMIN_PASSWORD')
-export const STRATOS_URL = requireEnv('STRATOS_URL')
 
 export const DOMAINS = {
   swordsmith: 'swordsmith',
@@ -64,10 +75,7 @@ export const TEST_USERS: Record<string, TestUser> = {
   },
 }
 
-export const STATE_FILE = new URL(
-  '../../../test-data/test-state.json',
-  import.meta.url,
-).pathname
+export const STATE_FILE = new URL('./test-state.json', import.meta.url).pathname
 export const TEST_DATA_DIR = new URL('../../../test-data', import.meta.url)
   .pathname
 export const PROJECT_ROOT = new URL('../../..', import.meta.url).pathname

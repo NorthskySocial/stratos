@@ -12,6 +12,11 @@ export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
 }
 
 /**
+ * Generic type for a Stratos database or transaction
+ */
+export type StratosDbOrTx = LibSQLDatabase<typeof schemaModule.schema>
+
+/**
  * Default SQLite pragmas for stratos databases
  */
 const DEFAULT_PRAGMAS: Record<string, string> = {}

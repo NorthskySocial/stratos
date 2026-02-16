@@ -1,6 +1,10 @@
 import { eq, inArray } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
-import { StratosDb, stratosRepoRoot, stratosRepoBlock } from '../db/index.js'
+import {
+  StratosDbOrTx,
+  stratosRepoRoot,
+  stratosRepoBlock,
+} from '../db/index.js'
 import { Logger } from '../types.js'
 import { StratosSqlRepoReader, BlockMap } from './reader.js'
 
@@ -8,7 +12,7 @@ import { StratosSqlRepoReader, BlockMap } from './reader.js'
  * Transactor for stratos repo - extends reader with write capabilities
  */
 export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
-  constructor(db: StratosDb, logger?: Logger) {
+  constructor(db: StratosDbOrTx, logger?: Logger) {
     super(db, logger)
   }
 

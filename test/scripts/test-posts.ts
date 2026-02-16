@@ -9,7 +9,6 @@
 //   Unauthenticated caller CANNOT read Rei's post.
 //   listRecords filters correctly per boundary.
 
-import { TEST_USERS } from './lib/config.ts'
 import {
   createRecord,
   getRecord,
@@ -18,7 +17,7 @@ import {
   deleteRecord,
 } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
-import { section, info, pass, fail, dim, summary } from './lib/log.ts'
+import { section, pass, fail, summary } from './lib/log.ts'
 
 let passed = 0
 let failed = 0

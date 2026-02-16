@@ -3,14 +3,14 @@
 // Usage: deno run -A test/scripts/run-all.ts [--direct]
 //
 // Options:
-//   --direct  Bypass OAuth and enroll users directly in the database
+//   --direct Bypass OAuth and enroll users directly in the database
 //
 // Phases:
-//   1. setup       — create PDS accounts, start Stratos
-//   2. enrollment  — OAuth enrollment via Playwright (or direct DB enrollment with --direct)
-//   3. boundaries  — configure per-user boundaries
-//   4. posts       — post CRUD + boundary access control
-//   5. teardown    — stop Stratos, clean up
+//   1. setup — create PDS accounts, start Stratos
+//   2. enrollment — OAuth enrollment via Playwright (or direct DB enrollment with --direct)
+//   3. boundaries — configure per-user boundaries
+//   4. posts — post CRUD + boundary access control
+//   5. teardown — stop Stratos, clean up
 
 import { section, info, pass, fail, summary } from './lib/log.ts'
 
@@ -27,10 +27,12 @@ interface Phase {
 }
 
 const phases: Phase[] = [
+  { name: 'Ngrok', script: 'ngrok-setup.ts' },
   { name: 'Setup', script: 'setup.ts' },
   directMode
     ? { name: 'Direct Enrollment', script: 'direct-enroll.ts' }
     : { name: 'OAuth Enrollment', script: 'test-enrollment.ts' },
+  { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
   { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
   { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },

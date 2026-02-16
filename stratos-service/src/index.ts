@@ -80,6 +80,16 @@ export class StratosServer {
       })
     })
 
+    const metadataHandler = (_req: express.Request, res: express.Response) => {
+      if (!ctx.oauthClient) {
+        return res.status(404).json({ error: 'OAuth not configured' })
+      }
+      res.json(ctx.oauthClient.clientMetadata)
+    }
+
+    app.get('/client-metadata.json', metadataHandler)
+    app.get('/.well-known/oauth-client-metadata.json', metadataHandler)
+
     if (ctx.oauthClient) {
       const oauthRoutes = createOAuthRoutes({
         oauthClient: ctx.oauthClient,
