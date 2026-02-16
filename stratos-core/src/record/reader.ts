@@ -3,7 +3,7 @@ import { AtUri } from '@atproto/syntax'
 import * as syntax from '@atproto/syntax'
 import { eq, and, gt, lt, asc, desc, isNull } from 'drizzle-orm'
 import {
-  StratosDb,
+  StratosDbOrTx,
   StratosBacklink,
   countAll,
   stratosRecord,
@@ -68,7 +68,7 @@ export interface RecordWithMeta {
  */
 export class StratosRecordReader {
   constructor(
-    protected db: StratosDb,
+    protected db: StratosDbOrTx,
     protected cborToRecord: (content: Uint8Array) => Record<string, unknown>,
     protected logger?: Logger,
   ) {}

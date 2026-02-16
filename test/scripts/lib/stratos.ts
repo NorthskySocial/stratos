@@ -1,13 +1,20 @@
 // Stratos XRPC API helpers
 
-import { STRATOS_URL } from './config.ts'
+import { STRATOS_URL, loadState } from './config.ts'
+
+async function getBaseUrl(forceLocal = false) {
+  if (forceLocal) return 'http://localhost:3100'
+  const state = await loadState()
+  return state.ngrokUrl || STRATOS_URL
+}
 
 /** Check Stratos health endpoint */
 export async function checkHealth(): Promise<{
   status: string
   version: string
 }> {
-  const url = `${STRATOS_URL}/health`
+  const baseUrl = await getBaseUrl(true) // Always use localhost for health
+  const url = `${baseUrl}/health`
   const res = await fetch(url)
   const body = await res.text()
   if (!res.ok) throw new Error(`Health check failed: ${res.status} - ${body}`)
@@ -21,9 +28,8 @@ export async function waitForHealthy(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   let attempt = 0
-  console.log(
-    `[health] Checking ${STRATOS_URL}/health (timeout: ${timeoutMs}ms)`,
-  )
+  const baseUrl = await getBaseUrl(true) // Always use localhost for health
+  console.log(`[health] Checking ${baseUrl}/health (timeout: ${timeoutMs}ms)`)
   while (Date.now() < deadline) {
     attempt++
     try {
@@ -48,8 +54,9 @@ export async function waitForHealthy(
 export async function enrollmentStatus(
   did: string,
 ): Promise<{ did: string; enrolled: boolean; enrolledAt?: string }> {
+  const baseUrl = await getBaseUrl()
   const res = await fetch(
-    `${STRATOS_URL}/xrpc/app.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
+    `${baseUrl}/xrpc/app.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
   )
   if (!res.ok) {
     const body = await res.text()
@@ -82,7 +89,8 @@ export async function createRecord(
   }
   if (rkey) body.rkey = rkey
 
-  const res = await fetch(`${STRATOS_URL}/xrpc/com.atproto.repo.createRecord`, {
+  const baseUrl = await getBaseUrl()
+  const res = await fetch(`${baseUrl}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -118,8 +126,9 @@ export async function getRecord(
     headers['Authorization'] = `Bearer ${callerDid}`
   }
 
+  const baseUrl = await getBaseUrl()
   const res = await fetch(
-    `${STRATOS_URL}/xrpc/com.atproto.repo.getRecord?${params}`,
+    `${baseUrl}/xrpc/com.atproto.repo.getRecord?${params}`,
     { headers },
   )
 
@@ -147,8 +156,9 @@ export async function tryGetRecord(
     headers['Authorization'] = `Bearer ${callerDid}`
   }
 
+  const baseUrl = await getBaseUrl()
   const res = await fetch(
-    `${STRATOS_URL}/xrpc/com.atproto.repo.getRecord?${params}`,
+    `${baseUrl}/xrpc/com.atproto.repo.getRecord?${params}`,
     { headers },
   )
 
@@ -180,8 +190,9 @@ export async function listRecords(
     headers['Authorization'] = `Bearer ${callerDid}`
   }
 
+  const baseUrl = await getBaseUrl()
   const res = await fetch(
-    `${STRATOS_URL}/xrpc/com.atproto.repo.listRecords?${params}`,
+    `${baseUrl}/xrpc/com.atproto.repo.listRecords?${params}`,
     { headers },
   )
 
@@ -199,7 +210,8 @@ export async function deleteRecord(
   collection: string,
   rkey: string,
 ): Promise<void> {
-  const res = await fetch(`${STRATOS_URL}/xrpc/com.atproto.repo.deleteRecord`, {
+  const baseUrl = await getBaseUrl()
+  const res = await fetch(`${baseUrl}/xrpc/com.atproto.repo.deleteRecord`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

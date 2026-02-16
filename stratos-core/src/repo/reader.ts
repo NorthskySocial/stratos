@@ -1,7 +1,7 @@
 import { eq, gt, inArray, desc, asc, sql, and } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import {
-  StratosDb,
+  StratosDbOrTx,
   stratosRepoRoot,
   stratosRepoBlock,
   countAll,
@@ -114,7 +114,7 @@ export class StratosSqlRepoReader {
   cache: BlockMap = new BlockMap()
 
   constructor(
-    protected db: StratosDb,
+    protected db: StratosDbOrTx,
     protected logger?: Logger,
   ) {}
 

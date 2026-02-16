@@ -20,7 +20,9 @@ export type {
   NewEnrollmentBoundary,
 } from './schema.js'
 
-export type ServiceDb = LibSQLDatabase<typeof schema>
+export type ServiceDb = LibSQLDatabase<typeof schema> & {
+  _client: ReturnType<typeof createClient>
+}
 
 /**
  * Create a service database connection
@@ -29,7 +31,9 @@ export function createServiceDb(location: string): ServiceDb {
   const client = createClient({
     url: `file:${location}`,
   })
-  return drizzle(client, { schema })
+  const base = drizzle(client, { schema }) as unknown as ServiceDb
+  base._client = client
+  return base
 }
 
 /**
@@ -79,10 +83,5 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
  * Close the service database connection
  */
 export async function closeServiceDb(db: ServiceDb): Promise<void> {
-  // LibSQL client cleanup
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = (db as any)._client
-  if (client && typeof client.close === 'function') {
-    client.close()
-  }
+  db._client.close()
 }

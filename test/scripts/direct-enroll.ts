@@ -2,8 +2,8 @@
 // Direct enrollment script — bypasses OAuth and enrolls users directly in the database.
 // Use this when OAuth flow is not working (e.g., PDS handle resolution issues).
 
-import { TEST_USERS, STRATOS_URL } from './lib/config.ts'
-import { enrollUser, createActorStore, setBoundaries } from './lib/db.ts'
+import { TEST_USERS } from './lib/config.ts'
+import { enrollUser, createActorStore } from './lib/db.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
 import { section, info, pass, fail, warn, dim } from './lib/log.ts'
@@ -51,7 +51,7 @@ async function run() {
       await createActorStore(user.did)
       dim(`  Actor store created`)
 
-      // Enroll in service database with boundaries
+      // Enroll in the service database with boundaries
       enrollUser(user.did, pdsEndpoint, testUser.boundaries)
       dim(`  Enrolled with boundaries: ${testUser.boundaries.join(', ')}`)
 

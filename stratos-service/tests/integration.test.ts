@@ -11,14 +11,7 @@ import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 
-import {
-  createStratosDb,
-  migrateStratosDb,
-  closeStratosDb,
-  StratosRecordTransactor,
-  BlobStore,
-  BlobStoreCreator,
-} from '@northskysocial/stratos-core'
+import { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
 
 import {
   assertStratosValidation,
@@ -30,17 +23,13 @@ import {
 } from '@northskysocial/stratos-core'
 
 import { StratosActorStore, SqliteEnrollmentStore } from '../src/context.js'
-import {
-  validateEnrollment,
-  assertEnrollment,
-  EnrollmentConfig,
-} from '../src/auth/enrollment.js'
+import { validateEnrollment, EnrollmentConfig } from '../src/auth'
 import {
   createServiceDb,
   migrateServiceDb,
   closeServiceDb,
   ServiceDb,
-} from '../src/db/index.js'
+} from '../src/db'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {
@@ -163,14 +152,14 @@ describe('Integration: Full Stratos Flow', () => {
     )
     await mkdir(testDir, { recursive: true })
 
-    // Set up enrollment store
+    // Set up the enrollment store
     const enrollmentDbPath = join(testDir, 'enrollment.sqlite')
     enrollmentDb = createServiceDb(enrollmentDbPath)
     await migrateServiceDb(enrollmentDb)
 
     enrollmentStore = new SqliteEnrollmentStore(enrollmentDb)
 
-    // Set up actor store with factory pattern
+    // Set up actor store with a factory pattern
     const blobstore = createMockBlobStoreCreator()
     actorStore = new StratosActorStore({
       dataDir: join(testDir, 'actors'),

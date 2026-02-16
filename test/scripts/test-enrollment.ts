@@ -5,7 +5,7 @@ import { chromium, type Page, type Browser } from 'npm:playwright@1.58.2'
 import { TEST_USERS, STRATOS_URL } from './lib/config.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
-import { section, info, pass, fail, warn, dim } from './lib/log.ts'
+import { section, info, pass, fail, warn, dim, error } from './lib/log.ts'
 
 const SCREENSHOT_DIR = new URL('../../test-data/screenshots', import.meta.url)
   .pathname
@@ -20,6 +20,7 @@ async function screenshotOnFailure(page: Page, name: string) {
     dim(`Screenshot saved: test-data/screenshots/${name}.png`)
   } catch {
     // best effort
+    dim(`Failed to save screenshot: ${name}.png`)
   }
 }
 
@@ -35,6 +36,12 @@ async function screenshotOnFailure(page: Page, name: string) {
  *   6. PDS redirects back to /oauth/callback → Stratos enrolls user
  *   7. Final page shows JSON with {success: true}
  */
+async function getAuthorizeUrl(handle: string) {
+  const state = await loadState()
+  const baseUrl = state.ngrokUrl || STRATOS_URL
+  return `${baseUrl}/oauth/authorize?handle=${encodeURIComponent(handle)}`
+}
+
 async function enrollUser(
   browser: Browser,
   handle: string,
@@ -49,13 +56,71 @@ async function enrollUser(
   try {
     // Step 1: Navigate to Stratos OAuth entry point
     info(`${label}: Navigating to OAuth authorize...`)
-    const authorizeUrl = `${STRATOS_URL}/oauth/authorize?handle=${encodeURIComponent(handle)}`
+    const authorizeUrl = await getAuthorizeUrl(handle)
 
-    // Stratos will redirect to PDS OAuth page — may take a moment
-    await page.goto(authorizeUrl, { waitUntil: 'networkidle', timeout: 30_000 })
+    // Set a custom header to skip ngrok browser warning
+    await context.setExtraHTTPHeaders({
+      'ngrok-skip-browser-warning': 'true',
+    })
+
+    // Stratos will redirect to the PDS OAuth page — may take a moment
+    await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
 
     dim(`${label}: Current URL: ${page.url()}`)
     await screenshotOnFailure(page, `${label}-01-after-redirect`)
+
+    const content = await page.content()
+    if (content.toLowerCase().includes('failed to resolve identity')) {
+      error(`${label}: Page contains 'Failed to resolve identity' error`)
+      throw new Error('Failed to resolve identity')
+    }
+
+    // Handle ngrok interstitial if it exists
+    // The button might have an aria-label or specific text
+    const ngrokButton = await page.$(
+      'button:has-text("Visit Site"), button:has-text("Visit the site")',
+    )
+    if (ngrokButton || page.url().includes('ngrok-free.app')) {
+      const body = await page.textContent('body')
+      if (
+        body?.includes('ngrok') &&
+        (body?.includes('browser') ||
+          body?.includes('Visit') ||
+          body?.includes('visit'))
+      ) {
+        dim(
+          `${label}: Ngrok interstitial detected, searching for Visit button...`,
+        )
+        if (ngrokButton) {
+          await ngrokButton.click()
+        } else {
+          // Fallback click on any button that looks like it
+          const buttons = await page.$$('button')
+          if (buttons.length > 0) {
+            // Sometimes it's the first button, sometimes not.
+            // Usually ngrok interstitial has only one prominent button.
+            await buttons[0].click()
+          } else {
+            // Try clicking by role or text if it's not a standard button
+            await page.click('text=/Visit Site/i').catch(() => {})
+          }
+        }
+        // Use a longer timeout and wait for network idle to be sure we redirected to PDS
+        try {
+          await page.waitForNavigation({
+            waitUntil: 'networkidle',
+            timeout: 30_000,
+          })
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        } catch (e) {
+          dim(
+            `${label}: Navigation after ngrok click timed out or didn't happen, continuing...`,
+          )
+        }
+        dim(`${label}: After ngrok interstitial URL: ${page.url()}`)
+        await screenshotOnFailure(page, `${label}-01b-after-ngrok`)
+      }
+    }
 
     // Step 2: We should now be on the PDS sign-in page
     // The PDS OAuth UI may use either the old or new frontend.
@@ -69,7 +134,7 @@ async function enrollUser(
 
     dim(`${label}: Sign-in form detected`)
 
-    // If username IS required (not pre-filled), fill it
+    // If a username IS required (not pre-filled), fill it
     const usernameInput =
       (await page.$(
         'input[name="username"]:not([readonly]):not([disabled])',
@@ -92,7 +157,7 @@ async function enrollUser(
     dim(`${label}: Credentials entered, submitting...`)
     await screenshotOnFailure(page, `${label}-02-credentials-filled`)
 
-    // Submit sign-in form — try multiple strategies
+    // Submit the sign-in form — try multiple strategies
     const signInButton =
       (await page.$('button[type="submit"]')) ??
       (await page.$('button:has-text("Sign in")'))
@@ -106,7 +171,7 @@ async function enrollUser(
 
     // Step 3: Wait for navigation — either to consent page or directly to callback
     await page.waitForURL(
-      (url) => {
+      (url: URL) => {
         const s = url.toString()
         return (
           s.includes('/oauth/callback') ||
@@ -141,7 +206,9 @@ async function enrollUser(
       }
 
       // Wait for final redirect to callback
-      await page.waitForURL((url) => url.toString().includes(STRATOS_URL), {
+      const state = await loadState()
+      const baseUrl = state.ngrokUrl || STRATOS_URL
+      await page.waitForURL((url: URL) => url.toString().includes(baseUrl), {
         timeout: 15_000,
       })
     }
@@ -155,6 +222,12 @@ async function enrollUser(
 
     // Try to extract JSON from the page body
     const bodyText = await page.textContent('body')
+    // DEBUG LOG
+    if (bodyText?.includes('ngrok')) {
+      console.log(
+        `[DEBUG_LOG] ${label} detected ngrok in final body: ${bodyText.substring(0, 500)}`,
+      )
+    }
     dim(`${label}: Response body: ${bodyText?.substring(0, 200)}`)
 
     if (

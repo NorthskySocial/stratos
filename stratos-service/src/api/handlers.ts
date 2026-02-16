@@ -11,6 +11,7 @@ import {
   listRecords,
 } from './records.js'
 import { registerHydrationHandlers } from '../features/index.js'
+import { Did } from '@atproto/api'
 
 type HandlerAuth = {
   credentials: {
@@ -42,14 +43,19 @@ type HandlerFn = (ctx: HandlerContext) => Promise<HandlerResponse>
 type XrpcServerInternal = XrpcServer & {
   method(
     nsid: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: { auth?: (ctx: any) => Promise<any>; handler: HandlerFn },
+    config: {
+      auth?: (
+        ctx: import('@atproto/xrpc-server').MethodAuthContext,
+      ) => Promise<unknown>
+      handler: HandlerFn
+    },
   ): void
 }
 
 /**
- * Register all XRPC handlers with the server
- * Note: Uses internal API until proper lexicon loading is implemented
+ * Register handlers for the application
+ * @param server XRPC server instance
+ * @param ctx App context
  */
 export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   const xrpc = server as unknown as XrpcServerInternal
@@ -63,7 +69,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       const { did } = validateUserAuth(auth)
       console.log('[createRecord] auth validated, did:', did)
       const body = input?.body as {
-        repo: string
+        repo: Did
         collection: string
         rkey?: string
         record: unknown

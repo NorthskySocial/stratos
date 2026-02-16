@@ -26,6 +26,11 @@ export function warn(msg: string): void {
   console.log(`  ${YELLOW}⚠${RESET} ${msg}`)
 }
 
+export function error(msg: string, error: { error: string }): void {
+  console.log(`  ${RED}E${RESET} ${msg}`)
+  console.error(error.error)
+}
+
 export function section(title: string): void {
   console.log(`\n${BOLD}${title}${RESET}`)
 }

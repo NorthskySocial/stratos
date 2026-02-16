@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   validateEnrollment,
   assertEnrollment,
   extractPdsEndpoint,
   EnrollmentConfig,
   EnrollmentDeniedError,
-} from '../src/auth/enrollment.js'
+} from '../src/auth'
 import type { IdResolver, DidDocument } from '@atproto/identity'
 
 // Mock IdResolver

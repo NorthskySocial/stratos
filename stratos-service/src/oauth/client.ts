@@ -1,8 +1,13 @@
-import { NodeOAuthClient, NodeSavedSession } from '@atproto/oauth-client-node'
+import {
+  NodeOAuthClient,
+  NodeSavedSession,
+  ResolvedHandle,
+  ResolveHandleOptions,
+} from '@atproto/oauth-client-node'
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
 import { eq } from 'drizzle-orm'
-import { type ServiceDb, oauthSession, oauthState } from '../db/index.js'
+import { oauthSession, oauthState, type ServiceDb } from '../db/index.js'
 
 /**
  * Database schema for OAuth session storage
@@ -128,13 +133,13 @@ export async function createOAuthClient(
   const sessionStore = new SqliteSessionStore(db)
   const stateStore = new SqliteStateStore(db)
 
-  // Create client key if provided
+  // Create the client key if provided
   let clientKey: JoseKey | undefined = undefined
   if (config.privateKeyPem) {
     clientKey = await JoseKey.fromImportable(config.privateKeyPem, 'key-1')
   }
 
-  const client = new NodeOAuthClient({
+  return new NodeOAuthClient({
     clientMetadata: {
       client_id: config.clientId,
       client_name: 'Stratos Service',
@@ -177,17 +182,17 @@ export async function createOAuthClient(
 
     // Use our identity resolver for handle resolution
     handleResolver: {
-      resolve: async (handle: string) => {
-        const result = await idResolver.handle.resolve(handle)
-        // HandleResolver expects ResolvedHandle (null | AtprotoDid)
-        // idResolver returns string | null which is compatible when the string is a DID
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return result as any
+      resolve: async (
+        handle: string,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        options: ResolveHandleOptions | undefined,
+      ) => {
+        // HandleResolver expects a ResolvedHandle; fall back to empty string if unresolved
+        const did = await idResolver.handle.resolve(handle)
+        return (did ?? null) as unknown as ResolvedHandle
       },
     },
   })
-
-  return client
 }
 
 // Migrations are now handled in ../db/index.ts via migrateServiceDb()

@@ -8,7 +8,7 @@ import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { Server as XrpcServer, XRPCError } from '@atproto/xrpc-server'
-import { schemas as atprotoSchemas } from '@atproto/api'
+import { schemas as atprotoSchemas, Agent } from '@atproto/api'
 import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
 
@@ -16,7 +16,7 @@ import {
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,
-  type StratosDb,
+  type StratosDbOrTx,
   StratosRecordReader,
   StratosRecordTransactor,
   StratosSqlRepoReader,
@@ -35,6 +35,7 @@ import {
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
+  PdsAgent,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
 
@@ -70,7 +71,7 @@ export interface StratosActorReader {
  */
 export interface StratosActorTransactor {
   did: string
-  db: StratosDb
+  db: StratosDbOrTx
   record: StratosRecordTransactor
   repo: StratosSqlRepoTransactor
   blob: StratosBlobTransactor
@@ -90,10 +91,12 @@ interface EnrollmentTable {
  * Actor store manager for Stratos
  */
 export class StratosActorStore {
-  private dataDir: string
-  private blobstore: BlobStoreCreator
-  private logger?: Logger
-  private cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private readonly dataDir: string
+  private readonly blobstore: BlobStoreCreator
+  private readonly logger?: Logger
+  private readonly cborToRecord: (
+    content: Uint8Array,
+  ) => Record<string, unknown>
 
   constructor(opts: {
     dataDir: string
@@ -180,17 +183,18 @@ export class StratosActorStore {
       return await db.transaction(async (tx) => {
         const store: StratosActorTransactor = {
           did,
-          db: tx as unknown as StratosDb,
+          db: tx as unknown as StratosDbOrTx,
           record: new StratosRecordTransactor(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            tx as any,
+            tx as unknown as StratosDbOrTx,
             this.cborToRecord,
             this.logger,
           ),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          repo: new StratosSqlRepoTransactor(tx as any),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          blob: new StratosBlobTransactor(tx as any, blobStore, this.logger),
+          repo: new StratosSqlRepoTransactor(tx as unknown as StratosDbOrTx),
+          blob: new StratosBlobTransactor(
+            tx as unknown as StratosDbOrTx,
+            blobStore,
+            this.logger,
+          ),
         }
         return fn(store)
       })
@@ -329,22 +333,20 @@ export class SqliteEnrollmentStore
 export interface AuthVerifiers {
   /** Standard user auth (OAuth token) */
   standard: (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ctx: any,
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did: string } }>
   /** Service-to-service auth (inter-service JWT) */
   service: (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ctx: any,
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did: string; iss: string } }>
   /** Optional user auth */
   optionalStandard: (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ctx: any,
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did?: string } }>
   /** Admin auth (basic auth or bearer token with admin password) */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  admin: (ctx: any) => Promise<{ credentials: { type: string } }>
+  admin: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{ credentials: { type: string } }>
 }
 
 /**
@@ -358,7 +360,7 @@ function createAuthVerifiers(
   adminPassword: string | undefined,
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier | undefined,
 ): AuthVerifiers {
-  // Helper to validate DID has active session
+  // Helper to validate DID has an active session
   const validateSession = async (did: string): Promise<boolean> => {
     if (!oauthClient) {
       // If no OAuth client, fall back to enrollment check
@@ -502,7 +504,7 @@ function createAuthVerifiers(
         return { credentials: { type: 'none' } }
       }
 
-      // Verify user has valid session (optional, so don't throw on failure)
+      // Verify the user has a valid session (optional, so don't throw on failure)
       const hasSession = await validateSession(token)
       if (!hasSession) {
         return { credentials: { type: 'none' } }
@@ -624,6 +626,48 @@ export async function createAppContext(
     plcUrl: cfg.identity.plcUrl,
   })
 
+  const originalResolve = idResolver.handle.resolve.bind(idResolver.handle)
+  idResolver.handle.resolve = async (handle: string) => {
+    try {
+      // 1. Try standard resolution first
+      const result = await originalResolve(handle)
+      if (result) return result
+    } catch (err) {
+      logger?.debug(
+        { handle, err: err instanceof Error ? err.message : String(err) },
+        'standard handle resolution failed, trying PDS fallback',
+      )
+    }
+
+    // 2. Fallback: Try resolving via PDS API if standard resolution fails
+    // This is useful for PDSs with dynamic handles that don't support .well-known/atproto-did on subdomains
+    try {
+      const domain = handle.split('.').slice(1).join('.')
+      if (domain) {
+        const pdsUrl = `https://${domain}`
+        const resolveUrl = `${pdsUrl}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
+        const resp = await fetch(resolveUrl)
+        if (resp.ok) {
+          const data = (await resp.json()) as unknown as { did?: string }
+          if (data.did) {
+            logger?.info(
+              { handle, did: data.did, pdsUrl },
+              'resolved handle via PDS API fallback',
+            )
+            return data.did
+          }
+        }
+      }
+    } catch (err) {
+      logger?.debug(
+        { handle, err: err instanceof Error ? err.message : String(err) },
+        'PDS handle resolution fallback failed',
+      )
+    }
+
+    return undefined
+  }
+
   const keyPath = path.join(cfg.storage.dataDir, 'signing_key')
   let signingKey: crypto.Keypair
 
@@ -701,8 +745,7 @@ export async function createAppContext(
     }
     try {
       const session = await oauthClient.restore(did)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return session ? ({ api: session } as any) : null
+      return new Agent(session) as unknown as PdsAgent
     } catch {
       return null
     }

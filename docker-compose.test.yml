@@ -42,6 +42,8 @@ services:
         fi
 
   stratos:
+    networks:
+      - default
     user: 1000:1000
     build:
       context: .
@@ -56,6 +58,14 @@ services:
       STRATOS_PORT: 3100
       STRATOS_DATA_DIR: /app/data
       STRATOS_BLOB_STORAGE: local
+      STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL:-http://127.0.0.1:3100}
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}
+      STRATOS_OAUTH_CLIENT_ID: ${STRATOS_OAUTH_CLIENT_ID:-http://127.0.0.1:3100/client-metadata.json}
+      STRATOS_OAUTH_CLIENT_URI: ${STRATOS_OAUTH_CLIENT_URI:-http://127.0.0.1:3100}
+      STRATOS_OAUTH_REDIRECT_URI: ${STRATOS_OAUTH_REDIRECT_URI:-http://127.0.0.1:3100/oauth/callback}
+    depends_on:
+      ssl-init:
+        condition: service_completed_successfully
     volumes:
       - ./test-data:/app/data
     healthcheck:
@@ -68,10 +78,27 @@ services:
           '--spider',
           'http://localhost:3100/health',
         ]
-      interval: 10s
+      interval: 2s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 30
+
+  ngrok:
+    networks:
+      - default
+    image: ngrok/ngrok:latest
+    container_name: stratos-ngrok
+    restart: 'no'
+    ports:
+      - '4040:4040'
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command:
+      - http
+      - http://stratos:3100
+
+networks:
+  default:
+    name: stratos-test-net
 
 volumes:
   ssl-certs:
