@@ -769,6 +769,7 @@ For high-traffic deployments:
 | `/oauth/*`                     | No            | Public enrollment flow      |
 | `createRecord`, `deleteRecord` | Yes           | OAuth access token          |
 | `getRecord`, `listRecords`     | Optional      | Used for boundary filtering |
+| `sync.getRecord`               | Optional      | Returns signed attestation CAR |
 | `subscribeRecords`             | Yes           | Service auth JWT            |
 | `/_health`                     | No            | Public health check         |
 
@@ -778,6 +779,18 @@ Records are validated on write:
 
 - Boundary domains must be in `STRATOS_ALLOWED_DOMAINS`
 - Cross-namespace embeds are rejected (no `app.bsky` references in stratos records)
+
+### Record Attestation
+
+The service signing key (`STRATOS_SIGNING_KEY`) is used to sign per-record attestations. When
+clients request records via `com.atproto.sync.getRecord`, the response includes a signed attestation
+block binding the record to its AT URI. This allows clients to:
+
+- Verify record content integrity (CID matches content hash)
+- Verify the record was served by this specific Stratos service (signature check against DID document)
+
+The signing key must be a secp256k1 private key. The corresponding public key should be published in
+the service's DID document so clients can verify signatures.
 
 ### Rate Limiting
 
