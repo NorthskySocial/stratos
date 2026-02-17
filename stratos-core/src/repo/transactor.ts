@@ -16,7 +16,13 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
     super(db, logger)
   }
 
-  async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
+  async updateRoot(
+    cid: CID,
+    rev: string,
+    did: string,
+    digest?: Buffer,
+    sig?: Buffer,
+  ): Promise<void> {
     await this.db
       .insert(stratosRepoRoot)
       .values({
@@ -24,6 +30,8 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
         cid: cid.toString(),
         rev,
         indexedAt: new Date().toISOString(),
+        digest: digest ?? null,
+        sig: sig ?? null,
       })
       .onConflictDoUpdate({
         target: stratosRepoRoot.did,
@@ -31,6 +39,8 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
           cid: cid.toString(),
           rev,
           indexedAt: new Date().toISOString(),
+          digest: digest ?? null,
+          sig: sig ?? null,
         },
       })
   }
