@@ -217,7 +217,8 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         throw new InvalidRequestError('Request body is required')
       }
 
-      const contentType = (input.encoding as string) || 'application/octet-stream'
+      const contentType =
+        (input.encoding as string) || 'application/octet-stream'
 
       // Collect the body into bytes
       let bytes: Uint8Array
@@ -227,7 +228,10 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
         }
         bytes = new Uint8Array(Buffer.concat(chunks))
-      } else if (input.body instanceof Uint8Array || Buffer.isBuffer(input.body)) {
+      } else if (
+        input.body instanceof Uint8Array ||
+        Buffer.isBuffer(input.body)
+      ) {
         bytes = new Uint8Array(input.body as Uint8Array)
       } else {
         throw new InvalidRequestError('Expected binary body')
@@ -257,7 +261,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       })
 
       ctx.logger?.info(
-        { did, cid: cid.toString(), size: bytes.length, durationMs: Date.now() - start },
+        {
+          did,
+          cid: cid.toString(),
+          size: bytes.length,
+          durationMs: Date.now() - start,
+        },
         'blob uploaded',
       )
 
@@ -457,7 +466,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       if (body.repo !== did) {
-        throw new AuthRequiredError('Cannot write to another user\'s repo')
+        throw new AuthRequiredError("Cannot write to another user's repo")
       }
 
       if (!body.writes || body.writes.length === 0) {
@@ -570,7 +579,8 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         return store.blob.listBlobs({ since, cursor, limit })
       })
 
-      const nextCursor = cids.length === limit ? cids[cids.length - 1] : undefined
+      const nextCursor =
+        cids.length === limit ? cids[cids.length - 1] : undefined
 
       return {
         encoding: 'application/json',
