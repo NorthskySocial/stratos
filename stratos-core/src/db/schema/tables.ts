@@ -15,6 +15,8 @@ export const stratosRepoRoot = sqliteTable('stratos_repo_root', {
   cid: text('cid').notNull(),
   rev: text('rev').notNull(),
   indexedAt: text('indexedAt').notNull(),
+  digest: blob('digest', { mode: 'buffer' }),
+  sig: blob('sig', { mode: 'buffer' }),
 })
 
 /**
@@ -46,6 +48,7 @@ export const stratosRecord = sqliteTable(
     repoRev: text('repoRev').notNull(),
     indexedAt: text('indexedAt').notNull(),
     takedownRef: text('takedownRef'),
+    sig: blob('sig', { mode: 'buffer' }),
   },
   (table) => [
     index('stratos_record_cid_idx').on(table.cid),

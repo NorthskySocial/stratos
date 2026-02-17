@@ -10,9 +10,10 @@ applications.
 3. [User Enrollment](#user-enrollment)
 4. [Creating Records](#creating-records)
 5. [Reading Records](#reading-records)
-6. [Domain Boundaries](#domain-boundaries)
-7. [UI Patterns](#ui-patterns)
-8. [API Reference](#api-reference)
+6. [Record Verification](#record-verification)
+7. [Domain Boundaries](#domain-boundaries)
+8. [UI Patterns](#ui-patterns)
+9. [API Reference](#api-reference)
 
 ---
 
@@ -490,6 +491,126 @@ async function hydrateFromSource(
   return response.json()
 }
 ```
+
+---
+
+## Record Verification
+
+Stratos services sign every record with an attestation when serving it via `com.atproto.sync.getRecord`. This allows clients to verify that a record was genuinely produced by the claimed Stratos service and has not been tampered with in transit.
+
+### Attestation CAR Format
+
+When you call `sync.getRecord` on a Stratos service, the response is a CAR v1 file containing two blocks instead of one:
+
+1. **Root block** — A signed attestation (`type: 'stratos-record-attestation'`) binding the record to its AT URI
+2. **Second block** — The actual record content (dag-cbor encoded)
+
+The attestation contains:
+
+| Field        | Description                                       |
+| ------------ | ------------------------------------------------- |
+| `type`       | Always `stratos-record-attestation`               |
+| `v`          | Version number (`1`)                              |
+| `did`        | DID of the record owner                           |
+| `collection` | Record collection (e.g., `app.stratos.feed.post`) |
+| `rkey`       | Record key                                        |
+| `cid`        | CID of the record block (content hash)            |
+| `rev`        | Revision identifier                               |
+| `codec`      | Always `dag-cbor`                                 |
+| `sig`        | Service signature over the attestation payload    |
+
+### Using `@northskysocial/stratos-core`
+
+The `@northskysocial/stratos-core/client` export provides three verification functions:
+
+```bash
+npm install @northskysocial/stratos-core
+```
+
+#### Detecting Attestation CARs
+
+```typescript
+import { isStratosAttestation } from '@northskysocial/stratos-core/client'
+
+const carBytes = await fetchSyncGetRecord(did, collection, rkey)
+if (isStratosAttestation(carBytes)) {
+  console.log('This is a Stratos attestation CAR')
+} else {
+  console.log('Standard PDS record CAR')
+}
+```
+
+#### Verifying Records
+
+```typescript
+import { verifyStratosRecord } from '@northskysocial/stratos-core/client'
+
+const { cid, record } = await verifyStratosRecord({
+  did: 'did:plc:abc',
+  collection: 'app.stratos.feed.post',
+  rkey: 'tid123',
+  carBytes,
+})
+
+// record is the decoded content, cid is the verified content hash
+// Throws if:
+//   - CID doesn't match block content (tampered data)
+//   - Attestation DID/collection/rkey don't match expected values
+//   - CAR structure is malformed
+```
+
+#### Extracting Attestation Payload
+
+```typescript
+import { extractAttestation } from '@northskysocial/stratos-core/client'
+
+const attestation = extractAttestation(carBytes)
+if (attestation) {
+  console.log(attestation.did)        // record owner
+  console.log(attestation.collection) // collection name
+  console.log(attestation.sig)        // service signature (Uint8Array)
+}
+```
+
+### Signature Verification
+
+`verifyStratosRecord` checks structural integrity (CID matches content, fields match expected
+values) but does **not** verify the cryptographic signature. For full non-repudiation, verify the
+signature against the service's public key:
+
+```typescript
+import { extractAttestation } from '@northskysocial/stratos-core/client'
+import { verifySignature } from '@atproto/crypto'
+
+const attestation = extractAttestation(carBytes)
+if (attestation?.sig) {
+  // Fetch the service's public key from its DID document
+  const serviceDidDoc = await resolveDidDocument(serviceEndpointDid)
+  const publicKey = extractVerificationMethod(serviceDidDoc)
+
+  // The signed payload is the attestation without the sig field
+  const payloadBytes = encodeAttestationForSigning(
+    attestation.did,
+    attestation.collection,
+    attestation.rkey,
+    attestation.cid,
+    attestation.rev,
+  )
+
+  const valid = await verifySignature(publicKey, payloadBytes, attestation.sig)
+  if (valid) {
+    console.log('Signature verified — record is authentic')
+  }
+}
+```
+
+### What Verification Proves
+
+| Check                         | What it proves                                                  |
+| ----------------------------- | --------------------------------------------------------------- |
+| CID integrity                 | Record content has not been modified since the CID was computed |
+| Field matching                | The attestation binds to the expected AT URI                    |
+| Signature (optional)          | The specific Stratos service produced this attestation          |
 
 ---
 
