@@ -13,8 +13,6 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import * as dagCbor from '@ipld/dag-cbor'
 import type { RecordAttestation } from '../repo/attestation.js'
 
-const DAG_CBOR_CODEC = 0x71
-
 export interface VerifyStratosRecordOptions {
   did: string
   collection: string
