@@ -58,9 +58,7 @@ async function buildAttestationCar(opts: {
     attCidBytes.length + attestationBytes.length,
   )
   const recCidBytes = recordCid.bytes
-  const recBlockVarInt = encodeVarint(
-    recCidBytes.length + recordBytes.length,
-  )
+  const recBlockVarInt = encodeVarint(recCidBytes.length + recordBytes.length)
 
   const carLength =
     headerVarInt.length +
@@ -74,13 +72,20 @@ async function buildAttestationCar(opts: {
 
   const car = new Uint8Array(carLength)
   let offset = 0
-  car.set(headerVarInt, offset); offset += headerVarInt.length
-  car.set(header, offset); offset += header.length
-  car.set(attBlockVarInt, offset); offset += attBlockVarInt.length
-  car.set(attCidBytes, offset); offset += attCidBytes.length
-  car.set(attestationBytes, offset); offset += attestationBytes.length
-  car.set(recBlockVarInt, offset); offset += recBlockVarInt.length
-  car.set(recCidBytes, offset); offset += recCidBytes.length
+  car.set(headerVarInt, offset)
+  offset += headerVarInt.length
+  car.set(header, offset)
+  offset += header.length
+  car.set(attBlockVarInt, offset)
+  offset += attBlockVarInt.length
+  car.set(attCidBytes, offset)
+  offset += attCidBytes.length
+  car.set(attestationBytes, offset)
+  offset += attestationBytes.length
+  car.set(recBlockVarInt, offset)
+  offset += recBlockVarInt.length
+  car.set(recCidBytes, offset)
+  offset += recCidBytes.length
   car.set(recordBytes, offset)
 
   return { car, recordCid, attestationCid }
@@ -107,10 +112,14 @@ async function buildPlainCar(
 
   const car = new Uint8Array(carLength)
   let offset = 0
-  car.set(headerVarInt, offset); offset += headerVarInt.length
-  car.set(header, offset); offset += header.length
-  car.set(blockVarInt, offset); offset += blockVarInt.length
-  car.set(cidBytes, offset); offset += cidBytes.length
+  car.set(headerVarInt, offset)
+  offset += headerVarInt.length
+  car.set(header, offset)
+  offset += header.length
+  car.set(blockVarInt, offset)
+  offset += blockVarInt.length
+  car.set(cidBytes, offset)
+  offset += cidBytes.length
   car.set(recordBytes, offset)
 
   return car

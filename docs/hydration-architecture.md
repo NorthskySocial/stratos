@@ -557,11 +557,11 @@ stratos/
 
 ### Sync
 
-| Endpoint                            | Method       | Auth         | Description                                             |
-| ----------------------------------- | ------------ | ------------ | ------------------------------------------------------- |
-| `com.atproto.sync.getRecord`        | Query        | User/Service | Get record as attestation CAR (signed, verifiable)      |
-| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                      |
-| `app.stratos.sync.getRepo`          | Query        | User/Service | Export CAR file                                         |
+| Endpoint                            | Method       | Auth         | Description                                        |
+| ----------------------------------- | ------------ | ------------ | -------------------------------------------------- |
+| `com.atproto.sync.getRecord`        | Query        | User/Service | Get record as attestation CAR (signed, verifiable) |
+| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                 |
+| `app.stratos.sync.getRepo`          | Query        | User/Service | Export CAR file                                    |
 
 ---
 
@@ -569,17 +569,17 @@ stratos/
 
 ### Environment Variables
 
-| Variable                     | Required | Default       | Description                                              |
-| ---------------------------- | -------- | ------------- | -------------------------------------------------------- |
-| `STRATOS_PORT`               | No       | `3100`        | HTTP server port                                         |
-| `STRATOS_PUBLIC_URL`         | Yes      | -             | Public URL for OAuth callbacks                           |
-| `STRATOS_DID`                | Yes      | -             | Service DID                                              |
-| `STRATOS_SERVICE_FRAGMENT`   | No       | `atproto_pns` | Service fragment for source field                        |
+| Variable                     | Required | Default       | Description                                                                    |
+| ---------------------------- | -------- | ------------- | ------------------------------------------------------------------------------ |
+| `STRATOS_PORT`               | No       | `3100`        | HTTP server port                                                               |
+| `STRATOS_PUBLIC_URL`         | Yes      | -             | Public URL for OAuth callbacks                                                 |
+| `STRATOS_DID`                | Yes      | -             | Service DID                                                                    |
+| `STRATOS_SERVICE_FRAGMENT`   | No       | `atproto_pns` | Service fragment for source field                                              |
 | `STRATOS_SIGNING_KEY`        | Yes      | -             | Service signing key (secp256k1) for inter-service auth and record attestations |
-| `STRATOS_ALLOWED_BOUNDARIES` | No       | `[]`          | Valid boundary values                                    |
-| `STRATOS_ALLOWED_APPVIEWS`   | No       | `[]`          | AppView DIDs allowed to call getRecord with service auth |
-| `STRATOS_DATA_DIR`           | No       | `./data`      | Per-actor SQLite storage                                 |
-| `STRATOS_BLOB_STORAGE`       | No       | `local`       | `local` or `s3`                                          |
+| `STRATOS_ALLOWED_BOUNDARIES` | No       | `[]`          | Valid boundary values                                                          |
+| `STRATOS_ALLOWED_APPVIEWS`   | No       | `[]`          | AppView DIDs allowed to call getRecord with service auth                       |
+| `STRATOS_DATA_DIR`           | No       | `./data`      | Per-actor SQLite storage                                                       |
+| `STRATOS_BLOB_STORAGE`       | No       | `local`       | `local` or `s3`                                                                |
 
 ### Service DID Configuration
 

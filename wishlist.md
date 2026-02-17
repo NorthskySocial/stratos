@@ -31,6 +31,7 @@ When a Stratos operator rotates their service signing key, all previously stored
 - The integrity chain (`stratos_repo_root.digest` + `sig`) is also bound to the signing key — a rotation invalidates the entire chain unless the old key is retained for verification.
 
 Options to explore:
+
 - Retain old public keys in the DID document (`verificationMethod` array) with validity periods so verifiers can match key to attestation era.
 - Store the service `did:key` identifier in each attestation so verifiers know which key to resolve.
 - Provide a re-signing migration tool that updates all attestation sigs and recomputes the chain under the new key.

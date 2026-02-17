@@ -764,14 +764,14 @@ For high-traffic deployments:
 
 ### Authentication
 
-| Endpoint                       | Auth Required | Auth Type                   |
-| ------------------------------ | ------------- | --------------------------- |
-| `/oauth/*`                     | No            | Public enrollment flow      |
-| `createRecord`, `deleteRecord` | Yes           | OAuth access token          |
-| `getRecord`, `listRecords`     | Optional      | Used for boundary filtering |
+| Endpoint                       | Auth Required | Auth Type                      |
+| ------------------------------ | ------------- | ------------------------------ |
+| `/oauth/*`                     | No            | Public enrollment flow         |
+| `createRecord`, `deleteRecord` | Yes           | OAuth access token             |
+| `getRecord`, `listRecords`     | Optional      | Used for boundary filtering    |
 | `sync.getRecord`               | Optional      | Returns signed attestation CAR |
-| `subscribeRecords`             | Yes           | Service auth JWT            |
-| `/_health`                     | No            | Public health check         |
+| `subscribeRecords`             | Yes           | Service auth JWT               |
+| `/_health`                     | No            | Public health check            |
 
 ### Boundary Enforcement
 
