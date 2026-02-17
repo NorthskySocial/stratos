@@ -100,8 +100,7 @@ export function isStratosAttestation(carBytes: Uint8Array): boolean {
     return (
       decoded !== null &&
       typeof decoded === 'object' &&
-      (decoded as Record<string, unknown>).type ===
-        'stratos-record-attestation'
+      (decoded as Record<string, unknown>).type === 'stratos-record-attestation'
     )
   } catch {
     return false
@@ -145,14 +144,10 @@ export async function verifyStratosRecord(
     const computed = CID.createV1(expectedCodec, hash)
 
     if (!rootCidStr && computed.toString() !== block.cid.toString()) {
-      throw new Error(
-        `CID integrity check failed for ${block.cid.toString()}`,
-      )
+      throw new Error(`CID integrity check failed for ${block.cid.toString()}`)
     }
     if (computed.toString() !== block.cid.toString()) {
-      throw new Error(
-        `CID integrity check failed for ${block.cid.toString()}`,
-      )
+      throw new Error(`CID integrity check failed for ${block.cid.toString()}`)
     }
     blockMap.set(block.cid.toString(), block.bytes)
   }
@@ -171,9 +166,7 @@ export async function verifyStratosRecord(
     throw new Error(`attestation DID mismatch: expected ${did}`)
   }
   if (attestation.collection !== collection) {
-    throw new Error(
-      `attestation collection mismatch: expected ${collection}`,
-    )
+    throw new Error(`attestation collection mismatch: expected ${collection}`)
   }
   if (attestation.rkey !== rkey) {
     throw new Error(`attestation rkey mismatch: expected ${rkey}`)
@@ -182,9 +175,7 @@ export async function verifyStratosRecord(
   const recordCid = attestation.cid as string
   const recordBytes = blockMap.get(recordCid)
   if (!recordBytes) {
-    throw new Error(
-      'record block referenced by attestation not found in CAR',
-    )
+    throw new Error('record block referenced by attestation not found in CAR')
   }
 
   const record = dagCbor.decode(recordBytes) as unknown

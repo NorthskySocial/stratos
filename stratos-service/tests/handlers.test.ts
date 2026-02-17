@@ -533,9 +533,7 @@ describe('attestation CAR building', () => {
 
     const storedBytes = new Uint8Array(result.storedBytes)
     const recCidBytes = recordCid.bytes
-    const recBlockVarInt = encodeVarint(
-      recCidBytes.length + storedBytes.length,
-    )
+    const recBlockVarInt = encodeVarint(recCidBytes.length + storedBytes.length)
 
     const carLength =
       headerVarInt.length +
@@ -549,13 +547,20 @@ describe('attestation CAR building', () => {
 
     const car = new Uint8Array(carLength)
     let offset = 0
-    car.set(headerVarInt, offset); offset += headerVarInt.length
-    car.set(header, offset); offset += header.length
-    car.set(attBlockVarInt, offset); offset += attBlockVarInt.length
-    car.set(attCidBytes, offset); offset += attCidBytes.length
-    car.set(attestationBytes, offset); offset += attestationBytes.length
-    car.set(recBlockVarInt, offset); offset += recBlockVarInt.length
-    car.set(recCidBytes, offset); offset += recCidBytes.length
+    car.set(headerVarInt, offset)
+    offset += headerVarInt.length
+    car.set(header, offset)
+    offset += header.length
+    car.set(attBlockVarInt, offset)
+    offset += attBlockVarInt.length
+    car.set(attCidBytes, offset)
+    offset += attCidBytes.length
+    car.set(attestationBytes, offset)
+    offset += attestationBytes.length
+    car.set(recBlockVarInt, offset)
+    offset += recBlockVarInt.length
+    car.set(recCidBytes, offset)
+    offset += recCidBytes.length
     car.set(storedBytes, offset)
 
     // Parse the CAR header
