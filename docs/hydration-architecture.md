@@ -333,8 +333,8 @@ function isAuthorized(
    GET https://stratos.community.example.com/oauth/authorize?handle=alice.bsky.social
 
 2. Stratos redirects to user's PDS OAuth
-   - Requests scopes: atproto, transition:generic
-   - These allow writing to any collection
+   - Requests scopes: atproto, repo:app.stratos.actor.enrollment, repo:app.stratos.feed.post
+   - These allow writing enrollment and stub records to the user's PDS
 
 3. User authorizes on PDS
 
