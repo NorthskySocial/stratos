@@ -38,11 +38,41 @@ describe('attestation', () => {
 
     it('should change output when any field changes', () => {
       const base = encodeAttestationForSigning(did, collection, rkey, cid, rev)
-      const diffDid = encodeAttestationForSigning('did:plc:other', collection, rkey, cid, rev)
-      const diffColl = encodeAttestationForSigning(did, 'app.stratos.other', rkey, cid, rev)
-      const diffRkey = encodeAttestationForSigning(did, collection, 'xyz', cid, rev)
-      const diffCid = encodeAttestationForSigning(did, collection, rkey, 'bafyother', rev)
-      const diffRev = encodeAttestationForSigning(did, collection, rkey, cid, 'otherrev')
+      const diffDid = encodeAttestationForSigning(
+        'did:plc:other',
+        collection,
+        rkey,
+        cid,
+        rev,
+      )
+      const diffColl = encodeAttestationForSigning(
+        did,
+        'app.stratos.other',
+        rkey,
+        cid,
+        rev,
+      )
+      const diffRkey = encodeAttestationForSigning(
+        did,
+        collection,
+        'xyz',
+        cid,
+        rev,
+      )
+      const diffCid = encodeAttestationForSigning(
+        did,
+        collection,
+        rkey,
+        'bafyother',
+        rev,
+      )
+      const diffRev = encodeAttestationForSigning(
+        did,
+        collection,
+        rkey,
+        cid,
+        'otherrev',
+      )
 
       expect(base).not.toEqual(diffDid)
       expect(base).not.toEqual(diffColl)
@@ -93,22 +123,42 @@ describe('attestation', () => {
     })
 
     it('should be deterministic', async () => {
-      const op = { action: 'create' as const, uri: `at://${did}/${collection}/${rkey}`, cid, rev }
+      const op = {
+        action: 'create' as const,
+        uri: `at://${did}/${collection}/${rkey}`,
+        cid,
+        rev,
+      }
       const a = await computeChainDigest(null, op)
       const b = await computeChainDigest(null, op)
       expect(a).toEqual(b)
     })
 
     it('should use zero digest when prev is null', async () => {
-      const op = { action: 'create' as const, uri: `at://${did}/${collection}/${rkey}`, cid, rev }
+      const op = {
+        action: 'create' as const,
+        uri: `at://${did}/${collection}/${rkey}`,
+        cid,
+        rev,
+      }
       const fromNull = await computeChainDigest(null, op)
       const fromZero = await computeChainDigest(new Uint8Array(32), op)
       expect(fromNull).toEqual(fromZero)
     })
 
     it('should chain operations sequentially', async () => {
-      const op1 = { action: 'create' as const, uri: `at://${did}/${collection}/rec1`, cid, rev: 'rev1' }
-      const op2 = { action: 'create' as const, uri: `at://${did}/${collection}/rec2`, cid, rev: 'rev2' }
+      const op1 = {
+        action: 'create' as const,
+        uri: `at://${did}/${collection}/rec1`,
+        cid,
+        rev: 'rev1',
+      }
+      const op2 = {
+        action: 'create' as const,
+        uri: `at://${did}/${collection}/rec2`,
+        cid,
+        rev: 'rev2',
+      }
 
       const digest1 = await computeChainDigest(null, op1)
       const digest2 = await computeChainDigest(digest1, op2)
@@ -123,8 +173,18 @@ describe('attestation', () => {
 
     it('should produce different digests for different actions', async () => {
       const uri = `at://${did}/${collection}/${rkey}`
-      const create = await computeChainDigest(null, { action: 'create', uri, cid, rev })
-      const update = await computeChainDigest(null, { action: 'update', uri, cid, rev })
+      const create = await computeChainDigest(null, {
+        action: 'create',
+        uri,
+        cid,
+        rev,
+      })
+      const update = await computeChainDigest(null, {
+        action: 'update',
+        uri,
+        cid,
+        rev,
+      })
       const del = await computeChainDigest(null, { action: 'delete', uri, rev })
 
       expect(create).not.toEqual(update)

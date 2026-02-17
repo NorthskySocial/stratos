@@ -566,9 +566,9 @@ import { extractAttestation } from '@northskysocial/stratos-core/client'
 
 const attestation = extractAttestation(carBytes)
 if (attestation) {
-  console.log(attestation.did)        // record owner
+  console.log(attestation.did) // record owner
   console.log(attestation.collection) // collection name
-  console.log(attestation.sig)        // service signature (Uint8Array)
+  console.log(attestation.sig) // service signature (Uint8Array)
 }
 ```
 
@@ -606,11 +606,11 @@ if (attestation?.sig) {
 
 ### What Verification Proves
 
-| Check                         | What it proves                                                  |
-| ----------------------------- | --------------------------------------------------------------- |
-| CID integrity                 | Record content has not been modified since the CID was computed |
-| Field matching                | The attestation binds to the expected AT URI                    |
-| Signature (optional)          | The specific Stratos service produced this attestation          |
+| Check                | What it proves                                                  |
+| -------------------- | --------------------------------------------------------------- |
+| CID integrity        | Record content has not been modified since the CID was computed |
+| Field matching       | The attestation binds to the expected AT URI                    |
+| Signature (optional) | The specific Stratos service produced this attestation          |
 
 ---
 
