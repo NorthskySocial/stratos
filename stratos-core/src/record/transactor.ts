@@ -29,6 +29,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
     action: 'create' | 'update' = 'create',
     repoRev: string,
     timestamp?: string,
+    sig?: Buffer,
   ): Promise<void> {
     this.logger?.debug({ uri: uri.toString() }, 'indexing stratos record')
 
@@ -54,6 +55,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
       .values({
         ...row,
         takedownRef: null,
+        sig: sig ?? null,
       })
       .onConflictDoUpdate({
         target: stratosRecord.uri,
@@ -61,6 +63,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
           cid: row.cid,
           repoRev: repoRev,
           indexedAt: row.indexedAt,
+          sig: sig ?? null,
         },
       })
 

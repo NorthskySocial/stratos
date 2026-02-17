@@ -131,15 +131,27 @@ export class StratosSqlRepoReader {
     return root?.cid ?? null
   }
 
-  async getRootDetailed(): Promise<{ cid: CID; rev: string } | null> {
+  async getRootDetailed(): Promise<{
+    cid: CID
+    rev: string
+    digest: Buffer | null
+    sig: Buffer | null
+  } | null> {
     const res = await this.db
-      .select({ cid: stratosRepoRoot.cid, rev: stratosRepoRoot.rev })
+      .select({
+        cid: stratosRepoRoot.cid,
+        rev: stratosRepoRoot.rev,
+        digest: stratosRepoRoot.digest,
+        sig: stratosRepoRoot.sig,
+      })
       .from(stratosRepoRoot)
       .limit(1)
     if (res.length === 0) return null
     return {
       cid: CID.parse(res[0].cid),
       rev: res[0].rev,
+      digest: res[0].digest as Buffer | null,
+      sig: res[0].sig as Buffer | null,
     }
   }
 

@@ -318,6 +318,19 @@ function isAuthorized(
 }
 ```
 
+### Record Attestation
+
+When records are served via `com.atproto.sync.getRecord`, the service signs each record with an
+attestation. This provides:
+
+- **Integrity** — CID in attestation matches record content hash
+- **Binding** — Attestation ties the record to a specific AT URI (did + collection + rkey)
+- **Authenticity** — Service signing key signs the attestation; verifiable against the service DID document
+
+The attestation is included as the root block in a 2-block CAR file. Clients can verify using
+`@northskysocial/stratos-core/client`. See the [client guide](client-guide.md#record-verification)
+for usage details.
+
 ---
 
 ## OAuth Enrollment with Profile Record
@@ -544,10 +557,11 @@ stratos/
 
 ### Sync
 
-| Endpoint                            | Method       | Auth         | Description        |
-| ----------------------------------- | ------------ | ------------ | ------------------ |
-| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose |
-| `app.stratos.sync.getRepo`          | Query        | User/Service | Export CAR file    |
+| Endpoint                            | Method       | Auth         | Description                                             |
+| ----------------------------------- | ------------ | ------------ | ------------------------------------------------------- |
+| `com.atproto.sync.getRecord`        | Query        | User/Service | Get record as attestation CAR (signed, verifiable)      |
+| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                      |
+| `app.stratos.sync.getRepo`          | Query        | User/Service | Export CAR file                                         |
 
 ---
 
@@ -561,7 +575,7 @@ stratos/
 | `STRATOS_PUBLIC_URL`         | Yes      | -             | Public URL for OAuth callbacks                           |
 | `STRATOS_DID`                | Yes      | -             | Service DID                                              |
 | `STRATOS_SERVICE_FRAGMENT`   | No       | `atproto_pns` | Service fragment for source field                        |
-| `STRATOS_SIGNING_KEY`        | Yes      | -             | Service signing key (secp256k1)                          |
+| `STRATOS_SIGNING_KEY`        | Yes      | -             | Service signing key (secp256k1) for inter-service auth and record attestations |
 | `STRATOS_ALLOWED_BOUNDARIES` | No       | `[]`          | Valid boundary values                                    |
 | `STRATOS_ALLOWED_APPVIEWS`   | No       | `[]`          | AppView DIDs allowed to call getRecord with service auth |
 | `STRATOS_DATA_DIR`           | No       | `./data`      | Per-actor SQLite storage                                 |
@@ -595,13 +609,15 @@ openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 
 ## Security Considerations
 
-| Concern                   | Mitigation                                                  |
-| ------------------------- | ----------------------------------------------------------- |
-| Boundary spoofing         | Stratos validates boundaries at write time                  |
-| Unauthorized hydration    | AppView allowlist, inter-service JWT verification           |
-| Profile record tampering  | User controls their PDS, signed commits                     |
-| Data leakage              | Hydration respects boundaries, no full data in subscription |
-| Cross-service correlation | Boundaries are service-local by default                     |
+| Concern                   | Mitigation                                                             |
+| ------------------------- | ---------------------------------------------------------------------- |
+| Boundary spoofing         | Stratos validates boundaries at write time                             |
+| Unauthorized hydration    | AppView allowlist, inter-service JWT verification                      |
+| Profile record tampering  | User controls their PDS, signed commits                                |
+| Data leakage              | Hydration respects boundaries, no full data in subscription            |
+| Cross-service correlation | Boundaries are service-local by default                                |
+| Record integrity          | `sync.getRecord` returns signed attestation CARs with CID verification |
+| Record authenticity       | Service signing key signs attestations; clients can verify via DID doc |
 
 ---
 

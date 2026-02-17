@@ -11,6 +11,10 @@ import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import * as dagCbor from '@ipld/dag-cbor'
 import type { AppContext } from '../context.js'
 import {
+  encodeAttestationForSigning,
+  encodeAttestation,
+} from '@northskysocial/stratos-core'
+import {
   createRecord,
   deleteRecord,
   getRecord,
@@ -592,11 +596,10 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  // Stratos does not maintain a Merkle Search Tree or signed commits, so this
-  // endpoint returns a minimal CAR containing only the record block. This
-  // supports CID verification (hash block bytes → compare to claimed CID) but
-  // does NOT support full ATProto repo-proof verification (signed commit + MST
-  // inclusion proof) that the reference PDS provides.
+  // Returns a 2-block CAR with a signed attestation root and the record block.
+  // The attestation proves the service attests to this record existing at the
+  // given URI with the given CID and revision. Verifiers check content integrity
+  // via CID and non-repudiation via the service's signing key.
   xrpc.method('com.atproto.sync.getRecord', {
     handler: async ({ params }: HandlerContext) => {
       const did = params.did as string
@@ -621,32 +624,71 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
         const recordCid = CID.parse(record.cid)
 
-        // Use the stored block bytes rather than re-encoding, because the
-        // original bytes are what the CID was computed over.
         let recordBytes = await store.repo.getBytes(recordCid)
         if (!recordBytes) {
-          // Fall back to re-encoding from the parsed value if the block isn't
-          // in the repo store (shouldn't happen in normal operation)
           recordBytes = cborEncode(record.value as LexValue)
         }
 
-        return { recordCid, recordBytes }
+        const root = await store.repo.getRootDetailed()
+
+        return {
+          recordCid,
+          recordBytes,
+          recordSig: record.sig,
+          rev: root?.rev ?? 'unknown',
+        }
       })
 
-      const { recordCid, recordBytes } = result
+      const { recordCid, recordBytes, recordSig, rev } = result
 
-      // Build CAR v1 following the same structure as @atproto/repo writeCarStream:
-      // header varint + CBOR header + (block varint + CID bytes + block data)*
-      const header = dagCbor.encode({ version: 1, roots: [recordCid] })
+      // Build attestation — use stored sig if available, otherwise sign on-the-fly
+      let sig: Uint8Array
+      if (recordSig) {
+        sig = new Uint8Array(recordSig)
+      } else {
+        const payload = encodeAttestationForSigning(
+          did,
+          collection,
+          rkey,
+          recordCid.toString(),
+          rev,
+        )
+        sig = await ctx.signingKey.sign(payload)
+      }
+
+      const attestationBytes = encodeAttestation(
+        did,
+        collection,
+        rkey,
+        recordCid.toString(),
+        rev,
+        sig,
+      )
+      const attestationHash = await sha256.digest(attestationBytes)
+      const attestationCid = CID.createV1(0x71, attestationHash)
+
+      // Build 2-block CAR: attestation root + record block
+      const header = dagCbor.encode({ version: 1, roots: [attestationCid] })
       const headerVarInt = encodeVarint(header.length)
-      const cidBytes = recordCid.bytes
-      const blockVarInt = encodeVarint(cidBytes.length + recordBytes.length)
+
+      const attCidBytes = attestationCid.bytes
+      const attBlockVarInt = encodeVarint(
+        attCidBytes.length + attestationBytes.length,
+      )
+
+      const recCidBytes = recordCid.bytes
+      const recBlockVarInt = encodeVarint(
+        recCidBytes.length + recordBytes.length,
+      )
 
       const carLength =
         headerVarInt.length +
         header.length +
-        blockVarInt.length +
-        cidBytes.length +
+        attBlockVarInt.length +
+        attCidBytes.length +
+        attestationBytes.length +
+        recBlockVarInt.length +
+        recCidBytes.length +
         recordBytes.length
 
       const car = new Uint8Array(carLength)
@@ -655,10 +697,16 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       offset += headerVarInt.length
       car.set(header, offset)
       offset += header.length
-      car.set(blockVarInt, offset)
-      offset += blockVarInt.length
-      car.set(cidBytes, offset)
-      offset += cidBytes.length
+      car.set(attBlockVarInt, offset)
+      offset += attBlockVarInt.length
+      car.set(attCidBytes, offset)
+      offset += attCidBytes.length
+      car.set(attestationBytes, offset)
+      offset += attestationBytes.length
+      car.set(recBlockVarInt, offset)
+      offset += recBlockVarInt.length
+      car.set(recCidBytes, offset)
+      offset += recCidBytes.length
       car.set(recordBytes, offset)
 
       return {
