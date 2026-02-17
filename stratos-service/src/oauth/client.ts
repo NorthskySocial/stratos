@@ -10,6 +10,16 @@ import { eq } from 'drizzle-orm'
 import { oauthSession, oauthState, type ServiceDb } from '../db/index.js'
 
 /**
+ * Granular OAuth scopes for PDS access.
+ * Covers writing enrollment records and stub records for all Stratos record types.
+ */
+export const OAUTH_SCOPE = [
+  'atproto',
+  'repo:app.stratos.actor.enrollment',
+  'repo:app.stratos.feed.post',
+].join(' ')
+
+/**
  * Database schema for OAuth session storage
  */
 export interface OAuthSessionTable {
@@ -147,7 +157,7 @@ export async function createOAuthClient(
       redirect_uris: [config.redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
-      scope: config.scope ?? 'atproto transition:generic',
+      scope: config.scope ?? OAUTH_SCOPE,
       token_endpoint_auth_method: clientKey ? 'private_key_jwt' : 'none',
       dpop_bound_access_tokens: true,
       application_type: 'web',

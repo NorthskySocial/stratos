@@ -43,7 +43,7 @@ import {
   type StratosServiceConfig,
   getServiceDidWithFragment,
 } from './config.js'
-import { createOAuthClient } from './oauth/client.js'
+import { createOAuthClien, OAUTH_SCOPE } from './oauth/client.js'
 import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import {
   createServiceDb,
@@ -689,7 +689,7 @@ export async function createAppContext(
         clientUri: cfg.service.publicUrl,
         redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
         privateKeyPem: cfg.oauth.clientSecret,
-        scope: 'atproto transition:generic',
+        scope: OAUTH_SCOPE,
       },
       db,
       idResolver,
