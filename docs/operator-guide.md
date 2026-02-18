@@ -313,7 +313,7 @@ Host this JSON at `https://stratos.example.com/client-metadata.json`:
   "tos_uri": "https://stratos.example.com/terms",
   "policy_uri": "https://stratos.example.com/privacy",
   "redirect_uris": ["https://stratos.example.com/oauth/callback"],
-  "scope": "atproto transition:generic",
+  "scope": "atproto repo:app.stratos.actor.enrollment repo:app.stratos.feed.post",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",

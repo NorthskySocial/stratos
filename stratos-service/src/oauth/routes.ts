@@ -4,6 +4,7 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
 import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
+import { OAUTH_SCOPE } from './client.js'
 
 /**
  * Enrollment record stored in database
@@ -74,7 +75,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
       // Start the authorization flow
       const authUrl = await oauthClient.authorize(handle, {
-        scope: 'atproto transition:generic',
+        scope: OAUTH_SCOPE,
       })
 
       // Redirect user to their PDS for authorization
