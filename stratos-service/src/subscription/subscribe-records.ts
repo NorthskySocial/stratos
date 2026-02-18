@@ -1,6 +1,6 @@
 import { asc, desc, gt } from 'drizzle-orm'
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import { type StratosDb, stratosSeq } from '@northskysocial/stratos-core'
+import { stratosSeq } from '@northskysocial/stratos-core'
 
 import type { AppContext } from '../context.js'
 
@@ -164,8 +164,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const db = (store.record as any).db as StratosDb
-      const rows = await db
+      const rows = await store.record.db
         .select({ seq: stratosSeq.seq })
         .from(stratosSeq)
         .orderBy(desc(stratosSeq.seq))
@@ -181,8 +180,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const db = (store.record as any).db as StratosDb
-      const rows = await db
+      const rows = await store.record.db
         .select({ seq: stratosSeq.seq })
         .from(stratosSeq)
         .orderBy(asc(stratosSeq.seq))
@@ -202,8 +200,7 @@ async function getEventsSince(
 ): Promise<SeqEvent[]> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const db = (store.record as any).db as StratosDb
-      const rows = await db
+      const rows = await store.record.db
         .select()
         .from(stratosSeq)
         .where(gt(stratosSeq.seq, cursor))

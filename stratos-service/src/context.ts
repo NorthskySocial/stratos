@@ -23,6 +23,7 @@ import {
   StratosSqlRepoTransactor,
   StratosBlobReader,
   StratosBlobTransactor,
+  type BlobStore,
   type BlobStoreCreator,
   type Logger,
   type EnrollmentService,
@@ -43,7 +44,7 @@ import {
   type StratosServiceConfig,
   getServiceDidWithFragment,
 } from './config.js'
-import { createOAuthClient } from './oauth/client.js'
+import { createOAuthClient, OAUTH_SCOPE } from './oauth/client.js'
 import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import {
   createServiceDb,
@@ -201,6 +202,13 @@ export class StratosActorStore {
     } finally {
       await closeStratosDb(db)
     }
+  }
+
+  /**
+   * Get the blobstore for an actor (for operations outside of a transaction)
+   */
+  getBlobStore(did: string): BlobStore {
+    return this.blobstore(did)
   }
 
   /**
@@ -689,7 +697,7 @@ export async function createAppContext(
         clientUri: cfg.service.publicUrl,
         redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
         privateKeyPem: cfg.oauth.clientSecret,
-        scope: 'atproto transition:generic',
+        scope: OAUTH_SCOPE,
       },
       db,
       idResolver,
@@ -714,9 +722,10 @@ export async function createAppContext(
 
   let dpopVerifier: DpopVerifier | undefined
   if (cfg.oauth && oauthClient) {
+    // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
+    // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
     const tokenVerifier = new PdsTokenVerifier({
       idResolver,
-      audience: cfg.service.publicUrl,
     })
     dpopVerifier = new DpopVerifier({
       serviceDid: cfg.service.did,

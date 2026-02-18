@@ -266,6 +266,141 @@ export async function deleteRecord(
   return result
 }
 
+export interface UpdateRecordInput {
+  repo: Did
+  collection: string
+  rkey: string
+  record: unknown
+  validate?: boolean
+}
+
+export interface UpdateRecordOutput {
+  uri: string
+  cid: string
+  commit?: {
+    cid: string
+    rev: string
+  }
+  validationStatus?: string
+}
+
+export async function updateRecord(
+  ctx: AppContext,
+  input: UpdateRecordInput,
+  callerDid: string,
+): Promise<UpdateRecordOutput> {
+  const { repo, collection, rkey, record, validate = true } = input
+
+  if (repo !== callerDid) {
+    throw new AuthRequiredError('Cannot update record for another user')
+  }
+
+  if (!collection.startsWith('app.stratos.')) {
+    throw new InvalidRequestError(
+      'Only app.stratos.* collections are supported',
+      'InvalidCollection',
+    )
+  }
+
+  const exists = await ctx.actorStore.exists(callerDid)
+  if (!exists) {
+    throw new InvalidRequestError('Repo not found', 'RepoNotFound')
+  }
+
+  if (validate) {
+    try {
+      assertStratosValidation(
+        record as Record<string, unknown>,
+        collection,
+        ctx.cfg.stratos,
+      )
+    } catch (err) {
+      if (err instanceof StratosValidationError) {
+        throw new InvalidRequestError(err.message, 'InvalidRecord')
+      }
+      throw err
+    }
+  }
+
+  const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    const uriStr = `at://${callerDid}/${collection}/${rkey}`
+    const uri = new AtUri(uriStr)
+
+    const existing = await store.record.getRecord(uri, null)
+    if (!existing) {
+      throw new InvalidRequestError('Record not found', 'RecordNotFound')
+    }
+
+    const recordBytes = encodeRecord(record)
+    const cid = await computeCid(record)
+    const rev = TID.nextStr()
+
+    await store.record.indexRecord(
+      uri,
+      cid,
+      record as Record<string, unknown>,
+      'update',
+      rev,
+    )
+
+    await store.repo.putBlock(cid, recordBytes, rev)
+    await store.repo.updateRoot(cid, rev, callerDid)
+
+    await sequenceChange(store, {
+      action: 'update',
+      uri: uriStr,
+      cid: cid.toString(),
+      record,
+    })
+
+    return {
+      uri,
+      cid,
+      cidStr: cid.toString(),
+      commit: {
+        cid: cid.toString(),
+        rev,
+      },
+    }
+  })
+
+  // Update stub on PDS
+  const recordObj = record as Record<string, unknown>
+  const createdAt =
+    typeof recordObj.createdAt === 'string'
+      ? recordObj.createdAt
+      : new Date().toISOString()
+  const recordType =
+    typeof recordObj.$type === 'string' ? recordObj.$type : collection
+
+  try {
+    await ctx.stubWriter.writeStub(
+      callerDid,
+      collection,
+      rkey,
+      recordType,
+      result.cid,
+      createdAt,
+    )
+  } catch (err) {
+    ctx.logger?.warn(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        did: callerDid,
+        collection,
+        rkey,
+      },
+      'failed to update stub on PDS',
+    )
+  }
+
+  return {
+    uri: result.uri.toString(),
+    cid: result.cid.toString(),
+    commit: result.commit,
+  }
+}
+
 /**
  * Get record input
  */

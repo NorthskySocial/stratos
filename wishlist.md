@@ -15,3 +15,9 @@ Have the option of referencing a user list for allow list so we don't have to ma
 ## Verify user membership
 
 Appview is checking the record in a users collection to see what their endpoint and membership is. Are we verifying this against stratos?
+
+## applyWrites atomicity
+
+The `com.atproto.repo.applyWrites` handler processes create/update/delete operations sequentially, each in its own `actorStore.transact()` call. If an operation in the middle of the batch fails, earlier operations are already committed and their PDS stubs are already written.
+
+Should wrap the entire batch in a single `actorStore.transact()` call and defer PDS stub writes until all local writes succeed. Stub writes are already non-critical (failure logged as warning), but the local store should be atomic.

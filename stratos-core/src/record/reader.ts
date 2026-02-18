@@ -68,7 +68,7 @@ export interface RecordWithMeta {
  */
 export class StratosRecordReader {
   constructor(
-    protected db: StratosDbOrTx,
+    public readonly db: StratosDbOrTx,
     protected cborToRecord: (content: Uint8Array) => Record<string, unknown>,
     protected logger?: Logger,
   ) {}
