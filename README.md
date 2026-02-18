@@ -8,6 +8,63 @@ namespaces like `app.bsky`, stratos records and blobs are:
 - Scoped by configurable boundary domains
 - Excluded from public sync/export
 
+## How It Works
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant PDS as User's PDS
+    participant Stratos as Stratos Service
+    participant AppView
+
+    rect rgb(219, 217, 250)
+    note over Client, PDS: Enrollment (one-time)
+    Client->>Stratos: GET /oauth/authorize?handle=alice.bsky.social
+    Stratos->>PDS: Redirect to PDS OAuth
+    PDS->>Client: Authorization prompt
+    Client->>PDS: User approves
+    PDS->>Stratos: Auth code callback
+    Stratos->>PDS: Exchange code for tokens
+    Stratos->>PDS: PUT app.stratos.actor.enrollment (profile record)
+    note over PDS: Enrollment record enables<br/>endpoint discovery
+    Stratos->>Stratos: Create per-user SQLite DB<br/>+ store enrollment
+    end
+
+    rect rgb(209, 242, 215)
+    note over Client, PDS: Create Post (dual-write)
+    Client->>Stratos: POST createRecord<br/>(DPoP auth)
+    Stratos->>Stratos: Validate boundary domains
+    Stratos->>Stratos: Store full record + sign attestation
+    Stratos->>PDS: PUT stub record with source field<br/>(using stored OAuth tokens)
+    note over PDS: Stub has source.service pointing<br/>to Stratos DID
+    Stratos-->>Client: 200 { uri, cid }
+    end
+
+    rect rgb(252, 220, 215)
+    note over AppView, Stratos: AppView Indexing
+    Stratos->>AppView: subscribeRecords firehose<br/>(WebSocket)
+    AppView->>AppView: Index stubs, detect source field
+    end
+
+    rect rgb(255, 243, 205)
+    note over Client, Stratos: Reading (hydration)
+    Client->>AppView: GET feed
+    AppView->>AppView: Build skeleton, find source fields
+    AppView->>Stratos: getRecord (service auth JWT)<br/>+ viewer DID
+    Stratos->>Stratos: Check viewer boundaries
+    Stratos-->>AppView: Full record (if authorized)
+    AppView-->>Client: Hydrated feed
+    end
+
+    rect rgb(209, 233, 252)
+    note over Client, Stratos: Verification (optional)
+    Client->>Stratos: sync.getRecord
+    Stratos-->>Client: Attestation CAR<br/>(signed 2-block CAR)
+    Client->>Client: Verify CID integrity
+    Client->>Client: Verify signature against<br/>service DID document
+    end
+```
+
 ## Quick Start
 
 ### Local Development
@@ -91,6 +148,7 @@ Shared library containing:
 - Validation logic for stratos records
 - Database schema and migrations
 - Storage abstractions (repo, record, blob)
+- Client verification utilities for attestation CARs (`@northskysocial/stratos-core/client`)
 
 ### @northskysocial/stratos-service
 

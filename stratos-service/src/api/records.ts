@@ -13,6 +13,8 @@ import {
   extractBoundaryDomains,
   stratosSeq,
   StratosValidationError,
+  encodeAttestationForSigning,
+  computeChainDigest,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext, StratosActorTransactor } from '../context.js'
@@ -112,20 +114,49 @@ export async function createRecord(
     // Generate revision
     const rev = TID.nextStr()
 
-    // Index the record
+    // Sign the record attestation
+    const attestationPayload = encodeAttestationForSigning(
+      callerDid,
+      collection,
+      rkey,
+      cid.toString(),
+      rev,
+    )
+    const sig = await ctx.signingKey.sign(attestationPayload)
+
+    // Index the record with attestation signature
     await store.record.indexRecord(
       uri,
       cid,
       record as Record<string, unknown>,
       'create',
       rev,
+      undefined,
+      Buffer.from(sig),
     )
 
     // Store in repo
     await store.repo.putBlock(cid, recordBytes, rev)
 
-    // Update root
-    await store.repo.updateRoot(cid, rev, callerDid)
+    // Compute chain digest and sign it
+    const root = await store.repo.getRootDetailed()
+    const prevDigest = root?.digest ?? null
+    const digest = await computeChainDigest(prevDigest, {
+      action: 'create',
+      uri: uriStr,
+      cid: cid.toString(),
+      rev,
+    })
+    const chainSig = await ctx.signingKey.sign(digest)
+
+    // Update root with chain digest
+    await store.repo.updateRoot(
+      cid,
+      rev,
+      callerDid,
+      Buffer.from(digest),
+      Buffer.from(chainSig),
+    )
 
     // Sequence the change
     await sequenceChange(store, {
@@ -240,6 +271,24 @@ export async function deleteRecord(
     const rev = TID.nextStr()
     const dummyCid = await computeCid({ dummy: true })
 
+    // Compute chain digest for the deletion and sign it
+    const root = await store.repo.getRootDetailed()
+    const prevDigest = root?.digest ?? null
+    const digest = await computeChainDigest(prevDigest, {
+      action: 'delete',
+      uri: uriStr,
+      rev,
+    })
+    const chainSig = await ctx.signingKey.sign(digest)
+
+    await store.repo.updateRoot(
+      dummyCid,
+      rev,
+      callerDid,
+      Buffer.from(digest),
+      Buffer.from(chainSig),
+    )
+
     return {
       commit: {
         cid: dummyCid.toString(),
@@ -335,16 +384,46 @@ export async function updateRecord(
     const cid = await computeCid(record)
     const rev = TID.nextStr()
 
+    // Sign the record attestation
+    const attestationPayload = encodeAttestationForSigning(
+      callerDid,
+      collection,
+      rkey,
+      cid.toString(),
+      rev,
+    )
+    const sig = await ctx.signingKey.sign(attestationPayload)
+
     await store.record.indexRecord(
       uri,
       cid,
       record as Record<string, unknown>,
       'update',
       rev,
+      undefined,
+      Buffer.from(sig),
     )
 
     await store.repo.putBlock(cid, recordBytes, rev)
-    await store.repo.updateRoot(cid, rev, callerDid)
+
+    // Compute chain digest and sign it
+    const root = await store.repo.getRootDetailed()
+    const prevDigest = root?.digest ?? null
+    const digest = await computeChainDigest(prevDigest, {
+      action: 'update',
+      uri: uriStr,
+      cid: cid.toString(),
+      rev,
+    })
+    const chainSig = await ctx.signingKey.sign(digest)
+
+    await store.repo.updateRoot(
+      cid,
+      rev,
+      callerDid,
+      Buffer.from(digest),
+      Buffer.from(chainSig),
+    )
 
     await sequenceChange(store, {
       action: 'update',
