@@ -79,9 +79,15 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
       did TEXT PRIMARY KEY,
       cid TEXT NOT NULL,
       rev TEXT NOT NULL,
-      indexedAt TEXT NOT NULL
+      indexedAt TEXT NOT NULL,
+      digest BLOB,
+      sig BLOB
     )
   `)
+
+  // Migration: add columns to existing databases
+  await safeAddColumn(db, 'stratos_repo_root', 'digest', 'BLOB')
+  await safeAddColumn(db, 'stratos_repo_root', 'sig', 'BLOB')
 
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_repo_block (
@@ -105,9 +111,13 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
       rkey TEXT NOT NULL,
       repoRev TEXT NOT NULL,
       indexedAt TEXT NOT NULL,
-      takedownRef TEXT
+      takedownRef TEXT,
+      sig BLOB
     )
   `)
+
+  // Migration: add sig column to existing databases
+  await safeAddColumn(db, 'stratos_record', 'sig', 'BLOB')
 
   await db.run(
     sql`CREATE INDEX IF NOT EXISTS stratos_record_cid_idx ON stratos_record(cid)`,
@@ -175,6 +185,34 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
   await db.run(
     sql`CREATE INDEX IF NOT EXISTS stratos_seq_sequenced_at_idx ON stratos_seq(sequencedAt)`,
   )
+}
+
+/**
+ * Safely add a column to an existing table, ignoring "duplicate column" errors.
+ * Used during migration to support databases created before the column existed.
+ */
+async function safeAddColumn(
+  db: StratosDb,
+  table: string,
+  column: string,
+  type: string,
+): Promise<void> {
+  try {
+    await db.run(sql.raw(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const causeMsg =
+      err instanceof Error && err.cause instanceof Error
+        ? err.cause.message
+        : ''
+    const combined = `${msg} ${causeMsg}`
+    if (
+      !combined.includes('duplicate column') &&
+      !combined.includes('already exists')
+    ) {
+      throw err
+    }
+  }
 }
 
 /**

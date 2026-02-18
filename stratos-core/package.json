@@ -17,6 +17,10 @@
     "./db": {
       "types": "./src/db/index.ts",
       "import": "./src/db/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts"
     }
   },
   "scripts": {
@@ -29,6 +33,7 @@
   "dependencies": {
     "@atproto/lexicon": "^0.6.1",
     "@atproto/syntax": "^0.4.3",
+    "@ipld/dag-cbor": "^9.2.5",
     "@libsql/client": "^0.17.0",
     "drizzle-orm": "^0.45.1",
     "multiformats": "^13.4.2",

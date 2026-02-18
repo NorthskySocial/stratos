@@ -61,6 +61,7 @@ export interface RecordWithMeta {
   value: Record<string, unknown>
   indexedAt: string
   takedownRef: string | null
+  sig: Buffer | null
 }
 
 /**
@@ -189,6 +190,7 @@ export class StratosRecordReader {
         cid: stratosRecord.cid,
         indexedAt: stratosRecord.indexedAt,
         takedownRef: stratosRecord.takedownRef,
+        sig: stratosRecord.sig,
         content: stratosRepoBlock.content,
       })
       .from(stratosRecord)
@@ -204,6 +206,7 @@ export class StratosRecordReader {
       value: this.cborToRecord(record.content),
       indexedAt: record.indexedAt,
       takedownRef: record.takedownRef ? record.takedownRef.toString() : null,
+      sig: record.sig as Buffer | null,
     }
   }
 

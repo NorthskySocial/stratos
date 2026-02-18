@@ -1,7 +1,7 @@
 /**
  * Tests for XRPC handler changes:
  * - uploadBlob: new handler following atproto two-phase blob upload pattern
- * - sync.getRecord: uses stored block bytes instead of re-encoding
+ * - sync.getRecord: 2-block attestation CAR (attestation root + record block)
  * - describeRepo: handleIsCorrect now actually resolves handle → DID
  * - getBlobStore: new method on StratosActorStore
  */
@@ -16,8 +16,13 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import * as dagCbor from '@ipld/dag-cbor'
+import * as crypto from '@atproto/crypto'
 
 import { BlobStore } from '@northskysocial/stratos-core'
+import {
+  encodeAttestationForSigning,
+  encodeAttestation,
+} from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../src/context.js'
 
 const RAW_CODEC = 0x55
@@ -425,6 +430,223 @@ describe('sync.getRecord CAR building', () => {
     expect(Buffer.from(retrieved!).equals(Buffer.from(originalBytes))).toBe(
       true,
     )
+  })
+})
+
+describe('attestation CAR building', () => {
+  let actorStore: StratosActorStore
+  let testDir: string
+  let signingKey: crypto.Secp256k1Keypair
+  const testDid = 'did:plc:attesttest'
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-attest-test-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    signingKey = await crypto.Secp256k1Keypair.create({ exportable: true })
+
+    actorStore = new StratosActorStore({
+      dataDir: testDir,
+      blobstore: () => createMockBlobStore(),
+      cborToRecord: (bytes: Uint8Array) =>
+        dagCbor.decode(bytes) as Record<string, unknown>,
+    })
+  })
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('should build a 2-block attestation CAR', async () => {
+    await actorStore.create(testDid)
+
+    const collection = 'app.stratos.feed.post'
+    const rkey = 'att1'
+    const record = { text: 'attestation test' }
+    const recordBytes = cborEncode(record as unknown as LexValue)
+    const hash = await sha256.digest(recordBytes)
+    const recordCid = CID.createV1(DAG_CBOR_CODEC, hash)
+    const rev = 'rev1'
+
+    await actorStore.transact(testDid, async (store) => {
+      const uri = new AtUri(`at://${testDid}/${collection}/${rkey}`)
+      await store.repo.putBlock(recordCid, recordBytes, rev)
+
+      const payload = encodeAttestationForSigning(
+        testDid,
+        collection,
+        rkey,
+        recordCid.toString(),
+        rev,
+      )
+      const sig = await signingKey.sign(payload)
+      await store.record.indexRecord(
+        uri,
+        recordCid,
+        record,
+        'create',
+        rev,
+        undefined,
+        Buffer.from(sig),
+      )
+    })
+
+    // Read back the record to get the sig
+    const result = await actorStore.read(testDid, async (store) => {
+      const uri = new AtUri(`at://${testDid}/${collection}/${rkey}`)
+      const rec = await store.record.getRecord(uri, null)
+      expect(rec).not.toBeNull()
+      expect(rec!.sig).not.toBeNull()
+
+      const storedBytes = await store.repo.getBytes(recordCid)
+      const root = await store.repo.getRootDetailed()
+
+      return {
+        recordSig: rec!.sig!,
+        storedBytes: storedBytes!,
+        rev: root?.rev ?? 'unknown',
+      }
+    })
+
+    // Build 2-block CAR (same logic as handler)
+    const sig = new Uint8Array(result.recordSig)
+    const attestationBytes = encodeAttestation(
+      testDid,
+      collection,
+      rkey,
+      recordCid.toString(),
+      result.rev,
+      sig,
+    )
+    const attestationHash = await sha256.digest(attestationBytes)
+    const attestationCid = CID.createV1(DAG_CBOR_CODEC, attestationHash)
+
+    const header = dagCbor.encode({ version: 1, roots: [attestationCid] })
+    const headerVarInt = encodeVarint(header.length)
+
+    const attCidBytes = attestationCid.bytes
+    const attBlockVarInt = encodeVarint(
+      attCidBytes.length + attestationBytes.length,
+    )
+
+    const storedBytes = new Uint8Array(result.storedBytes)
+    const recCidBytes = recordCid.bytes
+    const recBlockVarInt = encodeVarint(recCidBytes.length + storedBytes.length)
+
+    const carLength =
+      headerVarInt.length +
+      header.length +
+      attBlockVarInt.length +
+      attCidBytes.length +
+      attestationBytes.length +
+      recBlockVarInt.length +
+      recCidBytes.length +
+      storedBytes.length
+
+    const car = new Uint8Array(carLength)
+    let offset = 0
+    car.set(headerVarInt, offset)
+    offset += headerVarInt.length
+    car.set(header, offset)
+    offset += header.length
+    car.set(attBlockVarInt, offset)
+    offset += attBlockVarInt.length
+    car.set(attCidBytes, offset)
+    offset += attCidBytes.length
+    car.set(attestationBytes, offset)
+    offset += attestationBytes.length
+    car.set(recBlockVarInt, offset)
+    offset += recBlockVarInt.length
+    car.set(recCidBytes, offset)
+    offset += recCidBytes.length
+    car.set(storedBytes, offset)
+
+    // Parse the CAR header
+    const { value: headerLen, bytesRead } = decodeVarint(car, 0)
+    const headerSlice = car.slice(bytesRead, bytesRead + headerLen)
+    const decodedHeader = dagCbor.decode(headerSlice) as {
+      version: number
+      roots: CID[]
+    }
+    expect(decodedHeader.version).toBe(1)
+    expect(decodedHeader.roots).toHaveLength(1)
+    expect(decodedHeader.roots[0].toString()).toBe(attestationCid.toString())
+
+    // Parse first block (attestation)
+    let blockStart = bytesRead + headerLen
+    const { value: att1Len, bytesRead: att1VarIntLen } = decodeVarint(
+      car,
+      blockStart,
+    )
+    const attDataStart = blockStart + att1VarIntLen
+    const parsedAttCid = CID.decode(
+      car.slice(attDataStart, attDataStart + attCidBytes.length),
+    )
+    expect(parsedAttCid.toString()).toBe(attestationCid.toString())
+
+    const attBlock = car.slice(
+      attDataStart + attCidBytes.length,
+      attDataStart + att1Len,
+    )
+    const decodedAtt = dagCbor.decode(attBlock) as Record<string, unknown>
+    expect(decodedAtt.type).toBe('stratos-record-attestation')
+    expect(decodedAtt.v).toBe(1)
+    expect(decodedAtt.did).toBe(testDid)
+    expect(decodedAtt.collection).toBe(collection)
+    expect(decodedAtt.rkey).toBe(rkey)
+    expect(decodedAtt.cid).toBe(recordCid.toString())
+    expect(decodedAtt.codec).toBe('dag-cbor')
+
+    // Parse second block (record)
+    blockStart = attDataStart + att1Len
+    const { value: rec1Len, bytesRead: rec1VarIntLen } = decodeVarint(
+      car,
+      blockStart,
+    )
+    const recDataStart = blockStart + rec1VarIntLen
+    const parsedRecCid = CID.decode(
+      car.slice(recDataStart, recDataStart + recCidBytes.length),
+    )
+    expect(parsedRecCid.toString()).toBe(recordCid.toString())
+
+    const recBlock = car.slice(
+      recDataStart + recCidBytes.length,
+      recDataStart + rec1Len,
+    )
+
+    // Verify record bytes hash to the expected CID
+    const reHash = await sha256.digest(recBlock)
+    const reCid = CID.createV1(DAG_CBOR_CODEC, reHash)
+    expect(reCid.toString()).toBe(recordCid.toString())
+  })
+
+  it('should produce verifiable attestation signatures', async () => {
+    const collection = 'app.stratos.feed.post'
+    const rkey = 'sig1'
+    const cidStr = 'bafyreia2vlm5wqm3sio5qiackpjxbgvysshf2x6bwmmhbdru7k7mjqpwq'
+    const rev = 'rev1'
+
+    const payload = encodeAttestationForSigning(
+      testDid,
+      collection,
+      rkey,
+      cidStr,
+      rev,
+    )
+    const sig = await signingKey.sign(payload)
+
+    // Verify with the corresponding public key
+    const didKey = signingKey.did()
+    const verified = await crypto.verifySignature(didKey, payload, sig)
+    expect(verified).toBe(true)
+
+    // Verify that a tampered payload fails
+    const tampered = new Uint8Array(payload)
+    tampered[0] ^= 0xff
+    const tamperedResult = await crypto.verifySignature(didKey, tampered, sig)
+    expect(tamperedResult).toBe(false)
   })
 })
 
