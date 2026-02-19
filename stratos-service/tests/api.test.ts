@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -7,19 +7,19 @@ import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 
-import { BlobStore } from '@northskysocial/stratos-core'
+import { BlobStore, ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 import {
+  closeServiceDb,
   createServiceDb,
   migrateServiceDb,
-  closeServiceDb,
   ServiceDb,
 } from '../src/db'
 
 import { StratosServiceConfig } from '../src'
 import {
-  StratosActorStore,
-  SqliteEnrollmentStore,
   AppContext,
+  SqliteEnrollmentStore,
+  StratosActorStore,
 } from '../src/context.js'
 import { createRecord } from '../src/api'
 import { Did } from '@atproto/api'
@@ -117,7 +117,7 @@ function createTestConfig(dataDir: string): StratosServiceConfig {
       retentionDays: 30,
     },
     enrollment: {
-      mode: 'open',
+      mode: ENROLLMENT_MODE.OPEN,
       allowedDids: [],
       allowedPdsEndpoints: [],
     },

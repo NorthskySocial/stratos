@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 
 /**
  * Environment variable schema for stratos service
@@ -34,7 +35,7 @@ const envSchema = z.object({
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 
   // Enrollment
-  STRATOS_ENROLLMENT_MODE: z.enum(['open', 'allowlist']).default('allowlist'),
+  STRATOS_ENROLLMENT_MODE: z.enum(ENROLLMENT_MODE).default(ENROLLMENT_MODE.ALLOWLIST),
   STRATOS_ALLOWED_DIDS: z
     .string()
     .default('')
@@ -139,7 +140,7 @@ export interface StratosServiceConfig {
     devMode?: boolean
   }
   enrollment: {
-    mode: 'open' | 'allowlist'
+    mode: ENROLLMENT_MODE
     allowedDids: string[]
     allowedPdsEndpoints: string[]
   }
