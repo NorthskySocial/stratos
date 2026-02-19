@@ -44,7 +44,9 @@ const envSchema = z.object({
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 
   // Enrollment
-  STRATOS_ENROLLMENT_MODE: z.enum(ENROLLMENT_MODE).default(ENROLLMENT_MODE.ALLOWLIST),
+  STRATOS_ENROLLMENT_MODE: z
+    .enum(ENROLLMENT_MODE)
+    .default(ENROLLMENT_MODE.ALLOWLIST),
   STRATOS_ALLOWED_DIDS: z
     .string()
     .default('')
