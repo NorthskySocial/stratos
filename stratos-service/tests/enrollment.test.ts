@@ -1,12 +1,13 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
-  validateEnrollment,
   assertEnrollment,
-  extractPdsEndpoint,
   EnrollmentConfig,
   EnrollmentDeniedError,
+  extractPdsEndpoint,
+  validateEnrollment,
 } from '../src/auth'
-import type { IdResolver, DidDocument } from '@atproto/identity'
+import type { DidDocument, IdResolver } from '@atproto/identity'
+import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 
 // Mock IdResolver
 function createMockIdResolver(didDoc: DidDocument | null): IdResolver {
@@ -93,7 +94,7 @@ describe('enrollment', () => {
 
     describe('open mode', () => {
       const openConfig: EnrollmentConfig = {
-        mode: 'open',
+        mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
@@ -111,7 +112,7 @@ describe('enrollment', () => {
     describe('allowlist mode - DID list', () => {
       const allowedDid = 'did:plc:allowed'
       const didListConfig: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [allowedDid, 'did:plc:other-allowed'],
         allowedPdsEndpoints: [],
       }
@@ -144,7 +145,7 @@ describe('enrollment', () => {
 
     describe('allowlist mode - PDS endpoint list', () => {
       const pdsConfig: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [
           'https://pds.company.com',
@@ -246,7 +247,7 @@ describe('enrollment', () => {
 
     describe('combined DID and PDS with autoEnrollDomains', () => {
       const combinedConfig: EnrollmentConfig = {
-        mode: 'allowlist' as any,
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: ['did:plc:vip-user'],
         allowedPdsEndpoints: ['https://pds.company.com'],
         autoEnrollDomains: ['vip-boundary'],
@@ -291,7 +292,7 @@ describe('enrollment', () => {
   describe('assertEnrollment', () => {
     it('should return pdsEndpoint when allowed', async () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: ['https://pds.example.com'],
       }
@@ -319,7 +320,7 @@ describe('enrollment', () => {
 
     it('should throw EnrollmentDeniedError when not allowed', async () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: ['https://pds.example.com'],
       }
@@ -343,7 +344,7 @@ describe('enrollment', () => {
 
     it('should include reason in EnrollmentDeniedError', async () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: ['https://pds.example.com'],
       }

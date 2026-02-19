@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createServiceDb, migrateServiceDb, closeServiceDb, enrollmentBoundary, enrollment } from '../src/db'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import {
+  createServiceDb,
+  migrateServiceDb,
+  closeServiceDb,
+  enrollmentBoundary,
+} from '../src/db'
 import type { ServiceDb } from '../src/db'
 import { SqliteEnrollmentStore } from '../src/context'
-import type { EnrollmentConfig, Logger } from '@northskysocial/stratos-core'
 import { eq } from 'drizzle-orm'
 
 let db: ServiceDb
@@ -37,8 +41,6 @@ describe('Enrollment - auto enroll boundaries', () => {
       .from(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    expect(persisted.map((r) => r.boundary).sort()).toEqual(
-      boundaries.sort(),
-    )
+    expect(persisted.map((r) => r.boundary).sort()).toEqual(boundaries.sort())
   })
 })
