@@ -25,6 +25,8 @@ export interface EnrollmentConfig {
   allowedDids?: string[]
   /** List of PDS endpoints whose users are allowed to enroll */
   allowedPdsEndpoints?: string[]
+  /** Domains to automatically enroll users to */
+  autoEnrollDomains?: string[]
 }
 
 /**

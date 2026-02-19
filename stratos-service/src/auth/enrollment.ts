@@ -23,6 +23,7 @@ export interface EnrollmentResult {
   allowed: boolean
   reason?: EnrollmentDenialReason
   pdsEndpoint?: string
+  autoEnrollDomains?: string[]
 }
 
 /**
@@ -42,7 +43,10 @@ export async function validateEnrollment(
   // This doesn't require DID resolution - return immediately
   if (isDidAllowed(config, did)) {
     // DID is allowed without needing PDS resolution
-    return { allowed: true }
+    return {
+      allowed: true,
+      autoEnrollDomains: config.autoEnrollDomains,
+    }
   }
 
   // DID is not in DID allowlist
