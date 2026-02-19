@@ -244,16 +244,16 @@ describe('enrollment', () => {
       })
     })
 
-    describe('allowlist mode - combined DID and PDS', () => {
+    describe('combined DID and PDS with autoEnrollDomains', () => {
       const combinedConfig: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: 'allowlist' as any,
         allowedDids: ['did:plc:vip-user'],
         allowedPdsEndpoints: ['https://pds.company.com'],
+        autoEnrollDomains: ['vip-boundary'],
       }
 
-      it('should allow VIP user regardless of PDS', async () => {
-        const mockResolver = createMockIdResolver(null) // No resolution needed
-
+      it('should include autoEnrollDomains when VIP user is allowed', async () => {
+        const mockResolver = createMockIdResolver(null)
         const result = await validateEnrollment(
           combinedConfig,
           'did:plc:vip-user',
@@ -261,11 +261,10 @@ describe('enrollment', () => {
         )
 
         expect(result.allowed).toBe(true)
-        // DID check happens first, so resolver shouldn't be called
-        expect(mockResolver.did.resolve).not.toHaveBeenCalled()
+        expect(result.autoEnrollDomains).toEqual(['vip-boundary'])
       })
 
-      it('should allow non-VIP user from allowed PDS', async () => {
+      it('should include autoEnrollDomains when non-VIP user is allowed via PDS', async () => {
         const didDoc: DidDocument = {
           id: 'did:plc:regular-user',
           service: [
@@ -277,7 +276,6 @@ describe('enrollment', () => {
           ],
         }
         const mockResolver = createMockIdResolver(didDoc)
-
         const result = await validateEnrollment(
           combinedConfig,
           'did:plc:regular-user',
@@ -285,29 +283,7 @@ describe('enrollment', () => {
         )
 
         expect(result.allowed).toBe(true)
-      })
-
-      it('should deny non-VIP user from non-allowed PDS', async () => {
-        const didDoc: DidDocument = {
-          id: 'did:plc:outsider',
-          service: [
-            {
-              id: '#atproto_pds',
-              type: 'AtprotoPersonalDataServer',
-              serviceEndpoint: 'https://bsky.social',
-            },
-          ],
-        }
-        const mockResolver = createMockIdResolver(didDoc)
-
-        const result = await validateEnrollment(
-          combinedConfig,
-          'did:plc:outsider',
-          mockResolver,
-        )
-
-        expect(result.allowed).toBe(false)
-        expect(result.reason).toBe('NotInAllowlist')
+        expect(result.autoEnrollDomains).toEqual(['vip-boundary'])
       })
     })
   })

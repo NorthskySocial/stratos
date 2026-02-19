@@ -32,6 +32,15 @@ const envSchema = z.object({
       .map((d) => d.trim())
       .filter((d) => d.length > 0),
   ),
+  STRATOS_AUTO_ENROLL_DOMAINS: z
+    .string()
+    .default('')
+    .transform((s) =>
+      s
+        .split(',')
+        .map((d) => d.trim())
+        .filter((d) => d.length > 0),
+    ),
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 
   // Enrollment
@@ -143,6 +152,7 @@ export interface StratosServiceConfig {
     mode: ENROLLMENT_MODE
     allowedDids: string[]
     allowedPdsEndpoints: string[]
+    autoEnrollDomains?: string[]
   }
   identity: {
     plcUrl: string
@@ -217,6 +227,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       mode: env.STRATOS_ENROLLMENT_MODE,
       allowedDids: env.STRATOS_ALLOWED_DIDS,
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
+      autoEnrollDomains: env.STRATOS_AUTO_ENROLL_DOMAINS,
     },
     identity: {
       plcUrl: env.STRATOS_PLC_URL,

@@ -137,12 +137,19 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
 
       if (!alreadyEnrolled) {
+        // Determine boundaries for enrollment
+        const boundaries =
+          enrollmentResult.autoEnrollDomains &&
+          enrollmentResult.autoEnrollDomains.length > 0
+            ? enrollmentResult.autoEnrollDomains
+            : defaultBoundaries
+
         // Create enrollment record
         await enrollmentStore.enroll({
           did,
           enrolledAt: new Date().toISOString(),
           pdsEndpoint: enrollmentResult.pdsEndpoint,
-          boundaries: defaultBoundaries,
+          boundaries,
         })
 
         // Write profile record to user's PDS for endpoint discovery
@@ -156,7 +163,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             rkey: 'self',
             record: {
               service: serviceEndpoint,
-              boundaries: defaultBoundaries.map((value) => ({ value })),
+              boundaries: boundaries.map((value) => ({ value })),
               createdAt: new Date().toISOString(),
             },
           })

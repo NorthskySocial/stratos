@@ -74,15 +74,20 @@ export function validateEnrollmentEligibility(
   // Check if service is in open mode or DID is explicitly allowed
   if (isDidAllowed(config, did)) {
     // DID is allowed, pdsEndpoint is optional for enrollment permission
-    if (pdsEndpoint) {
-      return { allowed: true, pdsEndpoint }
+    return {
+      allowed: true,
+      pdsEndpoint: pdsEndpoint ?? undefined,
+      autoEnrollDomains: config.autoEnrollDomains,
     }
-    return { allowed: true }
   }
 
   // DID not in allowlist - check PDS endpoint allowlist
   if (pdsEndpoint && isPdsAllowed(config, pdsEndpoint)) {
-    return { allowed: true, pdsEndpoint }
+    return {
+      allowed: true,
+      pdsEndpoint,
+      autoEnrollDomains: config.autoEnrollDomains,
+    }
   }
 
   return { allowed: false, reason: 'NotInAllowlist' }
