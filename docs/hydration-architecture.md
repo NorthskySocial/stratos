@@ -68,38 +68,31 @@ interface RecordSource {
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              SYSTEM ARCHITECTURE                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph "External Ecosystem"
+        PDS["User's PDS<br/>(Stores Stubs)"]
+        AV["AppView<br/>(Indexing & Hydration)"]
+        PLC["Identity Resolver<br/>(PLC / DID:WEB)"]
+    end
 
-┌──────────────┐     ┌──────────────────┐     ┌─────────────────────────────┐
-│    CLIENT    │     │     APPVIEW      │     │     STRATOS SERVICE         │
-│              │     │                  │     │                             │
-│  Write post  │───▶│                  │     │  1. Store full record       │
-│              │     │                  │     │  2. Write stub to PDS       │
-│              │     │                  │     │                             │
-│              │     │  Index stubs     │◀───│  subscribeRecords firehose  │
-│              │     │  (detects source │     │  (streams commits)          │
-│              │     │   field)         │     │                             │
-│              │     │                  │     │                             │
-│  Get feed    │───▶│  Generate        │     │                             │
-│              │     │  skeleton        │     │                             │
-│              │◀───│       │          │     │                             │
-│              │     │       ▼          │     │                             │
-│              │     │  getRecord()  ───┼───▶│  com.atproto.repo.getRecord │
-│              │     │  from source     │◀───│  (boundary-filtered)        │
-└──────────────┘     └──────────────────┘     └─────────────────────────────┘
-                              │
-                              │ Resolve service DID
-                              ▼
-                     ┌──────────────────┐
-                     │    DID:WEB /     │
-                     │    DID:PLC       │
-                     │                  │
-                     │  /.well-known/   │
-                     │  did.json        │
-                     └──────────────────┘
+    subgraph "Stratos Service"
+        SS["Stratos API Server<br/>(XRPC / OAuth)"]
+        SDB[("Service DB<br/>(Enrollments/Metadata)")]
+        AS[("Actor Store<br/>(Full Records / Blobs)")]
+        FR["Firehose<br/>(subscribeRecords)"]
+    end
+
+    Client["User Client"] -- "1. Write Full Record" --> SS
+    SS -- "2. Store Full Record" --> AS
+    SS -- "3. Write Stub Record" --> PDS
+    SS -- "4. Emit Event" --> FR
+
+    AV -- "5. Index Stubs" --> PDS
+    AV -- "6. Resolve Service DID" --> PLC
+    AV -- "7. getRecord (Hydration)" --> SS
+    SS -- "8. Boundary Filtered Content" --> AV
+    AV -- "9. Hydrated Feed" --> Client
 ```
 
 ---

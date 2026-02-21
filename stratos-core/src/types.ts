@@ -27,6 +27,10 @@ export interface EnrollmentConfig {
   allowedPdsEndpoints?: string[]
   /** Domains to automatically enroll users to */
   autoEnrollDomains?: string[]
+  /** URL to fetch a list of allowed DIDs (optional) */
+  allowListUrl?: string
+  /** Friendly name for the collection in Valkey (optional) */
+  allowListBootstrapName?: string
 }
 
 /**

@@ -44,24 +44,29 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ### System Components
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         ATProtocol Network                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
-│  │  User's PDS  │◀──▶│Stratos Service │◀──▶│     AppView      │  │
-│  └──────────────┘    └──────────────────┘    └──────────────────┘  │
-│         │                     │                       │             │
-│         │ OAuth               │ Per-user              │ Indexed     │
-│         │ Authentication      │ SQLite DBs            │ Content     │
-│         ▼                     ▼                       ▼             │
-│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
-│  │   DID PLC    │    │   Blob Storage   │    │   PostgreSQL     │  │
-│  │              │    │  (Disk or S3)    │    │                  │  │
-│  └──────────────┘    └──────────────────┘    └──────────────────┘  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph "External Ecosystem"
+        PDS["User's PDS<br/>(Stores Stubs)"]
+        AV["AppView<br/>(Indexing & Hydration)"]
+        PLC["Identity Resolver<br/>(PLC / DID:WEB)"]
+    end
+
+    subgraph "Stratos Service"
+        SS["Stratos API Server<br/>(XRPC / OAuth)"]
+        SDB[("Service DB<br/>(Enrollments/Metadata)")]
+        AS[("Actor Store<br/>(Full Records / Blobs)")]
+        FR["Firehose<br/>(subscribeRecords)"]
+    end
+
+    Client["User Client"] -- "OAuth / XRPC" --> SS
+    SS -- "Per-user DBs" --> AS
+    SS -- "Metadata" --> SDB
+    SS -- "Stubs" --> PDS
+    AV -- "Index Stubs" --> PDS
+    AV -- "Hydration" --> SS
+    SS -- "Events" --> FR
+    FR -- "Stream" --> AV
 ```
 
 > **Note:** See [Blob Storage](#blob-storage) for configuration.
@@ -70,62 +75,50 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 #### 1. User Enrollment
 
-```
-User ──▶ Stratos /oauth/authorize?handle=user.bsky.social
-         │
-         ▼
-Stratos ──▶ User's PDS OAuth endpoint
-         │
-         ▼
-PDS ──▶ User authorizes Stratos
-         │
-         ▼
-PDS ──▶ Stratos /oauth/callback (with auth code)
-         │
-         ▼
-Stratos validates enrollment (DID/PDS allowlist)
-         │
-         ▼
-Creates enrollment record + per-user SQLite database
+```mermaid
+flowchart TD
+    User([User]) --> Auth[Stratos /oauth/authorize]
+    Auth --> PDS[User's PDS OAuth endpoint]
+    PDS --> Grant[User authorizes Stratos]
+    Grant --> Callback[Stratos /oauth/callback, with auth code]
+    Callback --> Validate{Validate Enrollment}
+    Validate -- "Allowed" --> Create[Create Enrollment Record & Actor DB]
+    Validate -- "Denied" --> Deny[Return 403 Forbidden]
 ```
 
 #### 2. Record Creation
 
-```
-Client ──▶ Stratos com.atproto.repo.createRecord
-           { collection: "app.stratos.feed.post",
-             record: { text: "...", boundary: { values: [{ value: "fanart" }] } }
-           }
-         │
-         ▼
-Stratos validates:
-  - User is enrolled
-  - Record has valid boundary
-  - No cross-namespace embeds
-         │
-         ▼
-Stores in per-user SQLite database
-         │
-         ▼
-Sequences event to stratos_seq table
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Stratos
+    participant P as User's PDS
+
+    C->>S: com.atproto.repo.createRecord
+    Note right of C: collection: app.stratos.feed.post<br/>record: { text: "...", boundary: {...} }
+    
+    S->>S: Validate Enrollment & Boundary
+    S->>S: Store in per-user SQLite
+    S->>S: Sequence event to stratos_seq
+    
+    S->>P: putRecord(Stub with source field)
+    Note over S,P: Optional: If using Source Field Pattern
 ```
 
 #### 3. AppView Indexing
 
-```
-AppView ──▶ Stratos app.stratos.sync.subscribeRecords (WebSocket)
-            { did: "<user-did>", cursor: 0 }
-         │
-         ▼
-Stratos streams commit events:
-  { $type: "app.stratos.sync.subscribeRecords#commit",
-    seq: 1,
-    did: "did:plc:abc",
-    ops: [{ action: "create", path: "app.stratos.feed.post/tid", record: {...} }]
-  }
-         │
-         ▼
-AppView indexes records with boundary metadata
+```mermaid
+sequenceDiagram
+    participant AV as AppView
+    participant S as Stratos
+
+    AV->>S: app.stratos.sync.subscribeRecords (WebSocket)
+    Note right of AV: { did: "<user-did>", cursor: 0 }
+    
+    S-->>AV: Stream commit events
+    Note left of S: { $type: "...#commit", seq: 1, did: "...", ops: [...] }
+    
+    AV->>AV: Index records with boundary metadata
 ```
 
 ### Storage Architecture

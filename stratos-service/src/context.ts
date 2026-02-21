@@ -37,6 +37,7 @@ import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
   PdsAgent,
+  ExternalAllowListProvider,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
 
@@ -367,6 +368,7 @@ function createAuthVerifiers(
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier | undefined,
+  allowListProvider: ExternalAllowListProvider | undefined,
 ): AuthVerifiers {
   // Helper to validate DID has an active session
   const validateSession = async (did: string): Promise<boolean> => {
@@ -380,7 +382,15 @@ function createAuthVerifiers(
       return true
     } catch {
       // Fall back to enrollment check for directly-enrolled users
-      return enrollmentStore.isEnrolled(did)
+      const enrolled = await enrollmentStore.isEnrolled(did)
+      if (enrolled) return true
+
+      // Also check external allow list provider if available
+      if (allowListProvider) {
+        return allowListProvider.isAllowed(did)
+      }
+
+      return false
     }
   }
 
@@ -572,6 +582,7 @@ export interface AppContext {
   oauthClient?: NodeOAuthClient
   signingKey: crypto.Keypair
   serviceDid: string
+  allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
   app: express.Application
   logger?: Logger
@@ -720,6 +731,18 @@ export async function createAppContext(
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
 
+  // Initialize external allow list provider if configured
+  let allowListProvider: ExternalAllowListProvider | undefined
+  if (cfg.enrollment.allowListUrl) {
+    allowListProvider = new ExternalAllowListProvider(
+      cfg.enrollment.allowListUrl,
+      cfg.enrollment.valkeyUrl,
+      cfg.enrollment.allowListBootstrapName,
+      logger,
+    )
+    await allowListProvider.start()
+  }
+
   let dpopVerifier: DpopVerifier | undefined
   if (cfg.oauth && oauthClient) {
     // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
@@ -742,6 +765,7 @@ export async function createAppContext(
     enrollmentStore,
     cfg.admin?.password,
     dpopVerifier,
+    allowListProvider,
   )
 
   const serviceDid = cfg.service.did
@@ -793,6 +817,7 @@ export async function createAppContext(
     oauthClient,
     signingKey,
     serviceDid,
+    allowListProvider,
     xrpcServer,
     app,
     logger,
@@ -803,5 +828,8 @@ export async function createAppContext(
  * Cleanup application context
  */
 export async function destroyAppContext(ctx: AppContext): Promise<void> {
+  if (ctx.allowListProvider) {
+    await ctx.allowListProvider.stop()
+  }
   await closeServiceDb(ctx.db)
 }
