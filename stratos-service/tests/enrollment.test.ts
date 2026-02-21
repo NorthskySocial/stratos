@@ -250,7 +250,7 @@ describe('enrollment', () => {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: ['did:plc:vip-user'],
         allowedPdsEndpoints: ['https://pds.company.com'],
-        autoEnrollDomains: ['vip-boundary'],
+        autoEnrollDomains: ['autoenrolled.org'],
       }
 
       it('should include autoEnrollDomains when VIP user is allowed', async () => {
@@ -262,7 +262,7 @@ describe('enrollment', () => {
         )
 
         expect(result.allowed).toBe(true)
-        expect(result.autoEnrollDomains).toEqual(['vip-boundary'])
+        expect(result.autoEnrollDomains).toEqual(['autoenrolled.org'])
       })
 
       it('should include autoEnrollDomains when non-VIP user is allowed via PDS', async () => {
@@ -284,7 +284,7 @@ describe('enrollment', () => {
         )
 
         expect(result.allowed).toBe(true)
-        expect(result.autoEnrollDomains).toEqual(['vip-boundary'])
+        expect(result.autoEnrollDomains).toEqual(['autoenrolled.org'])
       })
     })
   })

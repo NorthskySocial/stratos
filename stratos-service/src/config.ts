@@ -84,7 +84,10 @@ const envSchema = z.object({
 
   // Admin auth (optional)
   STRATOS_ADMIN_PASSWORD: z.string().optional(),
-
+  // External allow list (optional)
+  STRATOS_ALLOW_LIST_URL: z.string().url().optional(),
+  STRATOS_VALKEY_URL: z.string().url().optional(),
+  STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),
   // DPoP configuration
   STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
 })
@@ -155,6 +158,9 @@ export interface StratosServiceConfig {
     allowedDids: string[]
     allowedPdsEndpoints: string[]
     autoEnrollDomains?: string[]
+    allowListUrl?: string
+    allowListBootstrapName?: string
+    valkeyUrl?: string
   }
   identity: {
     plcUrl: string
@@ -230,6 +236,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
       allowedDids: env.STRATOS_ALLOWED_DIDS,
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
       autoEnrollDomains: env.STRATOS_AUTO_ENROLL_DOMAINS,
+      allowListUrl: env.STRATOS_ALLOW_LIST_URL,
+      allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
+      valkeyUrl: env.STRATOS_VALKEY_URL,
     },
     identity: {
       plcUrl: env.STRATOS_PLC_URL,

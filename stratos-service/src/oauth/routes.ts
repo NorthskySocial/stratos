@@ -4,6 +4,7 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
 import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
+import { type AllowListProvider } from '../features/enrollment/allow-list.js'
 import { OAUTH_SCOPE } from './client.js'
 
 /**
@@ -39,6 +40,8 @@ export interface OAuthRoutesConfig {
   serviceEndpoint: string
   /** Boundaries to assign to new enrollments (if empty, placeholder will be used) */
   defaultBoundaries?: string[]
+  /** External allow list provider (optional) */
+  allowListProvider?: AllowListProvider
   /** Logger for OAuth events */
   logger?: Logger
 }
@@ -55,6 +58,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     idResolver,
     serviceEndpoint,
     defaultBoundaries = [],
+    allowListProvider,
     logger,
   } = config
 
@@ -113,6 +117,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         enrollmentConfig,
         did,
         idResolver,
+        allowListProvider,
       )
 
       if (!enrollmentResult.allowed) {

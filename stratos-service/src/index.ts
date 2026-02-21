@@ -99,6 +99,7 @@ export class StratosServer {
         baseUrl: cfg.service.publicUrl,
         serviceEndpoint: cfg.service.publicUrl,
         defaultBoundaries: cfg.stratos.allowedDomains,
+        allowListProvider: ctx.allowListProvider,
         logger: ctx.logger,
       })
       app.use('/oauth', oauthRoutes)
