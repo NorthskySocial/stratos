@@ -96,11 +96,11 @@ sequenceDiagram
 
     C->>S: com.atproto.repo.createRecord
     Note right of C: collection: app.stratos.feed.post<br/>record: { text: "...", boundary: {...} }
-    
+
     S->>S: Validate Enrollment & Boundary
     S->>S: Store in per-user SQLite
     S->>S: Sequence event to stratos_seq
-    
+
     S->>P: putRecord(Stub with source field)
     Note over S,P: Optional: If using Source Field Pattern
 ```
@@ -114,10 +114,10 @@ sequenceDiagram
 
     AV->>S: app.stratos.sync.subscribeRecords (WebSocket)
     Note right of AV: { did: "<user-did>", cursor: 0 }
-    
+
     S-->>AV: Stream commit events
     Note left of S: { $type: "...#commit", seq: 1, did: "...", ops: [...] }
-    
+
     AV->>AV: Index records with boundary metadata
 ```
 

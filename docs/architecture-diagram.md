@@ -75,22 +75,22 @@ How the service manages user eligibility using both internal and external source
 flowchart LR
     Start([Enrollment Request]) --> OAuth[OAuth Authentication]
     OAuth --> Check{Eligible?}
-    
+
     subgraph "Eligibility Checks"
         Check -- "DID Allow List" --> DAL[Internal Config]
         Check -- "PDS Allow List" --> PAL[Internal Config]
         Check -- "External" --> EAL[ExternalAllowListProvider]
     end
-    
+
     EAL -- "Fetch & Cache" --> URL["External URL (.txt)"]
     EAL -- "Bootstrap" --> VK[(Valkey / Redis)]
-    
+
     DAL --> Allowed{Allowed?}
     PAL --> Allowed
     EAL --> Allowed
-    
+
     Allowed -- "Yes" --> Enrolled[Create Enrollment & Actor Store]
     Allowed -- "No" --> Denied[Return 403 Forbidden]
-    
+
     Enrolled --> Profile[Write app.stratos.actor.enrollment to PDS]
 ```

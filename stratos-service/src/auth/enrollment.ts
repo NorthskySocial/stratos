@@ -7,7 +7,7 @@ import {
   isDidAllowed,
   validateEnrollmentEligibility,
 } from '@northskysocial/stratos-core'
-import { type AllowListProvider } from '../features/enrollment/allow-list.js'
+import { type AllowListProvider } from '../features/index.js'
 
 // Re-export for convenience
 export {
