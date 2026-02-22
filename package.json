@@ -30,5 +30,8 @@
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@vitest/coverage-v8": "^4.0.18"
   }
 }
