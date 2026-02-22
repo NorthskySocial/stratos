@@ -54,6 +54,13 @@ const envSchema = z.object({
         .filter((d) => d.length > 0),
     ),
 
+  // Repo import
+  STRATOS_IMPORT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(256 * 1024 * 1024),
+
   // Signing key
   STRATOS_SIGNING_KEY_HEX: z.string().optional(),
 
@@ -137,6 +144,7 @@ export interface StratosServiceConfig {
     allowedDomains: string[]
     retentionDays: number
     devMode?: boolean
+    importMaxBytes: number
   }
   enrollment: {
     mode: 'open' | 'allowlist'
@@ -211,6 +219,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     stratos: {
       allowedDomains: env.STRATOS_ALLOWED_DOMAINS,
       retentionDays: env.STRATOS_RETENTION_DAYS,
+      importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,

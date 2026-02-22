@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../pdsls"
+		},
+		{
+			"path": "../../atcute"
+		},
+		{
+			"path": "../../../repos/atproto"
+		}
+	],
+	"settings": {}
+}
