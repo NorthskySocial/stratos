@@ -73,6 +73,8 @@ The Stratos service is configured via environment variables:
 | `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist` |
 | `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`        |
 | `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`        |
+| `STRATOS_IMPORT_MAX_BYTES`      | Maximum CAR file size for repo import             | `268435456` |
+| `STRATOS_SIGNING_KEY_HEX`      | Service signing key (secp256k1, hex-encoded)      | Auto-generated |
 
 ## Enrollment
 
@@ -91,6 +93,7 @@ Shared library containing:
 - Validation logic for stratos records
 - Database schema and migrations
 - Storage abstractions (repo, record, blob)
+- MST commit builder for ATProto-compatible repos
 
 ### @northskysocial/stratos-service
 
@@ -99,3 +102,5 @@ Standalone HTTP service providing:
 - OAuth authorization server
 - XRPC endpoints for record CRUD
 - WebSocket subscription for AppView indexing
+- Repository export/import via CAR files
+- Signed commits with MST inclusion proofs
