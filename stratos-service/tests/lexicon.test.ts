@@ -16,6 +16,8 @@ const EXPECTED_STRATOS_LEXICONS = [
   'app.stratos.feed.post',
   'app.stratos.repo.hydrateRecord',
   'app.stratos.repo.hydrateRecords',
+  'app.stratos.repo.importRepo',
+  'app.stratos.sync.getRepo',
   'app.stratos.sync.subscribeRecords',
 ]
 

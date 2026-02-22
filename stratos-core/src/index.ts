@@ -5,6 +5,7 @@ export * from './validation/index.js'
 export * from './db/index.js'
 export * from './repo/index.js'
 export * from './record/index.js'
+export * from './mst/index.js'
 
 // Blob - export with renamed BlobMetadata to avoid conflict
 export { StratosBlobReader, StratosBlobTransactor } from './blob/index.js'
