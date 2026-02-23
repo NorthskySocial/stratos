@@ -6,7 +6,7 @@ services:
     ports:
       - '8443:443'
     volumes:
-      - ./test/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ssl-certs:/etc/nginx/ssl:ro
     depends_on:
       ssl-init:
