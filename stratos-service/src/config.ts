@@ -80,6 +80,9 @@ const envSchema = z.object({
   // Admin auth (optional)
   STRATOS_ADMIN_PASSWORD: z.string().optional(),
 
+  // Dev mode (allows Bearer DID auth without DPoP for test scripts)
+  STRATOS_DEV_MODE: z.coerce.boolean().default(false),
+
   // DPoP configuration
   STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
 })
@@ -219,6 +222,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     stratos: {
       allowedDomains: env.STRATOS_ALLOWED_DOMAINS,
       retentionDays: env.STRATOS_RETENTION_DAYS,
+      devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
     },
     enrollment: {
