@@ -46,14 +46,14 @@ services:
       - default
     user: 1000:1000
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: ./Dockerfile
     container_name: stratos-test
     restart: 'no'
     ports:
       - '3100:3100'
     env_file:
-      - .env.test
+      - .env
     environment:
       STRATOS_PORT: 3100
       STRATOS_DATA_DIR: /app/data
