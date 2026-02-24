@@ -688,6 +688,24 @@ export class PgActorBlobReader {
     return { size: found[0].size, mimeType: found[0].mimeType }
   }
 
+  async getBlobWithTempKey(cid: CID): Promise<{
+    size: number
+    mimeType: string
+    tempKey: string | null
+  } | null> {
+    const found = await this.db
+      .select()
+      .from(pgStratosBlob)
+      .where(eq(pgStratosBlob.cid, cid.toString()))
+      .limit(1)
+    if (found.length === 0) return null
+    return {
+      size: found[0].size,
+      mimeType: found[0].mimeType,
+      tempKey: found[0].tempKey,
+    }
+  }
+
   async getBlob(cid: CID): Promise<{
     size: number
     mimeType?: string

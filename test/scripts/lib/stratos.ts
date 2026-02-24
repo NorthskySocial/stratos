@@ -229,3 +229,63 @@ export async function deleteRecord(
     throw new Error(`deleteRecord failed: ${res.status} ${errBody}`)
   }
 }
+
+interface UploadBlobResponse {
+  blob: {
+    $type: 'blob'
+    ref: { $link: string }
+    mimeType: string
+    size: number
+  }
+}
+
+/** Upload a blob to Stratos (requires auth) */
+export async function uploadBlob(
+  callerDid: string,
+  bytes: Uint8Array,
+  mimeType: string,
+): Promise<UploadBlobResponse['blob']> {
+  const baseUrl = await getBaseUrl()
+  const res = await fetch(`${baseUrl}/xrpc/com.atproto.repo.uploadBlob`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': mimeType,
+      Authorization: `Bearer ${callerDid}`,
+    },
+    body: bytes,
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    throw new Error(`uploadBlob failed: ${res.status} ${errBody}`)
+  }
+
+  const result = (await res.json()) as UploadBlobResponse
+  return result.blob
+}
+
+/** Get a blob from Stratos (requires auth, boundary-gated) */
+export async function getBlob(
+  did: string,
+  cid: string,
+  callerDid: string,
+): Promise<Uint8Array> {
+  const baseUrl = await getBaseUrl()
+  const params = new URLSearchParams({ did, cid })
+  const res = await fetch(
+    `${baseUrl}/xrpc/com.atproto.sync.getBlob?${params}`,
+    {
+      headers: {
+        Authorization: `Bearer ${callerDid}`,
+      },
+    },
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    throw new Error(`getBlob failed: ${res.status} ${errBody}`)
+  }
+
+  const buffer = await res.arrayBuffer()
+  return new Uint8Array(buffer)
+}

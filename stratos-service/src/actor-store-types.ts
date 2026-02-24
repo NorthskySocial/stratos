@@ -139,6 +139,11 @@ export interface ActorBlobReader {
     cursor?: string
     limit: number
   }): Promise<string[]>
+  getBlobWithTempKey(cid: CID): Promise<{
+    size: number
+    mimeType: string
+    tempKey: string | null
+  } | null>
   getBlobTakedownStatus(cid: CID): Promise<StatusAttr | null>
   getRecordsForBlob(cid: CID): Promise<string[]>
   hasBlob(cid: CID): Promise<boolean>
