@@ -20,7 +20,6 @@ const SCRIPTS_DIR = new URL('.', import.meta.url).pathname
 const directMode = Deno.args.includes('--direct')
 const preserve = Deno.args.includes('--preserve')
 
-
 interface Phase {
   name: string
   script: string
