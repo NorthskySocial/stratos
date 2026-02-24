@@ -49,3 +49,35 @@ The `importRepo` handler stores the original CAR blocks and commit verbatim, pre
 The service signing key is stored as unencrypted raw bytes on disk at `{dataDir}/signing_key`. Per-actor SQLite databases in `{dataDir}/actors/` also store all record data, blob metadata, and repo blocks unencrypted. Anyone with filesystem access can read private key material and user data directly.
 
 With PostgreSQL, encryption at rest can be offloaded to the database layer (e.g., TDE, encrypted volumes, or column-level encryption). SQLite has no built-in encryption support, so a solution is needed that covers the SQLite storage backend. The signing key file needs its own protection regardless of database backend.
+
+## Facets support
+
+`app.stratos.feed.post` should support facets (rich text annotations) like `app.bsky.feed.post` does. Facets enable mentions, links, and hashtags embedded in post text. This would involve:
+
+- Adding a `facets` field to the post lexicon referencing `app.bsky.richtext.facet`
+- Validating facet byte offsets against the text field
+- Test coverage in `generate-posts.ts` for posts with mentions and link facets
+
+## Video embed support
+
+The `app.stratos.feed.post` lexicon already includes `app.bsky.embed.video` in its embed union, but the blob pipeline needs work to handle video:
+
+- Video blob upload (larger files, different MIME types like `video/mp4`)
+- Aspect ratio metadata
+- Potentially a processing pipeline for transcoding or thumbnail generation
+- Test coverage for video embed creation and round-trip verification
+
+## Boundary gating on blob access
+
+`com.atproto.sync.getBlob` needs the same boundary gating as record access. The recommended approach is record-boundary lookup:
+
+- Look up which records reference the blob CID (via `stratos_record_blob` join table)
+- For each referencing record, extract boundary domains from the record value
+- Check if any of those boundary sets overlap with the viewer's boundaries
+- If no overlap across all referencing records, deny access
+
+Design considerations:
+- **Owner bypass**: Repo owner always has access to their own blobs
+- **Privacy**: Return `BlobNotFound` for both missing and unauthorized blobs (no information leakage about blob existence)
+- **Orphan blobs**: Blobs with no record references are inaccessible to non-owners
+- **Batch-aware optimization**: For AppView hydration of many posts, a future batch endpoint could accept multiple blob CIDs and a viewer DID, returning accessible blobs in one round-trip. This avoids N+1 queries when hydrating image-heavy feeds.
