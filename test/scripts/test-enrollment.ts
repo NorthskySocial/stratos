@@ -7,7 +7,7 @@ import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
 import { section, info, pass, fail, warn, dim, error } from './lib/log.ts'
 
-const SCREENSHOT_DIR = new URL('../../test-data/screenshots', import.meta.url)
+const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
   .pathname
 
 async function screenshotOnFailure(page: Page, name: string) {
