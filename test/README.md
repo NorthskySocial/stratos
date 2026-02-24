@@ -22,23 +22,24 @@ npx playwright install chromium
 | Sakura  | `sakura-{id}.{PDS_HOST}`  | `swordsmith` |
 | kaoruko | `kaoruko-{id}.{PDS_HOST}` | `aekea`      |
 
-Handles include a random 5-digit suffix (`{id}`) to avoid collisions with previous test runs. `{PDS_HOST}` comes from `test/scripts/.env`.
+Handles include a random 5-digit suffix (`{id}`) to avoid collisions with previous test runs. `{PDS_HOST}` comes from `scripts/.env`.
 
 Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 ## Configuration
 
-### Test scripts environment (`test/scripts/.env`)
+### Test scripts environment (`scripts/.env`)
 
-The Deno test scripts load their own `.env` from `test/scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
+The Deno test scripts load their own `.env` from `scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
 
 | Variable             | Example                 | Purpose                                                                      |
 | -------------------- | ----------------------- | ---------------------------------------------------------------------------- |
 | `PDS_HOST`           | `pds.example.com`       | PDS hostname (without protocol) — used for handle construction and API calls |
 | `PDS_ADMIN_PASSWORD` | `your-admin-password`   | PDS admin password for account creation/deletion                             |
 | `STRATOS_URL`        | `http://localhost:3100` | Stratos service URL the scripts call                                         |
+| `STRATOS_OAUTH_ISSUER` | `https://pds.example.com` | PDS OAuth issuer URL — **required** to enable `/oauth/*` routes           |
 
-If you need to point at a different PDS, update these variables and the user handles in `test/scripts/lib/config.ts`.
+If you need to point at a different PDS, update these variables and the user handles in `scripts/lib/config.ts`.
 
 ### Stratos container environment (`.env.test`)
 
@@ -48,7 +49,7 @@ The Docker Compose file (`docker-compose.test.yml`) loads `.env.test` from the p
 cp .env.example .env.test
 ```
 
-For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`, and point `STRATOS_ALLOWED_PDS_ENDPOINTS` / `STRATOS_OAUTH_ISSUER` at your PDS. See the [project README](../README.md) for the full list of available variables.
+For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`, and point `STRATOS_ALLOWED_PDS_ENDPOINTS` / `STRATOS_OAUTH_ISSUER` at your PDS. `STRATOS_OAUTH_ISSUER` must be set to a valid URL (e.g., `https://pds.example.com`) or the OAuth routes won't be registered and enrollment will fail with "Cannot GET /oauth/authorize". See the [project README](../README.md) for the full list of available variables.
 
 ### Docker Compose (`docker-compose.test.yml`)
 
@@ -88,14 +89,14 @@ rm -rf test-data/
 
 ### PDS Configuration
 
-The tests require a running PDS. The PDS host and admin password are configured in `test/scripts/.env` and are used to create invite codes then three test accounts with randomized handles. The PDS admin credentials are only used during setup and teardown (to delete the users). After that, all authentication goes through OAuth and the Stratos API.
+The tests require a running PDS. The PDS host and admin password are configured in `scripts/.env` and are used to create invite codes then three test accounts with randomized handles. The PDS admin credentials are only used during setup and teardown (to delete the users). After that, all authentication goes through OAuth and the Stratos API.
 
 ## Running
 
 ### Full suite
 
 ```bash
-deno run -A test/scripts/run-all.ts
+deno run -A scripts/run-all.ts
 ```
 
 Runs all five stages in order. On any stage failure the remaining stages (except teardown) are skipped.
@@ -105,7 +106,7 @@ Runs all five stages in order. On any stage failure the remaining stages (except
 If you cannot use Playwright browser automation (e.g., headless environment, PDS OAuth issues), use `--direct` to bypass OAuth enrollment:
 
 ```bash
-deno run -A test/scripts/run-all.ts --direct
+deno run -A scripts/run-all.ts --direct
 ```
 
 This mode:
@@ -127,11 +128,11 @@ Direct mode is useful when:
 Each script can be run independently. Stages 2–4 require the prior stages to have been run.
 
 ```bash
-deno run -A test/scripts/setup.ts
-deno run -A test/scripts/test-enrollment.ts
-deno run -A test/scripts/configure-boundaries.ts
-deno run -A test/scripts/test-posts.ts
-deno run -A test/scripts/teardown.ts
+deno run -A scripts/setup.ts
+deno run -A scripts/test-enrollment.ts
+deno run -A scripts/configure-boundaries.ts
+deno run -A scripts/test-posts.ts
+deno run -A scripts/teardown.ts
 ```
 
 ## Stages
@@ -329,7 +330,7 @@ Teardown
 ## Files
 
 ```
-test/
+
 └── scripts/
     ├── .env.example                   # Template for test scripts environment
     ├── deno.json                      # Deno config (isolates from project tsconfig)
@@ -356,6 +357,8 @@ Check container logs: `docker compose -f docker-compose.test.yml logs`
 
 **OAuth enrollment fails**
 Inspect screenshots in `test-data/screenshots/`. The PDS OAuth UI may have changed selectors.
+
+If you see **"Cannot GET /oauth/authorize"**, `STRATOS_OAUTH_ISSUER` is not set (or is empty) in `.env`. This env var gates whether Stratos registers OAuth routes at all. Set it to your PDS URL (e.g., `https://pds.example.com`).
 
 **Boundary configuration fails**
 Ensure the container has written to `test-data/service.sqlite` (the SQLite DB is created on first request, not on startup). Verify the bind mount: `ls -la test-data/`.

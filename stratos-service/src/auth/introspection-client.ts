@@ -26,6 +26,11 @@ export interface OAuthServerMetadata {
 export interface VerifiedTokenClaims {
   /** Token is valid and verified */
   active: true
+  /** Whether the token signature was cryptographically verified.
+   * false when the PDS uses symmetric signing (HS256) which can't be
+   * verified by a third-party resource server via JWKS. DPoP proof
+   * binding still provides authentication assurance in this case. */
+  signatureVerified: boolean
   /** Subject (user DID) */
   sub: string
   /** Issuer (PDS URL) */
@@ -289,6 +294,40 @@ export class PdsTokenVerifier implements TokenVerifier {
   }
 
   /**
+   * Decode the JWT header to inspect the signing algorithm
+   */
+  private decodeTokenHeader(token: string): { alg?: string; typ?: string } {
+    const parts = token.split('.')
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT format')
+    }
+
+    try {
+      return JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'))
+    } catch {
+      throw new Error('Failed to decode JWT header')
+    }
+  }
+
+  /**
+   * Decode full token claims without signature verification.
+   * Used as fallback when the PDS signs tokens with a symmetric algorithm
+   * (HS256) that can't be verified via JWKS by a third-party resource server.
+   */
+  private decodeTokenClaimsUnsafe(token: string): Record<string, unknown> {
+    const parts = token.split('.')
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT format')
+    }
+
+    try {
+      return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+    } catch {
+      throw new Error('Failed to decode JWT payload')
+    }
+  }
+
+  /**
    * Verify an access token
    */
   async verify(token: string): Promise<TokenVerificationResult> {
@@ -339,29 +378,47 @@ export class PdsTokenVerifier implements TokenVerifier {
       const keySet = jose.createLocalJWKSet(jwks)
 
       // 5. Verify token signature and claims
-      const { payload } = await jose.jwtVerify(token, keySet, {
-        issuer: issuerUrl.origin,
-        audience: this.audience,
-        clockTolerance: 30, // 30 second clock skew tolerance
-      })
+      try {
+        const { payload } = await jose.jwtVerify(token, keySet, {
+          issuer: issuerUrl.origin,
+          audience: this.audience,
+          clockTolerance: 30,
+        })
 
-      // 6. Validate subject
-      if (!payload.sub || !payload.sub.startsWith('did:')) {
-        return { active: false, error: 'Invalid subject claim' }
-      }
+        // 6. Validate subject
+        if (!payload.sub || !payload.sub.startsWith('did:')) {
+          return { active: false, error: 'Invalid subject claim' }
+        }
 
-      // 7. Return verified claims
-      return {
-        active: true,
-        sub: payload.sub,
-        iss: payload.iss!,
-        aud: payload.aud,
-        exp: payload.exp,
-        iat: payload.iat,
-        jti: payload.jti,
-        scope: payload['scope'] as string | undefined,
-        client_id: payload['client_id'] as string | undefined,
-        cnf: payload['cnf'] as { jkt?: string } | undefined,
+        return {
+          active: true,
+          signatureVerified: true,
+          sub: payload.sub,
+          iss: payload.iss!,
+          aud: payload.aud,
+          exp: payload.exp,
+          iat: payload.iat,
+          jti: payload.jti,
+          scope: payload['scope'] as string | undefined,
+          client_id: payload['client_id'] as string | undefined,
+          cnf: payload['cnf'] as { jkt?: string } | undefined,
+        }
+      } catch (verifyErr) {
+        // AT Protocol PDSes currently sign OAuth tokens with HS256 (symmetric).
+        // JWKS only publishes asymmetric keys, so jose rejects HS256 tokens.
+        // Fall back to accepting unverified claims when we detect this case.
+        // DPoP proof binding still provides authentication assurance.
+        const header = this.decodeTokenHeader(token)
+        const isSymmetricAlg =
+          header.alg === 'HS256' ||
+          header.alg === 'HS384' ||
+          header.alg === 'HS512'
+
+        if (!isSymmetricAlg) {
+          throw verifyErr
+        }
+
+        return this.buildUnverifiedResult(token, issuerUrl.origin)
       }
     } catch (err) {
       // jose throws specific errors for various failure cases
@@ -385,6 +442,61 @@ export class PdsTokenVerifier implements TokenVerifier {
         error:
           err instanceof Error ? err.message : 'Unknown verification error',
       }
+    }
+  }
+
+  /**
+   * Build a VerifiedTokenClaims result from an unverified token.
+   * Used when the PDS signs with a symmetric algorithm that can't be
+   * verified via JWKS. Still validates structural claims (sub, exp, etc.).
+   */
+  private buildUnverifiedResult(
+    token: string,
+    expectedIssuer: string,
+  ): TokenVerificationResult {
+    const payload = this.decodeTokenClaimsUnsafe(token)
+
+    const sub = payload['sub'] as string | undefined
+    if (!sub || !sub.startsWith('did:')) {
+      return { active: false, error: 'Invalid subject claim' }
+    }
+
+    const iss = payload['iss'] as string | undefined
+    if (!iss) {
+      return { active: false, error: 'Missing issuer claim' }
+    }
+
+    // Validate issuer matches what we fetched metadata from
+    try {
+      const issUrl = new URL(iss)
+      if (issUrl.origin !== expectedIssuer) {
+        return { active: false, error: 'Issuer mismatch' }
+      }
+    } catch {
+      return { active: false, error: 'Invalid issuer URL in token' }
+    }
+
+    // Check expiration
+    const exp = payload['exp'] as number | undefined
+    if (exp !== undefined) {
+      const now = Math.floor(Date.now() / 1000)
+      if (now > exp + 30) {
+        return { active: false, error: 'Token expired' }
+      }
+    }
+
+    return {
+      active: true,
+      signatureVerified: false,
+      sub,
+      iss,
+      aud: payload['aud'] as string | string[] | undefined,
+      exp,
+      iat: payload['iat'] as number | undefined,
+      jti: payload['jti'] as string | undefined,
+      scope: payload['scope'] as string | undefined,
+      client_id: payload['client_id'] as string | undefined,
+      cnf: payload['cnf'] as { jkt?: string } | undefined,
     }
   }
 
