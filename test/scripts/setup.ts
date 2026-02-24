@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run -A
 // Setup script — creates PDS accounts, starts Stratos via Docker Compose, waits for health.
 
-import { TEST_USERS, PROJECT_ROOT, TEST_DATA_DIR } from './lib/config.ts'
+import { TEST_USERS, TEST_ROOT, TEST_DATA_DIR } from './lib/config.ts'
 import { createInviteCode, createAccount, accountExists } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { saveState, loadState, type TestState } from './lib/state.ts'
@@ -124,7 +124,7 @@ async function run() {
       '--force-recreate',
       'stratos',
     ],
-    cwd: PROJECT_ROOT,
+    cwd: TEST_ROOT,
     stdout: 'piped',
     stderr: 'piped',
     env: {
@@ -151,7 +151,7 @@ async function run() {
     // Show container logs on failure
     const logs = new Deno.Command('docker', {
       args: ['compose', '-f', 'docker-compose.test.yml', 'logs', '--tail=50'],
-      cwd: PROJECT_ROOT,
+      cwd: TEST_ROOT,
       stdout: 'piped',
       stderr: 'piped',
     })

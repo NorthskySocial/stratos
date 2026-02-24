@@ -56,6 +56,7 @@ export class DpopVerificationError extends Error {
       | 'missing_auth'
       | 'invalid_token'
       | 'invalid_dpop_proof'
+      | 'use_dpop_nonce'
       | 'token_inactive'
       | 'key_binding_mismatch'
       | 'not_enrolled'
@@ -189,6 +190,14 @@ export class DpopVerifier {
         accessToken,
       )
     } catch (err) {
+      if (isUseDpopNonceError(err)) {
+        this.config.logger?.debug('DPoP nonce required, sending use_dpop_nonce')
+        throw new DpopVerificationError(
+          'DPoP nonce required',
+          'use_dpop_nonce',
+          'DPoP error="use_dpop_nonce"',
+        )
+      }
       const message = err instanceof Error ? err.message : 'Invalid DPoP proof'
       this.config.logger?.warn(
         { code: 'invalid_dpop_proof', error: message },
@@ -243,6 +252,13 @@ export class DpopVerifier {
 
     // Token is verified - cast to claims type
     const claims = verificationResult as VerifiedTokenClaims
+
+    if (!claims.signatureVerified) {
+      this.config.logger?.warn(
+        { did: claims.sub },
+        'token signature not verified (PDS uses symmetric signing); relying on DPoP proof binding',
+      )
+    }
 
     // Get subject (user DID)
     const did = claims.sub
@@ -317,4 +333,15 @@ export class DpopVerifier {
     }
     return value
   }
+}
+
+// OAuthError.error === 'use_dpop_nonce' identifies the nonce-required error
+// from @atproto/oauth-provider without needing to import the unexported class
+function isUseDpopNonceError(err: unknown): boolean {
+  return (
+    err != null &&
+    typeof err === 'object' &&
+    'error' in err &&
+    (err as Record<string, unknown>).error === 'use_dpop_nonce'
+  )
 }
