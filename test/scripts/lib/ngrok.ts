@@ -1,3 +1,4 @@
+import { TEST_ROOT } from './config.ts'
 import { info, pass, fail, warn } from './log.ts'
 import { loadState, saveState } from './state.ts'
 
@@ -7,6 +8,7 @@ export async function startNgrok(_port: number): Promise<string> {
 
   const cmd = new Deno.Command('docker-compose', {
     args: ['-f', 'docker-compose.test.yml', 'up', '-d', 'ngrok'],
+    cwd: TEST_ROOT,
     stdout: 'piped',
     stderr: 'piped',
   })
@@ -52,6 +54,7 @@ export async function stopNgrok(): Promise<void> {
   info('Stopping ngrok container...')
   const cmd = new Deno.Command('docker-compose', {
     args: ['-f', 'docker-compose.test.yml', 'stop', 'ngrok'],
+    cwd: TEST_ROOT,
   })
   try {
     await cmd.output()

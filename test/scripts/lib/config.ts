@@ -1,12 +1,12 @@
 // Test configuration — all constants for the E2E suite
-// Load from .env file in the scripts directory
+// Load from .env file in the test directory
 
 import { load } from 'jsr:@std/dotenv'
 
 import { loadState } from './state.ts'
 export { loadState }
 
-const envPath = new URL('../.env', import.meta.url).pathname
+const envPath = new URL('../../.env', import.meta.url).pathname
 await load({ envPath, export: true })
 
 const state = await loadState()
@@ -75,7 +75,7 @@ export const TEST_USERS: Record<string, TestUser> = {
   },
 }
 
-export const STATE_FILE = new URL('./test-state.json', import.meta.url).pathname
-export const TEST_DATA_DIR = new URL('../../../test-data', import.meta.url)
+export const TEST_ROOT = new URL('../..', import.meta.url).pathname
+export const STATE_FILE = new URL('../../test-state.json', import.meta.url).pathname
+export const TEST_DATA_DIR = new URL('../../test-data', import.meta.url)
   .pathname
-export const PROJECT_ROOT = new URL('../../..', import.meta.url).pathname

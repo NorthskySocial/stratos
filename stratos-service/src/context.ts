@@ -54,8 +54,11 @@ import {
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import { PdsTokenVerifier } from './auth/index.js'
-import { DpopVerifier } from './auth/index.js'
+import {
+  PdsTokenVerifier,
+  DpopVerifier,
+  DpopVerificationError,
+} from './auth/index.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -468,8 +471,15 @@ function createAuthVerifiers(
         return {
           credentials: { type: 'user', did: result.did },
         }
-      } catch {
-        return { credentials: { type: 'none' } }
+      } catch (err) {
+        // DPoP auth was attempted — propagate errors so clients can
+        // participate in nonce negotiation and see real auth failures
+        if (err instanceof DpopVerificationError && err.wwwAuthenticate) {
+          ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+        const message =
+          err instanceof Error ? err.message : 'DPoP verification failed'
+        throw new XRPCError(401, message)
       }
     },
     admin: async (ctx) => {

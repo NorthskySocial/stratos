@@ -50,7 +50,7 @@ export class StratosServer {
     })
 
     const app = ctx.app
-    app.use(cors())
+    app.use(cors({ exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate'] }))
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {
       if (req.path.startsWith('/xrpc/')) {
