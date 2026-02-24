@@ -7,7 +7,7 @@ import {
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
-import { encode as cborEncode, decode as cborDecode, type LexValue } from '@atproto/lex-cbor'
+import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import * as dagCbor from '@ipld/dag-cbor'
 import * as AtcuteCbor from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
@@ -26,7 +26,6 @@ import {
   deleteRecord,
   getRecord,
   listRecords,
-  updateRecord,
   applyWritesBatch,
   type BatchWriteOp,
 } from './records.js'
@@ -628,7 +627,6 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
           // Collect all block CIDs: commit + proof nodes + record
           const blockCids = new Set<string>([commitRootStr, ...proofCids])
-          const recordCid = CID.parse(record.cid)
           blockCids.add(record.cid)
 
           // Build CAR

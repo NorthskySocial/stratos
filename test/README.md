@@ -32,12 +32,12 @@ Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 The Deno test scripts load their own `.env` from `scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
 
-| Variable             | Example                 | Purpose                                                                      |
-| -------------------- | ----------------------- | ---------------------------------------------------------------------------- |
-| `PDS_HOST`           | `pds.example.com`       | PDS hostname (without protocol) — used for handle construction and API calls |
-| `PDS_ADMIN_PASSWORD` | `your-admin-password`   | PDS admin password for account creation/deletion                             |
-| `STRATOS_URL`        | `http://localhost:3100` | Stratos service URL the scripts call                                         |
-| `STRATOS_OAUTH_ISSUER` | `https://pds.example.com` | PDS OAuth issuer URL — **required** to enable `/oauth/*` routes           |
+| Variable               | Example                   | Purpose                                                                      |
+| ---------------------- | ------------------------- | ---------------------------------------------------------------------------- |
+| `PDS_HOST`             | `pds.example.com`         | PDS hostname (without protocol) — used for handle construction and API calls |
+| `PDS_ADMIN_PASSWORD`   | `your-admin-password`     | PDS admin password for account creation/deletion                             |
+| `STRATOS_URL`          | `http://localhost:3100`   | Stratos service URL the scripts call                                         |
+| `STRATOS_OAUTH_ISSUER` | `https://pds.example.com` | PDS OAuth issuer URL — **required** to enable `/oauth/*` routes              |
 
 If you need to point at a different PDS, update these variables and the user handles in `scripts/lib/config.ts`.
 
