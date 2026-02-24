@@ -76,6 +76,7 @@ export const TEST_USERS: Record<string, TestUser> = {
 }
 
 export const TEST_ROOT = new URL('../..', import.meta.url).pathname
-export const STATE_FILE = new URL('../../test-state.json', import.meta.url).pathname
+export const STATE_FILE = new URL('../../test-state.json', import.meta.url)
+  .pathname
 export const TEST_DATA_DIR = new URL('../../test-data', import.meta.url)
   .pathname
