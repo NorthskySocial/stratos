@@ -73,6 +73,20 @@ export const TEST_USERS: Record<string, TestUser> = {
     password: 'test-kaoruko-stratos-2026!',
     boundaries: [DOMAINS.aekea],
   },
+  fuyuko: {
+    name: 'Fuyuko',
+    handle: `fuyuko-${TEST_RUN_ID}.${PDS_HOST}`,
+    email: `tachikoma+fuyuko-${TEST_RUN_ID}@chipnick.com`,
+    password: 'test-fuyuko-stratos-2026!',
+    boundaries: [DOMAINS.swordsmith],
+  },
+  haruki: {
+    name: 'Haruki',
+    handle: `haruki-${TEST_RUN_ID}.${PDS_HOST}`,
+    email: `tachikoma+haruki-${TEST_RUN_ID}@chipnick.com`,
+    password: 'test-haruki-stratos-2026!',
+    boundaries: [DOMAINS.aekea],
+  },
 }
 
 export const TEST_ROOT = new URL('../..', import.meta.url).pathname
