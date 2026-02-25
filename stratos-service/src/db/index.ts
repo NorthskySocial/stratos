@@ -31,7 +31,7 @@ export function createServiceDb(location: string): ServiceDb {
   const client = createClient({
     url: `file:${location}`,
   })
-  const base = drizzle(client, { schema }) as unknown as ServiceDb
+  const base = drizzle({ client, schema }) as unknown as ServiceDb
   base._client = client
   return base
 }
