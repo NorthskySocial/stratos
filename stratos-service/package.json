@@ -39,7 +39,7 @@
     "@ipld/dag-cbor": "^9.2.5",
     "@libsql/client": "^0.17.0",
     "cors": "^2.8.6",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-orm": "^1.0.0-beta.15",
     "express": "^5.2.1",
     "express-async-errors": "^3.1.1",
     "http-terminator": "^3.2.0",
