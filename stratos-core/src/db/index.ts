@@ -39,7 +39,7 @@ export function createStratosDb(
     ...(opts?.pragmas ?? {}),
   }
 
-  const baseDb = drizzle(client, { schema: schemaModule.schema })
+  const baseDb = drizzle({ client, schema: schemaModule.schema })
   const db = baseDb as unknown as StratosDb
   db._client = client
 
