@@ -618,12 +618,19 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           const commitRootStr = commitRoot.toString()
           const commitBytes = await adapter.get(commitRootStr)
           if (!commitBytes) {
-            throw new InvalidRequestError('Commit block not found', 'RepoNotFound')
+            throw new InvalidRequestError(
+              'Commit block not found',
+              'RepoNotFound',
+            )
           }
           const commitData = AtcuteCbor.decode(commitBytes) as { data: CidLink }
           const mstRoot = commitData.data.$link
 
-          const proofCids = await buildInclusionProof(nodeStore, mstRoot, `${collection}/${rkey}`)
+          const proofCids = await buildInclusionProof(
+            nodeStore,
+            mstRoot,
+            `${collection}/${rkey}`,
+          )
 
           // Collect all block CIDs: commit + proof nodes + record
           const blockCids = new Set<string>([commitRootStr, ...proofCids])
@@ -674,10 +681,14 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
         const carBuf = new Uint8Array(carLength)
         let off = 0
-        carBuf.set(headerVarInt, off); off += headerVarInt.length
-        carBuf.set(header, off); off += header.length
-        carBuf.set(blockVarInt, off); off += blockVarInt.length
-        carBuf.set(cidBytes, off); off += cidBytes.length
+        carBuf.set(headerVarInt, off)
+        off += headerVarInt.length
+        carBuf.set(header, off)
+        off += header.length
+        carBuf.set(blockVarInt, off)
+        off += blockVarInt.length
+        carBuf.set(cidBytes, off)
+        off += cidBytes.length
         carBuf.set(recordBytes, off)
 
         return carBuf
@@ -780,7 +791,10 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       const carReader = CAR.fromUint8Array(carBytes)
       const roots = carReader.roots
       if (roots.length !== 1) {
-        throw new InvalidRequestError('CAR must have exactly one root', 'InvalidCar')
+        throw new InvalidRequestError(
+          'CAR must have exactly one root',
+          'InvalidCar',
+        )
       }
       const rootCidLink = roots[0]
 
@@ -788,10 +802,18 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       const blocks = new Map<string, Uint8Array>()
       for (const entry of carReader) {
         const cidStr = AtcuteCid.toString(entry.cid)
-        const blockBytes = new Uint8Array(entry.bytes) as Uint8Array<ArrayBuffer>
-        const expected = await AtcuteCid.create(entry.cid.codec as 0x55 | 0x71, blockBytes)
+        const blockBytes = new Uint8Array(
+          entry.bytes,
+        ) as Uint8Array<ArrayBuffer>
+        const expected = await AtcuteCid.create(
+          entry.cid.codec as 0x55 | 0x71,
+          blockBytes,
+        )
         if (AtcuteCid.toString(expected) !== cidStr) {
-          throw new InvalidRequestError('CID does not match block bytes', 'InvalidCar')
+          throw new InvalidRequestError(
+            'CID does not match block bytes',
+            'InvalidCar',
+          )
         }
         blocks.set(cidStr, blockBytes)
       }
@@ -799,7 +821,10 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       // Decode and validate the commit
       const commitBytes = blocks.get(rootCidLink.$link)
       if (!commitBytes) {
-        throw new InvalidRequestError('Root commit block not found in CAR', 'InvalidCar')
+        throw new InvalidRequestError(
+          'Root commit block not found in CAR',
+          'InvalidCar',
+        )
       }
       const commit = AtcuteCbor.decode(commitBytes) as {
         did: string
@@ -809,14 +834,18 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         sig: Uint8Array
       }
       if (commit.did !== did) {
-        throw new InvalidRequestError('Commit DID does not match authenticated user', 'InvalidCar')
+        throw new InvalidRequestError(
+          'Commit DID does not match authenticated user',
+          'InvalidCar',
+        )
       }
       if (!commit.rev || !commit.data?.$link) {
         throw new InvalidRequestError('Invalid commit structure', 'InvalidCar')
       }
 
       // Use @atcute/repo to iterate records from the MST
-      const records: Array<{ collection: string; rkey: string; cid: string }> = []
+      const records: Array<{ collection: string; rkey: string; cid: string }> =
+        []
       for (const entry of repoFromCar(carBytes)) {
         records.push({
           collection: entry.collection,
@@ -845,7 +874,9 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           const recordBytes = blocks.get(record.cid)
           if (!recordBytes) continue
 
-          const uri = new AtUri(`at://${did}/${record.collection}/${record.rkey}`)
+          const uri = new AtUri(
+            `at://${did}/${record.collection}/${record.rkey}`,
+          )
           const value = dagCbor.decode(recordBytes) as Record<string, unknown>
 
           await store.record.indexRecord(

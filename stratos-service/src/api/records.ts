@@ -18,7 +18,10 @@ import {
 } from '@northskysocial/stratos-core'
 
 import type { AppContext, StratosActorTransactor } from '../context.js'
-import { StratosBlockStoreReader, signAndPersistCommit } from '../features/mst/index.js'
+import {
+  StratosBlockStoreReader,
+  signAndPersistCommit,
+} from '../features/mst/index.js'
 import { Did } from '@atproto/api'
 
 /**
@@ -119,11 +122,19 @@ export async function createRecord(
     // Build and sign MST commit
     const adapter = new StratosBlockStoreReader(store.repo)
     const currentRoot = await store.repo.getRoot()
-    const unsigned = await buildCommit(adapter, currentRoot?.toString() ?? null, {
-      did: callerDid,
-      writes: [{ action: 'create', collection, rkey, cid: cid.toString() }],
-    })
-    const commitResult = await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: [{ action: 'create', collection, rkey, cid: cid.toString() }],
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
 
     // Index the record
     await store.record.indexRecord(
@@ -243,11 +254,19 @@ export async function deleteRecord(
     // Build and sign MST commit
     const adapter = new StratosBlockStoreReader(store.repo)
     const currentRoot = await store.repo.getRoot()
-    const unsigned = await buildCommit(adapter, currentRoot?.toString() ?? null, {
-      did: callerDid,
-      writes: [{ action: 'delete', collection, rkey, cid: null }],
-    })
-    const commitResult = await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: [{ action: 'delete', collection, rkey, cid: null }],
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
 
     // Sequence the change
     await sequenceChange(store, {
@@ -358,11 +377,19 @@ export async function updateRecord(
     // Build and sign MST commit
     const adapter = new StratosBlockStoreReader(store.repo)
     const currentRoot = await store.repo.getRoot()
-    const unsigned = await buildCommit(adapter, currentRoot?.toString() ?? null, {
-      did: callerDid,
-      writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
-    })
-    const commitResult = await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
 
     // Index the record
     await store.record.indexRecord(
@@ -614,7 +641,7 @@ export async function applyWritesBatch(
     }> = []
 
     for (const op of ops) {
-      const rkey = op.action === 'create' ? (op.rkey || TID.nextStr()) : op.rkey
+      const rkey = op.action === 'create' ? op.rkey || TID.nextStr() : op.rkey
       const uriStr = `at://${callerDid}/${op.collection}/${rkey}`
       const uri = new AtUri(uriStr)
 
@@ -623,27 +650,57 @@ export async function applyWritesBatch(
         if (!existing) {
           throw new InvalidRequestError('Record not found', 'RecordNotFound')
         }
-        mstOps.push({ action: 'delete', collection: op.collection, rkey, cid: null })
-        indexOps.push({ uri, uriStr, cid: null, record: undefined, action: 'delete' })
+        mstOps.push({
+          action: 'delete',
+          collection: op.collection,
+          rkey,
+          cid: null,
+        })
+        indexOps.push({
+          uri,
+          uriStr,
+          cid: null,
+          record: undefined,
+          action: 'delete',
+        })
       } else {
         const recordBytes = encodeRecord(op.record)
         const cid = await computeCid(op.record)
         const tempRev = TID.nextStr()
         await store.repo.putBlock(cid, recordBytes, tempRev)
 
-        mstOps.push({ action: op.action, collection: op.collection, rkey, cid: cid.toString() })
-        indexOps.push({ uri, uriStr, cid, record: op.record, action: op.action })
+        mstOps.push({
+          action: op.action,
+          collection: op.collection,
+          rkey,
+          cid: cid.toString(),
+        })
+        indexOps.push({
+          uri,
+          uriStr,
+          cid,
+          record: op.record,
+          action: op.action,
+        })
       }
     }
 
     // Single MST commit for all operations
     const adapter = new StratosBlockStoreReader(store.repo)
     const currentRoot = await store.repo.getRoot()
-    const unsigned = await buildCommit(adapter, currentRoot?.toString() ?? null, {
-      did: callerDid,
-      writes: mstOps,
-    })
-    const commitResult = await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: mstOps,
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
 
     // Index records and sequence changes
     const results: Array<{ uri?: string; cid?: string }> = []

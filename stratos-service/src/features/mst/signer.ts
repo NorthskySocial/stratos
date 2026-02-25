@@ -43,7 +43,9 @@ export async function signAndPersistCommit(
   }
 
   if (unsigned.removedCids.length > 0) {
-    await repoTransactor.deleteBlocks(unsigned.removedCids.map(s => CID.parse(s)))
+    await repoTransactor.deleteBlocks(
+      unsigned.removedCids.map((s) => CID.parse(s)),
+    )
   }
 
   await repoTransactor.putBlock(commitCid, commitBytes, unsigned.rev)

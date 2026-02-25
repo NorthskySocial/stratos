@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { MemoryBlockStore } from '@atcute/mst'
 import * as AtcuteCid from '@atcute/cid'
-import { encode as cborEncode, toBytes as cborToBytes, decode as cborDecode, type CidLink } from '@atcute/cbor'
+import {
+  encode as cborEncode,
+  toBytes as cborToBytes,
+  decode as cborDecode,
+  type CidLink,
+} from '@atcute/cbor'
 import { buildCommit, type MstWriteOp } from '../src/mst/builder.js'
 
 const DID = 'did:plc:testuser123'
@@ -27,7 +32,9 @@ async function persistAndMakeCommitCid(
     prev: null,
     sig: cborToBytes(new Uint8Array(64)),
   })
-  const commitCid = AtcuteCid.toString(await AtcuteCid.create(0x71, fakeCommitBlock))
+  const commitCid = AtcuteCid.toString(
+    await AtcuteCid.create(0x71, fakeCommitBlock),
+  )
   await storage.put(commitCid, fakeCommitBlock)
   return commitCid
 }
@@ -40,7 +47,12 @@ describe('buildCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'abc123', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'abc123',
+          cid: recordCid,
+        },
       ],
     })
 
@@ -62,9 +74,24 @@ describe('buildCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a2', cid: cid2 },
-        { action: 'create', collection: 'app.stratos.feed.like', rkey: 'b1', cid: cid3 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a2',
+          cid: cid2,
+        },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.like',
+          rkey: 'b1',
+          cid: cid3,
+        },
       ],
     })
 
@@ -81,7 +108,12 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
       ],
     })
 
@@ -99,7 +131,9 @@ describe('buildCommit', () => {
       prev: null,
       sig: cborToBytes(new Uint8Array(64)),
     })
-    const commitCid = AtcuteCid.toString(await AtcuteCid.create(0x71, fakeCommitBlock))
+    const commitCid = AtcuteCid.toString(
+      await AtcuteCid.create(0x71, fakeCommitBlock),
+    )
     await storage.put(commitCid, fakeCommitBlock)
 
     // Second commit: add another record on top of first
@@ -107,8 +141,18 @@ describe('buildCommit', () => {
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -125,7 +169,12 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
       ],
     })
 
@@ -139,7 +188,12 @@ describe('buildCommit', () => {
     const updated = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid2,
+        },
       ],
     })
 
@@ -156,8 +210,18 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -170,7 +234,12 @@ describe('buildCommit', () => {
     const afterDelete = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -187,7 +256,12 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
       ],
     })
 
@@ -197,7 +271,12 @@ describe('buildCommit', () => {
     const second = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -211,7 +290,12 @@ describe('buildCommit', () => {
       buildCommit(storage, null, {
         did: DID,
         writes: [
-          { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: null },
+          {
+            action: 'create',
+            collection: 'app.stratos.feed.post',
+            rkey: 'a1',
+            cid: null,
+          },
         ],
       }),
     ).rejects.toThrow('CID required for create operation')
@@ -224,7 +308,12 @@ describe('buildCommit', () => {
       buildCommit(storage, null, {
         did: DID,
         writes: [
-          { action: 'update', collection: 'app.stratos.feed.post', rkey: 'a1', cid: null },
+          {
+            action: 'update',
+            collection: 'app.stratos.feed.post',
+            rkey: 'a1',
+            cid: null,
+          },
         ],
       }),
     ).rejects.toThrow('CID required for update operation')
@@ -237,7 +326,12 @@ describe('buildCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'm1', cid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'm1',
+          cid,
+        },
       ],
     })
 
@@ -258,8 +352,18 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'r1', cid: cid1 },
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'r2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'r1',
+          cid: cid1,
+        },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'r2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -269,7 +373,12 @@ describe('buildCommit', () => {
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
-        { action: 'delete', collection: 'app.stratos.feed.post', rkey: 'r1', cid: null },
+        {
+          action: 'delete',
+          collection: 'app.stratos.feed.post',
+          rkey: 'r1',
+          cid: null,
+        },
       ],
     })
 
@@ -329,7 +438,12 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'ov1', cid: cid1 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'ov1',
+          cid: cid1,
+        },
       ],
     })
 
@@ -341,7 +455,12 @@ describe('buildCommit', () => {
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'ov2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'ov2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -359,7 +478,12 @@ describe('buildCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'dc1', cid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'dc1',
+          cid,
+        },
       ],
     })
 
@@ -396,7 +520,12 @@ describe('buildCommit', () => {
       buildCommit(storage, fakeCid, {
         did: DID,
         writes: [
-          { action: 'create', collection: 'app.stratos.feed.post', rkey: 'x1', cid: await makeCid('x') },
+          {
+            action: 'create',
+            collection: 'app.stratos.feed.post',
+            rkey: 'x1',
+            cid: await makeCid('x'),
+          },
         ],
       }),
     ).rejects.toThrow('Commit block not found')
@@ -409,7 +538,12 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'ct1', cid: cid1 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'ct1',
+          cid: cid1,
+        },
       ],
     })
 
@@ -427,7 +561,12 @@ describe('buildCommit', () => {
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'ct2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'ct2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -442,7 +581,12 @@ describe('buildCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'id1', cid: cid1 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'id1',
+          cid: cid1,
+        },
       ],
     })
 
@@ -452,7 +596,12 @@ describe('buildCommit', () => {
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
-        { action: 'update', collection: 'app.stratos.feed.post', rkey: 'id1', cid: cid1 },
+        {
+          action: 'update',
+          collection: 'app.stratos.feed.post',
+          rkey: 'id1',
+          cid: cid1,
+        },
       ],
     })
 

@@ -62,12 +62,26 @@ const envSchema = z.object({
     .default(256 * 1024 * 1024),
 
   // Signing key
-  STRATOS_SIGNING_KEY_HEX: z.string().optional().transform((v) => v || undefined),
+  STRATOS_SIGNING_KEY_HEX: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
 
   // OAuth
-  STRATOS_OAUTH_ISSUER: z.string().url().optional().or(z.literal('')).transform((v) => v || undefined),
-  STRATOS_OAUTH_CLIENT_ID: z.string().optional().transform((v) => v || undefined),
-  STRATOS_OAUTH_CLIENT_SECRET: z.string().optional().transform((v) => v || undefined),
+  STRATOS_OAUTH_ISSUER: z
+    .string()
+    .url()
+    .optional()
+    .or(z.literal(''))
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_CLIENT_ID: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_CLIENT_SECRET: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
 
   // PLC directory
   STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
