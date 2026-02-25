@@ -5,7 +5,10 @@ import { decode as cborDecode, isBytes, fromBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { MemoryBlockStore } from '@atcute/mst'
 import { signAndPersistCommit } from '../src/features/mst/signer.js'
-import { buildCommit, type UnsignedCommitData } from '@northskysocial/stratos-core'
+import {
+  buildCommit,
+  type UnsignedCommitData,
+} from '@northskysocial/stratos-core'
 import { BlockMap } from '@northskysocial/stratos-core'
 
 const DID = 'did:plc:testsigner'
@@ -83,14 +86,23 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'abc', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'abc',
+          cid: recordCid,
+        },
       ],
     })
 
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(transactor as any, keypair, unsigned)
+    const result = await signAndPersistCommit(
+      transactor as any,
+      keypair,
+      unsigned,
+    )
 
     expect(result.commitCid).toBeInstanceOf(CID)
     expect(result.commitBytes).toBeInstanceOf(Uint8Array)
@@ -105,7 +117,12 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'x1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'x1',
+          cid: recordCid,
+        },
       ],
     })
 
@@ -135,7 +152,12 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'p1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'p1',
+          cid: recordCid,
+        },
       ],
     })
 
@@ -165,14 +187,23 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'r1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'r1',
+          cid: recordCid,
+        },
       ],
     })
 
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(transactor as any, keypair, unsigned)
+    const result = await signAndPersistCommit(
+      transactor as any,
+      keypair,
+      unsigned,
+    )
 
     expect(transactor.updateRoot).toHaveBeenCalledOnce()
     expect(transactor.updateRoot).toHaveBeenCalledWith(
@@ -189,14 +220,23 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'c1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'c1',
+          cid: recordCid,
+        },
       ],
     })
 
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(transactor as any, keypair, unsigned)
+    const result = await signAndPersistCommit(
+      transactor as any,
+      keypair,
+      unsigned,
+    )
 
     // dag-cbor codec = 0x71
     expect(result.commitCid.code).toBe(0x71)
@@ -211,14 +251,23 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 's1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 's1',
+          cid: recordCid,
+        },
       ],
     })
 
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(transactor as any, keypair, unsigned)
+    const result = await signAndPersistCommit(
+      transactor as any,
+      keypair,
+      unsigned,
+    )
 
     const decoded = cborDecode(result.commitBytes) as Record<string, unknown>
     expect(decoded.did).toBe(DID)
@@ -238,8 +287,18 @@ describe('signAndPersistCommit', () => {
     const first = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a1', cid: cid1 },
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'a2', cid: cid2 },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a1',
+          cid: cid1,
+        },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'a2',
+          cid: cid2,
+        },
       ],
     })
 
@@ -265,7 +324,12 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'd1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'd1',
+          cid: recordCid,
+        },
       ],
     })
 
@@ -284,14 +348,23 @@ describe('signAndPersistCommit', () => {
     const unsigned = await buildCommit(storage, null, {
       did: DID,
       writes: [
-        { action: 'create', collection: 'app.stratos.feed.post', rkey: 'o1', cid: recordCid },
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'o1',
+          cid: recordCid,
+        },
       ],
     })
 
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(transactor as any, keypair, unsigned)
+    const result = await signAndPersistCommit(
+      transactor as any,
+      keypair,
+      unsigned,
+    )
 
     // The last putBlock call should be for the commit block itself
     const lastCall = transactor.putBlock.mock.calls.at(-1)!

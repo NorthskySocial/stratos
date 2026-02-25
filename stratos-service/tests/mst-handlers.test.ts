@@ -119,7 +119,10 @@ describe('CAR round-trip', () => {
     const entries = [...reader]
     expect(entries[0].bytes).toEqual(encoded)
 
-    const decoded = AtcuteCbor.decode(entries[0].bytes) as Record<string, unknown>
+    const decoded = AtcuteCbor.decode(entries[0].bytes) as Record<
+      string,
+      unknown
+    >
     expect(decoded).toEqual(original)
   })
 })
@@ -241,9 +244,13 @@ describe('MST inclusion proof CAR', () => {
     const recordCid = await makeCidStr('proof-record')
 
     // Insert a record into the MST
-    const root = await wrangler.putRecord(null, 'app.stratos.feed.post/abc123', {
-      $link: recordCid,
-    })
+    const root = await wrangler.putRecord(
+      null,
+      'app.stratos.feed.post/abc123',
+      {
+        $link: recordCid,
+      },
+    )
     expect(root).toBeTruthy()
 
     // Build inclusion proof
@@ -319,14 +326,32 @@ describe('MST inclusion proof CAR', () => {
     const cid2 = await makeCidStr('record-2')
     const cid3 = await makeCidStr('record-3')
 
-    let root = await wrangler.putRecord(null, 'app.stratos.feed.post/a1', { $link: cid1 })
-    root = await wrangler.putRecord(root, 'app.stratos.feed.post/a2', { $link: cid2 })
-    root = await wrangler.putRecord(root, 'app.stratos.feed.post/a3', { $link: cid3 })
+    let root = await wrangler.putRecord(null, 'app.stratos.feed.post/a1', {
+      $link: cid1,
+    })
+    root = await wrangler.putRecord(root, 'app.stratos.feed.post/a2', {
+      $link: cid2,
+    })
+    root = await wrangler.putRecord(root, 'app.stratos.feed.post/a3', {
+      $link: cid3,
+    })
 
     // Proof for each record should be available
-    const proof1 = await buildInclusionProof(nodeStore, root!, 'app.stratos.feed.post/a1')
-    const proof2 = await buildInclusionProof(nodeStore, root!, 'app.stratos.feed.post/a2')
-    const proof3 = await buildInclusionProof(nodeStore, root!, 'app.stratos.feed.post/a3')
+    const proof1 = await buildInclusionProof(
+      nodeStore,
+      root!,
+      'app.stratos.feed.post/a1',
+    )
+    const proof2 = await buildInclusionProof(
+      nodeStore,
+      root!,
+      'app.stratos.feed.post/a2',
+    )
+    const proof3 = await buildInclusionProof(
+      nodeStore,
+      root!,
+      'app.stratos.feed.post/a3',
+    )
 
     expect(proof1.size).toBeGreaterThan(0)
     expect(proof2.size).toBeGreaterThan(0)
@@ -401,7 +426,10 @@ describe('Import repo CAR verification', () => {
     commitCidStr: string
     recordCidStr: string
   }> {
-    const recordData = AtcuteCbor.encode({ $type: 'app.stratos.feed.post', text: 'imported' })
+    const recordData = AtcuteCbor.encode({
+      $type: 'app.stratos.feed.post',
+      text: 'imported',
+    })
     const recordCid = await AtcuteCid.create(0x71, recordData)
     const recordCidStr = AtcuteCid.toString(recordCid)
 
@@ -411,9 +439,13 @@ describe('Import repo CAR verification', () => {
     const nodeStore = new NodeStore(overlay)
     const wrangler = new NodeWrangler(nodeStore)
 
-    const mstRoot = await wrangler.putRecord(null, 'app.stratos.feed.post/imp1', {
-      $link: recordCidStr,
-    })
+    const mstRoot = await wrangler.putRecord(
+      null,
+      'app.stratos.feed.post/imp1',
+      {
+        $link: recordCidStr,
+      },
+    )
 
     const commitObj = {
       did,
@@ -549,7 +581,10 @@ describe('CID string interop', () => {
 
   it('should handle raw codec (0x55) CIDs', async () => {
     const data = new Uint8Array([1, 2, 3, 4, 5])
-    const atcuteCid = await AtcuteCid.create(0x55, data as Uint8Array<ArrayBuffer>)
+    const atcuteCid = await AtcuteCid.create(
+      0x55,
+      data as Uint8Array<ArrayBuffer>,
+    )
     const str = AtcuteCid.toString(atcuteCid)
 
     const mfCid = CID.parse(str)
