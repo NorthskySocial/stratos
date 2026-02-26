@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run -A
 // Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
-import { PROJECT_ROOT } from './lib/config.ts'
+import { TEST_ROOT } from './lib/config.ts'
 import { section, info, pass, fail, warn } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
@@ -34,7 +34,7 @@ async function run() {
   try {
     const compose = new Deno.Command('docker', {
       args: ['compose', '-f', 'docker-compose.test.yml', 'stop'],
-      cwd: PROJECT_ROOT,
+      cwd: TEST_ROOT,
       stdout: 'piped',
       stderr: 'piped',
     })

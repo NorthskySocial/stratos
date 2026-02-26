@@ -104,7 +104,14 @@ Stratos validates:
   - No cross-namespace embeds
          │
          ▼
-Stores in per-user SQLite database
+Stores record in per-user SQLite database
+         │
+         ▼
+Updates MST (Merkle Search Tree) and signs a new commit:
+  - Inserts record into MST via NodeWrangler
+  - Computes block diff (new/removed MST nodes)
+  - Signs commit with service secp256k1 key
+  - Persists commit block and updates repo root
          │
          ▼
 Sequences event to stratos_seq table
@@ -127,6 +134,43 @@ Stratos streams commit events:
          ▼
 AppView indexes records with boundary metadata
 ```
+
+### Repository & MST Architecture
+
+Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit chain** compatible
+with the ATProto repo format. Every record write produces a signed commit that updates the MST root,
+enabling cryptographic verification of repository contents.
+
+```
+┌─────────────────────────────────────────────────┐
+│  Signed Commit (v3)                             │
+│  ┌───────────────────────────────────────────┐  │
+│  │ did:     "did:plc:user"                   │  │
+│  │ version: 3                                │  │
+│  │ data:    <MST root CID>                   │  │
+│  │ rev:     "2024..." (TID)                  │  │
+│  │ sig:     <secp256k1 signature>            │  │
+│  └───────────────────────────────────────────┘  │
+│                    │                            │
+│                    ▼                            │
+│  MST (Merkle Search Tree)                       │
+│  ┌───────────────────────────────────────────┐  │
+│  │ collection/rkey → record CID              │  │
+│  │ Sorted key-value tree of all records      │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+Key capabilities:
+
+| Endpoint                      | Description                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| `com.atproto.sync.getRecord`  | Returns CAR with signed commit + MST inclusion proof + record block              |
+| `app.stratos.sync.getRepo`    | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
+| `app.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification             |
+
+The MST is implemented using `@atcute/mst` and all blocks are stored in the per-actor
+`stratos_repo_block` table alongside record data.
 
 ### Storage Architecture
 
@@ -385,6 +429,30 @@ STRATOS_ALLOWED_DOMAINS="general,fanart"
 ```
 
 Records with boundaries outside this list will be rejected.
+
+### Repository Import
+
+Configure the maximum CAR file size for `app.stratos.repo.importRepo`:
+
+```bash
+# Default: 256 MiB (268435456 bytes)
+STRATOS_IMPORT_MAX_BYTES=268435456
+```
+
+Import verifies CID integrity on every block in the CAR, validates the commit DID matches the
+authenticated user, and indexes all records from the MST.
+
+### Signing Key
+
+Stratos signs every repo commit with a secp256k1 key. This key is stored at
+`{dataDir}/signing_key` and auto-generated on first start, or can be provided via:
+
+```bash
+STRATOS_SIGNING_KEY_HEX="<hex-encoded-secp256k1-private-key>"
+```
+
+The corresponding public key is published in the service DID document for commit signature
+verification.
 
 ### Blob Storage
 
@@ -769,6 +837,9 @@ For high-traffic deployments:
 | `/oauth/*`                     | No            | Public enrollment flow      |
 | `createRecord`, `deleteRecord` | Yes           | OAuth access token          |
 | `getRecord`, `listRecords`     | Optional      | Used for boundary filtering |
+| `sync.getRecord`               | Yes           | User or service auth        |
+| `sync.getRepo`                 | Yes           | User auth (owner only)      |
+| `importRepo`                   | Yes           | User auth (owner only)      |
 | `subscribeRecords`             | Yes           | Service auth JWT            |
 | `/_health`                     | No            | Public health check         |
 

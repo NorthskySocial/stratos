@@ -68,38 +68,59 @@ interface RecordSource {
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              SYSTEM ARCHITECTURE                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+  subgraph client["CLIENT"]
+    direction TB
+    C1["Write post"]
+    C2["Get feed"]
+  end
 
-┌──────────────┐     ┌──────────────────┐     ┌─────────────────────────────┐
-│    CLIENT    │     │     APPVIEW      │     │     STRATOS SERVICE         │
-│              │     │                  │     │                             │
-│  Write post  │───▶│                  │     │  1. Store full record       │
-│              │     │                  │     │  2. Write stub to PDS       │
-│              │     │                  │     │                             │
-│              │     │  Index stubs     │◀───│  subscribeRecords firehose  │
-│              │     │  (detects source │     │  (streams commits)          │
-│              │     │   field)         │     │                             │
-│              │     │                  │     │                             │
-│  Get feed    │───▶│  Generate        │     │                             │
-│              │     │  skeleton        │     │                             │
-│              │◀───│       │          │     │                             │
-│              │     │       ▼          │     │                             │
-│              │     │  getRecord()  ───┼───▶│  com.atproto.repo.getRecord │
-│              │     │  from source     │◀───│  (boundary-filtered)        │
-└──────────────┘     └──────────────────┘     └─────────────────────────────┘
-                              │
-                              │ Resolve service DID
-                              ▼
-                     ┌──────────────────┐
-                     │    DID:WEB /     │
-                     │    DID:PLC       │
-                     │                  │
-                     │  /.well-known/   │
-                     │  did.json        │
-                     └──────────────────┘
+  subgraph appview["APPVIEW"]
+    direction TB
+    A1["Index stubs
+    (detects source field)"]
+    A2["Generate skeleton"]
+    A3["getRecord()
+    from source"]
+  end
+
+  subgraph stratos["STRATOS SERVICE"]
+    direction TB
+    S1["1. Store full record
+    2. Write stub to PDS"]
+    S2["subscribeRecords firehose
+    (streams commits)"]
+    S3["com.atproto.repo.getRecord
+    (boundary-filtered)"]
+  end
+
+  subgraph did["DID:WEB / DID:PLC"]
+    D1["/.well-known/did.json"]
+  end
+
+  C1 -->|"Write post"| S1
+  S2 -->|"firehose"| A1
+  C2 -->|"Get feed"| A2
+  A2 --> A3
+  A3 -->|"getRecord()"| S3
+  S3 -->|"response"| A3
+  A2 -->|"feed response"| C2
+  appview -->|"Resolve service DID"| did
+
+  style client fill:#e8f4fd,stroke:#90c4e8,color:#1a1a1a
+  style appview fill:#fef3e2,stroke:#f0c878,color:#1a1a1a
+  style stratos fill:#e8f8e8,stroke:#8ec88e,color:#1a1a1a
+  style did fill:#f3e8fd,stroke:#c49de8,color:#1a1a1a
+  style C1 fill:#d0e8fa,stroke:#7ab0dc,color:#1a1a1a
+  style C2 fill:#d0e8fa,stroke:#7ab0dc,color:#1a1a1a
+  style A1 fill:#fde8c8,stroke:#e0b060,color:#1a1a1a
+  style A2 fill:#fde8c8,stroke:#e0b060,color:#1a1a1a
+  style A3 fill:#fde8c8,stroke:#e0b060,color:#1a1a1a
+  style S1 fill:#d0f0d0,stroke:#70b870,color:#1a1a1a
+  style S2 fill:#d0f0d0,stroke:#70b870,color:#1a1a1a
+  style S3 fill:#d0f0d0,stroke:#70b870,color:#1a1a1a
+  style D1 fill:#e8d8f8,stroke:#a880d0,color:#1a1a1a
 ```
 
 ---
@@ -234,10 +255,24 @@ X-Stratos-Viewer: did:plc:viewer
 
 ### Hydration Request Flow
 
+```mermaid
+graph TD
+  R1["1. AppView receives<br/>feed request from viewer"] --> R2["2. AppView has indexed<br/>stubs with source fields"]
+  R2 --> R3["3. For each stub:<br/>parse source.service,<br/>resolve DID, call getRecord"]
+  R3 --> R4{"4. Stratos checks<br/>viewer boundaries"}
+  R4 -->|"Authorized"| R5["5. Return full record"]
+  R4 -->|"Unauthorized"| R6["5. Return 404<br/>RecordNotFound"]
+  R5 --> R7["6. AppView assembles<br/>final feed response"]
+  R6 --> R7
+
+  style R1 fill:#d0e8fa,stroke:#7ab0dc,color:#1a1a1a
+  style R2 fill:#fde8c8,stroke:#e0b060,color:#1a1a1a
+  style R3 fill:#e8d8f8,stroke:#a880d0,color:#1a1a1a
+  style R4 fill:#d0f0d0,stroke:#70b870,color:#1a1a1a
+  style R5 fill:#d0f0d0,stroke:#70b870,color:#1a1a1a
+  style R6 fill:#fdd0d0,stroke:#d07070,color:#1a1a1a
+  style R7 fill:#fde8c8,stroke:#e0b060,color:#1a1a1a
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           HYDRATION FLOW                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
 
 1. AppView receives feed request from viewer (did:plc:viewer)
 
@@ -248,12 +283,12 @@ X-Stratos-Viewer: did:plc:viewer
    b. Resolve DID to get service endpoint
    c. Call getRecord at that endpoint:
 
-      GET https://stratos.example.com/xrpc/com.atproto.repo.getRecord
-        ?repo=did:plc:alice
-        &collection=app.stratos.feed.post
-        &rkey=abc123
-      Authorization: Bearer <service-jwt>
-      X-Stratos-Viewer: did:plc:viewer
+   GET https://stratos.example.com/xrpc/com.atproto.repo.getRecord
+   ?repo=did:plc:alice
+   &collection=app.stratos.feed.post
+   &rkey=abc123
+   Authorization: Bearer <service-jwt>
+   X-Stratos-Viewer: did:plc:viewer
 
 4. Stratos checks viewer's boundaries:
    - Is viewer enrolled in this service?
@@ -264,7 +299,6 @@ X-Stratos-Viewer: did:plc:viewer
    If unauthorized, returns 404/RecordNotFound
 
 6. AppView assembles final feed response with hydrated content
-```
 
 ---
 
@@ -542,12 +576,14 @@ stratos/
 | `app.stratos.repo.hydrateRecord`  | Query     | User/Service | Hydrate single record with boundary filtering |
 | `app.stratos.repo.hydrateRecords` | Procedure | User/Service | Batch hydrate up to 100 records               |
 
-### Sync
+### Sync & Repository
 
-| Endpoint                            | Method       | Auth         | Description        |
-| ----------------------------------- | ------------ | ------------ | ------------------ |
-| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose |
-| `app.stratos.sync.getRepo`          | Query        | User/Service | Export CAR file    |
+| Endpoint                            | Method       | Auth         | Description                                                          |
+| ----------------------------------- | ------------ | ------------ | -------------------------------------------------------------------- |
+| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                                   |
+| `com.atproto.sync.getRecord`        | Query        | User/Service | Record CAR with signed commit + MST inclusion proof + record block   |
+| `app.stratos.sync.getRepo`          | Query        | User/Service | Export full repository as CAR (all blocks, MST nodes, signed commit) |
+| `app.stratos.repo.importRepo`       | Procedure    | User         | Import repository from CAR with CID integrity verification           |
 
 ---
 
@@ -564,6 +600,7 @@ stratos/
 | `STRATOS_SIGNING_KEY`        | Yes      | -             | Service signing key (secp256k1)                          |
 | `STRATOS_ALLOWED_BOUNDARIES` | No       | `[]`          | Valid boundary values                                    |
 | `STRATOS_ALLOWED_APPVIEWS`   | No       | `[]`          | AppView DIDs allowed to call getRecord with service auth |
+| `STRATOS_IMPORT_MAX_BYTES`   | No       | `268435456`   | Maximum CAR file size for importRepo (256 MiB)           |
 | `STRATOS_DATA_DIR`           | No       | `./data`      | Per-actor SQLite storage                                 |
 | `STRATOS_BLOB_STORAGE`       | No       | `local`       | `local` or `s3`                                          |
 
