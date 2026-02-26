@@ -4,6 +4,7 @@ import cors from 'cors'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
+import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type AppContext,
@@ -17,6 +18,10 @@ import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 import { registerEnrollmentHandlers } from './features/index.js'
+import {
+  StratosBlockStoreReader,
+  signAndPersistCommit,
+} from './features/mst/index.js'
 
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
@@ -100,6 +105,17 @@ export class StratosServer {
         serviceEndpoint: cfg.service.publicUrl,
         defaultBoundaries: cfg.stratos.allowedDomains,
         logger: ctx.logger,
+        initRepo: async (did: string) => {
+          await ctx.actorStore.create(did)
+          await ctx.actorStore.transact(did, async (store) => {
+            const adapter = new StratosBlockStoreReader(store.repo)
+            const unsigned = await buildCommit(adapter, null, {
+              did,
+              writes: [],
+            })
+            await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+          })
+        },
       })
       app.use('/oauth', oauthRoutes)
     }

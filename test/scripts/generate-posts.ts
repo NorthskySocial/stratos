@@ -92,12 +92,12 @@ const SWORDSMITH_THREADS: ThreadDef[] = [
     lines: [
       {
         user: 'rei',
-        text: 'HELLO! My name is Rei. You killed my father. Prepare to die.',
+        text: 'HELLO! My name is Inigo Montoya. You killed my father. Prepare to die.',
       },
       { user: 'fuyuko', text: 'Stop saying that!' },
       {
         user: 'rei',
-        text: 'HELLO! MY NAME IS REI! YOU KILLED MY FATHER! PREPARE TO DIE!',
+        text: 'HELLO! MY NAME IS INIGO MONTOYA! YOU KILLED MY FATHER! PREPARE TO DIE!',
       },
       { user: 'fuyuko', text: 'NO!' },
       { user: 'rei', text: 'Offer me money.' },
@@ -275,7 +275,9 @@ async function run() {
   // Threaded conversations
 
   for (const thread of SWORDSMITH_THREADS) {
-    section(`Thread: ${thread.label} (swordsmith) — ${thread.lines.length} posts`)
+    section(
+      `Thread: ${thread.label} (swordsmith) — ${thread.lines.length} posts`,
+    )
     const threadResults = await generateThread(thread, state.users)
     info(`Thread "${thread.label}": ${threadResults.length} posts created`)
   }

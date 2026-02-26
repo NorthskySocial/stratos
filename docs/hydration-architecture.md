@@ -283,12 +283,12 @@ graph TD
    b. Resolve DID to get service endpoint
    c. Call getRecord at that endpoint:
 
-      GET https://stratos.example.com/xrpc/com.atproto.repo.getRecord
-        ?repo=did:plc:alice
-        &collection=app.stratos.feed.post
-        &rkey=abc123
-      Authorization: Bearer <service-jwt>
-      X-Stratos-Viewer: did:plc:viewer
+   GET https://stratos.example.com/xrpc/com.atproto.repo.getRecord
+   ?repo=did:plc:alice
+   &collection=app.stratos.feed.post
+   &rkey=abc123
+   Authorization: Bearer <service-jwt>
+   X-Stratos-Viewer: did:plc:viewer
 
 4. Stratos checks viewer's boundaries:
    - Is viewer enrolled in this service?

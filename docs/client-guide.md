@@ -578,6 +578,7 @@ async function getRecordProof(
 ```
 
 The returned CAR contains:
+
 1. **Signed commit** — the repo root with the service's secp256k1 signature
 2. **MST inclusion proof** — the tree nodes proving the record exists in the repo
 3. **Record block** — the actual record data
@@ -638,6 +639,7 @@ async function importRepo(
 ```
 
 Import constraints:
+
 - Maximum CAR size: 256 MiB (configurable by operator)
 - CID integrity is verified for every block
 - The target repo must not already have an existing commit

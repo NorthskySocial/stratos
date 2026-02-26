@@ -39,6 +39,11 @@ import {
   PdsAgent,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
+import {
+  StratosBlockStoreReader,
+  signAndPersistCommit,
+} from './features/mst/index.js'
+import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type StratosServiceConfig,
@@ -673,9 +678,15 @@ export async function createAppContext(
 
   const enrollmentStore = new SqliteEnrollmentStore(db)
 
-  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) =>
-    actorStore.create(did),
-  )
+  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) => {
+    await actorStore.create(did)
+    // Initialize repo with an empty signed commit so it's valid from enrollment
+    await actorStore.transact(did, async (store) => {
+      const adapter = new StratosBlockStoreReader(store.repo)
+      const unsigned = await buildCommit(adapter, null, { did, writes: [] })
+      await signAndPersistCommit(store.repo, signingKey, unsigned)
+    })
+  })
 
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
