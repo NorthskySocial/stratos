@@ -163,11 +163,11 @@ enabling cryptographic verification of repository contents.
 
 Key capabilities:
 
-| Endpoint | Description |
-|----------|-------------|
-| `com.atproto.sync.getRecord` | Returns CAR with signed commit + MST inclusion proof + record block |
-| `app.stratos.sync.getRepo` | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
-| `app.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification |
+| Endpoint                      | Description                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| `com.atproto.sync.getRecord`  | Returns CAR with signed commit + MST inclusion proof + record block              |
+| `app.stratos.sync.getRepo`    | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
+| `app.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification             |
 
 The MST is implemented using `@atcute/mst` and all blocks are stored in the per-actor
 `stratos_repo_block` table alongside record data.
