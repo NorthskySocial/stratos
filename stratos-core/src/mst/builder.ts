@@ -5,6 +5,7 @@ import {
   NodeWrangler,
   OverlayBlockStore,
   MemoryBlockStore,
+  MSTNode,
   mstDiff,
   type ReadonlyBlockStore,
   type BlockMap,
@@ -56,6 +57,10 @@ export async function buildCommit(
     currentMstRoot = commitData.data.$link
   }
 
+  if (currentCommitCid !== null && input.writes.length === 0) {
+    throw new Error('Cannot create an empty commit on an existing repo')
+  }
+
   const upperStore = new MemoryBlockStore()
   const overlay = new OverlayBlockStore(upperStore, storage)
   const nodeStore = new NodeStore(overlay)
@@ -79,8 +84,15 @@ export async function buildCommit(
     }
   }
 
+  // Allow empty initial commits (no writes, no existing root) by creating an empty MST node
+  // we do this as RepoNotFound can mean many things and if we don't do this can lead to
+  // not know if the service is not working or we just haven't created a record yet
   if (root === null) {
-    throw new Error('MST root is null after applying writes')
+    if (currentCommitCid !== null) {
+      throw new Error('MST root is null after applying writes')
+    }
+    const emptyNode = await nodeStore.put(MSTNode.empty())
+    root = (await emptyNode.cid()).$link
   }
 
   const newBlocks: BlockMap = new Map(upperStore.blocks)

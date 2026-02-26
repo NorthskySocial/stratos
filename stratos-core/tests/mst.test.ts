@@ -499,17 +499,44 @@ describe('buildCommit', () => {
     expect(nodeBytes.length).toBeGreaterThan(0)
   })
 
-  it('should handle empty writes list', async () => {
+  it('should create an empty initial commit with no writes', async () => {
     const storage = new MemoryBlockStore()
 
-    // An empty write list with no existing commit should fail
-    // since the MST root would be null
+    const unsigned = await buildCommit(storage, null, {
+      did: DID,
+      writes: [],
+    })
+
+    expect(unsigned.did).toBe(DID)
+    expect(unsigned.version).toBe(3)
+    expect(unsigned.data).toBeTruthy()
+    expect(unsigned.newBlocks.size).toBeGreaterThan(0)
+    expect(unsigned.removedCids).toEqual([])
+  })
+
+  it('should reject empty writes on an existing commit', async () => {
+    const storage = new MemoryBlockStore()
+    const cid = await makeCid('record-1')
+
+    const first = await buildCommit(storage, null, {
+      did: DID,
+      writes: [
+        {
+          action: 'create',
+          collection: 'app.stratos.feed.post',
+          rkey: 'r1',
+          cid,
+        },
+      ],
+    })
+    const commitCid = await persistAndMakeCommitCid(storage, first)
+
     await expect(
-      buildCommit(storage, null, {
+      buildCommit(storage, commitCid, {
         did: DID,
         writes: [],
       }),
-    ).rejects.toThrow('MST root is null after applying writes')
+    ).rejects.toThrow('Cannot create an empty commit on an existing repo')
   })
 
   it('should throw when commit block is not found in storage', async () => {

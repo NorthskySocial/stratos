@@ -41,6 +41,8 @@ export interface OAuthRoutesConfig {
   defaultBoundaries?: string[]
   /** Logger for OAuth events */
   logger?: Logger
+  /** Initialize the actor store and repo for a newly enrolled user */
+  initRepo?: (did: string) => Promise<void>
 }
 
 /**
@@ -56,6 +58,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     serviceEndpoint,
     defaultBoundaries = [],
     logger,
+    initRepo,
   } = config
 
   /**
@@ -144,6 +147,22 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           pdsEndpoint: enrollmentResult.pdsEndpoint,
           boundaries: defaultBoundaries,
         })
+
+        // Initialize actor store and repo with an empty signed commit
+        if (initRepo) {
+          try {
+            await initRepo(did)
+          } catch (initErr) {
+            logger?.warn(
+              {
+                err:
+                  initErr instanceof Error ? initErr.message : String(initErr),
+                did,
+              },
+              'failed to initialize repo during enrollment',
+            )
+          }
+        }
 
         // Write profile record to user's PDS for endpoint discovery
         try {

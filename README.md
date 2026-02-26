@@ -63,18 +63,18 @@ STRATOS_S3_SECRET_KEY=minioadmin
 
 The Stratos service is configured via environment variables:
 
-| Variable                        | Description                                       | Default     |
-| ------------------------------- | ------------------------------------------------- | ----------- |
-| `STRATOS_SERVICE_DID`           | Service DID (e.g., `did:web:stratos.example.com`) | Required    |
-| `STRATOS_PORT`                  | HTTP port                                         | `3100`      |
-| `STRATOS_PUBLIC_URL`            | Public URL for the service                        | Required    |
-| `STRATOS_DATA_DIR`              | Directory for SQLite databases                    | `./data`    |
-| `STRATOS_ALLOWED_DOMAINS`       | Comma-separated list of valid boundary domains    | Required    |
-| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist` |
-| `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`        |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`        |
-| `STRATOS_IMPORT_MAX_BYTES`      | Maximum CAR file size for repo import             | `268435456` |
-| `STRATOS_SIGNING_KEY_HEX`      | Service signing key (secp256k1, hex-encoded)      | Auto-generated |
+| Variable                        | Description                                       | Default        |
+| ------------------------------- | ------------------------------------------------- | -------------- |
+| `STRATOS_SERVICE_DID`           | Service DID (e.g., `did:web:stratos.example.com`) | Required       |
+| `STRATOS_PORT`                  | HTTP port                                         | `3100`         |
+| `STRATOS_PUBLIC_URL`            | Public URL for the service                        | Required       |
+| `STRATOS_DATA_DIR`              | Directory for SQLite databases                    | `./data`       |
+| `STRATOS_ALLOWED_DOMAINS`       | Comma-separated list of valid boundary domains    | Required       |
+| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist`    |
+| `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`           |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`           |
+| `STRATOS_IMPORT_MAX_BYTES`      | Maximum CAR file size for repo import             | `268435456`    |
+| `STRATOS_SIGNING_KEY_HEX`       | Service signing key (secp256k1, hex-encoded)      | Auto-generated |
 
 ## Enrollment
 
