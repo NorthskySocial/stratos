@@ -82,7 +82,7 @@ export class StratosServer {
         id: serviceDid,
         verificationMethod: [
           {
-            id: `${serviceDid}#${cfg.service.fragment}`,
+            id: `${serviceDid}#${cfg.service.serviceFragment}`,
             type: 'Multikey',
             controller: serviceDid,
             publicKeyMultibase,
