@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "app.stratos.repo.importRepo",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Import a repository from a CAR file. Verifies record CID integrity and re-signs with the destination service key. The caller must be enrolled as the DID in the CAR's commit block.",
+      "input": {
+        "encoding": "application/vnd.ipld.car"
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["imported"],
+          "properties": {
+            "imported": {
+              "type": "integer",
+              "description": "Number of records successfully imported."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidCar",
+          "description": "The CAR file is malformed, has missing blocks, or contains records with mismatched CIDs."
+        },
+        {
+          "name": "RepoAlreadyExists",
+          "description": "The destination already has records for this DID. Import is only supported for empty repos."
+        }
+      ]
+    }
+  }
+}

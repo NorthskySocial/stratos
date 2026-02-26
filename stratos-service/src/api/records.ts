@@ -10,12 +10,18 @@ import { AtUri } from '@atproto/syntax'
 
 import {
   assertStratosValidation,
+  buildCommit,
   extractBoundaryDomains,
   stratosSeq,
   StratosValidationError,
+  type MstWriteOp,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext, StratosActorTransactor } from '../context.js'
+import {
+  StratosBlockStoreReader,
+  signAndPersistCommit,
+} from '../features/mst/index.js'
 import { Did } from '@atproto/api'
 
 /**
@@ -109,8 +115,26 @@ export async function createRecord(
     const recordBytes = encodeRecord(record)
     const cid = await computeCid(record)
 
-    // Generate revision
+    // Store the record block
     const rev = TID.nextStr()
+    await store.repo.putBlock(cid, recordBytes, rev)
+
+    // Build and sign MST commit
+    const adapter = new StratosBlockStoreReader(store.repo)
+    const currentRoot = await store.repo.getRoot()
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: [{ action: 'create', collection, rkey, cid: cid.toString() }],
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
 
     // Index the record
     await store.record.indexRecord(
@@ -118,14 +142,8 @@ export async function createRecord(
       cid,
       record as Record<string, unknown>,
       'create',
-      rev,
+      commitResult.rev,
     )
-
-    // Store in repo
-    await store.repo.putBlock(cid, recordBytes, rev)
-
-    // Update root
-    await store.repo.updateRoot(cid, rev, callerDid)
 
     // Sequence the change
     await sequenceChange(store, {
@@ -133,6 +151,8 @@ export async function createRecord(
       uri: uriStr,
       cid: cid.toString(),
       record,
+      commitCid: commitResult.commitCid.toString(),
+      rev: commitResult.rev,
     })
 
     return {
@@ -140,8 +160,8 @@ export async function createRecord(
       cid,
       cidStr: cid.toString(),
       commit: {
-        cid: cid.toString(),
-        rev,
+        cid: commitResult.commitCid.toString(),
+        rev: commitResult.rev,
       },
     }
   })
@@ -231,19 +251,35 @@ export async function deleteRecord(
     // Delete from record index
     await store.record.deleteRecord(uri)
 
+    // Build and sign MST commit
+    const adapter = new StratosBlockStoreReader(store.repo)
+    const currentRoot = await store.repo.getRoot()
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: [{ action: 'delete', collection, rkey, cid: null }],
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
+
     // Sequence the change
     await sequenceChange(store, {
       action: 'delete',
       uri: uriStr,
+      commitCid: commitResult.commitCid.toString(),
+      rev: commitResult.rev,
     })
-
-    const rev = TID.nextStr()
-    const dummyCid = await computeCid({ dummy: true })
 
     return {
       commit: {
-        cid: dummyCid.toString(),
-        rev,
+        cid: commitResult.commitCid.toString(),
+        rev: commitResult.rev,
       },
     }
   })
@@ -333,24 +369,45 @@ export async function updateRecord(
 
     const recordBytes = encodeRecord(record)
     const cid = await computeCid(record)
-    const rev = TID.nextStr()
 
+    // Store the record block
+    const rev = TID.nextStr()
+    await store.repo.putBlock(cid, recordBytes, rev)
+
+    // Build and sign MST commit
+    const adapter = new StratosBlockStoreReader(store.repo)
+    const currentRoot = await store.repo.getRoot()
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
+
+    // Index the record
     await store.record.indexRecord(
       uri,
       cid,
       record as Record<string, unknown>,
       'update',
-      rev,
+      commitResult.rev,
     )
 
-    await store.repo.putBlock(cid, recordBytes, rev)
-    await store.repo.updateRoot(cid, rev, callerDid)
-
+    // Sequence the change
     await sequenceChange(store, {
       action: 'update',
       uri: uriStr,
       cid: cid.toString(),
       record,
+      commitCid: commitResult.commitCid.toString(),
+      rev: commitResult.rev,
     })
 
     return {
@@ -358,8 +415,8 @@ export async function updateRecord(
       cid,
       cidStr: cid.toString(),
       commit: {
-        cid: cid.toString(),
-        rev,
+        cid: commitResult.commitCid.toString(),
+        rev: commitResult.rev,
       },
     }
   })
@@ -542,6 +599,151 @@ export async function listRecords(
 
 // Helper functions
 
+/**
+ * Apply multiple write operations in a single MST commit
+ */
+export interface BatchWriteOp {
+  action: 'create' | 'update' | 'delete'
+  collection: string
+  rkey: string
+  record?: unknown
+}
+
+export interface BatchWriteResult {
+  results: Array<{
+    uri?: string
+    cid?: string
+  }>
+  commit: {
+    cid: string
+    rev: string
+  }
+}
+
+export async function applyWritesBatch(
+  ctx: AppContext,
+  callerDid: string,
+  ops: BatchWriteOp[],
+): Promise<BatchWriteResult> {
+  const exists = await ctx.actorStore.exists(callerDid)
+  if (!exists) {
+    await ctx.actorStore.create(callerDid)
+  }
+
+  return await ctx.actorStore.transact(callerDid, async (store) => {
+    const mstOps: MstWriteOp[] = []
+    const indexOps: Array<{
+      uri: AtUri
+      uriStr: string
+      cid: CID | null
+      record: unknown
+      action: 'create' | 'update' | 'delete'
+    }> = []
+
+    for (const op of ops) {
+      const rkey = op.action === 'create' ? op.rkey || TID.nextStr() : op.rkey
+      const uriStr = `at://${callerDid}/${op.collection}/${rkey}`
+      const uri = new AtUri(uriStr)
+
+      if (op.action === 'delete') {
+        const existing = await store.record.getRecord(uri, null)
+        if (!existing) {
+          throw new InvalidRequestError('Record not found', 'RecordNotFound')
+        }
+        mstOps.push({
+          action: 'delete',
+          collection: op.collection,
+          rkey,
+          cid: null,
+        })
+        indexOps.push({
+          uri,
+          uriStr,
+          cid: null,
+          record: undefined,
+          action: 'delete',
+        })
+      } else {
+        const recordBytes = encodeRecord(op.record)
+        const cid = await computeCid(op.record)
+        const tempRev = TID.nextStr()
+        await store.repo.putBlock(cid, recordBytes, tempRev)
+
+        mstOps.push({
+          action: op.action,
+          collection: op.collection,
+          rkey,
+          cid: cid.toString(),
+        })
+        indexOps.push({
+          uri,
+          uriStr,
+          cid,
+          record: op.record,
+          action: op.action,
+        })
+      }
+    }
+
+    // Single MST commit for all operations
+    const adapter = new StratosBlockStoreReader(store.repo)
+    const currentRoot = await store.repo.getRoot()
+    const unsigned = await buildCommit(
+      adapter,
+      currentRoot?.toString() ?? null,
+      {
+        did: callerDid,
+        writes: mstOps,
+      },
+    )
+    const commitResult = await signAndPersistCommit(
+      store.repo,
+      ctx.signingKey,
+      unsigned,
+    )
+
+    // Index records and sequence changes
+    const results: Array<{ uri?: string; cid?: string }> = []
+    for (const indexOp of indexOps) {
+      if (indexOp.action === 'delete') {
+        await store.record.deleteRecord(indexOp.uri)
+        await sequenceChange(store, {
+          action: 'delete',
+          uri: indexOp.uriStr,
+          commitCid: commitResult.commitCid.toString(),
+          rev: commitResult.rev,
+        })
+        results.push({})
+      } else {
+        await store.record.indexRecord(
+          indexOp.uri,
+          indexOp.cid!,
+          indexOp.record as Record<string, unknown>,
+          indexOp.action,
+          commitResult.rev,
+        )
+        await sequenceChange(store, {
+          action: indexOp.action,
+          uri: indexOp.uriStr,
+          cid: indexOp.cid!.toString(),
+          record: indexOp.record,
+          commitCid: commitResult.commitCid.toString(),
+          rev: commitResult.rev,
+        })
+        results.push({ uri: indexOp.uriStr, cid: indexOp.cid!.toString() })
+      }
+    }
+
+    return {
+      results,
+      commit: {
+        cid: commitResult.commitCid.toString(),
+        rev: commitResult.rev,
+      },
+    }
+  })
+}
+
 function encodeRecord(record: unknown): Uint8Array {
   // Use CBOR encoding for records
   // Cast to LexValue since we validate the record before calling this
@@ -562,6 +764,8 @@ async function sequenceChange(
     uri: string
     cid?: string
     record?: unknown
+    commitCid: string
+    rev: string
   },
 ): Promise<void> {
   // Sequence the change for subscriptions
@@ -570,6 +774,8 @@ async function sequenceChange(
     path: new AtUri(op.uri).pathname,
     cid: op.cid,
     record: op.record as LexValue | undefined,
+    commit: op.commitCid,
+    rev: op.rev,
   }
 
   await store.db.insert(stratosSeq).values({

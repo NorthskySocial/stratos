@@ -39,6 +39,11 @@ import {
   PdsAgent,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
+import {
+  StratosBlockStoreReader,
+  signAndPersistCommit,
+} from './features/mst/index.js'
+import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type StratosServiceConfig,
@@ -54,8 +59,11 @@ import {
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import { PdsTokenVerifier } from './auth/index.js'
-import { DpopVerifier } from './auth/index.js'
+import {
+  PdsTokenVerifier,
+  DpopVerifier,
+  DpopVerificationError,
+} from './auth/index.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -362,101 +370,56 @@ export interface AuthVerifiers {
  */
 function createAuthVerifiers(
   serviceDid: string,
-  idResolver: IdResolver,
-  oauthClient: NodeOAuthClient | undefined,
+  _idResolver: IdResolver,
+  _oauthClient: NodeOAuthClient | undefined,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier | undefined,
+  devMode: boolean,
 ): AuthVerifiers {
-  // Helper to validate DID has an active session
-  const validateSession = async (did: string): Promise<boolean> => {
-    if (!oauthClient) {
-      // If no OAuth client, fall back to enrollment check
-      return enrollmentStore.isEnrolled(did)
-    }
-    try {
-      // Try to restore session - if successful, user has valid session
-      await oauthClient.restore(did, false)
-      return true
-    } catch {
-      // Fall back to enrollment check for directly-enrolled users
-      return enrollmentStore.isEnrolled(did)
-    }
-  }
-
   return {
     standard: async (ctx) => {
       const authHeader = ctx.req?.headers?.authorization
-      console.log(
-        '[auth] standard auth called, header:',
-        authHeader?.substring(0, 50),
-      )
       if (!authHeader) {
-        console.log('[auth] no auth header')
         throw new Error('Authorization required')
       }
 
-      // Try DPoP verification first
-      if (authHeader.startsWith('DPoP ') && dpopVerifier) {
-        console.log('[auth] trying DPoP verification')
-        try {
-          const result = await dpopVerifier.verify(
-            {
-              method: ctx.req.method || 'GET',
-              url: ctx.req.url || '/',
-              headers: ctx.req.headers as Record<
-                string,
-                string | string[] | undefined
-              >,
-            },
-            {
-              setHeader: (name, value) => ctx.res?.setHeader(name, value),
-            },
-          )
-          console.log('[auth] DPoP verified for:', result.did)
-          return {
-            credentials: { type: 'user', did: result.did },
+      if (devMode && authHeader.startsWith('Bearer ')) {
+        const did = authHeader.slice(7).trim()
+        if (did.startsWith('did:')) {
+          const isEnrolled = await enrollmentStore.isEnrolled(did)
+          if (isEnrolled) {
+            return { credentials: { type: 'user', did } }
           }
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'DPoP verification failed'
-          console.log('[auth] DPoP failed:', message)
-          throw new Error(message, { cause: err })
         }
+        throw new Error('Authorization failed')
       }
 
-      // Fall back to session-based auth for Bearer tokens
-      const [scheme, token] = authHeader.split(' ')
-      console.log(
-        '[auth] scheme:',
-        scheme,
-        'token starts with did:',
-        token?.startsWith('did:'),
-      )
-      if (!token) {
-        console.log('[auth] no token in header')
-        throw new Error('Invalid authorization header format')
+      if (!authHeader.startsWith('DPoP ') || !dpopVerifier) {
+        throw new Error('DPoP authorization required')
       }
 
-      // For now, support DID in token position for session-based auth
-      // In production, this would parse the JWT to extract the DID
-      const did = token.startsWith('did:') ? token : null
-      if (!did) {
-        console.log('[auth] token is not a DID')
-        throw new Error('Invalid token format: expected DID or DPoP token')
-      }
-
-      // Verify user has valid session
-      console.log('[auth] checking session for:', did)
-      const hasSession = await validateSession(did)
-      console.log('[auth] hasSession:', hasSession)
-      if (!hasSession) {
-        throw new Error('No valid session for user')
-      }
-
-      console.log('[auth] auth successful for:', did)
-      return {
-        credentials: { type: 'user', did },
+      try {
+        const result = await dpopVerifier.verify(
+          {
+            method: ctx.req.method || 'GET',
+            url: ctx.req.url || '/',
+            headers: ctx.req.headers as Record<
+              string,
+              string | string[] | undefined
+            >,
+          },
+          {
+            setHeader: (name, value) => ctx.res?.setHeader(name, value),
+          },
+        )
+        return {
+          credentials: { type: 'user', did: result.did },
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'DPoP verification failed'
+        throw new Error(message, { cause: err })
       }
     },
     service: async (ctx) => {
@@ -481,45 +444,47 @@ function createAuthVerifiers(
         return { credentials: { type: 'none' } }
       }
 
-      // Try DPoP verification first
-      if (authHeader.startsWith('DPoP ') && dpopVerifier) {
-        try {
-          const result = await dpopVerifier.verify(
-            {
-              method: ctx.req.method || 'GET',
-              url: ctx.req.url || '/',
-              headers: ctx.req.headers as Record<
-                string,
-                string | string[] | undefined
-              >,
-            },
-            {
-              setHeader: (name, value) => ctx.res?.setHeader(name, value),
-            },
-          )
-          return {
-            credentials: { type: 'user', did: result.did },
+      if (devMode && authHeader.startsWith('Bearer ')) {
+        const did = authHeader.slice(7).trim()
+        if (did.startsWith('did:')) {
+          const isEnrolled = await enrollmentStore.isEnrolled(did)
+          if (isEnrolled) {
+            return { credentials: { type: 'user', did } }
           }
-        } catch {
-          // DPoP verification failed, return unauthenticated
-          return { credentials: { type: 'none' } }
         }
-      }
-
-      // Fall back to session-based auth
-      const [, token] = authHeader.split(' ')
-      if (!token || !token.startsWith('did:')) {
         return { credentials: { type: 'none' } }
       }
 
-      // Verify the user has a valid session (optional, so don't throw on failure)
-      const hasSession = await validateSession(token)
-      if (!hasSession) {
+      if (!authHeader.startsWith('DPoP ') || !dpopVerifier) {
         return { credentials: { type: 'none' } }
       }
 
-      return {
-        credentials: { type: 'user', did: token },
+      try {
+        const result = await dpopVerifier.verify(
+          {
+            method: ctx.req.method || 'GET',
+            url: ctx.req.url || '/',
+            headers: ctx.req.headers as Record<
+              string,
+              string | string[] | undefined
+            >,
+          },
+          {
+            setHeader: (name, value) => ctx.res?.setHeader(name, value),
+          },
+        )
+        return {
+          credentials: { type: 'user', did: result.did },
+        }
+      } catch (err) {
+        // DPoP auth was attempted — propagate errors so clients can
+        // participate in nonce negotiation and see real auth failures
+        if (err instanceof DpopVerificationError && err.wwwAuthenticate) {
+          ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+        const message =
+          err instanceof Error ? err.message : 'DPoP verification failed'
+        throw new XRPCError(401, message)
       }
     },
     admin: async (ctx) => {
@@ -713,9 +678,15 @@ export async function createAppContext(
 
   const enrollmentStore = new SqliteEnrollmentStore(db)
 
-  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) =>
-    actorStore.create(did),
-  )
+  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) => {
+    await actorStore.create(did)
+    // Initialize repo with an empty signed commit so it's valid from enrollment
+    await actorStore.transact(did, async (store) => {
+      const adapter = new StratosBlockStoreReader(store.repo)
+      const unsigned = await buildCommit(adapter, null, { did, writes: [] })
+      await signAndPersistCommit(store.repo, signingKey, unsigned)
+    })
+  })
 
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
@@ -742,6 +713,7 @@ export async function createAppContext(
     enrollmentStore,
     cfg.admin?.password,
     dpopVerifier,
+    cfg.stratos.devMode === true,
   )
 
   const serviceDid = cfg.service.did

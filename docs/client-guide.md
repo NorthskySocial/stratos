@@ -550,6 +550,103 @@ async function getUserDomains(agent: Agent): Promise<string[]> {
 
 ---
 
+## Repository Export & Import
+
+### Verifying a Record (Sync)
+
+Clients can request a verifiable CAR containing the signed commit, MST inclusion proof, and record
+block:
+
+```typescript
+async function getRecordProof(
+  stratosEndpoint: string,
+  accessToken: string,
+  did: string,
+  collection: string,
+  rkey: string,
+): Promise<Uint8Array> {
+  const params = new URLSearchParams({ did, collection, rkey })
+  const response = await fetch(
+    `${stratosEndpoint}/xrpc/com.atproto.sync.getRecord?${params}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  )
+  if (!response.ok) throw new Error('Failed to get record proof')
+  return new Uint8Array(await response.arrayBuffer())
+}
+```
+
+The returned CAR contains:
+
+1. **Signed commit** — the repo root with the service's secp256k1 signature
+2. **MST inclusion proof** — the tree nodes proving the record exists in the repo
+3. **Record block** — the actual record data
+
+### Exporting a Repository
+
+Export the full repository as a CAR file containing all records, MST nodes, and the signed commit:
+
+```typescript
+async function exportRepo(
+  stratosEndpoint: string,
+  accessToken: string,
+  did: string,
+  since?: string,
+): Promise<Uint8Array> {
+  const params = new URLSearchParams({ did })
+  if (since) params.set('since', since)
+
+  const response = await fetch(
+    `${stratosEndpoint}/xrpc/app.stratos.sync.getRepo?${params}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  )
+  if (!response.ok) throw new Error('Failed to export repo')
+  return new Uint8Array(await response.arrayBuffer())
+}
+```
+
+### Importing a Repository
+
+Import a previously exported CAR file into a Stratos service. The caller must be enrolled and the
+CAR's commit DID must match the authenticated user:
+
+```typescript
+async function importRepo(
+  stratosEndpoint: string,
+  accessToken: string,
+  carBytes: Uint8Array,
+): Promise<{ imported: number }> {
+  const response = await fetch(
+    `${stratosEndpoint}/xrpc/app.stratos.repo.importRepo`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/vnd.ipld.car',
+      },
+      body: carBytes,
+    },
+  )
+  if (!response.ok) {
+    const err = await response.json()
+    throw new Error(err.message ?? 'Import failed')
+  }
+  return response.json()
+}
+```
+
+Import constraints:
+
+- Maximum CAR size: 256 MiB (configurable by operator)
+- CID integrity is verified for every block
+- The target repo must not already have an existing commit
+- Records are indexed but no PDS stubs are created
+
+---
+
 ## UI Patterns
 
 ### Enrollment Prompt
@@ -718,6 +815,35 @@ Authorization: Bearer <access_token>
 }
 ```
 
+#### Sync Get Record (CAR proof)
+
+```
+GET /xrpc/com.atproto.sync.getRecord?did=<did>&collection=<collection>&rkey=<rkey>
+Authorization: Bearer <access_token>
+Response: application/vnd.ipld.car
+```
+
+Returns a CAR containing the signed commit, MST inclusion proof nodes, and record block.
+
+#### Export Repository
+
+```
+GET /xrpc/app.stratos.sync.getRepo?did=<did>[&since=<rev>]
+Authorization: Bearer <access_token>
+Response: application/vnd.ipld.car
+```
+
+Returns a full CAR of the repo: all record blocks, MST nodes, and the signed commit.
+
+#### Import Repository
+
+```
+POST /xrpc/app.stratos.repo.importRepo
+Authorization: Bearer <access_token>
+Content-Type: application/vnd.ipld.car
+Response: { "imported": <count> }
+```
+
 #### Check Enrollment
 
 ```
@@ -762,6 +888,8 @@ interface Domain {
 | `InvalidRecord`     | Record failed validation (e.g., missing boundary) |
 | `RecordNotFound`    | Record doesn't exist or user doesn't have access  |
 | `AuthRequired`      | Endpoint requires authentication                  |
+| `InvalidCar`        | CAR file is malformed or fails CID integrity      |
+| `RepoAlreadyExists` | Target repo already has a commit (import blocked) |
 
 ---
 

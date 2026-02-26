@@ -18,6 +18,7 @@ const SCRIPTS_DIR = new URL('.', import.meta.url).pathname
 
 // Parse command line args
 const directMode = Deno.args.includes('--direct')
+const preserve = Deno.args.includes('--preserve')
 
 interface Phase {
   name: string
@@ -72,6 +73,10 @@ async function run() {
   let hasFailed = false
 
   for (const phase of phases) {
+    if (phase.name === 'Teardown' && preserve) {
+      info('Skipping teardown phase due to --preserve flag')
+      continue
+    }
     if (hasFailed && !phase.always) {
       info(`Skipping "${phase.name}" due to prior failure`)
       continue

@@ -6,7 +6,7 @@ services:
     ports:
       - '8443:443'
     volumes:
-      - ./test/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ssl-certs:/etc/nginx/ssl:ro
     depends_on:
       ssl-init:
@@ -46,20 +46,21 @@ services:
       - default
     user: 1000:1000
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: ./Dockerfile
     container_name: stratos-test
     restart: 'no'
     ports:
       - '3100:3100'
     env_file:
-      - .env.test
+      - .env
     environment:
       STRATOS_PORT: 3100
       STRATOS_DATA_DIR: /app/data
       STRATOS_BLOB_STORAGE: local
       STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL:-http://127.0.0.1:3100}
       STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}
+      STRATOS_OAUTH_ISSUER: ${STRATOS_OAUTH_ISSUER}
       STRATOS_OAUTH_CLIENT_ID: ${STRATOS_OAUTH_CLIENT_ID:-http://127.0.0.1:3100/client-metadata.json}
       STRATOS_OAUTH_CLIENT_URI: ${STRATOS_OAUTH_CLIENT_URI:-http://127.0.0.1:3100}
       STRATOS_OAUTH_REDIRECT_URI: ${STRATOS_OAUTH_REDIRECT_URI:-http://127.0.0.1:3100/oauth/callback}
