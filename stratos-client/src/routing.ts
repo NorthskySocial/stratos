@@ -19,7 +19,7 @@ export const createServiceFetchHandler = (
   return {
     async handle(pathname: string, init?: RequestInit): Promise<Response> {
       const url = new URL(pathname, serviceUrl)
-      return authenticatedHandler(url.href, init)
+      return authenticatedHandler(url.href, init ?? {})
     },
   }
 }
