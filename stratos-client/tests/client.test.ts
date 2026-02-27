@@ -97,7 +97,7 @@ describe('discovery', () => {
   })
 
   it('accepts a FetchHandler instead of a PDS URL', async () => {
-    const mockHandler = vi.fn(async (_pathname: string, _init: RequestInit) =>
+    const mockHandler = vi.fn(async () =>
       jsonResponse({
         uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
         cid: 'bafytest',

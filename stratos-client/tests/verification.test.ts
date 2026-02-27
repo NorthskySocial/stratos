@@ -12,7 +12,6 @@ import {
   MemoryBlockStore,
   OverlayBlockStore,
   NodeStore,
-  NodeWrangler,
   buildInclusionProof,
 } from '@atcute/mst'
 import { parseDidKey, Secp256k1PublicKey } from '@atcute/crypto'
