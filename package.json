@@ -6,7 +6,7 @@
   "description": "Stratos - Private namespace service for ATProtocol",
   "repository": {
     "type": "git",
-    "url": "https://github.com/example/stratos.git"
+    "url": "https://github.com/NorthskySocial/stratos.git"
   },
   "license": "MIT",
   "scripts": {
