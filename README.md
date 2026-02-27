@@ -23,7 +23,7 @@ flowchart TD
     F -->|Has boundaries| H{Viewer shares<br/>any boundary?}
     H -->|Yes| I[✓ Grant Access]
     H -->|No| J[✗ Deny Access]
-    
+
     style C fill:#90EE90
     style G fill:#90EE90
     style I fill:#90EE90
