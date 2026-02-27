@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
-import express, { type Router } from 'express'
+import express, { type Router, type Request, type Response } from 'express'
 import type { AppContext } from '../src/context.js'
 import { registerEnrollmentHandlers } from '../src/features/enrollment/handler.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
+import type { DpopVerifier, DpopAuthResult } from '../src/auth/dpop-verifier.js'
 
 function didArb(): fc.Arbitrary<string> {
   return fc.stringMatching(/^[a-z2-7]{24}$/).map((s) => `did:plc:${s}`)
@@ -25,10 +26,16 @@ interface MockResponse {
 function invokeRoute(
   router: Router,
   query: Record<string, string>,
+  headers: Record<string, string> = {},
 ): Promise<MockResponse> {
   return new Promise((resolve, reject) => {
     let statusCode = 200
-    const req = { query } as unknown as express.Request
+    const req = {
+      query,
+      headers,
+      method: 'GET',
+      url: '/xrpc/app.stratos.enrollment.status',
+    } as unknown as express.Request
     const res = {
       status(code: number) {
         statusCode = code
@@ -36,6 +43,9 @@ function invokeRoute(
       },
       json(body: unknown) {
         resolve({ statusCode, body })
+        return res
+      },
+      setHeader() {
         return res
       },
     } as unknown as express.Response
@@ -61,28 +71,59 @@ function invokeRoute(
 function createCtx(opts: {
   getEnrollment: (did: string) => Promise<Enrollment | null>
   getBoundaries: (did: string) => Promise<string[]>
+  dpopVerifier?: DpopVerifier | null
 }): AppContext {
   return {
     enrollmentService: { getEnrollment: opts.getEnrollment },
     enrollmentStore: { getBoundaries: opts.getBoundaries },
+    dpopVerifier: opts.dpopVerifier ?? null,
     logger: undefined,
   } as unknown as AppContext
 }
 
+function createMockDpopVerifier(
+  verifyResult: DpopAuthResult | null | Error,
+): DpopVerifier {
+  return {
+    verify: async () => {
+      if (verifyResult instanceof Error) throw verifyResult
+      if (verifyResult === null)
+        throw new Error('No auth header (should not be called)')
+      return verifyResult
+    },
+  } as unknown as DpopVerifier
+}
 
-describe('Status endpoint returns authoritative boundaries for enrolled DIDs', () => {
-  it('returns enrolled status with authoritative boundaries as Domain objects', async () => {
+
+describe('Status endpoint with authentication', () => {
+  it('returns enrolled status with boundaries when authenticated', async () => {
     await fc.assert(
       fc.asyncProperty(
         didArb(),
         boundarySetArb(),
-        fc.date({ min: new Date('2020-01-01T00:00:00Z'), max: new Date('2030-01-01T00:00:00Z'), noInvalidDate: true }),
+        fc.date({
+          min: new Date('2020-01-01T00:00:00Z'),
+          max: new Date('2030-01-01T00:00:00Z'),
+          noInvalidDate: true,
+        }),
         async (did, boundaries, enrolledAt) => {
           const router = express.Router()
+          const mockAuth: DpopAuthResult = {
+            type: 'dpop',
+            did,
+            scope: 'atproto',
+            pdsEndpoint: 'https://pds.example.com',
+            tokenType: 'DPoP',
+          }
           const ctx = createCtx({
             getEnrollment: async (queryDid) => {
               if (queryDid === did) {
-                return { did, boundaries, enrolledAt, pdsEndpoint: 'https://pds.example.com' }
+                return {
+                  did,
+                  boundaries,
+                  enrolledAt,
+                  pdsEndpoint: 'https://pds.example.com',
+                }
               }
               return null
             },
@@ -90,10 +131,11 @@ describe('Status endpoint returns authoritative boundaries for enrolled DIDs', (
               if (queryDid === did) return boundaries
               return []
             },
+            dpopVerifier: createMockDpopVerifier(mockAuth),
           })
 
           registerEnrollmentHandlers(router, ctx)
-          const res = await invokeRoute(router, { did })
+          const res = await invokeRoute(router, { did }, { authorization: 'DPoP token' })
 
           expect(res.statusCode).toBe(200)
 
@@ -102,7 +144,9 @@ describe('Status endpoint returns authoritative boundaries for enrolled DIDs', (
           expect(body.enrolled).toBe(true)
           expect(body.enrolledAt).toBe(enrolledAt.toISOString())
 
+          // Boundaries should be included when authenticated
           const returnedBoundaries = body.boundaries as Array<{ value: string }>
+          expect(returnedBoundaries).toBeDefined()
           expect(returnedBoundaries).toHaveLength(boundaries.length)
 
           const returnedValues = returnedBoundaries.map((b) => b.value).sort()
@@ -118,16 +162,63 @@ describe('Status endpoint returns authoritative boundaries for enrolled DIDs', (
       { numRuns: 100 },
     )
   })
+
+  it('returns enrolled status without boundaries when not authenticated', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        didArb(),
+        boundarySetArb(),
+        fc.date({
+          min: new Date('2020-01-01T00:00:00Z'),
+          max: new Date('2030-01-01T00:00:00Z'),
+          noInvalidDate: true,
+        }),
+        async (did, boundaries, enrolledAt) => {
+          const router = express.Router()
+          const ctx = createCtx({
+            getEnrollment: async (queryDid) => {
+              if (queryDid === did) {
+                return {
+                  did,
+                  boundaries,
+                  enrolledAt,
+                  pdsEndpoint: 'https://pds.example.com',
+                }
+              }
+              return null
+            },
+            getBoundaries: async () => [],
+            dpopVerifier: null,
+          })
+
+          registerEnrollmentHandlers(router, ctx)
+          const res = await invokeRoute(router, { did })
+
+          expect(res.statusCode).toBe(200)
+
+          const body = res.body as Record<string, unknown>
+          expect(body.did).toBe(did)
+          expect(body.enrolled).toBe(true)
+          expect(body.enrolledAt).toBe(enrolledAt.toISOString())
+
+          // Boundaries should NOT be included when not authenticated
+          expect(body.boundaries).toBeUndefined()
+        },
+      ),
+      { numRuns: 100 },
+    )
+  })
 })
 
-describe('Status endpoint returns no boundaries for non-enrolled DIDs', () => {
-  it('returns enrolled: false with no boundaries or enrolledAt', async () => {
+describe('Status endpoint for non-enrolled DIDs', () => {
+  it('returns enrolled: false with no boundaries or enrolledAt (unauthenticated)', async () => {
     await fc.assert(
       fc.asyncProperty(didArb(), async (did) => {
         const router = express.Router()
         const ctx = createCtx({
           getEnrollment: async () => null,
           getBoundaries: async () => [],
+          dpopVerifier: null,
         })
 
         registerEnrollmentHandlers(router, ctx)
@@ -152,6 +243,7 @@ describe('Status endpoint route registration', () => {
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
+      dpopVerifier: null,
     })
 
     registerEnrollmentHandlers(router, ctx)
@@ -173,6 +265,7 @@ describe('Status endpoint route registration', () => {
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
+      dpopVerifier: null,
     })
 
     registerEnrollmentHandlers(router, ctx)
