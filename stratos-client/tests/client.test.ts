@@ -136,7 +136,7 @@ describe('routing', () => {
 
       expect(mockHandler).toHaveBeenCalledWith(
         'https://stratos.example.com/xrpc/app.stratos.feed.post',
-        undefined,
+        {},
       )
     })
 
@@ -169,7 +169,7 @@ describe('routing', () => {
 
       expect(mockHandler).toHaveBeenCalledWith(
         'https://stratos.example.com/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=app.stratos.feed.post&rkey=abc',
-        undefined,
+        {},
       )
     })
   })
