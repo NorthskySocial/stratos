@@ -27,20 +27,41 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
 
         const enrollment = await ctx.enrollmentService.getEnrollment(did)
 
-        ctx.logger?.debug(
-          {
-            did,
-            enrolled: enrollment !== null,
-            durationMs: Date.now() - start,
-          },
-          'enrollment status checked',
-        )
+        if (enrollment) {
+          const boundaryValues = await ctx.enrollmentStore.getBoundaries(did)
+          const boundaries = boundaryValues.map((value) => ({ value }))
 
-        res.json({
-          did,
-          enrolled: enrollment !== null,
-          enrolledAt: enrollment?.enrolledAt.toISOString(),
-        })
+          ctx.logger?.debug(
+            {
+              did,
+              enrolled: true,
+              boundaryCount: boundaries.length,
+              durationMs: Date.now() - start,
+            },
+            'enrollment status checked',
+          )
+
+          res.json({
+            did,
+            enrolled: true,
+            enrolledAt: enrollment.enrolledAt.toISOString(),
+            boundaries,
+          })
+        } else {
+          ctx.logger?.debug(
+            {
+              did,
+              enrolled: false,
+              durationMs: Date.now() - start,
+            },
+            'enrollment status checked',
+          )
+
+          res.json({
+            did,
+            enrolled: false,
+          })
+        }
       } catch (err) {
         ctx.logger?.error(
           {
