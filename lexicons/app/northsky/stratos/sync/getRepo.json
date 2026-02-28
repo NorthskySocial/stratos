@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.stratos.sync.getRepo",
+  "id": "app.northsky.stratos.sync.getRepo",
   "defs": {
     "main": {
       "type": "query",

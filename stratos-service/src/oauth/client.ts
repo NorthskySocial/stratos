@@ -15,8 +15,8 @@ import { oauthSession, oauthState, type ServiceDb } from '../db/index.js'
  */
 export const OAUTH_SCOPE = [
   'atproto',
-  'repo:app.stratos.actor.enrollment',
-  'repo:app.stratos.feed.post',
+  'repo:app.northsky.stratos.actor.enrollment',
+  'repo:app.northsky.stratos.feed.post',
 ].join(' ')
 
 /**

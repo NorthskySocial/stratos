@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.stratos.enrollment.status",
+  "id": "app.northsky.stratos.enrollment.status",
   "defs": {
     "main": {
       "type": "query",

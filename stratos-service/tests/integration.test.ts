@@ -267,7 +267,7 @@ describe('Integration: Full Stratos Flow', () => {
     })
 
     it('should create and read a stratos record', async () => {
-      const uri = `at://${testDid}/app.stratos.feed.post/123`
+      const uri = `at://${testDid}/app.northsky.stratos.feed.post/123`
       const cid = await createCid('test record content')
       const record = {
         text: 'Hello Stratos!',
@@ -301,21 +301,21 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/app.stratos.feed.post/1`),
+          new AtUri(`at://${testDid}/app.northsky.stratos.feed.post/1`),
           cid,
           { text: 'Post 1' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/app.stratos.feed.post/2`),
+          new AtUri(`at://${testDid}/app.northsky.stratos.feed.post/2`),
           cid,
           { text: 'Post 2' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/app.stratos.graph.follow/1`),
+          new AtUri(`at://${testDid}/app.northsky.stratos.graph.follow/1`),
           cid,
           { subject: 'did:plc:other' },
           'create',
@@ -328,12 +328,12 @@ describe('Integration: Full Stratos Flow', () => {
       })
 
       expect(collections).toHaveLength(2)
-      expect(collections).toContain('app.stratos.feed.post')
-      expect(collections).toContain('app.stratos.graph.follow')
+      expect(collections).toContain('app.northsky.stratos.feed.post')
+      expect(collections).toContain('app.northsky.stratos.graph.follow')
     })
 
     it('should delete a record', async () => {
-      const uri = `at://${testDid}/app.stratos.feed.post/todelete`
+      const uri = `at://${testDid}/app.northsky.stratos.feed.post/todelete`
       const cid = await createCid('delete me')
 
       await actorStore.transact(testDid, async (store) => {
@@ -360,7 +360,7 @@ describe('Integration: Full Stratos Flow', () => {
     })
 
     it('should manage backlinks', async () => {
-      const postUri = `at://${testDid}/app.stratos.feed.post/withbacklinks`
+      const postUri = `at://${testDid}/app.northsky.stratos.feed.post/withbacklinks`
       const cid = await createCid('post with links')
 
       await actorStore.transact(testDid, async (store) => {
@@ -370,7 +370,7 @@ describe('Integration: Full Stratos Flow', () => {
           {
             text: 'Replying to someone',
             reply: {
-              parent: { uri: 'at://did:plc:other/app.stratos.feed.post/123' },
+              parent: { uri: 'at://did:plc:other/app.northsky.stratos.feed.post/123' },
             },
           },
           'create',
@@ -381,16 +381,16 @@ describe('Integration: Full Stratos Flow', () => {
           {
             uri: postUri,
             path: 'reply.parent.uri',
-            linkTo: 'at://did:plc:other/app.stratos.feed.post/123',
+            linkTo: 'at://did:plc:other/app.northsky.stratos.feed.post/123',
           },
         ])
       })
 
       const backlinks = await actorStore.transact(testDid, async (store) => {
         return await store.record.getRecordBacklinks({
-          collection: 'app.stratos.feed.post',
+          collection: 'app.northsky.stratos.feed.post',
           path: 'reply.parent.uri',
-          linkTo: 'at://did:plc:other/app.stratos.feed.post/123',
+          linkTo: 'at://did:plc:other/app.northsky.stratos.feed.post/123',
         })
       })
 
@@ -407,7 +407,7 @@ describe('Integration: Full Stratos Flow', () => {
 
     it('should validate complete stratos post', () => {
       const record = {
-        $type: 'app.stratos.feed.post',
+        $type: 'app.northsky.stratos.feed.post',
         text: 'This is a valid stratos post',
         boundary: {
           values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
@@ -416,7 +416,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.stratos.feed.post', stratosConfig)
+        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
       }).not.toThrow()
     })
 
@@ -426,11 +426,11 @@ describe('Integration: Full Stratos Flow', () => {
         boundary: { values: [{ value: 'example.com' }] },
         reply: {
           parent: {
-            uri: 'at://did:plc:abc/app.stratos.feed.post/123',
+            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123',
             cid: 'bafyabc',
           },
           root: {
-            uri: 'at://did:plc:abc/app.stratos.feed.post/100',
+            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/100',
             cid: 'bafyroot',
           },
         },
@@ -438,7 +438,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.stratos.feed.post', stratosConfig)
+        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
       }).not.toThrow()
     })
 
@@ -460,7 +460,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.stratos.feed.post', stratosConfig)
+        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
       }).toThrow('cannot reply to a non-stratos record')
     })
 
@@ -479,7 +479,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.stratos.feed.post', stratosConfig)
+        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
       }).toThrow('cannot embed bsky content')
     })
 
@@ -487,7 +487,7 @@ describe('Integration: Full Stratos Flow', () => {
       const record = {
         text: 'Quote stratos post',
         embed: {
-          record: { uri: 'at://did:plc:abc/app.stratos.feed.post/123' },
+          record: { uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123' },
         },
       }
 
@@ -510,11 +510,11 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('URI Classification', () => {
     it('should correctly identify stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(
+      expect(isStratosUri('at://did:plc:abc/app.northsky.stratos.feed.post/123')).toBe(
         true,
       )
       expect(
-        isStratosUri('at://did:plc:abc/app.stratos.graph.follow/456'),
+        isStratosUri('at://did:plc:abc/app.northsky.stratos.graph.follow/456'),
       ).toBe(true)
       expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(
         false,
@@ -526,14 +526,14 @@ describe('Integration: Full Stratos Flow', () => {
       expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
         true,
       )
-      expect(isBskyUri('at://did:plc:abc/app.stratos.feed.post/123')).toBe(
+      expect(isBskyUri('at://did:plc:abc/app.northsky.stratos.feed.post/123')).toBe(
         false,
       )
     })
 
     it('should correctly identify stratos collections', () => {
-      expect(isStratosCollection('app.stratos.feed.post')).toBe(true)
-      expect(isStratosCollection('app.stratos.graph.follow')).toBe(true)
+      expect(isStratosCollection('app.northsky.stratos.feed.post')).toBe(true)
+      expect(isStratosCollection('app.northsky.stratos.graph.follow')).toBe(true)
       expect(isStratosCollection('app.bsky.feed.post')).toBe(false)
       expect(isStratosCollection('com.atproto.repo.record')).toBe(false)
     })
@@ -559,7 +559,7 @@ describe('Integration: Full Stratos Flow', () => {
       const cid = await createCid('lifecycle test')
       await actorStore.transact(actorDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${actorDid}/app.stratos.feed.post/1`),
+          new AtUri(`at://${actorDid}/app.northsky.stratos.feed.post/1`),
           cid,
           { text: 'Post 1' },
           'create',

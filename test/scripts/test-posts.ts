@@ -55,8 +55,8 @@ async function run() {
   let postCid: string
 
   try {
-    const result = await createRecord(rei.did, 'app.stratos.feed.post', {
-      $type: 'app.stratos.feed.post',
+    const result = await createRecord(rei.did, 'app.northsky.stratos.feed.post', {
+      $type: 'app.northsky.stratos.feed.post',
       text: 'Forging a new katana in the swordsmith workshop',
       boundary: { values: [{ value: 'swordsmith' }] },
       createdAt: new Date().toISOString(),
@@ -85,7 +85,7 @@ async function run() {
   try {
     const record = await getRecord(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       postRkey,
       rei.did,
     )
@@ -118,7 +118,7 @@ async function run() {
   try {
     const record = await getRecord(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       postRkey,
       sakura.did,
     )
@@ -141,7 +141,7 @@ async function run() {
   {
     const result = await tryGetRecord(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       postRkey,
       kaoruko.did,
     )
@@ -169,7 +169,7 @@ async function run() {
   {
     const result = await tryGetRecord(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       postRkey,
       // no caller DID — unauthenticated
     )
@@ -198,7 +198,7 @@ async function run() {
   try {
     const sakuraList = await listRecords(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       sakura.did,
     )
     assert(
@@ -215,7 +215,7 @@ async function run() {
   try {
     const kaorukoList = await listRecords(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       kaoruko.did,
     )
     assert(
@@ -230,7 +230,7 @@ async function run() {
 
   // Unauthenticated should see nothing
   try {
-    const anonList = await listRecords(rei.did, 'app.stratos.feed.post')
+    const anonList = await listRecords(rei.did, 'app.northsky.stratos.feed.post')
     assert(
       anonList.records.length === 0,
       'Unauthenticated listRecords — empty',
@@ -249,8 +249,8 @@ async function run() {
   let kaorukoPostRkey: string
 
   try {
-    const result = await createRecord(kaoruko.did, 'app.stratos.feed.post', {
-      $type: 'app.stratos.feed.post',
+    const result = await createRecord(kaoruko.did, 'app.northsky.stratos.feed.post', {
+      $type: 'app.northsky.stratos.feed.post',
       text: 'Shopping at the Aekea marketplace',
       boundary: { values: [{ value: 'aekea' }] },
       createdAt: new Date().toISOString(),
@@ -276,7 +276,7 @@ async function run() {
   if (kaorukoPostRkey) {
     const reiResult = await tryGetRecord(
       kaoruko.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       kaorukoPostRkey,
       rei.did,
     )
@@ -296,7 +296,7 @@ async function run() {
     try {
       const own = await getRecord(
         kaoruko.did,
-        'app.stratos.feed.post',
+        'app.northsky.stratos.feed.post',
         kaorukoPostRkey,
         kaoruko.did,
       )
@@ -316,14 +316,14 @@ async function run() {
   section('Test 8: Delete records')
 
   try {
-    await deleteRecord(rei.did, 'app.stratos.feed.post', postRkey)
+    await deleteRecord(rei.did, 'app.northsky.stratos.feed.post', postRkey)
     pass("Rei's swordsmith post deleted")
     passed++
 
     // Verify it's gone
     const result = await tryGetRecord(
       rei.did,
-      'app.stratos.feed.post',
+      'app.northsky.stratos.feed.post',
       postRkey,
       rei.did,
     )
@@ -335,7 +335,7 @@ async function run() {
 
   if (kaorukoPostRkey) {
     try {
-      await deleteRecord(kaoruko.did, 'app.stratos.feed.post', kaorukoPostRkey)
+      await deleteRecord(kaoruko.did, 'app.northsky.stratos.feed.post', kaorukoPostRkey)
       pass("kaoruko's aekea post deleted")
       passed++
     } catch (err) {
