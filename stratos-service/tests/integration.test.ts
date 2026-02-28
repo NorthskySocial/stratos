@@ -370,7 +370,9 @@ describe('Integration: Full Stratos Flow', () => {
           {
             text: 'Replying to someone',
             reply: {
-              parent: { uri: 'at://did:plc:other/app.northsky.stratos.feed.post/123' },
+              parent: {
+                uri: 'at://did:plc:other/app.northsky.stratos.feed.post/123',
+              },
             },
           },
           'create',
@@ -416,7 +418,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
+        assertStratosValidation(
+          record,
+          'app.northsky.stratos.feed.post',
+          stratosConfig,
+        )
       }).not.toThrow()
     })
 
@@ -438,7 +444,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
+        assertStratosValidation(
+          record,
+          'app.northsky.stratos.feed.post',
+          stratosConfig,
+        )
       }).not.toThrow()
     })
 
@@ -460,7 +470,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
+        assertStratosValidation(
+          record,
+          'app.northsky.stratos.feed.post',
+          stratosConfig,
+        )
       }).toThrow('cannot reply to a non-stratos record')
     })
 
@@ -479,7 +493,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'app.northsky.stratos.feed.post', stratosConfig)
+        assertStratosValidation(
+          record,
+          'app.northsky.stratos.feed.post',
+          stratosConfig,
+        )
       }).toThrow('cannot embed bsky content')
     })
 
@@ -487,7 +505,9 @@ describe('Integration: Full Stratos Flow', () => {
       const record = {
         text: 'Quote stratos post',
         embed: {
-          record: { uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123' },
+          record: {
+            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123',
+          },
         },
       }
 
@@ -510,9 +530,9 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('URI Classification', () => {
     it('should correctly identify stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/app.northsky.stratos.feed.post/123')).toBe(
-        true,
-      )
+      expect(
+        isStratosUri('at://did:plc:abc/app.northsky.stratos.feed.post/123'),
+      ).toBe(true)
       expect(
         isStratosUri('at://did:plc:abc/app.northsky.stratos.graph.follow/456'),
       ).toBe(true)
@@ -526,14 +546,16 @@ describe('Integration: Full Stratos Flow', () => {
       expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
         true,
       )
-      expect(isBskyUri('at://did:plc:abc/app.northsky.stratos.feed.post/123')).toBe(
-        false,
-      )
+      expect(
+        isBskyUri('at://did:plc:abc/app.northsky.stratos.feed.post/123'),
+      ).toBe(false)
     })
 
     it('should correctly identify stratos collections', () => {
       expect(isStratosCollection('app.northsky.stratos.feed.post')).toBe(true)
-      expect(isStratosCollection('app.northsky.stratos.graph.follow')).toBe(true)
+      expect(isStratosCollection('app.northsky.stratos.graph.follow')).toBe(
+        true,
+      )
       expect(isStratosCollection('app.bsky.feed.post')).toBe(false)
       expect(isStratosCollection('com.atproto.repo.record')).toBe(false)
     })
