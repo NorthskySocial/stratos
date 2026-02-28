@@ -553,10 +553,10 @@ stratos/
 
 ### Enrollment
 
-| Endpoint                          | Method    | Auth | Description               |
-| --------------------------------- | --------- | ---- | ------------------------- |
-| `/oauth/authorize`                | GET       | None | Initiate OAuth enrollment |
-| `/oauth/callback`                 | GET       | None | OAuth callback handler    |
+| Endpoint                                   | Method    | Auth | Description               |
+| ------------------------------------------ | --------- | ---- | ------------------------- |
+| `/oauth/authorize`                         | GET       | None | Initiate OAuth enrollment |
+| `/oauth/callback`                          | GET       | None | OAuth callback handler    |
 | `app.northsky.stratos.enrollment.status`   | Query     | User | Check enrollment status   |
 | `app.northsky.stratos.enrollment.unenroll` | Procedure | User | Remove enrollment         |
 
@@ -571,17 +571,17 @@ stratos/
 
 ### Hydration
 
-| Endpoint                          | Method    | Auth         | Description                                   |
-| --------------------------------- | --------- | ------------ | --------------------------------------------- |
+| Endpoint                                   | Method    | Auth         | Description                                   |
+| ------------------------------------------ | --------- | ------------ | --------------------------------------------- |
 | `app.northsky.stratos.repo.hydrateRecord`  | Query     | User/Service | Hydrate single record with boundary filtering |
 | `app.northsky.stratos.repo.hydrateRecords` | Procedure | User/Service | Batch hydrate up to 100 records               |
 
 ### Sync & Repository
 
-| Endpoint                            | Method       | Auth         | Description                                                          |
-| ----------------------------------- | ------------ | ------------ | -------------------------------------------------------------------- |
+| Endpoint                                     | Method       | Auth         | Description                                                          |
+| -------------------------------------------- | ------------ | ------------ | -------------------------------------------------------------------- |
 | `app.northsky.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                                   |
-| `com.atproto.sync.getRecord`        | Query        | User/Service | Record CAR with signed commit + MST inclusion proof + record block   |
+| `com.atproto.sync.getRecord`                 | Query        | User/Service | Record CAR with signed commit + MST inclusion proof + record block   |
 | `app.northsky.stratos.sync.getRepo`          | Query        | User/Service | Export full repository as CAR (all blocks, MST nodes, signed commit) |
 | `app.northsky.stratos.repo.importRepo`       | Procedure    | User         | Import repository from CAR with CID integrity verification           |
 

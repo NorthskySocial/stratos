@@ -25,12 +25,12 @@ only to members of specific groups or communities.
 
 ### Key Concepts
 
-| Concept             | Description                                                       |
-| ------------------- | ----------------------------------------------------------------- |
-| **Stratos Service** | A server that stores private records (separate from PDS)          |
-| **Enrollment**      | User must enroll with a Stratos service to create private content |
-| **Domain Boundary** | Specifies which community boundaries can view a record            |
-| **Private Post**    | An `app.northsky.stratos.feed.post` record with boundary restrictions      |
+| Concept             | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| **Stratos Service** | A server that stores private records (separate from PDS)              |
+| **Enrollment**      | User must enroll with a Stratos service to create private content     |
+| **Domain Boundary** | Specifies which community boundaries can view a record                |
+| **Private Post**    | An `app.northsky.stratos.feed.post` record with boundary restrictions |
 
 ## Quick Start
 
@@ -80,7 +80,10 @@ const response = await fetch(
         boundary: {
           $type: 'app.northsky.stratos.boundary.defs#Domains',
           values: [
-            { $type: 'app.northsky.stratos.boundary.defs#Domain', value: 'general' },
+            {
+              $type: 'app.northsky.stratos.boundary.defs#Domain',
+              value: 'general',
+            },
           ],
         },
         createdAt: new Date().toISOString(),
@@ -177,7 +180,10 @@ interface StratosPost {
   text: string
   boundary: {
     $type: 'app.northsky.stratos.boundary.defs#Domains'
-    values: Array<{ $type: 'app.northsky.stratos.boundary.defs#Domain'; value: string }>
+    values: Array<{
+      $type: 'app.northsky.stratos.boundary.defs#Domain'
+      value: string
+    }>
   }
   createdAt: string
   facets?: RichTextFacet[]

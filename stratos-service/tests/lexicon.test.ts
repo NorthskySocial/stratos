@@ -56,7 +56,9 @@ describe('Stratos Lexicons', () => {
     })
 
     it('app.northsky.stratos.enrollment.status should be a query', () => {
-      const lex = lexicons.find((l) => l.id === 'app.northsky.stratos.enrollment.status')
+      const lex = lexicons.find(
+        (l) => l.id === 'app.northsky.stratos.enrollment.status',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
@@ -86,13 +88,17 @@ describe('Stratos Lexicons', () => {
     })
 
     it('app.northsky.stratos.feed.post should be a record', () => {
-      const lex = lexicons.find((l) => l.id === 'app.northsky.stratos.feed.post')
+      const lex = lexicons.find(
+        (l) => l.id === 'app.northsky.stratos.feed.post',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
 
     it('app.northsky.stratos.actor.enrollment should be a record', () => {
-      const lex = lexicons.find((l) => l.id === 'app.northsky.stratos.actor.enrollment')
+      const lex = lexicons.find(
+        (l) => l.id === 'app.northsky.stratos.actor.enrollment',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
@@ -138,9 +144,15 @@ describe('Stratos Lexicons', () => {
       const lexStore = (server as any).lex
 
       // Verify Stratos methods are available
-      expect(lexStore.getDef('app.northsky.stratos.enrollment.status')).toBeDefined()
-      expect(lexStore.getDef('app.northsky.stratos.repo.hydrateRecord')).toBeDefined()
-      expect(lexStore.getDef('app.northsky.stratos.repo.hydrateRecords')).toBeDefined()
+      expect(
+        lexStore.getDef('app.northsky.stratos.enrollment.status'),
+      ).toBeDefined()
+      expect(
+        lexStore.getDef('app.northsky.stratos.repo.hydrateRecord'),
+      ).toBeDefined()
+      expect(
+        lexStore.getDef('app.northsky.stratos.repo.hydrateRecords'),
+      ).toBeDefined()
     })
 
     it('should allow registering handlers for Stratos methods', () => {

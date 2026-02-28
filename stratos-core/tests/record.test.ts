@@ -184,7 +184,9 @@ describe('Record Transactor', () => {
     })
 
     it('should update existing record on conflict', async () => {
-      const uri = new AtUri('at://did:plc:test/app.northsky.stratos.feed.post/testkey')
+      const uri = new AtUri(
+        'at://did:plc:test/app.northsky.stratos.feed.post/testkey',
+      )
       const cid1 = await createCid({ text: 'Original' })
       const cid2 = await createCid({ text: 'Updated' })
 
@@ -214,7 +216,9 @@ describe('Record Transactor', () => {
     })
 
     it('should reject URI without DID', async () => {
-      const uri = new AtUri('at://handle.example.com/app.northsky.stratos.feed.post/1')
+      const uri = new AtUri(
+        'at://handle.example.com/app.northsky.stratos.feed.post/1',
+      )
       const cid = await createCid({ text: 'Test' })
 
       await expect(
@@ -225,7 +229,9 @@ describe('Record Transactor', () => {
 
   describe('deleteRecord', () => {
     it('should delete an existing record', async () => {
-      const uri = new AtUri('at://did:plc:test/app.northsky.stratos.feed.post/todelete')
+      const uri = new AtUri(
+        'at://did:plc:test/app.northsky.stratos.feed.post/todelete',
+      )
       const cid = await createCid({ text: 'Delete me' })
 
       await transactor.indexRecord(
@@ -242,7 +248,9 @@ describe('Record Transactor', () => {
     })
 
     it('should delete associated backlinks', async () => {
-      const uri = new AtUri('at://did:plc:test/app.northsky.stratos.graph.follow/1')
+      const uri = new AtUri(
+        'at://did:plc:test/app.northsky.stratos.graph.follow/1',
+      )
       const cid = await createCid({
         subject: 'did:plc:followed',
         createdAt: new Date().toISOString(),
@@ -309,7 +317,9 @@ describe('Record Transactor', () => {
     })
 
     it('should remove takedown from record', async () => {
-      const uri = new AtUri('at://did:plc:test/app.northsky.stratos.feed.post/restored')
+      const uri = new AtUri(
+        'at://did:plc:test/app.northsky.stratos.feed.post/restored',
+      )
       const cid = await createCid({ text: 'Restored content' })
 
       await transactor.indexRecord(
