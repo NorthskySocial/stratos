@@ -246,7 +246,7 @@ describe('MST inclusion proof CAR', () => {
     // Insert a record into the MST
     const root = await wrangler.putRecord(
       null,
-      'app.stratos.feed.post/abc123',
+      'app.northsky.stratos.feed.post/abc123',
       {
         $link: recordCid,
       },
@@ -257,7 +257,7 @@ describe('MST inclusion proof CAR', () => {
     const proofCids = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.stratos.feed.post/abc123',
+      'app.northsky.stratos.feed.post/abc123',
     )
 
     expect(proofCids.size).toBeGreaterThan(0)
@@ -326,13 +326,13 @@ describe('MST inclusion proof CAR', () => {
     const cid2 = await makeCidStr('record-2')
     const cid3 = await makeCidStr('record-3')
 
-    let root = await wrangler.putRecord(null, 'app.stratos.feed.post/a1', {
+    let root = await wrangler.putRecord(null, 'app.northsky.stratos.feed.post/a1', {
       $link: cid1,
     })
-    root = await wrangler.putRecord(root, 'app.stratos.feed.post/a2', {
+    root = await wrangler.putRecord(root, 'app.northsky.stratos.feed.post/a2', {
       $link: cid2,
     })
-    root = await wrangler.putRecord(root, 'app.stratos.feed.post/a3', {
+    root = await wrangler.putRecord(root, 'app.northsky.stratos.feed.post/a3', {
       $link: cid3,
     })
 
@@ -340,17 +340,17 @@ describe('MST inclusion proof CAR', () => {
     const proof1 = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.stratos.feed.post/a1',
+      'app.northsky.stratos.feed.post/a1',
     )
     const proof2 = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.stratos.feed.post/a2',
+      'app.northsky.stratos.feed.post/a2',
     )
     const proof3 = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.stratos.feed.post/a3',
+      'app.northsky.stratos.feed.post/a3',
     )
 
     expect(proof1.size).toBeGreaterThan(0)
@@ -372,7 +372,7 @@ describe('Full repo CAR building', () => {
     const nodeStore = new NodeStore(overlay)
     const wrangler = new NodeWrangler(nodeStore)
 
-    const root = await wrangler.putRecord(null, 'app.stratos.feed.post/t1', {
+    const root = await wrangler.putRecord(null, 'app.northsky.stratos.feed.post/t1', {
       $link: recordCidStr,
     })
 
@@ -427,7 +427,7 @@ describe('Import repo CAR verification', () => {
     recordCidStr: string
   }> {
     const recordData = AtcuteCbor.encode({
-      $type: 'app.stratos.feed.post',
+      $type: 'app.northsky.stratos.feed.post',
       text: 'imported',
     })
     const recordCid = await AtcuteCid.create(0x71, recordData)
@@ -441,7 +441,7 @@ describe('Import repo CAR verification', () => {
 
     const mstRoot = await wrangler.putRecord(
       null,
-      'app.stratos.feed.post/imp1',
+      'app.northsky.stratos.feed.post/imp1',
       {
         $link: recordCidStr,
       },
@@ -524,7 +524,7 @@ describe('Import repo CAR verification', () => {
     }
 
     expect(records).toHaveLength(1)
-    expect(records[0].collection).toBe('app.stratos.feed.post')
+    expect(records[0].collection).toBe('app.northsky.stratos.feed.post')
     expect(records[0].rkey).toBe('imp1')
     expect(records[0].cid).toBeTruthy()
   })

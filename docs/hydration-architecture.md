@@ -7,7 +7,7 @@ This document describes the Stratos architecture using the **source field patter
 - Writes **stub records** to user's PDS with a `source` field pointing to the Stratos service
 - Full records are stored in Stratos with boundary restrictions
 - AppViews hydrate via standard `com.atproto.repo.getRecord` calls to the service in `source.service`
-- Uses `app.stratos.actor.enrollment` records for endpoint discovery
+- Uses `app.northsky.stratos.actor.enrollment` records for endpoint discovery
 - Follows feature-sliced architecture with ports/adapters pattern
 
 ---
@@ -38,7 +38,7 @@ interface RecordSource {
 
 ```json
 {
-  "$type": "app.stratos.feed.post",
+  "$type": "app.northsky.stratos.feed.post",
   "text": "Private message for my community",
   "boundary": {
     "values": [{ "value": "fanart" }]
@@ -51,11 +51,11 @@ interface RecordSource {
 
 ```json
 {
-  "$type": "app.stratos.feed.post",
+  "$type": "app.northsky.stratos.feed.post",
   "source": {
     "vary": "authenticated",
     "subject": {
-      "uri": "at://did:plc:abc/app.stratos.feed.post/tid123",
+      "uri": "at://did:plc:abc/app.northsky.stratos.feed.post/tid123",
       "cid": "bafyreibeef..."
     },
     "service": "did:web:stratos.example.com#atproto_pns"
@@ -129,12 +129,12 @@ graph LR
 
 Instead of modifying user DID documents (requires PLC signing), users publish an enrollment record to their PDS during OAuth enrollment:
 
-### Lexicon: app.stratos.actor.enrollment
+### Lexicon: app.northsky.stratos.actor.enrollment
 
 ```json
 {
   "lexicon": 1,
-  "id": "app.stratos.actor.enrollment",
+  "id": "app.northsky.stratos.actor.enrollment",
   "defs": {
     "main": {
       "type": "record",
@@ -189,7 +189,7 @@ async function resolveStratosEndpoint(did: string): Promise<string | null> {
   // Fetch enrollment record from user's PDS
   const enrollment = await fetch(
     `${pdsEndpoint}/xrpc/com.atproto.repo.getRecord?` +
-      `repo=${did}&collection=app.stratos.actor.enrollment&rkey=self`,
+      `repo=${did}&collection=app.northsky.stratos.actor.enrollment&rkey=self`,
   )
 
   if (!enrollment.ok) return null
@@ -207,7 +207,7 @@ async function resolveStratosEndpoint(did: string): Promise<string | null> {
 
 AppViews use the source field to determine hydration:
 
-1. Index stub records from PDS firehose (via `app.stratos.sync.subscribeRecords`)
+1. Index stub records from PDS firehose (via `app.northsky.stratos.sync.subscribeRecords`)
 2. Detect `source` field → record needs hydration
 3. Resolve `source.service` DID to get service endpoint
 4. Call standard `com.atproto.repo.getRecord` at service endpoint
@@ -220,7 +220,7 @@ AppViews hydrate using the standard ATProto `getRecord` endpoint:
 ```http
 GET /xrpc/com.atproto.repo.getRecord
   ?repo=did:plc:alice
-  &collection=app.stratos.feed.post
+  &collection=app.northsky.stratos.feed.post
   &rkey=abc123
 
 Authorization: Bearer <service-auth-jwt>
@@ -231,10 +231,10 @@ X-Stratos-Viewer: did:plc:viewer
 
 ```json
 {
-  "uri": "at://did:plc:alice/app.stratos.feed.post/abc123",
+  "uri": "at://did:plc:alice/app.northsky.stratos.feed.post/abc123",
   "cid": "bafyreibeef...",
   "value": {
-    "$type": "app.stratos.feed.post",
+    "$type": "app.northsky.stratos.feed.post",
     "text": "Full private content",
     "boundary": {
       "values": [{ "value": "fanart" }]
@@ -285,7 +285,7 @@ graph TD
 
    GET https://stratos.example.com/xrpc/com.atproto.repo.getRecord
    ?repo=did:plc:alice
-   &collection=app.stratos.feed.post
+   &collection=app.northsky.stratos.feed.post
    &rkey=abc123
    Authorization: Bearer <service-jwt>
    X-Stratos-Viewer: did:plc:viewer
@@ -310,7 +310,7 @@ Stratos service determines viewer's boundaries via:
 
 1. **Enrollment check**: Is viewer enrolled in this service?
 2. **Write history**: Boundaries viewer has successfully written with
-3. **Membership records**: Explicit `app.stratos.boundary.member` records
+3. **Membership records**: Explicit `app.northsky.stratos.boundary.member` records
 4. **Service config**: Admin-assigned boundary permissions
 
 ```typescript
@@ -367,7 +367,7 @@ function isAuthorized(
    GET https://stratos.community.example.com/oauth/authorize?handle=alice.bsky.social
 
 2. Stratos redirects to user's PDS OAuth
-   - Requests scopes: atproto, repo:app.stratos.actor.enrollment, repo:app.stratos.feed.post
+   - Requests scopes: atproto, repo:app.northsky.stratos.actor.enrollment, repo:app.northsky.stratos.feed.post
    - These allow writing enrollment and stub records to the user's PDS
 
 3. User authorizes on PDS
@@ -383,10 +383,10 @@ function isAuthorized(
    Authorization: Bearer <user-access-token>
    {
      "repo": "did:plc:alice",
-     "collection": "app.stratos.actor.enrollment",
+     "collection": "app.northsky.stratos.actor.enrollment",
      "rkey": "self",
      "record": {
-       "$type": "app.stratos.actor.enrollment",
+       "$type": "app.northsky.stratos.actor.enrollment",
        "services": [{
          "endpoint": "https://stratos.community.example.com",
          "boundaries": ["fanart", "cosplay"],
@@ -557,8 +557,8 @@ stratos/
 | --------------------------------- | --------- | ---- | ------------------------- |
 | `/oauth/authorize`                | GET       | None | Initiate OAuth enrollment |
 | `/oauth/callback`                 | GET       | None | OAuth callback handler    |
-| `app.stratos.enrollment.status`   | Query     | User | Check enrollment status   |
-| `app.stratos.enrollment.unenroll` | Procedure | User | Remove enrollment         |
+| `app.northsky.stratos.enrollment.status`   | Query     | User | Check enrollment status   |
+| `app.northsky.stratos.enrollment.unenroll` | Procedure | User | Remove enrollment         |
 
 ### Records
 
@@ -573,17 +573,17 @@ stratos/
 
 | Endpoint                          | Method    | Auth         | Description                                   |
 | --------------------------------- | --------- | ------------ | --------------------------------------------- |
-| `app.stratos.repo.hydrateRecord`  | Query     | User/Service | Hydrate single record with boundary filtering |
-| `app.stratos.repo.hydrateRecords` | Procedure | User/Service | Batch hydrate up to 100 records               |
+| `app.northsky.stratos.repo.hydrateRecord`  | Query     | User/Service | Hydrate single record with boundary filtering |
+| `app.northsky.stratos.repo.hydrateRecords` | Procedure | User/Service | Batch hydrate up to 100 records               |
 
 ### Sync & Repository
 
 | Endpoint                            | Method       | Auth         | Description                                                          |
 | ----------------------------------- | ------------ | ------------ | -------------------------------------------------------------------- |
-| `app.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                                   |
+| `app.northsky.stratos.sync.subscribeRecords` | Subscription | Service      | WebSocket firehose                                                   |
 | `com.atproto.sync.getRecord`        | Query        | User/Service | Record CAR with signed commit + MST inclusion proof + record block   |
-| `app.stratos.sync.getRepo`          | Query        | User/Service | Export full repository as CAR (all blocks, MST nodes, signed commit) |
-| `app.stratos.repo.importRepo`       | Procedure    | User         | Import repository from CAR with CID integrity verification           |
+| `app.northsky.stratos.sync.getRepo`          | Query        | User/Service | Export full repository as CAR (all blocks, MST nodes, signed commit) |
+| `app.northsky.stratos.repo.importRepo`       | Procedure    | User         | Import repository from CAR with CID integrity verification           |
 
 ---
 
