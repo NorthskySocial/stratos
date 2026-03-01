@@ -2,7 +2,7 @@ export type { FetchHandler, FetchHandlerObject } from '@atcute/client'
 
 /**
  * stratos enrollment record as stored on the user's PDS.
- * matches the `app.stratos.actor.enrollment` lexicon shape.
+ * matches the `app.northsky.stratos.actor.enrollment` lexicon shape.
  */
 export interface StratosEnrollment {
   service: string
