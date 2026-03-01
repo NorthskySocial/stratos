@@ -1,10 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
-import express, { type Router, type Request, type Response } from 'express'
+import express, { type Router } from 'express'
 import type { AppContext } from '../src/context.js'
 import { registerEnrollmentHandlers } from '../src/features/enrollment/handler.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
-import type { DpopVerifier, DpopAuthResult } from '../src/auth/dpop-verifier.js'
 
 function didArb(): fc.Arbitrary<string> {
   return fc.stringMatching(/^[a-z2-7]{24}$/).map((s) => `did:plc:${s}`)
@@ -34,7 +33,7 @@ function invokeRoute(
       query,
       headers,
       method: 'GET',
-      url: '/xrpc/app.stratos.enrollment.status',
+      url: '/xrpc/app.northsky.stratos.enrollment.status',
     } as unknown as express.Request
     const res = {
       status(code: number) {
@@ -58,7 +57,7 @@ function invokeRoute(
       }
     }
     const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
-      (l) => l.route?.path === '/xrpc/app.stratos.enrollment.status',
+      (l) => l.route?.path === '/xrpc/app.northsky.stratos.enrollment.status',
     )
     if (!layer?.route) return reject(new Error('Route not registered'))
     const handler = layer.route.stack[0]?.handle
@@ -71,27 +70,22 @@ function invokeRoute(
 function createCtx(opts: {
   getEnrollment: (did: string) => Promise<Enrollment | null>
   getBoundaries: (did: string) => Promise<string[]>
-  dpopVerifier?: DpopVerifier | null
+  authenticatedDid?: string | null
 }): AppContext {
+  const authenticatedDid = opts.authenticatedDid ?? null
   return {
     enrollmentService: { getEnrollment: opts.getEnrollment },
-    enrollmentStore: { getBoundaries: opts.getBoundaries },
-    dpopVerifier: opts.dpopVerifier ?? null,
+    boundaryResolver: { getBoundaries: opts.getBoundaries },
+    authVerifier: {
+      optionalStandard: async () => {
+        if (authenticatedDid) {
+          return { credentials: { type: 'user', did: authenticatedDid } }
+        }
+        return { credentials: { type: 'none' } }
+      },
+    },
     logger: undefined,
   } as unknown as AppContext
-}
-
-function createMockDpopVerifier(
-  verifyResult: DpopAuthResult | null | Error,
-): DpopVerifier {
-  return {
-    verify: async () => {
-      if (verifyResult instanceof Error) throw verifyResult
-      if (verifyResult === null)
-        throw new Error('No auth header (should not be called)')
-      return verifyResult
-    },
-  } as unknown as DpopVerifier
 }
 
 describe('Status endpoint with authentication', () => {
@@ -107,13 +101,6 @@ describe('Status endpoint with authentication', () => {
         }),
         async (did, boundaries, enrolledAt) => {
           const router = express.Router()
-          const mockAuth: DpopAuthResult = {
-            type: 'dpop',
-            did,
-            scope: 'atproto',
-            pdsEndpoint: 'https://pds.example.com',
-            tokenType: 'DPoP',
-          }
           const ctx = createCtx({
             getEnrollment: async (queryDid) => {
               if (queryDid === did) {
@@ -130,7 +117,7 @@ describe('Status endpoint with authentication', () => {
               if (queryDid === did) return boundaries
               return []
             },
-            dpopVerifier: createMockDpopVerifier(mockAuth),
+            authenticatedDid: did,
           })
 
           registerEnrollmentHandlers(router, ctx)
@@ -191,7 +178,7 @@ describe('Status endpoint with authentication', () => {
               return null
             },
             getBoundaries: async () => [],
-            dpopVerifier: null,
+            authenticatedDid: null,
           })
 
           registerEnrollmentHandlers(router, ctx)
@@ -221,7 +208,7 @@ describe('Status endpoint for non-enrolled DIDs', () => {
         const ctx = createCtx({
           getEnrollment: async () => null,
           getBoundaries: async () => [],
-          dpopVerifier: null,
+          authenticatedDid: null,
         })
 
         registerEnrollmentHandlers(router, ctx)
@@ -241,12 +228,12 @@ describe('Status endpoint for non-enrolled DIDs', () => {
 })
 
 describe('Status endpoint route registration', () => {
-  it('registers the route at /xrpc/app.stratos.enrollment.status', () => {
+  it('registers the route at /xrpc/app.northsky.stratos.enrollment.status', () => {
     const router = express.Router()
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
-      dpopVerifier: null,
+      authenticatedDid: null,
     })
 
     registerEnrollmentHandlers(router, ctx)
@@ -256,7 +243,7 @@ describe('Status endpoint route registration', () => {
     }
     const layers = (router as unknown as { stack: RouteLayer[] }).stack
     const statusRoute = layers.find(
-      (l) => l.route?.path === '/xrpc/app.stratos.enrollment.status',
+      (l) => l.route?.path === '/xrpc/app.northsky.stratos.enrollment.status',
     )
 
     expect(statusRoute).toBeDefined()
@@ -268,7 +255,7 @@ describe('Status endpoint route registration', () => {
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
-      dpopVerifier: null,
+      authenticatedDid: null,
     })
 
     registerEnrollmentHandlers(router, ctx)

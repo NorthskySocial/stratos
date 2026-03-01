@@ -1,26 +1,24 @@
 import type { Router, Request, Response } from 'express'
 import type { AppContext } from '../../context.js'
-import type { DpopAuthResult } from '../../auth/dpop-verifier.js'
 
 /**
- * Attempt optional authentication - returns auth result if present and valid, null otherwise
+ * Attempt optional authentication
+ * Returns the authenticated DID if present and valid, null otherwise.
  */
 async function tryAuthenticate(
   ctx: AppContext,
   req: Request,
   res: Response,
-): Promise<DpopAuthResult | null> {
-  if (!ctx.dpopVerifier) return null
-  if (!req.headers.authorization) return null
-
-  return await ctx.dpopVerifier.verify(
-    {
-      method: req.method,
-      url: req.url,
-      headers: req.headers as Record<string, string | string[] | undefined>,
-    },
-    res,
-  )
+): Promise<string | null> {
+  try {
+    const result = await ctx.authVerifier.optionalStandard({
+      req,
+      res,
+    } as Parameters<typeof ctx.authVerifier.optionalStandard>[0])
+    return result.credentials.did ?? null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -67,8 +65,10 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
 
           // Only include boundaries if authenticated
           if (auth) {
-            const boundaryValues = await ctx.enrollmentStore.getBoundaries(did)
-            response.boundaries = boundaryValues.map((value) => ({ value }))
+            const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
+            response.boundaries = boundaryValues.map((value: string) => ({
+              value,
+            }))
           }
 
           ctx.logger?.debug(
