@@ -103,7 +103,9 @@ sequenceDiagram
 
     S->>P: putRecord(Stub with source field)
 ```
+
 Updates MST (Merkle Search Tree) and signs a new commit:
+
 - Inserts record into MST via NodeWrangler
 - Computes block diff (new/removed MST nodes)
 - Signs commit with service secp256k1 key

@@ -50,6 +50,9 @@ export class ExternalAllowListProvider implements AllowListProvider {
     return false
   }
 
+  /**
+   * Fetch the external allow list and update the internal allow list.
+   */
   async refresh(): Promise<void> {
     try {
       this.logger?.info({ url: this.url }, 'refreshing external allow list')

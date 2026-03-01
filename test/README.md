@@ -336,6 +336,7 @@ Teardown
     ├── deno.json                      # Deno config (isolates from project tsconfig)
     ├── setup.ts                       # Stage 1: PDS accounts + start Stratos
     ├── test-enrollment.ts             # Stage 2: OAuth enrollment via Playwright
+    ├── test-auto-enrollment.ts        # Stage 2b: Verify auto-enrollment logic
     ├── direct-enroll.ts               # Stage 2 alternative: Direct DB enrollment (--direct mode)
     ├── configure-boundaries.ts        # Stage 3: Per-user boundary assignment
     ├── test-posts.ts                  # Stage 4: CRUD + boundary access tests

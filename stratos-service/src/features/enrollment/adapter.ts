@@ -130,7 +130,7 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
  */
 export class ProfileRecordWriterImpl implements ProfileRecordWriter {
   constructor(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    //eslint-disable-next-line @typescript-eslint/no-explicit-any
     private getAgent: (did: string) => Promise<{ api: any } | null>,
   ) {}
 
