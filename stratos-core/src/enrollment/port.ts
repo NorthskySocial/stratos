@@ -11,7 +11,11 @@ export interface EnrollmentService {
    * @param boundaries - Boundaries the user should have access to
    * @returns The created enrollment
    */
-  enroll(did: string, boundaries: string[]): Promise<Enrollment>
+  enroll(
+    did: string,
+    boundaries: string[],
+    signingKeyDid: string,
+  ): Promise<Enrollment>
 
   /**
    * Check if a user is enrolled

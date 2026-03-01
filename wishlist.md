@@ -38,13 +38,11 @@ The `importRepo` handler stores the original CAR blocks and commit verbatim, pre
 
 `fast-check` is installed in both packages but unused. The MST implementation plan called for property-based tests covering: MST reflects current record state, commit signature round-trip, getRecord CAR proof completeness, MST determinism (confluence), write-then-delete round-trip, MST serialization round-trip, and import/export round-trip. The 330 deterministic tests cover the core paths but property tests would catch edge cases in key/CID distribution and ordering.
 
-## Generate signing key per user collection
+## Per-user signing key — sign collections with user key
 
-Currently the Stratos service signing key signs all users' commits, which means `verifyServiceSignature` only proves the service vouches for the record — not that a specific user authored it. This is analogous to PDS trust: the service operator is trusted to faithfully store user data.
+**Done**: P-256 signing key generation and storage is implemented. At enrollment time, Stratos generates a P-256 keypair per user, stores the private key at `{dataDir}/actors/{prefix}/{did}/signing_key`, and publishes the public key (`did:key` format) plus a service attestation in the enrollment record on the user's PDS. The attestation is a DAG-CBOR payload (`{boundaries, did, signingKey}`) signed by the service's secp256k1 key. Attestations are regenerated on boundary changes and deleted on unenrollment. The `signingKeyDid` is cached in the enrollment table for efficient status lookups.
 
-To enable user-level authorship verification, generate a per-user signing key at enrollment time, store the private key in Stratos, and publish the public key in the enrollment record on the user's PDS. Commits would then be signed with the user's key, allowing anyone to verify authorship from the enrollment record's public key.
-
-This also improves data portability: exported repos would carry user signatures that can be verified independently of the original Stratos service, making inter-service import verification straightforward (no need for the lazy inter-service verification workaround).
+**Next**: Use the per-user P-256 key to sign repo commits instead of (or in addition to) the service-wide secp256k1 key. This enables user-level authorship verification — anyone can verify a commit was created by a specific user by checking the signature against the public key in their enrollment record. This also improves data portability: exported repos carry user signatures verifiable independently of the original Stratos service.
 
 ## Encryption at rest
 

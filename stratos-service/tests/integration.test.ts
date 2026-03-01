@@ -244,6 +244,8 @@ describe('Integration: Full Stratos Flow', () => {
         did: testDid,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: testPds,
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const isEnrolled = await enrollmentStore.isEnrolled(testDid)
@@ -261,6 +263,8 @@ describe('Integration: Full Stratos Flow', () => {
         did: testDid,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: testPds,
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       await actorStore.create(testDid)
@@ -552,6 +556,8 @@ describe('Integration: Full Stratos Flow', () => {
         did: actorDid,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: 'https://pds.test.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
       expect(await enrollmentStore.isEnrolled(actorDid)).toBe(true)
 

@@ -56,11 +56,16 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             did: string
             enrolled: true
             enrolledAt: string
+            active: boolean
+            signingKey: string
             boundaries?: Array<{ value: string }>
+            attestation?: { sig: Uint8Array; signingKey: string }
           } = {
             did,
             enrolled: true,
             enrolledAt: enrollment.enrolledAt.toISOString(),
+            active: enrollment.active,
+            signingKey: enrollment.signingKeyDid,
           }
 
           // Only include boundaries if authenticated
@@ -69,6 +74,24 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             response.boundaries = boundaryValues.map((value: string) => ({
               value,
             }))
+
+            if (boundaryValues.length > 0) {
+              try {
+                response.attestation = await ctx.createAttestation(
+                  did,
+                  boundaryValues,
+                  enrollment.signingKeyDid,
+                )
+              } catch (err) {
+                ctx.logger?.warn(
+                  {
+                    err: err instanceof Error ? err.message : String(err),
+                    did,
+                  },
+                  'failed to generate attestation for status',
+                )
+              }
+            }
           }
 
           ctx.logger?.debug(
