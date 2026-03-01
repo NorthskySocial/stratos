@@ -25,12 +25,12 @@ only to members of specific groups or communities.
 
 ### Key Concepts
 
-| Concept             | Description                                                       |
-| ------------------- | ----------------------------------------------------------------- |
-| **Stratos Service** | A server that stores private records (separate from PDS)          |
-| **Enrollment**      | User must enroll with a Stratos service to create private content |
-| **Domain Boundary** | Specifies which community boundaries can view a record            |
-| **Private Post**    | An `app.stratos.feed.post` record with boundary restrictions      |
+| Concept             | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| **Stratos Service** | A server that stores private records (separate from PDS)              |
+| **Enrollment**      | User must enroll with a Stratos service to create private content     |
+| **Domain Boundary** | Specifies which community boundaries can view a record                |
+| **Private Post**    | An `app.northsky.stratos.feed.post` record with boundary restrictions |
 
 ## Quick Start
 
@@ -73,14 +73,17 @@ const response = await fetch(
     },
     body: JSON.stringify({
       repo: userDid,
-      collection: 'app.stratos.feed.post',
+      collection: 'app.northsky.stratos.feed.post',
       record: {
-        $type: 'app.stratos.feed.post',
+        $type: 'app.northsky.stratos.feed.post',
         text: 'This is a private post for my community!',
         boundary: {
-          $type: 'app.stratos.boundary.defs#Domains',
+          $type: 'app.northsky.stratos.boundary.defs#Domains',
           values: [
-            { $type: 'app.stratos.boundary.defs#Domain', value: 'general' },
+            {
+              $type: 'app.northsky.stratos.boundary.defs#Domain',
+              value: 'general',
+            },
           ],
         },
         createdAt: new Date().toISOString(),
@@ -107,7 +110,7 @@ async function isUserEnrolled(
   did: string,
 ): Promise<boolean> {
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/app.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
+    `${stratosEndpoint}/xrpc/app.northsky.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
   )
   const data = await response.json()
   return data.enrolled === true
@@ -173,11 +176,14 @@ async function handleEnrollmentCallback() {
 
 ```typescript
 interface StratosPost {
-  $type: 'app.stratos.feed.post'
+  $type: 'app.northsky.stratos.feed.post'
   text: string
   boundary: {
-    $type: 'app.stratos.boundary.defs#Domains'
-    values: Array<{ $type: 'app.stratos.boundary.defs#Domain'; value: string }>
+    $type: 'app.northsky.stratos.boundary.defs#Domains'
+    values: Array<{
+      $type: 'app.northsky.stratos.boundary.defs#Domain'
+      value: string
+    }>
   }
   createdAt: string
   facets?: RichTextFacet[]
@@ -205,13 +211,13 @@ async function createPrivatePost(
   await rt.detectFacets(agent) // Your atproto agent
 
   const record: StratosPost = {
-    $type: 'app.stratos.feed.post',
+    $type: 'app.northsky.stratos.feed.post',
     text: rt.text,
     facets: rt.facets,
     boundary: {
-      $type: 'app.stratos.boundary.defs#Domains',
+      $type: 'app.northsky.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
-        $type: 'app.stratos.boundary.defs#Domain',
+        $type: 'app.northsky.stratos.boundary.defs#Domain',
         value: domain,
       })),
     },
@@ -228,7 +234,7 @@ async function createPrivatePost(
       },
       body: JSON.stringify({
         repo: userDid,
-        collection: 'app.stratos.feed.post',
+        collection: 'app.northsky.stratos.feed.post',
         record,
       }),
     },
@@ -274,16 +280,16 @@ async function createPostWithImages(
   )
 
   const record: StratosPost = {
-    $type: 'app.stratos.feed.post',
+    $type: 'app.northsky.stratos.feed.post',
     text,
     embed: {
       $type: 'app.bsky.embed.images',
       images: uploadedImages,
     },
     boundary: {
-      $type: 'app.stratos.boundary.defs#Domains',
+      $type: 'app.northsky.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
-        $type: 'app.stratos.boundary.defs#Domain',
+        $type: 'app.northsky.stratos.boundary.defs#Domain',
         value: domain,
       })),
     },
@@ -299,7 +305,7 @@ async function createPostWithImages(
     },
     body: JSON.stringify({
       repo: userDid,
-      collection: 'app.stratos.feed.post',
+      collection: 'app.northsky.stratos.feed.post',
       record,
     }),
   }).then((r) => r.json())
@@ -319,16 +325,16 @@ async function createReply(
   domains: string[],
 ) {
   const record: StratosPost = {
-    $type: 'app.stratos.feed.post',
+    $type: 'app.northsky.stratos.feed.post',
     text,
     reply: {
       root: { uri: rootPost.uri, cid: rootPost.cid },
       parent: { uri: replyTo.uri, cid: replyTo.cid },
     },
     boundary: {
-      $type: 'app.stratos.boundary.defs#Domains',
+      $type: 'app.northsky.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
-        $type: 'app.stratos.boundary.defs#Domain',
+        $type: 'app.northsky.stratos.boundary.defs#Domain',
         value: domain,
       })),
     },
@@ -343,7 +349,7 @@ async function createReply(
     },
     body: JSON.stringify({
       repo: userDid,
-      collection: 'app.stratos.feed.post',
+      collection: 'app.northsky.stratos.feed.post',
       record,
     }),
   }).then((r) => r.json())
@@ -365,11 +371,11 @@ The stub record looks like this:
 
 ```json
 {
-  "$type": "app.stratos.feed.post",
+  "$type": "app.northsky.stratos.feed.post",
   "source": {
     "vary": "authenticated",
     "subject": {
-      "uri": "at://did:plc:abc/app.stratos.feed.post/tid123",
+      "uri": "at://did:plc:abc/app.northsky.stratos.feed.post/tid123",
       "cid": "bafyreibeef..."
     },
     "service": "did:web:stratos.example.com#atproto_pns"
@@ -502,12 +508,12 @@ Every Stratos record must include a `boundary` specifying which boundaries can a
 ```typescript
 {
   boundary: {
-    $type: 'app.stratos.boundary.defs#Domains',
+    $type: 'app.northsky.stratos.boundary.defs#Domains',
       values
   :
     [
-      {$type: 'app.stratos.boundary.defs#Domain', value: 'general'},
-      {$type: 'app.stratos.boundary.defs#Domain', value: 'writers'}
+      {$type: 'app.northsky.stratos.boundary.defs#Domain', value: 'general'},
+      {$type: 'app.northsky.stratos.boundary.defs#Domain', value: 'writers'}
     ]
   }
 }
@@ -528,7 +534,7 @@ Posts can be visible to multiple domains:
 
 ```typescript
 const crossDomainPost = {
-  $type: 'app.stratos.feed.post',
+  $type: 'app.northsky.stratos.feed.post',
   text: 'Announcement for both groups',
   boundary: {
     values: [{ value: 'fanart' }, { value: 'cosplay' }],
@@ -598,7 +604,7 @@ async function exportRepo(
   if (since) params.set('since', since)
 
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/app.stratos.sync.getRepo?${params}`,
+    `${stratosEndpoint}/xrpc/app.northsky.stratos.sync.getRepo?${params}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },
@@ -620,7 +626,7 @@ async function importRepo(
   carBytes: Uint8Array,
 ): Promise<{ imported: number }> {
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/app.stratos.repo.importRepo`,
+    `${stratosEndpoint}/xrpc/app.northsky.stratos.repo.importRepo`,
     {
       method: 'POST',
       headers: {
@@ -754,7 +760,7 @@ function StratosComposer({ agent, stratosDomains }) {
 
 ```tsx
 function PostCard({ post }) {
-  const isStratos = post.uri.includes('app.stratos.')
+  const isStratos = post.uri.includes('app.northsky.stratos.')
   const domains = post.record?.boundary?.values?.map((d) => d.value) ?? []
 
   return (
@@ -783,7 +789,7 @@ Authorization: Bearer <access_token>
 
 {
   "repo": "<user-did>",
-  "collection": "app.stratos.feed.post",
+  "collection": "app.northsky.stratos.feed.post",
   "record": { ... }
 }
 ```
@@ -810,7 +816,7 @@ Authorization: Bearer <access_token>
 
 {
   "repo": "<user-did>",
-  "collection": "app.stratos.feed.post",
+  "collection": "app.northsky.stratos.feed.post",
   "rkey": "<record-key>"
 }
 ```
@@ -828,7 +834,7 @@ Returns a CAR containing the signed commit, MST inclusion proof nodes, and recor
 #### Export Repository
 
 ```
-GET /xrpc/app.stratos.sync.getRepo?did=<did>[&since=<rev>]
+GET /xrpc/app.northsky.stratos.sync.getRepo?did=<did>[&since=<rev>]
 Authorization: Bearer <access_token>
 Response: application/vnd.ipld.car
 ```
@@ -838,7 +844,7 @@ Returns a full CAR of the repo: all record blocks, MST nodes, and the signed com
 #### Import Repository
 
 ```
-POST /xrpc/app.stratos.repo.importRepo
+POST /xrpc/app.northsky.stratos.repo.importRepo
 Authorization: Bearer <access_token>
 Content-Type: application/vnd.ipld.car
 Response: { "imported": <count> }
@@ -847,16 +853,16 @@ Response: { "imported": <count> }
 #### Check Enrollment
 
 ```
-GET /xrpc/app.stratos.enrollment.status?did=<user-did>
+GET /xrpc/app.northsky.stratos.enrollment.status?did=<user-did>
 ```
 
 ### Record Types
 
-#### app.stratos.feed.post
+#### app.northsky.stratos.feed.post
 
 ```typescript
 interface AppStratosFeedPost {
-  $type: 'app.stratos.feed.post'
+  $type: 'app.northsky.stratos.feed.post'
   text: string // Required, max 3000 chars
   boundary: Boundary // Required
   createdAt: string // Required, ISO datetime
@@ -869,12 +875,12 @@ interface AppStratosFeedPost {
 }
 
 interface Boundary {
-  $type: 'app.stratos.boundary.defs#Domains'
+  $type: 'app.northsky.stratos.boundary.defs#Domains'
   values: Domain[] // Max 10 domains
 }
 
 interface Domain {
-  $type: 'app.stratos.boundary.defs#Domain'
+  $type: 'app.northsky.stratos.boundary.defs#Domain'
   value: string // Domain name, max 253 chars
 }
 ```

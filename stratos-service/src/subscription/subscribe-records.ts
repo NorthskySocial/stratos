@@ -41,7 +41,7 @@ export interface RecordOp {
  * Commit message for subscription
  */
 export interface CommitMessage {
-  $type: 'app.stratos.sync.subscribeRecords#commit'
+  $type: 'app.northsky.stratos.sync.subscribeRecords#commit'
   seq: number
   did: string
   time: string
@@ -53,7 +53,7 @@ export interface CommitMessage {
  * Info message for subscription
  */
 export interface InfoMessage {
-  $type: 'app.stratos.sync.subscribeRecords#info'
+  $type: 'app.northsky.stratos.sync.subscribeRecords#info'
   name: string
   message?: string
 }
@@ -112,7 +112,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
     const oldestSeq = await getOldestSeq(ctx, did)
     if (cursor !== undefined && cursor < oldestSeq) {
       yield {
-        $type: 'app.stratos.sync.subscribeRecords#info',
+        $type: 'app.northsky.stratos.sync.subscribeRecords#info',
         name: 'OutdatedCursor',
         message: `Cursor ${cursor} is too old, some events may be missed`,
       }
@@ -242,7 +242,7 @@ function formatEvent(event: SeqEvent): CommitMessage {
   }
 
   return {
-    $type: 'app.stratos.sync.subscribeRecords#commit',
+    $type: 'app.northsky.stratos.sync.subscribeRecords#commit',
     seq: event.seq,
     did: event.did,
     time: event.time,
@@ -283,7 +283,7 @@ function sleep(ms: number): Promise<void> {
 export function registerSubscribeRecords(ctx: AppContext): void {
   const handler = createSubscribeRecordsHandler(ctx)
 
-  ctx.xrpcServer.streamMethod('app.stratos.sync.subscribeRecords', {
+  ctx.xrpcServer.streamMethod('app.northsky.stratos.sync.subscribeRecords', {
     handler: async function* ({ params, auth, signal }) {
       const typedParams = params as unknown as SubscribeRecordsParams
       const typedAuth = auth as {
