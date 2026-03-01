@@ -183,7 +183,7 @@ Enrolls all three users via the real PDS OAuth authorization flow.
    - Fills the password field (username is pre-filled via `login_hint`) and submits.
    - Clicks the consent/authorize button on the PDS approval page.
    - PDS redirects back to Stratos `/oauth/callback`, which completes enrollment.
-   - Verifies enrollment via `GET /xrpc/app.stratos.enrollment.status?did=<did>`.
+   - Verifies enrollment via `GET /xrpc/app.northsky.stratos.enrollment.status?did=<did>`.
 3. Saves screenshots to `test-data/screenshots/` at each step (useful for debugging selector issues).
 
 **Expected output:**
@@ -269,7 +269,7 @@ All API calls use `Authorization: Bearer <did>` for authentication, which works 
 Phase 4: Post CRUD & Boundary Tests
 
 Test 1: Create post with boundary
-  ✓ Rei created post — at://did:plc:.../app.stratos.feed.post/...
+  ✓ Rei created post — at://did:plc:.../app.northsky.stratos.feed.post/...
 
 Test 2: Owner retrieves own post
   ✓ Rei reads own post — URI matches

@@ -37,6 +37,7 @@ temp/
 # E2E test artifacts
 test-data/
 .env.test
+test-state.json
 
 .session-context.md
 docs/*-prompt.md

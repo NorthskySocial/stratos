@@ -5,9 +5,9 @@ import type { AppContext } from '../../context.js'
  * Register enrollment-related XRPC handlers
  */
 export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
-  // app.stratos.enrollment.status - Check enrollment status
+  // app.northsky.stratos.enrollment.status - Check enrollment status
   router.get(
-    '/xrpc/app.stratos.enrollment.status',
+    '/xrpc/app.northsky.stratos.enrollment.status',
     async (req: Request, res: Response) => {
       const start = Date.now()
       try {

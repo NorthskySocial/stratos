@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.stratos.actor.enrollment",
+  "id": "app.northsky.stratos.actor.enrollment",
   "defs": {
     "main": {
       "type": "record",
@@ -20,7 +20,7 @@
             "description": "List of boundaries the user has access to on this Stratos service.",
             "items": {
               "type": "ref",
-              "ref": "app.stratos.boundary.defs#Domain"
+              "ref": "app.northsky.stratos.boundary.defs#Domain"
             },
             "maxLength": 50
           },
