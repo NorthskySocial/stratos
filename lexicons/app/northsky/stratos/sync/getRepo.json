@@ -16,6 +16,7 @@
           },
           "since": {
             "type": "string",
+            "format": "tid",
             "description": "Optional revision cursor. If provided, only blocks newer than this revision are included."
           }
         }
