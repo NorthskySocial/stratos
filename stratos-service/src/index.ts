@@ -71,10 +71,23 @@ export class StratosServer {
     app.get('/.well-known/did.json', (_req, res) => {
       const serviceDid = ctx.serviceDid
       const serviceEndpoint = cfg.service.publicUrl
+      // publicKeyMultibase is the z-prefixed base58btc fragment from the did:key
+      const publicKeyMultibase = ctx.signingDidKey.slice('did:key:'.length)
 
       res.json({
-        '@context': ['https://www.w3.org/ns/did/v1'],
+        '@context': [
+          'https://www.w3.org/ns/did/v1',
+          'https://w3id.org/security/multikey/v1',
+        ],
         id: serviceDid,
+        verificationMethod: [
+          {
+            id: `${serviceDid}#${cfg.service.serviceFragment}`,
+            type: 'Multikey',
+            controller: serviceDid,
+            publicKeyMultibase,
+          },
+        ],
         service: [
           {
             id: '#stratos',

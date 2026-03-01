@@ -536,6 +536,7 @@ export interface AppContext {
   idResolver: IdResolver
   oauthClient?: NodeOAuthClient
   signingKey: crypto.Keypair
+  signingDidKey: string
   serviceDid: string
   xrpcServer: XrpcServer
   app: express.Application
@@ -653,6 +654,8 @@ export async function createAppContext(
     await fs.writeFile(keyPath, exported)
   }
 
+  const signingDidKey = signingKey.did()
+
   let oauthClient: NodeOAuthClient | undefined
   if (cfg.oauth) {
     oauthClient = await createOAuthClient(
@@ -764,6 +767,7 @@ export async function createAppContext(
     idResolver,
     oauthClient,
     signingKey,
+    signingDidKey,
     serviceDid,
     xrpcServer,
     app,
