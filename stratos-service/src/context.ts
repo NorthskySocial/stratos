@@ -390,7 +390,10 @@ function createAuthVerifiers(
         const did = authHeader.slice(7).trim()
         if (did.startsWith('did:')) {
           const isEnrolled = await enrollmentStore.isEnrolled(did)
-          if (isEnrolled) {
+          const isAllowed = allowListProvider
+            ? await allowListProvider.isAllowed(did)
+            : true
+          if (isEnrolled && isAllowed) {
             return { credentials: { type: 'user', did } }
           }
         }
@@ -450,7 +453,10 @@ function createAuthVerifiers(
         const did = authHeader.slice(7).trim()
         if (did.startsWith('did:')) {
           const isEnrolled = await enrollmentStore.isEnrolled(did)
-          if (isEnrolled) {
+          const isAllowed = allowListProvider
+            ? await allowListProvider.isAllowed(did)
+            : true
+          if (isEnrolled && isAllowed) {
             return { credentials: { type: 'user', did } }
           }
         }
@@ -721,6 +727,7 @@ export async function createAppContext(
       serviceEndpoint: cfg.service.publicUrl,
       tokenVerifier,
       enrollmentStore,
+      allowListProvider,
     })
   }
 
@@ -731,8 +738,8 @@ export async function createAppContext(
     enrollmentStore,
     cfg.admin?.password,
     dpopVerifier,
-    cfg.stratos.devMode === true,
     allowListProvider,
+    cfg.stratos.devMode === true,
   )
 
   const serviceDid = cfg.service.did
