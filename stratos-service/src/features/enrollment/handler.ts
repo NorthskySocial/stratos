@@ -13,19 +13,14 @@ async function tryAuthenticate(
   if (!ctx.dpopVerifier) return null
   if (!req.headers.authorization) return null
 
-  try {
-    return await ctx.dpopVerifier.verify(
-      {
-        method: req.method,
-        url: req.url,
-        headers: req.headers as Record<string, string | string[] | undefined>,
-      },
-      res,
-    )
-  } catch (err) {
-    // Invalid auth should still throw
-    throw err
-  }
+  return await ctx.dpopVerifier.verify(
+    {
+      method: req.method,
+      url: req.url,
+      headers: req.headers as Record<string, string | string[] | undefined>,
+    },
+    res,
+  )
 }
 
 /**
