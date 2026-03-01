@@ -2,6 +2,26 @@ import type { Router, Request, Response } from 'express'
 import type { AppContext } from '../../context.js'
 
 /**
+ * Attempt optional authentication
+ * Returns the authenticated DID if present and valid, null otherwise.
+ */
+async function tryAuthenticate(
+  ctx: AppContext,
+  req: Request,
+  res: Response,
+): Promise<string | null> {
+  try {
+    const result = await ctx.authVerifier.optionalStandard({
+      req,
+      res,
+    } as Parameters<typeof ctx.authVerifier.optionalStandard>[0])
+    return result.credentials.did ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Register enrollment-related XRPC handlers
  */
 export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
@@ -20,27 +40,64 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
           })
         }
 
+        // Attempt optional authentication
+        const auth = await tryAuthenticate(ctx, req, res)
+
         ctx.logger?.debug(
-          { method: 'enrollment.status', did },
+          { method: 'enrollment.status', did, authenticated: !!auth },
           'handling request',
         )
 
         const enrollment = await ctx.enrollmentService.getEnrollment(did)
 
-        ctx.logger?.debug(
-          {
+        // This isn't a super great way to do it but hiding boundaries unless authenticated prevents abuse
+        if (enrollment) {
+          const response: {
+            did: string
+            enrolled: true
+            enrolledAt: string
+            boundaries?: Array<{ value: string }>
+          } = {
             did,
-            enrolled: enrollment !== null,
-            durationMs: Date.now() - start,
-          },
-          'enrollment status checked',
-        )
+            enrolled: true,
+            enrolledAt: enrollment.enrolledAt.toISOString(),
+          }
 
-        res.json({
-          did,
-          enrolled: enrollment !== null,
-          enrolledAt: enrollment?.enrolledAt.toISOString(),
-        })
+          // Only include boundaries if authenticated
+          if (auth) {
+            const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
+            response.boundaries = boundaryValues.map((value: string) => ({
+              value,
+            }))
+          }
+
+          ctx.logger?.debug(
+            {
+              did,
+              enrolled: true,
+              authenticated: !!auth,
+              boundaryCount: response.boundaries?.length ?? 0,
+              durationMs: Date.now() - start,
+            },
+            'enrollment status checked',
+          )
+
+          res.json(response)
+        } else {
+          ctx.logger?.debug(
+            {
+              did,
+              enrolled: false,
+              durationMs: Date.now() - start,
+            },
+            'enrollment status checked',
+          )
+
+          res.json({
+            did,
+            enrolled: false,
+          })
+        }
       } catch (err) {
         ctx.logger?.error(
           {
