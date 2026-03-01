@@ -14,6 +14,27 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { 'content-type': 'application/json' },
   })
 
+const MOCK_SIG = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+const MOCK_SIG_B64 = btoa(String.fromCharCode(...MOCK_SIG))
+const MOCK_USER_KEY = 'did:key:zDnaeUserSigningKey123'
+const MOCK_SERVICE_KEY = 'did:key:zDnaeServiceKey456'
+
+const mockEnrollmentRecord = (valueOverrides?: Record<string, unknown>) => ({
+  uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
+  cid: 'bafytest',
+  value: {
+    service: 'https://stratos.example.com',
+    boundaries: [{ value: 'cosplayers' }],
+    signingKey: MOCK_USER_KEY,
+    attestation: {
+      sig: { $bytes: MOCK_SIG_B64 },
+      signingKey: MOCK_SERVICE_KEY,
+    },
+    createdAt: '2025-01-01T00:00:00Z',
+    ...valueOverrides,
+  },
+})
+
 describe('discovery', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -21,15 +42,7 @@ describe('discovery', () => {
 
   it('returns enrollment when record exists', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: {
-          service: 'https://stratos.example.com',
-          boundaries: [{ value: 'cosplayers' }],
-          createdAt: '2025-01-01T00:00:00Z',
-        },
-      }),
+      jsonResponse(mockEnrollmentRecord()),
     )
 
     const result = await discoverEnrollment(
@@ -40,9 +53,10 @@ describe('discovery', () => {
     expect(result).toEqual({
       service: 'https://stratos.example.com',
       boundaries: [{ value: 'cosplayers' }],
+      signingKey: MOCK_USER_KEY,
+      attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
     })
-
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('com.atproto.repo.getRecord'),
       expect.anything(),
@@ -79,14 +93,7 @@ describe('discovery', () => {
 
   it('normalizes missing boundaries to empty array', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: {
-          service: 'https://stratos.example.com',
-          createdAt: '2025-01-01T00:00:00Z',
-        },
-      }),
+      jsonResponse(mockEnrollmentRecord({ boundaries: undefined })),
     )
 
     const result = await discoverEnrollment(
@@ -98,15 +105,7 @@ describe('discovery', () => {
 
   it('accepts a FetchHandler instead of a PDS URL', async () => {
     const mockHandler = vi.fn(async () =>
-      jsonResponse({
-        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: {
-          service: 'https://stratos.example.com',
-          boundaries: [],
-          createdAt: '2025-01-01T00:00:00Z',
-        },
-      }),
+      jsonResponse(mockEnrollmentRecord({ boundaries: [] })),
     )
 
     const result = await discoverEnrollment('did:plc:test123', mockHandler)
@@ -114,6 +113,8 @@ describe('discovery', () => {
     expect(result).toEqual({
       service: 'https://stratos.example.com',
       boundaries: [],
+      signingKey: MOCK_USER_KEY,
+      attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
     })
     expect(mockHandler).toHaveBeenCalledWith(
