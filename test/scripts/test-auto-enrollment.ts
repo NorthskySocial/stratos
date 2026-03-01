@@ -193,8 +193,8 @@ async function verifyPdsRecord(
   const data = await res.json()
   info(`PDS record: ${JSON.stringify(data.value)}`)
 
-  //eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recordBoundaries = data.value.boundaries.map(
+    //eslint-disable-next-line @typescript-eslint/no-explicit-any
     (b: { value: any }) => b.value,
   )
   const match =
