@@ -20,7 +20,7 @@ The `@northskysocial/stratos-client` package provides the building blocks for en
 
 ## 1. Enrollment Discovery
 
-A user's Stratos enrollment is published as an `app.stratos.actor.enrollment` record on their PDS at the rkey `self` which is created during the enrollment process via oauth w/DPop. The enrollment process also initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. To discover whether a user is enrolled, fetch this record via the standard `com.atproto.repo.getRecord` XRPC endpoint on the user's PDS.
+A user's Stratos enrollment is published as an `app.northsky.stratos.actor.enrollment` record on their PDS at the rkey `self` which is created during the enrollment process via oauth w/DPop. The enrollment process also initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. To discover whether a user is enrolled, fetch this record via the standard `com.atproto.repo.getRecord` XRPC endpoint on the user's PDS.
 
 ### Enrollment record schema
 
@@ -225,7 +225,7 @@ const rpc = createServiceClient(sessionAgent, stratosActive, enrollment)
 await rpc.post('com.atproto.repo.createRecord', {
   input: {
     repo: did,
-    collection: 'app.stratos.feed.post',
+    collection: 'app.northsky.stratos.feed.post',
     record: {
       text: 'hello',
       createdAt: new Date().toISOString(),
@@ -298,10 +298,10 @@ Stratos records use AT Protocol auth scopes. Clients should declare the scopes t
 
 ### Required scopes
 
-| Scope                               | Description                   | Dependency                                   |
-| ----------------------------------- | ----------------------------- | -------------------------------------------- |
-| `repo:app.stratos.actor.enrollment` | Read/write enrollment records | None                                         |
-| `repo:app.stratos.feed.post`        | Read/write Stratos posts      | Requires `repo:app.stratos.actor.enrollment` |
+| Scope                                        | Description                   | Dependency                                            |
+| -------------------------------------------- | ----------------------------- | ----------------------------------------------------- |
+| `repo:app.northsky.stratos.actor.enrollment` | Read/write enrollment records | None                                                  |
+| `repo:app.northsky.stratos.feed.post`        | Read/write Stratos posts      | Requires `repo:app.northsky.stratos.actor.enrollment` |
 
 ### Scope utilities
 
@@ -314,13 +314,13 @@ import {
 
 // Individual scope construction
 const enrollmentScope = buildCollectionScope(STRATOS_SCOPES.enrollment)
-// => 'repo:app.stratos.actor.enrollment:create,update,delete'
+// => 'repo:app.northsky.stratos.actor.enrollment'
 
 // Full scope set for OAuth metadata
 const scopes = buildStratosScopes()
-// => ['transition:generic', 'transition:chat.bsky',
-//     'repo:app.stratos.actor.enrollment:create,update,delete',
-//     'repo:app.stratos.feed.post:create,update,delete']
+// => ['atproto',
+//     'repo:app.northsky.stratos.actor.enrollment',
+//     'repo:app.northsky.stratos.feed.post']
 ```
 
 ### OAuth client metadata
@@ -329,7 +329,7 @@ Add scopes to your `oauth-client-metadata.json`:
 
 ```json
 {
-  "scope": "atproto repo:app.stratos.actor.enrollment repo:app.stratos.feed.post"
+  "scope": "atproto repo:app.northsky.stratos.actor.enrollment repo:app.northsky.stratos.feed.post"
 }
 ```
 
