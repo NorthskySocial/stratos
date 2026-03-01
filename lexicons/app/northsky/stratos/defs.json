@@ -10,7 +10,8 @@
         "vary": {
           "type": "string",
           "description": "Indicates when hydration is needed. 'authenticated' means full content requires viewer authentication.",
-          "knownValues": ["authenticated", "unauthenticated"]
+          "knownValues": ["authenticated", "unauthenticated"],
+          "maxLength": 128
         },
         "subject": {
           "type": "ref",

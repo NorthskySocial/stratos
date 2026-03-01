@@ -20,6 +20,7 @@
           },
           "domain": {
             "type": "string",
+            "maxLength": 253,
             "description": "Optional domain filter. Only events for records with this domain in their boundary will be emitted."
           }
         }
@@ -56,6 +57,7 @@
         },
         "rev": {
           "type": "string",
+          "format": "tid",
           "description": "The repo revision."
         },
         "ops": {
@@ -73,10 +75,12 @@
         "action": {
           "type": "string",
           "knownValues": ["create", "update", "delete"],
+          "maxLength": 32,
           "description": "The type of operation."
         },
         "path": {
           "type": "string",
+          "maxLength": 512,
           "description": "The record path (collection/rkey)."
         },
         "cid": {
@@ -97,10 +101,12 @@
         "name": {
           "type": "string",
           "knownValues": ["OutdatedCursor"],
+          "maxLength": 128,
           "description": "The type of info message."
         },
         "message": {
           "type": "string",
+          "maxLength": 1024,
           "description": "Additional details about the info message."
         }
       }
