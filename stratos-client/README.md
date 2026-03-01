@@ -20,7 +20,7 @@ The `@northskysocial/stratos-client` package provides the building blocks for en
 
 ## 1. Enrollment Discovery
 
-A user's Stratos enrollment is published as an `zone.stratos.actor.enrollment` record on their PDS at the rkey `self` which is created during the enrollment process via oauth w/DPop. The enrollment process also initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. To discover whether a user is enrolled, fetch this record via the standard `com.atproto.repo.getRecord` XRPC endpoint on the user's PDS.
+A user's Stratos enrollment is published as an `zone.stratos.actor.enrollment` record on their PDS collection which is created during the enrollment process via oauth. The enrollment process also initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. A P-256 signing key is generated for the user and stored by the Stratos service — this key is _not yet_ used for record signing, only for enrollment attestation. To discover whether a user is enrolled, fetch this record via the standard `com.atproto.repo.getRecord` XRPC endpoint on the user's PDS and verify using the services public key.
 
 ### Enrollment record schema
 
@@ -28,15 +28,24 @@ A user's Stratos enrollment is published as an `zone.stratos.actor.enrollment` r
 {
   "service": "https://stratos.example.com",
   "boundaries": [{ "value": "WestCoastBestCoast" }, { "value": "TeaDrinkers" }],
+  "signingKey": "did:key:zDnae...",
+  "attestation": {
+    "sig": { "$bytes": "base64..." },
+    "signingKey": "did:key:zDnae..."
+  },
   "createdAt": "2025-01-15T00:00:00.000Z"
 }
 ```
 
-| Field        | Type                       | Description                                              |
-| ------------ | -------------------------- | -------------------------------------------------------- |
-| `service`    | `string` (URI)             | Stratos service endpoint where user's private data lives |
-| `boundaries` | `Array<{ value: string }>` | Domains the user can access                              |
-| `createdAt`  | `string` (datetime)        | When the enrollment was created                          |
+| Field                    | Type                       | Description                                                                                          |
+| ------------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `service`                | `string` (URI)             | Stratos service endpoint where user's private data lives                                             |
+| `boundaries`             | `Array<{ value: string }>` | Domains the user can access                                                                          |
+| `signingKey`             | `string` (did:key)         | User's P-256 public key, generated at enrollment (not yet used for record signing, only attestation) |
+| `attestation`            | `ServiceAttestation`       | Service attestation vouching for enrollment, boundaries, and signing key                             |
+| `attestation.sig`        | `bytes`                    | Signature over DAG-CBOR encoded `{boundaries, did, signingKey}` (sorted keys), signed by service key |
+| `attestation.signingKey` | `string` (did:key)         | The Stratos service's public key used to verify the attestation                                      |
+| `createdAt`              | `string` (datetime)        | When the enrollment was created                                                                      |
 
 ### Discovery function
 
@@ -58,6 +67,60 @@ const another_enrollment = await discoverEnrollment(did, agent.handle)
 `discoverEnrollment` makes a typed `com.atproto.repo.getRecord` call, validates the response shape, and normalizes missing boundaries to an empty array. It accepts either a PDS URL string or an existing `FetchHandler` for authenticated/custom transports.
 
 Discovery should happen at session establishment (login/resume) and the result cached for the session lifetime. Reset enrollment state on account switch or logout.
+
+### Verifying the attestation
+
+The enrollment record's `attestation` field is signed by the Stratos service's private key. To verify the enrollment is authentic, resolve the service's public key from its DID document and check the signature over the DAG-CBOR encoded payload:
+
+```typescript
+import { encode as cborEncode } from '@atcute/cbor'
+import { getPublicKeyFromDidController } from '@atcute/crypto'
+import { getAtprotoVerificationMaterial } from '@atcute/identity'
+import { WebDidDocumentResolver } from '@atcute/identity-resolver'
+import type { StratosEnrollment } from '@northskysocial/stratos-client'
+
+async function verifyEnrollmentAttestation(
+  enrollment: StratosEnrollment,
+  did: string,
+): Promise<boolean> {
+  const serviceDid = new URL(enrollment.service).hostname
+    .replaceAll('.', ':')
+    .replace(/^/, 'did:web:')
+
+  const resolver = new WebDidDocumentResolver()
+  const doc = await resolver.resolve(serviceDid as `did:web:${string}`)
+
+  const material = getAtprotoVerificationMaterial(doc)
+  if (!material) return false
+
+  const { publicKeyBytes } = getPublicKeyFromDidController(material)
+
+  // attestation payload is DAG-CBOR with sorted keys: {boundaries, did, signingKey}
+  const boundaries = enrollment.boundaries.map((b) => b.value).sort()
+  const payload = cborEncode({
+    boundaries,
+    did,
+    signingKey: enrollment.signingKey,
+  })
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    publicKeyBytes,
+    { name: 'ECDSA', namedCurve: 'K-256' },
+    false,
+    ['verify'],
+  )
+
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    key,
+    enrollment.attestation.sig,
+    payload,
+  )
+}
+```
+
+This confirms the Stratos service vouches for the user's DID, boundaries, and signing key binding. The service's `did:web` DID document is the root of trust — cache the resolved key to avoid repeated lookups.
 
 ---
 
@@ -289,6 +352,10 @@ const verified2 = await fetchAndVerifyRecord(serviceUrl, did, collection, rkey)
 ### Trust model
 
 Service signature verification proves the Stratos service vouches for the record's inclusion in the user's repository. It does **not** prove the user authored the record — the service signs commits on behalf of users. The service's `did:web` DID document is the root of trust.
+
+The enrollment attestation provides a separate trust signal: the service's signature over the user's DID, boundaries, and signing key proves the service vouches for that binding at enrollment time. Clients can verify this attestation using the service's public key from the `attestation.signingKey` field.
+
+> **Note:** The user's per-enrollment P-256 signing key (`signingKey` field) is generated by the Stratos service at enrollment time but is **not yet used for record signing**. Currently it only appears in the attestation payload to bind the key to the user's identity. Future versions may use this key for user-level commit signing, enabling stronger provenance guarantees where individual records can be verified as authored by the user rather than just vouched for by the service.
 
 ---
 
