@@ -94,7 +94,6 @@ function createMockDpopVerifier(
   } as unknown as DpopVerifier
 }
 
-
 describe('Status endpoint with authentication', () => {
   it('returns enrolled status with boundaries when authenticated', async () => {
     await fc.assert(
@@ -135,7 +134,11 @@ describe('Status endpoint with authentication', () => {
           })
 
           registerEnrollmentHandlers(router, ctx)
-          const res = await invokeRoute(router, { did }, { authorization: 'DPoP token' })
+          const res = await invokeRoute(
+            router,
+            { did },
+            { authorization: 'DPoP token' },
+          )
 
           expect(res.statusCode).toBe(200)
 
