@@ -44,6 +44,8 @@ export interface OAuthRoutesConfig {
   allowListProvider?: AllowListProvider
   /** Logger for OAuth events */
   logger?: Logger
+  /** Initialize the actor store and repo for a newly enrolled user */
+  initRepo?: (did: string) => Promise<void>
 }
 
 /**
@@ -60,6 +62,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     defaultBoundaries = [],
     allowListProvider,
     logger,
+    initRepo,
   } = config
 
   /**
@@ -157,6 +160,22 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           boundaries,
         })
 
+        // Initialize actor store and repo with an empty signed commit
+        if (initRepo) {
+          try {
+            await initRepo(did)
+          } catch (initErr) {
+            logger?.warn(
+              {
+                err:
+                  initErr instanceof Error ? initErr.message : String(initErr),
+                did,
+              },
+              'failed to initialize repo during enrollment',
+            )
+          }
+        }
+
         // Write profile record to user's PDS for endpoint discovery
         try {
           const oauthSession = await oauthClient.restore(did)
@@ -164,7 +183,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
           await agent.com.atproto.repo.putRecord({
             repo: did,
-            collection: 'app.stratos.actor.enrollment',
+            collection: 'app.northsky.stratos.actor.enrollment',
             rkey: 'self',
             record: {
               service: serviceEndpoint,

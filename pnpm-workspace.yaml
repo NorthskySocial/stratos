@@ -1,3 +1,4 @@
 packages:
   - 'stratos-core'
   - 'stratos-service'
+  - 'stratos-client'

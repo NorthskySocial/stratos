@@ -6,7 +6,7 @@
   "description": "Stratos - Private namespace service for ATProtocol",
   "repository": {
     "type": "git",
-    "url": "https://github.com/example/stratos.git"
+    "url": "https://github.com/NorthskySocial/stratos.git"
   },
   "license": "MIT",
   "scripts": {
@@ -20,6 +20,7 @@
     "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/deno": "^2.5.0",
     "@types/node": "^25.2.1",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
@@ -29,6 +30,10 @@
     "globals": "^17.3.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@vitest/coverage-v8": "^4.0.18"
   }
 }

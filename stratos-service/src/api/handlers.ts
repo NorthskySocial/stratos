@@ -9,15 +9,28 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import * as dagCbor from '@ipld/dag-cbor'
+import * as AtcuteCbor from '@atcute/cbor'
+import type { CidLink } from '@atcute/cid'
+import * as AtcuteCid from '@atcute/cid'
+import * as CAR from '@atcute/car'
+import { fromUint8Array as repoFromCar } from '@atcute/repo'
+import {
+  NodeStore,
+  OverlayBlockStore,
+  MemoryBlockStore,
+  buildInclusionProof,
+} from '@atcute/mst'
 import type { AppContext } from '../context.js'
 import {
   createRecord,
   deleteRecord,
   getRecord,
   listRecords,
-  updateRecord,
+  applyWritesBatch,
+  type BatchWriteOp,
 } from './records.js'
 import { registerHydrationHandlers } from '../features/index.js'
+import { StratosBlockStoreReader } from '../features/mst/index.js'
 import { Did } from '@atproto/api'
 
 type HandlerAuth = {
@@ -478,7 +491,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         'handling request',
       )
 
-      const results: Array<unknown> = []
+      const batchOps: BatchWriteOp[] = []
 
       for (const write of body.writes) {
         const type = write.$type
@@ -486,21 +499,11 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           type === 'com.atproto.repo.applyWrites#create' ||
           type === '#create'
         ) {
-          const result = await createRecord(
-            ctx,
-            {
-              repo: body.repo as Did,
-              collection: write.collection,
-              rkey: write.rkey,
-              record: write.value,
-              validate: body.validate,
-            },
-            did,
-          )
-          results.push({
-            uri: result.uri,
-            cid: result.cid,
-            validationStatus: result.validationStatus,
+          batchOps.push({
+            action: 'create',
+            collection: write.collection,
+            rkey: write.rkey ?? '',
+            record: write.value,
           })
         } else if (
           type === 'com.atproto.repo.applyWrites#update' ||
@@ -509,21 +512,11 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           if (!write.rkey) {
             throw new InvalidRequestError('rkey is required for update')
           }
-          const result = await updateRecord(
-            ctx,
-            {
-              repo: body.repo as Did,
-              collection: write.collection,
-              rkey: write.rkey,
-              record: write.value,
-              validate: body.validate,
-            },
-            did,
-          )
-          results.push({
-            uri: result.uri,
-            cid: result.cid,
-            validationStatus: result.validationStatus,
+          batchOps.push({
+            action: 'update',
+            collection: write.collection,
+            rkey: write.rkey,
+            record: write.value,
           })
         } else if (
           type === 'com.atproto.repo.applyWrites#delete' ||
@@ -532,20 +525,17 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           if (!write.rkey) {
             throw new InvalidRequestError('rkey is required for delete')
           }
-          await deleteRecord(
-            ctx,
-            {
-              repo: body.repo,
-              collection: write.collection,
-              rkey: write.rkey,
-            },
-            did,
-          )
-          results.push({})
+          batchOps.push({
+            action: 'delete',
+            collection: write.collection,
+            rkey: write.rkey,
+          })
         } else {
           throw new InvalidRequestError(`Unknown write type: ${type}`)
         }
       }
+
+      const batchResult = await applyWritesBatch(ctx, did, batchOps)
 
       ctx.logger?.info(
         { count: body.writes.length, durationMs: Date.now() - start },
@@ -554,7 +544,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
       return {
         encoding: 'application/json',
-        body: { results },
+        body: { results: batchResult.results, commit: batchResult.commit },
       }
     },
   })
@@ -592,11 +582,9 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  // Stratos does not maintain a Merkle Search Tree or signed commits, so this
-  // endpoint returns a minimal CAR containing only the record block. This
-  // supports CID verification (hash block bytes → compare to claimed CID) but
-  // does NOT support full ATProto repo-proof verification (signed commit + MST
-  // inclusion proof) that the reference PDS provides.
+  // Returns a CAR containing the commit block, MST inclusion proof, and
+  // record block when an MST commit exists. Falls back to a minimal
+  // single-block CAR for legacy repos without an MST commit.
   xrpc.method('com.atproto.sync.getRecord', {
     handler: async ({ params }: HandlerContext) => {
       const did = params.did as string
@@ -612,54 +600,99 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         throw new InvalidRequestError('Could not find repo', 'RepoNotFound')
       }
 
-      const result = await ctx.actorStore.read(did, async (store) => {
+      const car = await ctx.actorStore.read(did, async (store) => {
         const uri = new AtUri(`at://${did}/${collection}/${rkey}`)
         const record = await store.record.getRecord(uri, null)
         if (!record) {
           throw new InvalidRequestError('Record not found', 'RecordNotFound')
         }
 
-        const recordCid = CID.parse(record.cid)
+        const commitRoot = await store.repo.getRoot()
 
-        // Use the stored block bytes rather than re-encoding, because the
-        // original bytes are what the CID was computed over.
+        if (commitRoot) {
+          // MST path: return commit + MST inclusion proof + record block
+          const adapter = new StratosBlockStoreReader(store.repo)
+          const overlay = new OverlayBlockStore(new MemoryBlockStore(), adapter)
+          const nodeStore = new NodeStore(overlay)
+
+          const commitRootStr = commitRoot.toString()
+          const commitBytes = await adapter.get(commitRootStr)
+          if (!commitBytes) {
+            throw new InvalidRequestError(
+              'Commit block not found',
+              'RepoNotFound',
+            )
+          }
+          const commitData = AtcuteCbor.decode(commitBytes) as { data: CidLink }
+          const mstRoot = commitData.data.$link
+
+          const proofCids = await buildInclusionProof(
+            nodeStore,
+            mstRoot,
+            `${collection}/${rkey}`,
+          )
+
+          // Collect all block CIDs: commit + proof nodes + record
+          const blockCids = new Set<string>([commitRootStr, ...proofCids])
+          blockCids.add(record.cid)
+
+          // Build CAR
+          const rootLink: CidLink = { $link: commitRootStr }
+          const carBlocks: Array<{ cid: Uint8Array; data: Uint8Array }> = []
+          for (const cidStr of blockCids) {
+            const bytes = await adapter.get(cidStr)
+            if (!bytes) continue
+            const parsed = AtcuteCid.fromString(cidStr)
+            carBlocks.push({ cid: parsed.bytes, data: bytes })
+          }
+
+          const chunks: Uint8Array[] = []
+          for await (const chunk of CAR.writeCarStream([rootLink], carBlocks)) {
+            chunks.push(chunk)
+          }
+          const totalLength = chunks.reduce((sum, c) => sum + c.length, 0)
+          const result = new Uint8Array(totalLength)
+          let offset = 0
+          for (const chunk of chunks) {
+            result.set(chunk, offset)
+            offset += chunk.length
+          }
+          return result
+        }
+
+        // Legacy fallback: minimal single-block CAR
+        const recordCid = CID.parse(record.cid)
         let recordBytes = await store.repo.getBytes(recordCid)
         if (!recordBytes) {
-          // Fall back to re-encoding from the parsed value if the block isn't
-          // in the repo store (shouldn't happen in normal operation)
           recordBytes = cborEncode(record.value as LexValue)
         }
 
-        return { recordCid, recordBytes }
+        const header = dagCbor.encode({ version: 1, roots: [recordCid] })
+        const headerVarInt = encodeVarint(header.length)
+        const cidBytes = recordCid.bytes
+        const blockVarInt = encodeVarint(cidBytes.length + recordBytes.length)
+
+        const carLength =
+          headerVarInt.length +
+          header.length +
+          blockVarInt.length +
+          cidBytes.length +
+          recordBytes.length
+
+        const carBuf = new Uint8Array(carLength)
+        let off = 0
+        carBuf.set(headerVarInt, off)
+        off += headerVarInt.length
+        carBuf.set(header, off)
+        off += header.length
+        carBuf.set(blockVarInt, off)
+        off += blockVarInt.length
+        carBuf.set(cidBytes, off)
+        off += cidBytes.length
+        carBuf.set(recordBytes, off)
+
+        return carBuf
       })
-
-      const { recordCid, recordBytes } = result
-
-      // Build CAR v1 following the same structure as @atproto/repo writeCarStream:
-      // header varint + CBOR header + (block varint + CID bytes + block data)*
-      const header = dagCbor.encode({ version: 1, roots: [recordCid] })
-      const headerVarInt = encodeVarint(header.length)
-      const cidBytes = recordCid.bytes
-      const blockVarInt = encodeVarint(cidBytes.length + recordBytes.length)
-
-      const carLength =
-        headerVarInt.length +
-        header.length +
-        blockVarInt.length +
-        cidBytes.length +
-        recordBytes.length
-
-      const car = new Uint8Array(carLength)
-      let offset = 0
-      car.set(headerVarInt, offset)
-      offset += headerVarInt.length
-      car.set(header, offset)
-      offset += header.length
-      car.set(blockVarInt, offset)
-      offset += blockVarInt.length
-      car.set(cidBytes, offset)
-      offset += cidBytes.length
-      car.set(recordBytes, offset)
 
       return {
         encoding: 'application/vnd.ipld.car',
@@ -668,7 +701,210 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  xrpc.method('app.stratos.enrollment.status', {
+  xrpc.method('app.northsky.stratos.sync.getRepo', {
+    handler: async ({ params }: HandlerContext) => {
+      const did = params.did as string
+      if (!did) {
+        throw new InvalidRequestError('did is required')
+      }
+
+      const exists = await ctx.actorStore.exists(did)
+      if (!exists) {
+        throw new InvalidRequestError('Could not find repo', 'RepoNotFound')
+      }
+
+      const car = await ctx.actorStore.read(did, async (store) => {
+        const commitRoot = await store.repo.getRoot()
+        if (!commitRoot) {
+          throw new InvalidRequestError('Repo has no commits', 'RepoNotFound')
+        }
+
+        const commitRootStr = commitRoot.toString()
+        const rootLink: CidLink = { $link: commitRootStr }
+        const carBlocks: Array<{ cid: Uint8Array; data: Uint8Array }> = []
+
+        for await (const block of store.repo.iterateCarBlocks()) {
+          const parsed = AtcuteCid.fromString(block.cid.toString())
+          carBlocks.push({ cid: parsed.bytes, data: block.bytes })
+        }
+
+        const chunks: Uint8Array[] = []
+        for await (const chunk of CAR.writeCarStream([rootLink], carBlocks)) {
+          chunks.push(chunk)
+        }
+        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0)
+        const result = new Uint8Array(totalLength)
+        let offset = 0
+        for (const chunk of chunks) {
+          result.set(chunk, offset)
+          offset += chunk.length
+        }
+        return result
+      })
+
+      return {
+        encoding: 'application/vnd.ipld.car',
+        body: car,
+      }
+    },
+  })
+
+  xrpc.method('app.northsky.stratos.repo.importRepo', {
+    auth: authVerifier.standard,
+    handler: async ({ input, auth }: HandlerContext) => {
+      const start = Date.now()
+      const { did } = validateUserAuth(auth)
+
+      const carBytes = input?.body as Uint8Array
+      if (!carBytes || !(carBytes instanceof Uint8Array)) {
+        throw new InvalidRequestError('CAR file body required', 'InvalidCar')
+      }
+
+      if (carBytes.length > ctx.cfg.stratos.importMaxBytes) {
+        throw new InvalidRequestError(
+          `CAR file exceeds maximum size of ${ctx.cfg.stratos.importMaxBytes} bytes`,
+          'InvalidCar',
+        )
+      }
+
+      const isEnrolled = await ctx.enrollmentStore.isEnrolled(did)
+      if (!isEnrolled) {
+        throw new InvalidRequestError('User is not enrolled', 'NotEnrolled')
+      }
+
+      const exists = await ctx.actorStore.exists(did)
+      if (exists) {
+        const hasRoot = await ctx.actorStore.read(did, async (store) => {
+          return (await store.repo.getRoot()) !== null
+        })
+        if (hasRoot) {
+          throw new InvalidRequestError(
+            'Repo already exists for this DID',
+            'RepoAlreadyExists',
+          )
+        }
+      } else {
+        await ctx.actorStore.create(did)
+      }
+
+      // Parse and verify CAR
+      const carReader = CAR.fromUint8Array(carBytes)
+      const roots = carReader.roots
+      if (roots.length !== 1) {
+        throw new InvalidRequestError(
+          'CAR must have exactly one root',
+          'InvalidCar',
+        )
+      }
+      const rootCidLink = roots[0]
+
+      // Read all blocks from CAR, verifying CID integrity
+      const blocks = new Map<string, Uint8Array>()
+      for (const entry of carReader) {
+        const cidStr = AtcuteCid.toString(entry.cid)
+        const blockBytes = new Uint8Array(
+          entry.bytes,
+        ) as Uint8Array<ArrayBuffer>
+        const expected = await AtcuteCid.create(
+          entry.cid.codec as 0x55 | 0x71,
+          blockBytes,
+        )
+        if (AtcuteCid.toString(expected) !== cidStr) {
+          throw new InvalidRequestError(
+            'CID does not match block bytes',
+            'InvalidCar',
+          )
+        }
+        blocks.set(cidStr, blockBytes)
+      }
+
+      // Decode and validate the commit
+      const commitBytes = blocks.get(rootCidLink.$link)
+      if (!commitBytes) {
+        throw new InvalidRequestError(
+          'Root commit block not found in CAR',
+          'InvalidCar',
+        )
+      }
+      const commit = AtcuteCbor.decode(commitBytes) as {
+        did: string
+        data: CidLink
+        rev: string
+        version: number
+        sig: Uint8Array
+      }
+      if (commit.did !== did) {
+        throw new InvalidRequestError(
+          'Commit DID does not match authenticated user',
+          'InvalidCar',
+        )
+      }
+      if (!commit.rev || !commit.data?.$link) {
+        throw new InvalidRequestError('Invalid commit structure', 'InvalidCar')
+      }
+
+      // Use @atcute/repo to iterate records from the MST
+      const records: Array<{ collection: string; rkey: string; cid: string }> =
+        []
+      for (const entry of repoFromCar(carBytes)) {
+        records.push({
+          collection: entry.collection,
+          rkey: entry.rkey,
+          cid: entry.cid.$link,
+        })
+      }
+
+      const imported = await ctx.actorStore.transact(did, async (store) => {
+        let count = 0
+
+        // Store all blocks from the CAR
+        for (const [cidStr, bytes] of blocks) {
+          await store.repo.putBlock(CID.parse(cidStr), bytes, commit.rev)
+        }
+
+        // Set the repo root
+        await store.repo.updateRoot(
+          CID.parse(rootCidLink.$link),
+          commit.rev,
+          did,
+        )
+
+        // Index each record
+        for (const record of records) {
+          const recordBytes = blocks.get(record.cid)
+          if (!recordBytes) continue
+
+          const uri = new AtUri(
+            `at://${did}/${record.collection}/${record.rkey}`,
+          )
+          const value = dagCbor.decode(recordBytes) as Record<string, unknown>
+
+          await store.record.indexRecord(
+            uri,
+            CID.parse(record.cid),
+            value,
+            'create',
+            commit.rev,
+          )
+          count++
+        }
+
+        return count
+      })
+
+      ctx.logger?.info(
+        { did, imported, durationMs: Date.now() - start },
+        'repo imported',
+      )
+
+      return {
+        encoding: 'application/json',
+        body: { imported },
+      }
+    },
+  })
+
+  xrpc.method('app.northsky.stratos.enrollment.status', {
     handler: async ({ params }: HandlerContext) => {
       const did = params.did as string
       if (!did) {

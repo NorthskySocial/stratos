@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.stratos.feed.post",
+  "id": "app.northsky.stratos.feed.post",
   "defs": {
     "main": {
       "type": "record",
@@ -12,7 +12,7 @@
         "properties": {
           "source": {
             "type": "ref",
-            "ref": "app.stratos.defs#source",
+            "ref": "app.northsky.stratos.defs#source",
             "description": "When present, indicates this is a stub record. Full content should be hydrated from the referenced service."
           },
           "text": {
@@ -24,7 +24,7 @@
           "boundary": {
             "type": "union",
             "description": "Limit exposure to defined domains. Omitted in stub records.",
-            "refs": ["app.stratos.boundary.defs#Domains"]
+            "refs": ["app.northsky.stratos.boundary.defs#Domains"]
           },
           "facets": {
             "type": "array",

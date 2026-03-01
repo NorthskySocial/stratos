@@ -4,6 +4,7 @@ import cors from 'cors'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
+import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type AppContext,
@@ -17,6 +18,10 @@ import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
 import { registerEnrollmentHandlers } from './features/index.js'
+import {
+  StratosBlockStoreReader,
+  signAndPersistCommit,
+} from './features/mst/index.js'
 
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
@@ -50,7 +55,7 @@ export class StratosServer {
     })
 
     const app = ctx.app
-    app.use(cors())
+    app.use(cors({ exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate'] }))
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {
       if (req.path.startsWith('/xrpc/')) {
@@ -66,10 +71,23 @@ export class StratosServer {
     app.get('/.well-known/did.json', (_req, res) => {
       const serviceDid = ctx.serviceDid
       const serviceEndpoint = cfg.service.publicUrl
+      // publicKeyMultibase is the z-prefixed base58btc fragment from the did:key
+      const publicKeyMultibase = ctx.signingDidKey.slice('did:key:'.length)
 
       res.json({
-        '@context': ['https://www.w3.org/ns/did/v1'],
+        '@context': [
+          'https://www.w3.org/ns/did/v1',
+          'https://w3id.org/security/multikey/v1',
+        ],
         id: serviceDid,
+        verificationMethod: [
+          {
+            id: `${serviceDid}#${cfg.service.serviceFragment}`,
+            type: 'Multikey',
+            controller: serviceDid,
+            publicKeyMultibase,
+          },
+        ],
         service: [
           {
             id: '#stratos',
@@ -101,6 +119,17 @@ export class StratosServer {
         defaultBoundaries: cfg.stratos.allowedDomains,
         allowListProvider: ctx.allowListProvider,
         logger: ctx.logger,
+        initRepo: async (did: string) => {
+          await ctx.actorStore.create(did)
+          await ctx.actorStore.transact(did, async (store) => {
+            const adapter = new StratosBlockStoreReader(store.repo)
+            const unsigned = await buildCommit(adapter, null, {
+              did,
+              writes: [],
+            })
+            await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+          })
+        },
       })
       app.use('/oauth', oauthRoutes)
     }
