@@ -71,8 +71,19 @@ function createCtx(opts: {
   getEnrollment: (did: string) => Promise<Enrollment | null>
   getBoundaries: (did: string) => Promise<string[]>
   authenticatedDid?: string | null
+  createAttestation?: (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ) => Promise<{ sig: Uint8Array; signingKey: string }>
 }): AppContext {
   const authenticatedDid = opts.authenticatedDid ?? null
+  const createAttestation =
+    opts.createAttestation ??
+    (async () => ({
+      sig: new Uint8Array([0xde, 0xad]),
+      signingKey: 'did:key:zDnaeServiceKey',
+    }))
   return {
     enrollmentService: { getEnrollment: opts.getEnrollment },
     boundaryResolver: { getBoundaries: opts.getBoundaries },
@@ -84,6 +95,7 @@ function createCtx(opts: {
         return { credentials: { type: 'none' } }
       },
     },
+    createAttestation,
     logger: undefined,
   } as unknown as AppContext
 }
@@ -109,6 +121,8 @@ describe('Status endpoint with authentication', () => {
                   boundaries,
                   enrolledAt,
                   pdsEndpoint: 'https://pds.example.com',
+                  signingKeyDid: 'did:key:zDnaeTestUser123',
+                  active: true,
                 }
               }
               return null
@@ -134,6 +148,9 @@ describe('Status endpoint with authentication', () => {
           expect(body.enrolled).toBe(true)
           expect(body.enrolledAt).toBe(enrolledAt.toISOString())
 
+          // signingKey should be included when enrollment has one
+          expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
           // Boundaries should be included when authenticated
           const returnedBoundaries = body.boundaries as Array<{ value: string }>
           expect(returnedBoundaries).toBeDefined()
@@ -146,6 +163,16 @@ describe('Status endpoint with authentication', () => {
           for (const b of returnedBoundaries) {
             expect(Object.keys(b)).toEqual(['value'])
             expect(typeof b.value).toBe('string')
+          }
+
+          // Attestation should be present when authenticated with boundaries and signing key
+          if (boundaries.length > 0) {
+            const attestation = body.attestation as {
+              sig: unknown
+              signingKey: string
+            }
+            expect(attestation).toBeDefined()
+            expect(attestation.signingKey).toBe('did:key:zDnaeServiceKey')
           }
         },
       ),
@@ -173,6 +200,8 @@ describe('Status endpoint with authentication', () => {
                   boundaries,
                   enrolledAt,
                   pdsEndpoint: 'https://pds.example.com',
+                  signingKeyDid: 'did:key:zDnaeTestUser123',
+                  active: true,
                 }
               }
               return null
@@ -191,8 +220,12 @@ describe('Status endpoint with authentication', () => {
           expect(body.enrolled).toBe(true)
           expect(body.enrolledAt).toBe(enrolledAt.toISOString())
 
-          // Boundaries should NOT be included when not authenticated
+          // signingKey should still be present even when unauthenticated
+          expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // Boundaries and attestation should NOT be included when not authenticated
           expect(body.boundaries).toBeUndefined()
+          expect(body.attestation).toBeUndefined()
         },
       ),
       { numRuns: 100 },

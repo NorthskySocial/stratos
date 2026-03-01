@@ -224,6 +224,8 @@ describe('API Records', () => {
         did: testDid,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: 'https://pds.test.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const isEnrolled = await testContext.enrollmentStore.isEnrolled(testDid)
@@ -259,6 +261,8 @@ describe('API Records', () => {
       await testContext.enrollmentStore.enroll({
         did: testDid,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const mockCtx = {
@@ -317,6 +321,8 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did: 'did:plc:enrolled',
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const result = await store.isEnrolled('did:plc:enrolled')
@@ -330,6 +336,8 @@ describe('SqliteEnrollmentStore', () => {
         did: 'did:plc:newuser',
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const result = await store.getEnrollment('did:plc:newuser')
@@ -345,12 +353,16 @@ describe('SqliteEnrollmentStore', () => {
         did,
         enrolledAt: '2024-01-01T00:00:00Z',
         pdsEndpoint: 'https://old.pds.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       await store.enroll({
         did,
         enrolledAt: '2024-06-01T00:00:00Z',
         pdsEndpoint: 'https://new.pds.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const result = await store.getEnrollment(did)
@@ -366,6 +378,8 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       expect(await store.isEnrolled(did)).toBe(true)
@@ -394,6 +408,8 @@ describe('SqliteEnrollmentStore', () => {
         did,
         enrolledAt,
         pdsEndpoint: 'https://pds.test.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const result = await store.getEnrollment(did)
@@ -409,6 +425,8 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const result = await store.getEnrollment(did)
@@ -421,6 +439,8 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did: 'did:plc:nobounds',
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const boundaries = await store.getBoundaries('did:plc:nobounds')
@@ -432,6 +452,8 @@ describe('SqliteEnrollmentStore', () => {
         did: 'did:plc:withbounds',
         enrolledAt: new Date().toISOString(),
         boundaries: ['engineering', 'design'],
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const boundaries = await store.getBoundaries('did:plc:withbounds')
@@ -447,12 +469,16 @@ describe('SqliteEnrollmentStore', () => {
         did,
         enrolledAt: new Date().toISOString(),
         boundaries: ['old'],
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
         boundaries: ['new1', 'new2'],
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       const boundaries = await store.getBoundaries(did)
@@ -469,6 +495,8 @@ describe('SqliteEnrollmentStore', () => {
         did,
         enrolledAt: new Date().toISOString(),
         boundaries: ['a', 'b'],
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
       })
 
       await store.unenroll(did)

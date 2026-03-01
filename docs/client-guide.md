@@ -777,6 +777,78 @@ function PostCard({ post }) {
 
 ---
 
+## Attestation Verification
+
+### Overview
+
+Each enrolled user's enrollment record includes a **service attestation** — a DAG-CBOR payload
+signed by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment
+and boundaries offline without querying the enrollment status endpoint on every request.
+
+### Enrollment Record Fields
+
+The `app.northsky.stratos.actor.enrollment` record on the user's PDS includes:
+
+| Field         | Type                 | Description                       |
+| ------------- | -------------------- | --------------------------------- |
+| `service`     | string               | Stratos service endpoint URL      |
+| `boundaries`  | `Domain[]`           | User's boundary assignments       |
+| `signingKey`  | string (did:key)     | User's P-256 public key           |
+| `attestation` | `serviceAttestation` | Service attestation of enrollment |
+| `createdAt`   | string               | ISO 8601 enrollment timestamp     |
+
+The `serviceAttestation` object contains:
+
+| Field        | Type             | Description                                     |
+| ------------ | ---------------- | ----------------------------------------------- |
+| `sig`        | bytes            | secp256k1 signature over the CBOR payload       |
+| `signingKey` | string (did:key) | Service's public key that created the signature |
+
+### Verifying an Attestation
+
+To verify offline, reconstruct the CBOR payload and check the signature:
+
+```typescript
+import { encode as cborEncode } from '@atcute/cbor'
+import { verifySignature } from '@atproto/crypto'
+
+async function verifyAttestation(
+  enrollmentRecord: {
+    signingKey: string
+    attestation: { sig: Uint8Array; signingKey: string }
+    boundaries: Array<{ value: string }>
+  },
+  userDid: string,
+): Promise<boolean> {
+  const sortedBoundaries = enrollmentRecord.boundaries
+    .map((b) => b.value)
+    .sort()
+
+  const payload = cborEncode({
+    boundaries: sortedBoundaries,
+    did: userDid,
+    signingKey: enrollmentRecord.signingKey,
+  })
+
+  return verifySignature(
+    enrollmentRecord.attestation.signingKey,
+    payload,
+    enrollmentRecord.attestation.sig,
+  )
+}
+```
+
+### Trust Model
+
+- The attestation proves that the Stratos service attested the user's enrollment and boundaries at
+  a point in time.
+- For high-stakes operations, AppViews should additionally check the live enrollment status endpoint
+  to confirm the enrollment hasn't been revoked since the attestation was created.
+- The enrollment status endpoint (`app.northsky.stratos.enrollment.status`) is the canonical trust
+  anchor.
+
+---
+
 ## API Reference
 
 ### Endpoints

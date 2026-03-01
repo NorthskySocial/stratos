@@ -175,6 +175,11 @@ export class StratosServer {
             await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
           })
         },
+        createSigningKey: async (did: string) => {
+          const keypair = await ctx.actorStore.createSigningKey(did)
+          return keypair.did()
+        },
+        createAttestation: ctx.createAttestation,
       })
       app.use('/oauth', oauthRoutes)
     }
