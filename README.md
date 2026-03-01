@@ -1,12 +1,35 @@
-# Stratos - Private Namespace Service for ATProtocol
+# Stratos - Private Shared Data for ATProtocol
 
-Stratos provides isolated, private data storage within the ATProtocol ecosystem. Unlike public
-namespaces like `app.bsky`, stratos records and blobs are:
+Stratos provides isolated, private data storage within the ATProtocol ecosystem. ATprotocol is designed for data to be in the public to allow for open inter-operability. This however means that there is a lack of privacy on protocol, Stratos solves this while remaining "on protocol" by:
 
-- Stored in a dedicated Stratos service (separate from PDS)
+- Storing records and blobs in a dedicated Stratos service (separate from PDS)
+- Allowing users to enroll in the service via oauth to store their data
 - Accessible only to enrolled users
 - Scoped by configurable boundary domains
-- Excluded from public sync/export
+- Excluded from public/unauthenticated sync/export
+
+## Boundary Behavior
+
+Records stored in Stratos can be scoped to boundary domains. Access is determined during hydration based on whether the authenticated viewer shares boundaries with the record:
+
+```mermaid
+flowchart TD
+    A[Viewer Requests Record] --> B{Is viewer the owner?}
+    B -->|Yes| C[✓ Grant Access]
+    B -->|No| D{Is viewer enrolled?}
+    D -->|No| E[✗ Deny Access]
+    D -->|Yes| F{Record has boundaries?}
+    F -->|No boundaries| G[✓ Grant Access<br/>Public to enrolled users]
+    F -->|Has boundaries| H{Viewer shares<br/>any boundary?}
+    H -->|Yes| I[✓ Grant Access]
+    H -->|No| J[✗ Deny Access]
+
+    style C fill:#90EE90
+    style G fill:#90EE90
+    style I fill:#90EE90
+    style E fill:#FFB6C1
+    style J fill:#FFB6C1
+```
 
 ## Quick Start
 
@@ -63,16 +86,18 @@ STRATOS_S3_SECRET_KEY=minioadmin
 
 The Stratos service is configured via environment variables:
 
-| Variable                        | Description                                       | Default     |
-| ------------------------------- | ------------------------------------------------- | ----------- |
-| `STRATOS_SERVICE_DID`           | Service DID (e.g., `did:web:stratos.example.com`) | Required    |
-| `STRATOS_PORT`                  | HTTP port                                         | `3100`      |
-| `STRATOS_PUBLIC_URL`            | Public URL for the service                        | Required    |
-| `STRATOS_DATA_DIR`              | Directory for SQLite databases                    | `./data`    |
-| `STRATOS_ALLOWED_DOMAINS`       | Comma-separated list of valid boundary domains    | Required    |
-| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist` |
-| `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`        |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`        |
+| Variable                        | Description                                       | Default        |
+| ------------------------------- | ------------------------------------------------- | -------------- |
+| `STRATOS_SERVICE_DID`           | Service DID (e.g., `did:web:stratos.example.com`) | Required       |
+| `STRATOS_PORT`                  | HTTP port                                         | `3100`         |
+| `STRATOS_PUBLIC_URL`            | Public URL for the service                        | Required       |
+| `STRATOS_DATA_DIR`              | Directory for SQLite databases                    | `./data`       |
+| `STRATOS_ALLOWED_DOMAINS`       | Comma-separated list of valid boundary domains    | Required       |
+| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist`    |
+| `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`           |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`           |
+| `STRATOS_IMPORT_MAX_BYTES`      | Maximum CAR file size for repo import             | `268435456`    |
+| `STRATOS_SIGNING_KEY_HEX`       | Service signing key (secp256k1, hex-encoded)      | Auto-generated |
 
 ## Enrollment
 
@@ -86,11 +111,12 @@ Users enroll via OAuth authentication. The service validates enrollment based on
 
 ### @northskysocial/stratos-core
 
-Shared library containing:
+Core package containing:
 
 - Validation logic for stratos records
 - Database schema and migrations
 - Storage abstractions (repo, record, blob)
+- MST commit builder for ATProto-compatible repos
 
 ### @northskysocial/stratos-service
 
@@ -99,3 +125,5 @@ Standalone HTTP service providing:
 - OAuth authorization server
 - XRPC endpoints for record CRUD
 - WebSocket subscription for AppView indexing
+- Repository export/import via CAR files
+- Signed commits with MST inclusion proofs

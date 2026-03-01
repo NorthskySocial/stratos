@@ -9,14 +9,16 @@ import { loadStratosLexicons } from '../src/context.js'
 
 // Expected Stratos lexicon IDs
 const EXPECTED_STRATOS_LEXICONS = [
-  'app.stratos.actor.enrollment',
-  'app.stratos.boundary.defs',
-  'app.stratos.defs',
-  'app.stratos.enrollment.status',
-  'app.stratos.feed.post',
-  'app.stratos.repo.hydrateRecord',
-  'app.stratos.repo.hydrateRecords',
-  'app.stratos.sync.subscribeRecords',
+  'app.northsky.stratos.actor.enrollment',
+  'app.northsky.stratos.boundary.defs',
+  'app.northsky.stratos.defs',
+  'app.northsky.stratos.enrollment.status',
+  'app.northsky.stratos.feed.post',
+  'app.northsky.stratos.repo.hydrateRecord',
+  'app.northsky.stratos.repo.hydrateRecords',
+  'app.northsky.stratos.repo.importRepo',
+  'app.northsky.stratos.sync.getRepo',
+  'app.northsky.stratos.sync.subscribeRecords',
 ]
 
 describe('Stratos Lexicons', () => {
@@ -34,7 +36,7 @@ describe('Stratos Lexicons', () => {
       for (const lexicon of lexicons) {
         expect(lexicon.lexicon).toBe(1)
         expect(typeof lexicon.id).toBe('string')
-        expect(lexicon.id).toMatch(/^app\.stratos\./)
+        expect(lexicon.id).toMatch(/^app\.northsky\.stratos\./)
         expect(lexicon.defs).toBeDefined()
         expect(typeof lexicon.defs).toBe('object')
       }
@@ -53,44 +55,50 @@ describe('Stratos Lexicons', () => {
       lexicons = loadStratosLexicons()
     })
 
-    it('app.stratos.enrollment.status should be a query', () => {
-      const lex = lexicons.find((l) => l.id === 'app.stratos.enrollment.status')
-      expect(lex).toBeDefined()
-      expect(lex?.defs?.main?.type).toBe('query')
-    })
-
-    it('app.stratos.repo.hydrateRecord should be a query', () => {
+    it('app.northsky.stratos.enrollment.status should be a query', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.stratos.repo.hydrateRecord',
+        (l) => l.id === 'app.northsky.stratos.enrollment.status',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
 
-    it('app.stratos.repo.hydrateRecords should be a procedure', () => {
+    it('app.northsky.stratos.repo.hydrateRecord should be a query', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.stratos.repo.hydrateRecords',
+        (l) => l.id === 'app.northsky.stratos.repo.hydrateRecord',
+      )
+      expect(lex).toBeDefined()
+      expect(lex?.defs?.main?.type).toBe('query')
+    })
+
+    it('app.northsky.stratos.repo.hydrateRecords should be a procedure', () => {
+      const lex = lexicons.find(
+        (l) => l.id === 'app.northsky.stratos.repo.hydrateRecords',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('procedure')
     })
 
-    it('app.stratos.sync.subscribeRecords should be a subscription', () => {
+    it('app.northsky.stratos.sync.subscribeRecords should be a subscription', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.stratos.sync.subscribeRecords',
+        (l) => l.id === 'app.northsky.stratos.sync.subscribeRecords',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('subscription')
     })
 
-    it('app.stratos.feed.post should be a record', () => {
-      const lex = lexicons.find((l) => l.id === 'app.stratos.feed.post')
+    it('app.northsky.stratos.feed.post should be a record', () => {
+      const lex = lexicons.find(
+        (l) => l.id === 'app.northsky.stratos.feed.post',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
 
-    it('app.stratos.actor.enrollment should be a record', () => {
-      const lex = lexicons.find((l) => l.id === 'app.stratos.actor.enrollment')
+    it('app.northsky.stratos.actor.enrollment should be a record', () => {
+      const lex = lexicons.find(
+        (l) => l.id === 'app.northsky.stratos.actor.enrollment',
+      )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
@@ -136,9 +144,15 @@ describe('Stratos Lexicons', () => {
       const lexStore = (server as any).lex
 
       // Verify Stratos methods are available
-      expect(lexStore.getDef('app.stratos.enrollment.status')).toBeDefined()
-      expect(lexStore.getDef('app.stratos.repo.hydrateRecord')).toBeDefined()
-      expect(lexStore.getDef('app.stratos.repo.hydrateRecords')).toBeDefined()
+      expect(
+        lexStore.getDef('app.northsky.stratos.enrollment.status'),
+      ).toBeDefined()
+      expect(
+        lexStore.getDef('app.northsky.stratos.repo.hydrateRecord'),
+      ).toBeDefined()
+      expect(
+        lexStore.getDef('app.northsky.stratos.repo.hydrateRecords'),
+      ).toBeDefined()
     })
 
     it('should allow registering handlers for Stratos methods', () => {
@@ -148,7 +162,7 @@ describe('Stratos Lexicons', () => {
 
       // Should not throw when registering handlers for Stratos methods
       expect(() => {
-        server.method('app.stratos.enrollment.status', {
+        server.method('app.northsky.stratos.enrollment.status', {
           handler: async () => ({
             encoding: 'application/json',
             body: { did: 'did:test:123', enrolled: false },
@@ -157,11 +171,11 @@ describe('Stratos Lexicons', () => {
       }).not.toThrow()
 
       expect(() => {
-        server.method('app.stratos.repo.hydrateRecord', {
+        server.method('app.northsky.stratos.repo.hydrateRecord', {
           handler: async () => ({
             encoding: 'application/json',
             body: {
-              uri: 'at://test/app.stratos.feed.post/123',
+              uri: 'at://test/app.northsky.stratos.feed.post/123',
               cid: 'abc',
               value: {},
             },
@@ -176,7 +190,7 @@ describe('Stratos Lexicons', () => {
       const server = new XrpcServer(allLexicons)
 
       expect(() => {
-        server.method('app.stratos.repo.hydrateRecords', {
+        server.method('app.northsky.stratos.repo.hydrateRecords', {
           handler: async () => ({
             encoding: 'application/json',
             body: { records: [], notFound: [], blocked: [] },

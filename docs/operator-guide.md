@@ -95,15 +95,19 @@ sequenceDiagram
     participant P as User's PDS
 
     C->>S: com.atproto.repo.createRecord
-    Note right of C: collection: app.stratos.feed.post<br/>record: { text: "...", boundary: {...} }
+    Note right of C: collection: app.northsky.stratos.feed.post<br/>record: { text: "...", boundary: { values: [{ value: "fanart" }] } } }
 
-    S->>S: Validate Enrollment & Boundary
-    S->>S: Store in per-user SQLite
-    S->>S: Sequence event to stratos_seq
+    S->>S: Validate User Enrollment, Valid Boundary, No cross-namespace embeds
+    S->>S: Store record in per-user SQLite database
+    S->>S: Sequence event to stratos_seq table
 
     S->>P: putRecord(Stub with source field)
-    Note over S,P: Optional: If using Source Field Pattern
 ```
+Updates MST (Merkle Search Tree) and signs a new commit:
+- Inserts record into MST via NodeWrangler
+- Computes block diff (new/removed MST nodes)
+- Signs commit with service secp256k1 key
+- Persists commit block and updates repo root
 
 #### 3. AppView Indexing
 
@@ -112,14 +116,51 @@ sequenceDiagram
     participant AV as AppView
     participant S as Stratos
 
-    AV->>S: app.stratos.sync.subscribeRecords (WebSocket)
+    AV->>S: app.northsky.stratos.sync.subscribeRecords (WebSocket)
     Note right of AV: { did: "<user-did>", cursor: 0 }
 
-    S-->>AV: Stream commit events
-    Note left of S: { $type: "...#commit", seq: 1, did: "...", ops: [...] }
+    S-->>AV: Stratos streams commit events
+    Note left of S: { $type: "app.northsky.stratos.sync.subscribeRecords#commit", seq: 1, did: "did:plc:abc", ops: [{ action: "create", path: "app.northsky.stratos.feed.post/tid", record: {...} }] }
 
-    AV->>AV: Index records with boundary metadata
+    AV->>AV: Indexes records with boundary metadata
 ```
+
+### Repository & MST Architecture
+
+Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit chain** compatible
+with the ATProto repo format. Every record write produces a signed commit that updates the MST root,
+enabling cryptographic verification of repository contents.
+
+```
+┌─────────────────────────────────────────────────┐
+│  Signed Commit (v3)                             │
+│  ┌───────────────────────────────────────────┐  │
+│  │ did:     "did:plc:user"                   │  │
+│  │ version: 3                                │  │
+│  │ data:    <MST root CID>                   │  │
+│  │ rev:     "2024..." (TID)                  │  │
+│  │ sig:     <secp256k1 signature>            │  │
+│  └───────────────────────────────────────────┘  │
+│                    │                            │
+│                    ▼                            │
+│  MST (Merkle Search Tree)                       │
+│  ┌───────────────────────────────────────────┐  │
+│  │ collection/rkey → record CID              │  │
+│  │ Sorted key-value tree of all records      │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+Key capabilities:
+
+| Endpoint                               | Description                                                                      |
+| -------------------------------------- | -------------------------------------------------------------------------------- |
+| `com.atproto.sync.getRecord`           | Returns CAR with signed commit + MST inclusion proof + record block              |
+| `app.northsky.stratos.sync.getRepo`    | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
+| `app.northsky.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification             |
+
+The MST is implemented using `@atcute/mst` and all blocks are stored in the per-actor
+`stratos_repo_block` table alongside record data.
 
 ### Storage Architecture
 
@@ -306,7 +347,7 @@ Host this JSON at `https://stratos.example.com/client-metadata.json`:
   "tos_uri": "https://stratos.example.com/terms",
   "policy_uri": "https://stratos.example.com/privacy",
   "redirect_uris": ["https://stratos.example.com/oauth/callback"],
-  "scope": "atproto repo:app.stratos.actor.enrollment repo:app.stratos.feed.post",
+  "scope": "atproto repo:app.northsky.stratos.actor.enrollment repo:app.northsky.stratos.feed.post",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
@@ -339,7 +380,7 @@ curl https://stratos.example.com/health
 curl https://stratos.example.com/.well-known/did.json
 
 # Check enrollment status
-curl https://stratos.example.com/xrpc/app.stratos.enrollment.status?did=did:plc:abc123
+curl https://stratos.example.com/xrpc/app.northsky.stratos.enrollment.status?did=did:plc:abc123
 ```
 
 ---
@@ -378,6 +419,30 @@ STRATOS_ALLOWED_DOMAINS="general,fanart"
 ```
 
 Records with boundaries outside this list will be rejected.
+
+### Repository Import
+
+Configure the maximum CAR file size for `app.northsky.stratos.repo.importRepo`:
+
+```bash
+# Default: 256 MiB (268435456 bytes)
+STRATOS_IMPORT_MAX_BYTES=268435456
+```
+
+Import verifies CID integrity on every block in the CAR, validates the commit DID matches the
+authenticated user, and indexes all records from the MST.
+
+### Signing Key
+
+Stratos signs every repo commit with a secp256k1 key. This key is stored at
+`{dataDir}/signing_key` and auto-generated on first start, or can be provided via:
+
+```bash
+STRATOS_SIGNING_KEY_HEX="<hex-encoded-secp256k1-private-key>"
+```
+
+The corresponding public key is published in the service DID document for commit signature
+verification.
 
 ### Blob Storage
 
@@ -499,7 +564,7 @@ To migrate from disk to S3:
 
 ### Overview
 
-AppViews index Stratos content by subscribing to the `app.stratos.sync.subscribeRecords` WebSocket
+AppViews index Stratos content by subscribing to the `app.northsky.stratos.sync.subscribeRecords` WebSocket
 endpoint. This is similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
 
 ### Step 1: Service Authentication
@@ -512,7 +577,7 @@ import { createServiceAuthHeaders } from '@atproto/xrpc-server'
 const headers = await createServiceAuthHeaders({
   iss: appviewDid, // AppView's DID
   aud: stratosServiceDid, // Stratos service DID
-  lxm: 'app.stratos.sync.subscribeRecords',
+  lxm: 'app.northsky.stratos.sync.subscribeRecords',
   keypair: signingKey, // AppView's signing key
 })
 ```
@@ -525,7 +590,7 @@ import WebSocket from 'ws'
 async function subscribeToUser(did: string, cursor?: number) {
   const authHeaders = await createServiceAuthHeaders({...})
 
-  const url = new URL('wss://stratos.example.com/xrpc/app.stratos.sync.subscribeRecords')
+  const url = new URL('wss://stratos.example.com/xrpc/app.northsky.stratos.sync.subscribeRecords')
   url.searchParams.set('did', did)
   if (cursor) url.searchParams.set('cursor', cursor.toString())
 
@@ -536,7 +601,7 @@ async function subscribeToUser(did: string, cursor?: number) {
   ws.on('message', (data) => {
     const frame = decodeFrame(data)
 
-    if (frame.$type === 'app.stratos.sync.subscribeRecords#commit') {
+    if (frame.$type === 'app.northsky.stratos.sync.subscribeRecords#commit') {
       for (const op of frame.ops) {
         if (op.action === 'create' || op.action === 'update') {
           await indexRecord(frame.did, op.path, op.record)
@@ -673,7 +738,7 @@ class StratosIndexer {
     ws.on('message', async (data) => {
       const event = this.decodeEvent(data)
 
-      if (event.$type === 'app.stratos.sync.subscribeRecords#commit') {
+      if (event.$type === 'app.northsky.stratos.sync.subscribeRecords#commit') {
         await this.db.transaction().execute(async (tx) => {
           for (const op of event.ops) {
             await this.processOp(tx, event.did, op)
@@ -762,6 +827,9 @@ For high-traffic deployments:
 | `/oauth/*`                     | No            | Public enrollment flow      |
 | `createRecord`, `deleteRecord` | Yes           | OAuth access token          |
 | `getRecord`, `listRecords`     | Optional      | Used for boundary filtering |
+| `sync.getRecord`               | Yes           | User or service auth        |
+| `sync.getRepo`                 | Yes           | User auth (owner only)      |
+| `importRepo`                   | Yes           | User auth (owner only)      |
 | `subscribeRecords`             | Yes           | Service auth JWT            |
 | `/_health`                     | No            | Public health check         |
 
@@ -816,8 +884,8 @@ STRATOS_LOG_LEVEL=debug pnpm start
 curl localhost:3100/health
 
 # Check specific user enrollment
-curl "localhost:3100/xrpc/app.stratos.enrollment.status?did=did:plc:abc"
+curl "localhost:3100/xrpc/app.northsky.stratos.enrollment.status?did=did:plc:abc"
 
 # Test WebSocket connectivity
-wscat -c "ws://localhost:3100/xrpc/app.stratos.sync.subscribeRecords?did=did:plc:abc"
+wscat -c "ws://localhost:3100/xrpc/app.northsky.stratos.sync.subscribeRecords?did=did:plc:abc"
 ```

@@ -1,0 +1,69 @@
+name: Publish stratos-client to GitHub Packages
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish stratos-client
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build stratos-client
+        run: pnpm --filter @northskysocial/stratos-client build
+
+      - name: Check if version already published
+        id: version-check
+        run: |
+          VERSION=$(node -p "require('./stratos-client/package.json').version")
+          if npm view "@northskysocial/stratos-client@${VERSION}" version --registry=https://npm.pkg.github.com 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Version ${VERSION} already published — skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Version ${VERSION} not yet published — proceeding"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to GitHub Packages
+        if: steps.version-check.outputs.skip == 'false'
+        run: pnpm --filter @northskysocial/stratos-client publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

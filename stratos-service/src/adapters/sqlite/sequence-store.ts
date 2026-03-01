@@ -29,7 +29,7 @@ interface DecodedEvent {
 
 /**
  * Parse an event path into collection and rkey
- * @param path - Path like "app.stratos.feed.post/3jui7kdu3ak2i"
+ * @param path - Path like "app.northsky.stratos.feed.post/3jui7kdu3ak2i"
  */
 function parsePath(path: string): { collection: string; rkey: string } {
   const lastSlash = path.lastIndexOf('/')

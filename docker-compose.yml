@@ -42,6 +42,9 @@ services:
 
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Dev mode: allows Bearer DID auth without DPoP (for test scripts)
+      STRATOS_DEV_MODE: ${STRATOS_DEV_MODE:-false}
     volumes:
       - stratos-data:/app/data
     healthcheck:

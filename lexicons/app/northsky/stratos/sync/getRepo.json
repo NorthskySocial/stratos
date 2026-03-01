@@ -1,0 +1,34 @@
+{
+  "lexicon": 1,
+  "id": "app.northsky.stratos.sync.getRepo",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Export the full repository as a CAR file. Returns all record blocks, MST nodes, and the signed commit.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo to export."
+          },
+          "since": {
+            "type": "string",
+            "description": "Optional revision cursor. If provided, only blocks newer than this revision are included."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/vnd.ipld.car"
+      },
+      "errors": [
+        {
+          "name": "RepoNotFound",
+          "description": "The requested repo does not exist or has no commits."
+        }
+      ]
+    }
+  }
+}

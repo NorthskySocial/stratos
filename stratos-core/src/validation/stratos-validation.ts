@@ -17,15 +17,15 @@ export type RepoRecord = Record<string, unknown>
 
 /**
  * Validates stratos records for domain boundaries and cross-namespace isolation.
- * This function should be called for any record in the app.stratos.* namespace.
+ * This function should be called for any record in the app.northsky.stratos.* namespace.
  */
 export function assertStratosValidation(
   record: RepoRecord,
   collection: string,
   stratosConfig: StratosConfig | undefined,
 ): void {
-  // Only validate app.stratos.* collections
-  if (!collection.startsWith('app.stratos.')) {
+  // Only validate app.northsky.stratos.* collections
+  if (!collection.startsWith('app.northsky.stratos.')) {
     return
   }
 
@@ -38,7 +38,7 @@ export function assertStratosValidation(
   }
 
   // Validate boundary for stratos posts
-  if (collection === 'app.stratos.feed.post') {
+  if (collection === 'app.northsky.stratos.feed.post') {
     assertStratosPostValidation(record, stratosConfig)
   }
 }
@@ -154,7 +154,7 @@ function assertNoCrossNamespaceEmbed(
 export function isStratosUri(uri: string): boolean {
   try {
     const parsed = new AtUri(uri)
-    return parsed.collection.startsWith('app.stratos.')
+    return parsed.collection.startsWith('app.northsky.stratos.')
   } catch {
     return false
   }
@@ -177,7 +177,7 @@ export function isBskyUri(uri: string): boolean {
  * Stratos records are stored in a separate database and excluded from public sync.
  */
 export function isStratosCollection(collection: string): boolean {
-  return collection.startsWith('app.stratos.')
+  return collection.startsWith('app.northsky.stratos.')
 }
 
 /**

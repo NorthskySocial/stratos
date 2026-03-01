@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.stratos.repo.hydrateRecord",
+  "id": "app.northsky.stratos.repo.hydrateRecord",
   "defs": {
     "main": {
       "type": "query",
