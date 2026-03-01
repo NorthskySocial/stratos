@@ -35,6 +35,14 @@
               "type": "string",
               "format": "datetime",
               "description": "When the DID was enrolled, if enrolled."
+            },
+            "boundaries": {
+              "type": "array",
+              "description": "Authoritative boundaries assigned. Only included when request is authenticated.",
+              "items": {
+                "type": "ref",
+                "ref": "app.stratos.boundary.defs#Domain"
+              }
             }
           }
         }
