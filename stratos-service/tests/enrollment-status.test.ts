@@ -33,7 +33,7 @@ function invokeRoute(
       query,
       headers,
       method: 'GET',
-      url: '/xrpc/app.northsky.stratos.enrollment.status',
+      url: '/xrpc/zonestratos.enrollment.status',
     } as unknown as express.Request
     const res = {
       status(code: number) {
@@ -57,7 +57,7 @@ function invokeRoute(
       }
     }
     const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
-      (l) => l.route?.path === '/xrpc/app.northsky.stratos.enrollment.status',
+      (l) => l.route?.path === '/xrpc/zonestratos.enrollment.status',
     )
     if (!layer?.route) return reject(new Error('Route not registered'))
     const handler = layer.route.stack[0]?.handle
@@ -228,7 +228,7 @@ describe('Status endpoint for non-enrolled DIDs', () => {
 })
 
 describe('Status endpoint route registration', () => {
-  it('registers the route at /xrpc/app.northsky.stratos.enrollment.status', () => {
+  it('registers the route at /xrpc/zonestratos.enrollment.status', () => {
     const router = express.Router()
     const ctx = createCtx({
       getEnrollment: async () => null,
@@ -243,7 +243,7 @@ describe('Status endpoint route registration', () => {
     }
     const layers = (router as unknown as { stack: RouteLayer[] }).stack
     const statusRoute = layers.find(
-      (l) => l.route?.path === '/xrpc/app.northsky.stratos.enrollment.status',
+      (l) => l.route?.path === '/xrpc/zonestratos.enrollment.status',
     )
 
     expect(statusRoute).toBeDefined()

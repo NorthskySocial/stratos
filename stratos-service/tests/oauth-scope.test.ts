@@ -11,12 +11,12 @@ describe('OAUTH_SCOPE', () => {
 
   it('should contain enrollment record scope', () => {
     const scopes = OAUTH_SCOPE.split(' ')
-    expect(scopes).toContain('repo:app.northsky.stratos.actor.enrollment')
+    expect(scopes).toContain('repo:zonestratos.actor.enrollment')
   })
 
   it('should contain post record scope', () => {
     const scopes = OAUTH_SCOPE.split(' ')
-    expect(scopes).toContain('repo:app.northsky.stratos.feed.post')
+    expect(scopes).toContain('repo:zonestratos.feed.post')
   })
 
   it('should not contain transition:generic', () => {
@@ -30,7 +30,7 @@ describe('OAUTH_SCOPE', () => {
 
   it('should match the expected full value', () => {
     expect(OAUTH_SCOPE).toBe(
-      'atproto repo:app.northsky.stratos.actor.enrollment repo:app.northsky.stratos.feed.post',
+      'atproto repo:zonestratos.actor.enrollment repo:zonestratos.feed.post',
     )
   })
 })

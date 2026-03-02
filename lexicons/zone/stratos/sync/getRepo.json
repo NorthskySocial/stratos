@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.northsky.stratos.sync.getRepo",
+  "id": "zonestratos.sync.getRepo",
   "defs": {
     "main": {
       "type": "query",

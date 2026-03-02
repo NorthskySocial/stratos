@@ -701,7 +701,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  xrpc.method('app.northsky.stratos.sync.getRepo', {
+  xrpc.method('zonestratos.sync.getRepo', {
     handler: async ({ params }: HandlerContext) => {
       const did = params.did as string
       if (!did) {
@@ -749,7 +749,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  xrpc.method('app.northsky.stratos.repo.importRepo', {
+  xrpc.method('zonestratos.repo.importRepo', {
     auth: authVerifier.standard,
     handler: async ({ input, auth }: HandlerContext) => {
       const start = Date.now()
@@ -904,7 +904,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  xrpc.method('app.northsky.stratos.enrollment.status', {
+  xrpc.method('zonestratos.enrollment.status', {
     handler: async ({ params }: HandlerContext) => {
       const did = params.did as string
       if (!did) {

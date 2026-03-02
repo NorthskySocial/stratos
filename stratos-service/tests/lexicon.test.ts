@@ -9,16 +9,16 @@ import { loadStratosLexicons } from '../src/context.js'
 
 // Expected Stratos lexicon IDs
 const EXPECTED_STRATOS_LEXICONS = [
-  'app.northsky.stratos.actor.enrollment',
-  'app.northsky.stratos.boundary.defs',
-  'app.northsky.stratos.defs',
-  'app.northsky.stratos.enrollment.status',
-  'app.northsky.stratos.feed.post',
-  'app.northsky.stratos.repo.hydrateRecord',
-  'app.northsky.stratos.repo.hydrateRecords',
-  'app.northsky.stratos.repo.importRepo',
-  'app.northsky.stratos.sync.getRepo',
-  'app.northsky.stratos.sync.subscribeRecords',
+  'zonestratos.actor.enrollment',
+  'zonestratos.boundary.defs',
+  'zonestratos.defs',
+  'zonestratos.enrollment.status',
+  'zonestratos.feed.post',
+  'zonestratos.repo.hydrateRecord',
+  'zonestratos.repo.hydrateRecords',
+  'zonestratos.repo.importRepo',
+  'zonestratos.sync.getRepo',
+  'zonestratos.sync.subscribeRecords',
 ]
 
 describe('Stratos Lexicons', () => {
@@ -55,49 +55,49 @@ describe('Stratos Lexicons', () => {
       lexicons = loadStratosLexicons()
     })
 
-    it('app.northsky.stratos.enrollment.status should be a query', () => {
+    it('zonestratos.enrollment.status should be a query', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.northsky.stratos.enrollment.status',
+        (l) => l.id === 'zonestratos.enrollment.status',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
 
-    it('app.northsky.stratos.repo.hydrateRecord should be a query', () => {
+    it('zonestratos.repo.hydrateRecord should be a query', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.northsky.stratos.repo.hydrateRecord',
+        (l) => l.id === 'zonestratos.repo.hydrateRecord',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
 
-    it('app.northsky.stratos.repo.hydrateRecords should be a procedure', () => {
+    it('zonestratos.repo.hydrateRecords should be a procedure', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.northsky.stratos.repo.hydrateRecords',
+        (l) => l.id === 'zonestratos.repo.hydrateRecords',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('procedure')
     })
 
-    it('app.northsky.stratos.sync.subscribeRecords should be a subscription', () => {
+    it('zonestratos.sync.subscribeRecords should be a subscription', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.northsky.stratos.sync.subscribeRecords',
+        (l) => l.id === 'zonestratos.sync.subscribeRecords',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('subscription')
     })
 
-    it('app.northsky.stratos.feed.post should be a record', () => {
+    it('zonestratos.feed.post should be a record', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.northsky.stratos.feed.post',
+        (l) => l.id === 'zonestratos.feed.post',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
 
-    it('app.northsky.stratos.actor.enrollment should be a record', () => {
+    it('zonestratos.actor.enrollment should be a record', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'app.northsky.stratos.actor.enrollment',
+        (l) => l.id === 'zonestratos.actor.enrollment',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
@@ -145,13 +145,13 @@ describe('Stratos Lexicons', () => {
 
       // Verify Stratos methods are available
       expect(
-        lexStore.getDef('app.northsky.stratos.enrollment.status'),
+        lexStore.getDef('zonestratos.enrollment.status'),
       ).toBeDefined()
       expect(
-        lexStore.getDef('app.northsky.stratos.repo.hydrateRecord'),
+        lexStore.getDef('zonestratos.repo.hydrateRecord'),
       ).toBeDefined()
       expect(
-        lexStore.getDef('app.northsky.stratos.repo.hydrateRecords'),
+        lexStore.getDef('zonestratos.repo.hydrateRecords'),
       ).toBeDefined()
     })
 
@@ -162,7 +162,7 @@ describe('Stratos Lexicons', () => {
 
       // Should not throw when registering handlers for Stratos methods
       expect(() => {
-        server.method('app.northsky.stratos.enrollment.status', {
+        server.method('zonestratos.enrollment.status', {
           handler: async () => ({
             encoding: 'application/json',
             body: { did: 'did:test:123', enrolled: false },
@@ -171,11 +171,11 @@ describe('Stratos Lexicons', () => {
       }).not.toThrow()
 
       expect(() => {
-        server.method('app.northsky.stratos.repo.hydrateRecord', {
+        server.method('zonestratos.repo.hydrateRecord', {
           handler: async () => ({
             encoding: 'application/json',
             body: {
-              uri: 'at://test/app.northsky.stratos.feed.post/123',
+              uri: 'at://test/zonestratos.feed.post/123',
               cid: 'abc',
               value: {},
             },
@@ -190,7 +190,7 @@ describe('Stratos Lexicons', () => {
       const server = new XrpcServer(allLexicons)
 
       expect(() => {
-        server.method('app.northsky.stratos.repo.hydrateRecords', {
+        server.method('zonestratos.repo.hydrateRecords', {
           handler: async () => ({
             encoding: 'application/json',
             body: { records: [], notFound: [], blocked: [] },

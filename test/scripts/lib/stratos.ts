@@ -56,7 +56,7 @@ export async function enrollmentStatus(
 ): Promise<{ did: string; enrolled: boolean; enrolledAt?: string }> {
   const baseUrl = await getBaseUrl()
   const res = await fetch(
-    `${baseUrl}/xrpc/app.northsky.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
+    `${baseUrl}/xrpc/zonestratos.enrollment.status?did=${encodeURIComponent(did)}`,
   )
   if (!res.ok) {
     const body = await res.text()

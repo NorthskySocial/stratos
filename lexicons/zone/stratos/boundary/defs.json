@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.northsky.stratos.boundary.defs",
+  "id": "zonestratos.boundary.defs",
   "defs": {
     "Domain": {
       "type": "object",

@@ -33,7 +33,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           undefined,
         )
       }).toThrow(StratosValidationError)
@@ -52,7 +52,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           emptyConfig,
         )
       }).toThrow(StratosValidationError)
@@ -68,7 +68,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).not.toThrow()
@@ -86,7 +86,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).not.toThrow()
@@ -101,7 +101,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).toThrow('must have a boundary')
@@ -117,7 +117,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).toThrow('must have a boundary')
@@ -133,7 +133,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).toThrow('not allowed')
@@ -159,7 +159,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).toThrow('cannot reply to a non-stratos record')
@@ -171,11 +171,11 @@ describe('stratos-validation', () => {
         boundary: { values: [{ value: 'example.com' }] },
         reply: {
           parent: {
-            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123',
+            uri: 'at://did:plc:abc/zonestratos.feed.post/123',
             cid: 'bafyabc',
           },
           root: {
-            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/456',
+            uri: 'at://did:plc:abc/zonestratos.feed.post/456',
             cid: 'bafydef',
           },
         },
@@ -185,7 +185,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).not.toThrow()
@@ -208,7 +208,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).toThrow('cannot embed bsky content')
@@ -221,7 +221,7 @@ describe('stratos-validation', () => {
         embed: {
           $type: 'app.bsky.embed.record',
           record: {
-            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123',
+            uri: 'at://did:plc:abc/zonestratos.feed.post/123',
             cid: 'bafyabc',
           },
         },
@@ -231,7 +231,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertStratosValidation(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
           validConfig,
         )
       }).not.toThrow()
@@ -243,7 +243,7 @@ describe('stratos-validation', () => {
       const record = {
         embed: {
           record: {
-            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123',
+            uri: 'at://did:plc:abc/zonestratos.feed.post/123',
           },
         },
       }
@@ -251,7 +251,7 @@ describe('stratos-validation', () => {
       expect(() => {
         assertBskyNoCrossNamespaceEmbed(
           record,
-          'app.northsky.stratos.feed.post',
+          'zonestratos.feed.post',
         )
       }).not.toThrow()
     })
@@ -282,7 +282,7 @@ describe('stratos-validation', () => {
         text: 'test',
         embed: {
           record: {
-            uri: 'at://did:plc:abc/app.northsky.stratos.feed.post/123',
+            uri: 'at://did:plc:abc/zonestratos.feed.post/123',
           },
         },
       }
@@ -296,11 +296,11 @@ describe('stratos-validation', () => {
   describe('isStratosUri', () => {
     it('should return true for stratos URIs', () => {
       expect(
-        isStratosUri('at://did:plc:abc/app.northsky.stratos.feed.post/123'),
+        isStratosUri('at://did:plc:abc/zonestratos.feed.post/123'),
       ).toBe(true)
       expect(
         isStratosUri(
-          'at://did:plc:abc/app.northsky.stratos.actor.profile/self',
+          'at://did:plc:abc/zonestratos.actor.profile/self',
         ),
       ).toBe(true)
     })
@@ -331,7 +331,7 @@ describe('stratos-validation', () => {
 
     it('should return false for non-bsky URIs', () => {
       expect(
-        isBskyUri('at://did:plc:abc/app.northsky.stratos.feed.post/123'),
+        isBskyUri('at://did:plc:abc/zonestratos.feed.post/123'),
       ).toBe(false)
       expect(isBskyUri('at://did:plc:abc/com.atproto.repo.record/123')).toBe(
         false,
@@ -346,12 +346,12 @@ describe('stratos-validation', () => {
 
   describe('isStratosCollection', () => {
     it('should return true for stratos collections', () => {
-      expect(isStratosCollection('app.northsky.stratos.feed.post')).toBe(true)
-      expect(isStratosCollection('app.northsky.stratos.actor.profile')).toBe(
+      expect(isStratosCollection('zonestratos.feed.post')).toBe(true)
+      expect(isStratosCollection('zonestratos.actor.profile')).toBe(
         true,
       )
       expect(
-        isStratosCollection('app.northsky.stratos.some.future.collection'),
+        isStratosCollection('zonestratos.some.future.collection'),
       ).toBe(true)
     })
 
