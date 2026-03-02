@@ -71,7 +71,7 @@ export function registerHydrationHandlers(
     ctx.boundaryResolver,
   )
 
-  xrpc.method('app.northsky.stratos.repo.hydrateRecords', {
+  xrpc.method('zonestratos.repo.hydrateRecords', {
     handler: async ({ input, auth }: HandlerContext) => {
       const start = Date.now()
       const body = input?.body as HydrateRecordsInput | undefined
@@ -138,7 +138,7 @@ export function registerHydrationHandlers(
     },
   })
 
-  xrpc.method('app.northsky.stratos.repo.hydrateRecord', {
+  xrpc.method('zonestratos.repo.hydrateRecord', {
     handler: async ({ params, auth }: HandlerContext) => {
       const start = Date.now()
       const uri = params.uri as string | undefined

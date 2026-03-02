@@ -71,18 +71,18 @@ describe('Record Reader', () => {
       // Insert some records
       await db.insert(stratosRecord).values([
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.feed.post/1111111111111',
+          uri: 'at://did:plc:test/zonestratos.feed.post/1111111111111',
           cid: 'bafyreiabc123',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: '1111111111111',
           repoRev: 'rev1',
           indexedAt: new Date().toISOString(),
           takedownRef: null,
         },
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.feed.post/2222222222222',
+          uri: 'at://did:plc:test/zonestratos.feed.post/2222222222222',
           cid: 'bafyreiabc456',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: '2222222222222',
           repoRev: 'rev2',
           indexedAt: new Date().toISOString(),
@@ -104,27 +104,27 @@ describe('Record Reader', () => {
     it('should return unique collections', async () => {
       await db.insert(stratosRecord).values([
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.feed.post/1',
+          uri: 'at://did:plc:test/zonestratos.feed.post/1',
           cid: 'cid1',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: '1',
           repoRev: 'rev1',
           indexedAt: new Date().toISOString(),
           takedownRef: null,
         },
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.feed.post/2',
+          uri: 'at://did:plc:test/zonestratos.feed.post/2',
           cid: 'cid2',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: '2',
           repoRev: 'rev2',
           indexedAt: new Date().toISOString(),
           takedownRef: null,
         },
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.graph.follow/1',
+          uri: 'at://did:plc:test/zonestratos.graph.follow/1',
           cid: 'cid3',
-          collection: 'app.northsky.stratos.graph.follow',
+          collection: 'zonestratos.graph.follow',
           rkey: '1',
           repoRev: 'rev3',
           indexedAt: new Date().toISOString(),
@@ -134,8 +134,8 @@ describe('Record Reader', () => {
 
       const collections = await reader.listCollections()
       expect(collections).toHaveLength(2)
-      expect(collections).toContain('app.northsky.stratos.feed.post')
-      expect(collections).toContain('app.northsky.stratos.graph.follow')
+      expect(collections).toContain('zonestratos.feed.post')
+      expect(collections).toContain('zonestratos.graph.follow')
     })
   })
 })
@@ -167,7 +167,7 @@ describe('Record Transactor', () => {
   describe('indexRecord', () => {
     it('should index a new record', async () => {
       const uri = new AtUri(
-        'at://did:plc:test/app.northsky.stratos.feed.post/3jqfcqzm3fv2p',
+        'at://did:plc:test/zonestratos.feed.post/3jqfcqzm3fv2p',
       )
       const cid = await createCid({ text: 'Hello' })
       const record = { text: 'Hello', createdAt: new Date().toISOString() }
@@ -185,7 +185,7 @@ describe('Record Transactor', () => {
 
     it('should update existing record on conflict', async () => {
       const uri = new AtUri(
-        'at://did:plc:test/app.northsky.stratos.feed.post/testkey',
+        'at://did:plc:test/zonestratos.feed.post/testkey',
       )
       const cid1 = await createCid({ text: 'Original' })
       const cid2 = await createCid({ text: 'Updated' })
@@ -217,7 +217,7 @@ describe('Record Transactor', () => {
 
     it('should reject URI without DID', async () => {
       const uri = new AtUri(
-        'at://handle.example.com/app.northsky.stratos.feed.post/1',
+        'at://handle.example.com/zonestratos.feed.post/1',
       )
       const cid = await createCid({ text: 'Test' })
 
@@ -230,7 +230,7 @@ describe('Record Transactor', () => {
   describe('deleteRecord', () => {
     it('should delete an existing record', async () => {
       const uri = new AtUri(
-        'at://did:plc:test/app.northsky.stratos.feed.post/todelete',
+        'at://did:plc:test/zonestratos.feed.post/todelete',
       )
       const cid = await createCid({ text: 'Delete me' })
 
@@ -249,7 +249,7 @@ describe('Record Transactor', () => {
 
     it('should delete associated backlinks', async () => {
       const uri = new AtUri(
-        'at://did:plc:test/app.northsky.stratos.graph.follow/1',
+        'at://did:plc:test/zonestratos.graph.follow/1',
       )
       const cid = await createCid({
         subject: 'did:plc:followed',
@@ -289,7 +289,7 @@ describe('Record Transactor', () => {
   describe('updateRecordTakedown', () => {
     it('should apply takedown to record', async () => {
       const uri = new AtUri(
-        'at://did:plc:test/app.northsky.stratos.feed.post/badcontent',
+        'at://did:plc:test/zonestratos.feed.post/badcontent',
       )
       const cid = await createCid({ text: 'Bad content' })
 
@@ -318,7 +318,7 @@ describe('Record Transactor', () => {
 
     it('should remove takedown from record', async () => {
       const uri = new AtUri(
-        'at://did:plc:test/app.northsky.stratos.feed.post/restored',
+        'at://did:plc:test/zonestratos.feed.post/restored',
       )
       const cid = await createCid({ text: 'Restored content' })
 
@@ -352,14 +352,14 @@ describe('Record Transactor', () => {
     it('should add backlinks', async () => {
       await transactor.addBacklinks([
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.graph.follow/1',
+          uri: 'at://did:plc:test/zonestratos.graph.follow/1',
           path: 'subject',
           linkTo: 'did:plc:followed',
         },
         {
-          uri: 'at://did:plc:test/app.northsky.stratos.feed.post/1',
+          uri: 'at://did:plc:test/zonestratos.feed.post/1',
           path: 'reply.parent',
-          linkTo: 'at://did:plc:other/app.northsky.stratos.feed.post/2',
+          linkTo: 'at://did:plc:other/zonestratos.feed.post/2',
         },
       ])
 
@@ -369,7 +369,7 @@ describe('Record Transactor', () => {
     })
 
     it('should remove backlinks by URI', async () => {
-      const uri = 'at://did:plc:test/app.northsky.stratos.graph.follow/1'
+      const uri = 'at://did:plc:test/zonestratos.graph.follow/1'
 
       await transactor.addBacklinks([
         { uri, path: 'subject', linkTo: 'did:plc:a' },
@@ -385,7 +385,7 @@ describe('Record Transactor', () => {
 
     it('should not duplicate backlinks on conflict', async () => {
       const backlink = {
-        uri: 'at://did:plc:test/app.northsky.stratos.graph.follow/1',
+        uri: 'at://did:plc:test/zonestratos.graph.follow/1',
         path: 'subject',
         linkTo: 'did:plc:followed',
       }

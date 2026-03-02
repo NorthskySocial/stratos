@@ -146,7 +146,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
 
     await agent.api.com.atproto.repo.putRecord({
       repo: did,
-      collection: 'app.northsky.stratos.actor.enrollment',
+      collection: 'zonestratos.actor.enrollment',
       rkey: 'self',
       record: {
         service: serviceEndpoint,
@@ -164,7 +164,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
 
     await agent.api.com.atproto.repo.deleteRecord({
       repo: did,
-      collection: 'app.northsky.stratos.actor.enrollment',
+      collection: 'zonestratos.actor.enrollment',
       rkey: 'self',
     })
   }

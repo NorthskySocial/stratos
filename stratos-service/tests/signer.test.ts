@@ -88,7 +88,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'abc',
           cid: recordCid,
         },
@@ -119,7 +119,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'x1',
           cid: recordCid,
         },
@@ -154,7 +154,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'p1',
           cid: recordCid,
         },
@@ -189,7 +189,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'r1',
           cid: recordCid,
         },
@@ -222,7 +222,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'c1',
           cid: recordCid,
         },
@@ -253,7 +253,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 's1',
           cid: recordCid,
         },
@@ -289,13 +289,13 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a2',
           cid: cid2,
         },
@@ -326,7 +326,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'd1',
           cid: recordCid,
         },
@@ -350,7 +350,7 @@ describe('signAndPersistCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'o1',
           cid: recordCid,
         },

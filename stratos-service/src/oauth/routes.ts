@@ -171,7 +171,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
           await agent.com.atproto.repo.putRecord({
             repo: did,
-            collection: 'app.northsky.stratos.actor.enrollment',
+            collection: 'zonestratos.actor.enrollment',
             rkey: 'self',
             record: {
               service: serviceEndpoint,

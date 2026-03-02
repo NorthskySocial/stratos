@@ -246,7 +246,7 @@ describe('MST inclusion proof CAR', () => {
     // Insert a record into the MST
     const root = await wrangler.putRecord(
       null,
-      'app.northsky.stratos.feed.post/abc123',
+      'zonestratos.feed.post/abc123',
       {
         $link: recordCid,
       },
@@ -257,7 +257,7 @@ describe('MST inclusion proof CAR', () => {
     const proofCids = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.northsky.stratos.feed.post/abc123',
+      'zonestratos.feed.post/abc123',
     )
 
     expect(proofCids.size).toBeGreaterThan(0)
@@ -328,15 +328,15 @@ describe('MST inclusion proof CAR', () => {
 
     let root = await wrangler.putRecord(
       null,
-      'app.northsky.stratos.feed.post/a1',
+      'zonestratos.feed.post/a1',
       {
         $link: cid1,
       },
     )
-    root = await wrangler.putRecord(root, 'app.northsky.stratos.feed.post/a2', {
+    root = await wrangler.putRecord(root, 'zonestratos.feed.post/a2', {
       $link: cid2,
     })
-    root = await wrangler.putRecord(root, 'app.northsky.stratos.feed.post/a3', {
+    root = await wrangler.putRecord(root, 'zonestratos.feed.post/a3', {
       $link: cid3,
     })
 
@@ -344,17 +344,17 @@ describe('MST inclusion proof CAR', () => {
     const proof1 = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.northsky.stratos.feed.post/a1',
+      'zonestratos.feed.post/a1',
     )
     const proof2 = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.northsky.stratos.feed.post/a2',
+      'zonestratos.feed.post/a2',
     )
     const proof3 = await buildInclusionProof(
       nodeStore,
       root!,
-      'app.northsky.stratos.feed.post/a3',
+      'zonestratos.feed.post/a3',
     )
 
     expect(proof1.size).toBeGreaterThan(0)
@@ -378,7 +378,7 @@ describe('Full repo CAR building', () => {
 
     const root = await wrangler.putRecord(
       null,
-      'app.northsky.stratos.feed.post/t1',
+      'zonestratos.feed.post/t1',
       {
         $link: recordCidStr,
       },
@@ -435,7 +435,7 @@ describe('Import repo CAR verification', () => {
     recordCidStr: string
   }> {
     const recordData = AtcuteCbor.encode({
-      $type: 'app.northsky.stratos.feed.post',
+      $type: 'zonestratos.feed.post',
       text: 'imported',
     })
     const recordCid = await AtcuteCid.create(0x71, recordData)
@@ -449,7 +449,7 @@ describe('Import repo CAR verification', () => {
 
     const mstRoot = await wrangler.putRecord(
       null,
-      'app.northsky.stratos.feed.post/imp1',
+      'zonestratos.feed.post/imp1',
       {
         $link: recordCidStr,
       },
@@ -532,7 +532,7 @@ describe('Import repo CAR verification', () => {
     }
 
     expect(records).toHaveLength(1)
-    expect(records[0].collection).toBe('app.northsky.stratos.feed.post')
+    expect(records[0].collection).toBe('zonestratos.feed.post')
     expect(records[0].rkey).toBe('imp1')
     expect(records[0].cid).toBeTruthy()
   })

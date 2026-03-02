@@ -206,7 +206,7 @@ describe('API Records', () => {
           mockCtx,
           {
             repo: testDid,
-            collection: 'app.northsky.stratos.feed.post',
+            collection: 'zonestratos.feed.post',
             record: {
               text: 'Hello',
               boundary: { values: [{ value: 'example.com' }] },
@@ -245,7 +245,7 @@ describe('API Records', () => {
           mockCtx,
           {
             repo: otherDid,
-            collection: 'app.northsky.stratos.feed.post',
+            collection: 'zonestratos.feed.post',
             record: { text: 'test' },
           },
           testDid,
@@ -276,7 +276,7 @@ describe('API Records', () => {
           },
           testDid,
         ),
-      ).rejects.toThrow('app.northsky.stratos')
+      ).rejects.toThrow('zonestratos')
     })
   })
 })
@@ -563,7 +563,7 @@ describe('StratosActorStore', () => {
       await actorStore.transact(testDid, async (store) => {
         // Insert a record directly for testing
         const uri = new AtUri(
-          'at://did:plc:testactor/app.northsky.stratos.feed.post/123',
+          'at://did:plc:testactor/zonestratos.feed.post/123',
         )
         await store.record.indexRecord(
           uri,

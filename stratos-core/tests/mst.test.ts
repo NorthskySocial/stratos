@@ -49,7 +49,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'abc123',
           cid: recordCid,
         },
@@ -76,19 +76,19 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a2',
           cid: cid2,
         },
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.like',
+          collection: 'zonestratos.feed.like',
           rkey: 'b1',
           cid: cid3,
         },
@@ -110,7 +110,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
@@ -143,13 +143,13 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a2',
           cid: cid2,
         },
@@ -171,7 +171,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
@@ -190,7 +190,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid2,
         },
@@ -212,13 +212,13 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a2',
           cid: cid2,
         },
@@ -236,7 +236,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a2',
           cid: cid2,
         },
@@ -258,7 +258,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a1',
           cid: cid1,
         },
@@ -273,7 +273,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'a2',
           cid: cid2,
         },
@@ -292,7 +292,7 @@ describe('buildCommit', () => {
         writes: [
           {
             action: 'create',
-            collection: 'app.northsky.stratos.feed.post',
+            collection: 'zonestratos.feed.post',
             rkey: 'a1',
             cid: null,
           },
@@ -310,7 +310,7 @@ describe('buildCommit', () => {
         writes: [
           {
             action: 'update',
-            collection: 'app.northsky.stratos.feed.post',
+            collection: 'zonestratos.feed.post',
             rkey: 'a1',
             cid: null,
           },
@@ -328,7 +328,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'm1',
           cid,
         },
@@ -354,13 +354,13 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'r1',
           cid: cid1,
         },
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'r2',
           cid: cid2,
         },
@@ -375,7 +375,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'delete',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'r1',
           cid: null,
         },
@@ -398,7 +398,7 @@ describe('buildCommit', () => {
       const cid = await makeCid(`bulk-record-${i}`)
       writes.push({
         action: 'create',
-        collection: 'app.northsky.stratos.feed.post',
+        collection: 'zonestratos.feed.post',
         rkey: `key${String(i).padStart(4, '0')}`,
         cid,
       })
@@ -416,7 +416,7 @@ describe('buildCommit', () => {
     for (let i = 0; i < 5; i++) {
       deletes.push({
         action: 'delete',
-        collection: 'app.northsky.stratos.feed.post',
+        collection: 'zonestratos.feed.post',
         rkey: `key${String(i).padStart(4, '0')}`,
         cid: null,
       })
@@ -440,7 +440,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'ov1',
           cid: cid1,
         },
@@ -457,7 +457,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'ov2',
           cid: cid2,
         },
@@ -480,7 +480,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'dc1',
           cid,
         },
@@ -523,7 +523,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'r1',
           cid,
         },
@@ -549,7 +549,7 @@ describe('buildCommit', () => {
         writes: [
           {
             action: 'create',
-            collection: 'app.northsky.stratos.feed.post',
+            collection: 'zonestratos.feed.post',
             rkey: 'x1',
             cid: await makeCid('x'),
           },
@@ -567,7 +567,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'ct1',
           cid: cid1,
         },
@@ -590,7 +590,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'ct2',
           cid: cid2,
         },
@@ -610,7 +610,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'create',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'id1',
           cid: cid1,
         },
@@ -625,7 +625,7 @@ describe('buildCommit', () => {
       writes: [
         {
           action: 'update',
-          collection: 'app.northsky.stratos.feed.post',
+          collection: 'zonestratos.feed.post',
           rkey: 'id1',
           cid: cid1,
         },
