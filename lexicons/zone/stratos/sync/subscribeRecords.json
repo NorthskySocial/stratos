@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "subscription",
-      "description": "Subscribe to stratos record updates for a specific account. Requires service auth or owner authentication.",
+      "description": "Subscribe to stratos record updates for a specific account. AppViews must provide a signed service JWT via syncToken. Account owners may authenticate via the Authorization header instead.",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -22,6 +22,10 @@
             "type": "string",
             "maxLength": 253,
             "description": "Optional domain filter. Only events for records with this domain in their boundary will be emitted."
+          },
+          "syncToken": {
+            "type": "string",
+            "description": "Signed service JWT for AppView authentication. Must include iss, aud, exp, and lxm claims. Required for service callers; owner callers may use the Authorization header instead."
           }
         }
       },
