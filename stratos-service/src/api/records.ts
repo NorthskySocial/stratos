@@ -65,9 +65,9 @@ export async function createRecord(
   }
 
   // Validate collection is stratos namespace
-  if (!collection.startsWith('zonestratos.')) {
+  if (!collection.startsWith('zone.stratos.')) {
     throw new InvalidRequestError(
-      'Only zonestratos.* collections are supported',
+      'Only zone.stratos.* collections are supported',
       'InvalidCollection',
     )
   }
@@ -231,9 +231,9 @@ export async function deleteRecord(
   }
 
   // Validate collection
-  if (!collection.startsWith('zonestratos.')) {
+  if (!collection.startsWith('zone.stratos.')) {
     throw new InvalidRequestError(
-      'Only zonestratos.* collections are supported',
+      'Only zone.stratos.* collections are supported',
       'InvalidCollection',
     )
   }
@@ -331,9 +331,9 @@ export async function updateRecord(
     throw new AuthRequiredError('Cannot update record for another user')
   }
 
-  if (!collection.startsWith('zonestratos.')) {
+  if (!collection.startsWith('zone.stratos.')) {
     throw new InvalidRequestError(
-      'Only zonestratos.* collections are supported',
+      'Only zone.stratos.* collections are supported',
       'InvalidCollection',
     )
   }

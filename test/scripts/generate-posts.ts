@@ -159,8 +159,8 @@ async function generatePosts(
 
   for (const text of posts) {
     try {
-      const result = await createRecord(did, 'zonestratos.feed.post', {
-        $type: 'zonestratos.feed.post',
+      const result = await createRecord(did, 'zone.stratos.feed.post', {
+        $type: 'zone.stratos.feed.post',
         text,
         boundary: { values: [{ value: boundary }] },
         createdAt: new Date().toISOString(),
@@ -194,7 +194,7 @@ async function generateThread(
     }
 
     const record: Record<string, unknown> = {
-      $type: 'zonestratos.feed.post',
+      $type: 'zone.stratos.feed.post',
       text: line.text,
       boundary: { values: [{ value: thread.boundary }] },
       createdAt: new Date().toISOString(),
@@ -211,7 +211,7 @@ async function generateThread(
     try {
       const result = await createRecord(
         user.did,
-        'zonestratos.feed.post',
+        'zone.stratos.feed.post',
         record,
       )
       const rkey = result.uri.split('/').pop()!

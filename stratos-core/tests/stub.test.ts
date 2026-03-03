@@ -23,19 +23,19 @@ describe('Stub Domain', () => {
     it('should generate a stub with source field', async () => {
       const cid = await createCid('test record')
       const stub = generateStub({
-        uri: 'at://did:plc:abc123/zonestratos.feed.post/123',
+        uri: 'at://did:plc:abc123/zone.stratos.feed.post/123',
         cid,
-        recordType: 'zonestratos.feed.post',
+        recordType: 'zone.stratos.feed.post',
         createdAt: '2024-01-01T00:00:00.000Z',
         serviceDid: 'did:web:stratos.example.com#atproto_pns',
       })
 
-      expect(stub.$type).toBe('zonestratos.feed.post')
+      expect(stub.$type).toBe('zone.stratos.feed.post')
       expect(stub.createdAt).toBe('2024-01-01T00:00:00.000Z')
       expect(stub.source).toBeDefined()
       expect(stub.source.vary).toBe('authenticated')
       expect(stub.source.subject.uri).toBe(
-        'at://did:plc:abc123/zonestratos.feed.post/123',
+        'at://did:plc:abc123/zone.stratos.feed.post/123',
       )
       expect(stub.source.subject.cid).toBe(cid.toString())
       expect(stub.source.service).toBe(
@@ -46,25 +46,25 @@ describe('Stub Domain', () => {
     it('should preserve recordType as $type', async () => {
       const cid = await createCid('another record')
       const stub = generateStub({
-        uri: 'at://did:plc:xyz/zonestratos.graph.follow/abc',
+        uri: 'at://did:plc:xyz/zone.stratos.graph.follow/abc',
         cid,
-        recordType: 'zonestratos.graph.follow',
+        recordType: 'zone.stratos.graph.follow',
         createdAt: '2024-06-15T12:00:00.000Z',
         serviceDid: 'did:plc:myservice#atproto_pns',
       })
 
-      expect(stub.$type).toBe('zonestratos.graph.follow')
+      expect(stub.$type).toBe('zone.stratos.graph.follow')
     })
   })
 
   describe('isStubRecord', () => {
     it('should return true for valid stub record', () => {
       const stub = {
-        $type: 'zonestratos.feed.post',
+        $type: 'zone.stratos.feed.post',
         source: {
           vary: 'authenticated',
           subject: {
-            uri: 'at://did:plc:test/zonestratos.feed.post/1',
+            uri: 'at://did:plc:test/zone.stratos.feed.post/1',
             cid: 'bafytest',
           },
           service: 'did:plc:service#atproto_pns',
@@ -77,7 +77,7 @@ describe('Stub Domain', () => {
 
     it('should return false for full record without source', () => {
       const fullRecord = {
-        $type: 'zonestratos.feed.post',
+        $type: 'zone.stratos.feed.post',
         text: 'Hello world',
         boundary: { values: [{ value: 'example.com' }] },
         createdAt: '2024-01-01T00:00:00.000Z',
@@ -115,11 +115,11 @@ describe('Stub Domain', () => {
   describe('extractSource', () => {
     it('should extract source from stub record', () => {
       const stub = {
-        $type: 'zonestratos.feed.post',
+        $type: 'zone.stratos.feed.post',
         source: {
           vary: 'authenticated',
           subject: {
-            uri: 'at://did:plc:test/zonestratos.feed.post/1',
+            uri: 'at://did:plc:test/zone.stratos.feed.post/1',
             cid: 'bafytest',
           },
           service: 'did:plc:service#atproto_pns',
@@ -131,7 +131,7 @@ describe('Stub Domain', () => {
       expect(source).toBeDefined()
       expect(source?.vary).toBe('authenticated')
       expect(source?.subject.uri).toBe(
-        'at://did:plc:test/zonestratos.feed.post/1',
+        'at://did:plc:test/zone.stratos.feed.post/1',
       )
       expect(source?.service).toBe('did:plc:service#atproto_pns')
     })

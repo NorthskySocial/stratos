@@ -298,7 +298,7 @@ describe('sync.getRecord CAR building', () => {
     // Store block and index record
     await actorStore.transact(testDid, async (store) => {
       const uri = new AtUri(
-        `at://${testDid}/zonestratos.feed.post/rec1`,
+        `at://${testDid}/zone.stratos.feed.post/rec1`,
       )
       await store.repo.putBlock(recordCid, recordBytes, 'rev1')
       await store.record.indexRecord(uri, recordCid, record, 'create', 'rev1')
@@ -325,7 +325,7 @@ describe('sync.getRecord CAR building', () => {
 
     await actorStore.transact(testDid, async (store) => {
       const uri = new AtUri(
-        `at://${testDid}/zonestratos.feed.post/car1`,
+        `at://${testDid}/zone.stratos.feed.post/car1`,
       )
       await store.repo.putBlock(recordCid, recordBytes, 'rev1')
       await store.record.indexRecord(uri, recordCid, record, 'create', 'rev1')

@@ -105,12 +105,12 @@ describe('stratos-db', () => {
   describe('stratos_record operations', () => {
     it('should insert and retrieve a record', async () => {
       const now = new Date().toISOString()
-      const uri = 'at://did:plc:test/zonestratos.feed.post/123'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/123'
 
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafytest123',
-        collection: 'zonestratos.feed.post',
+        collection: 'zone.stratos.feed.post',
         rkey: '123',
         repoRev: 'rev1',
         indexedAt: now,
@@ -125,17 +125,17 @@ describe('stratos-db', () => {
 
       expect(retrieved).toBeDefined()
       expect(retrieved?.cid).toBe('bafytest123')
-      expect(retrieved?.collection).toBe('zonestratos.feed.post')
+      expect(retrieved?.collection).toBe('zone.stratos.feed.post')
     })
 
     it('should update a record', async () => {
       const now = new Date().toISOString()
-      const uri = 'at://did:plc:test/zonestratos.feed.post/123'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/123'
 
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafyold',
-        collection: 'zonestratos.feed.post',
+        collection: 'zone.stratos.feed.post',
         rkey: '123',
         repoRev: 'rev1',
         indexedAt: now,
@@ -159,12 +159,12 @@ describe('stratos-db', () => {
 
     it('should delete a record', async () => {
       const now = new Date().toISOString()
-      const uri = 'at://did:plc:test/zonestratos.feed.post/123'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/123'
 
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafytest',
-        collection: 'zonestratos.feed.post',
+        collection: 'zone.stratos.feed.post',
         rkey: '123',
         repoRev: 'rev1',
         indexedAt: now,
@@ -183,12 +183,12 @@ describe('stratos-db', () => {
 
     it('should enforce unique uri constraint', async () => {
       const now = new Date().toISOString()
-      const uri = 'at://did:plc:test/zonestratos.feed.post/123'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/123'
 
       await db.insert(stratosRecord).values({
         uri,
         cid: 'bafyfirst',
-        collection: 'zonestratos.feed.post',
+        collection: 'zone.stratos.feed.post',
         rkey: '123',
         repoRev: 'rev1',
         indexedAt: now,
@@ -199,7 +199,7 @@ describe('stratos-db', () => {
         db.insert(stratosRecord).values({
           uri,
           cid: 'bafysecond',
-          collection: 'zonestratos.feed.post',
+          collection: 'zone.stratos.feed.post',
           rkey: '123',
           repoRev: 'rev2',
           indexedAt: now,
@@ -236,18 +236,18 @@ describe('stratos-db', () => {
 
   describe('stratos_backlink operations', () => {
     it('should insert and query backlinks', async () => {
-      const uri = 'at://did:plc:test/zonestratos.feed.post/123'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/123'
 
       await db.insert(stratosBacklink).values({
         uri,
         path: 'reply.parent.uri',
-        linkTo: 'at://did:plc:other/zonestratos.feed.post/456',
+        linkTo: 'at://did:plc:other/zone.stratos.feed.post/456',
       })
 
       await db.insert(stratosBacklink).values({
         uri,
         path: 'reply.root.uri',
-        linkTo: 'at://did:plc:other/zonestratos.feed.post/789',
+        linkTo: 'at://did:plc:other/zone.stratos.feed.post/789',
       })
 
       const backlinks = await db
@@ -259,21 +259,21 @@ describe('stratos-db', () => {
     })
 
     it('should find records linking to a target', async () => {
-      const targetUri = 'at://did:plc:target/zonestratos.feed.post/100'
+      const targetUri = 'at://did:plc:target/zone.stratos.feed.post/100'
 
       await db.insert(stratosBacklink).values([
         {
-          uri: 'at://did:plc:a/zonestratos.feed.post/1',
+          uri: 'at://did:plc:a/zone.stratos.feed.post/1',
           path: 'reply.parent.uri',
           linkTo: targetUri,
         },
         {
-          uri: 'at://did:plc:b/zonestratos.feed.post/2',
+          uri: 'at://did:plc:b/zone.stratos.feed.post/2',
           path: 'reply.parent.uri',
           linkTo: targetUri,
         },
         {
-          uri: 'at://did:plc:c/zonestratos.feed.post/3',
+          uri: 'at://did:plc:c/zone.stratos.feed.post/3',
           path: 'reply.parent.uri',
           linkTo: 'at://other',
         },
@@ -286,10 +286,10 @@ describe('stratos-db', () => {
 
       expect(linking).toHaveLength(2)
       expect(linking.map((r) => r.uri)).toContain(
-        'at://did:plc:a/zonestratos.feed.post/1',
+        'at://did:plc:a/zone.stratos.feed.post/1',
       )
       expect(linking.map((r) => r.uri)).toContain(
-        'at://did:plc:b/zonestratos.feed.post/2',
+        'at://did:plc:b/zone.stratos.feed.post/2',
       )
     })
   })
