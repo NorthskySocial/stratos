@@ -326,13 +326,9 @@ describe('MST inclusion proof CAR', () => {
     const cid2 = await makeCidStr('record-2')
     const cid3 = await makeCidStr('record-3')
 
-    let root = await wrangler.putRecord(
-      null,
-      'zone.stratos.feed.post/a1',
-      {
-        $link: cid1,
-      },
-    )
+    let root = await wrangler.putRecord(null, 'zone.stratos.feed.post/a1', {
+      $link: cid1,
+    })
     root = await wrangler.putRecord(root, 'zone.stratos.feed.post/a2', {
       $link: cid2,
     })
@@ -376,13 +372,9 @@ describe('Full repo CAR building', () => {
     const nodeStore = new NodeStore(overlay)
     const wrangler = new NodeWrangler(nodeStore)
 
-    const root = await wrangler.putRecord(
-      null,
-      'zone.stratos.feed.post/t1',
-      {
-        $link: recordCidStr,
-      },
-    )
+    const root = await wrangler.putRecord(null, 'zone.stratos.feed.post/t1', {
+      $link: recordCidStr,
+    })
 
     // Create commit
     const commitObj = {

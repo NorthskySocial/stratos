@@ -163,9 +163,9 @@ enabling cryptographic verification of repository contents.
 
 Key capabilities:
 
-| Endpoint                               | Description                                                                      |
-| -------------------------------------- | -------------------------------------------------------------------------------- |
-| `com.atproto.sync.getRecord`           | Returns CAR with signed commit + MST inclusion proof + record block              |
+| Endpoint                       | Description                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------- |
+| `com.atproto.sync.getRecord`   | Returns CAR with signed commit + MST inclusion proof + record block              |
 | `zone.stratos.sync.getRepo`    | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
 | `zone.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification             |
 
