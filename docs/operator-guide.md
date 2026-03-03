@@ -614,9 +614,15 @@ async function subscribeToUser(
   cursor?: number,
 ) {
   // Mint a fresh token on every call — tokens expire and must not be reused across reconnects.
-  const syncToken = await mintSyncToken(appviewDid, stratosServiceDid, signingKey)
+  const syncToken = await mintSyncToken(
+    appviewDid,
+    stratosServiceDid,
+    signingKey,
+  )
 
-  const url = new URL('wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords')
+  const url = new URL(
+    'wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords',
+  )
   url.searchParams.set('did', did)
   url.searchParams.set('syncToken', syncToken)
   if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
@@ -761,7 +767,10 @@ class StratosIndexer {
     }
   }
 
-  private async connectWithAuth(did: string, cursor?: number): Promise<WebSocket> {
+  private async connectWithAuth(
+    did: string,
+    cursor?: number,
+  ): Promise<WebSocket> {
     // Mint a fresh JWT on every connection — tokens are short-lived and must
     // not be reused across reconnects.
     const syncToken = await createServiceJwt({
@@ -771,7 +780,9 @@ class StratosIndexer {
       keypair: this.signingKey,
     })
 
-    const url = new URL(`${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`)
+    const url = new URL(
+      `${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`,
+    )
     url.searchParams.set('did', did)
     url.searchParams.set('syncToken', syncToken)
     if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
