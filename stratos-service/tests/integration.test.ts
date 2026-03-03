@@ -418,11 +418,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(
-          record,
-          'zone.stratos.feed.post',
-          stratosConfig,
-        )
+        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
       }).not.toThrow()
     })
 
@@ -444,11 +440,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(
-          record,
-          'zone.stratos.feed.post',
-          stratosConfig,
-        )
+        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
       }).not.toThrow()
     })
 
@@ -470,11 +462,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(
-          record,
-          'zone.stratos.feed.post',
-          stratosConfig,
-        )
+        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
       }).toThrow('cannot reply to a non-stratos record')
     })
 
@@ -493,11 +481,7 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(
-          record,
-          'zone.stratos.feed.post',
-          stratosConfig,
-        )
+        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
       }).toThrow('cannot embed bsky content')
     })
 
@@ -530,9 +514,9 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('URI Classification', () => {
     it('should correctly identify stratos URIs', () => {
-      expect(
-        isStratosUri('at://did:plc:abc/zone.stratos.feed.post/123'),
-      ).toBe(true)
+      expect(isStratosUri('at://did:plc:abc/zone.stratos.feed.post/123')).toBe(
+        true,
+      )
       expect(
         isStratosUri('at://did:plc:abc/zone.stratos.graph.follow/456'),
       ).toBe(true)
@@ -546,16 +530,14 @@ describe('Integration: Full Stratos Flow', () => {
       expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
         true,
       )
-      expect(
-        isBskyUri('at://did:plc:abc/zone.stratos.feed.post/123'),
-      ).toBe(false)
+      expect(isBskyUri('at://did:plc:abc/zone.stratos.feed.post/123')).toBe(
+        false,
+      )
     })
 
     it('should correctly identify stratos collections', () => {
       expect(isStratosCollection('zone.stratos.feed.post')).toBe(true)
-      expect(isStratosCollection('zone.stratos.graph.follow')).toBe(
-        true,
-      )
+      expect(isStratosCollection('zone.stratos.graph.follow')).toBe(true)
       expect(isStratosCollection('app.bsky.feed.post')).toBe(false)
       expect(isStratosCollection('com.atproto.repo.record')).toBe(false)
     })

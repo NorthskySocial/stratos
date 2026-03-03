@@ -55,16 +55,12 @@ async function run() {
   let postCid: string
 
   try {
-    const result = await createRecord(
-      rei.did,
-      'zone.stratos.feed.post',
-      {
-        $type: 'zone.stratos.feed.post',
-        text: 'Forging a new katana in the swordsmith workshop',
-        boundary: { values: [{ value: 'swordsmith' }] },
-        createdAt: new Date().toISOString(),
-      },
-    )
+    const result = await createRecord(rei.did, 'zone.stratos.feed.post', {
+      $type: 'zone.stratos.feed.post',
+      text: 'Forging a new katana in the swordsmith workshop',
+      boundary: { values: [{ value: 'swordsmith' }] },
+      createdAt: new Date().toISOString(),
+    })
 
     postUri = result.uri
     postCid = result.cid
@@ -234,10 +230,7 @@ async function run() {
 
   // Unauthenticated should see nothing
   try {
-    const anonList = await listRecords(
-      rei.did,
-      'zone.stratos.feed.post',
-    )
+    const anonList = await listRecords(rei.did, 'zone.stratos.feed.post')
     assert(
       anonList.records.length === 0,
       'Unauthenticated listRecords — empty',
@@ -256,16 +249,12 @@ async function run() {
   let kaorukoPostRkey: string
 
   try {
-    const result = await createRecord(
-      kaoruko.did,
-      'zone.stratos.feed.post',
-      {
-        $type: 'zone.stratos.feed.post',
-        text: 'Shopping at the Aekea marketplace',
-        boundary: { values: [{ value: 'aekea' }] },
-        createdAt: new Date().toISOString(),
-      },
-    )
+    const result = await createRecord(kaoruko.did, 'zone.stratos.feed.post', {
+      $type: 'zone.stratos.feed.post',
+      text: 'Shopping at the Aekea marketplace',
+      boundary: { values: [{ value: 'aekea' }] },
+      createdAt: new Date().toISOString(),
+    })
 
     kaorukoPostRkey = result.uri.split('/').pop()!
     assert(!!result.uri, 'kaoruko created aekea post', result.uri)
@@ -346,11 +335,7 @@ async function run() {
 
   if (kaorukoPostRkey) {
     try {
-      await deleteRecord(
-        kaoruko.did,
-        'zone.stratos.feed.post',
-        kaorukoPostRkey,
-      )
+      await deleteRecord(kaoruko.did, 'zone.stratos.feed.post', kaorukoPostRkey)
       pass("kaoruko's aekea post deleted")
       passed++
     } catch (err) {

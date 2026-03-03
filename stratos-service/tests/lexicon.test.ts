@@ -88,17 +88,13 @@ describe('Stratos Lexicons', () => {
     })
 
     it('zone.stratos.feed.post should be a record', () => {
-      const lex = lexicons.find(
-        (l) => l.id === 'zone.stratos.feed.post',
-      )
+      const lex = lexicons.find((l) => l.id === 'zone.stratos.feed.post')
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
 
     it('zone.stratos.actor.enrollment should be a record', () => {
-      const lex = lexicons.find(
-        (l) => l.id === 'zone.stratos.actor.enrollment',
-      )
+      const lex = lexicons.find((l) => l.id === 'zone.stratos.actor.enrollment')
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
@@ -144,15 +140,9 @@ describe('Stratos Lexicons', () => {
       const lexStore = (server as any).lex
 
       // Verify Stratos methods are available
-      expect(
-        lexStore.getDef('zone.stratos.enrollment.status'),
-      ).toBeDefined()
-      expect(
-        lexStore.getDef('zone.stratos.repo.hydrateRecord'),
-      ).toBeDefined()
-      expect(
-        lexStore.getDef('zone.stratos.repo.hydrateRecords'),
-      ).toBeDefined()
+      expect(lexStore.getDef('zone.stratos.enrollment.status')).toBeDefined()
+      expect(lexStore.getDef('zone.stratos.repo.hydrateRecord')).toBeDefined()
+      expect(lexStore.getDef('zone.stratos.repo.hydrateRecords')).toBeDefined()
     })
 
     it('should allow registering handlers for Stratos methods', () => {
