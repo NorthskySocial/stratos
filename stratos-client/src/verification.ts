@@ -118,10 +118,7 @@ export const fetchAndVerifyRecord = async (
   const fetchFn = options?.fetchFn ?? fetch
 
   const params = new URLSearchParams({ did, collection, rkey })
-  const url = new URL(
-    `/xrpc/com.atproto.sync.getRecord?${params}`,
-    serviceUrl,
-  )
+  const url = new URL(`/xrpc/com.atproto.sync.getRecord?${params}`, serviceUrl)
 
   const res = await fetchFn(url.href)
   if (!res.ok) {
