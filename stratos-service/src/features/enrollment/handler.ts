@@ -25,9 +25,9 @@ async function tryAuthenticate(
  * Register enrollment-related XRPC handlers
  */
 export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
-  // zonestratos.enrollment.status - Check enrollment status
+  // zone.stratos.enrollment.status - Check enrollment status
   router.get(
-    '/xrpc/zonestratos.enrollment.status',
+    '/xrpc/zone.stratos.enrollment.status',
     async (req: Request, res: Response) => {
       const start = Date.now()
       try {

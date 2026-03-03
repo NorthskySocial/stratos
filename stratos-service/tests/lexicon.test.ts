@@ -9,16 +9,16 @@ import { loadStratosLexicons } from '../src/context.js'
 
 // Expected Stratos lexicon IDs
 const EXPECTED_STRATOS_LEXICONS = [
-  'zonestratos.actor.enrollment',
-  'zonestratos.boundary.defs',
-  'zonestratos.defs',
-  'zonestratos.enrollment.status',
-  'zonestratos.feed.post',
-  'zonestratos.repo.hydrateRecord',
-  'zonestratos.repo.hydrateRecords',
-  'zonestratos.repo.importRepo',
-  'zonestratos.sync.getRepo',
-  'zonestratos.sync.subscribeRecords',
+  'zone.stratos.actor.enrollment',
+  'zone.stratos.boundary.defs',
+  'zone.stratos.defs',
+  'zone.stratos.enrollment.status',
+  'zone.stratos.feed.post',
+  'zone.stratos.repo.hydrateRecord',
+  'zone.stratos.repo.hydrateRecords',
+  'zone.stratos.repo.importRepo',
+  'zone.stratos.sync.getRepo',
+  'zone.stratos.sync.subscribeRecords',
 ]
 
 describe('Stratos Lexicons', () => {
@@ -55,49 +55,49 @@ describe('Stratos Lexicons', () => {
       lexicons = loadStratosLexicons()
     })
 
-    it('zonestratos.enrollment.status should be a query', () => {
+    it('zone.stratos.enrollment.status should be a query', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'zonestratos.enrollment.status',
+        (l) => l.id === 'zone.stratos.enrollment.status',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
 
-    it('zonestratos.repo.hydrateRecord should be a query', () => {
+    it('zone.stratos.repo.hydrateRecord should be a query', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'zonestratos.repo.hydrateRecord',
+        (l) => l.id === 'zone.stratos.repo.hydrateRecord',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('query')
     })
 
-    it('zonestratos.repo.hydrateRecords should be a procedure', () => {
+    it('zone.stratos.repo.hydrateRecords should be a procedure', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'zonestratos.repo.hydrateRecords',
+        (l) => l.id === 'zone.stratos.repo.hydrateRecords',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('procedure')
     })
 
-    it('zonestratos.sync.subscribeRecords should be a subscription', () => {
+    it('zone.stratos.sync.subscribeRecords should be a subscription', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'zonestratos.sync.subscribeRecords',
+        (l) => l.id === 'zone.stratos.sync.subscribeRecords',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('subscription')
     })
 
-    it('zonestratos.feed.post should be a record', () => {
+    it('zone.stratos.feed.post should be a record', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'zonestratos.feed.post',
+        (l) => l.id === 'zone.stratos.feed.post',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
     })
 
-    it('zonestratos.actor.enrollment should be a record', () => {
+    it('zone.stratos.actor.enrollment should be a record', () => {
       const lex = lexicons.find(
-        (l) => l.id === 'zonestratos.actor.enrollment',
+        (l) => l.id === 'zone.stratos.actor.enrollment',
       )
       expect(lex).toBeDefined()
       expect(lex?.defs?.main?.type).toBe('record')
@@ -145,13 +145,13 @@ describe('Stratos Lexicons', () => {
 
       // Verify Stratos methods are available
       expect(
-        lexStore.getDef('zonestratos.enrollment.status'),
+        lexStore.getDef('zone.stratos.enrollment.status'),
       ).toBeDefined()
       expect(
-        lexStore.getDef('zonestratos.repo.hydrateRecord'),
+        lexStore.getDef('zone.stratos.repo.hydrateRecord'),
       ).toBeDefined()
       expect(
-        lexStore.getDef('zonestratos.repo.hydrateRecords'),
+        lexStore.getDef('zone.stratos.repo.hydrateRecords'),
       ).toBeDefined()
     })
 
@@ -162,7 +162,7 @@ describe('Stratos Lexicons', () => {
 
       // Should not throw when registering handlers for Stratos methods
       expect(() => {
-        server.method('zonestratos.enrollment.status', {
+        server.method('zone.stratos.enrollment.status', {
           handler: async () => ({
             encoding: 'application/json',
             body: { did: 'did:test:123', enrolled: false },
@@ -171,11 +171,11 @@ describe('Stratos Lexicons', () => {
       }).not.toThrow()
 
       expect(() => {
-        server.method('zonestratos.repo.hydrateRecord', {
+        server.method('zone.stratos.repo.hydrateRecord', {
           handler: async () => ({
             encoding: 'application/json',
             body: {
-              uri: 'at://test/zonestratos.feed.post/123',
+              uri: 'at://test/zone.stratos.feed.post/123',
               cid: 'abc',
               value: {},
             },
@@ -190,7 +190,7 @@ describe('Stratos Lexicons', () => {
       const server = new XrpcServer(allLexicons)
 
       expect(() => {
-        server.method('zonestratos.repo.hydrateRecords', {
+        server.method('zone.stratos.repo.hydrateRecords', {
           handler: async () => ({
             encoding: 'application/json',
             body: { records: [], notFound: [], blocked: [] },

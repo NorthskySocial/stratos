@@ -30,7 +30,7 @@ only to members of specific groups or communities.
 | **Stratos Service** | A server that stores private records (separate from PDS)              |
 | **Enrollment**      | User must enroll with a Stratos service to create private content     |
 | **Domain Boundary** | Specifies which community boundaries can view a record                |
-| **Private Post**    | An `zonestratos.feed.post` record with boundary restrictions |
+| **Private Post**    | An `zone.stratos.feed.post` record with boundary restrictions |
 
 ## Quick Start
 
@@ -73,15 +73,15 @@ const response = await fetch(
     },
     body: JSON.stringify({
       repo: userDid,
-      collection: 'zonestratos.feed.post',
+      collection: 'zone.stratos.feed.post',
       record: {
-        $type: 'zonestratos.feed.post',
+        $type: 'zone.stratos.feed.post',
         text: 'This is a private post for my community!',
         boundary: {
-          $type: 'zonestratos.boundary.defs#Domains',
+          $type: 'zone.stratos.boundary.defs#Domains',
           values: [
             {
-              $type: 'zonestratos.boundary.defs#Domain',
+              $type: 'zone.stratos.boundary.defs#Domain',
               value: 'general',
             },
           ],
@@ -110,7 +110,7 @@ async function isUserEnrolled(
   did: string,
 ): Promise<boolean> {
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/zonestratos.enrollment.status?did=${encodeURIComponent(did)}`,
+    `${stratosEndpoint}/xrpc/zone.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
   )
   const data = await response.json()
   return data.enrolled === true
@@ -176,12 +176,12 @@ async function handleEnrollmentCallback() {
 
 ```typescript
 interface StratosPost {
-  $type: 'zonestratos.feed.post'
+  $type: 'zone.stratos.feed.post'
   text: string
   boundary: {
-    $type: 'zonestratos.boundary.defs#Domains'
+    $type: 'zone.stratos.boundary.defs#Domains'
     values: Array<{
-      $type: 'zonestratos.boundary.defs#Domain'
+      $type: 'zone.stratos.boundary.defs#Domain'
       value: string
     }>
   }
@@ -211,13 +211,13 @@ async function createPrivatePost(
   await rt.detectFacets(agent) // Your atproto agent
 
   const record: StratosPost = {
-    $type: 'zonestratos.feed.post',
+    $type: 'zone.stratos.feed.post',
     text: rt.text,
     facets: rt.facets,
     boundary: {
-      $type: 'zonestratos.boundary.defs#Domains',
+      $type: 'zone.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
-        $type: 'zonestratos.boundary.defs#Domain',
+        $type: 'zone.stratos.boundary.defs#Domain',
         value: domain,
       })),
     },
@@ -234,7 +234,7 @@ async function createPrivatePost(
       },
       body: JSON.stringify({
         repo: userDid,
-        collection: 'zonestratos.feed.post',
+        collection: 'zone.stratos.feed.post',
         record,
       }),
     },
@@ -280,16 +280,16 @@ async function createPostWithImages(
   )
 
   const record: StratosPost = {
-    $type: 'zonestratos.feed.post',
+    $type: 'zone.stratos.feed.post',
     text,
     embed: {
       $type: 'app.bsky.embed.images',
       images: uploadedImages,
     },
     boundary: {
-      $type: 'zonestratos.boundary.defs#Domains',
+      $type: 'zone.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
-        $type: 'zonestratos.boundary.defs#Domain',
+        $type: 'zone.stratos.boundary.defs#Domain',
         value: domain,
       })),
     },
@@ -305,7 +305,7 @@ async function createPostWithImages(
     },
     body: JSON.stringify({
       repo: userDid,
-      collection: 'zonestratos.feed.post',
+      collection: 'zone.stratos.feed.post',
       record,
     }),
   }).then((r) => r.json())
@@ -325,16 +325,16 @@ async function createReply(
   domains: string[],
 ) {
   const record: StratosPost = {
-    $type: 'zonestratos.feed.post',
+    $type: 'zone.stratos.feed.post',
     text,
     reply: {
       root: { uri: rootPost.uri, cid: rootPost.cid },
       parent: { uri: replyTo.uri, cid: replyTo.cid },
     },
     boundary: {
-      $type: 'zonestratos.boundary.defs#Domains',
+      $type: 'zone.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
-        $type: 'zonestratos.boundary.defs#Domain',
+        $type: 'zone.stratos.boundary.defs#Domain',
         value: domain,
       })),
     },
@@ -349,7 +349,7 @@ async function createReply(
     },
     body: JSON.stringify({
       repo: userDid,
-      collection: 'zonestratos.feed.post',
+      collection: 'zone.stratos.feed.post',
       record,
     }),
   }).then((r) => r.json())
@@ -371,11 +371,11 @@ The stub record looks like this:
 
 ```json
 {
-  "$type": "zonestratos.feed.post",
+  "$type": "zone.stratos.feed.post",
   "source": {
     "vary": "authenticated",
     "subject": {
-      "uri": "at://did:plc:abc/zonestratos.feed.post/tid123",
+      "uri": "at://did:plc:abc/zone.stratos.feed.post/tid123",
       "cid": "bafyreibeef..."
     },
     "service": "did:web:stratos.example.com#atproto_pns"
@@ -508,12 +508,12 @@ Every Stratos record must include a `boundary` specifying which boundaries can a
 ```typescript
 {
   boundary: {
-    $type: 'zonestratos.boundary.defs#Domains',
+    $type: 'zone.stratos.boundary.defs#Domains',
       values
   :
     [
-      {$type: 'zonestratos.boundary.defs#Domain', value: 'general'},
-      {$type: 'zonestratos.boundary.defs#Domain', value: 'writers'}
+      {$type: 'zone.stratos.boundary.defs#Domain', value: 'general'},
+      {$type: 'zone.stratos.boundary.defs#Domain', value: 'writers'}
     ]
   }
 }
@@ -534,7 +534,7 @@ Posts can be visible to multiple domains:
 
 ```typescript
 const crossDomainPost = {
-  $type: 'zonestratos.feed.post',
+  $type: 'zone.stratos.feed.post',
   text: 'Announcement for both groups',
   boundary: {
     values: [{ value: 'fanart' }, { value: 'cosplay' }],
@@ -604,7 +604,7 @@ async function exportRepo(
   if (since) params.set('since', since)
 
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/zonestratos.sync.getRepo?${params}`,
+    `${stratosEndpoint}/xrpc/zone.stratos.sync.getRepo?${params}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },
@@ -626,7 +626,7 @@ async function importRepo(
   carBytes: Uint8Array,
 ): Promise<{ imported: number }> {
   const response = await fetch(
-    `${stratosEndpoint}/xrpc/zonestratos.repo.importRepo`,
+    `${stratosEndpoint}/xrpc/zone.stratos.repo.importRepo`,
     {
       method: 'POST',
       headers: {
@@ -760,7 +760,7 @@ function StratosComposer({ agent, stratosDomains }) {
 
 ```tsx
 function PostCard({ post }) {
-  const isStratos = post.uri.includes('zonestratos.')
+  const isStratos = post.uri.includes('zone.stratos.')
   const domains = post.record?.boundary?.values?.map((d) => d.value) ?? []
 
   return (
@@ -789,7 +789,7 @@ Authorization: Bearer <access_token>
 
 {
   "repo": "<user-did>",
-  "collection": "zonestratos.feed.post",
+  "collection": "zone.stratos.feed.post",
   "record": { ... }
 }
 ```
@@ -816,7 +816,7 @@ Authorization: Bearer <access_token>
 
 {
   "repo": "<user-did>",
-  "collection": "zonestratos.feed.post",
+  "collection": "zone.stratos.feed.post",
   "rkey": "<record-key>"
 }
 ```
@@ -834,7 +834,7 @@ Returns a CAR containing the signed commit, MST inclusion proof nodes, and recor
 #### Export Repository
 
 ```
-GET /xrpc/zonestratos.sync.getRepo?did=<did>[&since=<rev>]
+GET /xrpc/zone.stratos.sync.getRepo?did=<did>[&since=<rev>]
 Authorization: Bearer <access_token>
 Response: application/vnd.ipld.car
 ```
@@ -844,7 +844,7 @@ Returns a full CAR of the repo: all record blocks, MST nodes, and the signed com
 #### Import Repository
 
 ```
-POST /xrpc/zonestratos.repo.importRepo
+POST /xrpc/zone.stratos.repo.importRepo
 Authorization: Bearer <access_token>
 Content-Type: application/vnd.ipld.car
 Response: { "imported": <count> }
@@ -853,16 +853,16 @@ Response: { "imported": <count> }
 #### Check Enrollment
 
 ```
-GET /xrpc/zonestratos.enrollment.status?did=<user-did>
+GET /xrpc/zone.stratos.enrollment.status?did=<user-did>
 ```
 
 ### Record Types
 
-#### zonestratos.feed.post
+#### zone.stratos.feed.post
 
 ```typescript
 interface AppStratosFeedPost {
-  $type: 'zonestratos.feed.post'
+  $type: 'zone.stratos.feed.post'
   text: string // Required, max 3000 chars
   boundary: Boundary // Required
   createdAt: string // Required, ISO datetime
@@ -875,12 +875,12 @@ interface AppStratosFeedPost {
 }
 
 interface Boundary {
-  $type: 'zonestratos.boundary.defs#Domains'
+  $type: 'zone.stratos.boundary.defs#Domains'
   values: Domain[] // Max 10 domains
 }
 
 interface Domain {
-  $type: 'zonestratos.boundary.defs#Domain'
+  $type: 'zone.stratos.boundary.defs#Domain'
   value: string // Domain name, max 253 chars
 }
 ```

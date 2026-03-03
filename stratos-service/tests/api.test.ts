@@ -206,7 +206,7 @@ describe('API Records', () => {
           mockCtx,
           {
             repo: testDid,
-            collection: 'zonestratos.feed.post',
+            collection: 'zone.stratos.feed.post',
             record: {
               text: 'Hello',
               boundary: { values: [{ value: 'example.com' }] },
@@ -245,7 +245,7 @@ describe('API Records', () => {
           mockCtx,
           {
             repo: otherDid,
-            collection: 'zonestratos.feed.post',
+            collection: 'zone.stratos.feed.post',
             record: { text: 'test' },
           },
           testDid,
@@ -563,7 +563,7 @@ describe('StratosActorStore', () => {
       await actorStore.transact(testDid, async (store) => {
         // Insert a record directly for testing
         const uri = new AtUri(
-          'at://did:plc:testactor/zonestratos.feed.post/123',
+          'at://did:plc:testactor/zone.stratos.feed.post/123',
         )
         await store.record.indexRecord(
           uri,

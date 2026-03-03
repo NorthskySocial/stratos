@@ -171,7 +171,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
           await agent.com.atproto.repo.putRecord({
             repo: did,
-            collection: 'zonestratos.actor.enrollment',
+            collection: 'zone.stratos.actor.enrollment',
             rkey: 'self',
             record: {
               service: serviceEndpoint,
