@@ -7,10 +7,17 @@ import { eq, gt, asc, sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
-import { Server as XrpcServer, XRPCError } from '@atproto/xrpc-server'
+import {
+  Server as XrpcServer,
+  XRPCError,
+  AuthRequiredError,
+  type StreamAuthVerifier,
+  type StreamAuthContext,
+} from '@atproto/xrpc-server'
 import { schemas as atprotoSchemas, Agent } from '@atproto/api'
 import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
+import { verifyServiceAuth } from './auth/verifier.js'
 
 import {
   createStratosDb,
@@ -363,6 +370,8 @@ export interface AuthVerifiers {
   admin: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string } }>
+  /** Stream auth for zone.stratos.sync.subscribeRecords */
+  subscribeAuth: StreamAuthVerifier
 }
 
 /**
@@ -370,7 +379,7 @@ export interface AuthVerifiers {
  */
 function createAuthVerifiers(
   serviceDid: string,
-  _idResolver: IdResolver,
+  idResolver: IdResolver,
   _oauthClient: NodeOAuthClient | undefined,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
@@ -517,6 +526,56 @@ function createAuthVerifiers(
       return {
         credentials: { type: 'admin' },
       }
+    },
+    subscribeAuth: async (ctx: StreamAuthContext) => {
+      const params = ctx.params as Record<string, unknown>
+      const syncToken = params.syncToken
+
+      if (syncToken && typeof syncToken === 'string') {
+        const serviceCtx = await verifyServiceAuth(
+          `Bearer ${syncToken}`,
+          serviceDid,
+          'zone.stratos.sync.subscribeRecords',
+          idResolver,
+        )
+        return {
+          credentials: {
+            type: 'service',
+            iss: serviceCtx.iss,
+            aud: serviceCtx.aud,
+          },
+        }
+      }
+
+      const authHeader = ctx.req.headers.authorization
+      if (authHeader) {
+        if (devMode && authHeader.startsWith('Bearer ')) {
+          const did = authHeader.slice(7).trim()
+          if (did.startsWith('did:')) {
+            const isEnrolled = await enrollmentStore.isEnrolled(did)
+            if (isEnrolled) {
+              return { credentials: { type: 'user', did } }
+            }
+          }
+          throw new AuthRequiredError('Authorization failed')
+        }
+
+        if (authHeader.startsWith('DPoP ') && dpopVerifier) {
+          const result = await dpopVerifier.verify(
+            {
+              method: ctx.req.method || 'GET',
+              url: ctx.req.url || '/',
+              headers: ctx.req.headers as Record<string, string | string[] | undefined>,
+            },
+            { setHeader: () => {} },
+          )
+          return { credentials: { type: 'user', did: result.did } }
+        }
+      }
+
+      throw new AuthRequiredError(
+        'syncToken query param or Authorization header required',
+      )
     },
   }
 }

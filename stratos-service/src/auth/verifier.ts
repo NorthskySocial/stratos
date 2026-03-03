@@ -1,10 +1,7 @@
 import {
   MethodAuthVerifier,
-  AuthRequiredError,
   InvalidRequestError,
   type MethodAuthContext,
-  type StreamAuthVerifier,
-  type StreamAuthContext,
 } from '@atproto/xrpc-server'
 import { IdResolver, getDidKeyFromMultibase } from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
@@ -208,58 +205,6 @@ export async function verifyServiceAuth(
     aud: payload.aud,
     lxm: payload.lxm,
     exp: payload.exp,
-  }
-}
-
-/**
- * Create a stream auth verifier for zone.stratos.sync.subscribeRecords.
- *
- * AppViews pass a signed service JWT as the `syncToken` query parameter
- * (Authorization headers are unreliable through WebSocket proxies).
- * Account owners may authenticate via a standard Bearer access token in
- * the Authorization header instead.
- */
-export function createSubscribeRecordsAuthVerifier(
-  serviceDid: string,
-  idResolver: IdResolver,
-  validateAccessToken: (token: string) => Promise<AccessTokenClaims>,
-): StreamAuthVerifier {
-  return async (ctx: StreamAuthContext) => {
-    const params = ctx.params as Record<string, unknown>
-    const syncToken = params.syncToken
-
-    if (syncToken && typeof syncToken === 'string') {
-      const serviceCtx = await verifyServiceAuth(
-        `Bearer ${syncToken}`,
-        serviceDid,
-        'zone.stratos.sync.subscribeRecords',
-        idResolver,
-      )
-      return {
-        credentials: {
-          type: 'service',
-          iss: serviceCtx.iss,
-          aud: serviceCtx.aud,
-        },
-      }
-    }
-
-    const authHeader = ctx.req.headers.authorization
-    if (authHeader) {
-      const [bearer, token] = authHeader.split(' ')
-      if (bearer?.toLowerCase() !== 'bearer' || !token) {
-        throw new InvalidRequestError('Invalid authorization header format')
-      }
-      const claims = await validateAccessToken(token)
-      return {
-        credentials: {
-          type: 'user',
-          did: claims.sub,
-        },
-      }
-    }
-
-    throw new AuthRequiredError('syncToken query param or Authorization header required')
   }
 }
 
