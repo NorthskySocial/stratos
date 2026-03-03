@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "zonestratos.repo.hydrateRecord",
+  "id": "zone.stratos.repo.hydrateRecord",
   "defs": {
     "main": {
       "type": "query",

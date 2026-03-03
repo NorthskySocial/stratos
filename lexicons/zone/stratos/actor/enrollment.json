@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "zonestratos.actor.enrollment",
+  "id": "zone.stratos.actor.enrollment",
   "defs": {
     "main": {
       "type": "record",
@@ -20,7 +20,7 @@
             "description": "List of boundaries the user has access to on this Stratos service.",
             "items": {
               "type": "ref",
-              "ref": "zonestratos.boundary.defs#Domain"
+              "ref": "zone.stratos.boundary.defs#Domain"
             },
             "maxLength": 50
           },

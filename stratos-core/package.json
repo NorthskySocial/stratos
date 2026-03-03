@@ -27,15 +27,10 @@
     "lint": "eslint --ext .ts"
   },
   "dependencies": {
-    "@atcute/cbor": "^2.3.2",
-    "@atcute/cid": "^2.4.1",
-    "@atcute/mst": "^0.1.2",
-    "@atcute/uint8array": "^1.1.1",
-    "@atproto/common-web": "^0.4.16",
     "@atproto/lexicon": "^0.6.1",
     "@atproto/syntax": "^0.4.3",
     "@libsql/client": "^0.17.0",
-    "drizzle-orm": "^1.0.0-beta.15",
+    "drizzle-orm": "^0.45.1",
     "multiformats": "^13.4.2",
     "zod": "^4.3.6"
   },
@@ -44,7 +39,6 @@
     "@types/node": "^25.2.1",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
-    "fast-check": "^4.5.0",
     "globals": "^17.3.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.54.0",

@@ -54,34 +54,13 @@ const envSchema = z.object({
         .filter((d) => d.length > 0),
     ),
 
-  // Repo import
-  STRATOS_IMPORT_MAX_BYTES: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(256 * 1024 * 1024),
-
   // Signing key
-  STRATOS_SIGNING_KEY_HEX: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
+  STRATOS_SIGNING_KEY_HEX: z.string().optional(),
 
   // OAuth
-  STRATOS_OAUTH_ISSUER: z
-    .string()
-    .url()
-    .optional()
-    .or(z.literal(''))
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_CLIENT_ID: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_CLIENT_SECRET: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
+  STRATOS_OAUTH_ISSUER: z.string().url().optional(),
+  STRATOS_OAUTH_CLIENT_ID: z.string().optional(),
+  STRATOS_OAUTH_CLIENT_SECRET: z.string().optional(),
 
   // PLC directory
   STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
@@ -93,9 +72,6 @@ const envSchema = z.object({
 
   // Admin auth (optional)
   STRATOS_ADMIN_PASSWORD: z.string().optional(),
-
-  // Dev mode (allows Bearer DID auth without DPoP for test scripts)
-  STRATOS_DEV_MODE: z.coerce.boolean().default(false),
 
   // DPoP configuration
   STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
@@ -161,7 +137,6 @@ export interface StratosServiceConfig {
     allowedDomains: string[]
     retentionDays: number
     devMode?: boolean
-    importMaxBytes: number
   }
   enrollment: {
     mode: 'open' | 'allowlist'
@@ -236,8 +211,6 @@ export function envToConfig(env: Env): StratosServiceConfig {
     stratos: {
       allowedDomains: env.STRATOS_ALLOWED_DOMAINS,
       retentionDays: env.STRATOS_RETENTION_DAYS,
-      devMode: env.STRATOS_DEV_MODE,
-      importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,

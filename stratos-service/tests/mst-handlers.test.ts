@@ -246,7 +246,7 @@ describe('MST inclusion proof CAR', () => {
     // Insert a record into the MST
     const root = await wrangler.putRecord(
       null,
-      'zonestratos.feed.post/abc123',
+      'zone.stratos.feed.post/abc123',
       {
         $link: recordCid,
       },
@@ -257,7 +257,7 @@ describe('MST inclusion proof CAR', () => {
     const proofCids = await buildInclusionProof(
       nodeStore,
       root!,
-      'zonestratos.feed.post/abc123',
+      'zone.stratos.feed.post/abc123',
     )
 
     expect(proofCids.size).toBeGreaterThan(0)
@@ -326,17 +326,13 @@ describe('MST inclusion proof CAR', () => {
     const cid2 = await makeCidStr('record-2')
     const cid3 = await makeCidStr('record-3')
 
-    let root = await wrangler.putRecord(
-      null,
-      'zonestratos.feed.post/a1',
-      {
-        $link: cid1,
-      },
-    )
-    root = await wrangler.putRecord(root, 'zonestratos.feed.post/a2', {
+    let root = await wrangler.putRecord(null, 'zone.stratos.feed.post/a1', {
+      $link: cid1,
+    })
+    root = await wrangler.putRecord(root, 'zone.stratos.feed.post/a2', {
       $link: cid2,
     })
-    root = await wrangler.putRecord(root, 'zonestratos.feed.post/a3', {
+    root = await wrangler.putRecord(root, 'zone.stratos.feed.post/a3', {
       $link: cid3,
     })
 
@@ -344,17 +340,17 @@ describe('MST inclusion proof CAR', () => {
     const proof1 = await buildInclusionProof(
       nodeStore,
       root!,
-      'zonestratos.feed.post/a1',
+      'zone.stratos.feed.post/a1',
     )
     const proof2 = await buildInclusionProof(
       nodeStore,
       root!,
-      'zonestratos.feed.post/a2',
+      'zone.stratos.feed.post/a2',
     )
     const proof3 = await buildInclusionProof(
       nodeStore,
       root!,
-      'zonestratos.feed.post/a3',
+      'zone.stratos.feed.post/a3',
     )
 
     expect(proof1.size).toBeGreaterThan(0)
@@ -376,13 +372,9 @@ describe('Full repo CAR building', () => {
     const nodeStore = new NodeStore(overlay)
     const wrangler = new NodeWrangler(nodeStore)
 
-    const root = await wrangler.putRecord(
-      null,
-      'zonestratos.feed.post/t1',
-      {
-        $link: recordCidStr,
-      },
-    )
+    const root = await wrangler.putRecord(null, 'zone.stratos.feed.post/t1', {
+      $link: recordCidStr,
+    })
 
     // Create commit
     const commitObj = {
@@ -435,7 +427,7 @@ describe('Import repo CAR verification', () => {
     recordCidStr: string
   }> {
     const recordData = AtcuteCbor.encode({
-      $type: 'zonestratos.feed.post',
+      $type: 'zone.stratos.feed.post',
       text: 'imported',
     })
     const recordCid = await AtcuteCid.create(0x71, recordData)
@@ -449,7 +441,7 @@ describe('Import repo CAR verification', () => {
 
     const mstRoot = await wrangler.putRecord(
       null,
-      'zonestratos.feed.post/imp1',
+      'zone.stratos.feed.post/imp1',
       {
         $link: recordCidStr,
       },
@@ -532,7 +524,7 @@ describe('Import repo CAR verification', () => {
     }
 
     expect(records).toHaveLength(1)
-    expect(records[0].collection).toBe('zonestratos.feed.post')
+    expect(records[0].collection).toBe('zone.stratos.feed.post')
     expect(records[0].rkey).toBe('imp1')
     expect(records[0].cid).toBeTruthy()
   })
