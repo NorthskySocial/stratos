@@ -115,6 +115,15 @@ const envSchema = z.object({
 
   // DPoP configuration
   STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
+
+  // User-Agent
+  STRATOS_REPO_URL: z
+    .string()
+    .default('https://github.com/NorthskySocial/stratos'),
+  STRATOS_OPERATOR_CONTACT: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -206,6 +215,10 @@ export interface StratosServiceConfig {
   dpop: {
     requireNonce: boolean
   }
+  userAgent: {
+    repoUrl: string
+    operatorContact?: string
+  }
 }
 
 /**
@@ -289,6 +302,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
       : undefined,
     dpop: {
       requireNonce: env.STRATOS_DPOP_REQUIRE_NONCE,
+    },
+    userAgent: {
+      repoUrl: env.STRATOS_REPO_URL,
+      operatorContact: env.STRATOS_OPERATOR_CONTACT,
     },
   }
 }
