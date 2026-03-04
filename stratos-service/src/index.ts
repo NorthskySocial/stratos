@@ -66,7 +66,7 @@ export class StratosServer {
     })
 
     app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', version: '0.1.0' })
+      res.json({ status: 'ok', version: ctx.version })
     })
 
     app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
