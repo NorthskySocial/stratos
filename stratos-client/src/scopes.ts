@@ -7,8 +7,8 @@ const ALL_ACTIONS = ['create', 'update', 'delete']
  * these correspond to atproto granular scopes for specific collections.
  */
 export const STRATOS_SCOPES: StratosScopes = {
-  enrollment: 'app.northsky.stratos.actor.enrollment',
-  post: 'app.northsky.stratos.feed.post',
+  enrollment: 'zone.stratos.actor.enrollment',
+  post: 'zone.stratos.feed.post',
 }
 
 /**
