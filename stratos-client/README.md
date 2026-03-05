@@ -298,9 +298,9 @@ Stratos records use AT Protocol auth scopes. Clients should declare the scopes t
 
 ### Required scopes
 
-| Scope                                        | Description                   | Dependency                                            |
-| -------------------------------------------- | ----------------------------- | ----------------------------------------------------- |
-| `repo:zone.stratos.actor.enrollment` | Read/write enrollment records | None                                                  |
+| Scope                                | Description                   | Dependency                                    |
+| ------------------------------------ | ----------------------------- | --------------------------------------------- |
+| `repo:zone.stratos.actor.enrollment` | Read/write enrollment records | None                                          |
 | `repo:zone.stratos.feed.post`        | Read/write Stratos posts      | Requires `repo:zone.stratos.actor.enrollment` |
 
 ### Scope utilities
