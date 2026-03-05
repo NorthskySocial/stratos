@@ -579,17 +579,26 @@ endpoint. This is similar to how AppViews subscribe to PDS firehoses, but scoped
 
 ### Step 1: Service Authentication
 
-AppViews authenticate using **service auth** - a signed JWT proving their identity:
+AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query
+parameter. The token must be passed as a query param because `Authorization` headers are
+stripped by many WebSocket proxies and are not supported in browser WebSocket APIs.
 
 ```typescript
-import { createServiceAuthHeaders } from '@atproto/xrpc-server'
+import { createServiceJwt } from '@atproto/xrpc-server'
 
-const headers = await createServiceAuthHeaders({
-  iss: appviewDid, // AppView's DID
-  aud: stratosServiceDid, // Stratos service DID
-  lxm: 'zone.stratos.sync.subscribeRecords',
-  keypair: signingKey, // AppView's signing key
-})
+async function mintSyncToken(
+  appviewDid: string,
+  stratosServiceDid: string,
+  signingKey: Keypair,
+): Promise<string> {
+  // Tokens are short-lived — mint a fresh one for every connection or reconnect.
+  return createServiceJwt({
+    iss: appviewDid,
+    aud: stratosServiceDid,
+    lxm: 'zone.stratos.sync.subscribeRecords',
+    keypair: signingKey,
+  })
+}
 ```
 
 ### Step 2: Subscribe to User Records
@@ -597,18 +606,30 @@ const headers = await createServiceAuthHeaders({
 ```typescript
 import WebSocket from 'ws'
 
-async function subscribeToUser(did: string, cursor?: number) {
-  const authHeaders = await createServiceAuthHeaders({...})
+async function subscribeToUser(
+  appviewDid: string,
+  stratosServiceDid: string,
+  signingKey: Keypair,
+  did: string,
+  cursor?: number,
+) {
+  // Mint a fresh token on every call — tokens expire and must not be reused across reconnects.
+  const syncToken = await mintSyncToken(
+    appviewDid,
+    stratosServiceDid,
+    signingKey,
+  )
 
-  const url = new URL('wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords')
+  const url = new URL(
+    'wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords',
+  )
   url.searchParams.set('did', did)
-  if (cursor) url.searchParams.set('cursor', cursor.toString())
+  url.searchParams.set('syncToken', syncToken)
+  if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
 
-  const ws = new WebSocket(url.toString(), {
-    headers: authHeaders
-  })
+  const ws = new WebSocket(url.toString())
 
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     const frame = decodeFrame(data)
 
     if (frame.$type === 'zone.stratos.sync.subscribeRecords#commit') {
@@ -723,6 +744,7 @@ Query a community service for verified domain membership.
 ### Complete Integration Example
 
 ```typescript
+import { createServiceJwt } from '@atproto/xrpc-server'
 import { IdResolver } from '@atproto/identity'
 import { Kysely } from 'kysely'
 
@@ -733,6 +755,9 @@ class StratosIndexer {
     private db: Kysely<AppViewDb>,
     private idResolver: IdResolver,
     private stratosEndpoint: string,
+    private appviewDid: string,
+    private stratosServiceDid: string,
+    private signingKey: Keypair,
   ) {}
 
   async startIndexing(enrolledDids: string[]) {
@@ -742,11 +767,42 @@ class StratosIndexer {
     }
   }
 
+  private async connectWithAuth(
+    did: string,
+    cursor?: number,
+  ): Promise<WebSocket> {
+    // Mint a fresh JWT on every connection — tokens are short-lived and must
+    // not be reused across reconnects.
+    const syncToken = await createServiceJwt({
+      iss: this.appviewDid,
+      aud: this.stratosServiceDid,
+      lxm: 'zone.stratos.sync.subscribeRecords',
+      keypair: this.signingKey,
+    })
+
+    const url = new URL(
+      `${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`,
+    )
+    url.searchParams.set('did', did)
+    url.searchParams.set('syncToken', syncToken)
+    if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
+
+    return new WebSocket(url.toString())
+  }
+
   private async subscribeToUser(did: string, cursor?: number) {
     const ws = await this.connectWithAuth(did, cursor)
 
     ws.on('message', async (data) => {
       const event = this.decodeEvent(data)
+
+      if (event.$type === 'zone.stratos.sync.subscribeRecords#info') {
+        if (event.name === 'OutdatedCursor') {
+          // Cursor was too old; indexing continues but some events may be missed.
+          this.cursors.delete(did)
+        }
+        return
+      }
 
       if (event.$type === 'zone.stratos.sync.subscribeRecords#commit') {
         await this.db.transaction().execute(async (tx) => {
@@ -755,11 +811,13 @@ class StratosIndexer {
           }
           await this.saveCursor(tx, event.did, event.seq)
         })
+        this.cursors.set(did, event.seq)
       }
     })
 
     ws.on('close', () => {
-      // Reconnect after delay
+      // Load cursor from in-memory map (kept in sync with DB commits) and
+      // reconnect with a freshly minted token.
       setTimeout(() => this.subscribeToUser(did, this.cursors.get(did)), 5000)
     })
   }

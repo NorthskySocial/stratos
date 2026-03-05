@@ -276,7 +276,7 @@ describe('API Records', () => {
           },
           testDid,
         ),
-      ).rejects.toThrow('zonestratos')
+      ).rejects.toThrow('zone.stratos')
     })
   })
 })
