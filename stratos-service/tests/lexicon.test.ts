@@ -36,7 +36,7 @@ describe('Stratos Lexicons', () => {
       for (const lexicon of lexicons) {
         expect(lexicon.lexicon).toBe(1)
         expect(typeof lexicon.id).toBe('string')
-        expect(lexicon.id).toMatch(/^app\.northsky\.stratos\./)
+        expect(lexicon.id).toMatch(/^zone\.stratos\./)
         expect(lexicon.defs).toBeDefined()
         expect(typeof lexicon.defs).toBe('object')
       }

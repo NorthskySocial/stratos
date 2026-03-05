@@ -65,6 +65,7 @@ export interface SubscribeRecordsParams {
   did: string
   cursor?: number
   domain?: string
+  syncToken?: string
 }
 
 /**
@@ -284,6 +285,7 @@ export function registerSubscribeRecords(ctx: AppContext): void {
   const handler = createSubscribeRecordsHandler(ctx)
 
   ctx.xrpcServer.streamMethod('zone.stratos.sync.subscribeRecords', {
+    auth: ctx.authVerifier.subscribeAuth,
     handler: async function* ({ params, auth, signal }) {
       const typedParams = params as unknown as SubscribeRecordsParams
       const typedAuth = auth as {
