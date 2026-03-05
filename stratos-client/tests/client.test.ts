@@ -192,9 +192,7 @@ describe('routing', () => {
 
 describe('scopes', () => {
   it('has correct default scope identifiers', () => {
-    expect(STRATOS_SCOPES.enrollment).toBe(
-      'zone.stratos.actor.enrollment',
-    )
+    expect(STRATOS_SCOPES.enrollment).toBe('zone.stratos.actor.enrollment')
     expect(STRATOS_SCOPES.post).toBe('zone.stratos.feed.post')
   })
 
@@ -204,9 +202,7 @@ describe('scopes', () => {
   })
 
   it('builds collection scope with custom abilities', () => {
-    const scope = buildCollectionScope('zone.stratos.feed.post', [
-      'create',
-    ])
+    const scope = buildCollectionScope('zone.stratos.feed.post', ['create'])
     expect(scope).toBe('repo:zone.stratos.feed.post?action=create')
   })
 
