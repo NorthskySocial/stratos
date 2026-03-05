@@ -22,7 +22,7 @@ describe('discovery', () => {
   it('returns enrollment when record exists', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
-        uri: 'at://did:plc:test123/app.northsky.stratos.actor.enrollment/self',
+        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
         cid: 'bafytest',
         value: {
           service: 'https://stratos.example.com',
@@ -64,7 +64,7 @@ describe('discovery', () => {
   it('returns null when record has invalid shape', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
-        uri: 'at://did:plc:test123/app.northsky.stratos.actor.enrollment/self',
+        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
         cid: 'bafytest',
         value: { invalid: true },
       }),
@@ -80,7 +80,7 @@ describe('discovery', () => {
   it('normalizes missing boundaries to empty array', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
-        uri: 'at://did:plc:test123/app.northsky.stratos.actor.enrollment/self',
+        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
         cid: 'bafytest',
         value: {
           service: 'https://stratos.example.com',
@@ -99,7 +99,7 @@ describe('discovery', () => {
   it('accepts a FetchHandler instead of a PDS URL', async () => {
     const mockHandler = vi.fn(async () =>
       jsonResponse({
-        uri: 'at://did:plc:test123/app.northsky.stratos.actor.enrollment/self',
+        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
         cid: 'bafytest',
         value: {
           service: 'https://stratos.example.com',
@@ -132,10 +132,10 @@ describe('routing', () => {
         'https://stratos.example.com',
       )
 
-      await handler.handle('/xrpc/app.northsky.stratos.feed.post')
+      await handler.handle('/xrpc/zone.stratos.feed.post')
 
       expect(mockHandler).toHaveBeenCalledWith(
-        'https://stratos.example.com/xrpc/app.northsky.stratos.feed.post',
+        'https://stratos.example.com/xrpc/zone.stratos.feed.post',
         {},
       )
     })
@@ -164,11 +164,11 @@ describe('routing', () => {
       )
 
       await handler.handle(
-        '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=app.northsky.stratos.feed.post&rkey=abc',
+        '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
       )
 
       expect(mockHandler).toHaveBeenCalledWith(
-        'https://stratos.example.com/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=app.northsky.stratos.feed.post&rkey=abc',
+        'https://stratos.example.com/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
         {},
       )
     })
@@ -193,38 +193,38 @@ describe('routing', () => {
 describe('scopes', () => {
   it('has correct default scope identifiers', () => {
     expect(STRATOS_SCOPES.enrollment).toBe(
-      'app.northsky.stratos.actor.enrollment',
+      'zone.stratos.actor.enrollment',
     )
-    expect(STRATOS_SCOPES.post).toBe('app.northsky.stratos.feed.post')
+    expect(STRATOS_SCOPES.post).toBe('zone.stratos.feed.post')
   })
 
   it('builds collection scope with default abilities', () => {
-    const scope = buildCollectionScope('app.northsky.stratos.feed.post')
-    expect(scope).toBe('repo:app.northsky.stratos.feed.post')
+    const scope = buildCollectionScope('zone.stratos.feed.post')
+    expect(scope).toBe('repo:zone.stratos.feed.post')
   })
 
   it('builds collection scope with custom abilities', () => {
-    const scope = buildCollectionScope('app.northsky.stratos.feed.post', [
+    const scope = buildCollectionScope('zone.stratos.feed.post', [
       'create',
     ])
-    expect(scope).toBe('repo:app.northsky.stratos.feed.post?action=create')
+    expect(scope).toBe('repo:zone.stratos.feed.post?action=create')
   })
 
   it('builds collection scope with multiple custom abilities', () => {
-    const scope = buildCollectionScope('app.northsky.stratos.feed.post', [
+    const scope = buildCollectionScope('zone.stratos.feed.post', [
       'create',
       'update',
     ])
     expect(scope).toBe(
-      'repo:app.northsky.stratos.feed.post?action=create&action=update',
+      'repo:zone.stratos.feed.post?action=create&action=update',
     )
   })
 
   it('builds full Stratos scope set', () => {
     const scopes = buildStratosScopes()
     expect(scopes).toContain('atproto')
-    expect(scopes).toContain('repo:app.northsky.stratos.actor.enrollment')
-    expect(scopes).toContain('repo:app.northsky.stratos.feed.post')
+    expect(scopes).toContain('repo:zone.stratos.actor.enrollment')
+    expect(scopes).toContain('repo:zone.stratos.feed.post')
     expect(scopes).not.toContain('transition:generic')
     expect(scopes).not.toContain('transition:chat.bsky')
   })
