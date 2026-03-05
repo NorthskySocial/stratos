@@ -82,6 +82,22 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => v || undefined),
+  STRATOS_OAUTH_CLIENT_NAME: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_LOGO_URI: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_TOS_URI: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_POLICY_URI: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
 
   // PLC directory
   STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
@@ -176,6 +192,10 @@ export interface StratosServiceConfig {
     issuer: string
     clientId?: string
     clientSecret?: string
+    clientName?: string
+    logoUri?: string
+    tosUri?: string
+    policyUri?: string
   }
   logging: {
     level: string
@@ -253,6 +273,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
           issuer: env.STRATOS_OAUTH_ISSUER,
           clientId: env.STRATOS_OAUTH_CLIENT_ID,
           clientSecret: env.STRATOS_OAUTH_CLIENT_SECRET,
+          clientName: env.STRATOS_OAUTH_CLIENT_NAME,
+          logoUri: env.STRATOS_OAUTH_LOGO_URI,
+          tosUri: env.STRATOS_OAUTH_TOS_URI,
+          policyUri: env.STRATOS_OAUTH_POLICY_URI,
         }
       : undefined,
     logging: {

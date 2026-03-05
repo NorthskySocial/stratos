@@ -1,4 +1,5 @@
 import http from 'node:http'
+import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
 import { decode as cborDecode } from '@atproto/lex-cbor'
@@ -67,6 +68,11 @@ export class StratosServer {
     app.get('/health', (_req, res) => {
       res.json({ status: 'ok', version: '0.1.0' })
     })
+
+    app.use(
+      '/assets',
+      express.static(path.join(cfg.storage.dataDir, 'assets')),
+    )
 
     app.get('/.well-known/did.json', (_req, res) => {
       const serviceDid = ctx.serviceDid

@@ -13,6 +13,8 @@ dist/
 *.sqlite-shm
 
 data/
+!data/assets/
+!data/assets/.gitkeep
 *.log
 *.pid
 

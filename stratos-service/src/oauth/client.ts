@@ -130,6 +130,10 @@ export interface OAuthClientConfig {
   redirectUri: string
   privateKeyPem?: string
   scope?: string
+  clientName?: string
+  logoUri?: string
+  tosUri?: string
+  policyUri?: string
 }
 
 /**
@@ -152,8 +156,11 @@ export async function createOAuthClient(
   return new NodeOAuthClient({
     clientMetadata: {
       client_id: config.clientId,
-      client_name: 'Stratos Service',
+      client_name: config.clientName ?? 'Stratos Service',
       client_uri: config.clientUri,
+      ...(config.logoUri && { logo_uri: config.logoUri }),
+      ...(config.tosUri && { tos_uri: config.tosUri }),
+      ...(config.policyUri && { policy_uri: config.policyUri }),
       redirect_uris: [config.redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
