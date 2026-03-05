@@ -47,6 +47,6 @@ export const buildStratosScopes = (): string[] => {
   return [
     'atproto',
     buildCollectionScope(STRATOS_SCOPES.enrollment),
-    buildCollectionScope(STRATOS_SCOPES.post),
+    buildCollectionScope(STRATOS_SCOPES.post, ['create', 'delete']),
   ]
 }

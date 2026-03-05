@@ -224,7 +224,9 @@ describe('scopes', () => {
     const scopes = buildStratosScopes()
     expect(scopes).toContain('atproto')
     expect(scopes).toContain('repo:zone.stratos.actor.enrollment')
-    expect(scopes).toContain('repo:zone.stratos.feed.post')
+    expect(scopes).toContain(
+      'repo:zone.stratos.feed.post?action=create&action=delete',
+    )
     expect(scopes).not.toContain('transition:generic')
     expect(scopes).not.toContain('transition:chat.bsky')
   })
