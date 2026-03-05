@@ -69,10 +69,7 @@ export class StratosServer {
       res.json({ status: 'ok', version: '0.1.0' })
     })
 
-    app.use(
-      '/assets',
-      express.static(path.join(cfg.storage.dataDir, 'assets')),
-    )
+    app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
 
     app.get('/.well-known/did.json', (_req, res) => {
       const serviceDid = ctx.serviceDid
