@@ -745,6 +745,7 @@ export async function createAppContext(
       },
       db,
       idResolver,
+      fetchWithUserAgent,
     )
   }
 

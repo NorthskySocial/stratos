@@ -143,6 +143,7 @@ export async function createOAuthClient(
   config: OAuthClientConfig,
   db: ServiceDb,
   idResolver: IdResolver,
+  fetch: typeof globalThis.fetch,
 ): Promise<NodeOAuthClient> {
   const sessionStore = new SqliteSessionStore(db)
   const stateStore = new SqliteStateStore(db)
@@ -209,6 +210,8 @@ export async function createOAuthClient(
         return (did ?? null) as unknown as ResolvedHandle
       },
     },
+
+    fetch,
   })
 }
 
