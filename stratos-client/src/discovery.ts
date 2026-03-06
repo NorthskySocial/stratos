@@ -3,7 +3,7 @@ import { Client, simpleFetchHandler } from '@atcute/client'
 import type { FetchHandler } from '@atcute/client'
 import type { StratosEnrollment } from './types.js'
 
-const ENROLLMENT_COLLECTION = 'app.stratos.actor.enrollment'
+const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 const ENROLLMENT_RKEY = 'self'
 
 const isEnrollmentRecord = (

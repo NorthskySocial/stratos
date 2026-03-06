@@ -24,7 +24,7 @@ import {
 } from '../src/verification.js'
 
 const TEST_DID = 'did:plc:testverify' as const
-const TEST_COLLECTION = 'app.stratos.feed.post'
+const TEST_COLLECTION = 'zone.stratos.feed.post'
 const TEST_RKEY = 'abc123'
 
 async function collectCarStream(
