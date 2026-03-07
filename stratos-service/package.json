@@ -16,7 +16,8 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts src",
-    "codegen": "lex gen-server ../lexicons --out ./src/lexicon"
+    "codegen": "lex gen-server ../lexicons --out ./src/lexicon",
+    "generate:version": "tsx scripts/generate-version.ts"
   },
   "dependencies": {
     "@northskysocial/stratos-core": "workspace:*",

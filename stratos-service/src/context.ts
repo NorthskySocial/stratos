@@ -71,6 +71,8 @@ import {
   DpopVerifier,
   DpopVerificationError,
 } from './auth/index.js'
+import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
+import { VERSION } from './version.js'
 
 /**
  * Per-actor Stratos store for reading
@@ -588,6 +590,7 @@ function createAuthVerifiers(
  */
 export interface AppContext {
   cfg: StratosServiceConfig
+  version: string
   db: ServiceDb
   actorStore: StratosActorStore
   enrollmentStore: EnrollmentStore
@@ -651,6 +654,13 @@ export async function createAppContext(
 ): Promise<AppContext> {
   const { cfg, blobstore, cborToRecord, logger } = opts
 
+  const userAgent = buildUserAgent(
+    VERSION,
+    cfg.userAgent.repoUrl,
+    cfg.userAgent.operatorContact,
+  )
+  const fetchWithUserAgent = createFetchWithUserAgent(userAgent)
+
   const serviceDbPath = path.join(cfg.storage.dataDir, 'service.sqlite')
   await fs.mkdir(cfg.storage.dataDir, { recursive: true })
 
@@ -682,7 +692,7 @@ export async function createAppContext(
       if (domain) {
         const pdsUrl = `https://${domain}`
         const resolveUrl = `${pdsUrl}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
-        const resp = await fetch(resolveUrl)
+        const resp = await fetchWithUserAgent(resolveUrl)
         if (resp.ok) {
           const data = (await resp.json()) as unknown as { did?: string }
           if (data.did) {
@@ -735,6 +745,7 @@ export async function createAppContext(
       },
       db,
       idResolver,
+      fetchWithUserAgent,
     )
   }
 
@@ -766,6 +777,7 @@ export async function createAppContext(
     // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
     const tokenVerifier = new PdsTokenVerifier({
       idResolver,
+      fetch: fetchWithUserAgent,
     })
     dpopVerifier = new DpopVerifier({
       serviceDid: cfg.service.did,
@@ -823,6 +835,7 @@ export async function createAppContext(
 
   return {
     cfg,
+    version: VERSION,
     db,
     actorStore,
     enrollmentStore,
