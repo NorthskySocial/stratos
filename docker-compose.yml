@@ -47,6 +47,10 @@ services:
       STRATOS_OAUTH_TOS_URI: ${STRATOS_OAUTH_TOS_URI:-}
       STRATOS_OAUTH_POLICY_URI: ${STRATOS_OAUTH_POLICY_URI:-}
 
+      # User agent (optional)
+      STRATOS_REPO_URL: ${STRATOS_REPO_URL:-https://github.com/NorthskySocial/stratos}
+      STRATOS_OPERATOR_CONTACT: ${STRATOS_OPERATOR_CONTACT:-}
+
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-info}
 

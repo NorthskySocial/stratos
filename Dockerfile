@@ -24,9 +24,15 @@ COPY stratos-core/ ./stratos-core/
 COPY stratos-service/ ./stratos-service/
 COPY lexicons/ ./lexicons/
 
+# Generate version module from package.json
+RUN pnpm run --filter stratos-service generate:version
+
 # Create data directory structure.
 # /app/data/assets/ - optional static files served at /assets (e.g. OAuth consent screen logo)
 RUN mkdir -p /app/data/assets && chown -R node:node /app/data
+
+# Create data directory
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
 # Switch to non-root user
 USER node

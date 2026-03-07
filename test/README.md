@@ -41,12 +41,12 @@ The Deno test scripts load their own `.env` from `scripts/.env`. Copy from `.env
 
 If you need to point at a different PDS, update these variables and the user handles in `scripts/lib/config.ts`.
 
-### Stratos container environment (`.env.test`)
+### Stratos container environment (`.env`)
 
-The Docker Compose file (`docker-compose.test.yml`) loads `.env.test` from the project root into the Stratos container via `env_file`. Create it by copying `.env.example` and adjusting for testing:
+The Docker Compose file (`docker-compose.test.yml`) loads `.env` from the project root into the Stratos container via `env_file`. Create it by copying `.env.example` and adjusting for testing:
 
 ```bash
-cp .env.example .env.test
+cp .env.example .env
 ```
 
 For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`, and point `STRATOS_ALLOWED_PDS_ENDPOINTS` / `STRATOS_OAUTH_ISSUER` at your PDS. `STRATOS_OAUTH_ISSUER` must be set to a valid URL (e.g., `https://pds.example.com`) or the OAuth routes won't be registered and enrollment will fail with "Cannot GET /oauth/authorize". See the [project README](../README.md) for the full list of available variables.
