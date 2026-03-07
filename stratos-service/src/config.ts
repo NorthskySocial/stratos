@@ -175,6 +175,7 @@ export interface StratosServiceConfig {
     serviceFragment: string
     port: number
     publicUrl: string
+    repoUrl: string
   }
   storage: {
     backend: 'sqlite' | 'postgres'
@@ -259,6 +260,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       serviceFragment: env.STRATOS_SERVICE_FRAGMENT,
       port: env.STRATOS_PORT,
       publicUrl: env.STRATOS_PUBLIC_URL,
+      repoUrl: env.STRATOS_REPO_URL,
     },
     storage: {
       backend: env.STRATOS_STORAGE_BACKEND,

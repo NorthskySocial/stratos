@@ -94,7 +94,7 @@ export class StratosServer {
           '',
           '  Most API routes are under /xrpc/',
           '',
-          '        Code: https://github.com/NorthskySocial/stratos',
+          `        Code: ${cfg.service.repoUrl}`,
           '    Protocol: https://atproto.com',
           '',
         ].join('\n'),
