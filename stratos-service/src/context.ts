@@ -432,10 +432,10 @@ export interface AuthVerifiers {
 function createAuthVerifiers(
   serviceDid: string,
   idResolver: IdResolver,
-  _oauthClient: NodeOAuthClient | undefined,
+  _oauthClient: NodeOAuthClient,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
-  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier | undefined,
+  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
   devMode: boolean,
 ): AuthVerifiers {
   return {
@@ -649,7 +649,7 @@ export interface AppContext {
   stubWriter: StubWriterService
   authVerifier: AuthVerifiers
   idResolver: IdResolver
-  oauthClient?: NodeOAuthClient
+  oauthClient: NodeOAuthClient
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
@@ -783,26 +783,23 @@ export async function createAppContext(
 
   const signingDidKey = signingKey.did()
 
-  let oauthClient: NodeOAuthClient | undefined
-  if (cfg.oauth) {
-    oauthClient = await createOAuthClient(
-      {
-        clientId:
-          cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
-        clientUri: cfg.service.publicUrl,
-        redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
-        privateKeyPem: cfg.oauth.clientSecret,
-        scope: OAUTH_SCOPE,
-        clientName: cfg.oauth.clientName,
-        logoUri: cfg.oauth.logoUri,
-        tosUri: cfg.oauth.tosUri,
-        policyUri: cfg.oauth.policyUri,
-      },
-      db,
-      idResolver,
-      fetchWithUserAgent,
-    )
-  }
+  const oauthClient = await createOAuthClient(
+    {
+      clientId:
+        cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
+      clientUri: cfg.service.publicUrl,
+      redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
+      privateKeyPem: cfg.oauth.clientSecret,
+      scope: OAUTH_SCOPE,
+      clientName: cfg.oauth.clientName,
+      logoUri: cfg.oauth.logoUri,
+      tosUri: cfg.oauth.tosUri,
+      policyUri: cfg.oauth.policyUri,
+    },
+    db,
+    idResolver,
+    fetchWithUserAgent,
+  )
 
   const actorStore = new StratosActorStore({
     dataDir: path.join(cfg.storage.dataDir, 'actors'),
@@ -825,21 +822,18 @@ export async function createAppContext(
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
 
-  let dpopVerifier: DpopVerifier | undefined
-  if (cfg.oauth && oauthClient) {
-    // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
-    // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
-    const tokenVerifier = new PdsTokenVerifier({
-      idResolver,
-      fetch: fetchWithUserAgent,
-    })
-    dpopVerifier = new DpopVerifier({
-      serviceDid: cfg.service.did,
-      serviceEndpoint: cfg.service.publicUrl,
-      tokenVerifier,
-      enrollmentStore,
-    })
-  }
+  // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
+  // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
+  const tokenVerifier = new PdsTokenVerifier({
+    idResolver,
+    fetch: fetchWithUserAgent,
+  })
+  const dpopVerifier = new DpopVerifier({
+    serviceDid: cfg.service.did,
+    serviceEndpoint: cfg.service.publicUrl,
+    tokenVerifier,
+    enrollmentStore,
+  })
 
   const authVerifier = createAuthVerifiers(
     cfg.service.did,
@@ -856,9 +850,6 @@ export async function createAppContext(
   const serviceDidWithFragment = getServiceDidWithFragment(cfg)
 
   const stubWriter = new StubWriterServiceImpl(async (did) => {
-    if (!oauthClient) {
-      return null
-    }
     try {
       const session = await oauthClient.restore(did)
       return new Agent(session) as unknown as PdsAgent
