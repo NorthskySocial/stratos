@@ -82,7 +82,7 @@ export function resolveConfigFromEnv(): StratosConfig {
 
 export async function resolveConfig(): Promise<StratosConfig> {
   try {
-    const mod = await import('../conf/config.js')
+    const mod = await import('../conf/config.ts')
     return mod.default satisfies StratosConfig
   } catch {
     return resolveConfigFromEnv()

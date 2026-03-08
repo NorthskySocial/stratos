@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib'
-import { resolveConfig } from './config.js'
-import { NetworkStack } from './network-stack.js'
-import { StratosServiceStack } from './stratos-service-stack.js'
-import { WebappStack } from './webapp-stack.js'
+import { resolveConfig } from './config.ts'
+import { NetworkStack } from './network-stack.ts'
+import { StratosServiceStack } from './stratos-service-stack.ts'
+import { WebappStack } from './webapp-stack.ts'
 
 const config = await resolveConfig()
 

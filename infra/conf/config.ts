@@ -1,4 +1,4 @@
-import type { StratosConfig } from '../src/config.js'
+import type { StratosConfig } from '../src/config.ts'
 
 const config: StratosConfig = {
   // --- Environment ---

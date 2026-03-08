@@ -11,10 +11,10 @@ REGION=$(aws configure get region || echo "${AWS_DEFAULT_REGION:-us-east-1}")
 REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
 
 # Resolve config — uses conf/config.ts if present, falls back to env vars
-ENV_NAME=$(npx tsx -e "import('./src/config.js').then(m => m.resolveConfig()).then(c => console.log(c.environment))")
-VITE_STRATOS_URL=$(npx tsx -e "import('./src/config.js').then(m => m.resolveConfig()).then(c => console.log(c.webapp.stratosUrl))")
-WEBAPP_SUBDOMAIN=$(npx tsx -e "import('./src/config.js').then(m => m.resolveConfig()).then(c => console.log(c.webappSubdomain))")
-DOMAIN_NAME=$(npx tsx -e "import('./src/config.js').then(m => m.resolveConfig()).then(c => console.log(c.domainName))")
+ENV_NAME=$(node --input-type=module -e "import {resolveConfig} from './src/config.ts'; const c = await resolveConfig(); console.log(c.environment)")
+VITE_STRATOS_URL=$(node --input-type=module -e "import {resolveConfig} from './src/config.ts'; const c = await resolveConfig(); console.log(c.webapp.stratosUrl)")
+WEBAPP_SUBDOMAIN=$(node --input-type=module -e "import {resolveConfig} from './src/config.ts'; const c = await resolveConfig(); console.log(c.webappSubdomain)")
+DOMAIN_NAME=$(node --input-type=module -e "import {resolveConfig} from './src/config.ts'; const c = await resolveConfig(); console.log(c.domainName)")
 
 STRATOS_REPO="$REGISTRY/stratos-$ENV_NAME"
 WEBAPP_REPO="$REGISTRY/stratos-webapp-$ENV_NAME"

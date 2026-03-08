@@ -8,7 +8,7 @@ import * as logs from 'aws-cdk-lib/aws-logs'
 import * as route53 from 'aws-cdk-lib/aws-route53'
 import * as route53Targets from 'aws-cdk-lib/aws-route53-targets'
 import type { Construct } from 'constructs'
-import type { StratosConfig } from './config.js'
+import type { StratosConfig } from './config.ts'
 
 export interface WebappStackProps extends cdk.StackProps {
   config: StratosConfig

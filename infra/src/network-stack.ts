@@ -4,7 +4,7 @@ import * as ecr from 'aws-cdk-lib/aws-ecr'
 import * as ecs from 'aws-cdk-lib/aws-ecs'
 import * as route53 from 'aws-cdk-lib/aws-route53'
 import type { Construct } from 'constructs'
-import type { StratosConfig } from './config.js'
+import type { StratosConfig } from './config.ts'
 
 export interface NetworkStackProps extends cdk.StackProps {
   config: StratosConfig
