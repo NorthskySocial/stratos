@@ -60,40 +60,54 @@ Get the Stratos service endpoint from the AppView or configuration:
 const STRATOS_ENDPOINT = 'https://stratos.example.com'
 ```
 
-### 3. Create a Private Post
+### 3. Create an Agent for Stratos
+
+When using `@atproto/api` with an OAuth session, you **must** wrap the session's `fetchHandler` to
+route requests to the Stratos service URL. Setting `agent.serviceUrl` does **not** work — the
+`OAuthSession` always resolves URLs against the OAuth token's audience (the user's PDS), ignoring
+any `serviceUrl` override.
 
 ```typescript
-const response = await fetch(
-  `${STRATOS_ENDPOINT}/xrpc/com.atproto.repo.createRecord`,
-  {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      repo: userDid,
-      collection: 'zone.stratos.feed.post',
-      record: {
-        $type: 'zone.stratos.feed.post',
-        text: 'This is a private post for my community!',
-        boundary: {
-          $type: 'zone.stratos.boundary.defs#Domains',
-          values: [
-            {
-              $type: 'zone.stratos.boundary.defs#Domain',
-              value: 'general',
-            },
-          ],
-        },
-        createdAt: new Date().toISOString(),
-      },
-    }),
-  },
-)
+import { Agent } from '@atproto/api'
+import type { OAuthSession } from '@atproto/oauth-client-browser'
 
-const result = await response.json()
-console.log('Created:', result.uri)
+function createStratosAgent(session: OAuthSession, serviceUrl: string): Agent {
+  // Wrap the session's fetchHandler so XRPC pathnames resolve against the
+  // Stratos service URL. The session's DPoP proof generation derives htu
+  // from the actual request URL, so proofs are valid for the Stratos origin.
+  return new Agent((url: string, init: RequestInit) => {
+    const fullUrl = new URL(url, serviceUrl)
+    return session.fetchHandler(fullUrl.href, init)
+  })
+}
+```
+
+> **Common mistake:** `new Agent(session)` followed by `agent.serviceUrl = new URL(stratosUrl)`
+> will silently send requests to the PDS instead of Stratos. Always use the wrapper pattern above.
+
+### 4. Create a Private Post
+
+```typescript
+const stratosAgent = createStratosAgent(session, STRATOS_ENDPOINT)
+
+await stratosAgent.com.atproto.repo.createRecord({
+  repo: userDid,
+  collection: 'zone.stratos.feed.post',
+  record: {
+    $type: 'zone.stratos.feed.post',
+    text: 'This is a private post for my community!',
+    boundary: {
+      $type: 'zone.stratos.boundary.defs#Domains',
+      values: [
+        {
+          $type: 'zone.stratos.boundary.defs#Domain',
+          value: 'general',
+        },
+      ],
+    },
+    createdAt: new Date().toISOString(),
+  },
+})
 ```
 
 ---
