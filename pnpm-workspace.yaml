@@ -3,3 +3,4 @@ packages:
   - 'stratos-service'
   - 'stratos-client'
   - 'webapp'
+  - 'infra'
