@@ -63,9 +63,11 @@
 </script>
 
 <div class="composer">
+  <div class="composer-header">✧ LeAvE a CoMmEnT!! ✧</div>
+
   <textarea
     bind:value={text}
-    placeholder={isPrivate ? 'Write a private post…' : 'Write a post…'}
+    placeholder={isPrivate ? '~*~ write a sEcReT message... ~*~' : '~*~ wHaTs oN uR mInD?? ~*~'}
     disabled={posting}
     rows="3"
   ></textarea>
@@ -77,43 +79,63 @@
         bind:checked={isPrivate}
         disabled={!enrollment || posting}
       />
-      <span>Private</span>
+      <span>{isPrivate ? '🔒 pRiVaTe' : '🌐 pUbLiC'}</span>
       {#if !enrollment}
-        <span class="tooltip">Enroll in Stratos to post privately</span>
+        <span class="tooltip">eNrOLL iN sTrAtOs 2 pOsT pRiVaTeLy!!</span>
       {/if}
     </label>
 
     <button onclick={handlePost} disabled={posting || !text.trim()}>
-      {posting ? 'Posting…' : 'Post'}
+      {posting ? '~*~ pOsTiNg... ~*~' : '~*~ PoSt iT ~*~'}
     </button>
   </div>
 
   {#if error}
-    <p class="error">{error}</p>
+    <p class="error">!! {error} !!</p>
   {/if}
 </div>
 
 <style>
   .composer {
-    padding: 1rem;
-    border-bottom: 1px solid #eee;
+    padding: 0.75rem;
+    border: 2px solid #ff00ff44;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #1a003088, #0a001a88);
+    margin-bottom: 0.75rem;
+  }
+
+  .composer-header {
+    text-align: center;
+    color: #ffff00;
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-shadow: 0 0 8px #ffff00;
+    margin-bottom: 0.5rem;
+    animation: rainbow 4s linear infinite;
   }
 
   textarea {
     width: 100%;
     padding: 0.6rem 0.75rem;
-    border: 1px solid #ccc;
+    border: 2px solid #00ffff44;
     border-radius: 6px;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     font-family: inherit;
     resize: vertical;
     box-sizing: border-box;
+    background: #0a0020;
+    color: #00ff00;
+    text-shadow: 0 0 4px #00ff0066;
+  }
+
+  textarea::placeholder {
+    color: #00ff0066;
   }
 
   textarea:focus {
     outline: none;
-    border-color: #0066ff;
-    box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.15);
+    border-color: #ff00ff;
+    box-shadow: 0 0 10px #ff00ff66;
   }
 
   .composer-actions {
@@ -127,9 +149,10 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     cursor: pointer;
     position: relative;
+    color: #ccc;
   }
 
   .private-toggle.disabled {
@@ -138,8 +161,9 @@
   }
 
   .private-toggle input:checked + span {
-    color: #8b5cf6;
-    font-weight: 600;
+    color: #ff69b4;
+    font-weight: bold;
+    text-shadow: 0 0 4px #ff69b4;
   }
 
   .tooltip {
@@ -147,11 +171,12 @@
     position: absolute;
     bottom: 100%;
     left: 0;
-    background: #333;
-    color: white;
+    background: #1a0030;
+    color: #ff69b4;
     padding: 0.3rem 0.5rem;
     border-radius: 4px;
-    font-size: 0.75rem;
+    border: 1px solid #ff00ff44;
+    font-size: 0.7rem;
     white-space: nowrap;
     margin-bottom: 0.3rem;
   }
@@ -162,26 +187,41 @@
 
   button {
     padding: 0.45rem 1rem;
-    background: #0066ff;
+    background: linear-gradient(135deg, #ff00ff, #8b00ff, #ff69b4);
     color: white;
-    border: none;
+    border: 2px solid #ff69b4;
     border-radius: 6px;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    font-weight: bold;
+    font-family: inherit;
     cursor: pointer;
+    text-shadow: 0 0 4px #fff;
+    box-shadow: 0 0 8px #ff00ff44;
   }
 
   button:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
   button:not(:disabled):hover {
-    background: #0052cc;
+    box-shadow: 0 0 16px #ff00ff, 0 0 24px #ff00ff88;
   }
 
   .error {
     margin-top: 0.5rem;
-    color: #cc0000;
-    font-size: 0.85rem;
+    color: #ff4444;
+    font-size: 0.75rem;
+    text-shadow: 0 0 4px #ff444466;
+  }
+
+  @keyframes rainbow {
+    0% { color: #ff0000; }
+    16% { color: #ff8800; }
+    33% { color: #ffff00; }
+    50% { color: #00ff00; }
+    66% { color: #0088ff; }
+    83% { color: #ff00ff; }
+    100% { color: #ff0000; }
   }
 </style>

@@ -6,12 +6,28 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
-  font-size: 15px;
+  font-family: 'Comic Sans MS', 'Comic Sans', 'Chalkboard SE', cursive, sans-serif;
+  font-size: 14px;
   line-height: 1.5;
-  color: #1a1a1a;
-  background: #fff;
+  color: #00ffff;
+  background: #0a001a;
+  background-image:
+    radial-gradient(1px 1px at 10% 20%, #ffffff88 0%, transparent 100%),
+    radial-gradient(1px 1px at 30% 80%, #ffffff66 0%, transparent 100%),
+    radial-gradient(1px 1px at 50% 10%, #ffffff88 0%, transparent 100%),
+    radial-gradient(1px 1px at 70% 60%, #ffffff44 0%, transparent 100%),
+    radial-gradient(1px 1px at 90% 30%, #ffffff66 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 15% 55%, #ffffff88 0%, transparent 100%),
+    radial-gradient(1px 1px at 40% 40%, #ffffff55 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 65% 85%, #ffffff77 0%, transparent 100%),
+    radial-gradient(1px 1px at 85% 15%, #ffffff66 0%, transparent 100%),
+    radial-gradient(1px 1px at 25% 35%, #ffffff44 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 55% 70%, #ffffff88 0%, transparent 100%),
+    radial-gradient(1px 1px at 75% 45%, #ffffff55 0%, transparent 100%),
+    radial-gradient(1px 1px at 5% 90%, #ffffff77 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 95% 75%, #ffffff66 0%, transparent 100%);
+  background-size: 200px 200px;
+  cursor: crosshair;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -21,10 +37,77 @@ body {
 }
 
 a {
-  color: #0066ff;
+  color: #ff69b4;
   text-decoration: none;
+  text-shadow: 0 0 4px #ff69b4;
 }
 
 a:hover {
+  color: #ff00ff;
   text-decoration: underline;
+  text-shadow: 0 0 8px #ff00ff;
+}
+
+::selection {
+  background: #ff00ff;
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a001a;
+  border-left: 1px solid #ff00ff44;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #ff00ff, #8b00ff);
+  border-radius: 6px;
+  border: 2px solid #0a001a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #ff69b4, #ff00ff);
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes rainbow {
+  0% { color: #ff0000; }
+  16% { color: #ff8800; }
+  33% { color: #ffff00; }
+  50% { color: #00ff00; }
+  66% { color: #0088ff; }
+  83% { color: #8800ff; }
+  100% { color: #ff0000; }
+}
+
+@keyframes rainbow-bg {
+  0% { border-color: #ff0000; box-shadow: 0 0 8px #ff000088; }
+  16% { border-color: #ff8800; box-shadow: 0 0 8px #ff880088; }
+  33% { border-color: #ffff00; box-shadow: 0 0 8px #ffff0088; }
+  50% { border-color: #00ff00; box-shadow: 0 0 8px #00ff0088; }
+  66% { border-color: #0088ff; box-shadow: 0 0 8px #0088ff88; }
+  83% { border-color: #8800ff; box-shadow: 0 0 8px #8800ff88; }
+  100% { border-color: #ff0000; box-shadow: 0 0 8px #ff000088; }
+}
+
+@keyframes neon-pulse {
+  0%, 100% { opacity: 1; text-shadow: 0 0 4px currentColor, 0 0 8px currentColor; }
+  50% { opacity: 0.8; text-shadow: 0 0 2px currentColor, 0 0 4px currentColor; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+marquee {
+  color: #ff69b4;
+  font-weight: bold;
 }

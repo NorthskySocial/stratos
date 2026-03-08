@@ -1,4 +1,11 @@
 import type { Agent } from '@atproto/api'
+import { blobUrl, thumbUrl } from './slingshot'
+
+export interface PostImage {
+  alt: string
+  thumb: string
+  fullsize: string
+}
 
 export interface FeedPost {
   uri: string
@@ -7,6 +14,31 @@ export interface FeedPost {
   createdAt: string
   isPrivate: boolean
   hasReply: boolean
+  images: PostImage[]
+  authorDid: string
+}
+
+function extractImages(
+  val: Record<string, unknown>,
+  did: string,
+): PostImage[] {
+  const embed = val.embed as Record<string, unknown> | undefined
+  if (!embed || embed.$type !== 'app.bsky.embed.images') return []
+  const images = embed.images as Array<Record<string, unknown>> | undefined
+  if (!Array.isArray(images)) return []
+  return images
+    .map((img) => {
+      const blob = img.image as Record<string, unknown> | undefined
+      const ref = blob?.ref as Record<string, unknown> | undefined
+      const cid = ref?.$link as string | undefined
+      if (!cid) return null
+      return {
+        alt: (img.alt as string) ?? '',
+        thumb: thumbUrl(did, cid),
+        fullsize: blobUrl(did, cid),
+      }
+    })
+    .filter((x): x is PostImage => x !== null)
 }
 
 export async function fetchPublicPosts(
@@ -28,6 +60,8 @@ export async function fetchPublicPosts(
         createdAt: (val.createdAt as string) ?? '',
         isPrivate: false,
         hasReply: !!val.reply,
+        images: extractImages(val, did),
+        authorDid: did,
       }
     })
   } catch {
@@ -54,6 +88,8 @@ export async function fetchStratosPosts(
         createdAt: (val.createdAt as string) ?? '',
         isPrivate: true,
         hasReply: !!val.reply,
+        images: extractImages(val, did),
+        authorDid: did,
       }
     })
   } catch {
