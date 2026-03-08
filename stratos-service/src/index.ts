@@ -145,44 +145,39 @@ export class StratosServer {
     })
 
     const metadataHandler = (_req: express.Request, res: express.Response) => {
-      if (!ctx.oauthClient) {
-        return res.status(404).json({ error: 'OAuth not configured' })
-      }
       res.json(ctx.oauthClient.clientMetadata)
     }
 
     app.get('/client-metadata.json', metadataHandler)
     app.get('/.well-known/oauth-client-metadata.json', metadataHandler)
 
-    if (ctx.oauthClient) {
-      const oauthRoutes = createOAuthRoutes({
-        oauthClient: ctx.oauthClient,
-        enrollmentConfig: cfg.enrollment,
-        enrollmentStore: ctx.enrollmentStore,
-        idResolver: ctx.idResolver,
-        baseUrl: cfg.service.publicUrl,
-        serviceEndpoint: cfg.service.publicUrl,
-        defaultBoundaries: cfg.stratos.allowedDomains,
-        logger: ctx.logger,
-        initRepo: async (did: string) => {
-          await ctx.actorStore.create(did)
-          await ctx.actorStore.transact(did, async (store) => {
-            const adapter = new StratosBlockStoreReader(store.repo)
-            const unsigned = await buildCommit(adapter, null, {
-              did,
-              writes: [],
-            })
-            await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+    const oauthRoutes = createOAuthRoutes({
+      oauthClient: ctx.oauthClient,
+      enrollmentConfig: cfg.enrollment,
+      enrollmentStore: ctx.enrollmentStore,
+      idResolver: ctx.idResolver,
+      baseUrl: cfg.service.publicUrl,
+      serviceEndpoint: cfg.service.publicUrl,
+      defaultBoundaries: cfg.stratos.allowedDomains,
+      logger: ctx.logger,
+      initRepo: async (did: string) => {
+        await ctx.actorStore.create(did)
+        await ctx.actorStore.transact(did, async (store) => {
+          const adapter = new StratosBlockStoreReader(store.repo)
+          const unsigned = await buildCommit(adapter, null, {
+            did,
+            writes: [],
           })
-        },
-        createSigningKey: async (did: string) => {
-          const keypair = await ctx.actorStore.createSigningKey(did)
-          return keypair.did()
-        },
-        createAttestation: ctx.createAttestation,
-      })
-      app.use('/oauth', oauthRoutes)
-    }
+          await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+        })
+      },
+      createSigningKey: async (did: string) => {
+        const keypair = await ctx.actorStore.createSigningKey(did)
+        return keypair.did()
+      },
+      createAttestation: ctx.createAttestation,
+    })
+    app.use('/oauth', oauthRoutes)
 
     registerHandlers(ctx.xrpcServer, ctx)
     registerEnrollmentHandlers(app, ctx)
