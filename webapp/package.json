@@ -1,0 +1,23 @@
+{
+  "name": "@northskysocial/stratos-webapp",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.15.8",
+    "@atproto/oauth-client-browser": "^0.3.17",
+    "@atproto/syntax": "^0.3.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tsconfig/svelte": "^5.0.4",
+    "svelte": "^5.20.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
