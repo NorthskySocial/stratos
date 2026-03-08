@@ -23,7 +23,15 @@ export interface WebappStackProps extends cdk.StackProps {
 export class WebappStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: WebappStackProps) {
     super(scope, id, props)
-    const { config, vpc, cluster, hostedZone, repository, imageTag, imageDigest } = props
+    const {
+      config,
+      vpc,
+      cluster,
+      hostedZone,
+      repository,
+      imageTag,
+      imageDigest,
+    } = props
 
     const fqdn = `${config.webappSubdomain}.${config.domainName}`
 
@@ -45,7 +53,9 @@ export class WebappStack extends cdk.Stack {
 
     taskDefinition.addContainer('webapp', {
       image: ecs.ContainerImage.fromEcrRepository(repository, imageTag),
-      dockerLabels: imageDigest ? { 'com.stratos.image-digest': imageDigest } : undefined,
+      dockerLabels: imageDigest
+        ? { 'com.stratos.image-digest': imageDigest }
+        : undefined,
       portMappings: [{ containerPort: 80, protocol: ecs.Protocol.TCP }],
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: 'webapp',
@@ -56,7 +66,14 @@ export class WebappStack extends cdk.Stack {
         }),
       }),
       healthCheck: {
-        command: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:80/'],
+        command: [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:80/',
+        ],
         interval: cdk.Duration.seconds(30),
         timeout: cdk.Duration.seconds(5),
         retries: 3,
@@ -116,7 +133,9 @@ export class WebappStack extends cdk.Stack {
     new route53.ARecord(this, 'DnsRecord', {
       zone: hostedZone,
       recordName: config.webappSubdomain,
-      target: route53.RecordTarget.fromAlias(new route53Targets.LoadBalancerTarget(alb)),
+      target: route53.RecordTarget.fromAlias(
+        new route53Targets.LoadBalancerTarget(alb),
+      ),
     })
 
     // Outputs
