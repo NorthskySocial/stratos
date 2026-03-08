@@ -35,8 +35,7 @@ jobs:
         with:
           version: 8
 
-      - name: Install infra dependencies
-        working-directory: infra
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
