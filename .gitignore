@@ -47,3 +47,4 @@ docs/*-prompt.md
 
 # CDK stuff
 infra/cdk.out/
+cdk.context.json
