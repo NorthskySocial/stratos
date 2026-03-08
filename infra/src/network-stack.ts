@@ -26,7 +26,11 @@ export class NetworkStack extends cdk.Stack {
       natGateways: 1,
       subnetConfiguration: [
         { name: 'Public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
-        { name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS, cidrMask: 24 },
+        {
+          name: 'Private',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+          cidrMask: 24,
+        },
       ],
     })
 
@@ -37,10 +41,14 @@ export class NetworkStack extends cdk.Stack {
     })
 
     if (config.hostedZoneId) {
-      this.hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
-        hostedZoneId: config.hostedZoneId,
-        zoneName: config.domainName,
-      })
+      this.hostedZone = route53.HostedZone.fromHostedZoneAttributes(
+        this,
+        'HostedZone',
+        {
+          hostedZoneId: config.hostedZoneId,
+          zoneName: config.domainName,
+        },
+      )
     } else {
       this.hostedZone = route53.HostedZone.fromLookup(this, 'HostedZone', {
         domainName: config.domainName,
@@ -51,13 +59,17 @@ export class NetworkStack extends cdk.Stack {
     this.stratosRepo = new ecr.Repository(this, 'StratosRepo', {
       repositoryName: `stratos-${config.environment}`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
-      lifecycleRules: [{ maxImageCount: 10, description: 'Keep last 10 images' }],
+      lifecycleRules: [
+        { maxImageCount: 10, description: 'Keep last 10 images' },
+      ],
     })
 
     this.webappRepo = new ecr.Repository(this, 'WebappRepo', {
       repositoryName: `stratos-webapp-${config.environment}`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
-      lifecycleRules: [{ maxImageCount: 10, description: 'Keep last 10 images' }],
+      lifecycleRules: [
+        { maxImageCount: 10, description: 'Keep last 10 images' },
+      ],
     })
   }
 }

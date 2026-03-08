@@ -24,17 +24,21 @@ const imageTag = app.node.tryGetContext('imageTag') ?? 'latest'
 const stratosImageDigest = app.node.tryGetContext('stratosImageDigest') ?? ''
 const webappImageDigest = app.node.tryGetContext('webappImageDigest') ?? ''
 
-const stratosService = new StratosServiceStack(app, `Stratos-Service-${config.environment}`, {
-  env,
-  config,
-  vpc: network.vpc,
-  cluster: network.cluster,
-  hostedZone: network.hostedZone,
-  repository: network.stratosRepo,
-  imageTag,
-  imageDigest: stratosImageDigest,
-  description: 'Stratos API on ECS Fargate with ALB and ACM SSL',
-})
+const stratosService = new StratosServiceStack(
+  app,
+  `Stratos-Service-${config.environment}`,
+  {
+    env,
+    config,
+    vpc: network.vpc,
+    cluster: network.cluster,
+    hostedZone: network.hostedZone,
+    repository: network.stratosRepo,
+    imageTag,
+    imageDigest: stratosImageDigest,
+    description: 'Stratos API on ECS Fargate with ALB and ACM SSL',
+  },
+)
 stratosService.addDependency(network)
 
 const webapp = new WebappStack(app, `Stratos-Webapp-${config.environment}`, {

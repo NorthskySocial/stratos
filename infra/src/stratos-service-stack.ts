@@ -24,7 +24,15 @@ export interface StratosServiceStackProps extends cdk.StackProps {
 export class StratosServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: StratosServiceStackProps) {
     super(scope, id, props)
-    const { config, vpc, cluster, hostedZone, repository, imageTag, imageDigest } = props
+    const {
+      config,
+      vpc,
+      cluster,
+      hostedZone,
+      repository,
+      imageTag,
+      imageDigest,
+    } = props
 
     const fqdn = `${config.stratosSubdomain}.${config.domainName}`
 
@@ -65,7 +73,10 @@ export class StratosServiceStack extends cdk.Stack {
       efsVolumeConfiguration: {
         fileSystemId: fileSystem.fileSystemId,
         transitEncryption: 'ENABLED',
-        authorizationConfig: { accessPointId: accessPoint.accessPointId, iam: 'ENABLED' },
+        authorizationConfig: {
+          accessPointId: accessPoint.accessPointId,
+          iam: 'ENABLED',
+        },
       },
     })
 
@@ -107,7 +118,9 @@ export class StratosServiceStack extends cdk.Stack {
     const container = taskDefinition.addContainer('stratos', {
       image: ecs.ContainerImage.fromEcrRepository(repository, imageTag),
       environment: stratosEnv,
-      dockerLabels: imageDigest ? { 'com.stratos.image-digest': imageDigest } : undefined,
+      dockerLabels: imageDigest
+        ? { 'com.stratos.image-digest': imageDigest }
+        : undefined,
       portMappings: [{ containerPort: 3100, protocol: ecs.Protocol.TCP }],
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: 'stratos',
@@ -118,7 +131,14 @@ export class StratosServiceStack extends cdk.Stack {
         }),
       }),
       healthCheck: {
-        command: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3100/health'],
+        command: [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3100/health',
+        ],
         interval: cdk.Duration.seconds(30),
         timeout: cdk.Duration.seconds(10),
         retries: 3,
@@ -139,7 +159,10 @@ export class StratosServiceStack extends cdk.Stack {
       allowAllOutbound: true,
     })
 
-    fileSystem.connections.allowDefaultPortFrom(serviceSg, 'Allow EFS from Stratos tasks')
+    fileSystem.connections.allowDefaultPortFrom(
+      serviceSg,
+      'Allow EFS from Stratos tasks',
+    )
 
     // Fargate service
     const service = new ecs.FargateService(this, 'Service', {
@@ -198,7 +221,9 @@ export class StratosServiceStack extends cdk.Stack {
     new route53.ARecord(this, 'DnsRecord', {
       zone: hostedZone,
       recordName: config.stratosSubdomain,
-      target: route53.RecordTarget.fromAlias(new route53Targets.LoadBalancerTarget(alb)),
+      target: route53.RecordTarget.fromAlias(
+        new route53Targets.LoadBalancerTarget(alb),
+      ),
     })
 
     // Outputs
