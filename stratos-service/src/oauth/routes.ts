@@ -74,11 +74,21 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
   router.get('/authorize', async (req, res) => {
     try {
       const handle = req.query.handle as string
+      const redirectUri = req.query.redirect_uri as string | undefined
 
       if (!handle) {
         return res.status(400).json({
           error: 'InvalidRequest',
           message: 'Handle parameter required',
+        })
+      }
+
+      if (redirectUri) {
+        res.cookie('stratos_redirect', redirectUri, {
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 10 * 60 * 1000,
+          secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
         })
       }
 
@@ -201,7 +211,28 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         }
       }
 
-      // Return success page or redirect to app
+      // Redirect back to the app if a redirect was stored, otherwise return JSON
+      const cookies = req.headers.cookie
+        ?.split(';')
+        .reduce<Record<string, string>>((acc, c) => {
+          const [key, ...rest] = c.trim().split('=')
+          if (key) acc[key] = decodeURIComponent(rest.join('='))
+          return acc
+        }, {})
+      const redirectTo = cookies?.stratos_redirect
+      if (redirectTo) {
+        res.clearCookie('stratos_redirect')
+        try {
+          const url = new URL(redirectTo)
+          if (url.protocol === 'https:' || url.protocol === 'http:') {
+            url.searchParams.set('stratos_enrolled', 'true')
+            return res.redirect(url.toString())
+          }
+        } catch {
+          // Invalid URL, fall through to JSON response
+        }
+      }
+
       res.json({
         success: true,
         did,
