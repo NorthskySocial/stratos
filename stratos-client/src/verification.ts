@@ -9,33 +9,10 @@ import { getAtprotoVerificationMaterial } from '@atcute/identity'
 import { WebDidDocumentResolver } from '@atcute/identity-resolver'
 import type {
   VerificationLevel,
-  VerificationLevel,
   VerifiedRecord,
   FetchAndVerifyOptions,
   ResolveSigningKeyOptions,
 } from './types.js'
-
-type DidString = `did:plc:${string}` | `did:web:${string}`
-
-const verifyRecordCar = async (
-  carBytes: Uint8Array,
-  collection: string,
-  rkey: string,
-  did?: string,
-  publicKey?: PublicKey,
-): Promise<VerifiedRecord> => {
-  const result = await atcuteVerifyRecord({
-    carBytes,
-    collection,
-    rkey,
-    did: did as DidString | undefined,
-    publicKey,
-  })
-  const level: VerificationLevel = publicKey
-    ? 'service-signature'
-    : 'cid-integrity'
-  return { cid: result.cid, record: result.record, level }
-}
 
 type DidString = `did:plc:${string}` | `did:web:${string}`
 
@@ -75,7 +52,6 @@ export const verifyCidIntegrity = async (
   rkey: string,
   did?: string,
 ): Promise<VerifiedRecord> => {
-  return verifyRecordCar(carBytes, collection, rkey, did)
   return verifyRecordCar(carBytes, collection, rkey, did)
 }
 
@@ -152,13 +128,6 @@ export const fetchAndVerifyRecord = async (
   }
 
   const carBytes = new Uint8Array(await res.arrayBuffer())
-  return verifyRecordCar(
-    carBytes,
-    collection,
-    rkey,
-    did,
-    options?.serviceSigningKey,
-  )
   return verifyRecordCar(
     carBytes,
     collection,
