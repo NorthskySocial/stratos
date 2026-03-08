@@ -1,7 +1,9 @@
 import { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 
-export const STRATOS_URL = import.meta.env.VITE_STRATOS_URL as string | undefined
+export const STRATOS_URL = import.meta.env.VITE_STRATOS_URL as
+  | string
+  | undefined
 
 export interface StratosEnrollment {
   service: string
