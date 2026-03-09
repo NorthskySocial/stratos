@@ -35,7 +35,7 @@
     "@atproto/lexicon": "^0.6.1",
     "@atproto/syntax": "^0.4.3",
     "@libsql/client": "^0.17.0",
-    "drizzle-orm": "^1.0.0-beta.15",
+    "drizzle-orm": "1.0.0-beta.16-ea816b6",
     "multiformats": "^13.4.2",
     "zod": "^4.3.6"
   },
