@@ -45,7 +45,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
         const parsed = new AtUri(row.uri)
         records.push({
           uri: row.uri,
-          cid: row.cid,
+          cid: CID.parse(row.cid),
           collection: parsed.collection,
           rkey: parsed.rkey,
         })

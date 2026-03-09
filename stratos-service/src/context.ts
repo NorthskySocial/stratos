@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
-import { eq, gt, asc, sql } from 'drizzle-orm'
+import { eq, gt, asc, desc, sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
@@ -24,6 +24,7 @@ import {
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,
+  stratosSeq,
   type StratosDbOrTx,
   StratosRecordReader,
   StratosRecordTransactor,
@@ -42,6 +43,12 @@ import {
   type ListEnrollmentsOptions,
   createAttestationPayload,
 } from '@northskysocial/stratos-core'
+import type {
+  SequenceOperations,
+  ActorReader,
+  ActorTransactor,
+  ActorStore,
+} from './actor-store-types.js'
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
@@ -81,44 +88,75 @@ import {
 import {
   PgEnrollmentStoreWriter,
 } from './adapters/postgres/enrollment-store.js'
+import { PostgresActorStore } from './adapters/postgres/actor-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 
 /**
- * Per-actor Stratos store for reading
- */
-export interface StratosActorReader {
-  did: string
-  record: StratosRecordReader
-  repo: StratosSqlRepoReader
-  blob: StratosBlobReader
-}
-
-/**
- * Per-actor Stratos store for writing
- */
-export interface StratosActorTransactor {
-  did: string
-  db: StratosDbOrTx
-  record: StratosRecordTransactor
-  repo: StratosSqlRepoTransactor
-  blob: StratosBlobTransactor
-}
-
-/**
- * Enrolled actor database schema
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-interface EnrollmentTable {
-  did: string
-  enrolledAt: string
-  pdsEndpoint: string | null
-}
-
-/**
  * Actor store manager for Stratos
  */
-export class StratosActorStore {
+class SqliteSequenceOps implements SequenceOperations {
+  constructor(private db: StratosDbOrTx) {}
+
+  async getLatestSeq(): Promise<number> {
+    const rows = await this.db
+      .select({ seq: stratosSeq.seq })
+      .from(stratosSeq)
+      .orderBy(desc(stratosSeq.seq))
+      .limit(1)
+    return rows[0]?.seq ?? 0
+  }
+
+  async getOldestSeq(): Promise<number> {
+    const rows = await this.db
+      .select({ seq: stratosSeq.seq })
+      .from(stratosSeq)
+      .orderBy(asc(stratosSeq.seq))
+      .limit(1)
+    return rows[0]?.seq ?? 0
+  }
+
+  async getEventsSince(
+    cursor: number,
+    limit = 100,
+  ): Promise<
+    Array<{
+      seq: number
+      did: string
+      eventType: string
+      event: Buffer
+      invalidated: number
+      sequencedAt: string
+    }>
+  > {
+    const rows = await this.db
+      .select()
+      .from(stratosSeq)
+      .where(gt(stratosSeq.seq, cursor))
+      .orderBy(asc(stratosSeq.seq))
+      .limit(limit)
+    return rows as Array<{
+      seq: number
+      did: string
+      eventType: string
+      event: Buffer
+      invalidated: number
+      sequencedAt: string
+    }>
+  }
+
+  async appendEvent(event: {
+    did: string
+    eventType: string
+    event: Buffer
+    invalidated: number
+    sequencedAt: string
+  }): Promise<void> {
+    await this.db.insert(stratosSeq).values(event)
+  }
+}
+
+export class StratosActorStore implements ActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
@@ -138,17 +176,11 @@ export class StratosActorStore {
     this.cborToRecord = opts.cborToRecord
   }
 
-  /**
-   * Check if an actor database exists
-   */
   async exists(did: string): Promise<boolean> {
     const { dbLocation } = await this.getLocation(did)
     return fileExists(dbLocation)
   }
 
-  /**
-   * Create a new actor database
-   */
   async create(did: string): Promise<void> {
     const { directory, dbLocation } = await this.getLocation(did)
     await fs.mkdir(directory, { recursive: true })
@@ -162,20 +194,14 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Delete an actor database
-   */
   async destroy(did: string): Promise<void> {
     const { directory } = await this.getLocation(did)
     await fs.rm(directory, { recursive: true, force: true })
   }
 
-  /**
-   * Open a database for reading
-   */
   async read<T>(
     did: string,
-    fn: (store: StratosActorReader) => T | PromiseLike<T>,
+    fn: (store: ActorReader) => T | PromiseLike<T>,
   ): Promise<T> {
     const { dbLocation } = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
@@ -183,11 +209,12 @@ export class StratosActorStore {
     const blobStore = this.blobstore(did)
 
     try {
-      const store: StratosActorReader = {
+      const store: ActorReader = {
         did,
         record: new StratosRecordReader(db, this.cborToRecord, this.logger),
         repo: new StratosSqlRepoReader(db),
         blob: new StratosBlobReader(db, blobStore, this.logger),
+        sequence: new SqliteSequenceOps(db),
       }
       return await fn(store)
     } finally {
@@ -195,12 +222,9 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Open a database for writing within a transaction
-   */
   async transact<T>(
     did: string,
-    fn: (store: StratosActorTransactor) => T | PromiseLike<T>,
+    fn: (store: ActorTransactor) => T | PromiseLike<T>,
   ): Promise<T> {
     const { dbLocation } = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
@@ -209,20 +233,21 @@ export class StratosActorStore {
 
     try {
       return await db.transaction(async (tx) => {
-        const store: StratosActorTransactor = {
+        const txDb = tx as unknown as StratosDbOrTx
+        const store: ActorTransactor = {
           did,
-          db: tx as unknown as StratosDbOrTx,
           record: new StratosRecordTransactor(
-            tx as unknown as StratosDbOrTx,
+            txDb,
             this.cborToRecord,
             this.logger,
           ),
-          repo: new StratosSqlRepoTransactor(tx as unknown as StratosDbOrTx),
+          repo: new StratosSqlRepoTransactor(txDb),
           blob: new StratosBlobTransactor(
-            tx as unknown as StratosDbOrTx,
+            txDb,
             blobStore,
             this.logger,
           ),
+          sequence: new SqliteSequenceOps(txDb),
         }
         return fn(store)
       })
@@ -231,16 +256,10 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Get the blobstore for an actor (for operations outside of a transaction)
-   */
   getBlobStore(did: string): BlobStore {
     return this.blobstore(did)
   }
 
-  /**
-   * Generate and persist a P-256 signing key for an actor
-   */
   async createSigningKey(did: string): Promise<crypto.P256Keypair> {
     const { directory } = await this.getLocation(did)
     const keyPath = path.join(directory, 'signing_key')
@@ -250,9 +269,6 @@ export class StratosActorStore {
     return keypair
   }
 
-  /**
-   * Load an actor's P-256 signing key from disk
-   */
   async loadSigningKey(did: string): Promise<crypto.P256Keypair | null> {
     const { directory } = await this.getLocation(did)
     const keyPath = path.join(directory, 'signing_key')
@@ -263,9 +279,6 @@ export class StratosActorStore {
     return crypto.P256Keypair.import(keyBytes, { exportable: true })
   }
 
-  /**
-   * Delete an actor's signing key (for revocation)
-   */
   async deleteSigningKey(did: string): Promise<void> {
     const { directory } = await this.getLocation(did)
     const keyPath = path.join(directory, 'signing_key')
@@ -276,9 +289,6 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Get file paths for an actor
-   */
   private async getLocation(did: string) {
     const didHash = await crypto.sha256Hex(did)
     const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
@@ -675,7 +685,7 @@ export interface AppContext {
   cfg: StratosServiceConfig
   version: string
   db?: ServiceDb
-  actorStore: StratosActorStore
+  actorStore: ActorStore
   enrollmentStore: EnrollmentStore
   enrollmentService: EnrollmentService
   boundaryResolver: BoundaryResolver
@@ -856,12 +866,25 @@ export async function createAppContext(
     fetchWithUserAgent,
   )
 
-  const actorStore = new StratosActorStore({
-    dataDir: path.join(cfg.storage.dataDir, 'actors'),
-    blobstore,
-    cborToRecord,
-    logger,
-  })
+  let actorStore: ActorStore
+  if (cfg.storage.backend === 'postgres') {
+    if (!cfg.storage.postgresUrl) {
+      throw new Error('STRATOS_POSTGRES_URL is required when backend is postgres')
+    }
+    actorStore = new PostgresActorStore({
+      connectionString: cfg.storage.postgresUrl,
+      blobstore,
+      cborToRecord,
+      logger,
+    })
+  } else {
+    actorStore = new StratosActorStore({
+      dataDir: path.join(cfg.storage.dataDir, 'actors'),
+      blobstore,
+      cborToRecord,
+      logger,
+    })
+  }
 
   const enrollmentService = new EnrollmentServiceImpl(enrollmentStore, async (did) => {
     await actorStore.create(did)

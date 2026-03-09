@@ -1,12 +1,9 @@
 import { CID } from 'multiformats/cid'
 import type { ReadonlyBlockStore, BlockMap } from '@atcute/mst'
-import type {
-  StratosSqlRepoReader,
-  StratosSqlRepoTransactor,
-} from '@northskysocial/stratos-core'
+import type { ActorRepoReader } from '../../actor-store-types.js'
 
 export class StratosBlockStoreReader implements ReadonlyBlockStore {
-  constructor(private store: StratosSqlRepoReader | StratosSqlRepoTransactor) {}
+  constructor(private store: ActorRepoReader) {}
 
   async get(cid: string): Promise<Uint8Array<ArrayBuffer> | null> {
     return this.store.getBytes(

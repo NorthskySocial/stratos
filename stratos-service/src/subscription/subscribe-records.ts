@@ -1,6 +1,4 @@
-import { asc, desc, gt } from 'drizzle-orm'
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import { stratosSeq } from '@northskysocial/stratos-core'
 
 import type { AppContext } from '../context.js'
 
@@ -13,18 +11,6 @@ interface SeqEvent {
   time: string
   rev: string
   event: string // JSON-encoded event
-}
-
-/**
- * Database row from stratos_seq table
- */
-interface SeqRow {
-  seq: number
-  did: string
-  eventType: string
-  event: Buffer
-  invalidated: number
-  sequencedAt: string
 }
 
 /**
@@ -165,13 +151,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const rows = await store.record.db
-        .select({ seq: stratosSeq.seq })
-        .from(stratosSeq)
-        .orderBy(desc(stratosSeq.seq))
-        .limit(1)
-
-      return rows[0]?.seq ?? 0
+      return store.sequence.getLatestSeq()
     })
   } catch {
     return 0
@@ -181,13 +161,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const rows = await store.record.db
-        .select({ seq: stratosSeq.seq })
-        .from(stratosSeq)
-        .orderBy(asc(stratosSeq.seq))
-        .limit(1)
-
-      return rows[0]?.seq ?? 0
+      return store.sequence.getOldestSeq()
     })
   } catch {
     return 0
@@ -201,16 +175,9 @@ async function getEventsSince(
 ): Promise<SeqEvent[]> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
-      const rows = await store.record.db
-        .select()
-        .from(stratosSeq)
-        .where(gt(stratosSeq.seq, cursor))
-        .orderBy(asc(stratosSeq.seq))
-        .limit(100)
+      const rows = await store.sequence.getEventsSince(cursor, 100)
 
-      // Transform database rows to SeqEvent format
-      return rows.map((row: SeqRow): SeqEvent => {
-        // Parse the event to extract the rev or use empty string
+      return rows.map((row): SeqEvent => {
         let rev = ''
         try {
           const parsed = JSON.parse(row.event.toString('utf-8'))

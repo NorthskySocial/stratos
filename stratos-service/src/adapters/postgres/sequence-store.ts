@@ -146,6 +146,6 @@ export class PgSequenceStoreWriter
       .delete(pgStratosSeq)
       .where(sql`${pgStratosSeq.seq} < ${seq}`)
 
-    return result.rowCount ?? 0
+    return (result as unknown as { rowCount?: number }).rowCount ?? 0
   }
 }
