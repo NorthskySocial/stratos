@@ -2,6 +2,7 @@ import http from 'node:http'
 import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
@@ -57,6 +58,7 @@ export class StratosServer {
 
     const app = ctx.app
     app.use(cors({ exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate'] }))
+    app.use(cookieParser())
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {
       if (req.path.startsWith('/xrpc/')) {
@@ -160,6 +162,8 @@ export class StratosServer {
       serviceEndpoint: cfg.service.publicUrl,
       defaultBoundaries: cfg.stratos.allowedDomains,
       logger: ctx.logger,
+      devMode: cfg.stratos.devMode === true,
+      dpopVerifier: ctx.dpopVerifier,
       initRepo: async (did: string) => {
         await ctx.actorStore.create(did)
         await ctx.actorStore.transact(did, async (store) => {
