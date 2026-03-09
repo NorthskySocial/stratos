@@ -1,0 +1,35 @@
+# Postgres overlay for E2E tests.
+# Usage: docker compose -f docker-compose.test.yml -f docker-compose.postgres.yml up -d --build
+#
+# Adds a PostgreSQL container and configures Stratos to use it as the storage backend.
+# The stratos service waits for postgres to be healthy before starting.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stratos-postgres
+    restart: 'no'
+    environment:
+      POSTGRES_USER: stratos
+      POSTGRES_PASSWORD: stratos
+      POSTGRES_DB: stratos
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U stratos']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  stratos:
+    environment:
+      STRATOS_STORAGE_BACKEND: postgres
+      STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
