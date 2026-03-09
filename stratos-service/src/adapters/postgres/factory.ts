@@ -61,7 +61,7 @@ export class PostgresStorageFactory implements StorageFactory {
   private createActorDb(schemaName: string): StratosPgDb {
     const client = postgres(this.connectionString, {
       max: 5,
-      search_path: schemaName,
+      connection: { search_path: schemaName },
     })
     return drizzle({ client, schema: pgActorSchema })
   }
