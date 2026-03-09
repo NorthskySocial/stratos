@@ -1,5 +1,5 @@
 import postgres from 'postgres'
-import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import { drizzle } from 'drizzle-orm/postgres-js'
 import { sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import type {

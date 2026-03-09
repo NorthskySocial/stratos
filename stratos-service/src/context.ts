@@ -65,7 +65,12 @@ import {
   type StratosServiceConfig,
   getServiceDidWithFragment,
 } from './config.js'
-import { createOAuthClient, OAUTH_SCOPE, createSqliteOAuthStores, createPgOAuthStores } from './oauth/client.js'
+import {
+  createOAuthClient,
+  OAUTH_SCOPE,
+  createSqliteOAuthStores,
+  createPgOAuthStores,
+} from './oauth/client.js'
 import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import {
   createServiceDb,
@@ -85,9 +90,7 @@ import {
   migrateServicePgDb,
   closeServicePgDb,
 } from './db/pg.js'
-import {
-  PgEnrollmentStoreWriter,
-} from './adapters/postgres/enrollment-store.js'
+import { PgEnrollmentStoreWriter } from './adapters/postgres/enrollment-store.js'
 import { PostgresActorStore } from './adapters/postgres/actor-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
@@ -242,11 +245,7 @@ export class StratosActorStore implements ActorStore {
             this.logger,
           ),
           repo: new StratosSqlRepoTransactor(txDb),
-          blob: new StratosBlobTransactor(
-            txDb,
-            blobStore,
-            this.logger,
-          ),
+          blob: new StratosBlobTransactor(txDb, blobStore, this.logger),
           sequence: new SqliteSequenceOps(txDb),
         }
         return fn(store)
@@ -774,7 +773,9 @@ export async function createAppContext(
 
   if (cfg.storage.backend === 'postgres') {
     if (!cfg.storage.postgresUrl) {
-      throw new Error('STRATOS_POSTGRES_URL is required when backend is postgres')
+      throw new Error(
+        'STRATOS_POSTGRES_URL is required when backend is postgres',
+      )
     }
     const pgDb = createServicePgDb(cfg.storage.postgresUrl)
     await migrateServicePgDb(pgDb)
@@ -869,7 +870,9 @@ export async function createAppContext(
   let actorStore: ActorStore
   if (cfg.storage.backend === 'postgres') {
     if (!cfg.storage.postgresUrl) {
-      throw new Error('STRATOS_POSTGRES_URL is required when backend is postgres')
+      throw new Error(
+        'STRATOS_POSTGRES_URL is required when backend is postgres',
+      )
     }
     actorStore = new PostgresActorStore({
       connectionString: cfg.storage.postgresUrl,
@@ -886,14 +889,18 @@ export async function createAppContext(
     })
   }
 
-  const enrollmentService = new EnrollmentServiceImpl(enrollmentStore, async (did) => {
-    await actorStore.create(did)
-    await actorStore.transact(did, async (store) => {
-      const adapter = new StratosBlockStoreReader(store.repo)
-      const unsigned = await buildCommit(adapter, null, { did, writes: [] })
-      await signAndPersistCommit(store.repo, signingKey, unsigned)
-    })
-  })
+  const enrollmentService = new EnrollmentServiceImpl(
+    enrollmentStore,
+    async (did) => {
+      await actorStore.create(did)
+      // Initialize repo with an empty signed commit so it's valid from enrollment
+      await actorStore.transact(did, async (store) => {
+        const adapter = new StratosBlockStoreReader(store.repo)
+        const unsigned = await buildCommit(adapter, null, { did, writes: [] })
+        await signAndPersistCommit(store.repo, signingKey, unsigned)
+      })
+    },
+  )
 
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)

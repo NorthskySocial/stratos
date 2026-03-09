@@ -136,9 +136,7 @@ export class PgActorRecordReader {
         eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
       )
       .where(and(...conditions))
-      .orderBy(
-        reverse ? asc(pgStratosRecord.rkey) : desc(pgStratosRecord.rkey),
-      )
+      .orderBy(reverse ? asc(pgStratosRecord.rkey) : desc(pgStratosRecord.rkey))
       .limit(limit)
 
     return res.map((row) => ({
@@ -1023,7 +1021,11 @@ export class PostgresActorStore implements ActorStore {
     try {
       const store: ActorReader = {
         did,
-        record: new PgActorRecordReader(actorDb, this.cborToRecord, this.logger),
+        record: new PgActorRecordReader(
+          actorDb,
+          this.cborToRecord,
+          this.logger,
+        ),
         repo: new PgActorRepoReader(actorDb, this.logger),
         blob: new PgActorBlobReader(actorDb, blobStore, this.logger),
         sequence: new PgSequenceOps(actorDb),
