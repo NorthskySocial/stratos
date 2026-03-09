@@ -284,6 +284,13 @@ export function envToConfig(env: Env): StratosServiceConfig {
       tosUri: env.STRATOS_OAUTH_TOS_URI,
       policyUri: env.STRATOS_OAUTH_POLICY_URI,
     },
+          clientName: env.STRATOS_OAUTH_CLIENT_NAME,
+          logoUri: env.STRATOS_OAUTH_LOGO_URI,
+          tosUri: env.STRATOS_OAUTH_TOS_URI,
+          policyUri: env.STRATOS_OAUTH_POLICY_URI,
+        }
+      : undefined,
+>>>>>>> 3ffafb6 (switch issuer config to boolean because its misleading and leftover. todo would be to clean up oauth configuration later)
     logging: {
       level: env.LOG_LEVEL,
     },
