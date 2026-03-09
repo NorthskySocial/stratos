@@ -16,6 +16,12 @@ services:
       # Service fragment for DID document
       STRATOS_SERVICE_FRAGMENT: ${STRATOS_SERVICE_FRAGMENT:-atproto_pns}
 
+      # Storage backend: "sqlite" (default) or "postgres"
+      # To use postgres, change to "postgres", set STRATOS_DB_POSTGRES_URL below,
+      # and uncomment the postgres service at the bottom of this file.
+      STRATOS_DB_BACKEND: ${STRATOS_DB_BACKEND:-sqlite}
+      # STRATOS_DB_POSTGRES_URL: postgresql://stratos:stratos@postgres:5432/stratos
+
       # Storage
       STRATOS_DATA_DIR: /app/data
       STRATOS_BLOB_STORAGE: ${STRATOS_BLOB_STORAGE:-local}
@@ -72,6 +78,24 @@ services:
       retries: 3
       start_period: 10s
 
+  # Uncomment to use PostgreSQL instead of SQLite.
+  # Also set STRATOS_DB_BACKEND=postgres and uncomment STRATOS_DB_POSTGRES_URL above.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: stratos
+  #     POSTGRES_PASSWORD: stratos
+  #     POSTGRES_DB: stratos
+  #   ports:
+  #     - '5432:5432'
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ['CMD-SHELL', 'pg_isready -U stratos']
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+
   # Uncomment to use with S3-compatible storage (e.g., MinIO)
   # minio:
   #   image: minio/minio:latest
@@ -93,4 +117,5 @@ services:
 
 volumes:
   stratos-data:
+  # pgdata:
   # minio-data:
