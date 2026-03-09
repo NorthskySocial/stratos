@@ -3,6 +3,7 @@ export type {
   FetchHandlerObject,
   FetchAndVerifyOptions,
   ResolveSigningKeyOptions,
+  ServiceAttestation,
   StratosEnrollment,
   StratosScopes,
   VerificationLevel,

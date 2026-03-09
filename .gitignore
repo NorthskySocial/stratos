@@ -44,3 +44,7 @@ test-state.json
 .session-context.md
 docs/*-prompt.md
 .github/*-instructions.md
+
+# CDK stuff
+infra/cdk.out/
+cdk.context.json

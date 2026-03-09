@@ -9,6 +9,8 @@ export interface Enrollment {
   boundaries: string[]
   enrolledAt: Date
   pdsEndpoint: string
+  signingKeyDid: string
+  active: boolean
 }
 
 /**

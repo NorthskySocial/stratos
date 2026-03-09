@@ -68,12 +68,6 @@ const envSchema = z.object({
     .transform((v) => v || undefined),
 
   // OAuth
-  STRATOS_OAUTH_ISSUER: z
-    .string()
-    .url()
-    .optional()
-    .or(z.literal(''))
-    .transform((v) => v || undefined),
   STRATOS_OAUTH_CLIENT_ID: z
     .string()
     .optional()
@@ -198,8 +192,7 @@ export interface StratosServiceConfig {
     plcUrl: string
   }
   signingKeyHex?: string
-  oauth?: {
-    issuer: string
+  oauth: {
     clientId?: string
     clientSecret?: string
     clientName?: string
@@ -283,17 +276,14 @@ export function envToConfig(env: Env): StratosServiceConfig {
       plcUrl: env.STRATOS_PLC_URL,
     },
     signingKeyHex: env.STRATOS_SIGNING_KEY_HEX,
-    oauth: env.STRATOS_OAUTH_ISSUER
-      ? {
-          issuer: env.STRATOS_OAUTH_ISSUER,
-          clientId: env.STRATOS_OAUTH_CLIENT_ID,
-          clientSecret: env.STRATOS_OAUTH_CLIENT_SECRET,
-          clientName: env.STRATOS_OAUTH_CLIENT_NAME,
-          logoUri: env.STRATOS_OAUTH_LOGO_URI,
-          tosUri: env.STRATOS_OAUTH_TOS_URI,
-          policyUri: env.STRATOS_OAUTH_POLICY_URI,
-        }
-      : undefined,
+    oauth: {
+      clientId: env.STRATOS_OAUTH_CLIENT_ID,
+      clientSecret: env.STRATOS_OAUTH_CLIENT_SECRET,
+      clientName: env.STRATOS_OAUTH_CLIENT_NAME,
+      logoUri: env.STRATOS_OAUTH_LOGO_URI,
+      tosUri: env.STRATOS_OAUTH_TOS_URI,
+      policyUri: env.STRATOS_OAUTH_POLICY_URI,
+    },
     logging: {
       level: env.LOG_LEVEL,
     },

@@ -15,3 +15,6 @@ export type { BlobMetadata as BlobInfo } from './blob/reader.js'
 export * from './enrollment/index.js'
 export * from './stub/index.js'
 export * from './hydration/index.js'
+
+// Attestation
+export * from './attestation/index.js'

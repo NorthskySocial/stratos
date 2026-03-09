@@ -28,6 +28,9 @@ docs/
 
 # Docker files
 Dockerfile
+
+# CDK
+infra/cdk.out/
 docker-compose*.yml
 .dockerignore
 

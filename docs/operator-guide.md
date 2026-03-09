@@ -454,6 +454,32 @@ STRATOS_SIGNING_KEY_HEX="<hex-encoded-secp256k1-private-key>"
 The corresponding public key is published in the service DID document for commit signature
 verification.
 
+### User Signing Keys
+
+Each enrolled user receives a P-256 (NIST P-256) signing key generated at enrollment time. This key
+enables future per-user record signing and is attested by the service's secp256k1 key.
+
+**Storage**: User signing keys are stored as raw private key bytes at
+`{dataDir}/actors/{prefix}/{did}/signing_key`, alongside the actor's SQLite database.
+
+**Enrollment record**: The user's public key (as a `did:key` string) and a service attestation are
+published to the user's PDS in the `app.northsky.stratos.actor.enrollment` record. The attestation
+is a DAG-CBOR payload (`{boundaries, did, signingKey}`) signed by the service's secp256k1 key.
+
+**Attestation lifecycle**:
+
+- Generated at enrollment time with the user's initial boundaries
+- Regenerated when boundaries change (always during an authenticated user action)
+- Deleted on unenrollment along with the signing key
+
+**Revocation**: When a user unenrolls, their signing key is deleted from disk and the enrollment
+record is removed from the service database. A best-effort attempt is made to delete the PDS
+enrollment record. AppViews should check the enrollment status endpoint as the canonical trust anchor
+for high-stakes operations.
+
+**Verification**: AppViews can verify a user's attestation offline by checking the DAG-CBOR payload
+signature against the service's public key (available in the service DID document).
+
 ### Blob Storage
 
 Stratos supports two blob storage backends using a hexagonal (ports & adapters) architecture:
