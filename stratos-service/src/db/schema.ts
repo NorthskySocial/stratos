@@ -26,6 +26,8 @@ export const enrollment = sqliteTable('enrollment', {
   did: text('did').primaryKey(),
   enrolledAt: text('enrolledAt').notNull(),
   pdsEndpoint: text('pdsEndpoint'),
+  signingKeyDid: text('signingKeyDid').notNull(),
+  active: text('active').notNull().default('true'),
 })
 
 /**

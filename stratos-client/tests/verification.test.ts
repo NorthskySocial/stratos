@@ -205,81 +205,7 @@ describe('verifyCidIntegrity', () => {
   })
 })
 
-describe('verifyServiceSignature (via fetchAndVerifyRecord)', () => {
-  it('succeeds with correct keypair and DID', async () => {
-    const keypair = await Secp256k1Keypair.create({ exportable: true })
-    const publicKey = await keypairToPublicKey(keypair)
-    const { carBytes } = await buildSignedRecordCar(
-      keypair,
-      TEST_DID,
-      TEST_COLLECTION,
-      TEST_RKEY,
-    )
-
-    const mockFetch = vi.fn(async () => new Response(carBytes))
-
-    const result = await fetchAndVerifyRecord(
-      'https://stratos.example.com',
-      TEST_DID,
-      TEST_COLLECTION,
-      TEST_RKEY,
-      { serviceSigningKey: publicKey, fetchFn: mockFetch },
-    )
-
-    expect(result.level).toBe('service-signature')
-    expect(result.cid).toBeTruthy()
-    expect(result.record).toBeTruthy()
-  })
-
-  it('fails with wrong keypair', async () => {
-    const signingKeypair = await Secp256k1Keypair.create({ exportable: true })
-    const wrongKeypair = await Secp256k1Keypair.create({ exportable: true })
-    const wrongPublicKey = await keypairToPublicKey(wrongKeypair)
-    const { carBytes } = await buildSignedRecordCar(
-      signingKeypair,
-      TEST_DID,
-      TEST_COLLECTION,
-      TEST_RKEY,
-    )
-
-    const mockFetch = vi.fn(async () => new Response(carBytes))
-
-    await expect(
-      fetchAndVerifyRecord(
-        'https://stratos.example.com',
-        TEST_DID,
-        TEST_COLLECTION,
-        TEST_RKEY,
-        { serviceSigningKey: wrongPublicKey, fetchFn: mockFetch },
-      ),
-    ).rejects.toThrow(/signature/)
-  })
-
-  it('fails with wrong DID (cross-user swap detection)', async () => {
-    const keypair = await Secp256k1Keypair.create({ exportable: true })
-    const publicKey = await keypairToPublicKey(keypair)
-    const { carBytes } = await buildSignedRecordCar(
-      keypair,
-      TEST_DID,
-      TEST_COLLECTION,
-      TEST_RKEY,
-    )
-
-    const mockFetch = vi.fn(async () => new Response(carBytes))
-
-    await expect(
-      fetchAndVerifyRecord(
-        'https://stratos.example.com',
-        'did:plc:differentuser',
-        TEST_COLLECTION,
-        TEST_RKEY,
-        { serviceSigningKey: publicKey, fetchFn: mockFetch },
-      ),
-    ).rejects.toThrow(/did/)
-  })
-})
-
-describe('resolveServiceSigningKey', () => {
+describe('fetchAndVerifyRecord', () => {
   it('extracts a secp256k1 key from a DID document via #atproto fragment', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const didKey = keypair.did()
@@ -400,6 +326,53 @@ describe('fetchAndVerifyRecord', () => {
 
     expect(result.level).toBe('service-signature')
     expect(result.cid).toBeTruthy()
+  })
+
+  it('fails with wrong keypair', async () => {
+    const signingKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const wrongKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const wrongPublicKey = await keypairToPublicKey(wrongKeypair)
+    const { carBytes } = await buildSignedRecordCar(
+      signingKeypair,
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const mockFetch = vi.fn(async () => new Response(carBytes))
+
+    await expect(
+      fetchAndVerifyRecord(
+        'https://stratos.example.com',
+        TEST_DID,
+        TEST_COLLECTION,
+        TEST_RKEY,
+        { serviceSigningKey: wrongPublicKey, fetchFn: mockFetch },
+      ),
+    ).rejects.toThrow(/signature/)
+  })
+
+  it('fails with wrong DID (cross-user swap detection)', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const publicKey = await keypairToPublicKey(keypair)
+    const { carBytes } = await buildSignedRecordCar(
+      keypair,
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const mockFetch = vi.fn(async () => new Response(carBytes))
+
+    await expect(
+      fetchAndVerifyRecord(
+        'https://stratos.example.com',
+        'did:plc:differentuser',
+        TEST_COLLECTION,
+        TEST_RKEY,
+        { serviceSigningKey: publicKey, fetchFn: mockFetch },
+      ),
+    ).rejects.toThrow(/did/)
   })
 
   it('falls back to CID integrity when no serviceSigningKey is provided', async () => {

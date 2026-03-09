@@ -36,7 +36,11 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     private logger?: Logger,
   ) {}
 
-  async enroll(did: string, boundaries: string[]): Promise<Enrollment> {
+  async enroll(
+    did: string,
+    boundaries: string[],
+    signingKeyDid: string,
+  ): Promise<Enrollment> {
     const start = Date.now()
     const now = new Date()
 
@@ -45,7 +49,9 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     await this.store.db.insert(enrollment).values({
       did,
       enrolledAt: now.toISOString(),
-      pdsEndpoint: null, // Will be updated by the validator
+      pdsEndpoint: null,
+      signingKeyDid,
+      active: 'true',
     })
 
     this.logger?.info(
@@ -58,17 +64,19 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       boundaries,
       enrolledAt: now,
       pdsEndpoint: '',
+      signingKeyDid,
+      active: true,
     }
   }
 
   async isEnrolled(did: string): Promise<boolean> {
     const result = await this.store.db
-      .select({ did: enrollment.did })
+      .select({ did: enrollment.did, active: enrollment.active })
       .from(enrollment)
       .where(eq(enrollment.did, did))
       .limit(1)
 
-    return result.length > 0
+    return result.length > 0 && result[0].active === 'true'
   }
 
   async getEnrollment(did: string): Promise<Enrollment | null> {
@@ -85,14 +93,19 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     const record = result[0]
     return {
       did: record.did,
-      boundaries: [], // TODO: fetch from actor store
+      boundaries: [],
       enrolledAt: new Date(record.enrolledAt),
       pdsEndpoint: record.pdsEndpoint ?? '',
+      signingKeyDid: record.signingKeyDid,
+      active: record.active === 'true',
     }
   }
 
   async unenroll(did: string): Promise<void> {
-    await this.store.db.delete(enrollment).where(eq(enrollment.did, did))
+    await this.store.db
+      .update(enrollment)
+      .set({ active: 'false' })
+      .where(eq(enrollment.did, did))
 
     this.logger?.info({ did }, 'user unenrolled')
   }

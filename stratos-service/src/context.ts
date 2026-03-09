@@ -39,6 +39,7 @@ import {
   type EnrollmentStoreReader,
   type StoredEnrollment,
   type ListEnrollmentsOptions,
+  createAttestationPayload,
 } from '@northskysocial/stratos-core'
 import {
   EnrollmentServiceImpl,
@@ -229,6 +230,44 @@ export class StratosActorStore {
   }
 
   /**
+   * Generate and persist a P-256 signing key for an actor
+   */
+  async createSigningKey(did: string): Promise<crypto.P256Keypair> {
+    const { directory } = await this.getLocation(did)
+    const keyPath = path.join(directory, 'signing_key')
+    const keypair = await crypto.P256Keypair.create({ exportable: true })
+    const exported = await (keypair as crypto.ExportableKeypair).export()
+    await fs.writeFile(keyPath, exported)
+    return keypair
+  }
+
+  /**
+   * Load an actor's P-256 signing key from disk
+   */
+  async loadSigningKey(did: string): Promise<crypto.P256Keypair | null> {
+    const { directory } = await this.getLocation(did)
+    const keyPath = path.join(directory, 'signing_key')
+    if (!(await fileExists(keyPath))) {
+      return null
+    }
+    const keyBytes = await fs.readFile(keyPath)
+    return crypto.P256Keypair.import(keyBytes, { exportable: true })
+  }
+
+  /**
+   * Delete an actor's signing key (for revocation)
+   */
+  async deleteSigningKey(did: string): Promise<void> {
+    const { directory } = await this.getLocation(did)
+    const keyPath = path.join(directory, 'signing_key')
+    try {
+      await fs.unlink(keyPath)
+    } catch {
+      // Key file may not exist
+    }
+  }
+
+  /**
    * Get file paths for an actor
    */
   private async getLocation(did: string) {
@@ -256,7 +295,7 @@ export class SqliteEnrollmentStore
       .where(eq(enrollment.did, did))
       .limit(1)
 
-    return rows.length > 0
+    return rows.length > 0 && rows[0].active === 'true'
   }
 
   async enroll(record: EnrollmentRecord): Promise<void> {
@@ -266,12 +305,16 @@ export class SqliteEnrollmentStore
         did: record.did,
         enrolledAt: record.enrolledAt,
         pdsEndpoint: record.pdsEndpoint ?? null,
+        signingKeyDid: record.signingKeyDid,
+        active: record.active ? 'true' : 'false',
       })
       .onConflictDoUpdate({
         target: enrollment.did,
         set: {
           enrolledAt: record.enrolledAt,
           pdsEndpoint: record.pdsEndpoint ?? null,
+          signingKeyDid: record.signingKeyDid,
+          active: record.active ? 'true' : 'false',
         },
       })
 
@@ -293,7 +336,10 @@ export class SqliteEnrollmentStore
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    await this.db.delete(enrollment).where(eq(enrollment.did, did))
+    await this.db
+      .update(enrollment)
+      .set({ active: 'false' })
+      .where(eq(enrollment.did, did))
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -310,6 +356,8 @@ export class SqliteEnrollmentStore
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }
   }
 
@@ -331,6 +379,8 @@ export class SqliteEnrollmentStore
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }))
   }
 
@@ -382,10 +432,10 @@ export interface AuthVerifiers {
 function createAuthVerifiers(
   serviceDid: string,
   idResolver: IdResolver,
-  _oauthClient: NodeOAuthClient | undefined,
+  _oauthClient: NodeOAuthClient,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
-  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier | undefined,
+  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
   devMode: boolean,
 ): AuthVerifiers {
   return {
@@ -599,13 +649,18 @@ export interface AppContext {
   stubWriter: StubWriterService
   authVerifier: AuthVerifiers
   idResolver: IdResolver
-  oauthClient?: NodeOAuthClient
+  oauthClient: NodeOAuthClient
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
   xrpcServer: XrpcServer
   app: express.Application
   logger?: Logger
+  createAttestation(
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ): Promise<{ sig: Uint8Array; signingKey: string }>
 }
 
 /**
@@ -728,26 +783,23 @@ export async function createAppContext(
 
   const signingDidKey = signingKey.did()
 
-  let oauthClient: NodeOAuthClient | undefined
-  if (cfg.oauth) {
-    oauthClient = await createOAuthClient(
-      {
-        clientId:
-          cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
-        clientUri: cfg.service.publicUrl,
-        redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
-        privateKeyPem: cfg.oauth.clientSecret,
-        scope: OAUTH_SCOPE,
-        clientName: cfg.oauth.clientName,
-        logoUri: cfg.oauth.logoUri,
-        tosUri: cfg.oauth.tosUri,
-        policyUri: cfg.oauth.policyUri,
-      },
-      db,
-      idResolver,
-      fetchWithUserAgent,
-    )
-  }
+  const oauthClient = await createOAuthClient(
+    {
+      clientId:
+        cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
+      clientUri: cfg.service.publicUrl,
+      redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
+      privateKeyPem: cfg.oauth.clientSecret,
+      scope: OAUTH_SCOPE,
+      clientName: cfg.oauth.clientName,
+      logoUri: cfg.oauth.logoUri,
+      tosUri: cfg.oauth.tosUri,
+      policyUri: cfg.oauth.policyUri,
+    },
+    db,
+    idResolver,
+    fetchWithUserAgent,
+  )
 
   const actorStore = new StratosActorStore({
     dataDir: path.join(cfg.storage.dataDir, 'actors'),
@@ -760,7 +812,6 @@ export async function createAppContext(
 
   const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) => {
     await actorStore.create(did)
-    // Initialize repo with an empty signed commit so it's valid from enrollment
     await actorStore.transact(did, async (store) => {
       const adapter = new StratosBlockStoreReader(store.repo)
       const unsigned = await buildCommit(adapter, null, { did, writes: [] })
@@ -771,21 +822,18 @@ export async function createAppContext(
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
 
-  let dpopVerifier: DpopVerifier | undefined
-  if (cfg.oauth && oauthClient) {
-    // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
-    // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
-    const tokenVerifier = new PdsTokenVerifier({
-      idResolver,
-      fetch: fetchWithUserAgent,
-    })
-    dpopVerifier = new DpopVerifier({
-      serviceDid: cfg.service.did,
-      serviceEndpoint: cfg.service.publicUrl,
-      tokenVerifier,
-      enrollmentStore,
-    })
-  }
+  // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
+  // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
+  const tokenVerifier = new PdsTokenVerifier({
+    idResolver,
+    fetch: fetchWithUserAgent,
+  })
+  const dpopVerifier = new DpopVerifier({
+    serviceDid: cfg.service.did,
+    serviceEndpoint: cfg.service.publicUrl,
+    tokenVerifier,
+    enrollmentStore,
+  })
 
   const authVerifier = createAuthVerifiers(
     cfg.service.did,
@@ -802,9 +850,6 @@ export async function createAppContext(
   const serviceDidWithFragment = getServiceDidWithFragment(cfg)
 
   const stubWriter = new StubWriterServiceImpl(async (did) => {
-    if (!oauthClient) {
-      return null
-    }
     try {
       const session = await oauthClient.restore(did)
       return new Agent(session) as unknown as PdsAgent
@@ -833,6 +878,16 @@ export async function createAppContext(
     },
   })
 
+  const createAttestation = async (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ): Promise<{ sig: Uint8Array; signingKey: string }> => {
+    const payload = createAttestationPayload(did, boundaries, userDidKey)
+    const sig = await signingKey.sign(payload)
+    return { sig, signingKey: signingDidKey }
+  }
+
   return {
     cfg,
     version: VERSION,
@@ -851,6 +906,7 @@ export async function createAppContext(
     xrpcServer,
     app,
     logger,
+    createAttestation,
   }
 }
 

@@ -14,6 +14,8 @@ export interface EnrollmentRecord {
   enrolledAt: string
   pdsEndpoint?: string
   boundaries?: string[]
+  signingKeyDid: string
+  active: boolean
 }
 
 /**
@@ -35,14 +37,16 @@ export interface OAuthRoutesConfig {
   enrollmentStore: EnrollmentStore
   idResolver: IdResolver
   baseUrl: string
-  /** The public service endpoint URL for this Stratos service */
   serviceEndpoint: string
-  /** Boundaries to assign to new enrollments (if empty, placeholder will be used) */
   defaultBoundaries?: string[]
-  /** Logger for OAuth events */
   logger?: Logger
-  /** Initialize the actor store and repo for a newly enrolled user */
-  initRepo?: (did: string) => Promise<void>
+  initRepo: (did: string) => Promise<void>
+  createSigningKey: (did: string) => Promise<string>
+  createAttestation: (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ) => Promise<{ sig: Uint8Array; signingKey: string }>
 }
 
 /**
@@ -59,6 +63,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     defaultBoundaries = [],
     logger,
     initRepo,
+    createSigningKey,
+    createAttestation,
   } = config
 
   /**
@@ -68,11 +74,21 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
   router.get('/authorize', async (req, res) => {
     try {
       const handle = req.query.handle as string
+      const redirectUri = req.query.redirect_uri as string | undefined
 
       if (!handle) {
         return res.status(400).json({
           error: 'InvalidRequest',
           message: 'Handle parameter required',
+        })
+      }
+
+      if (redirectUri) {
+        res.cookie('stratos_redirect', redirectUri, {
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 10 * 60 * 1000,
+          secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
         })
       }
 
@@ -140,29 +156,26 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
 
       if (!alreadyEnrolled) {
+        // Initialize actor store and repo with an empty signed commit
+        await initRepo(did)
+
+        // Generate user signing key and service attestation
+        const userSigningKeyDid = await createSigningKey(did)
+        const attestation = await createAttestation(
+          did,
+          defaultBoundaries,
+          userSigningKeyDid,
+        )
+
         // Create enrollment record
         await enrollmentStore.enroll({
           did,
           enrolledAt: new Date().toISOString(),
           pdsEndpoint: enrollmentResult.pdsEndpoint,
           boundaries: defaultBoundaries,
+          signingKeyDid: userSigningKeyDid,
+          active: true,
         })
-
-        // Initialize actor store and repo with an empty signed commit
-        if (initRepo) {
-          try {
-            await initRepo(did)
-          } catch (initErr) {
-            logger?.warn(
-              {
-                err:
-                  initErr instanceof Error ? initErr.message : String(initErr),
-                did,
-              },
-              'failed to initialize repo during enrollment',
-            )
-          }
-        }
 
         // Write profile record to user's PDS for endpoint discovery
         try {
@@ -176,6 +189,11 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             record: {
               service: serviceEndpoint,
               boundaries: defaultBoundaries.map((value) => ({ value })),
+              signingKey: userSigningKeyDid,
+              attestation: {
+                sig: attestation.sig,
+                signingKey: attestation.signingKey,
+              },
               createdAt: new Date().toISOString(),
             },
           })
@@ -193,7 +211,28 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         }
       }
 
-      // Return success page or redirect to app
+      // Redirect back to the app if a redirect was stored, otherwise return JSON
+      const cookies = req.headers.cookie
+        ?.split(';')
+        .reduce<Record<string, string>>((acc, c) => {
+          const [key, ...rest] = c.trim().split('=')
+          if (key) acc[key] = decodeURIComponent(rest.join('='))
+          return acc
+        }, {})
+      const redirectTo = cookies?.stratos_redirect
+      if (redirectTo) {
+        res.clearCookie('stratos_redirect')
+        try {
+          const url = new URL(redirectTo)
+          if (url.protocol === 'https:' || url.protocol === 'http:') {
+            url.searchParams.set('stratos_enrolled', 'true')
+            return res.redirect(url.toString())
+          }
+        } catch {
+          // Invalid URL, fall through to JSON response
+        }
+      }
+
       res.json({
         success: true,
         did,
@@ -332,7 +371,23 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         })
       }
 
-      // Unenroll the user
+      // Best-effort PDS enrollment record deletion
+      try {
+        const oauthSession = await oauthClient.restore(did)
+        const agent = new Agent(oauthSession)
+        await agent.com.atproto.repo.deleteRecord({
+          repo: did,
+          collection: 'app.northsky.stratos.actor.enrollment',
+          rkey: 'self',
+        })
+      } catch (err) {
+        logger?.warn(
+          { err: err instanceof Error ? err.message : String(err), did },
+          'failed to delete PDS enrollment record',
+        )
+      }
+
+      // Remove boundaries and mark enrollment inactive (signing key is preserved)
       await enrollmentStore.unenroll(did)
 
       // Revoke the OAuth session if client available
