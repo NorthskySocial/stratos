@@ -28,7 +28,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
     const rows = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(pgStratosRecord)
-    return rows[0]?.count ?? 0
+    return Number(rows[0]?.count ?? 0)
   }
 
   async listAll(): Promise<RecordDescript[]> {
@@ -99,7 +99,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
     return res.map((row) => ({
       uri: row.uri,
       cid: row.cid,
-      value: this.cborToRecord(row.content),
+      value: this.cborToRecord(new Uint8Array(row.content as ArrayBuffer)),
       indexedAt: new Date().toISOString(),
       takedownRef: null,
     }))
@@ -135,7 +135,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
     return {
       uri: record.uri,
       cid: record.cid,
-      value: this.cborToRecord(record.content),
+      value: this.cborToRecord(new Uint8Array(record.content as ArrayBuffer)),
       indexedAt: record.indexedAt,
       takedownRef: record.takedownRef,
     }
@@ -158,7 +158,8 @@ export class PgRecordStoreReader implements RecordStoreReader {
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
       .limit(1)
 
-    return rows[0]?.content ?? null
+    const content = rows[0]?.content
+    return content ? new Uint8Array(content as ArrayBuffer) : null
   }
 }
 
