@@ -109,7 +109,6 @@ export class PgSequenceStoreReader implements SequenceStoreReader {
   async getEventsRange(
     startSeq: number,
     endSeq: number,
-    _options?: GetEventsSinceOptions,
   ): Promise<SequenceEvent[]> {
     const rows = await this.db
       .select()

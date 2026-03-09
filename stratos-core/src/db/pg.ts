@@ -5,9 +5,7 @@ import * as pgSchemaModule from './schema/pg-index.js'
 
 export type StratosPgDb = PostgresJsDatabase<typeof pgSchemaModule.pgSchema>
 
-export type StratosPgDbOrTx = PostgresJsDatabase<
-  typeof pgSchemaModule.pgSchema
->
+export type StratosPgDbOrTx = PostgresJsDatabase<typeof pgSchemaModule.pgSchema>
 
 export function createStratosPgDb(
   connectionString: string,
@@ -25,9 +23,7 @@ export async function migrateStratosPgDb(
   schemaName?: string,
 ): Promise<void> {
   if (schemaName) {
-    await db.execute(
-      sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`),
-    )
+    await db.execute(sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`))
     await db.execute(sql.raw(`SET search_path TO "${schemaName}"`))
   }
 
@@ -134,6 +130,7 @@ export async function migrateStratosPgDb(
   )
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function closeStratosPgDb(db: StratosPgDb): Promise<void> {
   // postgres.js client reference is not directly accessible from drizzle instance,
   // so callers should manage the postgres client lifecycle separately if needed

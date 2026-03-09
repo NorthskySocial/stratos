@@ -264,12 +264,8 @@ export class PgRecordStoreWriter
 
   async deleteRecord(uri: string): Promise<void> {
     await Promise.all([
-      this.db
-        .delete(pgStratosRecord)
-        .where(eq(pgStratosRecord.uri, uri)),
-      this.db
-        .delete(pgStratosBacklink)
-        .where(eq(pgStratosBacklink.uri, uri)),
+      this.db.delete(pgStratosRecord).where(eq(pgStratosRecord.uri, uri)),
+      this.db.delete(pgStratosBacklink).where(eq(pgStratosBacklink.uri, uri)),
     ])
   }
 

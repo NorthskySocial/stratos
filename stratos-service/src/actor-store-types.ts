@@ -1,9 +1,7 @@
 import type { CID } from 'multiformats/cid'
 import type { AtUri } from '@atproto/syntax'
 import type {
-  Logger,
   BlobStore,
-  BlobStoreCreator,
   StatusAttr,
   ListRecordsOpts,
   RecordWithContent,
@@ -61,9 +59,7 @@ export interface ActorRecordReader {
   ): Promise<boolean>
   getRecordTakedownStatus(uri: AtUri): Promise<StatusAttr | null>
   getCurrentRecordCid(uri: AtUri): Promise<CID | null>
-  getRecordBacklinks(
-    opts: GetBacklinksOpts,
-  ): Promise<
+  getRecordBacklinks(opts: GetBacklinksOpts): Promise<
     Array<{
       uri: string
       cid: string
@@ -192,7 +188,10 @@ export interface ActorStore {
   exists(did: string): Promise<boolean>
   create(did: string): Promise<void>
   destroy(did: string): Promise<void>
-  read<T>(did: string, fn: (store: ActorReader) => T | PromiseLike<T>): Promise<T>
+  read<T>(
+    did: string,
+    fn: (store: ActorReader) => T | PromiseLike<T>,
+  ): Promise<T>
   transact<T>(
     did: string,
     fn: (store: ActorTransactor) => T | PromiseLike<T>,

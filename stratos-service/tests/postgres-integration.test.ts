@@ -6,7 +6,15 @@
  *
  * Run: pnpm exec vitest run tests/postgres-integration.test.ts
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+} from 'vitest'
 import { AtUri } from '@atproto/syntax'
 import {
   startPostgresContainer,
@@ -100,8 +108,12 @@ describe('PostgreSQL Backend Integration', () => {
         )
       })
 
-      const count1 = await actorStore.read(testDid, (s) => s.record.recordCount())
-      const count2 = await actorStore.read(testDid2, (s) => s.record.recordCount())
+      const count1 = await actorStore.read(testDid, (s) =>
+        s.record.recordCount(),
+      )
+      const count2 = await actorStore.read(testDid2, (s) =>
+        s.record.recordCount(),
+      )
 
       expect(count1).toBe(1)
       expect(count2).toBe(0)
@@ -127,7 +139,9 @@ describe('PostgreSQL Backend Integration', () => {
         )
       })
 
-      const count = await actorStore.read(testDid, (s) => s.record.recordCount())
+      const count = await actorStore.read(testDid, (s) =>
+        s.record.recordCount(),
+      )
       expect(count).toBe(1)
     })
 
@@ -158,7 +172,9 @@ describe('PostgreSQL Backend Integration', () => {
         )
       })
 
-      const collections = await actorStore.read(testDid, (s) => s.record.listCollections())
+      const collections = await actorStore.read(testDid, (s) =>
+        s.record.listCollections(),
+      )
       expect(collections).toHaveLength(2)
       expect(collections).toContain('zone.stratos.feed.post')
       expect(collections).toContain('zone.stratos.graph.follow')
@@ -178,13 +194,17 @@ describe('PostgreSQL Backend Integration', () => {
         )
       })
 
-      expect(await actorStore.read(testDid, (s) => s.record.recordCount())).toBe(1)
+      expect(
+        await actorStore.read(testDid, (s) => s.record.recordCount()),
+      ).toBe(1)
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.deleteRecord(new AtUri(uri))
       })
 
-      expect(await actorStore.read(testDid, (s) => s.record.recordCount())).toBe(0)
+      expect(
+        await actorStore.read(testDid, (s) => s.record.recordCount()),
+      ).toBe(0)
     })
 
     it('should manage backlinks', async () => {
@@ -195,7 +215,12 @@ describe('PostgreSQL Backend Integration', () => {
         await store.record.indexRecord(
           new AtUri(postUri),
           cid,
-          { text: 'Reply', reply: { parent: { uri: 'at://did:plc:other/zone.stratos.feed.post/123' } } },
+          {
+            text: 'Reply',
+            reply: {
+              parent: { uri: 'at://did:plc:other/zone.stratos.feed.post/123' },
+            },
+          },
           'create',
           'rev1',
         )
@@ -277,13 +302,20 @@ describe('PostgreSQL Backend Integration', () => {
         await store.sequence.appendEvent({
           did: testDid,
           eventType: 'append',
-          event: Buffer.from(JSON.stringify({ action: 'create', path: 'zone.stratos.feed.post/1' })),
+          event: Buffer.from(
+            JSON.stringify({
+              action: 'create',
+              path: 'zone.stratos.feed.post/1',
+            }),
+          ),
           invalidated: 0,
           sequencedAt: new Date().toISOString(),
         })
       })
 
-      const latestSeq = await actorStore.read(testDid, (s) => s.sequence.getLatestSeq())
+      const latestSeq = await actorStore.read(testDid, (s) =>
+        s.sequence.getLatestSeq(),
+      )
       expect(latestSeq).toBeGreaterThan(0)
     })
 
@@ -292,20 +324,32 @@ describe('PostgreSQL Backend Integration', () => {
         await store.sequence.appendEvent({
           did: testDid,
           eventType: 'append',
-          event: Buffer.from(JSON.stringify({ action: 'create', path: 'zone.stratos.feed.post/1' })),
+          event: Buffer.from(
+            JSON.stringify({
+              action: 'create',
+              path: 'zone.stratos.feed.post/1',
+            }),
+          ),
           invalidated: 0,
           sequencedAt: new Date().toISOString(),
         })
         await store.sequence.appendEvent({
           did: testDid,
           eventType: 'append',
-          event: Buffer.from(JSON.stringify({ action: 'create', path: 'zone.stratos.feed.post/2' })),
+          event: Buffer.from(
+            JSON.stringify({
+              action: 'create',
+              path: 'zone.stratos.feed.post/2',
+            }),
+          ),
           invalidated: 0,
           sequencedAt: new Date().toISOString(),
         })
       })
 
-      const events = await actorStore.read(testDid, (s) => s.sequence.getEventsSince(0, 100))
+      const events = await actorStore.read(testDid, (s) =>
+        s.sequence.getEventsSince(0, 100),
+      )
       expect(events.length).toBeGreaterThanOrEqual(2)
     })
   })
@@ -319,7 +363,9 @@ describe('PostgreSQL Backend Integration', () => {
       })
 
       expect(await enrollmentStore.isEnrolled(testDid)).toBe(true)
-      expect(await enrollmentStore.isEnrolled('did:plc:nonexistent')).toBe(false)
+      expect(await enrollmentStore.isEnrolled('did:plc:nonexistent')).toBe(
+        false,
+      )
     })
 
     it('should get enrollment details', async () => {

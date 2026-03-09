@@ -9,10 +9,14 @@ import type { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../../src/context.js'
 import { PostgresActorStore } from '../../src/adapters/postgres/actor-store.js'
 import type { ActorStore } from '../../src/actor-store-types.js'
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
+import {
+  PostgreSqlContainer,
+  type StartedPostgreSqlContainer,
+} from '@testcontainers/postgresql'
 
 export const POSTGRES_URL = process.env.STRATOS_POSTGRES_URL
-export const IS_POSTGRES = process.env.STRATOS_TEST_BACKEND === 'postgres' || !!POSTGRES_URL
+export const IS_POSTGRES =
+  process.env.STRATOS_TEST_BACKEND === 'postgres' || !!POSTGRES_URL
 export const HAS_POSTGRES = !!POSTGRES_URL
 
 let pgContainer: StartedPostgreSqlContainer | null = null
@@ -58,23 +62,29 @@ export function createMockBlobStore(): BlobStore {
         storage.delete(key)
       }
     }),
-    putPermanent: vi.fn().mockImplementation(async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-      if (bytes instanceof Uint8Array) {
-        storage.set(cid.toString(), bytes)
-      } else {
-        const chunks: Uint8Array[] = []
-        for await (const chunk of bytes) {
-          chunks.push(chunk)
-        }
-        const total = new Uint8Array(chunks.reduce((sum, c) => sum + c.length, 0))
-        let offset = 0
-        for (const chunk of chunks) {
-          total.set(chunk, offset)
-          offset += chunk.length
-        }
-        storage.set(cid.toString(), total)
-      }
-    }),
+    putPermanent: vi
+      .fn()
+      .mockImplementation(
+        async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
+          if (bytes instanceof Uint8Array) {
+            storage.set(cid.toString(), bytes)
+          } else {
+            const chunks: Uint8Array[] = []
+            for await (const chunk of bytes) {
+              chunks.push(chunk)
+            }
+            const total = new Uint8Array(
+              chunks.reduce((sum, c) => sum + c.length, 0),
+            )
+            let offset = 0
+            for (const chunk of chunks) {
+              total.set(chunk, offset)
+              offset += chunk.length
+            }
+            storage.set(cid.toString(), total)
+          }
+        },
+      ),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockImplementation(async (cid: CID) => {
@@ -85,8 +95,12 @@ export function createMockBlobStore(): BlobStore {
         storage.delete(cid.toString())
       }
     }),
-    hasTemp: vi.fn().mockImplementation(async (key: string) => storage.has(key)),
-    hasStored: vi.fn().mockImplementation(async (cid: CID) => storage.has(cid.toString())),
+    hasTemp: vi
+      .fn()
+      .mockImplementation(async (key: string) => storage.has(key)),
+    hasStored: vi
+      .fn()
+      .mockImplementation(async (cid: CID) => storage.has(cid.toString())),
     getBytes: vi.fn().mockImplementation(async (cid: CID) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
@@ -95,7 +109,9 @@ export function createMockBlobStore(): BlobStore {
     getStream: vi.fn().mockImplementation(async (cid: CID) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
-      async function* generate() { yield bytes! }
+      async function* generate() {
+        yield bytes!
+      }
       return generate()
     }),
   }
@@ -124,7 +140,10 @@ export async function createTestBackend(): Promise<TestBackend> {
 }
 
 async function createSqliteBackend(): Promise<TestBackend> {
-  const testDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
+  const testDir = join(
+    tmpdir(),
+    `stratos-test-${randomBytes(8).toString('hex')}`,
+  )
   await mkdir(testDir, { recursive: true })
 
   const blobstore = createMockBlobStoreCreator()
@@ -142,7 +161,9 @@ async function createSqliteBackend(): Promise<TestBackend> {
   }
 }
 
-async function createPostgresBackend(postgresUrl: string): Promise<TestBackend> {
+async function createPostgresBackend(
+  postgresUrl: string,
+): Promise<TestBackend> {
   const blobstore = createMockBlobStoreCreator()
   const actorStore = new PostgresActorStore({
     connectionString: postgresUrl,

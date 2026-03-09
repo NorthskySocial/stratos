@@ -49,6 +49,7 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
   `)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function closeServicePgDb(db: ServicePgDb): Promise<void> {
   // postgres.js client lifecycle is managed externally
 }

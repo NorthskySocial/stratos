@@ -1,8 +1,5 @@
 export { PgRecordStoreReader, PgRecordStoreWriter } from './record-store.js'
-export {
-  PgBlobMetadataReader,
-  PgBlobMetadataWriter,
-} from './blob-store.js'
+export { PgBlobMetadataReader, PgBlobMetadataWriter } from './blob-store.js'
 export { PgRepoStoreReader, PgRepoStoreWriter } from './repo-store.js'
 export {
   PgSequenceStoreReader,

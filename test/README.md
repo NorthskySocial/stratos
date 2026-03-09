@@ -32,12 +32,12 @@ Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 The Deno test scripts load their own `.env` from `scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
 
-| Variable               | Example                   | Purpose                                                                      |
-| ---------------------- | ------------------------- | ---------------------------------------------------------------------------- |
-| `PDS_HOST`             | `pds.example.com`         | PDS hostname (without protocol) — used for handle construction and API calls |
-| `PDS_ADMIN_PASSWORD`   | `your-admin-password`     | PDS admin password for account creation/deletion                             |
-| `STRATOS_URL`          | `http://localhost:3100`   | Stratos service URL the scripts call                                         |
-| `USE_OAUTH`            | `true`                    | Enable OAuth enrollment routes (`/oauth/*`)                                  |
+| Variable             | Example                 | Purpose                                                                      |
+| -------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PDS_HOST`           | `pds.example.com`       | PDS hostname (without protocol) — used for handle construction and API calls |
+| `PDS_ADMIN_PASSWORD` | `your-admin-password`   | PDS admin password for account creation/deletion                             |
+| `STRATOS_URL`        | `http://localhost:3100` | Stratos service URL the scripts call                                         |
+| `USE_OAUTH`          | `true`                  | Enable OAuth enrollment routes (`/oauth/*`)                                  |
 
 If you need to point at a different PDS, update these variables and the user handles in `scripts/lib/config.ts`.
 
@@ -144,6 +144,7 @@ This mode:
 3. Boundary configuration and direct enrollment connect to PostgreSQL at `localhost:5432` instead of `service.sqlite`
 
 The PostgreSQL compose overlay (`docker-compose.postgres.yml`) adds:
+
 - A `postgres` service with healthcheck
 - Overrides on the `stratos` service for PG environment variables and dependency ordering
 
