@@ -144,7 +144,7 @@ export class PgActorRecordReader {
     return res.map((row) => ({
       uri: row.uri,
       cid: row.cid,
-      value: this.cborToRecord(new Uint8Array(row.content as ArrayBuffer)),
+      value: this.cborToRecord(row.content),
     }))
   }
 
@@ -183,7 +183,7 @@ export class PgActorRecordReader {
     return {
       uri: record.uri,
       cid: record.cid,
-      value: this.cborToRecord(new Uint8Array(record.content as ArrayBuffer)),
+      value: this.cborToRecord(record.content),
       indexedAt: record.indexedAt,
       takedownRef: record.takedownRef ? record.takedownRef.toString() : null,
     }
@@ -436,7 +436,7 @@ export class PgActorRepoReader {
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
       .limit(1)
     if (found.length === 0) return null
-    const content = new Uint8Array(found[0].content as ArrayBuffer)
+    const content = found[0].content
     this.cache.set(cid, content)
     return content
   }
@@ -464,7 +464,7 @@ export class PgActorRepoReader {
         .where(inArray(pgStratosRepoBlock.cid, batch))
       for (const row of res) {
         const cid = CID.parse(row.cid)
-        blocks.set(cid, new Uint8Array(row.content as ArrayBuffer))
+        blocks.set(cid, row.content)
         missing.delete(cid)
       }
     }
@@ -481,7 +481,7 @@ export class PgActorRepoReader {
       for (const row of res) {
         yield {
           cid: CID.parse(row.cid),
-          bytes: new Uint8Array(row.content as ArrayBuffer),
+          bytes: row.content,
         }
       }
       const lastRow = res.at(-1)
@@ -529,7 +529,7 @@ export class PgActorRepoReader {
     return res.map((row) => ({
       cid: row.cid,
       repoRev: row.repoRev,
-      content: new Uint8Array(row.content as ArrayBuffer),
+      content: row.content,
     }))
   }
 

@@ -60,7 +60,7 @@ export class PgRepoStoreReader implements RepoStoreReader {
       .limit(1)
 
     const content = rows[0]?.content
-    return content ? new Uint8Array(content as ArrayBuffer) : null
+    return content ? content : null
   }
 
   async hasBlock(cid: CID): Promise<boolean> {
@@ -96,7 +96,7 @@ export class PgRepoStoreReader implements RepoStoreReader {
         )
 
       for (const row of rows) {
-        result.set(row.cid, new Uint8Array(row.content as ArrayBuffer))
+        result.set(row.cid, row.content)
       }
     }
 
