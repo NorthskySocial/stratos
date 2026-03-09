@@ -1,6 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { readFileSync, readdirSync } from 'node:fs'
+import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { eq, gt, asc, sql } from 'drizzle-orm'
@@ -273,6 +274,10 @@ export class StratosActorStore {
   private async getLocation(did: string) {
     const didHash = await crypto.sha256Hex(did)
     const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
+    const resolved = path.resolve(directory)
+    if (!resolved.startsWith(path.resolve(this.dataDir))) {
+      throw new Error('Invalid DID: resolved path escapes data directory')
+    }
     const dbLocation = path.join(directory, 'stratos.sqlite')
     const blobLocation = path.join(directory, 'blobs')
     return { directory, dbLocation, blobLocation }
@@ -427,6 +432,20 @@ export interface AuthVerifiers {
 }
 
 /**
+ * Timing-safe string comparison to prevent timing attacks on credentials
+ */
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8')
+  const bufB = Buffer.from(b, 'utf8')
+  if (bufA.length !== bufB.length) {
+    // Compare against self to consume constant time, then return false
+    timingSafeEqual(bufA, bufA)
+    return false
+  }
+  return timingSafeEqual(bufA, bufB)
+}
+
+/**
  * Create auth verifiers for the application
  */
 function createAuthVerifiers(
@@ -488,15 +507,18 @@ function createAuthVerifiers(
       if (!authHeader) {
         throw new Error('Service authorization required')
       }
-      // Service auth validates inter-service JWT
-      const [, token] = authHeader.split(' ')
-      if (!token) {
-        throw new Error('Invalid authorization header format')
-      }
-      // In production, would verify JWT signature and extract iss/aud
-      // For now, trust service tokens (should be signed JWTs from AppViews)
+      const serviceCtx = await verifyServiceAuth(
+        authHeader,
+        serviceDid,
+        undefined,
+        idResolver,
+      )
       return {
-        credentials: { type: 'service', did: serviceDid, iss: token },
+        credentials: {
+          type: 'service',
+          did: serviceCtx.iss,
+          iss: serviceCtx.iss,
+        },
       }
     },
     optionalStandard: async (ctx) => {
@@ -562,13 +584,16 @@ function createAuthVerifiers(
         const encoded = authHeader.slice(6)
         const decoded = Buffer.from(encoded, 'base64').toString('utf8')
         const [user, pass] = decoded.split(':')
-        if (user !== 'admin' || pass !== adminPassword) {
+        if (
+          !safeEqual(user ?? '', 'admin') ||
+          !safeEqual(pass ?? '', adminPassword)
+        ) {
           throw new Error('Invalid admin credentials')
         }
       } else if (authHeader.startsWith('Bearer ')) {
         // Simple bearer token: just the password
         const token = authHeader.slice(7)
-        if (token !== adminPassword) {
+        if (!safeEqual(token, adminPassword)) {
           throw new Error('Invalid admin token')
         }
       } else {
@@ -661,6 +686,7 @@ export interface AppContext {
     boundaries: string[],
     userDidKey: string,
   ): Promise<{ sig: Uint8Array; signingKey: string }>
+  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
 }
 
 /**
@@ -730,39 +756,34 @@ export async function createAppContext(
   const originalResolve = idResolver.handle.resolve.bind(idResolver.handle)
   idResolver.handle.resolve = async (handle: string) => {
     try {
-      // 1. Try standard resolution first
       const result = await originalResolve(handle)
       if (result) return result
     } catch (err) {
       logger?.debug(
         { handle, err: err instanceof Error ? err.message : String(err) },
-        'standard handle resolution failed, trying PDS fallback',
+        'standard handle resolution failed, trying PLC fallback',
       )
     }
 
-    // 2. Fallback: Try resolving via PDS API if standard resolution fails
-    // This is useful for PDSs with dynamic handles that don't support .well-known/atproto-did on subdomains
+    // Fallback: resolve via PLC directory (trusted endpoint, no SSRF risk)
     try {
-      const domain = handle.split('.').slice(1).join('.')
-      if (domain) {
-        const pdsUrl = `https://${domain}`
-        const resolveUrl = `${pdsUrl}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
-        const resp = await fetchWithUserAgent(resolveUrl)
-        if (resp.ok) {
-          const data = (await resp.json()) as unknown as { did?: string }
-          if (data.did) {
-            logger?.info(
-              { handle, did: data.did, pdsUrl },
-              'resolved handle via PDS API fallback',
-            )
-            return data.did
-          }
+      const plcUrl = cfg.identity.plcUrl
+      const resolveUrl = `${plcUrl}/did-by-handle/${encodeURIComponent(handle)}`
+      const resp = await fetchWithUserAgent(resolveUrl)
+      if (resp.ok) {
+        const did = await resp.text()
+        if (did && did.startsWith('did:')) {
+          logger?.info(
+            { handle, did },
+            'resolved handle via PLC directory fallback',
+          )
+          return did
         }
       }
     } catch (err) {
       logger?.debug(
         { handle, err: err instanceof Error ? err.message : String(err) },
-        'PDS handle resolution fallback failed',
+        'PLC handle resolution fallback failed',
       )
     }
 
@@ -907,6 +928,7 @@ export async function createAppContext(
     app,
     logger,
     createAttestation,
+    dpopVerifier,
   }
 }
 

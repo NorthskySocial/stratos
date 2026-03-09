@@ -944,6 +944,43 @@ Recommended rate limits:
 | `getRecord`     | 1000/minute per IP  |
 | OAuth authorize | 10/minute per IP    |
 
+### CORS Configuration
+
+Stratos ships with permissive CORS (`Access-Control-Allow-Origin: *`) by default. This is safe for
+the XRPC API because DPoP binding provides request-level proof of possession — a token stolen via a
+cross-origin request cannot be replayed without the corresponding DPoP private key.
+
+However, operators **should** restrict CORS origins via their reverse proxy to only allow their
+webapp origin. This provides defense in depth and prevents cross-origin requests from untrusted
+frontends.
+
+**Required exposed headers:** `DPoP-Nonce`, `WWW-Authenticate`
+
+These headers must be included in `Access-Control-Expose-Headers` for DPoP nonce negotiation to
+work correctly from browser clients.
+
+**Example nginx configuration:**
+
+```nginx
+# Restrict CORS to your webapp origin
+location / {
+    # Remove the default permissive CORS header from upstream
+    proxy_hide_header Access-Control-Allow-Origin;
+
+    # Set restrictive CORS
+    add_header Access-Control-Allow-Origin "https://your-webapp.example.com" always;
+    add_header Access-Control-Allow-Methods "GET, POST, OPTIONS, DELETE" always;
+    add_header Access-Control-Allow-Headers "Authorization, DPoP, Content-Type" always;
+    add_header Access-Control-Expose-Headers "DPoP-Nonce, WWW-Authenticate" always;
+
+    if ($request_method = OPTIONS) {
+        return 204;
+    }
+
+    proxy_pass http://stratos:3100;
+}
+```
+
 ---
 
 ## Troubleshooting
