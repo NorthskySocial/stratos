@@ -64,7 +64,7 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       .select({ count: sql<number>`count(*)` })
       .from(pgEnrollment)
 
-    return rows[0]?.count ?? 0
+    return Number(rows[0]?.count ?? 0)
   }
 
   async getBoundaries(did: string): Promise<string[]> {

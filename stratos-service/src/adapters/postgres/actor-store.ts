@@ -56,7 +56,7 @@ export class PgActorRecordReader {
       .select({ count: countAll })
       .from(pgStratosRecord)
       .limit(1)
-    return res[0]?.count ?? 0
+    return Number(res[0]?.count ?? 0)
   }
 
   async listAll(): Promise<StratosRecordDescript[]> {
@@ -144,7 +144,7 @@ export class PgActorRecordReader {
     return res.map((row) => ({
       uri: row.uri,
       cid: row.cid,
-      value: this.cborToRecord(row.content as Uint8Array),
+      value: this.cborToRecord(new Uint8Array(row.content as ArrayBuffer)),
     }))
   }
 
@@ -183,7 +183,7 @@ export class PgActorRecordReader {
     return {
       uri: record.uri,
       cid: record.cid,
-      value: this.cborToRecord(record.content as Uint8Array),
+      value: this.cborToRecord(new Uint8Array(record.content as ArrayBuffer)),
       indexedAt: record.indexedAt,
       takedownRef: record.takedownRef ? record.takedownRef.toString() : null,
     }
@@ -436,7 +436,7 @@ export class PgActorRepoReader {
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
       .limit(1)
     if (found.length === 0) return null
-    const content = found[0].content as Uint8Array
+    const content = new Uint8Array(found[0].content as ArrayBuffer)
     this.cache.set(cid, content)
     return content
   }
@@ -464,7 +464,7 @@ export class PgActorRepoReader {
         .where(inArray(pgStratosRepoBlock.cid, batch))
       for (const row of res) {
         const cid = CID.parse(row.cid)
-        blocks.set(cid, row.content as Uint8Array)
+        blocks.set(cid, new Uint8Array(row.content as ArrayBuffer))
         missing.delete(cid)
       }
     }
@@ -481,7 +481,7 @@ export class PgActorRepoReader {
       for (const row of res) {
         yield {
           cid: CID.parse(row.cid),
-          bytes: row.content as Uint8Array,
+          bytes: new Uint8Array(row.content as ArrayBuffer),
         }
       }
       const lastRow = res.at(-1)
@@ -529,7 +529,7 @@ export class PgActorRepoReader {
     return res.map((row) => ({
       cid: row.cid,
       repoRev: row.repoRev,
-      content: row.content as Uint8Array,
+      content: new Uint8Array(row.content as ArrayBuffer),
     }))
   }
 
@@ -537,7 +537,7 @@ export class PgActorRepoReader {
     const res = await this.db
       .select({ count: countAll })
       .from(pgStratosRepoBlock)
-    return res[0]?.count ?? 0
+    return Number(res[0]?.count ?? 0)
   }
 
   async listExistingBlocks(): Promise<CidSet> {

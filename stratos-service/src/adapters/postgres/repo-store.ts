@@ -59,7 +59,8 @@ export class PgRepoStoreReader implements RepoStoreReader {
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
       .limit(1)
 
-    return rows[0]?.content ?? null
+    const content = rows[0]?.content
+    return content ? new Uint8Array(content as ArrayBuffer) : null
   }
 
   async hasBlock(cid: CID): Promise<boolean> {
@@ -95,7 +96,7 @@ export class PgRepoStoreReader implements RepoStoreReader {
         )
 
       for (const row of rows) {
-        result.set(row.cid, row.content)
+        result.set(row.cid, new Uint8Array(row.content as ArrayBuffer))
       }
     }
 
@@ -107,7 +108,7 @@ export class PgRepoStoreReader implements RepoStoreReader {
       .select({ count: sql<number>`count(*)` })
       .from(pgStratosRepoBlock)
 
-    return rows[0]?.count ?? 0
+    return Number(rows[0]?.count ?? 0)
   }
 }
 
