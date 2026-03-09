@@ -3,7 +3,7 @@
 // Rei → [swordsmith], Sakura → [swordsmith], kaoruko → [aekea]
 
 import { TEST_USERS } from './lib/config.ts'
-import { setBoundaries, getBoundaries } from './lib/db.ts'
+import { setBoundaries, getBoundaries } from './lib/backend.ts'
 import { loadState } from './lib/state.ts'
 import { section, info, pass, fail } from './lib/log.ts'
 
@@ -32,10 +32,10 @@ async function run() {
     )
 
     try {
-      setBoundaries(userState.did, userDef.boundaries)
+      await setBoundaries(userState.did, userDef.boundaries)
 
       // Verify
-      const actual = getBoundaries(userState.did)
+      const actual = await getBoundaries(userState.did)
       const expected = new Set(userDef.boundaries)
       const actualSet = new Set(actual)
 
