@@ -4,7 +4,9 @@ import { sql } from 'drizzle-orm'
 import * as schemaModule from './schema/index.js'
 
 export * from './schema/index.js'
+export * from './schema/pg-index.js'
 export * from './util.js'
+export * from './pg.js'
 
 export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
   _client: Client

@@ -146,6 +146,9 @@ importers:
       multiformats:
         specifier: ^13.4.2
         version: 13.4.2
+      postgres:
+        specifier: ^3.4.8
+        version: 3.4.8
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -282,6 +285,9 @@ importers:
       pino-http:
         specifier: ^11.0.0
         version: 11.0.0
+      postgres:
+        specifier: ^3.4.8
+        version: 3.4.8
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -3031,6 +3037,10 @@ packages:
   postcss@8.5.6:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
     engines: {node: ^10 || ^12 || >=14}
+
+  postgres@3.4.8:
+    resolution: {integrity: sha512-d+JFcLM17njZaOLkv6SCev7uoLaBtfK86vMUXhW1Z4glPWh4jozno9APvW/XKFJ3CCxVoC7OL38BqRydtu5nGg==}
+    engines: {node: '>=12'}
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
@@ -6849,6 +6859,8 @@ snapshots:
       nanoid: 3.3.11
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  postgres@3.4.8: {}
 
   prelude-ls@1.2.1: {}
 
