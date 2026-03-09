@@ -40,6 +40,8 @@ export interface OAuthRoutesConfig {
   serviceEndpoint: string
   defaultBoundaries?: string[]
   logger?: Logger
+  devMode?: boolean
+  dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
   initRepo: (did: string) => Promise<void>
   createSigningKey: (did: string) => Promise<string>
   createAttestation: (
@@ -62,10 +64,75 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     serviceEndpoint,
     defaultBoundaries = [],
     logger,
+    devMode = false,
+    dpopVerifier,
     initRepo,
     createSigningKey,
     createAttestation,
   } = config
+
+  const isSecure = config.baseUrl.startsWith('https://')
+
+  /**
+   * Authenticate a request using DPoP (production) or Bearer DID (dev mode only).
+   * Returns the authenticated DID, or null if the response was already sent.
+   */
+  async function authenticateRequest(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<string | null> {
+    const authHeader = req.headers.authorization
+    if (!authHeader) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authorization required',
+      })
+      return null
+    }
+
+    if (devMode && authHeader.startsWith('Bearer ')) {
+      const did = authHeader.slice(7).trim()
+      if (did.startsWith('did:')) {
+        return did
+      }
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid token format',
+      })
+      return null
+    }
+
+    if (!authHeader.startsWith('DPoP ')) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'DPoP authorization required',
+      })
+      return null
+    }
+
+    try {
+      const result = await dpopVerifier.verify(
+        {
+          method: req.method || 'GET',
+          url: req.url || '/',
+          headers: req.headers as Record<string, string | string[] | undefined>,
+        },
+        {
+          setHeader: (name: string, value: string) =>
+            res.setHeader(name, value),
+        },
+      )
+      return result.did
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'DPoP verification failed'
+      res.status(401).json({
+        error: 'Unauthorized',
+        message,
+      })
+      return null
+    }
+  }
 
   /**
    * Start OAuth authorization flow
@@ -84,11 +151,27 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       }
 
       if (redirectUri) {
+        try {
+          const redirectOrigin = new URL(redirectUri).origin
+          const baseOrigin = new URL(config.baseUrl).origin
+          if (redirectOrigin !== baseOrigin) {
+            return res.status(400).json({
+              error: 'InvalidRequest',
+              message: 'redirect_uri must be same-origin as the service',
+            })
+          }
+        } catch {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'Invalid redirect_uri',
+          })
+        }
+
         res.cookie('stratos_redirect', redirectUri, {
           httpOnly: true,
           sameSite: 'lax',
           maxAge: 10 * 60 * 1000,
-          secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+          secure: isSecure,
         })
       }
 
@@ -110,7 +193,6 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       res.status(500).json({
         error: 'AuthorizationError',
         message: 'Failed to start authorization flow',
-        detail: errorMsg,
       })
     }
   })
@@ -212,19 +294,13 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       }
 
       // Redirect back to the app if a redirect was stored, otherwise return JSON
-      const cookies = req.headers.cookie
-        ?.split(';')
-        .reduce<Record<string, string>>((acc, c) => {
-          const [key, ...rest] = c.trim().split('=')
-          if (key) acc[key] = decodeURIComponent(rest.join('='))
-          return acc
-        }, {})
-      const redirectTo = cookies?.stratos_redirect
+      const redirectTo = (req as express.Request & { cookies?: Record<string, string> }).cookies?.stratos_redirect
       if (redirectTo) {
         res.clearCookie('stratos_redirect')
         try {
           const url = new URL(redirectTo)
-          if (url.protocol === 'https:' || url.protocol === 'http:') {
+          const baseOrigin = new URL(config.baseUrl).origin
+          if (url.origin === baseOrigin) {
             url.searchParams.set('stratos_enrolled', 'true')
             return res.redirect(url.toString())
           }
@@ -266,36 +342,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
    */
   router.get('/status', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization
-      if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Bearer token required',
-        })
-      }
-
-      // Extract DID from bearer token (format: "Bearer did:plc:xxx")
-      const token = authHeader.slice(7) // Remove "Bearer "
-      if (!token.startsWith('did:')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid token format: expected DID',
-        })
-      }
-
-      const did = token
-
-      // Validate session exists (optional, for extra security)
-      if (oauthClient) {
-        try {
-          await oauthClient.restore(did, false)
-        } catch {
-          return res.status(401).json({
-            error: 'Unauthorized',
-            message: 'No valid session for user',
-          })
-        }
-      }
+      const did = await authenticateRequest(req, res)
+      if (!did) return
 
       // Check enrollment status
       const enrollment = await enrollmentStore.getEnrollment(did)
@@ -331,36 +379,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
    */
   router.post('/revoke', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization
-      if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Bearer token required',
-        })
-      }
-
-      // Extract DID from bearer token (format: "Bearer did:plc:xxx")
-      const token = authHeader.slice(7) // Remove "Bearer "
-      if (!token.startsWith('did:')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid token format: expected DID',
-        })
-      }
-
-      const did = token
-
-      // Validate session exists
-      if (oauthClient) {
-        try {
-          await oauthClient.restore(did, false)
-        } catch {
-          return res.status(401).json({
-            error: 'Unauthorized',
-            message: 'No valid session for user',
-          })
-        }
-      }
+      const did = await authenticateRequest(req, res)
+      if (!did) return
 
       // Check if enrolled
       const isEnrolled = await enrollmentStore.isEnrolled(did)
