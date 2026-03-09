@@ -294,7 +294,9 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       }
 
       // Redirect back to the app if a redirect was stored, otherwise return JSON
-      const redirectTo = (req as express.Request & { cookies?: Record<string, string> }).cookies?.stratos_redirect
+      const redirectTo = (
+        req as express.Request & { cookies?: Record<string, string> }
+      ).cookies?.stratos_redirect
       if (redirectTo) {
         res.clearCookie('stratos_redirect')
         try {
