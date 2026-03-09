@@ -99,7 +99,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
     return res.map((row) => ({
       uri: row.uri,
       cid: row.cid,
-      value: this.cborToRecord(new Uint8Array(row.content as ArrayBuffer)),
+      value: this.cborToRecord(row.content),
       indexedAt: new Date().toISOString(),
       takedownRef: null,
     }))
@@ -135,7 +135,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
     return {
       uri: record.uri,
       cid: record.cid,
-      value: this.cborToRecord(new Uint8Array(record.content as ArrayBuffer)),
+      value: this.cborToRecord(record.content),
       indexedAt: record.indexedAt,
       takedownRef: record.takedownRef,
     }
@@ -159,7 +159,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
       .limit(1)
 
     const content = rows[0]?.content
-    return content ? new Uint8Array(content as ArrayBuffer) : null
+    return content ? content : null
   }
 }
 
