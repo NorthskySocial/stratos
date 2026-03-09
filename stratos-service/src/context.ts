@@ -58,7 +58,7 @@ import {
   type StratosServiceConfig,
   getServiceDidWithFragment,
 } from './config.js'
-import { createOAuthClient, OAUTH_SCOPE } from './oauth/client.js'
+import { createOAuthClient, OAUTH_SCOPE, createSqliteOAuthStores, createPgOAuthStores } from './oauth/client.js'
 import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import {
   createServiceDb,
@@ -73,6 +73,14 @@ import {
   DpopVerifier,
   DpopVerificationError,
 } from './auth/index.js'
+import {
+  createServicePgDb,
+  migrateServicePgDb,
+  closeServicePgDb,
+} from './db/pg.js'
+import {
+  PgEnrollmentStoreWriter,
+} from './adapters/postgres/enrollment-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 
@@ -666,7 +674,7 @@ function createAuthVerifiers(
 export interface AppContext {
   cfg: StratosServiceConfig
   version: string
-  db: ServiceDb
+  db?: ServiceDb
   actorStore: StratosActorStore
   enrollmentStore: EnrollmentStore
   enrollmentService: EnrollmentService
@@ -687,6 +695,7 @@ export interface AppContext {
     userDidKey: string,
   ): Promise<{ sig: Uint8Array; signingKey: string }>
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
+  destroy: () => Promise<void>
 }
 
 /**
@@ -745,9 +754,34 @@ export async function createAppContext(
   const serviceDbPath = path.join(cfg.storage.dataDir, 'service.sqlite')
   await fs.mkdir(cfg.storage.dataDir, { recursive: true })
 
-  const db = createServiceDb(serviceDbPath)
+  let db: ServiceDb | undefined
+  let enrollmentStore: EnrollmentStore & EnrollmentStoreReader
+  let oauthStores: {
+    sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
+    stateStore: import('./oauth/client.js').OAuthStateStoreBackend
+  }
+  let destroyBackend: () => Promise<void>
 
-  await migrateServiceDb(db)
+  if (cfg.storage.backend === 'postgres') {
+    if (!cfg.storage.postgresUrl) {
+      throw new Error('STRATOS_POSTGRES_URL is required when backend is postgres')
+    }
+    const pgDb = createServicePgDb(cfg.storage.postgresUrl)
+    await migrateServicePgDb(pgDb)
+    enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    oauthStores = createPgOAuthStores(pgDb)
+    destroyBackend = async () => {
+      await closeServicePgDb(pgDb)
+    }
+  } else {
+    db = createServiceDb(serviceDbPath)
+    await migrateServiceDb(db)
+    enrollmentStore = new SqliteEnrollmentStore(db)
+    oauthStores = createSqliteOAuthStores(db)
+    destroyBackend = async () => {
+      await closeServiceDb(db!)
+    }
+  }
 
   const idResolver = new IdResolver({
     plcUrl: cfg.identity.plcUrl,
@@ -817,7 +851,7 @@ export async function createAppContext(
       tosUri: cfg.oauth.tosUri,
       policyUri: cfg.oauth.policyUri,
     },
-    db,
+    oauthStores,
     idResolver,
     fetchWithUserAgent,
   )
@@ -829,9 +863,7 @@ export async function createAppContext(
     logger,
   })
 
-  const enrollmentStore = new SqliteEnrollmentStore(db)
-
-  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) => {
+  const enrollmentService = new EnrollmentServiceImpl(enrollmentStore, async (did) => {
     await actorStore.create(did)
     await actorStore.transact(did, async (store) => {
       const adapter = new StratosBlockStoreReader(store.repo)
@@ -929,6 +961,7 @@ export async function createAppContext(
     logger,
     createAttestation,
     dpopVerifier,
+    destroy: destroyBackend,
   }
 }
 
@@ -936,5 +969,5 @@ export async function createAppContext(
  * Cleanup application context
  */
 export async function destroyAppContext(ctx: AppContext): Promise<void> {
-  await closeServiceDb(ctx.db)
+  await ctx.destroy()
 }
