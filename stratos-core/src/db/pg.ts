@@ -128,6 +128,13 @@ export async function migrateStratosPgDb(
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS stratos_seq_sequenced_at_idx ON stratos_seq("sequencedAt")`,
   )
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS stratos_signing_key (
+      did TEXT PRIMARY KEY,
+      key BYTEA NOT NULL
+    )
+  `)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

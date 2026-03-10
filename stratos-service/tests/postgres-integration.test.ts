@@ -360,6 +360,8 @@ describe('PostgreSQL Backend Integration', () => {
         did: testDid,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zSpikeSpiegelBebop1',
+        active: true,
       })
 
       expect(await enrollmentStore.isEnrolled(testDid)).toBe(true)
@@ -374,6 +376,8 @@ describe('PostgreSQL Backend Integration', () => {
         did: testDid,
         enrolledAt,
         pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zFayeValentineBebop1',
+        active: true,
       })
 
       const enrollment = await enrollmentStore.getEnrollment(testDid)
@@ -386,6 +390,8 @@ describe('PostgreSQL Backend Integration', () => {
       await enrollmentStore.enroll({
         did: testDid,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zJetBlackBebop1',
+        active: true,
       })
 
       await enrollmentStore.setBoundaries(testDid, ['engineering', 'design'])
@@ -408,6 +414,8 @@ describe('PostgreSQL Backend Integration', () => {
       await enrollmentStore.enroll({
         did: testDid,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zEdwardWongBebop1',
+        active: true,
       })
 
       expect(await enrollmentStore.isEnrolled(testDid)).toBe(true)
@@ -419,10 +427,14 @@ describe('PostgreSQL Backend Integration', () => {
       await enrollmentStore.enroll({
         did: testDid,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zViciousBebop1',
+        active: true,
       })
       await enrollmentStore.enroll({
         did: testDid2,
         enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zJuliaBebop1',
+        active: true,
       })
 
       const enrollments = await enrollmentStore.listEnrollments()

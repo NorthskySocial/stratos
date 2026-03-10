@@ -17,6 +17,8 @@ export const pgEnrollment = pgTable('enrollment', {
   did: text('did').primaryKey(),
   enrolledAt: text('enrolledAt').notNull(),
   pdsEndpoint: text('pdsEndpoint'),
+  signingKeyDid: text('signingKeyDid').notNull(),
+  active: text('active').notNull().default('true'),
 })
 
 export const pgEnrollmentBoundary = pgTable(

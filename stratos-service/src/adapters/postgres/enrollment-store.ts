@@ -13,12 +13,12 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
 
   async isEnrolled(did: string): Promise<boolean> {
     const rows = await this.db
-      .select({ did: pgEnrollment.did })
+      .select({ did: pgEnrollment.did, active: pgEnrollment.active })
       .from(pgEnrollment)
       .where(eq(pgEnrollment.did, did))
       .limit(1)
 
-    return rows.length > 0
+    return rows.length > 0 && rows[0].active === 'true'
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -35,6 +35,8 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }
   }
 
@@ -56,6 +58,8 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }))
   }
 
@@ -88,12 +92,16 @@ export class PgEnrollmentStoreWriter
         did: data.did,
         enrolledAt: data.enrolledAt,
         pdsEndpoint: data.pdsEndpoint ?? null,
+        signingKeyDid: data.signingKeyDid,
+        active: data.active ? 'true' : 'false',
       })
       .onConflictDoUpdate({
         target: pgEnrollment.did,
         set: {
           enrolledAt: data.enrolledAt,
           pdsEndpoint: data.pdsEndpoint ?? null,
+          signingKeyDid: data.signingKeyDid,
+          active: data.active ? 'true' : 'false',
         },
       })
 
@@ -106,7 +114,10 @@ export class PgEnrollmentStoreWriter
     await this.db
       .delete(pgEnrollmentBoundary)
       .where(eq(pgEnrollmentBoundary.did, did))
-    await this.db.delete(pgEnrollment).where(eq(pgEnrollment.did, did))
+    await this.db
+      .update(pgEnrollment)
+      .set({ active: 'false' })
+      .where(eq(pgEnrollment.did, did))
   }
 
   async updateEnrollment(
