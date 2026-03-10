@@ -7,6 +7,7 @@ import {
   pgStratosBlob,
   pgStratosRecordBlob,
   pgStratosBacklink,
+  pgStratosSigningKey,
   pgStratosSeq,
 } from './pg-tables.js'
 
@@ -17,5 +18,6 @@ export const pgSchema = {
   pgStratosBlob,
   pgStratosRecordBlob,
   pgStratosBacklink,
+  pgStratosSigningKey,
   pgStratosSeq,
 }

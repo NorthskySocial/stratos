@@ -32,7 +32,9 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     CREATE TABLE IF NOT EXISTS enrollment (
       did TEXT PRIMARY KEY,
       "enrolledAt" TEXT NOT NULL,
-      "pdsEndpoint" TEXT
+      "pdsEndpoint" TEXT,
+      "signingKeyDid" TEXT NOT NULL,
+      active TEXT NOT NULL DEFAULT 'true'
     )
   `)
 

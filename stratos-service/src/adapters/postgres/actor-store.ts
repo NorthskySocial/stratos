@@ -10,6 +10,7 @@ import {
   type StratosPgDbOrTx,
   migrateStratosPgDb,
   pgSchema as pgActorSchema,
+  pgStratosSigningKey,
   pgStratosRecord,
   pgStratosRepoBlock,
   pgStratosRepoRoot,
@@ -1071,5 +1072,66 @@ export class PostgresActorStore implements ActorStore {
 
   getBlobStore(did: string): BlobStore {
     return this.blobstore(did)
+  }
+
+  async createSigningKey(did: string): Promise<crypto.P256Keypair> {
+    const schemaName = await this.getSchemaName(did)
+    const client = postgres(this.connectionString, {
+      max: 1,
+      connection: { search_path: schemaName },
+    })
+    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
+    try {
+      const keypair = await crypto.P256Keypair.create({ exportable: true })
+      const exported = await (keypair as crypto.ExportableKeypair).export()
+      await actorDb
+        .insert(pgStratosSigningKey)
+        .values({ did, key: Buffer.from(exported) })
+        .onConflictDoUpdate({
+          target: pgStratosSigningKey.did,
+          set: { key: Buffer.from(exported) },
+        })
+      return keypair
+    } finally {
+      await client.end()
+    }
+  }
+
+  async loadSigningKey(did: string): Promise<crypto.P256Keypair | null> {
+    const schemaName = await this.getSchemaName(did)
+    const client = postgres(this.connectionString, {
+      max: 1,
+      connection: { search_path: schemaName },
+    })
+    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
+    try {
+      const rows = await actorDb
+        .select({ key: pgStratosSigningKey.key })
+        .from(pgStratosSigningKey)
+        .where(eq(pgStratosSigningKey.did, did))
+        .limit(1)
+      if (rows.length === 0) return null
+      return crypto.P256Keypair.import(new Uint8Array(rows[0].key), {
+        exportable: true,
+      })
+    } finally {
+      await client.end()
+    }
+  }
+
+  async deleteSigningKey(did: string): Promise<void> {
+    const schemaName = await this.getSchemaName(did)
+    const client = postgres(this.connectionString, {
+      max: 1,
+      connection: { search_path: schemaName },
+    })
+    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
+    try {
+      await actorDb
+        .delete(pgStratosSigningKey)
+        .where(eq(pgStratosSigningKey.did, did))
+    } finally {
+      await client.end()
+    }
   }
 }

@@ -83,6 +83,11 @@ export const pgStratosBacklink = pgTable(
   ],
 )
 
+export const pgStratosSigningKey = pgTable('stratos_signing_key', {
+  did: text('did').primaryKey(),
+  key: bytea('key').notNull(),
+})
+
 export const pgStratosSeq = pgTable(
   'stratos_seq',
   {
