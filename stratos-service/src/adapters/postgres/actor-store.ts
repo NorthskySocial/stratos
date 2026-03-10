@@ -434,7 +434,7 @@ export class PgActorRepoReader {
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
       .limit(1)
     if (found.length === 0) return null
-    const content = found[0].content
+    const content = new Uint8Array(found[0].content)
     this.cache.set(cid, content)
     return content
   }
@@ -462,7 +462,7 @@ export class PgActorRepoReader {
         .where(inArray(pgStratosRepoBlock.cid, batch))
       for (const row of res) {
         const cid = CID.parse(row.cid)
-        blocks.set(cid, row.content)
+        blocks.set(cid, new Uint8Array(row.content))
         missing.delete(cid)
       }
     }
@@ -527,7 +527,7 @@ export class PgActorRepoReader {
     return res.map((row) => ({
       cid: row.cid,
       repoRev: row.repoRev,
-      content: row.content,
+      content: new Uint8Array(row.content),
     }))
   }
 
