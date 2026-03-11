@@ -84,12 +84,15 @@
   <div class="app-layout">
     <aside class="sidebar">
       <EnrollmentIndicator {handle} {enrollment} {serviceUrl} />
-      <button class="sign-out" onclick={handleSignOut}>Sign Out</button>
     </aside>
 
     <main class="main">
       <header class="app-header">
-        <h1>Stratos</h1>
+        <div>
+          <h1>Stratos</h1>
+          <p class="session-label">{handle}</p>
+        </div>
+        <button class="sign-out" onclick={handleSignOut}>Log Out</button>
       </header>
 
       <Composer {session} {enrollment} {stratosAgent} onpost={refreshFeed} />
@@ -145,10 +148,21 @@
   .app-header {
     padding: 1rem;
     border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
   }
 
   .app-header h1 {
     margin: 0;
     font-size: 1.25rem;
+  }
+
+  .session-label {
+    margin: 0.2rem 0 0;
+    color: #666;
+    font-size: 0.85rem;
+    word-break: break-all;
   }
 </style>

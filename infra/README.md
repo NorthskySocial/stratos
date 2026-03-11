@@ -7,18 +7,18 @@ Deploys the Stratos API service and webapp on **ECS Fargate** with Application L
 ```
 Route53 (*.example.com)
   ├── stratos.example.com → ALB → ECS Fargate (Stratos API, port 3100)
-  │                                  ├── EFS volume (/app/data)  [sqlite backend]
-  │                                  └── RDS PostgreSQL          [postgres backend]
+  │                                  ├── EFS volume (/app/data)
+  │                                  └── RDS PostgreSQL
   └── app.example.com     → ALB → ECS Fargate (Webapp nginx, port 80)
 ```
 
 **Stacks:**
 
-| Stack                   | Resources                                                                                 |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `Stratos-Network-{env}` | VPC (2 AZ, NAT gateway), ECS cluster, Route53 zone lookup                                 |
-| `Stratos-Service-{env}` | Fargate service, ALB, ACM certificate, EFS or RDS (see storage backend), Route53 A record |
-| `Stratos-Webapp-{env}`  | Fargate service, ALB, ACM certificate, Route53 A record                                   |
+| Stack                   | Resources                                                         |
+| ----------------------- | ----------------------------------------------------------------- |
+| `Stratos-Network-{env}` | VPC (2 AZ, NAT gateway), ECS cluster, Route53 zone lookup         |
+| `Stratos-Service-{env}` | Fargate service, ALB, ACM certificate, EFS, RDS, Route53 A record |
+| `Stratos-Webapp-{env}`  | Fargate service, ALB, ACM certificate, Route53 A record           |
 
 ## Prerequisites
 
@@ -66,20 +66,24 @@ All configuration is via environment variables:
 
 ### Storage Backend
 
-| Variable                 | Default    | Description                                        |
-| ------------------------ | ---------- | -------------------------------------------------- |
-| `STORAGE_BACKEND`        | `postgres` | `sqlite` provisions EFS; `postgres` provisions RDS |
-| `STRATOS_PG_DB_NAME`     | `stratos`  | PostgreSQL database name                           |
-| `STRATOS_PG_STORAGE_GIB` | `20`       | Allocated RDS storage in GiB                       |
+| Variable                 | Default    | Description                                                               |
+| ------------------------ | ---------- | ------------------------------------------------------------------------- |
+| `STORAGE_BACKEND`        | `postgres` | `sqlite` mounts EFS into ECS; `postgres` injects RDS credentials into ECS |
+| `STRATOS_PG_DB_NAME`     | `stratos`  | PostgreSQL database name                                                  |
+| `STRATOS_PG_STORAGE_GIB` | `20`       | Allocated RDS storage in GiB                                              |
 
-When `storageBackend` is `postgres` (the default), the service stack creates:
+The service stack always creates:
 
+- **EFS** file system and access point for `/app/data`
 - **RDS PostgreSQL 16** instance (`db.t4g.micro`) in private subnets
 - **Secrets Manager** secret with auto-generated credentials
 - Security group allowing port 5432 only from the Fargate service
+
+When `STORAGE_BACKEND=postgres`, the ECS task is wired to use RDS by injecting these secret fields into the container:
+
 - Individual secret fields (`STRATOS_PG_HOST`, `STRATOS_PG_PORT`, `STRATOS_PG_USERNAME`, `STRATOS_PG_PASSWORD`, `STRATOS_PG_DBNAME`) injected into the container via ECS secrets
 
-When `storageBackend` is `sqlite`, the stack creates an EFS file system mounted at `/app/data`.
+When `STORAGE_BACKEND=sqlite`, the ECS task mounts the EFS file system at `/app/data`.
 All `STRATOS_*` environment variables from the Stratos service are also supported (see `docker-compose.yml` for the full list).
 
 ## Deploy

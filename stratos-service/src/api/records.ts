@@ -49,6 +49,60 @@ export interface CreateRecordOutput {
   validationStatus?: string
 }
 
+async function assertCallerCanWriteDomains(
+  ctx: AppContext,
+  callerDid: string,
+  collection: string,
+  record: unknown,
+): Promise<void> {
+  if (!collection.startsWith('zone.stratos.')) {
+    return
+  }
+
+  const requestedDomains = extractBoundaryDomains(
+    record as Record<string, unknown>,
+  )
+  if (requestedDomains.length === 0) {
+    return
+  }
+
+  const callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)
+  const missingDomains = requestedDomains.filter(
+    (domain) => !callerDomains.includes(domain),
+  )
+
+  if (missingDomains.length > 0) {
+    const availableDomains =
+      callerDomains.length > 0 ? callerDomains.join(', ') : '(none)'
+    throw new InvalidRequestError(
+      `You do not have access to boundary domain(s): ${missingDomains.join(', ')}. Your enrolled domains: ${availableDomains}`,
+      'ForbiddenBoundary',
+    )
+  }
+}
+
+async function validateWritableRecord(
+  ctx: AppContext,
+  callerDid: string,
+  collection: string,
+  record: unknown,
+): Promise<void> {
+  try {
+    assertStratosValidation(
+      record as Record<string, unknown>,
+      collection,
+      ctx.cfg.stratos,
+    )
+  } catch (err) {
+    if (err instanceof StratosValidationError) {
+      throw new InvalidRequestError(err.message, 'InvalidRecord')
+    }
+    throw err
+  }
+
+  await assertCallerCanWriteDomains(ctx, callerDid, collection, record)
+}
+
 /**
  * Create a new record in the stratos store
  */
@@ -92,19 +146,7 @@ export async function createRecord(
 
   // Validate the record if requested
   if (validate) {
-    try {
-      // Note: assertStratosValidation handles post-specific validation internally
-      assertStratosValidation(
-        record as Record<string, unknown>,
-        collection,
-        ctx.cfg.stratos,
-      )
-    } catch (err) {
-      if (err instanceof StratosValidationError) {
-        throw new InvalidRequestError(err.message, 'InvalidRecord')
-      }
-      throw err
-    }
+    await validateWritableRecord(ctx, callerDid, collection, record)
   }
 
   // Perform the write
@@ -344,18 +386,7 @@ export async function updateRecord(
   }
 
   if (validate) {
-    try {
-      assertStratosValidation(
-        record as Record<string, unknown>,
-        collection,
-        ctx.cfg.stratos,
-      )
-    } catch (err) {
-      if (err instanceof StratosValidationError) {
-        throw new InvalidRequestError(err.message, 'InvalidRecord')
-      }
-      throw err
-    }
+    await validateWritableRecord(ctx, callerDid, collection, record)
   }
 
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
@@ -664,6 +695,8 @@ export async function applyWritesBatch(
           action: 'delete',
         })
       } else {
+        await validateWritableRecord(ctx, callerDid, op.collection, op.record)
+
         const recordBytes = encodeRecord(op.record)
         const cid = await computeCid(op.record)
         const tempRev = TID.nextStr()

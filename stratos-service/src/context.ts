@@ -12,6 +12,7 @@ import {
   Server as XrpcServer,
   XRPCError,
   AuthRequiredError,
+  InvalidRequestError,
   type StreamAuthVerifier,
   type StreamAuthContext,
 } from '@atproto/xrpc-server'
@@ -87,6 +88,7 @@ import {
 } from './auth/index.js'
 import {
   createServicePgDb,
+  checkServicePgDbStartup,
   migrateServicePgDb,
   closeServicePgDb,
 } from './db/pg.js'
@@ -514,9 +516,23 @@ function createAuthVerifiers(
           credentials: { type: 'user', did: result.did },
         }
       } catch (err) {
+        if (err instanceof DpopVerificationError && err.wwwAuthenticate) {
+          ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+
+        if (
+          err instanceof DpopVerificationError &&
+          err.code === 'not_enrolled'
+        ) {
+          throw new InvalidRequestError(
+            'User is not enrolled in this Stratos service',
+            'NotEnrolled',
+          )
+        }
+
         const message =
           err instanceof Error ? err.message : 'DPoP verification failed'
-        throw new Error(message, { cause: err })
+        throw new XRPCError(401, message)
       }
     },
     service: async (ctx) => {
@@ -778,6 +794,19 @@ export async function createAppContext(
       )
     }
     const pgDb = createServicePgDb(cfg.storage.postgresUrl)
+    const pgStartup = await checkServicePgDbStartup(pgDb)
+    logger?.info(
+      {
+        database: pgStartup.currentDatabase,
+        user: pgStartup.currentUser,
+        schema: pgStartup.currentSchema,
+        searchPath: pgStartup.searchPath,
+        hasDatabaseCreate: pgStartup.hasDatabaseCreate,
+        hasSchemaUsage: pgStartup.hasSchemaUsage,
+        hasSchemaCreate: pgStartup.hasSchemaCreate,
+      },
+      'postgres service database preflight passed',
+    )
     await migrateServicePgDb(pgDb)
     enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
     oauthStores = createPgOAuthStores(pgDb)

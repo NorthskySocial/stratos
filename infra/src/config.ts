@@ -42,10 +42,10 @@ export interface StratosConfig {
     stratosUrl: string
   }
 
-  /** Storage backend: 'sqlite' uses EFS, 'postgres' uses RDS */
+  /** Runtime storage backend: both EFS and RDS are provisioned, this selects which one ECS uses */
   storageBackend?: 'sqlite' | 'postgres'
 
-  /** RDS Postgres config (required when storageBackend is 'postgres') */
+  /** RDS Postgres config */
   postgres?: {
     instanceClass?: string
     allocatedStorageGiB?: number
