@@ -146,13 +146,14 @@ async function executeMigrationStep(
   try {
     await db.execute(statement)
   } catch (error) {
-    let diagnosticSuffix = ''
-    try {
-      const diagnostics = await checkServicePgDbStartup(db)
-      diagnosticSuffix = `; startup diagnostics: ${formatStartupDiagnostics(diagnostics)}`
-    } catch (diagnosticError) {
-      diagnosticSuffix = `; startup diagnostics failed: ${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)}`
-    }
+    const diagnosticSuffix = await (async () => {
+      try {
+        const diagnostics = await checkServicePgDbStartup(db)
+        return `; startup diagnostics: ${formatStartupDiagnostics(diagnostics)}`
+      } catch (diagnosticError) {
+        return `; startup diagnostics failed: ${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)}`
+      }
+    })()
 
     const errorDetails = extractPgErrorDetails(error)
     throw new Error(
@@ -223,7 +224,6 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function closeServicePgDb(db: ServicePgDb): Promise<void> {
   await db.$client.end()
 }

@@ -520,7 +520,10 @@ function createAuthVerifiers(
           ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
         }
 
-        if (err instanceof DpopVerificationError && err.code === 'not_enrolled') {
+        if (
+          err instanceof DpopVerificationError &&
+          err.code === 'not_enrolled'
+        ) {
           throw new InvalidRequestError(
             'User is not enrolled in this Stratos service',
             'NotEnrolled',
