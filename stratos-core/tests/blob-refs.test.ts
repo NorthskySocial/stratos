@@ -251,7 +251,13 @@ describe('findBlobRefs', () => {
         images: [
           { image: { $type: 'blob', ref: { $link: 'abc' } } },
           { image: { $type: 'blob', mimeType: 'image/png' } },
-          { image: { $type: 'notblob', ref: { $link: 'abc' }, mimeType: 'image/png' } },
+          {
+            image: {
+              $type: 'notblob',
+              ref: { $link: 'abc' },
+              mimeType: 'image/png',
+            },
+          },
         ],
       },
     }

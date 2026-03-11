@@ -23,10 +23,7 @@ function isRawBlobRef(val: unknown): val is RawBlobRef {
  * Detects raw blob objects ({ $type: "blob", ref: { $link }, mimeType, size })
  * and returns them as PreparedBlobRef[].
  */
-export function findBlobRefs(
-  val: unknown,
-  layer = 0,
-): PreparedBlobRef[] {
+export function findBlobRefs(val: unknown, layer = 0): PreparedBlobRef[] {
   if (layer > 32) return []
 
   if (Array.isArray(val)) {
@@ -37,11 +34,13 @@ export function findBlobRefs(
     if (isRawBlobRef(val)) {
       try {
         const cid = CID.parse(val.ref.$link)
-        return [{
-          cid,
-          mimeType: val.mimeType,
-          constraints: {},
-        }]
+        return [
+          {
+            cid,
+            mimeType: val.mimeType,
+            constraints: {},
+          },
+        ]
       } catch {
         return []
       }
