@@ -329,10 +329,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       const errStack = err instanceof Error ? err.stack : undefined
-      logger?.error(
-        { err: errMsg, stack: errStack },
-        'OAuth callback failed',
-      )
+      logger?.error({ err: errMsg, stack: errStack }, 'OAuth callback failed')
       console.error('OAuth callback failed:', errMsg)
       if (errStack) console.error(errStack)
       res.status(500).json({

@@ -14,11 +14,11 @@ Route53 (*.example.com)
 
 **Stacks:**
 
-| Stack                   | Resources                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| `Stratos-Network-{env}` | VPC (2 AZ, NAT gateway), ECS cluster, Route53 zone lookup                                  |
-| `Stratos-Service-{env}` | Fargate service, ALB, ACM certificate, EFS or RDS (see storage backend), Route53 A record  |
-| `Stratos-Webapp-{env}`  | Fargate service, ALB, ACM certificate, Route53 A record                                    |
+| Stack                   | Resources                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `Stratos-Network-{env}` | VPC (2 AZ, NAT gateway), ECS cluster, Route53 zone lookup                                 |
+| `Stratos-Service-{env}` | Fargate service, ALB, ACM certificate, EFS or RDS (see storage backend), Route53 A record |
+| `Stratos-Webapp-{env}`  | Fargate service, ALB, ACM certificate, Route53 A record                                   |
 
 ## Prerequisites
 
@@ -63,13 +63,14 @@ All configuration is via environment variables:
 | `WEBAPP_TASK_MEMORY`     | `512`        | Webapp task memory in MiB                         |
 | `STRATOS_DESIRED_COUNT`  | `1`          | Stratos task count                                |
 | `WEBAPP_DESIRED_COUNT`   | `1`          | Webapp task count                                 |
+
 ### Storage Backend
 
-| Variable              | Default    | Description                                                  |
-| --------------------- | ---------- | ------------------------------------------------------------ |
-| `STORAGE_BACKEND` | `postgres` | `sqlite` provisions EFS; `postgres` provisions RDS           |
-| `STRATOS_PG_DB_NAME`      | `stratos`  | PostgreSQL database name                                     |
-| `STRATOS_PG_STORAGE_GIB`  | `20`       | Allocated RDS storage in GiB                                 |
+| Variable                 | Default    | Description                                        |
+| ------------------------ | ---------- | -------------------------------------------------- |
+| `STORAGE_BACKEND`        | `postgres` | `sqlite` provisions EFS; `postgres` provisions RDS |
+| `STRATOS_PG_DB_NAME`     | `stratos`  | PostgreSQL database name                           |
+| `STRATOS_PG_STORAGE_GIB` | `20`       | Allocated RDS storage in GiB                       |
 
 When `storageBackend` is `postgres` (the default), the service stack creates:
 

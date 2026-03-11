@@ -198,6 +198,8 @@ export interface ActorStore {
   ): Promise<T>
   getBlobStore(did: string): BlobStore
   createSigningKey(did: string): Promise<import('@atproto/crypto').P256Keypair>
-  loadSigningKey(did: string): Promise<import('@atproto/crypto').P256Keypair | null>
+  loadSigningKey(
+    did: string,
+  ): Promise<import('@atproto/crypto').P256Keypair | null>
   deleteSigningKey(did: string): Promise<void>
 }
