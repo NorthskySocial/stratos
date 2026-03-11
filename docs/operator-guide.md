@@ -54,7 +54,7 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 │  └──────────────┘    └──────────────────┘    └──────────────────┘  │
 │         │                     │                       │             │
 │         │ OAuth               │ Per-user              │ Indexed     │
-│         │ Authentication      │ SQLite DBs            │ Content     │
+│         │ Authentication      │ SQLite / PG           │ Content     │
 │         ▼                     ▼                       ▼             │
 │  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
 │  │   DID PLC    │    │   Blob Storage   │    │   PostgreSQL     │  │
@@ -86,7 +86,7 @@ PDS ──▶ Stratos /oauth/callback (with auth code)
 Stratos validates enrollment (DID/PDS allowlist)
          │
          ▼
-Creates enrollment record + per-user SQLite database
+Creates enrollment record + per-user database (SQLite file or PostgreSQL schema)
 ```
 
 #### 2. Record Creation
@@ -174,8 +174,9 @@ The MST is implemented using `@atcute/mst` and all blocks are stored in the per-
 
 ### Storage Architecture
 
-Each enrolled user gets an isolated SQLite database. Blobs can be stored either on the local
-filesystem or in S3-compatible storage (see [Blob Storage](#blob-storage) configuration).
+Each enrolled user gets an isolated SQLite database (default) or an isolated PostgreSQL schema
+(when using the `postgres` backend). Blobs can be stored either on the local filesystem or in
+S3-compatible storage (see [Blob Storage](#blob-storage) configuration).
 
 **With local blob storage:**
 
@@ -304,6 +305,17 @@ STRATOS_PUBLIC_URL="https://stratos.example.com"
 
 # Storage
 STRATOS_DATA_DIR="/var/lib/stratos/data"
+
+# Storage backend: 'sqlite' (per-user SQLite files) or 'postgres' (per-user PG schemas)
+STORAGE_BACKEND="sqlite"
+# For PostgreSQL backend:
+# STRATOS_POSTGRES_URL="postgres://user:pass@localhost:5432/stratos"
+# Or individual connection params (useful with AWS Secrets Manager):
+# STRATOS_PG_HOST="db.example.com"
+# STRATOS_PG_PORT="5432"
+# STRATOS_PG_USERNAME="stratos"
+# STRATOS_PG_PASSWORD="secret"
+# STRATOS_PG_DBNAME="stratos"
 
 # Blob Storage Provider: 'local' (filesystem) or 's3' (S3-compatible)
 STRATOS_BLOB_STORAGE="local"
@@ -502,12 +514,23 @@ Configuration:
 
 ```bash
 # Use SQLite (default)
-STRATOS_STORAGE_BACKEND="sqlite"
+STORAGE_BACKEND="sqlite"
 
-# Use PostgreSQL
-STRATOS_STORAGE_BACKEND="postgres"
+# Use PostgreSQL — either a full connection URL:
+STORAGE_BACKEND="postgres"
 STRATOS_POSTGRES_URL="postgres://user:pass@localhost:5432/stratos"
+
+# Or individual connection parameters (useful with AWS Secrets Manager / ECS):
+STORAGE_BACKEND="postgres"
+STRATOS_PG_HOST="db.example.com"
+STRATOS_PG_PORT="5432"
+STRATOS_PG_USERNAME="stratos"
+STRATOS_PG_PASSWORD="secret"
+STRATOS_PG_DBNAME="stratos"
 ```
+
+When both `STRATOS_POSTGRES_URL` and the individual `STRATOS_PG_*` variables are set,
+`STRATOS_POSTGRES_URL` takes precedence.
 
 With PostgreSQL, each enrolled actor gets their own schema within the database, providing data
 isolation while enabling centralized management.

@@ -6,6 +6,7 @@ import * as ecs from 'aws-cdk-lib/aws-ecs'
 import * as efs from 'aws-cdk-lib/aws-efs'
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2'
 import * as logs from 'aws-cdk-lib/aws-logs'
+import * as rds from 'aws-cdk-lib/aws-rds'
 import * as route53 from 'aws-cdk-lib/aws-route53'
 import * as route53Targets from 'aws-cdk-lib/aws-route53-targets'
 import type { Construct } from 'constructs'
@@ -35,6 +36,7 @@ export class StratosServiceStack extends cdk.Stack {
     } = props
 
     const fqdn = `${config.stratosSubdomain}.${config.domainName}`
+    const storageBackend = config.storageBackend ?? 'postgres'
 
     // ACM certificate with DNS validation
     const certificate = new acm.Certificate(this, 'Certificate', {
@@ -42,21 +44,75 @@ export class StratosServiceStack extends cdk.Stack {
       validation: acm.CertificateValidation.fromDns(hostedZone),
     })
 
-    // EFS for persistent Stratos data (SQLite databases, blobs)
-    const fileSystem = new efs.FileSystem(this, 'DataVolume', {
+    // Security group for the service (declared early so both backends can reference it)
+    const serviceSg = new ec2.SecurityGroup(this, 'ServiceSg', {
       vpc,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      encrypted: true,
-      performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
-      throughputMode: efs.ThroughputMode.BURSTING,
-      lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
+      description: 'Stratos Fargate service',
+      allowAllOutbound: true,
     })
 
-    const accessPoint = fileSystem.addAccessPoint('DataAccessPoint', {
-      path: '/stratos-data',
-      createAcl: { ownerGid: '1000', ownerUid: '1000', permissions: '755' },
-      posixUser: { gid: '1000', uid: '1000' },
-    })
+    // --- Storage backend: EFS (SQLite) or RDS (Postgres) ---
+    let fileSystem: efs.FileSystem | undefined
+    let accessPoint: efs.AccessPoint | undefined
+    let dbInstance: rds.DatabaseInstance | undefined
+
+    if (storageBackend === 'sqlite') {
+      fileSystem = new efs.FileSystem(this, 'DataVolume', {
+        vpc,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+        encrypted: true,
+        performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
+        throughputMode: efs.ThroughputMode.BURSTING,
+        lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
+      })
+
+      accessPoint = fileSystem.addAccessPoint('DataAccessPoint', {
+        path: '/stratos-data',
+        createAcl: { ownerGid: '1000', ownerUid: '1000', permissions: '755' },
+        posixUser: { gid: '1000', uid: '1000' },
+      })
+
+      fileSystem.connections.allowDefaultPortFrom(
+        serviceSg,
+        'Allow EFS from Stratos tasks',
+      )
+    } else {
+      const dbName = config.postgres?.databaseName ?? 'stratos'
+
+      const dbSg = new ec2.SecurityGroup(this, 'DbSg', {
+        vpc,
+        description: 'Stratos RDS Postgres',
+        allowAllOutbound: false,
+      })
+      dbSg.addIngressRule(
+        serviceSg,
+        ec2.Port.tcp(5432),
+        'Allow Postgres from Stratos tasks',
+      )
+
+      dbInstance = new rds.DatabaseInstance(this, 'Postgres', {
+        engine: rds.DatabaseInstanceEngine.postgres({
+          version: rds.PostgresEngineVersion.VER_16,
+        }),
+        instanceType: ec2.InstanceType.of(
+          ec2.InstanceClass.T4G,
+          ec2.InstanceSize.MICRO,
+        ),
+        vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [dbSg],
+        databaseName: dbName,
+        credentials: rds.Credentials.fromGeneratedSecret('stratos', {
+          secretName: `stratos-${config.environment}-db-credentials`,
+        }),
+        allocatedStorage: config.postgres?.allocatedStorageGiB ?? 20,
+        storageEncrypted: true,
+        multiAz: false,
+        autoMinorVersionUpgrade: true,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+        deletionProtection: true,
+      })
+    }
 
     // Task definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDef', {
@@ -68,17 +124,19 @@ export class StratosServiceStack extends cdk.Stack {
       },
     })
 
-    taskDefinition.addVolume({
-      name: 'stratos-data',
-      efsVolumeConfiguration: {
-        fileSystemId: fileSystem.fileSystemId,
-        transitEncryption: 'ENABLED',
-        authorizationConfig: {
-          accessPointId: accessPoint.accessPointId,
-          iam: 'ENABLED',
+    if (storageBackend === 'sqlite' && fileSystem && accessPoint) {
+      taskDefinition.addVolume({
+        name: 'stratos-data',
+        efsVolumeConfiguration: {
+          fileSystemId: fileSystem.fileSystemId,
+          transitEncryption: 'ENABLED',
+          authorizationConfig: {
+            accessPointId: accessPoint.accessPointId,
+            iam: 'ENABLED',
+          },
         },
-      },
-    })
+      })
+    }
 
     const stratosEnv: Record<string, string> = {
       STRATOS_SERVICE_DID: config.stratos.serviceDid,
@@ -115,6 +173,8 @@ export class StratosServiceStack extends cdk.Stack {
       if (value) stratosEnv[key] = value
     }
 
+    stratosEnv['STORAGE_BACKEND'] = storageBackend
+
     const container = taskDefinition.addContainer('stratos', {
       image: ecs.ContainerImage.fromEcrRepository(repository, imageTag),
       environment: stratosEnv,
@@ -146,23 +206,40 @@ export class StratosServiceStack extends cdk.Stack {
       },
     })
 
-    container.addMountPoints({
-      sourceVolume: 'stratos-data',
-      containerPath: '/app/data',
-      readOnly: false,
-    })
+    if (storageBackend === 'sqlite') {
+      container.addMountPoints({
+        sourceVolume: 'stratos-data',
+        containerPath: '/app/data',
+        readOnly: false,
+      })
+    }
 
-    // Security group for the service
-    const serviceSg = new ec2.SecurityGroup(this, 'ServiceSg', {
-      vpc,
-      description: 'Stratos Fargate service',
-      allowAllOutbound: true,
-    })
+    // Grant the task access to the RDS secret so it can build the connection URL
+    if (storageBackend === 'postgres' && dbInstance?.secret) {
+      dbInstance.secret.grantRead(taskDefinition.taskRole)
 
-    fileSystem.connections.allowDefaultPortFrom(
-      serviceSg,
-      'Allow EFS from Stratos tasks',
-    )
+      const dbSecret = dbInstance.secret
+      container.addSecret(
+        'STRATOS_PG_HOST',
+        ecs.Secret.fromSecretsManager(dbSecret, 'host'),
+      )
+      container.addSecret(
+        'STRATOS_PG_PORT',
+        ecs.Secret.fromSecretsManager(dbSecret, 'port'),
+      )
+      container.addSecret(
+        'STRATOS_PG_USERNAME',
+        ecs.Secret.fromSecretsManager(dbSecret, 'username'),
+      )
+      container.addSecret(
+        'STRATOS_PG_PASSWORD',
+        ecs.Secret.fromSecretsManager(dbSecret, 'password'),
+      )
+      container.addSecret(
+        'STRATOS_PG_DBNAME',
+        ecs.Secret.fromSecretsManager(dbSecret, 'dbname'),
+      )
+    }
 
     // Fargate service
     const service = new ecs.FargateService(this, 'Service', {
@@ -176,8 +253,9 @@ export class StratosServiceStack extends cdk.Stack {
       circuitBreaker: { enable: true, rollback: true },
     })
 
-    // Allow task role to use EFS
-    fileSystem.grantReadWrite(taskDefinition.taskRole)
+    if (storageBackend === 'sqlite' && fileSystem) {
+      fileSystem.grantReadWrite(taskDefinition.taskRole)
+    }
 
     // ALB
     const alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
@@ -229,5 +307,11 @@ export class StratosServiceStack extends cdk.Stack {
     // Outputs
     new cdk.CfnOutput(this, 'StratosUrl', { value: `https://${fqdn}` })
     new cdk.CfnOutput(this, 'AlbDns', { value: alb.loadBalancerDnsName })
+    new cdk.CfnOutput(this, 'StorageBackend', { value: storageBackend })
+    if (dbInstance) {
+      new cdk.CfnOutput(this, 'DbEndpoint', {
+        value: dbInstance.dbInstanceEndpointAddress,
+      })
+    }
   }
 }

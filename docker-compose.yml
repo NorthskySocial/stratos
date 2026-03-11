@@ -16,6 +16,18 @@ services:
       # Service fragment for DID document
       STRATOS_SERVICE_FRAGMENT: ${STRATOS_SERVICE_FRAGMENT:-atproto_pns}
 
+      # Storage backend: "sqlite" (default) or "postgres"
+      # To use postgres, change to "postgres" and either set STRATOS_POSTGRES_URL
+      # or the individual STRATOS_PG_* vars below, then uncomment the postgres service.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-sqlite}
+      # STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
+      # Or use individual connection params (e.g. from AWS Secrets Manager):
+      # STRATOS_PG_HOST: postgres
+      # STRATOS_PG_PORT: 5432
+      # STRATOS_PG_USERNAME: stratos
+      # STRATOS_PG_PASSWORD: stratos
+      # STRATOS_PG_DBNAME: stratos
+
       # Storage
       STRATOS_DATA_DIR: /app/data
       STRATOS_BLOB_STORAGE: ${STRATOS_BLOB_STORAGE:-local}
@@ -72,6 +84,25 @@ services:
       retries: 3
       start_period: 10s
 
+  # Uncomment to use PostgreSQL instead of SQLite.
+  # Also set STORAGE_BACKEND=postgres and configure STRATOS_POSTGRES_URL
+  # or STRATOS_PG_* vars above.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: stratos
+  #     POSTGRES_PASSWORD: stratos
+  #     POSTGRES_DB: stratos
+  #   ports:
+  #     - '5432:5432'
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ['CMD-SHELL', 'pg_isready -U stratos']
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+
   # Uncomment to use with S3-compatible storage (e.g., MinIO)
   # minio:
   #   image: minio/minio:latest
@@ -93,4 +124,5 @@ services:
 
 volumes:
   stratos-data:
+  # pgdata:
   # minio-data:

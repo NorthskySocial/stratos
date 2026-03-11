@@ -8,6 +8,8 @@ import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
 import { eq } from 'drizzle-orm'
 import { oauthSession, oauthState, type ServiceDb } from '../db/index.js'
+import { pgOauthSession, pgOauthState } from '../db/pg-schema.js'
+import type { ServicePgDb } from '../db/pg.js'
 
 /**
  * Granular OAuth scopes for PDS access.
@@ -41,9 +43,27 @@ export interface OAuthSessionDb {
 }
 
 /**
+ * Common interface for OAuth session persistence
+ */
+export interface OAuthSessionStoreBackend {
+  get(key: string): Promise<NodeSavedSession | undefined>
+  set(key: string, session: NodeSavedSession): Promise<void>
+  del(key: string): Promise<void>
+}
+
+/**
+ * Common interface for OAuth state persistence
+ */
+export interface OAuthStateStoreBackend {
+  get(key: string): Promise<string | undefined>
+  set(key: string, state: string): Promise<void>
+  del(key: string): Promise<void>
+}
+
+/**
  * SQLite session store for OAuth client
  */
-export class SqliteSessionStore {
+export class SqliteSessionStore implements OAuthSessionStoreBackend {
   constructor(private db: ServiceDb) {}
 
   async get(key: string): Promise<NodeSavedSession | undefined> {
@@ -87,7 +107,7 @@ export class SqliteSessionStore {
 /**
  * SQLite state store for OAuth authorization flow
  */
-export class SqliteStateStore {
+export class SqliteStateStore implements OAuthStateStoreBackend {
   constructor(private db: ServiceDb) {}
 
   async get(key: string): Promise<string | undefined> {
@@ -137,16 +157,122 @@ export interface OAuthClientConfig {
 }
 
 /**
+ * PostgreSQL session store for OAuth client
+ */
+export class PgSessionStore implements OAuthSessionStoreBackend {
+  constructor(private db: ServicePgDb) {}
+
+  async get(key: string): Promise<NodeSavedSession | undefined> {
+    const rows = await this.db
+      .select()
+      .from(pgOauthSession)
+      .where(eq(pgOauthSession.key, key))
+      .limit(1)
+
+    const row = rows[0]
+    if (!row) return undefined
+    return JSON.parse(row.session) as NodeSavedSession
+  }
+
+  async set(key: string, session: NodeSavedSession): Promise<void> {
+    const now = new Date().toISOString()
+    const sessionStr = JSON.stringify(session)
+
+    await this.db
+      .insert(pgOauthSession)
+      .values({
+        key,
+        session: sessionStr,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: pgOauthSession.key,
+        set: {
+          session: sessionStr,
+          updatedAt: now,
+        },
+      })
+  }
+
+  async del(key: string): Promise<void> {
+    await this.db.delete(pgOauthSession).where(eq(pgOauthSession.key, key))
+  }
+}
+
+/**
+ * PostgreSQL state store for OAuth authorization flow
+ */
+export class PgStateStore implements OAuthStateStoreBackend {
+  constructor(private db: ServicePgDb) {}
+
+  async get(key: string): Promise<string | undefined> {
+    const rows = await this.db
+      .select()
+      .from(pgOauthState)
+      .where(eq(pgOauthState.key, key))
+      .limit(1)
+
+    return rows[0]?.state
+  }
+
+  async set(key: string, state: string): Promise<void> {
+    const now = new Date().toISOString()
+
+    await this.db
+      .insert(pgOauthState)
+      .values({
+        key,
+        state,
+        createdAt: now,
+      })
+      .onConflictDoUpdate({
+        target: pgOauthState.key,
+        set: { state },
+      })
+  }
+
+  async del(key: string): Promise<void> {
+    await this.db.delete(pgOauthState).where(eq(pgOauthState.key, key))
+  }
+}
+
+/**
+ * Create OAuth stores for the given backend
+ */
+export function createSqliteOAuthStores(db: ServiceDb): {
+  sessionStore: OAuthSessionStoreBackend
+  stateStore: OAuthStateStoreBackend
+} {
+  return {
+    sessionStore: new SqliteSessionStore(db),
+    stateStore: new SqliteStateStore(db),
+  }
+}
+
+export function createPgOAuthStores(db: ServicePgDb): {
+  sessionStore: OAuthSessionStoreBackend
+  stateStore: OAuthStateStoreBackend
+} {
+  return {
+    sessionStore: new PgSessionStore(db),
+    stateStore: new PgStateStore(db),
+  }
+}
+
+/**
  * Create an OAuth client for Stratos service
  */
 export async function createOAuthClient(
   config: OAuthClientConfig,
-  db: ServiceDb,
+  stores: {
+    sessionStore: OAuthSessionStoreBackend
+    stateStore: OAuthStateStoreBackend
+  },
   idResolver: IdResolver,
   fetch: typeof globalThis.fetch,
 ): Promise<NodeOAuthClient> {
-  const sessionStore = new SqliteSessionStore(db)
-  const stateStore = new SqliteStateStore(db)
+  const { sessionStore, stateStore } = stores
 
   // Create the client key if provided
   let clientKey: JoseKey | undefined = undefined

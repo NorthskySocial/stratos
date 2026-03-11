@@ -13,8 +13,13 @@ const envSchema = z.object({
 
   // Storage
   STRATOS_DATA_DIR: z.string().default('./data'),
-  STRATOS_STORAGE_BACKEND: z.enum(['sqlite', 'postgres']).default('sqlite'),
+  STORAGE_BACKEND: z.enum(['sqlite', 'postgres']).default('sqlite'),
   STRATOS_POSTGRES_URL: z.string().optional(),
+  STRATOS_PG_HOST: z.string().optional(),
+  STRATOS_PG_PORT: z.coerce.number().int().positive().optional(),
+  STRATOS_PG_USERNAME: z.string().optional(),
+  STRATOS_PG_PASSWORD: z.string().optional(),
+  STRATOS_PG_DBNAME: z.string().optional(),
   STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
   // S3 storage (optional)
@@ -246,6 +251,24 @@ function buildBlobstoreConfig(env: Env): BlobstoreConfig {
   }
 }
 
+function buildPostgresUrl(env: Env): string | undefined {
+  const {
+    STRATOS_PG_HOST,
+    STRATOS_PG_PORT,
+    STRATOS_PG_USERNAME,
+    STRATOS_PG_PASSWORD,
+    STRATOS_PG_DBNAME,
+  } = env
+  if (!STRATOS_PG_HOST) return undefined
+  const user = encodeURIComponent(STRATOS_PG_USERNAME ?? 'stratos')
+  const pass = STRATOS_PG_PASSWORD
+    ? `:${encodeURIComponent(STRATOS_PG_PASSWORD)}`
+    : ''
+  const port = STRATOS_PG_PORT ?? 5432
+  const dbname = STRATOS_PG_DBNAME ?? 'stratos'
+  return `postgres://${user}${pass}@${STRATOS_PG_HOST}:${port}/${dbname}`
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   return {
     service: {
@@ -256,9 +279,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
       repoUrl: env.STRATOS_REPO_URL,
     },
     storage: {
-      backend: env.STRATOS_STORAGE_BACKEND,
+      backend: env.STORAGE_BACKEND,
       dataDir: env.STRATOS_DATA_DIR,
-      postgresUrl: env.STRATOS_POSTGRES_URL,
+      postgresUrl: env.STRATOS_POSTGRES_URL ?? buildPostgresUrl(env),
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {

@@ -54,6 +54,7 @@
     "multiformats": "^13.4.2",
     "pino": "^10.3.0",
     "pino-http": "^11.0.0",
+    "postgres": "^3.4.8",
     "tsx": "^4.21.0",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
@@ -61,6 +62,7 @@
   "devDependencies": {
     "@atproto/lex-cli": "^0.9.8",
     "@eslint/js": "^10.0.1",
+    "@testcontainers/postgresql": "^11.12.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -69,6 +71,7 @@
     "eslint": "^10.0.0",
     "fast-check": "^4.5.0",
     "globals": "^17.3.0",
+    "testcontainers": "^11.12.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.54.0",

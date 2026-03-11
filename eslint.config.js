@@ -1,10 +1,9 @@
 import js from '@eslint/js'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
-import { defineConfig } from 'eslint/config'
 import prettierConfig from 'eslint-config-prettier'
 
-export default defineConfig([
+export default tseslint.config(
   {
     ignores: [
       'dist/',
@@ -14,12 +13,12 @@ export default defineConfig([
       '**/node_modules/',
       'stratos-core/',
       'stratos-service/',
+      'stratos-client/',
     ],
   },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
   {
-    files: ['**/*.{js,mjs,cjs,ts,mts,cts}'],
-    plugins: { js },
-    extends: [js.configs.recommended],
     languageOptions: {
       globals: {
         ...globals.browser,
@@ -28,7 +27,6 @@ export default defineConfig([
       },
     },
   },
-  ...tseslint.configs.recommended,
   {
     files: ['test/scripts/**/*.ts'],
     languageOptions: {
@@ -38,4 +36,4 @@ export default defineConfig([
     },
   },
   prettierConfig,
-])
+)

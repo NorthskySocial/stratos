@@ -327,13 +327,14 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         )
       }
     } catch (err) {
-      logger?.error(
-        { err: err instanceof Error ? err.message : String(err) },
-        'OAuth callback failed',
-      )
+      const errMsg = err instanceof Error ? err.message : String(err)
+      const errStack = err instanceof Error ? err.stack : undefined
+      logger?.error({ err: errMsg, stack: errStack }, 'OAuth callback failed')
+      console.error('OAuth callback failed:', errMsg)
+      if (errStack) console.error(errStack)
       res.status(500).json({
         error: 'CallbackError',
-        message: 'Failed to complete authorization',
+        message: devMode ? errMsg : 'Failed to complete authorization',
       })
     }
   })

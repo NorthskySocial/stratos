@@ -7,7 +7,8 @@
 // SQLite adapters
 export * from './sqlite/index.js'
 
-// PostgreSQL adapters (to be implemented)
+// PostgreSQL adapters
+export * from './postgres/index.js'
 // export * from './postgres/index.js'
 
 // Re-export storage interfaces from stratos-core

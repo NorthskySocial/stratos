@@ -1,4 +1,3 @@
-import { eq } from 'drizzle-orm'
 import type { IdResolver, DidDocument } from '@atproto/identity'
 import type {
   EnrollmentService,
@@ -16,22 +15,14 @@ import {
   validateEnrollmentEligibility,
   NotEnrolledError,
 } from '@northskysocial/stratos-core'
-import type { ServiceDb } from '../../db/index.js'
-import { enrollment } from '../../db/index.js'
-
-/**
- * Enrollment store for persistence
- */
-export interface EnrollmentStore {
-  db: ServiceDb
-}
+import type { EnrollmentStore } from '../../oauth/routes.js'
 
 /**
  * Implementation of EnrollmentService port
  */
 export class EnrollmentServiceImpl implements EnrollmentService {
   constructor(
-    private store: EnrollmentStore,
+    private enrollmentStore: EnrollmentStore,
     private actorStoreCreator: (did: string) => Promise<void>,
     private logger?: Logger,
   ) {}
@@ -46,12 +37,12 @@ export class EnrollmentServiceImpl implements EnrollmentService {
 
     await this.actorStoreCreator(did)
 
-    await this.store.db.insert(enrollment).values({
+    await this.enrollmentStore.enroll({
       did,
       enrolledAt: now.toISOString(),
-      pdsEndpoint: null,
+      pdsEndpoint: undefined,
       signingKeyDid,
-      active: 'true',
+      active: true,
     })
 
     this.logger?.info(
@@ -70,43 +61,25 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   }
 
   async isEnrolled(did: string): Promise<boolean> {
-    const result = await this.store.db
-      .select({ did: enrollment.did, active: enrollment.active })
-      .from(enrollment)
-      .where(eq(enrollment.did, did))
-      .limit(1)
-
-    return result.length > 0 && result[0].active === 'true'
+    return this.enrollmentStore.isEnrolled(did)
   }
 
   async getEnrollment(did: string): Promise<Enrollment | null> {
-    const result = await this.store.db
-      .select()
-      .from(enrollment)
-      .where(eq(enrollment.did, did))
-      .limit(1)
+    const record = await this.enrollmentStore.getEnrollment(did)
+    if (!record) return null
 
-    if (result.length === 0) {
-      return null
-    }
-
-    const record = result[0]
     return {
       did: record.did,
       boundaries: [],
       enrolledAt: new Date(record.enrolledAt),
       pdsEndpoint: record.pdsEndpoint ?? '',
       signingKeyDid: record.signingKeyDid,
-      active: record.active === 'true',
+      active: record.active,
     }
   }
 
   async unenroll(did: string): Promise<void> {
-    await this.store.db
-      .update(enrollment)
-      .set({ active: 'false' })
-      .where(eq(enrollment.did, did))
-
+    await this.enrollmentStore.unenroll(did)
     this.logger?.info({ did }, 'user unenrolled')
   }
 }

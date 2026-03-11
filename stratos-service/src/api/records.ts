@@ -12,12 +12,12 @@ import {
   assertStratosValidation,
   buildCommit,
   extractBoundaryDomains,
-  stratosSeq,
   StratosValidationError,
   type MstWriteOp,
 } from '@northskysocial/stratos-core'
 
-import type { AppContext, StratosActorTransactor } from '../context.js'
+import type { AppContext } from '../context.js'
+import type { ActorTransactor } from '../actor-store-types.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
@@ -758,7 +758,7 @@ async function computeCid(record: unknown): Promise<CID> {
 }
 
 async function sequenceChange(
-  store: StratosActorTransactor,
+  store: ActorTransactor,
   op: {
     action: 'create' | 'update' | 'delete'
     uri: string
@@ -778,7 +778,7 @@ async function sequenceChange(
     rev: op.rev,
   }
 
-  await store.db.insert(stratosSeq).values({
+  await store.sequence.appendEvent({
     did: store.did,
     eventType: 'append',
     event: Buffer.from(cborEncode(event)),

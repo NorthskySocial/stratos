@@ -3,7 +3,7 @@ import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Keypair } from '@atproto/crypto'
-import type { StratosSqlRepoTransactor } from '@northskysocial/stratos-core'
+import type { ActorRepoTransactor } from '../../actor-store-types.js'
 import { type UnsignedCommitData } from '@northskysocial/stratos-core'
 
 export interface SignedCommitResult {
@@ -13,7 +13,7 @@ export interface SignedCommitResult {
 }
 
 export async function signAndPersistCommit(
-  repoTransactor: StratosSqlRepoTransactor,
+  repoTransactor: ActorRepoTransactor,
   signingKey: Keypair,
   unsigned: UnsignedCommitData,
 ): Promise<SignedCommitResult> {
