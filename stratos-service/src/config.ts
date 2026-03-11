@@ -252,10 +252,18 @@ function buildBlobstoreConfig(env: Env): BlobstoreConfig {
 }
 
 function buildPostgresUrl(env: Env): string | undefined {
-  const { STRATOS_PG_HOST, STRATOS_PG_PORT, STRATOS_PG_USERNAME, STRATOS_PG_PASSWORD, STRATOS_PG_DBNAME } = env
+  const {
+    STRATOS_PG_HOST,
+    STRATOS_PG_PORT,
+    STRATOS_PG_USERNAME,
+    STRATOS_PG_PASSWORD,
+    STRATOS_PG_DBNAME,
+  } = env
   if (!STRATOS_PG_HOST) return undefined
   const user = encodeURIComponent(STRATOS_PG_USERNAME ?? 'stratos')
-  const pass = STRATOS_PG_PASSWORD ? `:${encodeURIComponent(STRATOS_PG_PASSWORD)}` : ''
+  const pass = STRATOS_PG_PASSWORD
+    ? `:${encodeURIComponent(STRATOS_PG_PASSWORD)}`
+    : ''
   const port = STRATOS_PG_PORT ?? 5432
   const dbname = STRATOS_PG_DBNAME ?? 'stratos'
   return `postgres://${user}${pass}@${STRATOS_PG_HOST}:${port}/${dbname}`

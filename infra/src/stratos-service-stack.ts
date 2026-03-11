@@ -219,11 +219,26 @@ export class StratosServiceStack extends cdk.Stack {
       dbInstance.secret.grantRead(taskDefinition.taskRole)
 
       const dbSecret = dbInstance.secret
-      container.addSecret('STRATOS_PG_HOST', ecs.Secret.fromSecretsManager(dbSecret, 'host'))
-      container.addSecret('STRATOS_PG_PORT', ecs.Secret.fromSecretsManager(dbSecret, 'port'))
-      container.addSecret('STRATOS_PG_USERNAME', ecs.Secret.fromSecretsManager(dbSecret, 'username'))
-      container.addSecret('STRATOS_PG_PASSWORD', ecs.Secret.fromSecretsManager(dbSecret, 'password'))
-      container.addSecret('STRATOS_PG_DBNAME', ecs.Secret.fromSecretsManager(dbSecret, 'dbname'))
+      container.addSecret(
+        'STRATOS_PG_HOST',
+        ecs.Secret.fromSecretsManager(dbSecret, 'host'),
+      )
+      container.addSecret(
+        'STRATOS_PG_PORT',
+        ecs.Secret.fromSecretsManager(dbSecret, 'port'),
+      )
+      container.addSecret(
+        'STRATOS_PG_USERNAME',
+        ecs.Secret.fromSecretsManager(dbSecret, 'username'),
+      )
+      container.addSecret(
+        'STRATOS_PG_PASSWORD',
+        ecs.Secret.fromSecretsManager(dbSecret, 'password'),
+      )
+      container.addSecret(
+        'STRATOS_PG_DBNAME',
+        ecs.Secret.fromSecretsManager(dbSecret, 'dbname'),
+      )
     }
 
     // Fargate service
