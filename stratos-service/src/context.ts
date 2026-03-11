@@ -12,6 +12,7 @@ import {
   Server as XrpcServer,
   XRPCError,
   AuthRequiredError,
+  InvalidRequestError,
   type StreamAuthVerifier,
   type StreamAuthContext,
 } from '@atproto/xrpc-server'
@@ -515,9 +516,20 @@ function createAuthVerifiers(
           credentials: { type: 'user', did: result.did },
         }
       } catch (err) {
+        if (err instanceof DpopVerificationError && err.wwwAuthenticate) {
+          ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+
+        if (err instanceof DpopVerificationError && err.code === 'not_enrolled') {
+          throw new InvalidRequestError(
+            'User is not enrolled in this Stratos service',
+            'NotEnrolled',
+          )
+        }
+
         const message =
           err instanceof Error ? err.message : 'DPoP verification failed'
-        throw new Error(message, { cause: err })
+        throw new XRPCError(401, message)
       }
     },
     service: async (ctx) => {

@@ -20,6 +20,9 @@ const envSchema = z.object({
   STRATOS_PG_USERNAME: z.string().optional(),
   STRATOS_PG_PASSWORD: z.string().optional(),
   STRATOS_PG_DBNAME: z.string().optional(),
+  STRATOS_PG_SSLMODE: z
+    .enum(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])
+    .optional(),
   STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
   // S3 storage (optional)
@@ -258,6 +261,7 @@ function buildPostgresUrl(env: Env): string | undefined {
     STRATOS_PG_USERNAME,
     STRATOS_PG_PASSWORD,
     STRATOS_PG_DBNAME,
+    STRATOS_PG_SSLMODE,
   } = env
   if (!STRATOS_PG_HOST) return undefined
   const user = encodeURIComponent(STRATOS_PG_USERNAME ?? 'stratos')
@@ -266,7 +270,11 @@ function buildPostgresUrl(env: Env): string | undefined {
     : ''
   const port = STRATOS_PG_PORT ?? 5432
   const dbname = STRATOS_PG_DBNAME ?? 'stratos'
-  return `postgres://${user}${pass}@${STRATOS_PG_HOST}:${port}/${dbname}`
+  const url = new URL(
+    `postgres://${user}${pass}@${STRATOS_PG_HOST}:${port}/${dbname}`,
+  )
+  url.searchParams.set('sslmode', STRATOS_PG_SSLMODE ?? 'require')
+  return url.toString()
 }
 
 export function envToConfig(env: Env): StratosServiceConfig {
