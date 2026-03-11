@@ -87,6 +87,7 @@ import {
 } from './auth/index.js'
 import {
   createServicePgDb,
+  checkServicePgDbStartup,
   migrateServicePgDb,
   closeServicePgDb,
 } from './db/pg.js'
@@ -778,6 +779,19 @@ export async function createAppContext(
       )
     }
     const pgDb = createServicePgDb(cfg.storage.postgresUrl)
+    const pgStartup = await checkServicePgDbStartup(pgDb)
+    logger?.info(
+      {
+        database: pgStartup.currentDatabase,
+        user: pgStartup.currentUser,
+        schema: pgStartup.currentSchema,
+        searchPath: pgStartup.searchPath,
+        hasDatabaseCreate: pgStartup.hasDatabaseCreate,
+        hasSchemaUsage: pgStartup.hasSchemaUsage,
+        hasSchemaCreate: pgStartup.hasSchemaCreate,
+      },
+      'postgres service database preflight passed',
+    )
     await migrateServicePgDb(pgDb)
     enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
     oauthStores = createPgOAuthStores(pgDb)
