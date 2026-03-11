@@ -25,7 +25,7 @@ services:
 
   stratos:
     environment:
-      STRATOS_STORAGE_BACKEND: postgres
+      STORAGE_BACKEND: postgres
       STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
     depends_on:
       postgres:
