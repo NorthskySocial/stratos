@@ -44,6 +44,14 @@ STRATOS_POSTGRES_URL=postgres://stratos:stratos@localhost:5432/stratos \
   pnpm exec vitest run tests/postgres-integration.test.ts
 ```
 
+Or use individual connection parameters instead of a URL:
+
+```bash
+STRATOS_PG_HOST=localhost STRATOS_PG_PORT=5432 \
+  STRATOS_PG_USERNAME=stratos STRATOS_PG_PASSWORD=stratos STRATOS_PG_DBNAME=stratos \
+  pnpm exec vitest run tests/postgres-integration.test.ts
+```
+
 Or run the full suite with PG tests included:
 
 ```bash

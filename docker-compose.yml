@@ -17,10 +17,16 @@ services:
       STRATOS_SERVICE_FRAGMENT: ${STRATOS_SERVICE_FRAGMENT:-atproto_pns}
 
       # Storage backend: "sqlite" (default) or "postgres"
-      # To use postgres, change to "postgres", set STRATOS_DB_POSTGRES_URL below,
-      # and uncomment the postgres service at the bottom of this file.
-      STRATOS_DB_BACKEND: ${STRATOS_DB_BACKEND:-sqlite}
-      # STRATOS_DB_POSTGRES_URL: postgresql://stratos:stratos@postgres:5432/stratos
+      # To use postgres, change to "postgres" and either set STRATOS_POSTGRES_URL
+      # or the individual STRATOS_PG_* vars below, then uncomment the postgres service.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-sqlite}
+      # STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
+      # Or use individual connection params (e.g. from AWS Secrets Manager):
+      # STRATOS_PG_HOST: postgres
+      # STRATOS_PG_PORT: 5432
+      # STRATOS_PG_USERNAME: stratos
+      # STRATOS_PG_PASSWORD: stratos
+      # STRATOS_PG_DBNAME: stratos
 
       # Storage
       STRATOS_DATA_DIR: /app/data
@@ -79,7 +85,8 @@ services:
       start_period: 10s
 
   # Uncomment to use PostgreSQL instead of SQLite.
-  # Also set STRATOS_DB_BACKEND=postgres and uncomment STRATOS_DB_POSTGRES_URL above.
+  # Also set STORAGE_BACKEND=postgres and configure STRATOS_POSTGRES_URL
+  # or STRATOS_PG_* vars above.
   # postgres:
   #   image: postgres:16-alpine
   #   environment:

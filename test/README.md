@@ -140,7 +140,7 @@ deno run -A scripts/run-all.ts --direct --postgres
 This mode:
 
 1. Starts a `postgres:16-alpine` container alongside Stratos via `docker-compose.postgres.yml` overlay
-2. Configures the Stratos container with `STRATOS_STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
+2. Configures the Stratos container with `STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
 3. Boundary configuration and direct enrollment connect to PostgreSQL at `localhost:5432` instead of `service.sqlite`
 
 The PostgreSQL compose overlay (`docker-compose.postgres.yml`) adds:
