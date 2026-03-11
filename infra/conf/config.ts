@@ -9,6 +9,7 @@ const config: StratosConfig = {
   // hostedZoneId: 'Z1234567890',  // optional — looked up by domainName if omitted
   stratosSubdomain: 'stratos', // → stratos.example.com
   webappSubdomain: 'app', // → app.example.com
+  storageBackend: 'postgres', 
 
   // --- Stratos service ---
   stratos: {

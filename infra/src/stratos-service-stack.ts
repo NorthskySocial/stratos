@@ -51,68 +51,62 @@ export class StratosServiceStack extends cdk.Stack {
       allowAllOutbound: true,
     })
 
-    // --- Storage backend: EFS (SQLite) or RDS (Postgres) ---
-    let fileSystem: efs.FileSystem | undefined
-    let accessPoint: efs.AccessPoint | undefined
-    let dbInstance: rds.DatabaseInstance | undefined
+    // --- Always provision both persistent storage backends. ---
+    const fileSystem = new efs.FileSystem(this, 'DataVolume', {
+      vpc,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encrypted: true,
+      performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
+      throughputMode: efs.ThroughputMode.BURSTING,
+      lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
+    })
 
-    if (storageBackend === 'sqlite') {
-      fileSystem = new efs.FileSystem(this, 'DataVolume', {
-        vpc,
-        removalPolicy: cdk.RemovalPolicy.RETAIN,
-        encrypted: true,
-        performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
-        throughputMode: efs.ThroughputMode.BURSTING,
-        lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
-      })
+    const accessPoint = fileSystem.addAccessPoint('DataAccessPoint', {
+      path: '/stratos-data',
+      createAcl: { ownerGid: '1000', ownerUid: '1000', permissions: '755' },
+      posixUser: { gid: '1000', uid: '1000' },
+    })
 
-      accessPoint = fileSystem.addAccessPoint('DataAccessPoint', {
-        path: '/stratos-data',
-        createAcl: { ownerGid: '1000', ownerUid: '1000', permissions: '755' },
-        posixUser: { gid: '1000', uid: '1000' },
-      })
+    fileSystem.connections.allowDefaultPortFrom(
+      serviceSg,
+      'Allow EFS from Stratos tasks',
+    )
 
-      fileSystem.connections.allowDefaultPortFrom(
-        serviceSg,
-        'Allow EFS from Stratos tasks',
-      )
-    } else {
-      const dbName = config.postgres?.databaseName ?? 'stratos'
+    const dbName = config.postgres?.databaseName ?? 'stratos'
 
-      const dbSg = new ec2.SecurityGroup(this, 'DbSg', {
-        vpc,
-        description: 'Stratos RDS Postgres',
-        allowAllOutbound: false,
-      })
-      dbSg.addIngressRule(
-        serviceSg,
-        ec2.Port.tcp(5432),
-        'Allow Postgres from Stratos tasks',
-      )
+    const dbSg = new ec2.SecurityGroup(this, 'DbSg', {
+      vpc,
+      description: 'Stratos RDS Postgres',
+      allowAllOutbound: false,
+    })
+    dbSg.addIngressRule(
+      serviceSg,
+      ec2.Port.tcp(5432),
+      'Allow Postgres from Stratos tasks',
+    )
 
-      dbInstance = new rds.DatabaseInstance(this, 'Postgres', {
-        engine: rds.DatabaseInstanceEngine.postgres({
-          version: rds.PostgresEngineVersion.VER_16,
-        }),
-        instanceType: ec2.InstanceType.of(
-          ec2.InstanceClass.T4G,
-          ec2.InstanceSize.MICRO,
-        ),
-        vpc,
-        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-        securityGroups: [dbSg],
-        databaseName: dbName,
-        credentials: rds.Credentials.fromGeneratedSecret('stratos', {
-          secretName: `stratos-${config.environment}-db-credentials`,
-        }),
-        allocatedStorage: config.postgres?.allocatedStorageGiB ?? 20,
-        storageEncrypted: true,
-        multiAz: false,
-        autoMinorVersionUpgrade: true,
-        removalPolicy: cdk.RemovalPolicy.RETAIN,
-        deletionProtection: true,
-      })
-    }
+    const dbInstance = new rds.DatabaseInstance(this, 'Postgres', {
+      engine: rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.VER_16,
+      }),
+      instanceType: ec2.InstanceType.of(
+        ec2.InstanceClass.T4G,
+        ec2.InstanceSize.MICRO,
+      ),
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [dbSg],
+      databaseName: dbName,
+      credentials: rds.Credentials.fromGeneratedSecret('stratos', {
+        secretName: `stratos-${config.environment}-db-credentials`,
+      }),
+      allocatedStorage: config.postgres?.allocatedStorageGiB ?? 20,
+      storageEncrypted: true,
+      multiAz: false,
+      autoMinorVersionUpgrade: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      deletionProtection: true,
+    })
 
     // Task definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDef', {
@@ -124,7 +118,7 @@ export class StratosServiceStack extends cdk.Stack {
       },
     })
 
-    if (storageBackend === 'sqlite' && fileSystem && accessPoint) {
+    if (storageBackend === 'sqlite') {
       taskDefinition.addVolume({
         name: 'stratos-data',
         efsVolumeConfiguration: {
@@ -174,6 +168,9 @@ export class StratosServiceStack extends cdk.Stack {
     }
 
     stratosEnv['STORAGE_BACKEND'] = storageBackend
+    if (storageBackend === 'postgres') {
+      stratosEnv['STRATOS_PG_SSLMODE'] = 'require'
+    }
 
     const container = taskDefinition.addContainer('stratos', {
       image: ecs.ContainerImage.fromEcrRepository(repository, imageTag),
@@ -215,7 +212,7 @@ export class StratosServiceStack extends cdk.Stack {
     }
 
     // Grant the task access to the RDS secret so it can build the connection URL
-    if (storageBackend === 'postgres' && dbInstance?.secret) {
+    if (storageBackend === 'postgres' && dbInstance.secret) {
       dbInstance.secret.grantRead(taskDefinition.taskRole)
 
       const dbSecret = dbInstance.secret
@@ -253,7 +250,7 @@ export class StratosServiceStack extends cdk.Stack {
       circuitBreaker: { enable: true, rollback: true },
     })
 
-    if (storageBackend === 'sqlite' && fileSystem) {
+    if (storageBackend === 'sqlite') {
       fileSystem.grantReadWrite(taskDefinition.taskRole)
     }
 
@@ -308,10 +305,11 @@ export class StratosServiceStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'StratosUrl', { value: `https://${fqdn}` })
     new cdk.CfnOutput(this, 'AlbDns', { value: alb.loadBalancerDnsName })
     new cdk.CfnOutput(this, 'StorageBackend', { value: storageBackend })
-    if (dbInstance) {
-      new cdk.CfnOutput(this, 'DbEndpoint', {
-        value: dbInstance.dbInstanceEndpointAddress,
-      })
-    }
+    new cdk.CfnOutput(this, 'DbEndpoint', {
+      value: dbInstance.dbInstanceEndpointAddress,
+    })
+    new cdk.CfnOutput(this, 'EfsFileSystemId', {
+      value: fileSystem.fileSystemId,
+    })
   }
 }
