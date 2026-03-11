@@ -73,6 +73,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
   const isSecure = config.baseUrl.startsWith('https://')
 
+  const allowedSchemes = isSecure ? ['https:'] : ['http:', 'https:']
+
   /**
    * Authenticate a request using DPoP (production) or Bearer DID (dev mode only).
    * Returns the authenticated DID, or null if the response was already sent.
@@ -152,12 +154,11 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
       if (redirectUri) {
         try {
-          const redirectOrigin = new URL(redirectUri).origin
-          const baseOrigin = new URL(config.baseUrl).origin
-          if (redirectOrigin !== baseOrigin) {
+          const parsed = new URL(redirectUri)
+          if (!allowedSchemes.includes(parsed.protocol)) {
             return res.status(400).json({
               error: 'InvalidRequest',
-              message: 'redirect_uri must be same-origin as the service',
+              message: 'redirect_uri must use https',
             })
           }
         } catch {
@@ -301,8 +302,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         res.clearCookie('stratos_redirect')
         try {
           const url = new URL(redirectTo)
-          const baseOrigin = new URL(config.baseUrl).origin
-          if (url.origin === baseOrigin) {
+          if (allowedSchemes.includes(url.protocol)) {
             url.searchParams.set('stratos_enrolled', 'true')
             return res.redirect(url.toString())
           }
