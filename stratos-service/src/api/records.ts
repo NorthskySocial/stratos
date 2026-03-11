@@ -695,12 +695,7 @@ export async function applyWritesBatch(
           action: 'delete',
         })
       } else {
-        await validateWritableRecord(
-          ctx,
-          callerDid,
-          op.collection,
-          op.record,
-        )
+        await validateWritableRecord(ctx, callerDid, op.collection, op.record)
 
         const recordBytes = encodeRecord(op.record)
         const cid = await computeCid(op.record)
