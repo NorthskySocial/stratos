@@ -9,54 +9,78 @@ import { section, pass, fail, info, warn, summary } from './lib/log.ts'
 
 // Minimal 1x1 PNG (67 bytes)
 const TINY_PNG = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
-  0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-  0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00, 0x00, 0x00,
-  0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+  0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02,
+  0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44,
+  0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x00, 0x02, 0x00,
+  0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+  0xae, 0x42, 0x60, 0x82,
 ])
 
 // Minimal JPEG (smallest valid JFIF — ~107 bytes)
 function makeTinyJpeg(): Uint8Array {
   const data = new Uint8Array(107)
   // SOI
-  data[0] = 0xff; data[1] = 0xd8
+  data[0] = 0xff
+  data[1] = 0xd8
   // APP0 (JFIF marker)
-  data[2] = 0xff; data[3] = 0xe0
-  data[4] = 0x00; data[5] = 0x10 // length 16
+  data[2] = 0xff
+  data[3] = 0xe0
+  data[4] = 0x00
+  data[5] = 0x10 // length 16
   // "JFIF\0"
-  data[6] = 0x4a; data[7] = 0x46; data[8] = 0x49; data[9] = 0x46; data[10] = 0x00
-  data[11] = 0x01; data[12] = 0x01 // version 1.1
+  data[6] = 0x4a
+  data[7] = 0x46
+  data[8] = 0x49
+  data[9] = 0x46
+  data[10] = 0x00
+  data[11] = 0x01
+  data[12] = 0x01 // version 1.1
   data[13] = 0x00 // aspect ratio
-  data[14] = 0x00; data[15] = 0x01 // x density
-  data[16] = 0x00; data[17] = 0x01 // y density
-  data[18] = 0x00; data[19] = 0x00 // no thumbnail
+  data[14] = 0x00
+  data[15] = 0x01 // x density
+  data[16] = 0x00
+  data[17] = 0x01 // y density
+  data[18] = 0x00
+  data[19] = 0x00 // no thumbnail
   // SOF0 (Start of Frame)
-  data[20] = 0xff; data[21] = 0xc0
-  data[22] = 0x00; data[23] = 0x0b // length 11
+  data[20] = 0xff
+  data[21] = 0xc0
+  data[22] = 0x00
+  data[23] = 0x0b // length 11
   data[24] = 0x08 // precision
-  data[25] = 0x00; data[26] = 0x01 // height 1
-  data[27] = 0x00; data[28] = 0x01 // width 1
+  data[25] = 0x00
+  data[26] = 0x01 // height 1
+  data[27] = 0x00
+  data[28] = 0x01 // width 1
   data[29] = 0x01 // 1 component
   data[30] = 0x01 // component id
   data[31] = 0x11 // sampling 1x1
   data[32] = 0x00 // quant table 0
   // DHT (Huffman table)
-  data[33] = 0xff; data[34] = 0xc4
-  data[35] = 0x00; data[36] = 0x1f // length 31
+  data[33] = 0xff
+  data[34] = 0xc4
+  data[35] = 0x00
+  data[36] = 0x1f // length 31
   data[37] = 0x00 // DC table 0
   // 16 code counts + 12 values (28 bytes of zeros is a valid empty-ish table)
   // SOS (Start of Scan)
-  data[66] = 0xff; data[67] = 0xda
-  data[68] = 0x00; data[69] = 0x08 // length 8
+  data[66] = 0xff
+  data[67] = 0xda
+  data[68] = 0x00
+  data[69] = 0x08 // length 8
   data[70] = 0x01 // 1 component
-  data[71] = 0x01; data[72] = 0x00 // component 1, DC/AC table 0
-  data[73] = 0x00; data[74] = 0x3f; data[75] = 0x00 // spectral selection
+  data[71] = 0x01
+  data[72] = 0x00 // component 1, DC/AC table 0
+  data[73] = 0x00
+  data[74] = 0x3f
+  data[75] = 0x00 // spectral selection
   // Scan data (minimal)
-  data[76] = 0x7b; data[77] = 0x40
+  data[76] = 0x7b
+  data[77] = 0x40
   // EOI
-  data[78] = 0xff; data[79] = 0xd9
+  data[78] = 0xff
+  data[79] = 0xd9
   return data
 }
 
@@ -121,7 +145,11 @@ async function createTextPost(
   text: string,
 ): Promise<{ uri: string; cid: string; rkey: string } | null> {
   try {
-    const result = await createRecord(did, 'zone.stratos.feed.post', makePost(text, boundary))
+    const result = await createRecord(
+      did,
+      'zone.stratos.feed.post',
+      makePost(text, boundary),
+    )
     const rkey = result.uri.split('/').pop()!
     pass(`${name}: text post`, text.substring(0, 50))
     passed++
@@ -165,7 +193,10 @@ async function createImagePost(
       }),
     )
     const rkey = result.uri.split('/').pop()!
-    pass(`${name}: image post (${imageCount} image${imageCount > 1 ? 's' : ''})`, text.substring(0, 50))
+    pass(
+      `${name}: image post (${imageCount} image${imageCount > 1 ? 's' : ''})`,
+      text.substring(0, 50),
+    )
     passed++
     return { uri: result.uri, cid: result.cid, rkey }
   } catch (err) {
@@ -205,7 +236,10 @@ async function createExternalPost(
       }),
     )
     const rkey = result.uri.split('/').pop()!
-    pass(`${name}: external post${withThumb ? ' (with thumb)' : ''}`, text.substring(0, 50))
+    pass(
+      `${name}: external post${withThumb ? ' (with thumb)' : ''}`,
+      text.substring(0, 50),
+    )
     passed++
     return { uri: result.uri, cid: result.cid, rkey }
   } catch (err) {
@@ -352,7 +386,9 @@ async function validateBlobRoundTrip(
   try {
     const fetched = await getBlob(did, blobRef.ref.$link, did)
     if (fetched.length !== originalBytes.length) {
-      fail(`${label}: blob round-trip — size mismatch (got ${fetched.length}, expected ${originalBytes.length})`)
+      fail(
+        `${label}: blob round-trip — size mismatch (got ${fetched.length}, expected ${originalBytes.length})`,
+      )
       failed++
       return false
     }
@@ -389,28 +425,51 @@ async function generateEmbedPosts(
   const results: Array<{ uri: string; cid: string; rkey: string }> = []
 
   // Single image
-  const img1 = await createImagePost(did, name, boundary, 'A post with a single image attachment')
+  const img1 = await createImagePost(
+    did,
+    name,
+    boundary,
+    'A post with a single image attachment',
+  )
   if (img1) {
     results.push(img1)
     await validateRecordRoundTrip(did, img1.uri, `${name}: single-image`)
   }
 
   // Multi-image (3 images)
-  const img3 = await createImagePost(did, name, boundary, 'Gallery post with three images', 3)
+  const img3 = await createImagePost(
+    did,
+    name,
+    boundary,
+    'Gallery post with three images',
+    3,
+  )
   if (img3) {
     results.push(img3)
     await validateRecordRoundTrip(did, img3.uri, `${name}: multi-image`)
   }
 
   // External link without thumbnail
-  const ext1 = await createExternalPost(did, name, boundary, 'Check out this link', false)
+  const ext1 = await createExternalPost(
+    did,
+    name,
+    boundary,
+    'Check out this link',
+    false,
+  )
   if (ext1) {
     results.push(ext1)
     await validateRecordRoundTrip(did, ext1.uri, `${name}: external-no-thumb`)
   }
 
   // External link with thumbnail
-  const ext2 = await createExternalPost(did, name, boundary, 'Link with preview thumbnail', true)
+  const ext2 = await createExternalPost(
+    did,
+    name,
+    boundary,
+    'Link with preview thumbnail',
+    true,
+  )
   if (ext2) {
     results.push(ext2)
     await validateRecordRoundTrip(did, ext2.uri, `${name}: external-with-thumb`)
@@ -420,9 +479,12 @@ async function generateEmbedPosts(
   if (results.length > 0) {
     const toQuote = results[0]
     const quote = await createQuotePost(
-      did, name, boundary,
+      did,
+      name,
+      boundary,
       'Quoting my earlier post',
-      toQuote.uri, toQuote.cid,
+      toQuote.uri,
+      toQuote.cid,
     )
     if (quote) {
       results.push(quote)
@@ -431,9 +493,12 @@ async function generateEmbedPosts(
 
     // Quote with media
     const qwm = await createQuoteWithMediaPost(
-      did, name, boundary,
+      did,
+      name,
+      boundary,
       'Quoting with an image attached',
-      toQuote.uri, toQuote.cid,
+      toQuote.uri,
+      toQuote.cid,
     )
     if (qwm) {
       results.push(qwm)
@@ -446,18 +511,26 @@ async function generateEmbedPosts(
   if (root) {
     results.push(root)
     const reply1 = await createReplyPost(
-      did, name, boundary,
+      did,
+      name,
+      boundary,
       'First reply in the thread',
-      root.uri, root.cid,
-      root.uri, root.cid,
+      root.uri,
+      root.cid,
+      root.uri,
+      root.cid,
     )
     if (reply1) {
       results.push(reply1)
       const reply2 = await createReplyPost(
-        did, name, boundary,
+        did,
+        name,
+        boundary,
         'Nested reply to the first reply',
-        root.uri, root.cid,
-        reply1.uri, reply1.cid,
+        root.uri,
+        root.cid,
+        reply1.uri,
+        reply1.cid,
       )
       if (reply2) {
         results.push(reply2)
@@ -483,11 +556,21 @@ async function run() {
 
   // --- Text-only posts ---
   section(`Rei (swordsmith) — ${SWORDSMITH_POSTS.length} text posts`)
-  const reiTextResults = await generateTextPosts(rei.did, 'Rei', 'swordsmith', SWORDSMITH_POSTS)
+  const reiTextResults = await generateTextPosts(
+    rei.did,
+    'Rei',
+    'swordsmith',
+    SWORDSMITH_POSTS,
+  )
   info(`Rei: ${reiTextResults.length} text posts created`)
 
   section(`kaoruko (aekea) — ${AEKEA_POSTS.length} text posts`)
-  const kaorukoTextResults = await generateTextPosts(kaoruko.did, 'kaoruko', 'aekea', AEKEA_POSTS)
+  const kaorukoTextResults = await generateTextPosts(
+    kaoruko.did,
+    'kaoruko',
+    'aekea',
+    AEKEA_POSTS,
+  )
   info(`kaoruko: ${kaorukoTextResults.length} text posts created`)
 
   // --- Embed posts ---
@@ -496,7 +579,11 @@ async function run() {
   info(`Rei: ${reiEmbedResults.length} embed posts created`)
 
   section('kaoruko (aekea) — embed posts')
-  const kaorukoEmbedResults = await generateEmbedPosts(kaoruko.did, 'kaoruko', 'aekea')
+  const kaorukoEmbedResults = await generateEmbedPosts(
+    kaoruko.did,
+    'kaoruko',
+    'aekea',
+  )
   info(`kaoruko: ${kaorukoEmbedResults.length} embed posts created`)
 
   // --- Blob round-trip validation ---
@@ -511,10 +598,10 @@ async function run() {
   // --- Cross-namespace embed rejection ---
   section('Cross-namespace embed rejection')
   try {
-    await createRecord(rei.did, 'zone.stratos.feed.post', makePost(
-      'This should fail — quoting a bsky post',
-      'swordsmith',
-      {
+    await createRecord(
+      rei.did,
+      'zone.stratos.feed.post',
+      makePost('This should fail — quoting a bsky post', 'swordsmith', {
         embed: {
           $type: 'app.bsky.embed.record',
           record: {
@@ -522,8 +609,8 @@ async function run() {
             cid: 'bafyreifakecidforcrossnamespacetest',
           },
         },
-      },
-    ))
+      }),
+    )
     fail('Cross-namespace embed: should have been rejected')
     failed++
   } catch {
@@ -539,11 +626,14 @@ async function run() {
     rei.records['generated'] = allReiResults[allReiResults.length - 1]
   }
   if (allKaorukoResults.length > 0) {
-    kaoruko.records['generated'] = allKaorukoResults[allKaorukoResults.length - 1]
+    kaoruko.records['generated'] =
+      allKaorukoResults[allKaorukoResults.length - 1]
   }
   await saveState(state)
 
-  info(`Total: Rei ${allReiResults.length}, kaoruko ${allKaorukoResults.length}`)
+  info(
+    `Total: Rei ${allReiResults.length}, kaoruko ${allKaorukoResults.length}`,
+  )
   summary(passed, failed)
   if (failed > 0) Deno.exit(1)
 }

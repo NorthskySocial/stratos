@@ -13,7 +13,6 @@ import {
   buildCommit,
   extractBoundaryDomains,
   findBlobRefs,
-  stratosSeq,
   StratosValidationError,
   type MstWriteOp,
 } from '@northskysocial/stratos-core'

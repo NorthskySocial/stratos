@@ -608,18 +608,23 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         // Blob inherits boundaries from its associated record(s);
         // viewer must share a boundary with at least one linked record
         if (callerDid !== did) {
-          const callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)
+          const callerDomains =
+            await ctx.boundaryResolver.getBoundaries(callerDid)
           let hasAccess = false
           for (const uri of recordUris) {
             const atUri = new AtUri(uri)
             const rec = await store.record.getRecord(atUri, null)
             if (rec) {
-              const recordDomains = extractBoundaryDomains(rec.value as Record<string, unknown>)
+              const recordDomains = extractBoundaryDomains(
+                rec.value as Record<string, unknown>,
+              )
               if (recordDomains.length === 0) {
                 hasAccess = true
                 break
               }
-              if (callerDomains.some((d: string) => recordDomains.includes(d))) {
+              if (
+                callerDomains.some((d: string) => recordDomains.includes(d))
+              ) {
                 hasAccess = true
                 break
               }

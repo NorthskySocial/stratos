@@ -77,6 +77,7 @@ The `app.stratos.feed.post` lexicon already includes `app.bsky.embed.video` in i
 - If no overlap across all referencing records, deny access
 
 Design considerations:
+
 - **Owner bypass**: Repo owner always has access to their own blobs
 - **Privacy**: Return `BlobNotFound` for both missing and unauthorized blobs (no information leakage about blob existence)
 - **Orphan blobs**: Blobs with no record references are inaccessible to non-owners
