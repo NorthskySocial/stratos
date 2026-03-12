@@ -573,7 +573,9 @@ describe('SqliteEnrollmentStore', () => {
         active: true,
       })
 
-      await store.updateEnrollment(did, { enrollmentRkey: 'did:web:stratos.example.com' })
+      await store.updateEnrollment(did, {
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
 
       const result = await store.getEnrollment(did)
       expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')

@@ -15,7 +15,14 @@ function createMockEnrollmentStore(
 ): EnrollmentStore {
   return {
     isEnrolled: vi.fn(async () => !!enrollment),
-    getEnrollment: vi.fn(async () => enrollment as ReturnType<EnrollmentStore['getEnrollment']> extends Promise<infer T> ? T : never),
+    getEnrollment: vi.fn(
+      async () =>
+        enrollment as ReturnType<
+          EnrollmentStore['getEnrollment']
+        > extends Promise<infer T>
+          ? T
+          : never,
+    ),
     enroll: vi.fn(async () => {}),
     unenroll: vi.fn(async () => {}),
     updateEnrollment: vi.fn(async () => {}),
@@ -48,7 +55,9 @@ function createMockAgent(records: Array<{ uri: string; value: unknown }> = []) {
   }
 }
 
-function createMockOAuthClient(records: Array<{ uri: string; value: unknown }> = []) {
+function createMockOAuthClient(
+  records: Array<{ uri: string; value: unknown }> = [],
+) {
   const mockAgent = createMockAgent(records)
 
   vi.mocked(Agent).mockImplementation(function () {
@@ -98,15 +107,21 @@ const CORRECT_RKEY_RECORD = {
 
 describe('serviceDIDToRkey', () => {
   it('should pass through a did:web without percent encoding', () => {
-    expect(serviceDIDToRkey('did:web:stratos.example.com')).toBe('did:web:stratos.example.com')
+    expect(serviceDIDToRkey('did:web:stratos.example.com')).toBe(
+      'did:web:stratos.example.com',
+    )
   })
 
   it('should replace %3A with colon for port-encoded did:web', () => {
-    expect(serviceDIDToRkey('did:web:localhost%3A3100')).toBe('did:web:localhost:3100')
+    expect(serviceDIDToRkey('did:web:localhost%3A3100')).toBe(
+      'did:web:localhost:3100',
+    )
   })
 
   it('should handle case-insensitive percent encoding', () => {
-    expect(serviceDIDToRkey('did:web:localhost%3a3100')).toBe('did:web:localhost:3100')
+    expect(serviceDIDToRkey('did:web:localhost%3a3100')).toBe(
+      'did:web:localhost:3100',
+    )
   })
 
   it('should handle did:plc unchanged', () => {
@@ -127,7 +142,11 @@ describe('migrateEnrollmentRkey', () => {
       const { client } = createMockOAuthClient()
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, client, SERVICE_ENDPOINT, SERVICE_DID,
+        TEST_DID,
+        store,
+        client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
       )
 
       expect(client.restore).not.toHaveBeenCalled()
@@ -138,7 +157,12 @@ describe('migrateEnrollmentRkey', () => {
   describe('when enrollment has a self-keyed record', () => {
     let store: EnrollmentStore
     let agent: ReturnType<typeof createMockOAuthClient>['agent']
-    const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
+    const mockLogger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }
 
     beforeEach(async () => {
       vi.mocked(Agent).mockReset()
@@ -152,7 +176,12 @@ describe('migrateEnrollmentRkey', () => {
       agent = mock.agent
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, mock.client, SERVICE_ENDPOINT, SERVICE_DID, mockLogger,
+        TEST_DID,
+        store,
+        mock.client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
+        mockLogger,
       )
     })
 
@@ -174,10 +203,9 @@ describe('migrateEnrollmentRkey', () => {
     })
 
     it('should update the DB with the service DID rkey', () => {
-      expect(store.updateEnrollment).toHaveBeenCalledWith(
-        TEST_DID,
-        { enrollmentRkey: SERVICE_DID_RKEY },
-      )
+      expect(store.updateEnrollment).toHaveBeenCalledWith(TEST_DID, {
+        enrollmentRkey: SERVICE_DID_RKEY,
+      })
     })
   })
 
@@ -198,7 +226,11 @@ describe('migrateEnrollmentRkey', () => {
       agent = mock.agent
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, mock.client, SERVICE_ENDPOINT, SERVICE_DID,
+        TEST_DID,
+        store,
+        mock.client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
       )
     })
 
@@ -220,10 +252,9 @@ describe('migrateEnrollmentRkey', () => {
     })
 
     it('should update the DB with the service DID rkey', () => {
-      expect(store.updateEnrollment).toHaveBeenCalledWith(
-        TEST_DID,
-        { enrollmentRkey: SERVICE_DID_RKEY },
-      )
+      expect(store.updateEnrollment).toHaveBeenCalledWith(TEST_DID, {
+        enrollmentRkey: SERVICE_DID_RKEY,
+      })
     })
   })
 
@@ -239,15 +270,18 @@ describe('migrateEnrollmentRkey', () => {
       const { client, agent } = createMockOAuthClient([CORRECT_RKEY_RECORD])
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, client, SERVICE_ENDPOINT, SERVICE_DID,
+        TEST_DID,
+        store,
+        client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
       )
 
       expect(agent.com.atproto.repo.putRecord).not.toHaveBeenCalled()
       expect(agent.com.atproto.repo.deleteRecord).not.toHaveBeenCalled()
-      expect(store.updateEnrollment).toHaveBeenCalledWith(
-        TEST_DID,
-        { enrollmentRkey: SERVICE_DID_RKEY },
-      )
+      expect(store.updateEnrollment).toHaveBeenCalledWith(TEST_DID, {
+        enrollmentRkey: SERVICE_DID_RKEY,
+      })
     })
   })
 
@@ -256,7 +290,10 @@ describe('migrateEnrollmentRkey', () => {
       vi.mocked(Agent).mockReset()
       const otherServiceRecord = {
         ...SELF_RECORD,
-        value: { ...SELF_RECORD.value, service: 'https://other-stratos.example.com' },
+        value: {
+          ...SELF_RECORD.value,
+          service: 'https://other-stratos.example.com',
+        },
       }
       const store = createMockEnrollmentStore({
         did: TEST_DID,
@@ -267,7 +304,11 @@ describe('migrateEnrollmentRkey', () => {
       const { client, agent } = createMockOAuthClient([otherServiceRecord])
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, client, SERVICE_ENDPOINT, SERVICE_DID,
+        TEST_DID,
+        store,
+        client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
       )
 
       expect(agent.com.atproto.repo.putRecord).not.toHaveBeenCalled()
@@ -282,7 +323,11 @@ describe('migrateEnrollmentRkey', () => {
       const { client } = createMockOAuthClient()
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, client, SERVICE_ENDPOINT, SERVICE_DID,
+        TEST_DID,
+        store,
+        client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
       )
 
       expect(client.restore).not.toHaveBeenCalled()
@@ -305,7 +350,13 @@ describe('migrateEnrollmentRkey', () => {
       } as unknown as NodeOAuthClient
 
       await expect(
-        migrateEnrollmentRkey(TEST_DID, store, client, SERVICE_ENDPOINT, SERVICE_DID),
+        migrateEnrollmentRkey(
+          TEST_DID,
+          store,
+          client,
+          SERVICE_ENDPOINT,
+          SERVICE_DID,
+        ),
       ).resolves.not.toThrow()
 
       expect(store.updateEnrollment).not.toHaveBeenCalled()
@@ -317,7 +368,10 @@ describe('migrateEnrollmentRkey', () => {
       vi.mocked(Agent).mockReset()
       const recordWithSlash = {
         ...SELF_RECORD,
-        value: { ...SELF_RECORD.value, service: 'https://stratos.example.com/' },
+        value: {
+          ...SELF_RECORD.value,
+          service: 'https://stratos.example.com/',
+        },
       }
       const store = createMockEnrollmentStore({
         did: TEST_DID,
@@ -328,14 +382,17 @@ describe('migrateEnrollmentRkey', () => {
       const { client, agent } = createMockOAuthClient([recordWithSlash])
 
       await migrateEnrollmentRkey(
-        TEST_DID, store, client, SERVICE_ENDPOINT, SERVICE_DID,
+        TEST_DID,
+        store,
+        client,
+        SERVICE_ENDPOINT,
+        SERVICE_DID,
       )
 
       expect(agent.com.atproto.repo.putRecord).toHaveBeenCalled()
-      expect(store.updateEnrollment).toHaveBeenCalledWith(
-        TEST_DID,
-        { enrollmentRkey: SERVICE_DID_RKEY },
-      )
+      expect(store.updateEnrollment).toHaveBeenCalledWith(TEST_DID, {
+        enrollmentRkey: SERVICE_DID_RKEY,
+      })
     })
   })
 })

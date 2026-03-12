@@ -116,7 +116,9 @@ export async function migrateEnrollmentRkey(
 
     if (currentRkey === expectedRkey) {
       // PDS record already has correct rkey, just sync the DB
-      await enrollmentStore.updateEnrollment(did, { enrollmentRkey: expectedRkey })
+      await enrollmentStore.updateEnrollment(did, {
+        enrollmentRkey: expectedRkey,
+      })
       return
     }
 
@@ -135,7 +137,9 @@ export async function migrateEnrollmentRkey(
       rkey: currentRkey,
     })
 
-    await enrollmentStore.updateEnrollment(did, { enrollmentRkey: expectedRkey })
+    await enrollmentStore.updateEnrollment(did, {
+      enrollmentRkey: expectedRkey,
+    })
 
     logger?.info(
       { did, oldRkey: currentRkey, newRkey: expectedRkey },
@@ -511,7 +515,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       }
 
       // Best-effort PDS enrollment record deletion using stored rkey or service DID
-      const rkey = currentEnrollment.enrollmentRkey || serviceDIDToRkey(serviceDid)
+      const rkey =
+        currentEnrollment.enrollmentRkey || serviceDIDToRkey(serviceDid)
       try {
         const oauthSession = await oauthClient.restore(did)
         const agent = new Agent(oauthSession)

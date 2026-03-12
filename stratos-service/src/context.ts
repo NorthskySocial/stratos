@@ -395,11 +395,16 @@ export class SqliteEnrollmentStore
     updates: Partial<Omit<EnrollmentRecord, 'did'>>,
   ): Promise<void> {
     const setValues: Record<string, unknown> = {}
-    if (updates.enrolledAt !== undefined) setValues.enrolledAt = updates.enrolledAt
-    if (updates.pdsEndpoint !== undefined) setValues.pdsEndpoint = updates.pdsEndpoint
-    if (updates.signingKeyDid !== undefined) setValues.signingKeyDid = updates.signingKeyDid
-    if (updates.active !== undefined) setValues.active = updates.active ? 'true' : 'false'
-    if (updates.enrollmentRkey !== undefined) setValues.enrollmentRkey = updates.enrollmentRkey
+    if (updates.enrolledAt !== undefined)
+      setValues.enrolledAt = updates.enrolledAt
+    if (updates.pdsEndpoint !== undefined)
+      setValues.pdsEndpoint = updates.pdsEndpoint
+    if (updates.signingKeyDid !== undefined)
+      setValues.signingKeyDid = updates.signingKeyDid
+    if (updates.active !== undefined)
+      setValues.active = updates.active ? 'true' : 'false'
+    if (updates.enrollmentRkey !== undefined)
+      setValues.enrollmentRkey = updates.enrollmentRkey
 
     if (Object.keys(setValues).length > 0) {
       await this.db
