@@ -510,6 +510,107 @@ describe('SqliteEnrollmentStore', () => {
       expect(boundaries).toEqual([])
     })
   })
+
+  describe('enrollmentRkey', () => {
+    it('should store and retrieve enrollmentRkey', async () => {
+      const did = 'did:plc:reiwithrkey'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should return undefined enrollmentRkey when not set', async () => {
+      const did = 'did:plc:sakuranorkey'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBeUndefined()
+    })
+
+    it('should update enrollmentRkey on re-enrollment', async () => {
+      const did = 'did:plc:kaorukorkey'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:old-stratos.example.com',
+      })
+
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+  })
+
+  describe('updateEnrollment', () => {
+    it('should update enrollmentRkey', async () => {
+      const did = 'did:plc:fuyukoupdate'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+      })
+
+      await store.updateEnrollment(did, { enrollmentRkey: 'did:web:stratos.example.com' })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should update pdsEndpoint without affecting other fields', async () => {
+      const did = 'did:plc:harukipartial'
+      const enrolledAt = '2025-01-01T00:00:00Z'
+      await store.enroll({
+        did,
+        enrolledAt,
+        pdsEndpoint: 'https://old.pds.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      await store.updateEnrollment(did, { pdsEndpoint: 'https://new.pds.com' })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.pdsEndpoint).toBe('https://new.pds.com')
+      expect(result?.enrolledAt).toBe(enrolledAt)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should not fail when no updates provided', async () => {
+      const did = 'did:plc:noupdate'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+      })
+
+      await expect(store.updateEnrollment(did, {})).resolves.not.toThrow()
+    })
+  })
 })
 
 describe('StratosActorStore', () => {

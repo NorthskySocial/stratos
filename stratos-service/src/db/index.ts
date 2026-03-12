@@ -64,9 +64,19 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       enrolledAt TEXT NOT NULL,
       pdsEndpoint TEXT,
       signingKeyDid TEXT NOT NULL,
-      active TEXT NOT NULL DEFAULT 'true'
+      active TEXT NOT NULL DEFAULT 'true',
+      enrollmentRkey TEXT
     )
   `)
+
+  // Migration: add enrollmentRkey column if missing (for existing databases)
+  await db
+    .run(
+      sql`
+    ALTER TABLE enrollment ADD COLUMN enrollmentRkey TEXT
+  `,
+    )
+    .catch(() => {})
 
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS enrollment_boundary (
