@@ -66,13 +66,14 @@ export interface ProfileRecordWriter {
     did: string,
     serviceEndpoint: string,
     boundaries: string[],
-  ): Promise<void>
+  ): Promise<string>
 
   /**
    * Delete the enrollment profile record from the user's PDS
    * @param did - User's DID
+   * @param rkey - Record key of the enrollment record to delete
    */
-  deleteEnrollmentRecord(did: string): Promise<void>
+  deleteEnrollmentRecord(did: string, rkey: string): Promise<void>
 }
 
 /**
