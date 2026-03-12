@@ -28,14 +28,15 @@ export function enrollUser(
   did: string,
   pdsEndpoint?: string,
   boundaries?: string[],
+  enrollmentRkey?: string,
 ): void {
   const db = openDb()
   try {
     const enrolledAt = new Date().toISOString()
     db.exec(
-      `INSERT INTO enrollment (did, enrolledAt, pdsEndpoint) VALUES (?, ?, ?)
-       ON CONFLICT(did) DO UPDATE SET enrolledAt = excluded.enrolledAt, pdsEndpoint = excluded.pdsEndpoint`,
-      [did, enrolledAt, pdsEndpoint ?? null],
+      `INSERT INTO enrollment (did, enrolledAt, pdsEndpoint, enrollmentRkey) VALUES (?, ?, ?, ?)
+       ON CONFLICT(did) DO UPDATE SET enrolledAt = excluded.enrolledAt, pdsEndpoint = excluded.pdsEndpoint, enrollmentRkey = excluded.enrollmentRkey`,
+      [did, enrolledAt, pdsEndpoint ?? null, enrollmentRkey ?? null],
     )
 
     if (boundaries && boundaries.length > 0) {

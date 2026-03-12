@@ -10,6 +10,7 @@ export interface StratosEnrollment {
   boundaries: Array<{ value: string }>
   signingKey: string
   createdAt: string
+  rkey: string
 }
 
 export async function discoverStratosEnrollment(
@@ -17,21 +18,55 @@ export async function discoverStratosEnrollment(
 ): Promise<StratosEnrollment | null> {
   const agent = new Agent(session)
   try {
-    const res = await agent.com.atproto.repo.getRecord({
+    const res = await agent.com.atproto.repo.listRecords({
       repo: session.sub,
       collection: 'zone.stratos.actor.enrollment',
-      rkey: 'self',
+      limit: 100,
     })
-    const val = res.data.value as Record<string, unknown>
-    if (typeof val.service !== 'string') return null
-    return {
-      service: val.service,
-      boundaries: Array.isArray(val.boundaries) ? val.boundaries : [],
-      signingKey: (val.signingKey as string) ?? '',
-      createdAt: (val.createdAt as string) ?? '',
+    for (const record of res.data.records) {
+      const val = record.value as Record<string, unknown>
+      if (typeof val.service !== 'string') continue
+      const rkey = record.uri.split('/').pop() ?? ''
+      return {
+        service: val.service,
+        boundaries: Array.isArray(val.boundaries) ? val.boundaries : [],
+        signingKey: (val.signingKey as string) ?? '',
+        createdAt: (val.createdAt as string) ?? '',
+        rkey,
+      }
     }
+    return null
   } catch {
     return null
+  }
+}
+
+export async function discoverAllStratosEnrollments(
+  session: OAuthSession,
+): Promise<StratosEnrollment[]> {
+  const agent = new Agent(session)
+  try {
+    const res = await agent.com.atproto.repo.listRecords({
+      repo: session.sub,
+      collection: 'zone.stratos.actor.enrollment',
+      limit: 100,
+    })
+    return res.data.records
+      .map((record) => {
+        const val = record.value as Record<string, unknown>
+        if (typeof val.service !== 'string') return null
+        const rkey = record.uri.split('/').pop() ?? ''
+        return {
+          service: val.service,
+          boundaries: Array.isArray(val.boundaries) ? val.boundaries : [],
+          signingKey: (val.signingKey as string) ?? '',
+          createdAt: (val.createdAt as string) ?? '',
+          rkey,
+        }
+      })
+      .filter((e): e is StratosEnrollment => e !== null)
+  } catch {
+    return []
   }
 }
 

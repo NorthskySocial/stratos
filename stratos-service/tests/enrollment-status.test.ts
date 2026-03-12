@@ -123,6 +123,7 @@ describe('Status endpoint with authentication', () => {
                   pdsEndpoint: 'https://pds.example.com',
                   signingKeyDid: 'did:key:zDnaeTestUser123',
                   active: true,
+                  enrollmentRkey: 'did:web:stratos.example.com',
                 }
               }
               return null
@@ -150,6 +151,9 @@ describe('Status endpoint with authentication', () => {
 
           // signingKey should be included when enrollment has one
           expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // enrollmentRkey should be included
+          expect(body.enrollmentRkey).toBe('did:web:stratos.example.com')
 
           // Boundaries should be included when authenticated
           const returnedBoundaries = body.boundaries as Array<{ value: string }>
@@ -202,6 +206,7 @@ describe('Status endpoint with authentication', () => {
                   pdsEndpoint: 'https://pds.example.com',
                   signingKeyDid: 'did:key:zDnaeTestUser123',
                   active: true,
+                  enrollmentRkey: 'did:web:stratos.example.com',
                 }
               }
               return null
@@ -222,6 +227,9 @@ describe('Status endpoint with authentication', () => {
 
           // signingKey should still be present even when unauthenticated
           expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // enrollmentRkey should be present even when unauthenticated
+          expect(body.enrollmentRkey).toBe('did:web:stratos.example.com')
 
           // Boundaries and attestation should NOT be included when not authenticated
           expect(body.boundaries).toBeUndefined()

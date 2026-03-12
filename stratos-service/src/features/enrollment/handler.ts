@@ -58,6 +58,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             enrolledAt: string
             active: boolean
             signingKey: string
+            enrollmentRkey?: string
             boundaries?: Array<{ value: string }>
             attestation?: { sig: Uint8Array; signingKey: string }
           } = {
@@ -66,6 +67,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             enrolledAt: enrollment.enrolledAt.toISOString(),
             active: enrollment.active,
             signingKey: enrollment.signingKeyDid,
+            enrollmentRkey: enrollment.enrollmentRkey,
           }
 
           // Only include boundaries if authenticated

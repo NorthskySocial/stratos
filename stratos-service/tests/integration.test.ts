@@ -246,6 +246,7 @@ describe('Integration: Full Stratos Flow', () => {
         pdsEndpoint: testPds,
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
+        enrollmentRkey: 'did:web:stratos.test',
       })
 
       const isEnrolled = await enrollmentStore.isEnrolled(testDid)
@@ -253,6 +254,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       const enrollment = await enrollmentStore.getEnrollment(testDid)
       expect(enrollment?.pdsEndpoint).toBe(testPds)
+      expect(enrollment?.enrollmentRkey).toBe('did:web:stratos.test')
     })
   })
 
@@ -265,6 +267,7 @@ describe('Integration: Full Stratos Flow', () => {
         pdsEndpoint: testPds,
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
+        enrollmentRkey: 'did:web:stratos.test',
       })
 
       await actorStore.create(testDid)

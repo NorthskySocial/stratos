@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-import { discoverEnrollment } from '../src/discovery.js'
-import { createServiceFetchHandler, resolveServiceUrl } from '../src/routing.js'
+import { discoverEnrollment, discoverEnrollments } from '../src/discovery.js'
+import {
+  createServiceFetchHandler,
+  resolveServiceUrl,
+  findEnrollmentByService,
+} from '../src/routing.js'
 import {
   buildCollectionScope,
   buildStratosScopes,
@@ -20,7 +24,7 @@ const MOCK_USER_KEY = 'did:key:zDnaeUserSigningKey123'
 const MOCK_SERVICE_KEY = 'did:key:zDnaeServiceKey456'
 
 const mockEnrollmentRecord = (valueOverrides?: Record<string, unknown>) => ({
-  uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
+  uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
   cid: 'bafytest',
   value: {
     service: 'https://stratos.example.com',
@@ -35,6 +39,12 @@ const mockEnrollmentRecord = (valueOverrides?: Record<string, unknown>) => ({
   },
 })
 
+const mockListRecordsResponse = (
+  records: ReturnType<typeof mockEnrollmentRecord>[],
+) => ({
+  records,
+})
+
 describe('discovery', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -42,7 +52,7 @@ describe('discovery', () => {
 
   it('returns enrollment when record exists', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(mockEnrollmentRecord()),
+      jsonResponse(mockListRecordsResponse([mockEnrollmentRecord()])),
     )
 
     const result = await discoverEnrollment(
@@ -56,16 +66,17 @@ describe('discovery', () => {
       signingKey: MOCK_USER_KEY,
       attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
+      rkey: 'did:web:stratos.example.com',
     })
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('com.atproto.repo.getRecord'),
+      expect.stringContaining('com.atproto.repo.listRecords'),
       expect.anything(),
     )
   })
 
-  it('returns null when record does not exist', async () => {
+  it('returns null when no enrollment records exist', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({ error: 'RecordNotFound', message: 'not found' }, 400),
+      jsonResponse(mockListRecordsResponse([])),
     )
 
     const result = await discoverEnrollment(
@@ -77,11 +88,15 @@ describe('discovery', () => {
 
   it('returns null when record has invalid shape', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: { invalid: true },
-      }),
+      jsonResponse(
+        mockListRecordsResponse([
+          {
+            uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
+            cid: 'bafytest',
+            value: { invalid: true },
+          },
+        ]),
+      ),
     )
 
     const result = await discoverEnrollment(
@@ -93,7 +108,11 @@ describe('discovery', () => {
 
   it('normalizes missing boundaries to empty array', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(mockEnrollmentRecord({ boundaries: undefined })),
+      jsonResponse(
+        mockListRecordsResponse([
+          mockEnrollmentRecord({ boundaries: undefined }),
+        ]),
+      ),
     )
 
     const result = await discoverEnrollment(
@@ -105,7 +124,9 @@ describe('discovery', () => {
 
   it('accepts a FetchHandler instead of a PDS URL', async () => {
     const mockHandler = vi.fn(async () =>
-      jsonResponse(mockEnrollmentRecord({ boundaries: [] })),
+      jsonResponse(
+        mockListRecordsResponse([mockEnrollmentRecord({ boundaries: [] })]),
+      ),
     )
 
     const result = await discoverEnrollment('did:plc:test123', mockHandler)
@@ -116,11 +137,46 @@ describe('discovery', () => {
       signingKey: MOCK_USER_KEY,
       attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
+      rkey: 'did:web:stratos.example.com',
     })
     expect(mockHandler).toHaveBeenCalledWith(
-      expect.stringContaining('com.atproto.repo.getRecord'),
+      expect.stringContaining('com.atproto.repo.listRecords'),
       expect.anything(),
     )
+  })
+
+  it('discovers multiple enrollments', async () => {
+    const record1 = mockEnrollmentRecord()
+    const record2 = {
+      ...mockEnrollmentRecord({ service: 'https://stratos2.example.com' }),
+      uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos2.example.com',
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(mockListRecordsResponse([record1, record2])),
+    )
+
+    const results = await discoverEnrollments(
+      'did:plc:test123',
+      'https://pds.example.com',
+    )
+
+    expect(results).toHaveLength(2)
+    expect(results[0].rkey).toBe('did:web:stratos.example.com')
+    expect(results[0].service).toBe('https://stratos.example.com')
+    expect(results[1].rkey).toBe('did:web:stratos2.example.com')
+    expect(results[1].service).toBe('https://stratos2.example.com')
+  })
+
+  it('returns empty array when no records exist', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(mockListRecordsResponse([])),
+    )
+
+    const results = await discoverEnrollments(
+      'did:plc:test123',
+      'https://pds.example.com',
+    )
+    expect(results).toEqual([])
   })
 })
 
@@ -187,6 +243,56 @@ describe('routing', () => {
     it('returns fallback URL when not enrolled', () => {
       const url = resolveServiceUrl(null, 'https://pds.example.com')
       expect(url).toBe('https://pds.example.com')
+    })
+  })
+
+  describe('findEnrollmentByService', () => {
+    const makeEnrollment = (service: string, rkey: string) => ({
+      service,
+      boundaries: [],
+      signingKey: MOCK_USER_KEY,
+      attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
+      createdAt: '2025-01-01T00:00:00Z',
+      rkey,
+    })
+
+    it('finds enrollment matching service URL', () => {
+      const enrollments = [
+        makeEnrollment('https://stratos-a.example.com', 'rkey1'),
+        makeEnrollment('https://stratos-b.example.com', 'rkey2'),
+      ]
+      const result = findEnrollmentByService(
+        enrollments,
+        'https://stratos-b.example.com',
+      )
+      expect(result?.rkey).toBe('rkey2')
+    })
+
+    it('matches with trailing slash normalization', () => {
+      const enrollments = [
+        makeEnrollment('https://stratos.example.com/', 'rkey1'),
+      ]
+      const result = findEnrollmentByService(
+        enrollments,
+        'https://stratos.example.com',
+      )
+      expect(result?.rkey).toBe('rkey1')
+    })
+
+    it('returns null when no match', () => {
+      const enrollments = [
+        makeEnrollment('https://stratos.example.com', 'rkey1'),
+      ]
+      const result = findEnrollmentByService(
+        enrollments,
+        'https://other.example.com',
+      )
+      expect(result).toBeNull()
+    })
+
+    it('returns null for empty array', () => {
+      const result = findEnrollmentByService([], 'https://stratos.example.com')
+      expect(result).toBeNull()
     })
   })
 })
