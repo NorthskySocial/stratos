@@ -10,6 +10,7 @@ export interface StratosEnrollment {
   signingKey: string
   attestation: ServiceAttestation
   createdAt: string
+  rkey: string
 }
 
 /**

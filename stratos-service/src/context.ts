@@ -333,6 +333,7 @@ export class SqliteEnrollmentStore
         pdsEndpoint: record.pdsEndpoint ?? null,
         signingKeyDid: record.signingKeyDid,
         active: record.active ? 'true' : 'false',
+        enrollmentRkey: record.enrollmentRkey ?? null,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -341,6 +342,7 @@ export class SqliteEnrollmentStore
           pdsEndpoint: record.pdsEndpoint ?? null,
           signingKeyDid: record.signingKeyDid,
           active: record.active ? 'true' : 'false',
+          enrollmentRkey: record.enrollmentRkey ?? null,
         },
       })
 
@@ -384,6 +386,26 @@ export class SqliteEnrollmentStore
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
+    }
+  }
+
+  async updateEnrollment(
+    did: string,
+    updates: Partial<Omit<EnrollmentRecord, 'did'>>,
+  ): Promise<void> {
+    const setValues: Record<string, unknown> = {}
+    if (updates.enrolledAt !== undefined) setValues.enrolledAt = updates.enrolledAt
+    if (updates.pdsEndpoint !== undefined) setValues.pdsEndpoint = updates.pdsEndpoint
+    if (updates.signingKeyDid !== undefined) setValues.signingKeyDid = updates.signingKeyDid
+    if (updates.active !== undefined) setValues.active = updates.active ? 'true' : 'false'
+    if (updates.enrollmentRkey !== undefined) setValues.enrollmentRkey = updates.enrollmentRkey
+
+    if (Object.keys(setValues).length > 0) {
+      await this.db
+        .update(enrollment)
+        .set(setValues)
+        .where(eq(enrollment.did, did))
     }
   }
 
@@ -407,6 +429,7 @@ export class SqliteEnrollmentStore
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
     }))
   }
 

@@ -11,6 +11,7 @@ export interface Enrollment {
   pdsEndpoint: string
   signingKeyDid: string
   active: boolean
+  enrollmentRkey?: string
 }
 
 /**
