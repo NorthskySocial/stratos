@@ -362,6 +362,7 @@ describe('PostgreSQL Backend Integration', () => {
         pdsEndpoint: 'https://pds.example.com',
         signingKeyDid: 'did:key:zSpikeSpiegelBebop1',
         active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
       })
 
       expect(await enrollmentStore.isEnrolled(testDid)).toBe(true)
@@ -378,12 +379,14 @@ describe('PostgreSQL Backend Integration', () => {
         pdsEndpoint: 'https://pds.example.com',
         signingKeyDid: 'did:key:zFayeValentineBebop1',
         active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
       })
 
       const enrollment = await enrollmentStore.getEnrollment(testDid)
       expect(enrollment).toBeTruthy()
       expect(enrollment!.did).toBe(testDid)
       expect(enrollment!.pdsEndpoint).toBe('https://pds.example.com')
+      expect(enrollment!.enrollmentRkey).toBe('did:web:stratos.example.com')
     })
 
     it('should manage boundaries', async () => {
@@ -439,6 +442,88 @@ describe('PostgreSQL Backend Integration', () => {
 
       const enrollments = await enrollmentStore.listEnrollments()
       expect(enrollments.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('should store and retrieve enrollmentRkey', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zMusashiMiyamotoBebop1',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should return undefined enrollmentRkey when not set', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zLinBebop1',
+        active: true,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.enrollmentRkey).toBeUndefined()
+    })
+
+    it('should update enrollmentRkey on re-enrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zAndieBebop1',
+        active: true,
+        enrollmentRkey: 'did:web:old-stratos.example.com',
+      })
+
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zAndieBebop1',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should update enrollmentRkey via updateEnrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zGrenBebop1',
+        active: true,
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should update pdsEndpoint without affecting enrollmentRkey', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        pdsEndpoint: 'https://old.pds.com',
+        signingKeyDid: 'did:key:zPunchBebop1',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        pdsEndpoint: 'https://new.pds.com',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.pdsEndpoint).toBe('https://new.pds.com')
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
     })
   })
 })

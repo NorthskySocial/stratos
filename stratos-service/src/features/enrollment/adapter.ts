@@ -75,6 +75,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       pdsEndpoint: record.pdsEndpoint ?? '',
       signingKeyDid: record.signingKeyDid,
       active: record.active,
+      enrollmentRkey: record.enrollmentRkey,
     }
   }
 
@@ -124,25 +125,29 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
     did: string,
     serviceEndpoint: string,
     boundaries: string[],
-  ): Promise<void> {
+  ): Promise<string> {
     const agent = await this.getAgent(did)
     if (!agent) {
       throw new NotEnrolledError(did)
     }
 
-    await agent.api.com.atproto.repo.putRecord({
+    const res = await agent.api.com.atproto.repo.createRecord({
       repo: did,
       collection: 'zone.stratos.actor.enrollment',
-      rkey: 'self',
       record: {
         service: serviceEndpoint,
         boundaries: boundaries.map((value) => ({ value })),
         createdAt: new Date().toISOString(),
       },
     })
+
+    // Extract rkey from the returned URI: at://did/collection/rkey
+    const uri: string = res.data.uri
+    const rkey = uri.split('/').pop()!
+    return rkey
   }
 
-  async deleteEnrollmentRecord(did: string): Promise<void> {
+  async deleteEnrollmentRecord(did: string, rkey: string): Promise<void> {
     const agent = await this.getAgent(did)
     if (!agent) {
       throw new NotEnrolledError(did)
@@ -151,7 +156,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
     await agent.api.com.atproto.repo.deleteRecord({
       repo: did,
       collection: 'zone.stratos.actor.enrollment',
-      rkey: 'self',
+      rkey: rkey || 'self',
     })
   }
 }

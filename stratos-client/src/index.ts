@@ -10,8 +10,17 @@ export type {
   VerifiedRecord,
 } from './types.js'
 
-export { discoverEnrollment } from './discovery.js'
-export { createServiceFetchHandler, resolveServiceUrl } from './routing.js'
+export {
+  discoverEnrollment,
+  discoverEnrollments,
+  getEnrollmentByServiceDid,
+} from './discovery.js'
+export {
+  createServiceFetchHandler,
+  resolveServiceUrl,
+  findEnrollmentByService,
+  serviceDIDToRkey,
+} from './routing.js'
 export {
   verifyCidIntegrity,
   resolveServiceSigningKey,
