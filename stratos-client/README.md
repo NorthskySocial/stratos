@@ -121,7 +121,7 @@ AT Protocol rkeys cannot contain `%` characters, but `did:web` DIDs with ports u
 import { serviceDIDToRkey } from '@northskysocial/stratos-client'
 
 serviceDIDToRkey('did:web:stratos.example.com') // => 'did:web:stratos.example.com'
-serviceDIDToRkey('did:web:localhost%3A3100')     // => 'did:web:localhost:3100'
+serviceDIDToRkey('did:web:localhost%3A3100') // => 'did:web:localhost:3100'
 ```
 
 ### Enrollment selection

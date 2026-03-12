@@ -51,9 +51,7 @@ export async function waitForHealthy(
 }
 
 /** Check enrollment status (no auth required) */
-export async function enrollmentStatus(
-  did: string,
-): Promise<{
+export async function enrollmentStatus(did: string): Promise<{
   did: string
   enrolled: boolean
   enrolledAt?: string
