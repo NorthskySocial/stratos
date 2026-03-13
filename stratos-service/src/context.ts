@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import { readFileSync, readdirSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { EventEmitter } from 'node:events'
 import express from 'express'
 import { eq, gt, asc, desc, sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
@@ -748,8 +749,21 @@ export interface AppContext {
     userDidKey: string,
   ): Promise<{ sig: Uint8Array; signingKey: string }>
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
+  enrollmentEvents: EnrollmentEventEmitter
   destroy: () => Promise<void>
 }
+
+export interface EnrollmentEvent {
+  did: string
+  action: 'enroll' | 'unenroll'
+  service?: string
+  boundaries?: string[]
+  time: string
+}
+
+export type EnrollmentEventEmitter = EventEmitter<{
+  enrollment: [EnrollmentEvent]
+}>
 
 /**
  * Application context options
@@ -946,6 +960,8 @@ export async function createAppContext(
     })
   }
 
+  const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
+
   const enrollmentService = new EnrollmentServiceImpl(
     enrollmentStore,
     async (did) => {
@@ -957,6 +973,9 @@ export async function createAppContext(
         await signAndPersistCommit(store.repo, signingKey, unsigned)
       })
     },
+    logger,
+    enrollmentEvents,
+    cfg.service.publicUrl,
   )
 
   // Resolves per-user boundaries from storage
@@ -1048,6 +1067,7 @@ export async function createAppContext(
     logger,
     createAttestation,
     dpopVerifier,
+    enrollmentEvents,
     destroy: destroyBackend,
   }
 }
