@@ -3,9 +3,9 @@
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
   import { init, signOut } from './lib/auth'
-  import { discoverStratosEnrollment, STRATOS_URL, type StratosEnrollment } from './lib/stratos'
-  import { createStratosAgent } from './lib/stratos-agent'
-  import { fetchPublicPosts, fetchStratosPosts, buildUnifiedFeed, type FeedPost } from './lib/feed'
+  import { discoverStratosEnrollment, STRATOS_URL, APPVIEW_URL, type StratosEnrollment } from './lib/stratos'
+  import { createServiceAgent, createStratosAgent } from './lib/stratos-agent'
+  import { fetchPublicPosts, fetchRepoPublicPosts, fetchStratosPosts, fetchAppviewStratosPosts, buildUnifiedFeed, type FeedPost } from './lib/feed'
   import LoginScreen from './lib/LoginScreen.svelte'
   import EnrollmentIndicator from './lib/EnrollmentIndicator.svelte'
   import Composer from './lib/Composer.svelte'
@@ -13,9 +13,11 @@
 
   let session: OAuthSession | null = $state(null)
   let enrollment: StratosEnrollment | null = $state(null)
+  let appviewAgent: Agent | null = $state(null)
   let stratosAgent: Agent | null = $state(null)
   let posts: FeedPost[] = $state([])
   let loading = $state(true)
+  let did = $state('')
   let handle = $state('')
   let serviceUrl = $state(STRATOS_URL ?? '')
 
@@ -24,7 +26,10 @@
     try {
       session = await init()
       if (session) {
-        handle = session.sub
+        did = session.sub
+        const agent = new Agent(session)
+        const profile = await agent.com.atproto.repo.describeRepo({ repo: session.sub })
+        handle = profile.data.handle
         await discoverAndLoad()
       }
     } catch (err) {
@@ -36,6 +41,10 @@
 
   async function discoverAndLoad() {
     if (!session) return
+
+    if (APPVIEW_URL) {
+      appviewAgent = createServiceAgent(session, APPVIEW_URL)
+    }
 
     enrollment = await discoverStratosEnrollment(session)
 
@@ -51,11 +60,18 @@
   async function refreshFeed() {
     if (!session) return
 
-    const pdsAgent = new Agent(session)
-    const publicPosts = await fetchPublicPosts(pdsAgent, session.sub)
+    const publicPosts = appviewAgent
+      ? await fetchPublicPosts(appviewAgent, session.sub)
+      : await fetchRepoPublicPosts(new Agent(session), session.sub)
 
     let stratosPosts: FeedPost[] = []
-    if (stratosAgent) {
+    if (APPVIEW_URL) {
+      stratosPosts = await fetchAppviewStratosPosts(
+        session,
+        APPVIEW_URL,
+        session.sub,
+      )
+    } else if (stratosAgent) {
       stratosPosts = await fetchStratosPosts(stratosAgent, session.sub)
     }
 
@@ -66,9 +82,11 @@
     await signOut()
     session = null
     enrollment = null
+    appviewAgent = null
     stratosAgent = null
     posts = []
     handle = ''
+    did = ''
   }
 
   onMount(() => {
@@ -90,7 +108,7 @@
       <header class="app-header">
         <div>
           <h1>Stratos</h1>
-          <p class="session-label">{handle}</p>
+          <p class="session-label">{did}</p>
         </div>
         <button class="sign-out" onclick={handleSignOut}>Log Out</button>
       </header>
