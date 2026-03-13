@@ -1,7 +1,7 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 
-import type { AppContext } from '../context.js'
+import type { AppContext, EnrollmentEvent } from '../context.js'
 
 /**
  * Sequence event from stratos_seq table
@@ -46,19 +46,132 @@ export interface InfoMessage {
 }
 
 /**
+ * Enrollment message for subscription
+ */
+export interface EnrollmentMessage {
+  $type: 'zone.stratos.sync.subscribeRecords#enrollment'
+  did: string
+  action: 'enroll' | 'unenroll'
+  service?: string
+  boundaries?: string[]
+  time: string
+}
+
+/**
  * Parameters for subscribeRecords
  */
 export interface SubscribeRecordsParams {
-  did: string
+  did?: string
   cursor?: number
   domain?: string
   syncToken?: string
 }
 
+type SubscriptionMessage = CommitMessage | InfoMessage | EnrollmentMessage
+
 /**
- * Create the subscribeRecords stream handler
+ * Create the per-actor subscribeRecords stream handler.
+ * Subscribes to record commits for a specific actor.
+ */
+function createActorSubscriptionHandler(ctx: AppContext) {
+  return async function* subscribeActorRecords(
+    did: string,
+    cursor: number | undefined,
+    domain: string | undefined,
+    signal: AbortSignal,
+  ): AsyncGenerator<SubscriptionMessage> {
+    const exists = await ctx.actorStore.exists(did)
+    if (!exists) {
+      throw new InvalidRequestError('Account not found', 'NotFound')
+    }
+
+    const latestSeq = await getLatestSeq(ctx, did)
+    if (cursor !== undefined && cursor > latestSeq) {
+      throw new InvalidRequestError('Cursor is in the future', 'FutureCursor')
+    }
+
+    const oldestSeq = await getOldestSeq(ctx, did)
+    if (cursor !== undefined && cursor < oldestSeq) {
+      yield {
+        $type: 'zone.stratos.sync.subscribeRecords#info',
+        name: 'OutdatedCursor',
+        message: `Cursor ${cursor} is too old, some events may be missed`,
+      }
+    }
+
+    let lastSeq = cursor ?? 0
+    const catchUp = await getEventsSince(ctx, did, lastSeq)
+
+    for (const event of catchUp) {
+      if (signal.aborted) return
+      if (domain && !matchesDomain(event, domain)) continue
+      yield formatEvent(event)
+      lastSeq = event.seq
+    }
+
+    while (!signal.aborted) {
+      await sleep(500)
+      if (signal.aborted) return
+
+      const newEvents = await getEventsSince(ctx, did, lastSeq)
+      for (const event of newEvents) {
+        if (signal.aborted) return
+        if (domain && !matchesDomain(event, domain)) continue
+        yield formatEvent(event)
+        lastSeq = event.seq
+      }
+    }
+  }
+}
+
+/**
+ * Create the service-level subscription handler.
+ * Streams enrollment events to connected clients.
+ */
+function createServiceSubscriptionHandler(ctx: AppContext) {
+  return async function* subscribeServiceEvents(
+    signal: AbortSignal,
+  ): AsyncGenerator<SubscriptionMessage> {
+    const eventQueue: EnrollmentEvent[] = []
+
+    const onEnrollment = (event: EnrollmentEvent) => {
+      eventQueue.push(event)
+    }
+
+    ctx.enrollmentEvents.on('enrollment', onEnrollment)
+
+    try {
+      while (!signal.aborted) {
+        while (eventQueue.length > 0) {
+          if (signal.aborted) return
+          const event = eventQueue.shift()!
+          yield {
+            $type: 'zone.stratos.sync.subscribeRecords#enrollment',
+            did: event.did,
+            action: event.action,
+            service: event.service,
+            boundaries: event.boundaries,
+            time: event.time,
+          }
+        }
+
+        await sleep(500)
+      }
+    } finally {
+      ctx.enrollmentEvents.off('enrollment', onEnrollment)
+    }
+  }
+}
+
+/**
+ * Create the subscribeRecords stream handler.
+ * - With `did`: per-actor record commit stream (existing behavior)
+ * - Without `did`: service-level enrollment event stream
  */
 export function createSubscribeRecordsHandler(ctx: AppContext) {
+  const actorHandler = createActorSubscriptionHandler(ctx)
+  const serviceHandler = createServiceSubscriptionHandler(ctx)
+
   return async function* subscribeRecords(
     params: SubscribeRecordsParams,
     auth: {
@@ -70,79 +183,26 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
       }
     },
     signal: AbortSignal,
-  ): AsyncGenerator<CommitMessage | InfoMessage> {
+  ): AsyncGenerator<SubscriptionMessage> {
     const { did, cursor, domain } = params
-
-    // Validate authentication
-    const callerDid = auth?.credentials?.did
     const isServiceAuth = auth?.credentials?.type === 'service'
-    const isOwnerAuth = callerDid === did
 
-    if (!isOwnerAuth && !isServiceAuth) {
-      throw new AuthRequiredError(
-        'Service auth or owner authentication required',
-      )
-    }
-
-    // Check if actor store exists
-    const exists = await ctx.actorStore.exists(did)
-    if (!exists) {
-      throw new InvalidRequestError('Account not found', 'NotFound')
-    }
-
-    // If cursor is in the future, error
-    const latestSeq = await getLatestSeq(ctx, did)
-    if (cursor !== undefined && cursor > latestSeq) {
-      throw new InvalidRequestError('Cursor is in the future', 'FutureCursor')
-    }
-
-    // If cursor is outdated, send info message
-    const oldestSeq = await getOldestSeq(ctx, did)
-    if (cursor !== undefined && cursor < oldestSeq) {
-      yield {
-        $type: 'zone.stratos.sync.subscribeRecords#info',
-        name: 'OutdatedCursor',
-        message: `Cursor ${cursor} is too old, some events may be missed`,
+    if (did) {
+      const callerDid = auth?.credentials?.did
+      const isOwnerAuth = callerDid === did
+      if (!isOwnerAuth && !isServiceAuth) {
+        throw new AuthRequiredError(
+          'Service auth or owner authentication required',
+        )
       }
-    }
-
-    // Emit historical events from cursor
-    let lastSeq = cursor ?? 0
-    const catchUp = await getEventsSince(ctx, did, lastSeq)
-
-    for (const event of catchUp) {
-      if (signal.aborted) return
-
-      // Filter by domain if specified
-      if (domain && !matchesDomain(event, domain)) {
-        continue
+      yield* actorHandler(did, cursor, domain, signal)
+    } else {
+      if (!isServiceAuth) {
+        throw new AuthRequiredError(
+          'Service auth required for service-level subscription',
+        )
       }
-
-      yield formatEvent(event)
-      lastSeq = event.seq
-    }
-
-    // Now poll for new events
-    while (!signal.aborted) {
-      // Wait a bit before polling
-      await sleep(500)
-
-      if (signal.aborted) return
-
-      // Check for new events
-      const newEvents = await getEventsSince(ctx, did, lastSeq)
-
-      for (const event of newEvents) {
-        if (signal.aborted) return
-
-        // Filter by domain if specified
-        if (domain && !matchesDomain(event, domain)) {
-          continue
-        }
-
-        yield formatEvent(event)
-        lastSeq = event.seq
-      }
+      yield* serviceHandler(signal)
     }
   }
 }
