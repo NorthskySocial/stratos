@@ -4,15 +4,14 @@
   "defs": {
     "main": {
       "type": "subscription",
-      "description": "Subscribe to stratos record updates for a specific account. AppViews must provide a signed service JWT via syncToken. Account owners may authenticate via the Authorization header instead.",
+      "description": "Subscribe to stratos events. When 'did' is provided, subscribes to record updates for that account. When omitted, subscribes to service-level events (enrollments). AppViews must provide a signed service JWT via syncToken.",
       "parameters": {
         "type": "params",
-        "required": ["did"],
         "properties": {
           "did": {
             "type": "string",
             "format": "did",
-            "description": "The DID of the account to subscribe to."
+            "description": "The DID of the account to subscribe to. If omitted, subscribes to service-level enrollment events."
           },
           "cursor": {
             "type": "integer",
@@ -32,7 +31,7 @@
       "message": {
         "schema": {
           "type": "union",
-          "refs": ["#commit", "#info"]
+          "refs": ["#commit", "#enrollment", "#info"]
         }
       },
       "errors": [
@@ -112,6 +111,39 @@
           "type": "string",
           "maxLength": 1024,
           "description": "Additional details about the info message."
+        }
+      }
+    },
+    "enrollment": {
+      "type": "object",
+      "description": "An enrollment event indicating a user has enrolled or unenrolled from the service.",
+      "required": ["did", "action", "time"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of the user."
+        },
+        "action": {
+          "type": "string",
+          "knownValues": ["enroll", "unenroll"],
+          "maxLength": 32,
+          "description": "The enrollment action."
+        },
+        "service": {
+          "type": "string",
+          "format": "uri",
+          "description": "The Stratos service endpoint URL."
+        },
+        "boundaries": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The boundaries assigned to the user."
+        },
+        "time": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Timestamp of the enrollment event."
         }
       }
     }
