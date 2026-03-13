@@ -24,7 +24,10 @@ export interface FeedPost {
   hasReply: boolean
 }
 
-function mapFeedViewPosts(feed: FeedViewPost[], isPrivate: boolean): FeedPost[] {
+function mapFeedViewPosts(
+  feed: FeedViewPost[],
+  isPrivate: boolean,
+): FeedPost[] {
   return feed.flatMap((item) => {
     if (!item.post || item.reason) {
       return []
@@ -36,8 +39,7 @@ function mapFeedViewPosts(feed: FeedViewPost[], isPrivate: boolean): FeedPost[] 
         uri: item.post.uri,
         cid: item.post.cid,
         text: (val.text as string) ?? '',
-        createdAt:
-          (val.createdAt as string) ?? item.post.indexedAt ?? '',
+        createdAt: (val.createdAt as string) ?? item.post.indexedAt ?? '',
         isPrivate,
         hasReply: !!val.reply,
       },
