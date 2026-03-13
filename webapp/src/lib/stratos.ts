@@ -5,6 +5,10 @@ export const STRATOS_URL = import.meta.env.VITE_STRATOS_URL as
   | string
   | undefined
 
+export const APPVIEW_URL = import.meta.env.VITE_APPVIEW_URL as
+  | string
+  | undefined
+
 export interface StratosEnrollment {
   service: string
   boundaries: Array<{ value: string }>
