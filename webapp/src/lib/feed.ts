@@ -1,4 +1,19 @@
 import type { Agent } from '@atproto/api'
+import type { OAuthSession } from '@atproto/oauth-client-browser'
+
+interface FeedViewPost {
+  post?: {
+    uri: string
+    cid: string
+    record?: Record<string, unknown>
+    indexedAt?: string
+  }
+  reason?: unknown
+}
+
+interface StratosAuthorFeedResponse {
+  feed?: FeedViewPost[]
+}
 
 export interface FeedPost {
   uri: string
@@ -9,7 +24,28 @@ export interface FeedPost {
   hasReply: boolean
 }
 
-export async function fetchPublicPosts(
+function mapFeedViewPosts(feed: FeedViewPost[], isPrivate: boolean): FeedPost[] {
+  return feed.flatMap((item) => {
+    if (!item.post || item.reason) {
+      return []
+    }
+
+    const val = item.post.record ?? {}
+    return [
+      {
+        uri: item.post.uri,
+        cid: item.post.cid,
+        text: (val.text as string) ?? '',
+        createdAt:
+          (val.createdAt as string) ?? item.post.indexedAt ?? '',
+        isPrivate,
+        hasReply: !!val.reply,
+      },
+    ]
+  })
+}
+
+export async function fetchRepoPublicPosts(
   agent: Agent,
   did: string,
 ): Promise<FeedPost[]> {
@@ -30,6 +66,22 @@ export async function fetchPublicPosts(
         hasReply: !!val.reply,
       }
     })
+  } catch {
+    return []
+  }
+}
+
+export async function fetchPublicPosts(
+  agent: Agent,
+  did: string,
+): Promise<FeedPost[]> {
+  try {
+    const res = await agent.app.bsky.feed.getAuthorFeed({
+      actor: did,
+      filter: 'posts_with_replies',
+      limit: 50,
+    })
+    return mapFeedViewPosts(res.data.feed as FeedViewPost[], false)
   } catch {
     return []
   }
@@ -56,6 +108,28 @@ export async function fetchStratosPosts(
         hasReply: !!val.reply,
       }
     })
+  } catch {
+    return []
+  }
+}
+
+export async function fetchAppviewStratosPosts(
+  session: OAuthSession,
+  appviewUrl: string,
+  did: string,
+): Promise<FeedPost[]> {
+  try {
+    const url = new URL('/xrpc/zone.stratos.feed.getAuthorFeed', appviewUrl)
+    url.searchParams.set('actor', did)
+    url.searchParams.set('limit', '50')
+
+    const res = await session.fetchHandler(url.href, { method: 'GET' })
+    if (!res.ok) {
+      return []
+    }
+
+    const body = (await res.json()) as StratosAuthorFeedResponse
+    return mapFeedViewPosts(body.feed ?? [], true)
   } catch {
     return []
   }
