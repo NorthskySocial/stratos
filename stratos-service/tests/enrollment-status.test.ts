@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
 import express, { type Router } from 'express'
-import type { AppContext } from '../src/context.js'
-import { registerEnrollmentHandlers } from '../src/features/enrollment/handler.js'
+import type { AppContext } from '../src'
+import { registerEnrollmentHandlers } from '../src/features'
 import type { Enrollment } from '@northskysocial/stratos-core'
 
 function didArb(): fc.Arbitrary<string> {

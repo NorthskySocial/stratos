@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-import { discoverEnrollment } from '../src/discovery.js'
-import { createServiceFetchHandler, resolveServiceUrl } from '../src/routing.js'
+import { discoverEnrollment } from '../src'
+import { createServiceFetchHandler, resolveServiceUrl } from '../src'
 import {
   buildCollectionScope,
   buildStratosScopes,
   STRATOS_SCOPES,
-} from '../src/scopes.js'
+} from '../src'
 
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

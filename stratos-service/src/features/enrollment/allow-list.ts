@@ -1,4 +1,4 @@
-import { type Logger, type Cache } from '@northskysocial/stratos-core'
+import { type Cache, type Logger } from '@northskysocial/stratos-core'
 
 export interface AllowListProvider {
   isAllowed(did: string): Promise<boolean>
@@ -37,8 +37,7 @@ export class ExternalAllowListProvider implements AllowListProvider {
     }
 
     if (this.cache && this.bootstrapName) {
-      const exists = await this.cache.sismember(this.bootstrapName, did)
-      return exists
+      return await this.cache.sismember(this.bootstrapName, did)
     }
 
     return false

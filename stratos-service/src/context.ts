@@ -60,7 +60,7 @@ import { StubWriterServiceImpl } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-} from './features/mst/index.js'
+} from './features/index.js'
 import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
@@ -93,8 +93,8 @@ import {
   migrateServicePgDb,
   closeServicePgDb,
 } from './db/pg.js'
-import { PgEnrollmentStoreWriter } from './adapters/postgres/enrollment-store.js'
-import { PostgresActorStore } from './adapters/postgres/actor-store.js'
+import { PgEnrollmentStoreWriter } from './adapters/index.js'
+import { PostgresActorStore } from './adapters/index.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 import { RedisCache } from './adapters/redis-cache.js'

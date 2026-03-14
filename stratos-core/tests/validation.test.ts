@@ -6,8 +6,8 @@ import {
   isBskyUri,
   isStratosCollection,
   extractBoundaryDomains,
-} from '../src/index.js'
-import { StratosConfig, StratosValidationError } from '../src/types.js'
+} from '../src'
+import { StratosConfig, StratosValidationError } from '../src'
 
 describe('stratos-validation', () => {
   const validConfig: StratosConfig = {

@@ -9,11 +9,11 @@ import {
   parseServiceEndpoint,
   isLocalService,
   createHydrationContext,
-} from '../src/hydration/index.js'
+} from '../src'
 import type {
   HydrationContext,
   AccessCheckInput,
-} from '../src/hydration/index.js'
+} from '../src'
 
 describe('Hydration Domain', () => {
   describe('canAccessRecord', () => {

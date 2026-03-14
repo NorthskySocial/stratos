@@ -4,7 +4,7 @@ import * as AtcuteCid from '@atcute/cid'
 import { decode as cborDecode, isBytes, fromBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { MemoryBlockStore } from '@atcute/mst'
-import { signAndPersistCommit } from '../src/features/mst/signer.js'
+import { signAndPersistCommit } from '../src/features'
 import {
   buildCommit,
   type UnsignedCommitData,
