@@ -22,12 +22,12 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
 
   async isEnrolled(did: string): Promise<boolean> {
     const rows = await this.db
-      .select({ did: enrollment.did })
+      .select({ did: enrollment.did, active: enrollment.active })
       .from(enrollment)
       .where(eq(enrollment.did, did))
       .limit(1)
 
-    return rows.length > 0
+    return rows.length > 0 && rows[0].active === 'true'
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -44,6 +44,8 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }
   }
 
@@ -65,6 +67,8 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }))
   }
 
@@ -100,12 +104,16 @@ export class SqliteEnrollmentStoreWriter
         did: data.did,
         enrolledAt: data.enrolledAt,
         pdsEndpoint: data.pdsEndpoint ?? null,
+        signingKeyDid: data.signingKeyDid,
+        active: data.active ? 'true' : 'false',
       })
       .onConflictDoUpdate({
         target: enrollment.did,
         set: {
           enrolledAt: data.enrolledAt,
           pdsEndpoint: data.pdsEndpoint ?? null,
+          signingKeyDid: data.signingKeyDid,
+          active: data.active ? 'true' : 'false',
         },
       })
 
@@ -118,7 +126,11 @@ export class SqliteEnrollmentStoreWriter
     await this.db
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
-    await this.db.delete(enrollment).where(eq(enrollment.did, did))
+
+    await this.db
+      .update(enrollment)
+      .set({ active: 'false' })
+      .where(eq(enrollment.did, did))
   }
 
   async updateEnrollment(
@@ -132,6 +144,12 @@ export class SqliteEnrollmentStoreWriter
     }
     if (updates.pdsEndpoint !== undefined) {
       setValues.pdsEndpoint = updates.pdsEndpoint
+    }
+    if (updates.signingKeyDid !== undefined) {
+      setValues.signingKeyDid = updates.signingKeyDid
+    }
+    if (updates.active !== undefined) {
+      setValues.active = updates.active ? 'true' : 'false'
     }
 
     if (Object.keys(setValues).length > 0) {

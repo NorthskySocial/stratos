@@ -1,21 +1,31 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { readFileSync, readdirSync } from 'node:fs'
+import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
-import { eq, gt, asc, sql } from 'drizzle-orm'
+import { eq, gt, asc, desc, sql } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
-import { Server as XrpcServer, XRPCError } from '@atproto/xrpc-server'
+import {
+  Server as XrpcServer,
+  XRPCError,
+  AuthRequiredError,
+  InvalidRequestError,
+  type StreamAuthVerifier,
+  type StreamAuthContext,
+} from '@atproto/xrpc-server'
 import { schemas as atprotoSchemas, Agent } from '@atproto/api'
 import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
+import { verifyServiceAuth } from './auth/verifier.js'
 
 import {
   createStratosDb,
   migrateStratosDb,
   closeStratosDb,
+  stratosSeq,
   type StratosDbOrTx,
   StratosRecordReader,
   StratosRecordTransactor,
@@ -32,7 +42,14 @@ import {
   type EnrollmentStoreReader,
   type StoredEnrollment,
   type ListEnrollmentsOptions,
+  createAttestationPayload,
 } from '@northskysocial/stratos-core'
+import type {
+  SequenceOperations,
+  ActorReader,
+  ActorTransactor,
+  ActorStore,
+} from './actor-store-types.js'
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
@@ -50,7 +67,12 @@ import {
   type StratosServiceConfig,
   getServiceDidWithFragment,
 } from './config.js'
-import { createOAuthClient, OAUTH_SCOPE } from './oauth/client.js'
+import {
+  createOAuthClient,
+  OAUTH_SCOPE,
+  createSqliteOAuthStores,
+  createPgOAuthStores,
+} from './oauth/client.js'
 import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
 import {
   createServiceDb,
@@ -65,42 +87,82 @@ import {
   DpopVerifier,
   DpopVerificationError,
 } from './auth/index.js'
-
-/**
- * Per-actor Stratos store for reading
- */
-export interface StratosActorReader {
-  did: string
-  record: StratosRecordReader
-  repo: StratosSqlRepoReader
-  blob: StratosBlobReader
-}
-
-/**
- * Per-actor Stratos store for writing
- */
-export interface StratosActorTransactor {
-  did: string
-  db: StratosDbOrTx
-  record: StratosRecordTransactor
-  repo: StratosSqlRepoTransactor
-  blob: StratosBlobTransactor
-}
-
-/**
- * Enrolled actor database schema
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-interface EnrollmentTable {
-  did: string
-  enrolledAt: string
-  pdsEndpoint: string | null
-}
+import {
+  createServicePgDb,
+  checkServicePgDbStartup,
+  migrateServicePgDb,
+  closeServicePgDb,
+} from './db/pg.js'
+import { PgEnrollmentStoreWriter } from './adapters/postgres/enrollment-store.js'
+import { PostgresActorStore } from './adapters/postgres/actor-store.js'
+import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
+import { VERSION } from './version.js'
 
 /**
  * Actor store manager for Stratos
  */
-export class StratosActorStore {
+class SqliteSequenceOps implements SequenceOperations {
+  constructor(private db: StratosDbOrTx) {}
+
+  async getLatestSeq(): Promise<number> {
+    const rows = await this.db
+      .select({ seq: stratosSeq.seq })
+      .from(stratosSeq)
+      .orderBy(desc(stratosSeq.seq))
+      .limit(1)
+    return rows[0]?.seq ?? 0
+  }
+
+  async getOldestSeq(): Promise<number> {
+    const rows = await this.db
+      .select({ seq: stratosSeq.seq })
+      .from(stratosSeq)
+      .orderBy(asc(stratosSeq.seq))
+      .limit(1)
+    return rows[0]?.seq ?? 0
+  }
+
+  async getEventsSince(
+    cursor: number,
+    limit = 100,
+  ): Promise<
+    Array<{
+      seq: number
+      did: string
+      eventType: string
+      event: Buffer
+      invalidated: number
+      sequencedAt: string
+    }>
+  > {
+    const rows = await this.db
+      .select()
+      .from(stratosSeq)
+      .where(gt(stratosSeq.seq, cursor))
+      .orderBy(asc(stratosSeq.seq))
+      .limit(limit)
+    return rows as Array<{
+      seq: number
+      did: string
+      eventType: string
+      event: Buffer
+      invalidated: number
+      sequencedAt: string
+    }>
+  }
+
+  async appendEvent(event: {
+    did: string
+    eventType: string
+    event: Buffer
+    invalidated: number
+    sequencedAt: string
+  }): Promise<void> {
+    await this.db.insert(stratosSeq).values(event)
+  }
+}
+
+export class StratosActorStore implements ActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
@@ -120,17 +182,11 @@ export class StratosActorStore {
     this.cborToRecord = opts.cborToRecord
   }
 
-  /**
-   * Check if an actor database exists
-   */
   async exists(did: string): Promise<boolean> {
     const { dbLocation } = await this.getLocation(did)
     return fileExists(dbLocation)
   }
 
-  /**
-   * Create a new actor database
-   */
   async create(did: string): Promise<void> {
     const { directory, dbLocation } = await this.getLocation(did)
     await fs.mkdir(directory, { recursive: true })
@@ -144,20 +200,14 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Delete an actor database
-   */
   async destroy(did: string): Promise<void> {
     const { directory } = await this.getLocation(did)
     await fs.rm(directory, { recursive: true, force: true })
   }
 
-  /**
-   * Open a database for reading
-   */
   async read<T>(
     did: string,
-    fn: (store: StratosActorReader) => T | PromiseLike<T>,
+    fn: (store: ActorReader) => T | PromiseLike<T>,
   ): Promise<T> {
     const { dbLocation } = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
@@ -165,11 +215,12 @@ export class StratosActorStore {
     const blobStore = this.blobstore(did)
 
     try {
-      const store: StratosActorReader = {
+      const store: ActorReader = {
         did,
         record: new StratosRecordReader(db, this.cborToRecord, this.logger),
         repo: new StratosSqlRepoReader(db),
         blob: new StratosBlobReader(db, blobStore, this.logger),
+        sequence: new SqliteSequenceOps(db),
       }
       return await fn(store)
     } finally {
@@ -177,12 +228,9 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Open a database for writing within a transaction
-   */
   async transact<T>(
     did: string,
-    fn: (store: StratosActorTransactor) => T | PromiseLike<T>,
+    fn: (store: ActorTransactor) => T | PromiseLike<T>,
   ): Promise<T> {
     const { dbLocation } = await this.getLocation(did)
     const db = createStratosDb(dbLocation)
@@ -191,20 +239,17 @@ export class StratosActorStore {
 
     try {
       return await db.transaction(async (tx) => {
-        const store: StratosActorTransactor = {
+        const txDb = tx as unknown as StratosDbOrTx
+        const store: ActorTransactor = {
           did,
-          db: tx as unknown as StratosDbOrTx,
           record: new StratosRecordTransactor(
-            tx as unknown as StratosDbOrTx,
+            txDb,
             this.cborToRecord,
             this.logger,
           ),
-          repo: new StratosSqlRepoTransactor(tx as unknown as StratosDbOrTx),
-          blob: new StratosBlobTransactor(
-            tx as unknown as StratosDbOrTx,
-            blobStore,
-            this.logger,
-          ),
+          repo: new StratosSqlRepoTransactor(txDb),
+          blob: new StratosBlobTransactor(txDb, blobStore, this.logger),
+          sequence: new SqliteSequenceOps(txDb),
         }
         return fn(store)
       })
@@ -213,19 +258,46 @@ export class StratosActorStore {
     }
   }
 
-  /**
-   * Get the blobstore for an actor (for operations outside of a transaction)
-   */
   getBlobStore(did: string): BlobStore {
     return this.blobstore(did)
   }
 
-  /**
-   * Get file paths for an actor
-   */
+  async createSigningKey(did: string): Promise<crypto.P256Keypair> {
+    const { directory } = await this.getLocation(did)
+    const keyPath = path.join(directory, 'signing_key')
+    const keypair = await crypto.P256Keypair.create({ exportable: true })
+    const exported = await (keypair as crypto.ExportableKeypair).export()
+    await fs.writeFile(keyPath, exported)
+    return keypair
+  }
+
+  async loadSigningKey(did: string): Promise<crypto.P256Keypair | null> {
+    const { directory } = await this.getLocation(did)
+    const keyPath = path.join(directory, 'signing_key')
+    if (!(await fileExists(keyPath))) {
+      return null
+    }
+    const keyBytes = await fs.readFile(keyPath)
+    return crypto.P256Keypair.import(keyBytes, { exportable: true })
+  }
+
+  async deleteSigningKey(did: string): Promise<void> {
+    const { directory } = await this.getLocation(did)
+    const keyPath = path.join(directory, 'signing_key')
+    try {
+      await fs.unlink(keyPath)
+    } catch {
+      // Key file may not exist
+    }
+  }
+
   private async getLocation(did: string) {
     const didHash = await crypto.sha256Hex(did)
     const directory = path.join(this.dataDir, didHash.slice(0, 2), did)
+    const resolved = path.resolve(directory)
+    if (!resolved.startsWith(path.resolve(this.dataDir))) {
+      throw new Error('Invalid DID: resolved path escapes data directory')
+    }
     const dbLocation = path.join(directory, 'stratos.sqlite')
     const blobLocation = path.join(directory, 'blobs')
     return { directory, dbLocation, blobLocation }
@@ -248,7 +320,7 @@ export class SqliteEnrollmentStore
       .where(eq(enrollment.did, did))
       .limit(1)
 
-    return rows.length > 0
+    return rows.length > 0 && rows[0].active === 'true'
   }
 
   async enroll(record: EnrollmentRecord): Promise<void> {
@@ -258,12 +330,16 @@ export class SqliteEnrollmentStore
         did: record.did,
         enrolledAt: record.enrolledAt,
         pdsEndpoint: record.pdsEndpoint ?? null,
+        signingKeyDid: record.signingKeyDid,
+        active: record.active ? 'true' : 'false',
       })
       .onConflictDoUpdate({
         target: enrollment.did,
         set: {
           enrolledAt: record.enrolledAt,
           pdsEndpoint: record.pdsEndpoint ?? null,
+          signingKeyDid: record.signingKeyDid,
+          active: record.active ? 'true' : 'false',
         },
       })
 
@@ -285,7 +361,10 @@ export class SqliteEnrollmentStore
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    await this.db.delete(enrollment).where(eq(enrollment.did, did))
+    await this.db
+      .update(enrollment)
+      .set({ active: 'false' })
+      .where(eq(enrollment.did, did))
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -302,6 +381,8 @@ export class SqliteEnrollmentStore
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }
   }
 
@@ -323,6 +404,8 @@ export class SqliteEnrollmentStore
       did: row.did,
       enrolledAt: row.enrolledAt,
       pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
     }))
   }
 
@@ -364,6 +447,22 @@ export interface AuthVerifiers {
   admin: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string } }>
+  /** Stream auth for zone.stratos.sync.subscribeRecords */
+  subscribeAuth: StreamAuthVerifier
+}
+
+/**
+ * Timing-safe string comparison to prevent timing attacks on credentials
+ */
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8')
+  const bufB = Buffer.from(b, 'utf8')
+  if (bufA.length !== bufB.length) {
+    // Compare against self to consume constant time, then return false
+    timingSafeEqual(bufA, bufA)
+    return false
+  }
+  return timingSafeEqual(bufA, bufB)
 }
 
 /**
@@ -371,11 +470,11 @@ export interface AuthVerifiers {
  */
 function createAuthVerifiers(
   serviceDid: string,
-  _idResolver: IdResolver,
-  _oauthClient: NodeOAuthClient | undefined,
+  idResolver: IdResolver,
+  _oauthClient: NodeOAuthClient,
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
-  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier | undefined,
+  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
   allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
 ): AuthVerifiers {
@@ -422,9 +521,23 @@ function createAuthVerifiers(
           credentials: { type: 'user', did: result.did },
         }
       } catch (err) {
+        if (err instanceof DpopVerificationError && err.wwwAuthenticate) {
+          ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+
+        if (
+          err instanceof DpopVerificationError &&
+          err.code === 'not_enrolled'
+        ) {
+          throw new InvalidRequestError(
+            'User is not enrolled in this Stratos service',
+            'NotEnrolled',
+          )
+        }
+
         const message =
           err instanceof Error ? err.message : 'DPoP verification failed'
-        throw new Error(message, { cause: err })
+        throw new XRPCError(401, message)
       }
     },
     service: async (ctx) => {
@@ -432,15 +545,18 @@ function createAuthVerifiers(
       if (!authHeader) {
         throw new Error('Service authorization required')
       }
-      // Service auth validates inter-service JWT
-      const [, token] = authHeader.split(' ')
-      if (!token) {
-        throw new Error('Invalid authorization header format')
-      }
-      // In production, would verify JWT signature and extract iss/aud
-      // For now, trust service tokens (should be signed JWTs from AppViews)
+      const serviceCtx = await verifyServiceAuth(
+        authHeader,
+        serviceDid,
+        undefined,
+        idResolver,
+      )
       return {
-        credentials: { type: 'service', did: serviceDid, iss: token },
+        credentials: {
+          type: 'service',
+          did: serviceCtx.iss,
+          iss: serviceCtx.iss,
+        },
       }
     },
     optionalStandard: async (ctx) => {
@@ -509,13 +625,16 @@ function createAuthVerifiers(
         const encoded = authHeader.slice(6)
         const decoded = Buffer.from(encoded, 'base64').toString('utf8')
         const [user, pass] = decoded.split(':')
-        if (user !== 'admin' || pass !== adminPassword) {
+        if (
+          !safeEqual(user ?? '', 'admin') ||
+          !safeEqual(pass ?? '', adminPassword)
+        ) {
           throw new Error('Invalid admin credentials')
         }
       } else if (authHeader.startsWith('Bearer ')) {
         // Simple bearer token: just the password
         const token = authHeader.slice(7)
-        if (token !== adminPassword) {
+        if (!safeEqual(token, adminPassword)) {
           throw new Error('Invalid admin token')
         }
       } else {
@@ -526,6 +645,59 @@ function createAuthVerifiers(
         credentials: { type: 'admin' },
       }
     },
+    subscribeAuth: async (ctx: StreamAuthContext) => {
+      const params = ctx.params as Record<string, unknown>
+      const syncToken = params.syncToken
+
+      if (syncToken && typeof syncToken === 'string') {
+        const serviceCtx = await verifyServiceAuth(
+          `Bearer ${syncToken}`,
+          serviceDid,
+          'zone.stratos.sync.subscribeRecords',
+          idResolver,
+        )
+        return {
+          credentials: {
+            type: 'service',
+            iss: serviceCtx.iss,
+            aud: serviceCtx.aud,
+          },
+        }
+      }
+
+      const authHeader = ctx.req.headers.authorization
+      if (authHeader) {
+        if (devMode && authHeader.startsWith('Bearer ')) {
+          const did = authHeader.slice(7).trim()
+          if (did.startsWith('did:')) {
+            const isEnrolled = await enrollmentStore.isEnrolled(did)
+            if (isEnrolled) {
+              return { credentials: { type: 'user', did } }
+            }
+          }
+          throw new AuthRequiredError('Authorization failed')
+        }
+
+        if (authHeader.startsWith('DPoP ') && dpopVerifier) {
+          const result = await dpopVerifier.verify(
+            {
+              method: ctx.req.method || 'GET',
+              url: ctx.req.url || '/',
+              headers: ctx.req.headers as Record<
+                string,
+                string | string[] | undefined
+              >,
+            },
+            { setHeader: () => {} },
+          )
+          return { credentials: { type: 'user', did: result.did } }
+        }
+      }
+
+      throw new AuthRequiredError(
+        'syncToken query param or Authorization header required',
+      )
+    },
   }
 }
 
@@ -534,15 +706,16 @@ function createAuthVerifiers(
  */
 export interface AppContext {
   cfg: StratosServiceConfig
-  db: ServiceDb
-  actorStore: StratosActorStore
+  version: string
+  db?: ServiceDb
+  actorStore: ActorStore
   enrollmentStore: EnrollmentStore
   enrollmentService: EnrollmentService
   boundaryResolver: BoundaryResolver
   stubWriter: StubWriterService
   authVerifier: AuthVerifiers
   idResolver: IdResolver
-  oauthClient?: NodeOAuthClient
+  oauthClient: NodeOAuthClient
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
@@ -550,6 +723,13 @@ export interface AppContext {
   xrpcServer: XrpcServer
   app: express.Application
   logger?: Logger
+  createAttestation(
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ): Promise<{ sig: Uint8Array; signingKey: string }>
+  dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
+  destroy: () => Promise<void>
 }
 
 /**
@@ -598,12 +778,59 @@ export async function createAppContext(
 ): Promise<AppContext> {
   const { cfg, blobstore, cborToRecord, logger } = opts
 
+  const userAgent = buildUserAgent(
+    VERSION,
+    cfg.userAgent.repoUrl,
+    cfg.userAgent.operatorContact,
+  )
+  const fetchWithUserAgent = createFetchWithUserAgent(userAgent)
+
   const serviceDbPath = path.join(cfg.storage.dataDir, 'service.sqlite')
   await fs.mkdir(cfg.storage.dataDir, { recursive: true })
 
-  const db = createServiceDb(serviceDbPath)
+  let db: ServiceDb | undefined
+  let enrollmentStore: EnrollmentStore & EnrollmentStoreReader
+  let oauthStores: {
+    sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
+    stateStore: import('./oauth/client.js').OAuthStateStoreBackend
+  }
+  let destroyBackend: () => Promise<void>
 
-  await migrateServiceDb(db)
+  if (cfg.storage.backend === 'postgres') {
+    if (!cfg.storage.postgresUrl) {
+      throw new Error(
+        'STRATOS_POSTGRES_URL is required when backend is postgres',
+      )
+    }
+    const pgDb = createServicePgDb(cfg.storage.postgresUrl)
+    const pgStartup = await checkServicePgDbStartup(pgDb)
+    logger?.info(
+      {
+        database: pgStartup.currentDatabase,
+        user: pgStartup.currentUser,
+        schema: pgStartup.currentSchema,
+        searchPath: pgStartup.searchPath,
+        hasDatabaseCreate: pgStartup.hasDatabaseCreate,
+        hasSchemaUsage: pgStartup.hasSchemaUsage,
+        hasSchemaCreate: pgStartup.hasSchemaCreate,
+      },
+      'postgres service database preflight passed',
+    )
+    await migrateServicePgDb(pgDb)
+    enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    oauthStores = createPgOAuthStores(pgDb)
+    destroyBackend = async () => {
+      await closeServicePgDb(pgDb)
+    }
+  } else {
+    db = createServiceDb(serviceDbPath)
+    await migrateServiceDb(db)
+    enrollmentStore = new SqliteEnrollmentStore(db)
+    oauthStores = createSqliteOAuthStores(db)
+    destroyBackend = async () => {
+      await closeServiceDb(db!)
+    }
+  }
 
   const idResolver = new IdResolver({
     plcUrl: cfg.identity.plcUrl,
@@ -612,39 +839,34 @@ export async function createAppContext(
   const originalResolve = idResolver.handle.resolve.bind(idResolver.handle)
   idResolver.handle.resolve = async (handle: string) => {
     try {
-      // 1. Try standard resolution first
       const result = await originalResolve(handle)
       if (result) return result
     } catch (err) {
       logger?.debug(
         { handle, err: err instanceof Error ? err.message : String(err) },
-        'standard handle resolution failed, trying PDS fallback',
+        'standard handle resolution failed, trying PLC fallback',
       )
     }
 
-    // 2. Fallback: Try resolving via PDS API if standard resolution fails
-    // This is useful for PDSs with dynamic handles that don't support .well-known/atproto-did on subdomains
+    // Fallback: resolve via PLC directory (trusted endpoint, no SSRF risk)
     try {
-      const domain = handle.split('.').slice(1).join('.')
-      if (domain) {
-        const pdsUrl = `https://${domain}`
-        const resolveUrl = `${pdsUrl}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
-        const resp = await fetch(resolveUrl)
-        if (resp.ok) {
-          const data = (await resp.json()) as unknown as { did?: string }
-          if (data.did) {
-            logger?.info(
-              { handle, did: data.did, pdsUrl },
-              'resolved handle via PDS API fallback',
-            )
-            return data.did
-          }
+      const plcUrl = cfg.identity.plcUrl
+      const resolveUrl = `${plcUrl}/did-by-handle/${encodeURIComponent(handle)}`
+      const resp = await fetchWithUserAgent(resolveUrl)
+      if (resp.ok) {
+        const did = await resp.text()
+        if (did && did.startsWith('did:')) {
+          logger?.info(
+            { handle, did },
+            'resolved handle via PLC directory fallback',
+          )
+          return did
         }
       }
     } catch (err) {
       logger?.debug(
         { handle, err: err instanceof Error ? err.message : String(err) },
-        'PDS handle resolution fallback failed',
+        'PLC handle resolution fallback failed',
       )
     }
 
@@ -665,40 +887,58 @@ export async function createAppContext(
 
   const signingDidKey = signingKey.did()
 
-  let oauthClient: NodeOAuthClient | undefined
-  if (cfg.oauth) {
-    oauthClient = await createOAuthClient(
-      {
-        clientId:
-          cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
-        clientUri: cfg.service.publicUrl,
-        redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
-        privateKeyPem: cfg.oauth.clientSecret,
-        scope: OAUTH_SCOPE,
-      },
-      db,
-      idResolver,
-    )
+  const oauthClient = await createOAuthClient(
+    {
+      clientId:
+        cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
+      clientUri: cfg.service.publicUrl,
+      redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
+      privateKeyPem: cfg.oauth.clientSecret,
+      scope: OAUTH_SCOPE,
+      clientName: cfg.oauth.clientName,
+      logoUri: cfg.oauth.logoUri,
+      tosUri: cfg.oauth.tosUri,
+      policyUri: cfg.oauth.policyUri,
+    },
+    oauthStores,
+    idResolver,
+    fetchWithUserAgent,
+  )
+
+  let actorStore: ActorStore
+  if (cfg.storage.backend === 'postgres') {
+    if (!cfg.storage.postgresUrl) {
+      throw new Error(
+        'STRATOS_POSTGRES_URL is required when backend is postgres',
+      )
+    }
+    actorStore = new PostgresActorStore({
+      connectionString: cfg.storage.postgresUrl,
+      blobstore,
+      cborToRecord,
+      logger,
+    })
+  } else {
+    actorStore = new StratosActorStore({
+      dataDir: path.join(cfg.storage.dataDir, 'actors'),
+      blobstore,
+      cborToRecord,
+      logger,
+    })
   }
 
-  const actorStore = new StratosActorStore({
-    dataDir: path.join(cfg.storage.dataDir, 'actors'),
-    blobstore,
-    cborToRecord,
-    logger,
-  })
-
-  const enrollmentStore = new SqliteEnrollmentStore(db)
-
-  const enrollmentService = new EnrollmentServiceImpl({ db }, async (did) => {
-    await actorStore.create(did)
-    // Initialize repo with an empty signed commit so it's valid from enrollment
-    await actorStore.transact(did, async (store) => {
-      const adapter = new StratosBlockStoreReader(store.repo)
-      const unsigned = await buildCommit(adapter, null, { did, writes: [] })
-      await signAndPersistCommit(store.repo, signingKey, unsigned)
-    })
-  })
+  const enrollmentService = new EnrollmentServiceImpl(
+    enrollmentStore,
+    async (did) => {
+      await actorStore.create(did)
+      // Initialize repo with an empty signed commit so it's valid from enrollment
+      await actorStore.transact(did, async (store) => {
+        const adapter = new StratosBlockStoreReader(store.repo)
+        const unsigned = await buildCommit(adapter, null, { did, writes: [] })
+        await signAndPersistCommit(store.repo, signingKey, unsigned)
+      })
+    },
+  )
 
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
@@ -715,21 +955,19 @@ export async function createAppContext(
     await allowListProvider.start()
   }
 
-  let dpopVerifier: DpopVerifier | undefined
-  if (cfg.oauth && oauthClient) {
-    // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
-    // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
-    const tokenVerifier = new PdsTokenVerifier({
-      idResolver,
-    })
-    dpopVerifier = new DpopVerifier({
-      serviceDid: cfg.service.did,
-      serviceEndpoint: cfg.service.publicUrl,
-      tokenVerifier,
-      enrollmentStore,
-      allowListProvider,
-    })
-  }
+  // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
+  // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
+  const tokenVerifier = new PdsTokenVerifier({
+    idResolver,
+    fetch: fetchWithUserAgent,
+  })
+  const dpopVerifier = new DpopVerifier({
+    serviceDid: cfg.service.did,
+    serviceEndpoint: cfg.service.publicUrl,
+    tokenVerifier,
+    enrollmentStore,
+    allowListProvider,
+  })
 
   const authVerifier = createAuthVerifiers(
     cfg.service.did,
@@ -747,9 +985,6 @@ export async function createAppContext(
   const serviceDidWithFragment = getServiceDidWithFragment(cfg)
 
   const stubWriter = new StubWriterServiceImpl(async (did) => {
-    if (!oauthClient) {
-      return null
-    }
     try {
       const session = await oauthClient.restore(did)
       return new Agent(session) as unknown as PdsAgent
@@ -778,8 +1013,19 @@ export async function createAppContext(
     },
   })
 
+  const createAttestation = async (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ): Promise<{ sig: Uint8Array; signingKey: string }> => {
+    const payload = createAttestationPayload(did, boundaries, userDidKey)
+    const sig = await signingKey.sign(payload)
+    return { sig, signingKey: signingDidKey }
+  }
+
   return {
     cfg,
+    version: VERSION,
     db,
     actorStore,
     enrollmentStore,
@@ -796,6 +1042,9 @@ export async function createAppContext(
     xrpcServer,
     app,
     logger,
+    createAttestation,
+    dpopVerifier,
+    destroy: destroyBackend,
   }
 }
 
@@ -806,5 +1055,5 @@ export async function destroyAppContext(ctx: AppContext): Promise<void> {
   if (ctx.allowListProvider) {
     await ctx.allowListProvider.stop()
   }
-  await closeServiceDb(ctx.db)
+  await ctx.destroy()
 }

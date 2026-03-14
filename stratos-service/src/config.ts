@@ -14,8 +14,16 @@ const envSchema = z.object({
 
   // Storage
   STRATOS_DATA_DIR: z.string().default('./data'),
-  STRATOS_STORAGE_BACKEND: z.enum(['sqlite', 'postgres']).default('sqlite'),
+  STORAGE_BACKEND: z.enum(['sqlite', 'postgres']).default('sqlite'),
   STRATOS_POSTGRES_URL: z.string().optional(),
+  STRATOS_PG_HOST: z.string().optional(),
+  STRATOS_PG_PORT: z.coerce.number().int().positive().optional(),
+  STRATOS_PG_USERNAME: z.string().optional(),
+  STRATOS_PG_PASSWORD: z.string().optional(),
+  STRATOS_PG_DBNAME: z.string().optional(),
+  STRATOS_PG_SSLMODE: z
+    .enum(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])
+    .optional(),
   STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
   // S3 storage (optional)
@@ -80,17 +88,27 @@ const envSchema = z.object({
     .transform((v) => v || undefined),
 
   // OAuth
-  STRATOS_OAUTH_ISSUER: z
-    .string()
-    .url()
-    .optional()
-    .or(z.literal(''))
-    .transform((v) => v || undefined),
   STRATOS_OAUTH_CLIENT_ID: z
     .string()
     .optional()
     .transform((v) => v || undefined),
   STRATOS_OAUTH_CLIENT_SECRET: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_CLIENT_NAME: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_LOGO_URI: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_TOS_URI: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  STRATOS_OAUTH_POLICY_URI: z
     .string()
     .optional()
     .transform((v) => v || undefined),
@@ -115,6 +133,15 @@ const envSchema = z.object({
 
   // DPoP configuration
   STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
+
+  // User-Agent
+  STRATOS_REPO_URL: z
+    .string()
+    .default('https://github.com/NorthskySocial/stratos'),
+  STRATOS_OPERATOR_CONTACT: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -166,6 +193,7 @@ export interface StratosServiceConfig {
     serviceFragment: string
     port: number
     publicUrl: string
+    repoUrl: string
   }
   storage: {
     backend: 'sqlite' | 'postgres'
@@ -192,10 +220,13 @@ export interface StratosServiceConfig {
     plcUrl: string
   }
   signingKeyHex?: string
-  oauth?: {
-    issuer: string
+  oauth: {
     clientId?: string
     clientSecret?: string
+    clientName?: string
+    logoUri?: string
+    tosUri?: string
+    policyUri?: string
   }
   logging: {
     level: string
@@ -205,6 +236,10 @@ export interface StratosServiceConfig {
   }
   dpop: {
     requireNonce: boolean
+  }
+  userAgent: {
+    repoUrl: string
+    operatorContact?: string
   }
 }
 
@@ -239,6 +274,29 @@ function buildBlobstoreConfig(env: Env): BlobstoreConfig {
   }
 }
 
+function buildPostgresUrl(env: Env): string | undefined {
+  const {
+    STRATOS_PG_HOST,
+    STRATOS_PG_PORT,
+    STRATOS_PG_USERNAME,
+    STRATOS_PG_PASSWORD,
+    STRATOS_PG_DBNAME,
+    STRATOS_PG_SSLMODE,
+  } = env
+  if (!STRATOS_PG_HOST) return undefined
+  const user = encodeURIComponent(STRATOS_PG_USERNAME ?? 'stratos')
+  const pass = STRATOS_PG_PASSWORD
+    ? `:${encodeURIComponent(STRATOS_PG_PASSWORD)}`
+    : ''
+  const port = STRATOS_PG_PORT ?? 5432
+  const dbname = STRATOS_PG_DBNAME ?? 'stratos'
+  const url = new URL(
+    `postgres://${user}${pass}@${STRATOS_PG_HOST}:${port}/${dbname}`,
+  )
+  url.searchParams.set('sslmode', STRATOS_PG_SSLMODE ?? 'require')
+  return url.toString()
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   return {
     service: {
@@ -246,11 +304,12 @@ export function envToConfig(env: Env): StratosServiceConfig {
       serviceFragment: env.STRATOS_SERVICE_FRAGMENT,
       port: env.STRATOS_PORT,
       publicUrl: env.STRATOS_PUBLIC_URL,
+      repoUrl: env.STRATOS_REPO_URL,
     },
     storage: {
-      backend: env.STRATOS_STORAGE_BACKEND,
+      backend: env.STORAGE_BACKEND,
       dataDir: env.STRATOS_DATA_DIR,
-      postgresUrl: env.STRATOS_POSTGRES_URL,
+      postgresUrl: env.STRATOS_POSTGRES_URL ?? buildPostgresUrl(env),
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {
@@ -272,13 +331,14 @@ export function envToConfig(env: Env): StratosServiceConfig {
       plcUrl: env.STRATOS_PLC_URL,
     },
     signingKeyHex: env.STRATOS_SIGNING_KEY_HEX,
-    oauth: env.STRATOS_OAUTH_ISSUER
-      ? {
-          issuer: env.STRATOS_OAUTH_ISSUER,
-          clientId: env.STRATOS_OAUTH_CLIENT_ID,
-          clientSecret: env.STRATOS_OAUTH_CLIENT_SECRET,
-        }
-      : undefined,
+    oauth: {
+      clientId: env.STRATOS_OAUTH_CLIENT_ID,
+      clientSecret: env.STRATOS_OAUTH_CLIENT_SECRET,
+      clientName: env.STRATOS_OAUTH_CLIENT_NAME,
+      logoUri: env.STRATOS_OAUTH_LOGO_URI,
+      tosUri: env.STRATOS_OAUTH_TOS_URI,
+      policyUri: env.STRATOS_OAUTH_POLICY_URI,
+    },
     logging: {
       level: env.LOG_LEVEL,
     },
@@ -289,6 +349,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
       : undefined,
     dpop: {
       requireNonce: env.STRATOS_DPOP_REQUIRE_NONCE,
+    },
+    userAgent: {
+      repoUrl: env.STRATOS_REPO_URL,
+      operatorContact: env.STRATOS_OPERATOR_CONTACT,
     },
   }
 }

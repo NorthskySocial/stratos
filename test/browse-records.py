@@ -24,7 +24,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 CONFIG = {"url": "http://localhost:3100"}
-DEFAULT_COLLECTION = "app.northsky.stratos.feed.post"
+DEFAULT_COLLECTION = "zone.stratos.feed.post"
 
 # Known test users — loaded from test-state.json if available, otherwise hardcoded fallbacks
 KNOWN_USERS: dict[str, dict] = {}
@@ -168,7 +168,7 @@ def discover_pds(did: str) -> str | None:
 
 def discover_stratos_from_pds(did: str, pds_url: str) -> dict | None:
     """Read the enrollment record from the user's PDS to find the Stratos service."""
-    params = urlencode({"repo": did, "collection": "app.northsky.stratos.actor.enrollment", "rkey": "self"})
+    params = urlencode({"repo": did, "collection": "zone.stratos.actor.enrollment", "rkey": "self"})
     status, body = http_get_json(f"{pds_url}/xrpc/com.atproto.repo.getRecord?{params}")
     if status == 200 and isinstance(body, dict):
         return body.get("value", {})
@@ -284,7 +284,7 @@ def cmd_discover(user: str):
     enrollment = discover_stratos_from_pds(did, pds_url)
     if not enrollment:
         print(
-            f"        {C.INFO}No app.northsky.stratos.actor.enrollment record found.{C.R}",
+            f"        {C.INFO}No zone.stratos.actor.enrollment record found.{C.R}",
             f"        {C.INFO}This user is not enrolled in any Stratos service.{C.R}",
             sep="\n",
         )
@@ -636,7 +636,7 @@ def cmd_hydrate(uri: str, caller_did: str | None):
     )
 
     status, body = xrpc_post(
-        "app.northsky.stratos.repo.hydrateRecords",
+        "zone.stratos.repo.hydrateRecords",
         {"uris": [uri]},
         caller_did,
     )
@@ -717,7 +717,7 @@ def cmd_interactive():
             print("""
   Commands:
     auth <user>           Set viewer identity (name or DID, 'none' to clear)
-    list <user> [coll]    List records for user (default collection: app.northsky.stratos.feed.post)
+    list <user> [coll]    List records for user (default collection: zone.stratos.feed.post)
     get <at-uri>          Fetch a specific record via getRecord
     hydrate <at-uri>      Fetch via hydrateRecords (shows blocked status explicitly)
     discover <user>       Discover Stratos via ATProto pathway (DID → PDS → enrollment → records)

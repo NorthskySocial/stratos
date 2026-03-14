@@ -13,13 +13,13 @@ import {
   canAccessRecord,
   extractBoundaryDomains,
 } from '@northskysocial/stratos-core'
-import type { StratosActorStore } from '../../context.js'
+import type { ActorStore } from '../../actor-store-types.js'
 
 /**
  * Implementation of RecordResolver port using actor store
  */
 export class ActorStoreRecordResolver implements RecordResolver {
-  constructor(private actorStore: StratosActorStore) {}
+  constructor(private actorStore: ActorStore) {}
 
   async getRecord(
     ownerDid: string,

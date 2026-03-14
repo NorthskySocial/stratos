@@ -1,6 +1,8 @@
 import http from 'node:http'
+import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
@@ -56,6 +58,7 @@ export class StratosServer {
 
     const app = ctx.app
     app.use(cors({ exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate'] }))
+    app.use(cookieParser())
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {
       if (req.path.startsWith('/xrpc/')) {
@@ -64,9 +67,54 @@ export class StratosServer {
       express.json({ limit: '100kb' })(req, res, next)
     })
 
-    app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', version: '0.1.0' })
+    app.get('/', (_req, res) => {
+      res.type('text/plain')
+      res.send(
+        [
+          '',
+          '       \u2588\u2588\u2588\u2588\u2588\u2588\u2588     \u2588\u2588\u2588\u2588           \u2588     \u2588\u2588\u2588\u2588\u2588 \u2588\u2588\u2588                   \u2588\u2588\u2588\u2588           \u2588      \u2588 \u2588\u2588\u2588         \u2588\u2588\u2588\u2588\u2588\u2588\u2588   ',
+          '     \u2588       \u2588\u2588\u2588  \u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588   \u2588\u2588\u2588\u2588\u2588\u2588  \u2588 \u2588\u2588     \u2588\u2588\u2588\u2588\u2588        \u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588     \u2588  \u2588\u2588\u2588\u2588       \u2588       \u2588\u2588\u2588 ',
+          '    \u2588         \u2588\u2588 \u2588     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588    \u2588\u2588   \u2588  \u2588  \u2588\u2588    \u2588  \u2588\u2588\u2588       \u2588     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588      \u2588  \u2588  \u2588\u2588\u2588     \u2588         \u2588\u2588 ',
+          '    \u2588\u2588        \u2588  \u2588     \u2588  \u2588        \u2588    \u2588  \u2588   \u2588\u2588       \u2588\u2588\u2588       \u2588     \u2588  \u2588          \u2588  \u2588\u2588   \u2588\u2588\u2588    \u2588\u2588        \u2588  ',
+          '     \u2588\u2588\u2588          \u2588\u2588  \u2588  \u2588\u2588            \u2588  \u2588    \u2588       \u2588  \u2588\u2588       \u2588\u2588  \u2588  \u2588\u2588         \u2588  \u2588\u2588\u2588    \u2588\u2588\u2588    \u2588\u2588\u2588         ',
+          '    \u2588\u2588 \u2588\u2588\u2588           \u2588  \u2588\u2588\u2588           \u2588\u2588 \u2588\u2588   \u2588        \u2588  \u2588\u2588          \u2588  \u2588\u2588\u2588        \u2588\u2588   \u2588\u2588     \u2588\u2588   \u2588\u2588 \u2588\u2588\u2588       ',
+          '     \u2588\u2588\u2588 \u2588\u2588\u2588        \u2588\u2588   \u2588\u2588           \u2588\u2588 \u2588\u2588  \u2588        \u2588    \u2588\u2588        \u2588\u2588   \u2588\u2588        \u2588\u2588   \u2588\u2588     \u2588\u2588    \u2588\u2588\u2588 \u2588\u2588\u2588     ',
+          '       \u2588\u2588\u2588 \u2588\u2588\u2588      \u2588\u2588   \u2588\u2588           \u2588\u2588 \u2588\u2588\u2588\u2588         \u2588    \u2588\u2588        \u2588\u2588   \u2588\u2588        \u2588\u2588   \u2588\u2588     \u2588\u2588      \u2588\u2588\u2588 \u2588\u2588\u2588   ',
+          '         \u2588\u2588\u2588 \u2588\u2588\u2588    \u2588\u2588   \u2588\u2588           \u2588\u2588 \u2588\u2588  \u2588\u2588\u2588     \u2588      \u2588\u2588       \u2588\u2588   \u2588\u2588        \u2588\u2588   \u2588\u2588     \u2588\u2588        \u2588\u2588\u2588 \u2588\u2588\u2588 ',
+          '           \u2588\u2588 \u2588\u2588\u2588   \u2588\u2588   \u2588\u2588           \u2588\u2588 \u2588\u2588    \u2588\u2588    \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588       \u2588\u2588   \u2588\u2588        \u2588\u2588   \u2588\u2588     \u2588\u2588          \u2588\u2588 \u2588\u2588\u2588',
+          '            \u2588\u2588 \u2588\u2588    \u2588\u2588  \u2588\u2588           \u2588  \u2588\u2588    \u2588\u2588   \u2588        \u2588\u2588       \u2588\u2588  \u2588\u2588         \u2588\u2588  \u2588\u2588     \u2588\u2588           \u2588\u2588 \u2588\u2588',
+          '             \u2588 \u2588      \u2588\u2588 \u2588      \u2588        \u2588     \u2588\u2588   \u2588        \u2588\u2588        \u2588\u2588 \u2588      \u2588    \u2588\u2588 \u2588      \u2588             \u2588 \u2588 ',
+          '   \u2588\u2588\u2588        \u2588        \u2588\u2588\u2588     \u2588     \u2588\u2588\u2588\u2588      \u2588\u2588\u2588 \u2588\u2588\u2588\u2588\u2588      \u2588\u2588        \u2588\u2588\u2588     \u2588      \u2588\u2588\u2588     \u2588    \u2588\u2588\u2588        \u2588  ',
+          '  \u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588          \u2588\u2588\u2588\u2588\u2588\u2588\u2588     \u2588  \u2588\u2588\u2588\u2588    \u2588\u2588 \u2588   \u2588\u2588\u2588\u2588    \u2588\u2588 \u2588       \u2588\u2588\u2588\u2588\u2588\u2588\u2588        \u2588\u2588\u2588\u2588\u2588\u2588\u2588    \u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588   ',
+          ' \u2588     \u2588\u2588\u2588\u2588\u2588              \u2588\u2588\u2588      \u2588    \u2588\u2588     \u2588 \u2588     \u2588\u2588      \u2588\u2588          \u2588\u2588\u2588            \u2588\u2588\u2588     \u2588     \u2588\u2588\u2588\u2588\u2588     ',
+          ' \u2588                                 \u2588             \u2588                                                \u2588               ',
+          '  \u2588                                 \u2588             \u2588                                                \u2588              ',
+          '   \u2588\u2588                                \u2588\u2588            \u2588\u2588                                               \u2588\u2588            ',
+          '',
+          '',
+          '  This is Stratos, a private permissioned data service for AT Protocol',
+          '',
+          '  Most API routes are under /xrpc/',
+          '',
+          `        Code: ${cfg.service.repoUrl}`,
+          '    Protocol: https://atproto.com',
+          '',
+        ].join('\n'),
+      )
     })
+
+    app.get('/robots.txt', (_req, res) => {
+      res.type('text/plain')
+      res.send(
+        '# Hello! Crawling these APIs is not allowed\n\nUser-agent: *\nDisallow: /',
+      )
+    })
+
+    app.get('/health', (_req, res) => {
+      res.json({ status: 'ok', version: ctx.version })
+    })
+
+    app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
 
     app.get('/.well-known/did.json', (_req, res) => {
       const serviceDid = ctx.serviceDid
@@ -99,40 +147,42 @@ export class StratosServer {
     })
 
     const metadataHandler = (_req: express.Request, res: express.Response) => {
-      if (!ctx.oauthClient) {
-        return res.status(404).json({ error: 'OAuth not configured' })
-      }
       res.json(ctx.oauthClient.clientMetadata)
     }
 
     app.get('/client-metadata.json', metadataHandler)
     app.get('/.well-known/oauth-client-metadata.json', metadataHandler)
 
-    if (ctx.oauthClient) {
-      const oauthRoutes = createOAuthRoutes({
-        oauthClient: ctx.oauthClient,
-        enrollmentConfig: cfg.enrollment,
-        enrollmentStore: ctx.enrollmentStore,
-        idResolver: ctx.idResolver,
-        baseUrl: cfg.service.publicUrl,
-        serviceEndpoint: cfg.service.publicUrl,
-        defaultBoundaries: cfg.stratos.allowedDomains,
-        allowListProvider: ctx.allowListProvider,
-        logger: ctx.logger,
-        initRepo: async (did: string) => {
-          await ctx.actorStore.create(did)
-          await ctx.actorStore.transact(did, async (store) => {
-            const adapter = new StratosBlockStoreReader(store.repo)
-            const unsigned = await buildCommit(adapter, null, {
-              did,
-              writes: [],
-            })
-            await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+    const oauthRoutes = createOAuthRoutes({
+      oauthClient: ctx.oauthClient,
+      enrollmentConfig: cfg.enrollment,
+      enrollmentStore: ctx.enrollmentStore,
+      idResolver: ctx.idResolver,
+      baseUrl: cfg.service.publicUrl,
+      serviceEndpoint: cfg.service.publicUrl,
+      defaultBoundaries: cfg.stratos.allowedDomains,
+      allowListProvider: ctx.allowListProvider,
+      logger: ctx.logger,
+      devMode: cfg.stratos.devMode === true,
+      dpopVerifier: ctx.dpopVerifier,
+      initRepo: async (did: string) => {
+        await ctx.actorStore.create(did)
+        await ctx.actorStore.transact(did, async (store) => {
+          const adapter = new StratosBlockStoreReader(store.repo)
+          const unsigned = await buildCommit(adapter, null, {
+            did,
+            writes: [],
           })
-        },
-      })
-      app.use('/oauth', oauthRoutes)
-    }
+          await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+        })
+      },
+      createSigningKey: async (did: string) => {
+        const keypair = await ctx.actorStore.createSigningKey(did)
+        return keypair.did()
+      },
+      createAttestation: ctx.createAttestation,
+    })
+    app.use('/oauth', oauthRoutes)
 
     registerHandlers(ctx.xrpcServer, ctx)
     registerEnrollmentHandlers(app, ctx)

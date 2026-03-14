@@ -1,4 +1,3 @@
-import { eq } from 'drizzle-orm'
 import type { IdResolver, DidDocument } from '@atproto/identity'
 import type {
   EnrollmentService,
@@ -16,36 +15,34 @@ import {
   validateEnrollmentEligibility,
   NotEnrolledError,
 } from '@northskysocial/stratos-core'
-import type { ServiceDb } from '../../db/index.js'
-import { enrollment } from '../../db/index.js'
-
-/**
- * Enrollment store for persistence
- */
-export interface EnrollmentStore {
-  db: ServiceDb
-}
+import type { EnrollmentStore } from '../../oauth/routes.js'
 
 /**
  * Implementation of EnrollmentService port
  */
 export class EnrollmentServiceImpl implements EnrollmentService {
   constructor(
-    private store: EnrollmentStore,
+    private enrollmentStore: EnrollmentStore,
     private actorStoreCreator: (did: string) => Promise<void>,
     private logger?: Logger,
   ) {}
 
-  async enroll(did: string, boundaries: string[]): Promise<Enrollment> {
+  async enroll(
+    did: string,
+    boundaries: string[],
+    signingKeyDid: string,
+  ): Promise<Enrollment> {
     const start = Date.now()
     const now = new Date()
 
     await this.actorStoreCreator(did)
 
-    await this.store.db.insert(enrollment).values({
+    await this.enrollmentStore.enroll({
       did,
       enrolledAt: now.toISOString(),
-      pdsEndpoint: null, // Will be updated by the validator
+      pdsEndpoint: undefined,
+      signingKeyDid,
+      active: true,
     })
 
     this.logger?.info(
@@ -58,42 +55,31 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       boundaries,
       enrolledAt: now,
       pdsEndpoint: '',
+      signingKeyDid,
+      active: true,
     }
   }
 
   async isEnrolled(did: string): Promise<boolean> {
-    const result = await this.store.db
-      .select({ did: enrollment.did })
-      .from(enrollment)
-      .where(eq(enrollment.did, did))
-      .limit(1)
-
-    return result.length > 0
+    return this.enrollmentStore.isEnrolled(did)
   }
 
   async getEnrollment(did: string): Promise<Enrollment | null> {
-    const result = await this.store.db
-      .select()
-      .from(enrollment)
-      .where(eq(enrollment.did, did))
-      .limit(1)
+    const record = await this.enrollmentStore.getEnrollment(did)
+    if (!record) return null
 
-    if (result.length === 0) {
-      return null
-    }
-
-    const record = result[0]
     return {
       did: record.did,
-      boundaries: [], // TODO: fetch from actor store
+      boundaries: [],
       enrolledAt: new Date(record.enrolledAt),
       pdsEndpoint: record.pdsEndpoint ?? '',
+      signingKeyDid: record.signingKeyDid,
+      active: record.active,
     }
   }
 
   async unenroll(did: string): Promise<void> {
-    await this.store.db.delete(enrollment).where(eq(enrollment.did, did))
-
+    await this.enrollmentStore.unenroll(did)
     this.logger?.info({ did }, 'user unenrolled')
   }
 }
@@ -146,7 +132,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
 
     await agent.api.com.atproto.repo.putRecord({
       repo: did,
-      collection: 'app.northsky.stratos.actor.enrollment',
+      collection: 'zone.stratos.actor.enrollment',
       rkey: 'self',
       record: {
         service: serviceEndpoint,
@@ -164,7 +150,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
 
     await agent.api.com.atproto.repo.deleteRecord({
       repo: did,
-      collection: 'app.northsky.stratos.actor.enrollment',
+      collection: 'zone.stratos.actor.enrollment',
       rkey: 'self',
     })
   }

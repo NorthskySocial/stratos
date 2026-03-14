@@ -6,6 +6,7 @@ import { createInviteCode, createAccount, accountExists } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { saveState, loadState, type TestState } from './lib/state.ts'
 import { section, info, pass, fail, warn, error } from './lib/log.ts'
+import { isPostgres } from './lib/backend.ts'
 
 async function run() {
   section('Phase 1: Setup')
@@ -114,16 +115,20 @@ async function run() {
       'http://127.0.0.1:3100/oauth/callback'
   }
 
+  const composeArgs = ['-f', 'docker-compose.test.yml']
+  if (isPostgres()) {
+    composeArgs.push('-f', 'docker-compose.postgres.yml')
+    info('Using PostgreSQL storage backend')
+  }
+  composeArgs.push('up', '-d', '--build', '--force-recreate')
+  if (isPostgres()) {
+    composeArgs.push('postgres', 'stratos')
+  } else {
+    composeArgs.push('stratos')
+  }
+
   const compose = new Deno.Command('docker-compose', {
-    args: [
-      '-f',
-      'docker-compose.test.yml',
-      'up',
-      '-d',
-      '--build',
-      '--force-recreate',
-      'stratos',
-    ],
+    args: composeArgs,
     cwd: TEST_ROOT,
     stdout: 'piped',
     stderr: 'piped',
@@ -149,8 +154,11 @@ async function run() {
     pass('Stratos is healthy')
   } catch (err) {
     // Show container logs on failure
+    const logArgs = ['compose', '-f', 'docker-compose.test.yml']
+    if (isPostgres()) logArgs.push('-f', 'docker-compose.postgres.yml')
+    logArgs.push('logs', '--tail=50')
     const logs = new Deno.Command('docker', {
-      args: ['compose', '-f', 'docker-compose.test.yml', 'logs', '--tail=50'],
+      args: logArgs,
       cwd: TEST_ROOT,
       stdout: 'piped',
       stderr: 'piped',

@@ -1,9 +1,10 @@
 #!/usr/bin/env -S deno run -A
 // Run all E2E test phases sequentially.
-// Usage: deno run -A test/scripts/run-all.ts [--direct]
+// Usage: deno run -A test/scripts/run-all.ts [--direct] [--postgres]
 //
 // Options:
-//   --direct Bypass OAuth and enroll users directly in the database
+//   --direct   Bypass OAuth and enroll users directly in the database
+//   --postgres Use PostgreSQL storage backend instead of SQLite
 //
 // Phases:
 //   1. setup — create PDS accounts, start Stratos
@@ -19,6 +20,11 @@ const SCRIPTS_DIR = new URL('.', import.meta.url).pathname
 // Parse command line args
 const directMode = Deno.args.includes('--direct')
 const preserve = Deno.args.includes('--preserve')
+const postgresMode = Deno.args.includes('--postgres')
+
+if (postgresMode) {
+  Deno.env.set('STRATOS_E2E_BACKEND', 'postgres')
+}
 
 interface Phase {
   name: string
@@ -67,6 +73,9 @@ async function run() {
 
   if (directMode) {
     info('Running in DIRECT MODE (bypassing OAuth)')
+  }
+  if (postgresMode) {
+    info('Running with POSTGRESQL storage backend')
   }
 
   let phasesRun = 0

@@ -44,29 +44,24 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ### System Components
 
-```mermaid
-graph TD
-    subgraph "External Ecosystem"
-        PDS["User's PDS<br/>(Stores Stubs)"]
-        AV["AppView<br/>(Indexing & Hydration)"]
-        PLC["Identity Resolver<br/>(PLC / DID:WEB)"]
-    end
-
-    subgraph "Stratos Service"
-        SS["Stratos API Server<br/>(XRPC / OAuth)"]
-        SDB[("Service DB<br/>(Enrollments/Metadata)")]
-        AS[("Actor Store<br/>(Full Records / Blobs)")]
-        FR["Firehose<br/>(subscribeRecords)"]
-    end
-
-    Client["User Client"] -- "OAuth / XRPC" --> SS
-    SS -- "Per-user DBs" --> AS
-    SS -- "Metadata" --> SDB
-    SS -- "Stubs" --> PDS
-    AV -- "Index Stubs" --> PDS
-    AV -- "Hydration" --> SS
-    SS -- "Events" --> FR
-    FR -- "Stream" --> AV
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ATProtocol Network                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
+│  │  User's PDS  │◀──▶│Stratos Service │◀──▶│     AppView      │  │
+│  └──────────────┘    └──────────────────┘    └──────────────────┘  │
+│         │                     │                       │             │
+│         │ OAuth               │ Per-user              │ Indexed     │
+│         │ Authentication      │ SQLite / PG           │ Content     │
+│         ▼                     ▼                       ▼             │
+│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
+│  │   DID PLC    │    │   Blob Storage   │    │   PostgreSQL     │  │
+│  │              │    │  (Disk or S3)    │    │                  │  │
+│  └──────────────┘    └──────────────────┘    └──────────────────┘  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 > **Note:** See [Blob Storage](#blob-storage) for configuration.
@@ -75,15 +70,23 @@ graph TD
 
 #### 1. User Enrollment
 
-```mermaid
-flowchart TD
-    User([User]) --> Auth[Stratos /oauth/authorize]
-    Auth --> PDS[User's PDS OAuth endpoint]
-    PDS --> Grant[User authorizes Stratos]
-    Grant --> Callback[Stratos /oauth/callback, with auth code]
-    Callback --> Validate{Validate Enrollment}
-    Validate -- "Allowed" --> Create[Create Enrollment Record & Actor DB]
-    Validate -- "Denied" --> Deny[Return 403 Forbidden]
+```
+User ──▶ Stratos /oauth/authorize?handle=user.bsky.social
+         │
+         ▼
+Stratos ──▶ User's PDS OAuth endpoint
+         │
+         ▼
+PDS ──▶ User authorizes Stratos
+         │
+         ▼
+PDS ──▶ Stratos /oauth/callback (with auth code)
+         │
+         ▼
+Stratos validates enrollment (DID/PDS allowlist)
+         │
+         ▼
+Creates enrollment record + per-user database (SQLite file or PostgreSQL schema)
 ```
 
 #### 2. Record Creation
@@ -103,7 +106,21 @@ sequenceDiagram
 
     S->>P: putRecord(Stub with source field)
 ```
-
+Client ──▶ Stratos com.atproto.repo.createRecord
+           { collection: "zone.stratos.feed.post",
+             record: { text: "...", boundary: { values: [{ value: "fanart" }] } }
+           }
+         │
+         ▼
+Stratos validates:
+  - User is enrolled
+  - Record has valid boundary
+  - No cross-namespace embeds
+         │
+         ▼
+Stores record in per-user SQLite database
+         │
+         ▼
 Updates MST (Merkle Search Tree) and signs a new commit:
 
 - Inserts record into MST via NodeWrangler
@@ -113,18 +130,20 @@ Updates MST (Merkle Search Tree) and signs a new commit:
 
 #### 3. AppView Indexing
 
-```mermaid
-sequenceDiagram
-    participant AV as AppView
-    participant S as Stratos
-
-    AV->>S: app.northsky.stratos.sync.subscribeRecords (WebSocket)
-    Note right of AV: { did: "<user-did>", cursor: 0 }
-
-    S-->>AV: Stratos streams commit events
-    Note left of S: { $type: "app.northsky.stratos.sync.subscribeRecords#commit", seq: 1, did: "did:plc:abc", ops: [{ action: "create", path: "app.northsky.stratos.feed.post/tid", record: {...} }] }
-
-    AV->>AV: Indexes records with boundary metadata
+```
+AppView ──▶ Stratos zone.stratos.sync.subscribeRecords (WebSocket)
+            { did: "<user-did>", cursor: 0 }
+         │
+         ▼
+Stratos streams commit events:
+  { $type: "zone.stratos.sync.subscribeRecords#commit",
+    seq: 1,
+    did: "did:plc:abc",
+    ops: [{ action: "create", path: "zone.stratos.feed.post/tid", record: {...} }]
+  }
+         │
+         ▼
+AppView indexes records with boundary metadata
 ```
 
 ### Repository & MST Architecture
@@ -155,19 +174,20 @@ enabling cryptographic verification of repository contents.
 
 Key capabilities:
 
-| Endpoint                               | Description                                                                      |
-| -------------------------------------- | -------------------------------------------------------------------------------- |
-| `com.atproto.sync.getRecord`           | Returns CAR with signed commit + MST inclusion proof + record block              |
-| `app.northsky.stratos.sync.getRepo`    | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
-| `app.northsky.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification             |
+| Endpoint                       | Description                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------- |
+| `com.atproto.sync.getRecord`   | Returns CAR with signed commit + MST inclusion proof + record block              |
+| `zone.stratos.sync.getRepo`    | Exports the full repository as a CAR file (all blocks, MST nodes, signed commit) |
+| `zone.stratos.repo.importRepo` | Imports a repository from a CAR file with CID integrity verification             |
 
 The MST is implemented using `@atcute/mst` and all blocks are stored in the per-actor
 `stratos_repo_block` table alongside record data.
 
 ### Storage Architecture
 
-Each enrolled user gets an isolated SQLite database. Blobs can be stored either on the local
-filesystem or in S3-compatible storage (see [Blob Storage](#blob-storage) configuration).
+Each enrolled user gets an isolated SQLite database (default) or an isolated PostgreSQL schema
+(when using the `postgres` backend). Blobs can be stored either on the local filesystem or in
+S3-compatible storage (see [Blob Storage](#blob-storage) configuration).
 
 **With local blob storage:**
 
@@ -297,6 +317,17 @@ STRATOS_PUBLIC_URL="https://stratos.example.com"
 # Storage
 STRATOS_DATA_DIR="/var/lib/stratos/data"
 
+# Storage backend: 'sqlite' (per-user SQLite files) or 'postgres' (per-user PG schemas)
+STORAGE_BACKEND="sqlite"
+# For PostgreSQL backend:
+# STRATOS_POSTGRES_URL="postgres://user:pass@localhost:5432/stratos"
+# Or individual connection params (useful with AWS Secrets Manager):
+# STRATOS_PG_HOST="db.example.com"
+# STRATOS_PG_PORT="5432"
+# STRATOS_PG_USERNAME="stratos"
+# STRATOS_PG_PASSWORD="secret"
+# STRATOS_PG_DBNAME="stratos"
+
 # Blob Storage Provider: 'local' (filesystem) or 's3' (S3-compatible)
 STRATOS_BLOB_STORAGE="local"
 
@@ -349,7 +380,7 @@ Host this JSON at `https://stratos.example.com/client-metadata.json`:
   "tos_uri": "https://stratos.example.com/terms",
   "policy_uri": "https://stratos.example.com/privacy",
   "redirect_uris": ["https://stratos.example.com/oauth/callback"],
-  "scope": "atproto repo:app.northsky.stratos.actor.enrollment repo:app.northsky.stratos.feed.post",
+  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
@@ -382,7 +413,7 @@ curl https://stratos.example.com/health
 curl https://stratos.example.com/.well-known/did.json
 
 # Check enrollment status
-curl https://stratos.example.com/xrpc/app.northsky.stratos.enrollment.status?did=did:plc:abc123
+curl https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=did:plc:abc123
 ```
 
 ---
@@ -424,7 +455,7 @@ Records with boundaries outside this list will be rejected.
 
 ### Repository Import
 
-Configure the maximum CAR file size for `app.northsky.stratos.repo.importRepo`:
+Configure the maximum CAR file size for `zone.stratos.repo.importRepo`:
 
 ```bash
 # Default: 256 MiB (268435456 bytes)
@@ -445,6 +476,32 @@ STRATOS_SIGNING_KEY_HEX="<hex-encoded-secp256k1-private-key>"
 
 The corresponding public key is published in the service DID document for commit signature
 verification.
+
+### User Signing Keys
+
+Each enrolled user receives a P-256 (NIST P-256) signing key generated at enrollment time. This key
+enables future per-user record signing and is attested by the service's secp256k1 key.
+
+**Storage**: User signing keys are stored as raw private key bytes at
+`{dataDir}/actors/{prefix}/{did}/signing_key`, alongside the actor's SQLite database.
+
+**Enrollment record**: The user's public key (as a `did:key` string) and a service attestation are
+published to the user's PDS in the `app.northsky.stratos.actor.enrollment` record. The attestation
+is a DAG-CBOR payload (`{boundaries, did, signingKey}`) signed by the service's secp256k1 key.
+
+**Attestation lifecycle**:
+
+- Generated at enrollment time with the user's initial boundaries
+- Regenerated when boundaries change (always during an authenticated user action)
+- Deleted on unenrollment along with the signing key
+
+**Revocation**: When a user unenrolls, their signing key is deleted from disk and the enrollment
+record is removed from the service database. A best-effort attempt is made to delete the PDS
+enrollment record. AppViews should check the enrollment status endpoint as the canonical trust anchor
+for high-stakes operations.
+
+**Verification**: AppViews can verify a user's attestation offline by checking the DAG-CBOR payload
+signature against the service's public key (available in the service DID document).
 
 ### Blob Storage
 
@@ -468,12 +525,23 @@ Configuration:
 
 ```bash
 # Use SQLite (default)
-STRATOS_STORAGE_BACKEND="sqlite"
+STORAGE_BACKEND="sqlite"
 
-# Use PostgreSQL
-STRATOS_STORAGE_BACKEND="postgres"
+# Use PostgreSQL — either a full connection URL:
+STORAGE_BACKEND="postgres"
 STRATOS_POSTGRES_URL="postgres://user:pass@localhost:5432/stratos"
+
+# Or individual connection parameters (useful with AWS Secrets Manager / ECS):
+STORAGE_BACKEND="postgres"
+STRATOS_PG_HOST="db.example.com"
+STRATOS_PG_PORT="5432"
+STRATOS_PG_USERNAME="stratos"
+STRATOS_PG_PASSWORD="secret"
+STRATOS_PG_DBNAME="stratos"
 ```
+
+When both `STRATOS_POSTGRES_URL` and the individual `STRATOS_PG_*` variables are set,
+`STRATOS_POSTGRES_URL` takes precedence.
 
 With PostgreSQL, each enrolled actor gets their own schema within the database, providing data
 isolation while enabling centralized management.
@@ -566,22 +634,31 @@ To migrate from disk to S3:
 
 ### Overview
 
-AppViews index Stratos content by subscribing to the `app.northsky.stratos.sync.subscribeRecords` WebSocket
+AppViews index Stratos content by subscribing to the `zone.stratos.sync.subscribeRecords` WebSocket
 endpoint. This is similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
 
 ### Step 1: Service Authentication
 
-AppViews authenticate using **service auth** - a signed JWT proving their identity:
+AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query
+parameter. The token must be passed as a query param because `Authorization` headers are
+stripped by many WebSocket proxies and are not supported in browser WebSocket APIs.
 
 ```typescript
-import { createServiceAuthHeaders } from '@atproto/xrpc-server'
+import { createServiceJwt } from '@atproto/xrpc-server'
 
-const headers = await createServiceAuthHeaders({
-  iss: appviewDid, // AppView's DID
-  aud: stratosServiceDid, // Stratos service DID
-  lxm: 'app.northsky.stratos.sync.subscribeRecords',
-  keypair: signingKey, // AppView's signing key
-})
+async function mintSyncToken(
+  appviewDid: string,
+  stratosServiceDid: string,
+  signingKey: Keypair,
+): Promise<string> {
+  // Tokens are short-lived — mint a fresh one for every connection or reconnect.
+  return createServiceJwt({
+    iss: appviewDid,
+    aud: stratosServiceDid,
+    lxm: 'zone.stratos.sync.subscribeRecords',
+    keypair: signingKey,
+  })
+}
 ```
 
 ### Step 2: Subscribe to User Records
@@ -589,21 +666,33 @@ const headers = await createServiceAuthHeaders({
 ```typescript
 import WebSocket from 'ws'
 
-async function subscribeToUser(did: string, cursor?: number) {
-  const authHeaders = await createServiceAuthHeaders({...})
+async function subscribeToUser(
+  appviewDid: string,
+  stratosServiceDid: string,
+  signingKey: Keypair,
+  did: string,
+  cursor?: number,
+) {
+  // Mint a fresh token on every call — tokens expire and must not be reused across reconnects.
+  const syncToken = await mintSyncToken(
+    appviewDid,
+    stratosServiceDid,
+    signingKey,
+  )
 
-  const url = new URL('wss://stratos.example.com/xrpc/app.northsky.stratos.sync.subscribeRecords')
+  const url = new URL(
+    'wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords',
+  )
   url.searchParams.set('did', did)
-  if (cursor) url.searchParams.set('cursor', cursor.toString())
+  url.searchParams.set('syncToken', syncToken)
+  if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
 
-  const ws = new WebSocket(url.toString(), {
-    headers: authHeaders
-  })
+  const ws = new WebSocket(url.toString())
 
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     const frame = decodeFrame(data)
 
-    if (frame.$type === 'app.northsky.stratos.sync.subscribeRecords#commit') {
+    if (frame.$type === 'zone.stratos.sync.subscribeRecords#commit') {
       for (const op of frame.ops) {
         if (op.action === 'create' || op.action === 'update') {
           await indexRecord(frame.did, op.path, op.record)
@@ -715,6 +804,7 @@ Query a community service for verified domain membership.
 ### Complete Integration Example
 
 ```typescript
+import { createServiceJwt } from '@atproto/xrpc-server'
 import { IdResolver } from '@atproto/identity'
 import { Kysely } from 'kysely'
 
@@ -725,6 +815,9 @@ class StratosIndexer {
     private db: Kysely<AppViewDb>,
     private idResolver: IdResolver,
     private stratosEndpoint: string,
+    private appviewDid: string,
+    private stratosServiceDid: string,
+    private signingKey: Keypair,
   ) {}
 
   async startIndexing(enrolledDids: string[]) {
@@ -734,24 +827,57 @@ class StratosIndexer {
     }
   }
 
+  private async connectWithAuth(
+    did: string,
+    cursor?: number,
+  ): Promise<WebSocket> {
+    // Mint a fresh JWT on every connection — tokens are short-lived and must
+    // not be reused across reconnects.
+    const syncToken = await createServiceJwt({
+      iss: this.appviewDid,
+      aud: this.stratosServiceDid,
+      lxm: 'zone.stratos.sync.subscribeRecords',
+      keypair: this.signingKey,
+    })
+
+    const url = new URL(
+      `${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`,
+    )
+    url.searchParams.set('did', did)
+    url.searchParams.set('syncToken', syncToken)
+    if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
+
+    return new WebSocket(url.toString())
+  }
+
   private async subscribeToUser(did: string, cursor?: number) {
     const ws = await this.connectWithAuth(did, cursor)
 
     ws.on('message', async (data) => {
       const event = this.decodeEvent(data)
 
-      if (event.$type === 'app.northsky.stratos.sync.subscribeRecords#commit') {
+      if (event.$type === 'zone.stratos.sync.subscribeRecords#info') {
+        if (event.name === 'OutdatedCursor') {
+          // Cursor was too old; indexing continues but some events may be missed.
+          this.cursors.delete(did)
+        }
+        return
+      }
+
+      if (event.$type === 'zone.stratos.sync.subscribeRecords#commit') {
         await this.db.transaction().execute(async (tx) => {
           for (const op of event.ops) {
             await this.processOp(tx, event.did, op)
           }
           await this.saveCursor(tx, event.did, event.seq)
         })
+        this.cursors.set(did, event.seq)
       }
     })
 
     ws.on('close', () => {
-      // Reconnect after delay
+      // Load cursor from in-memory map (kept in sync with DB commits) and
+      // reconnect with a freshly minted token.
       setTimeout(() => this.subscribeToUser(did, this.cursors.get(did)), 5000)
     })
   }
@@ -852,6 +978,43 @@ Recommended rate limits:
 | `getRecord`     | 1000/minute per IP  |
 | OAuth authorize | 10/minute per IP    |
 
+### CORS Configuration
+
+Stratos ships with permissive CORS (`Access-Control-Allow-Origin: *`) by default. This is safe for
+the XRPC API because DPoP binding provides request-level proof of possession — a token stolen via a
+cross-origin request cannot be replayed without the corresponding DPoP private key.
+
+However, operators **should** restrict CORS origins via their reverse proxy to only allow their
+webapp origin. This provides defense in depth and prevents cross-origin requests from untrusted
+frontends.
+
+**Required exposed headers:** `DPoP-Nonce`, `WWW-Authenticate`
+
+These headers must be included in `Access-Control-Expose-Headers` for DPoP nonce negotiation to
+work correctly from browser clients.
+
+**Example nginx configuration:**
+
+```nginx
+# Restrict CORS to your webapp origin
+location / {
+    # Remove the default permissive CORS header from upstream
+    proxy_hide_header Access-Control-Allow-Origin;
+
+    # Set restrictive CORS
+    add_header Access-Control-Allow-Origin "https://your-webapp.example.com" always;
+    add_header Access-Control-Allow-Methods "GET, POST, OPTIONS, DELETE" always;
+    add_header Access-Control-Allow-Headers "Authorization, DPoP, Content-Type" always;
+    add_header Access-Control-Expose-Headers "DPoP-Nonce, WWW-Authenticate" always;
+
+    if ($request_method = OPTIONS) {
+        return 204;
+    }
+
+    proxy_pass http://stratos:3100;
+}
+```
+
 ---
 
 ## Troubleshooting
@@ -886,8 +1049,8 @@ STRATOS_LOG_LEVEL=debug pnpm start
 curl localhost:3100/health
 
 # Check specific user enrollment
-curl "localhost:3100/xrpc/app.northsky.stratos.enrollment.status?did=did:plc:abc"
+curl "localhost:3100/xrpc/zone.stratos.enrollment.status?did=did:plc:abc"
 
 # Test WebSocket connectivity
-wscat -c "ws://localhost:3100/xrpc/app.northsky.stratos.sync.subscribeRecords?did=did:plc:abc"
+wscat -c "ws://localhost:3100/xrpc/zone.stratos.sync.subscribeRecords?did=did:plc:abc"
 ```

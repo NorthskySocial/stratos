@@ -8,10 +8,33 @@ import {
 import { getAtprotoVerificationMaterial } from '@atcute/identity'
 import { WebDidDocumentResolver } from '@atcute/identity-resolver'
 import type {
+  VerificationLevel,
   VerifiedRecord,
   FetchAndVerifyOptions,
   ResolveSigningKeyOptions,
 } from './types.js'
+
+type DidString = `did:plc:${string}` | `did:web:${string}`
+
+const verifyRecordCar = async (
+  carBytes: Uint8Array,
+  collection: string,
+  rkey: string,
+  did?: string,
+  publicKey?: PublicKey,
+): Promise<VerifiedRecord> => {
+  const result = await atcuteVerifyRecord({
+    carBytes,
+    collection,
+    rkey,
+    did: did as DidString | undefined,
+    publicKey,
+  })
+  const level: VerificationLevel = publicKey
+    ? 'service-signature'
+    : 'cid-integrity'
+  return { cid: result.cid, record: result.record, level }
+}
 
 /**
  * verifies CID integrity and MST path for a record CAR without checking
@@ -29,13 +52,7 @@ export const verifyCidIntegrity = async (
   rkey: string,
   did?: string,
 ): Promise<VerifiedRecord> => {
-  const result = await atcuteVerifyRecord({
-    carBytes,
-    collection,
-    rkey,
-    did: did as `did:plc:${string}` | `did:web:${string}` | undefined,
-  })
-  return { cid: result.cid, record: result.record, level: 'cid-integrity' }
+  return verifyRecordCar(carBytes, collection, rkey, did)
 }
 
 /**
@@ -100,10 +117,8 @@ export const fetchAndVerifyRecord = async (
 ): Promise<VerifiedRecord> => {
   const fetchFn = options?.fetchFn ?? fetch
 
-  const url = new URL(
-    `/xrpc/com.atproto.sync.getRecord?did=${encodeURIComponent(did)}&collection=${encodeURIComponent(collection)}&rkey=${encodeURIComponent(rkey)}`,
-    serviceUrl,
-  )
+  const params = new URLSearchParams({ did, collection, rkey })
+  const url = new URL(`/xrpc/com.atproto.sync.getRecord?${params}`, serviceUrl)
 
   const res = await fetchFn(url.href)
   if (!res.ok) {
@@ -113,21 +128,11 @@ export const fetchAndVerifyRecord = async (
   }
 
   const carBytes = new Uint8Array(await res.arrayBuffer())
-
-  if (options?.serviceSigningKey) {
-    const result = await atcuteVerifyRecord({
-      carBytes,
-      collection,
-      rkey,
-      did: did as `did:plc:${string}` | `did:web:${string}`,
-      publicKey: options.serviceSigningKey,
-    })
-    return {
-      cid: result.cid,
-      record: result.record,
-      level: 'service-signature' as const,
-    }
-  }
-
-  return verifyCidIntegrity(carBytes, collection, rkey, did)
+  return verifyRecordCar(
+    carBytes,
+    collection,
+    rkey,
+    did,
+    options?.serviceSigningKey,
+  )
 }
