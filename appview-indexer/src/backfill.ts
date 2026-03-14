@@ -6,6 +6,10 @@ import { jsonToLex, parseCid } from './pds-subscription.ts'
 
 const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 
+function toHttpUrl(endpoint: string): string {
+  return endpoint.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://')
+}
+
 export interface BackfillOptions {
   repoProvider: string
   indexingService: IndexingService
@@ -44,7 +48,7 @@ async function backfillViaListRecords(
   let cursor: string | undefined
 
   do {
-    const url = new URL(`/xrpc/com.atproto.repo.listRecords`, opts.repoProvider)
+    const url = new URL(`/xrpc/com.atproto.repo.listRecords`, toHttpUrl(opts.repoProvider))
     url.searchParams.set('repo', did)
     url.searchParams.set('limit', '100')
     if (cursor) url.searchParams.set('cursor', cursor)
@@ -102,8 +106,10 @@ async function listAllRepos(
   const repos: Array<{ did: string }> = []
   let cursor: string | undefined
 
+  const httpBase = toHttpUrl(repoProvider)
+
   do {
-    const url = new URL(`/xrpc/com.atproto.sync.listRepos`, repoProvider)
+    const url = new URL(`/xrpc/com.atproto.sync.listRepos`, httpBase)
     url.searchParams.set('limit', '1000')
     if (cursor) url.searchParams.set('cursor', cursor)
 
