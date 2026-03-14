@@ -30,6 +30,8 @@ describe('Enrollment - auto enroll boundaries', () => {
       did,
       enrolledAt: new Date().toISOString(),
       boundaries,
+      signingKeyDid: 'did:key:zUsagiTsukinoMoon123',
+      active: true,
     })
 
     // Boundaries should be persisted
