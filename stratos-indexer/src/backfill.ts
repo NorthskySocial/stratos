@@ -17,22 +17,23 @@ export interface BackfillOptions {
   indexingService: IndexingService
   enrollmentCallback: EnrollmentCallback
   onError?: (err: Error) => void
-  onProgress?: (processed: number, total: number) => void
+  onProgress?: (processed: number) => void
 }
 
 export async function backfillRepos(opts: BackfillOptions): Promise<number> {
-  const repos = await listAllRepos(opts.repoProvider)
   let processed = 0
 
-  for (const repo of repos) {
-    try {
-      await backfillViaListRecords(opts, repo.did)
-      processed++
-      opts.onProgress?.(processed, repos.length)
-    } catch (err) {
-      opts.onError?.(
-        new Error(`failed to backfill repo ${repo.did}`, { cause: err }),
-      )
+  for await (const page of listRepoPages(opts.repoProvider)) {
+    for (const repo of page) {
+      try {
+        await backfillViaListRecords(opts, repo.did)
+        processed++
+        opts.onProgress?.(processed)
+      } catch (err) {
+        opts.onError?.(
+          new Error(`failed to backfill repo ${repo.did}`, { cause: err }),
+        )
+      }
     }
   }
 
@@ -102,10 +103,9 @@ async function backfillViaListRecords(
   } while (cursor)
 }
 
-async function listAllRepos(
+async function* listRepoPages(
   repoProvider: string,
-): Promise<Array<{ did: string }>> {
-  const repos: Array<{ did: string }> = []
+): AsyncGenerator<Array<{ did: string }>> {
   let cursor: string | undefined
   const httpBase = toHttpUrl(repoProvider)
 
@@ -122,9 +122,7 @@ async function listAllRepos(
       cursor?: string
     }
 
-    repos.push(...body.repos)
+    yield body.repos
     cursor = body.cursor
   } while (cursor)
-
-  return repos
 }
