@@ -8,4 +8,4 @@ FROM denoland/deno:latest
 WORKDIR /app
 COPY --from=builder /app .
 COPY --from=builder /deno-dir /deno-dir
-CMD ["deno", "run", "--allow-all", "--cached-only", "src/bin/main.ts"]
+CMD ["deno", "run", "--allow-all", "--cached-only", "--v8-flags=--max-old-space-size=3584", "src/bin/main.ts"]

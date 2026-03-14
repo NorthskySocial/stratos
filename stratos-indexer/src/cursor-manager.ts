@@ -61,11 +61,13 @@ export class CursorManager {
 
   private async flush(): Promise<void> {
     if (!this.dirty) return
-    this.dirty = false
 
-    await this.onFlush({
+    const state = {
       pdsSeq: this.pdsSeq,
       stratosCursors: new Map(this.stratosCursors),
-    })
+    }
+
+    await this.onFlush(state)
+    this.dirty = false
   }
 }
