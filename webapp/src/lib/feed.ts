@@ -11,8 +11,9 @@ interface FeedViewPost {
   reason?: unknown
 }
 
-interface StratosAuthorFeedResponse {
+interface StratosTimelineResponse {
   feed?: FeedViewPost[]
+  cursor?: string
 }
 
 export interface FeedPost {
@@ -118,27 +119,25 @@ export async function fetchStratosPosts(
 export async function fetchAppviewStratosPosts(
   session: OAuthSession,
   appviewUrl: string,
-  did: string,
 ): Promise<FeedPost[]> {
   try {
-    const url = new URL('/xrpc/zone.stratos.feed.getAuthorFeed', appviewUrl)
-    url.searchParams.set('actor', did)
+    const url = new URL('/xrpc/zone.stratos.feed.getTimeline', appviewUrl)
     url.searchParams.set('limit', '50')
 
     const res = await session.fetchHandler(url.href, { method: 'GET' })
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
       console.error(
-        `[stratos] getAuthorFeed failed: ${res.status} ${errText}`,
+        `[stratos] getTimeline failed: ${res.status} ${errText}`,
       )
       return []
     }
 
-    const body = (await res.json()) as StratosAuthorFeedResponse
-    console.log(`[stratos] getAuthorFeed: ${body.feed?.length ?? 0} posts`)
+    const body = (await res.json()) as StratosTimelineResponse
+    console.log(`[stratos] getTimeline: ${body.feed?.length ?? 0} posts`)
     return mapFeedViewPosts(body.feed ?? [], true)
   } catch (err) {
-    console.error('[stratos] getAuthorFeed error:', err)
+    console.error('[stratos] getTimeline error:', err)
     return []
   }
 }
