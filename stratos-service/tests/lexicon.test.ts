@@ -14,6 +14,7 @@ const EXPECTED_STRATOS_LEXICONS = [
   'zone.stratos.defs',
   'zone.stratos.enrollment.status',
   'zone.stratos.feed.post',
+  'zone.stratos.identity.resolveEnrollments',
   'zone.stratos.repo.hydrateRecord',
   'zone.stratos.repo.hydrateRecords',
   'zone.stratos.repo.importRepo',
