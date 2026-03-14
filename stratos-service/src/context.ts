@@ -504,6 +504,7 @@ function createAuthVerifiers(
   adminPassword: string | undefined,
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
   devMode: boolean,
+  syncToken: string | undefined,
 ): AuthVerifiers {
   return {
     standard: async (ctx) => {
@@ -668,11 +669,17 @@ function createAuthVerifiers(
     },
     subscribeAuth: async (ctx: StreamAuthContext) => {
       const params = ctx.params as Record<string, unknown>
-      const syncToken = params.syncToken
+      const tokenParam = params.syncToken
 
-      if (syncToken && typeof syncToken === 'string') {
+      if (tokenParam && typeof tokenParam === 'string' && syncToken) {
+        if (safeEqual(tokenParam, syncToken)) {
+          return { credentials: { type: 'service', iss: 'sync-token', aud: serviceDid } }
+        }
+      }
+
+      if (tokenParam && typeof tokenParam === 'string') {
         const serviceCtx = await verifyServiceAuth(
-          `Bearer ${syncToken}`,
+          `Bearer ${tokenParam}`,
           serviceDid,
           'zone.stratos.sync.subscribeRecords',
           idResolver,
@@ -1002,6 +1009,7 @@ export async function createAppContext(
     cfg.admin?.password,
     dpopVerifier,
     cfg.stratos.devMode === true,
+    cfg.syncToken,
   )
 
   const serviceDid = cfg.service.did
