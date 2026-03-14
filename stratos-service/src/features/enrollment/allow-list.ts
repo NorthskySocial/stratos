@@ -1,5 +1,4 @@
-import { Redis } from 'ioredis'
-import { type Logger } from '@northskysocial/stratos-core'
+import { type Logger, type Cache } from '@northskysocial/stratos-core'
 
 export interface AllowListProvider {
   isAllowed(did: string): Promise<boolean>
@@ -7,21 +6,16 @@ export interface AllowListProvider {
 }
 
 export class ExternalAllowListProvider implements AllowListProvider {
-  private readonly redis: Redis | null = null
   private allowList: Set<string> = new Set()
   private refreshInterval: NodeJS.Timeout | null = null
 
   constructor(
     private url: string,
-    private valkeyUrl?: string,
+    private cache?: Cache,
     private bootstrapName?: string,
     private logger?: Logger,
     private refreshMs: number = 600000, // 10 minutes default
-  ) {
-    if (this.valkeyUrl) {
-      this.redis = new Redis(this.valkeyUrl)
-    }
-  }
+  ) {}
 
   async start() {
     await this.refresh()
@@ -32,8 +26,8 @@ export class ExternalAllowListProvider implements AllowListProvider {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval)
     }
-    if (this.redis) {
-      await this.redis.quit()
+    if (this.cache) {
+      await this.cache.close()
     }
   }
 
@@ -42,9 +36,9 @@ export class ExternalAllowListProvider implements AllowListProvider {
       return true
     }
 
-    if (this.redis && this.bootstrapName) {
-      const exists = await this.redis.sismember(this.bootstrapName, did)
-      return exists === 1
+    if (this.cache && this.bootstrapName) {
+      const exists = await this.cache.sismember(this.bootstrapName, did)
+      return exists
     }
 
     return false
@@ -69,13 +63,13 @@ export class ExternalAllowListProvider implements AllowListProvider {
       this.allowList = new Set(dids)
       this.logger?.info({ count: dids.length }, 'external allow list refreshed')
 
-      if (this.redis && this.bootstrapName && dids.length > 0) {
+      if (this.cache && this.bootstrapName && dids.length > 0) {
         this.logger?.info(
           { bootstrapName: this.bootstrapName },
           'bootstrapping valkey allow list',
         )
         // Use a pipeline or transaction for efficiency
-        const pipeline = this.redis.pipeline()
+        const pipeline = this.cache.pipeline()
         pipeline.del(this.bootstrapName)
         const chunkSize = 1000
         for (let i = 0; i < dids.length; i += chunkSize) {

@@ -97,6 +97,7 @@ import { PgEnrollmentStoreWriter } from './adapters/postgres/enrollment-store.js
 import { PostgresActorStore } from './adapters/postgres/actor-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
+import { RedisCache } from './adapters/redis-cache.js'
 
 /**
  * Actor store manager for Stratos
@@ -946,9 +947,12 @@ export async function createAppContext(
   // Initialize external allow list provider if configured
   let allowListProvider: ExternalAllowListProvider | undefined
   if (cfg.enrollment.allowListUrl) {
+    const cache = cfg.enrollment.valkeyUrl
+      ? new RedisCache(cfg.enrollment.valkeyUrl)
+      : undefined
     allowListProvider = new ExternalAllowListProvider(
       cfg.enrollment.allowListUrl,
-      cfg.enrollment.valkeyUrl,
+      cache,
       cfg.enrollment.allowListBootstrapName,
       logger,
     )
