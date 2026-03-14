@@ -69,7 +69,6 @@
       stratosPosts = await fetchAppviewStratosPosts(
         session,
         APPVIEW_URL,
-        session.sub,
       )
     } else if (stratosAgent) {
       stratosPosts = await fetchStratosPosts(stratosAgent, session.sub)
