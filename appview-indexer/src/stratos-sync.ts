@@ -77,9 +77,14 @@ export class StratosServiceSubscription {
     }
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
-      this.onError?.(
-        new Error('Stratos service subscription error', { cause: e.error }),
-      )
+      const cause = e.error instanceof Error ? e.error.message : String(e.error ?? 'unknown')
+      this.onError?.(new Error(`service subscription ws error: ${cause}`))
+    }
+
+    this.ws.onclose = (e: { code: number; reason: string }) => {
+      if (e.code !== 1000) {
+        this.onError?.(new Error(`service subscription ws closed: code=${e.code} reason=${e.reason || 'none'}`))
+      }
     }
   }
 
@@ -192,15 +197,17 @@ export class StratosActorSync {
       void this.handleMessage(did, e.data)
     }
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (e: { code: number; reason: string }) => {
       this.subscriptions.delete(did)
+      if (e.code !== 1000) {
+        this.onError?.(new Error(`actor sync ws closed for ${did}: code=${e.code} reason=${e.reason || 'none'}`))
+      }
       this.scheduleReconnect(did, attempt)
     })
 
-    ws.addEventListener('error', (err) => {
-      this.onError?.(
-        new Error(`Stratos actor sync error for ${did}`, { cause: err }),
-      )
+    ws.addEventListener('error', (e: Event & { error?: unknown }) => {
+      const cause = e instanceof Error ? e.message : (e as { error?: unknown }).error ?? 'unknown'
+      this.onError?.(new Error(`actor sync ws error for ${did}: ${cause}`))
     })
   }
 
