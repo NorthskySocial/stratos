@@ -3,7 +3,7 @@
 // Use this when OAuth flow is not working (e.g., PDS handle resolution issues).
 
 import { TEST_USERS } from './lib/config.ts'
-import { enrollUser, createActorStore } from './lib/db.ts'
+import { enrollUser, createActorStore } from './lib/backend.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
 import { section, info, pass, fail, warn, dim } from './lib/log.ts'
@@ -52,7 +52,7 @@ async function run() {
       dim(`  Actor store created`)
 
       // Enroll in the service database with boundaries
-      enrollUser(user.did, pdsEndpoint, testUser.boundaries)
+      await enrollUser(user.did, pdsEndpoint, testUser.boundaries)
       dim(`  Enrolled with boundaries: ${testUser.boundaries.join(', ')}`)
 
       // Verify enrollment via API

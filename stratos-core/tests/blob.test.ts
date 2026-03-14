@@ -246,8 +246,8 @@ describe('Blob Reader', () => {
 
     it('should return record URIs that use the blob', async () => {
       const cid = await createCid('shared blob')
-      const uri1 = 'at://did:plc:abc/app.northsky.stratos.feed.post/1'
-      const uri2 = 'at://did:plc:abc/app.northsky.stratos.feed.post/2'
+      const uri1 = 'at://did:plc:abc/zone.stratos.feed.post/1'
+      const uri2 = 'at://did:plc:abc/zone.stratos.feed.post/2'
 
       await db.insert(stratosRecordBlob).values([
         { blobCid: cid.toString(), recordUri: uri1 },
@@ -265,12 +265,12 @@ describe('Blob Reader', () => {
     it('should list blobs with pagination', async () => {
       const cid1 = await createCid('blob1')
       const cid2 = await createCid('blob2')
-      const uri = 'at://did:plc:test/app.northsky.stratos.feed.post/1'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/1'
 
       await db.insert(stratosRecord).values({
         uri,
         cid: 'record-cid',
-        collection: 'app.northsky.stratos.feed.post',
+        collection: 'zone.stratos.feed.post',
         rkey: '1',
         repoRev: 'rev1',
         indexedAt: new Date().toISOString(),
@@ -354,7 +354,7 @@ describe('Blob Transactor', () => {
   describe('associateBlobWithRecord', () => {
     it('should create blob-record association', async () => {
       const cid = await createCid('associated blob')
-      const uri = 'at://did:plc:test/app.northsky.stratos.feed.post/123'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/123'
 
       await transactor.associateBlobWithRecord(cid, uri)
 
@@ -364,7 +364,7 @@ describe('Blob Transactor', () => {
 
     it('should handle duplicate associations gracefully', async () => {
       const cid = await createCid('blob with dupes')
-      const uri = 'at://did:plc:test/app.northsky.stratos.feed.post/456'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/456'
 
       await transactor.associateBlobWithRecord(cid, uri)
       await expect(
@@ -380,7 +380,7 @@ describe('Blob Transactor', () => {
     it('should remove all blob associations for a record', async () => {
       const cid1 = await createCid('blob1')
       const cid2 = await createCid('blob2')
-      const uri = 'at://did:plc:test/app.northsky.stratos.feed.post/789'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/789'
 
       await transactor.associateBlobWithRecord(cid1, uri)
       await transactor.associateBlobWithRecord(cid2, uri)
@@ -435,7 +435,7 @@ describe('Blob Transactor', () => {
     it('should delete blobs not associated with any record', async () => {
       const orphanCid = await createCid('orphan')
       const usedCid = await createCid('used')
-      const uri = 'at://did:plc:test/app.northsky.stratos.feed.post/1'
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/1'
 
       // Track both blobs
       await transactor.trackBlob({

@@ -1,0 +1,78 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.repo.hydrateRecords",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Hydrate multiple records by URI. Returns records filtered by viewer's boundary access.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uris"],
+          "properties": {
+            "uris": {
+              "type": "array",
+              "description": "Array of AT-URIs to hydrate (max 100)",
+              "items": {
+                "type": "string",
+                "format": "at-uri"
+              },
+              "maxLength": 100
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["records", "notFound", "blocked"],
+          "properties": {
+            "records": {
+              "type": "array",
+              "description": "Successfully hydrated records",
+              "items": {
+                "type": "ref",
+                "ref": "#recordView"
+              }
+            },
+            "notFound": {
+              "type": "array",
+              "description": "URIs that were not found",
+              "items": {
+                "type": "string",
+                "format": "at-uri"
+              }
+            },
+            "blocked": {
+              "type": "array",
+              "description": "URIs blocked due to boundary restrictions",
+              "items": {
+                "type": "string",
+                "format": "at-uri"
+              }
+            }
+          }
+        }
+      }
+    },
+    "recordView": {
+      "type": "object",
+      "required": ["uri", "cid", "value"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "value": {
+          "type": "unknown"
+        }
+      }
+    }
+  }
+}

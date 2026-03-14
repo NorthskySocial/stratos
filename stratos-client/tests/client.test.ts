@@ -14,6 +14,27 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { 'content-type': 'application/json' },
   })
 
+const MOCK_SIG = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+const MOCK_SIG_B64 = btoa(String.fromCharCode(...MOCK_SIG))
+const MOCK_USER_KEY = 'did:key:zDnaeUserSigningKey123'
+const MOCK_SERVICE_KEY = 'did:key:zDnaeServiceKey456'
+
+const mockEnrollmentRecord = (valueOverrides?: Record<string, unknown>) => ({
+  uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
+  cid: 'bafytest',
+  value: {
+    service: 'https://stratos.example.com',
+    boundaries: [{ value: 'cosplayers' }],
+    signingKey: MOCK_USER_KEY,
+    attestation: {
+      sig: { $bytes: MOCK_SIG_B64 },
+      signingKey: MOCK_SERVICE_KEY,
+    },
+    createdAt: '2025-01-01T00:00:00Z',
+    ...valueOverrides,
+  },
+})
+
 describe('discovery', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -21,15 +42,7 @@ describe('discovery', () => {
 
   it('returns enrollment when record exists', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: {
-          service: 'https://stratos.example.com',
-          boundaries: [{ value: 'cosplayers' }],
-          createdAt: '2025-01-01T00:00:00Z',
-        },
-      }),
+      jsonResponse(mockEnrollmentRecord()),
     )
 
     const result = await discoverEnrollment(
@@ -40,9 +53,10 @@ describe('discovery', () => {
     expect(result).toEqual({
       service: 'https://stratos.example.com',
       boundaries: [{ value: 'cosplayers' }],
+      signingKey: MOCK_USER_KEY,
+      attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
     })
-
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('com.atproto.repo.getRecord'),
       expect.anything(),
@@ -64,7 +78,7 @@ describe('discovery', () => {
   it('returns null when record has invalid shape', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
-        uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
+        uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/self',
         cid: 'bafytest',
         value: { invalid: true },
       }),
@@ -79,14 +93,7 @@ describe('discovery', () => {
 
   it('normalizes missing boundaries to empty array', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: {
-          service: 'https://stratos.example.com',
-          createdAt: '2025-01-01T00:00:00Z',
-        },
-      }),
+      jsonResponse(mockEnrollmentRecord({ boundaries: undefined })),
     )
 
     const result = await discoverEnrollment(
@@ -98,15 +105,7 @@ describe('discovery', () => {
 
   it('accepts a FetchHandler instead of a PDS URL', async () => {
     const mockHandler = vi.fn(async () =>
-      jsonResponse({
-        uri: 'at://did:plc:test123/app.stratos.actor.enrollment/self',
-        cid: 'bafytest',
-        value: {
-          service: 'https://stratos.example.com',
-          boundaries: [],
-          createdAt: '2025-01-01T00:00:00Z',
-        },
-      }),
+      jsonResponse(mockEnrollmentRecord({ boundaries: [] })),
     )
 
     const result = await discoverEnrollment('did:plc:test123', mockHandler)
@@ -114,6 +113,8 @@ describe('discovery', () => {
     expect(result).toEqual({
       service: 'https://stratos.example.com',
       boundaries: [],
+      signingKey: MOCK_USER_KEY,
+      attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
     })
     expect(mockHandler).toHaveBeenCalledWith(
@@ -132,10 +133,10 @@ describe('routing', () => {
         'https://stratos.example.com',
       )
 
-      await handler.handle('/xrpc/app.stratos.feed.post')
+      await handler.handle('/xrpc/zone.stratos.feed.post')
 
       expect(mockHandler).toHaveBeenCalledWith(
-        'https://stratos.example.com/xrpc/app.stratos.feed.post',
+        'https://stratos.example.com/xrpc/zone.stratos.feed.post',
         {},
       )
     })
@@ -164,11 +165,11 @@ describe('routing', () => {
       )
 
       await handler.handle(
-        '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=app.stratos.feed.post&rkey=abc',
+        '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
       )
 
       expect(mockHandler).toHaveBeenCalledWith(
-        'https://stratos.example.com/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=app.stratos.feed.post&rkey=abc',
+        'https://stratos.example.com/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
         {},
       )
     })
@@ -192,27 +193,38 @@ describe('routing', () => {
 
 describe('scopes', () => {
   it('has correct default scope identifiers', () => {
-    expect(STRATOS_SCOPES.enrollment).toBe('app.stratos.actor.enrollment')
-    expect(STRATOS_SCOPES.post).toBe('app.stratos.feed.post')
+    expect(STRATOS_SCOPES.enrollment).toBe('zone.stratos.actor.enrollment')
+    expect(STRATOS_SCOPES.post).toBe('zone.stratos.feed.post')
   })
 
   it('builds collection scope with default abilities', () => {
-    const scope = buildCollectionScope('app.stratos.feed.post')
-    expect(scope).toBe('repo:app.stratos.feed.post:create,update,delete')
+    const scope = buildCollectionScope('zone.stratos.feed.post')
+    expect(scope).toBe('repo:zone.stratos.feed.post')
   })
 
   it('builds collection scope with custom abilities', () => {
-    const scope = buildCollectionScope('app.stratos.feed.post', ['create'])
-    expect(scope).toBe('repo:app.stratos.feed.post:create')
+    const scope = buildCollectionScope('zone.stratos.feed.post', ['create'])
+    expect(scope).toBe('repo:zone.stratos.feed.post?action=create')
+  })
+
+  it('builds collection scope with multiple custom abilities', () => {
+    const scope = buildCollectionScope('zone.stratos.feed.post', [
+      'create',
+      'update',
+    ])
+    expect(scope).toBe(
+      'repo:zone.stratos.feed.post?action=create&action=update',
+    )
   })
 
   it('builds full Stratos scope set', () => {
     const scopes = buildStratosScopes()
-    expect(scopes).toContain('transition:generic')
-    expect(scopes).toContain('transition:chat.bsky')
+    expect(scopes).toContain('atproto')
+    expect(scopes).toContain('repo:zone.stratos.actor.enrollment')
     expect(scopes).toContain(
-      'repo:app.stratos.actor.enrollment:create,update,delete',
+      'repo:zone.stratos.feed.post?action=create&action=delete',
     )
-    expect(scopes).toContain('repo:app.stratos.feed.post:create,update,delete')
+    expect(scopes).not.toContain('transition:generic')
+    expect(scopes).not.toContain('transition:chat.bsky')
   })
 })

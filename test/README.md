@@ -32,24 +32,24 @@ Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 The Deno test scripts load their own `.env` from `scripts/.env`. Copy from `.env.example` in the same directory and fill in the values:
 
-| Variable               | Example                   | Purpose                                                                      |
-| ---------------------- | ------------------------- | ---------------------------------------------------------------------------- |
-| `PDS_HOST`             | `pds.example.com`         | PDS hostname (without protocol) — used for handle construction and API calls |
-| `PDS_ADMIN_PASSWORD`   | `your-admin-password`     | PDS admin password for account creation/deletion                             |
-| `STRATOS_URL`          | `http://localhost:3100`   | Stratos service URL the scripts call                                         |
-| `STRATOS_OAUTH_ISSUER` | `https://pds.example.com` | PDS OAuth issuer URL — **required** to enable `/oauth/*` routes              |
+| Variable             | Example                 | Purpose                                                                      |
+| -------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PDS_HOST`           | `pds.example.com`       | PDS hostname (without protocol) — used for handle construction and API calls |
+| `PDS_ADMIN_PASSWORD` | `your-admin-password`   | PDS admin password for account creation/deletion                             |
+| `STRATOS_URL`        | `http://localhost:3100` | Stratos service URL the scripts call                                         |
+| `USE_OAUTH`          | `true`                  | Enable OAuth enrollment routes (`/oauth/*`)                                  |
 
 If you need to point at a different PDS, update these variables and the user handles in `scripts/lib/config.ts`.
 
-### Stratos container environment (`.env.test`)
+### Stratos container environment (`.env`)
 
-The Docker Compose file (`docker-compose.test.yml`) loads `.env.test` from the project root into the Stratos container via `env_file`. Create it by copying `.env.example` and adjusting for testing:
+The Docker Compose file (`docker-compose.test.yml`) loads `.env` from the project root into the Stratos container via `env_file`. Create it by copying `.env.example` and adjusting for testing:
 
 ```bash
-cp .env.example .env.test
+cp .env.example .env
 ```
 
-For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`, and point `STRATOS_ALLOWED_PDS_ENDPOINTS` / `STRATOS_OAUTH_ISSUER` at your PDS. `STRATOS_OAUTH_ISSUER` must be set to a valid URL (e.g., `https://pds.example.com`) or the OAuth routes won't be registered and enrollment will fail with "Cannot GET /oauth/authorize". See the [project README](../README.md) for the full list of available variables.
+For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`, and point `STRATOS_ALLOWED_PDS_ENDPOINTS` at your PDS. `USE_OAUTH=true` must be set or the OAuth routes won't be registered and enrollment will fail with "Cannot GET /oauth/authorize". See the [project README](../README.md) for the full list of available variables.
 
 ### Docker Compose (`docker-compose.test.yml`)
 
@@ -123,6 +123,44 @@ Direct mode is useful when:
 - PDS OAuth flow is broken or changed
 - You need faster iteration on boundary/record tests
 
+### PostgreSQL mode
+
+Run the full E2E suite against PostgreSQL instead of SQLite:
+
+```bash
+deno run -A scripts/run-all.ts --postgres
+```
+
+Or combine with direct mode:
+
+```bash
+deno run -A scripts/run-all.ts --direct --postgres
+```
+
+This mode:
+
+1. Starts a `postgres:16-alpine` container alongside Stratos via `docker-compose.postgres.yml` overlay
+2. Configures the Stratos container with `STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
+3. Boundary configuration and direct enrollment connect to PostgreSQL at `localhost:5432` instead of `service.sqlite`
+
+The PostgreSQL compose overlay (`docker-compose.postgres.yml`) adds:
+
+- A `postgres` service with healthcheck
+- Overrides on the `stratos` service for PG environment variables and dependency ordering
+
+To start the PostgreSQL stack manually:
+
+```bash
+docker compose -f docker-compose.test.yml -f docker-compose.postgres.yml up -d --build
+```
+
+If running individual scripts with PostgreSQL, set the environment variable:
+
+```bash
+export STRATOS_E2E_BACKEND=postgres
+deno run -A scripts/configure-boundaries.ts
+```
+
 ### Individual stages
 
 Each script can be run independently. Stages 2–4 require the prior stages to have been run.
@@ -183,7 +221,7 @@ Enrolls all three users via the real PDS OAuth authorization flow.
    - Fills the password field (username is pre-filled via `login_hint`) and submits.
    - Clicks the consent/authorize button on the PDS approval page.
    - PDS redirects back to Stratos `/oauth/callback`, which completes enrollment.
-   - Verifies enrollment via `GET /xrpc/app.northsky.stratos.enrollment.status?did=<did>`.
+   - Verifies enrollment via `GET /xrpc/zone.stratos.enrollment.status?did=<did>`.
 3. Saves screenshots to `test-data/screenshots/` at each step (useful for debugging selector issues).
 
 **Expected output:**
@@ -269,7 +307,7 @@ All API calls use `Authorization: Bearer <did>` for authentication, which works 
 Phase 4: Post CRUD & Boundary Tests
 
 Test 1: Create post with boundary
-  ✓ Rei created post — at://did:plc:.../app.northsky.stratos.feed.post/...
+  ✓ Rei created post — at://did:plc:.../zone.stratos.feed.post/...
 
 Test 2: Owner retrieves own post
   ✓ Rei reads own post — URI matches
@@ -359,7 +397,7 @@ Check container logs: `docker compose -f docker-compose.test.yml logs`
 **OAuth enrollment fails**
 Inspect screenshots in `test-data/screenshots/`. The PDS OAuth UI may have changed selectors.
 
-If you see **"Cannot GET /oauth/authorize"**, `STRATOS_OAUTH_ISSUER` is not set (or is empty) in `.env`. This env var gates whether Stratos registers OAuth routes at all. Set it to your PDS URL (e.g., `https://pds.example.com`).
+If you see **"Cannot GET /oauth/authorize"**, `USE_OAUTH` is not set to `true` in `.env`. This env var gates whether Stratos registers OAuth routes at all.
 
 **Boundary configuration fails**
 Ensure the container has written to `test-data/service.sqlite` (the SQLite DB is created on first request, not on startup). Verify the bind mount: `ls -la test-data/`.

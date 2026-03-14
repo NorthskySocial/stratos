@@ -8,6 +8,8 @@ export interface StoredEnrollment {
   enrolledAt: string
   pdsEndpoint?: string
   boundaries?: string[]
+  signingKeyDid: string
+  active: boolean
 }
 
 /**

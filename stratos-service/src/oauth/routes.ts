@@ -15,6 +15,8 @@ export interface EnrollmentRecord {
   enrolledAt: string
   pdsEndpoint?: string
   boundaries?: string[]
+  signingKeyDid: string
+  active: boolean
 }
 
 /**
@@ -36,16 +38,21 @@ export interface OAuthRoutesConfig {
   enrollmentStore: EnrollmentStore
   idResolver: IdResolver
   baseUrl: string
-  /** The public service endpoint URL for this Stratos service */
   serviceEndpoint: string
-  /** Boundaries to assign to new enrollments (if empty, placeholder will be used) */
   defaultBoundaries?: string[]
   /** External allow list provider (optional) */
   allowListProvider?: AllowListProvider
   /** Logger for OAuth events */
   logger?: Logger
-  /** Initialize the actor store and repo for a newly enrolled user */
-  initRepo?: (did: string) => Promise<void>
+  devMode?: boolean
+  dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
+  initRepo: (did: string) => Promise<void>
+  createSigningKey: (did: string) => Promise<string>
+  createAttestation: (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ) => Promise<{ sig: Uint8Array; signingKey: string }>
 }
 
 /**
@@ -62,8 +69,77 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     defaultBoundaries = [],
     allowListProvider,
     logger,
+    devMode = false,
+    dpopVerifier,
     initRepo,
+    createSigningKey,
+    createAttestation,
   } = config
+
+  const isSecure = config.baseUrl.startsWith('https://')
+
+  const allowedSchemes = isSecure ? ['https:'] : ['http:', 'https:']
+
+  /**
+   * Authenticate a request using DPoP (production) or Bearer DID (dev mode only).
+   * Returns the authenticated DID, or null if the response was already sent.
+   */
+  async function authenticateRequest(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<string | null> {
+    const authHeader = req.headers.authorization
+    if (!authHeader) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authorization required',
+      })
+      return null
+    }
+
+    if (devMode && authHeader.startsWith('Bearer ')) {
+      const did = authHeader.slice(7).trim()
+      if (did.startsWith('did:')) {
+        return did
+      }
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid token format',
+      })
+      return null
+    }
+
+    if (!authHeader.startsWith('DPoP ')) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'DPoP authorization required',
+      })
+      return null
+    }
+
+    try {
+      const result = await dpopVerifier.verify(
+        {
+          method: req.method || 'GET',
+          url: req.url || '/',
+          headers: req.headers as Record<string, string | string[] | undefined>,
+        },
+        {
+          setHeader: (name: string, value: string) =>
+            res.setHeader(name, value),
+        },
+      )
+      return result.did
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'DPoP verification failed'
+      res.status(401).json({
+        error: 'Unauthorized',
+        message,
+      })
+      return null
+    }
+  }
 
   /**
    * Start OAuth authorization flow
@@ -72,11 +148,36 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
   router.get('/authorize', async (req, res) => {
     try {
       const handle = req.query.handle as string
+      const redirectUri = req.query.redirect_uri as string | undefined
 
       if (!handle) {
         return res.status(400).json({
           error: 'InvalidRequest',
           message: 'Handle parameter required',
+        })
+      }
+
+      if (redirectUri) {
+        try {
+          const parsed = new URL(redirectUri)
+          if (!allowedSchemes.includes(parsed.protocol)) {
+            return res.status(400).json({
+              error: 'InvalidRequest',
+              message: 'redirect_uri must use https',
+            })
+          }
+        } catch {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'Invalid redirect_uri',
+          })
+        }
+
+        res.cookie('stratos_redirect', redirectUri, {
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 10 * 60 * 1000,
+          secure: isSecure,
         })
       }
 
@@ -98,7 +199,6 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       res.status(500).json({
         error: 'AuthorizationError',
         message: 'Failed to start authorization flow',
-        detail: errorMsg,
       })
     }
   })
@@ -145,6 +245,17 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
 
       if (!alreadyEnrolled) {
+        // Initialize actor store and repo with an empty signed commit
+        await initRepo(did)
+
+        // Generate user signing key and service attestation
+        const userSigningKeyDid = await createSigningKey(did)
+        const attestation = await createAttestation(
+          did,
+          defaultBoundaries,
+          userSigningKeyDid,
+        )
+
         // Determine boundaries for enrollment
         const boundaries =
           enrollmentResult.autoEnrollDomains &&
@@ -158,23 +269,9 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           enrolledAt: new Date().toISOString(),
           pdsEndpoint: enrollmentResult.pdsEndpoint,
           boundaries,
+          signingKeyDid: userSigningKeyDid,
+          active: true,
         })
-
-        // Initialize actor store and repo with an empty signed commit
-        if (initRepo) {
-          try {
-            await initRepo(did)
-          } catch (initErr) {
-            logger?.warn(
-              {
-                err:
-                  initErr instanceof Error ? initErr.message : String(initErr),
-                did,
-              },
-              'failed to initialize repo during enrollment',
-            )
-          }
-        }
 
         // Write profile record to user's PDS for endpoint discovery
         try {
@@ -183,11 +280,16 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
           await agent.com.atproto.repo.putRecord({
             repo: did,
-            collection: 'app.northsky.stratos.actor.enrollment',
+            collection: 'zone.stratos.actor.enrollment',
             rkey: 'self',
             record: {
               service: serviceEndpoint,
               boundaries: boundaries.map((value) => ({ value })),
+              signingKey: userSigningKeyDid,
+              attestation: {
+                sig: attestation.sig,
+                signingKey: attestation.signingKey,
+              },
               createdAt: new Date().toISOString(),
             },
           })
@@ -205,7 +307,23 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         }
       }
 
-      // Return success page or redirect to app
+      // Redirect back to the app if a redirect was stored, otherwise return JSON
+      const redirectTo = (
+        req as express.Request & { cookies?: Record<string, string> }
+      ).cookies?.stratos_redirect
+      if (redirectTo) {
+        res.clearCookie('stratos_redirect')
+        try {
+          const url = new URL(redirectTo)
+          if (allowedSchemes.includes(url.protocol)) {
+            url.searchParams.set('stratos_enrolled', 'true')
+            return res.redirect(url.toString())
+          }
+        } catch {
+          // Invalid URL, fall through to JSON response
+        }
+      }
+
       res.json({
         success: true,
         did,
@@ -222,13 +340,14 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         )
       }
     } catch (err) {
-      logger?.error(
-        { err: err instanceof Error ? err.message : String(err) },
-        'OAuth callback failed',
-      )
+      const errMsg = err instanceof Error ? err.message : String(err)
+      const errStack = err instanceof Error ? err.stack : undefined
+      logger?.error({ err: errMsg, stack: errStack }, 'OAuth callback failed')
+      console.error('OAuth callback failed:', errMsg)
+      if (errStack) console.error(errStack)
       res.status(500).json({
         error: 'CallbackError',
-        message: 'Failed to complete authorization',
+        message: devMode ? errMsg : 'Failed to complete authorization',
       })
     }
   })
@@ -239,36 +358,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
    */
   router.get('/status', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization
-      if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Bearer token required',
-        })
-      }
-
-      // Extract DID from bearer token (format: "Bearer did:plc:xxx")
-      const token = authHeader.slice(7) // Remove "Bearer "
-      if (!token.startsWith('did:')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid token format: expected DID',
-        })
-      }
-
-      const did = token
-
-      // Validate session exists (optional, for extra security)
-      if (oauthClient) {
-        try {
-          await oauthClient.restore(did, false)
-        } catch {
-          return res.status(401).json({
-            error: 'Unauthorized',
-            message: 'No valid session for user',
-          })
-        }
-      }
+      const did = await authenticateRequest(req, res)
+      if (!did) return
 
       // Check enrollment status
       const enrollment = await enrollmentStore.getEnrollment(did)
@@ -304,36 +395,8 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
    */
   router.post('/revoke', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization
-      if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Bearer token required',
-        })
-      }
-
-      // Extract DID from bearer token (format: "Bearer did:plc:xxx")
-      const token = authHeader.slice(7) // Remove "Bearer "
-      if (!token.startsWith('did:')) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid token format: expected DID',
-        })
-      }
-
-      const did = token
-
-      // Validate session exists
-      if (oauthClient) {
-        try {
-          await oauthClient.restore(did, false)
-        } catch {
-          return res.status(401).json({
-            error: 'Unauthorized',
-            message: 'No valid session for user',
-          })
-        }
-      }
+      const did = await authenticateRequest(req, res)
+      if (!did) return
 
       // Check if enrolled
       const isEnrolled = await enrollmentStore.isEnrolled(did)
@@ -344,7 +407,23 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         })
       }
 
-      // Unenroll the user
+      // Best-effort PDS enrollment record deletion
+      try {
+        const oauthSession = await oauthClient.restore(did)
+        const agent = new Agent(oauthSession)
+        await agent.com.atproto.repo.deleteRecord({
+          repo: did,
+          collection: 'app.northsky.stratos.actor.enrollment',
+          rkey: 'self',
+        })
+      } catch (err) {
+        logger?.warn(
+          { err: err instanceof Error ? err.message : String(err), did },
+          'failed to delete PDS enrollment record',
+        )
+      }
+
+      // Remove boundaries and mark enrollment inactive (signing key is preserved)
       await enrollmentStore.unenroll(did)
 
       // Revoke the OAuth session if client available

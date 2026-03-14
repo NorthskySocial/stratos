@@ -1,11 +1,11 @@
 # Stratos Private Namespace Service - Docker Image
 #
-# Uses tsx for TypeScript execution without compilation,
-# as the codebase uses dynamic imports and runtime transpilation.
+# Multi-stage build: compiles TypeScript at build time for fast startup.
+# Stage 1 builds both packages; Stage 2 runs compiled JS directly with node.
 
-FROM node:24-alpine
+# --- Build stage ---
+FROM node:24-alpine AS builder
 
-# Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
@@ -15,7 +15,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
 
-# Install all dependencies (tsx is a production dependency needed for runtime)
+# Install all dependencies (including devDependencies for tsc)
 RUN pnpm install --frozen-lockfile
 
 # Copy source files
@@ -24,8 +24,50 @@ COPY stratos-core/ ./stratos-core/
 COPY stratos-service/ ./stratos-service/
 COPY lexicons/ ./lexicons/
 
-# Create data directory
-RUN mkdir -p /app/data && chown -R node:node /app/data
+# Generate version module, then compile both packages
+RUN pnpm run --filter stratos-service generate:version \
+    && pnpm run --filter stratos-core build \
+    && pnpm run --filter stratos-service build
+
+# Patch stratos-core package.json to export compiled dist/ for production
+RUN node -e " \
+  const fs = require('fs'); \
+  const pkg = JSON.parse(fs.readFileSync('stratos-core/package.json', 'utf8')); \
+  pkg.main = 'dist/index.js'; \
+  pkg.types = 'dist/index.d.ts'; \
+  pkg.exports = { \
+    '.': { types: './dist/index.d.ts', import: './dist/index.js' }, \
+    './validation': { types: './dist/validation/index.d.ts', import: './dist/validation/index.js' }, \
+    './db': { types: './dist/db/index.d.ts', import: './dist/db/index.js' } \
+  }; \
+  fs.writeFileSync('stratos-core/package.json', JSON.stringify(pkg, null, 2) + '\n'); \
+"
+
+# --- Production stage ---
+FROM node:24-alpine
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy package files — use patched stratos-core package.json from builder
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --from=builder /app/stratos-core/package.json ./stratos-core/
+COPY stratos-service/package.json ./stratos-service/
+
+# Install production dependencies only (no devDependencies)
+RUN pnpm install --frozen-lockfile --prod
+
+# Copy compiled output from builder
+COPY --from=builder /app/stratos-core/dist/ ./stratos-core/dist/
+COPY --from=builder /app/stratos-service/dist/ ./stratos-service/dist/
+
+# Copy lexicons (needed at runtime for validation)
+COPY lexicons/ ./lexicons/
+
+# Create data directory structure
+# /app/data/assets/ - optional static files served at /assets (e.g. OAuth consent screen logo)
+RUN mkdir -p /app/data/assets && chown -R node:node /app/data
 
 # Switch to non-root user
 USER node
@@ -42,6 +84,6 @@ ENV NODE_ENV=production
 ENV STRATOS_PORT=3100
 ENV STRATOS_DATA_DIR=/app/data
 
-# Run the service using tsx from stratos-service (where it's installed)
+# Run compiled JS directly — no tsx transpilation at startup
 WORKDIR /app/stratos-service
-CMD ["pnpm", "exec", "tsx", "src/bin/stratos.ts"]
+CMD ["node", "dist/bin/stratos.js"]

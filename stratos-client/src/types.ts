@@ -2,12 +2,23 @@ export type { FetchHandler, FetchHandlerObject } from '@atcute/client'
 
 /**
  * stratos enrollment record as stored on the user's PDS.
- * matches the `app.stratos.actor.enrollment` lexicon shape.
+ * matches the `zone.stratos.actor.enrollment` lexicon shape.
  */
 export interface StratosEnrollment {
   service: string
   boundaries: Array<{ value: string }>
+  signingKey: string
+  attestation: ServiceAttestation
   createdAt: string
+}
+
+/**
+ * service attestation vouching for the user's enrollment, boundaries, and signing key.
+ * the signed payload is DAG-CBOR encoded {boundaries, did, signingKey} with sorted keys.
+ */
+export interface ServiceAttestation {
+  sig: Uint8Array
+  signingKey: string
 }
 
 /**
