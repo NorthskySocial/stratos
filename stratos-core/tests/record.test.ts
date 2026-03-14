@@ -8,10 +8,7 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { eq } from 'drizzle-orm'
 
-import {
-  StratosRecordReader,
-  StratosRecordTransactor,
-} from '../src'
+import { StratosRecordReader, StratosRecordTransactor } from '../src'
 import {
   createStratosDb,
   migrateStratosDb,

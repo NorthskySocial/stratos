@@ -10,10 +10,7 @@ import {
   isLocalService,
   createHydrationContext,
 } from '../src'
-import type {
-  HydrationContext,
-  AccessCheckInput,
-} from '../src'
+import type { HydrationContext, AccessCheckInput } from '../src'
 
 describe('Hydration Domain', () => {
   describe('canAccessRecord', () => {
