@@ -1,0 +1,25 @@
+{
+  "name": "@northskysocial/stratos-indexer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint src tests"
+  },
+  "dependencies": {
+    "@atcute/atproto": "^3.1.10",
+    "@atcute/car": "^5.1.1",
+    "@atcute/cbor": "^2.3.2",
+    "@atcute/firehose": "^0.1.0",
+    "@atproto/bsky": "^0.0.214",
+    "@atproto/identity": "^0.4.8",
+    "@atproto/lexicon": "^0.4.12",
+    "@atproto/repo": "^0.8.1",
+    "@atproto/syntax": "^0.4.0",
+    "multiformats": "9.9.0",
+    "partysocket": "^1.1.4"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  }
+}
