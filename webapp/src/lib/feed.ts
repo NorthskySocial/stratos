@@ -127,12 +127,18 @@ export async function fetchAppviewStratosPosts(
 
     const res = await session.fetchHandler(url.href, { method: 'GET' })
     if (!res.ok) {
+      const errText = await res.text().catch(() => '')
+      console.error(
+        `[stratos] getAuthorFeed failed: ${res.status} ${errText}`,
+      )
       return []
     }
 
     const body = (await res.json()) as StratosAuthorFeedResponse
+    console.log(`[stratos] getAuthorFeed: ${body.feed?.length ?? 0} posts`)
     return mapFeedViewPosts(body.feed ?? [], true)
-  } catch {
+  } catch (err) {
+    console.error('[stratos] getAuthorFeed error:', err)
     return []
   }
 }
