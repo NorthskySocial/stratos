@@ -1,4 +1,5 @@
 import { WebSocket } from 'partysocket'
+import { decodeFirst } from '@atcute/cbor'
 import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
 import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
 
@@ -71,9 +72,10 @@ export class StratosServiceSubscription {
     })
 
     this.ws = new WebSocket(wsUrl)
+    this.ws.binaryType = 'arraybuffer'
 
     this.ws.onmessage = (e: MessageEvent) => {
-      void this.handleMessage(e.data)
+      void this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
     }
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
@@ -88,16 +90,10 @@ export class StratosServiceSubscription {
     }
   }
 
-  private async handleMessage(data: unknown): Promise<void> {
+  private async handleMessage(data: Uint8Array): Promise<void> {
     try {
-      const text =
-        typeof data === 'string'
-          ? data
-          : new TextDecoder().decode(data as ArrayBuffer)
-      const msg = JSON.parse(text) as { $type?: string } & Record<
-        string,
-        unknown
-      >
+      const msg = decodeXrpcFrame(data)
+      if (!msg) return
 
       if (
         msg.$type === '#enrollment' ||
@@ -191,10 +187,11 @@ export class StratosActorSync {
 
     const wsUrl = buildWsUrl(this.config.stratosServiceUrl, params)
     const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
     this.subscriptions.set(did, ws)
 
     ws.onmessage = (e: MessageEvent) => {
-      void this.handleMessage(did, e.data)
+      void this.handleMessage(did, new Uint8Array(e.data as ArrayBuffer))
     }
 
     ws.addEventListener('close', (e: { code: number; reason: string }) => {
@@ -222,21 +219,14 @@ export class StratosActorSync {
     this.reconnectTimers.set(did, timer)
   }
 
-  private async handleMessage(did: string, data: unknown): Promise<void> {
+  private async handleMessage(did: string, data: Uint8Array): Promise<void> {
     try {
-      const text =
-        typeof data === 'string'
-          ? data
-          : new TextDecoder().decode(data as ArrayBuffer)
-      const msg = JSON.parse(text) as { $type?: string } & Record<
-        string,
-        unknown
-      >
+      const msg = decodeXrpcFrame(data)
+      if (!msg) return
 
       if (msg.$type === '#info') {
         const name = (msg as { name?: string }).name
         if (name === 'OutdatedCursor') {
-          // TODO: trigger full repo import
           console.warn(`outdated cursor for ${did}, need full repo import`)
         }
         return
@@ -397,6 +387,25 @@ function extractBoundaries(record: Record<string, unknown>): string[] {
 }
 
 // --- Shared utilities ---
+
+function decodeXrpcFrame(data: Uint8Array): (Record<string, unknown> & { $type?: string }) | null {
+  const [header, remainder] = decodeFirst(data)
+  const [body] = decodeFirst(remainder)
+
+  const hdr = header as { op?: number; t?: string }
+  if (hdr.op === -1) {
+    const err = body as { error?: string; message?: string }
+    throw new Error(`xrpc stream error: ${err.error}: ${err.message ?? ''}`)
+  }
+
+  if (hdr.op !== 1) return null
+
+  const record = body as Record<string, unknown>
+  if (hdr.t) {
+    record.$type = hdr.t
+  }
+  return record
+}
 
 function buildWsUrl(
   serviceUrl: string,
