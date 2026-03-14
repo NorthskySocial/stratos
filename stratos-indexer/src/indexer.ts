@@ -1,5 +1,7 @@
 import type { IndexerConfig } from './config.ts'
 import type { Database } from '@atproto/bsky'
+import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
+import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
 import {
   createDatabase,
   createIdResolver,
@@ -65,16 +67,46 @@ export class Indexer {
       idResolver,
     )
 
-    // Cursor manager with periodic flush
+    // Cursor manager with periodic flush to database
     this.cursorManager = new CursorManager(
       this.config.worker.cursorFlushIntervalMs,
       async (state) => {
+        const rawDb = (db as unknown as { db: unknown }).db as Kysely<DatabaseSchemaType>
+        for (const [did, seq] of state.stratosCursors) {
+          await rawDb
+            .insertInto('stratos_sync_cursor' as never)
+            .values({ did, seq, updatedAt: new Date().toISOString() } as never)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .onConflict((oc: any) =>
+              oc.column('did' as never).doUpdateSet({
+                seq,
+                updatedAt: new Date().toISOString(),
+              } as never),
+            )
+            .execute()
+        }
         console.log(
           { pdsSeq: state.pdsSeq, actorCursors: state.stratosCursors.size },
           'cursor flush',
         )
       },
     )
+
+    // Restore cursors from database
+    const rawDb = (db as unknown as { db: unknown }).db as Kysely<DatabaseSchemaType>
+    const savedCursors = await rawDb
+      .selectFrom('stratos_sync_cursor' as never)
+      .select(['did' as never, 'seq' as never])
+      .execute() as Array<{ did: string; seq: number }>
+    if (savedCursors.length > 0) {
+      const cursorMap = new Map<string, number>()
+      for (const row of savedCursors) {
+        cursorMap.set(row.did, row.seq)
+      }
+      this.cursorManager.restore({ pdsSeq: 0, stratosCursors: cursorMap })
+      console.log({ count: savedCursors.length }, 'restored sync cursors from database')
+    }
+
     this.cursorManager.start()
 
     // Enrollment callbacks (defined first, referenced by worker pool and subscriptions)
@@ -156,9 +188,9 @@ export class Indexer {
       indexingService,
       enrollmentCallback,
       onError: (err) => console.error({ err: err.message }, 'backfill error'),
-      onProgress: (processed, total) => {
-        if (processed % 100 === 0 || processed === total) {
-          console.log({ processed, total }, 'backfill progress')
+      onProgress: (processed) => {
+        if (processed % 100 === 0) {
+          console.log({ processed }, 'backfill progress')
         }
       },
     })
