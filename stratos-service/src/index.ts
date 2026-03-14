@@ -23,7 +23,7 @@ import { registerEnrollmentHandlers } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-} from './features/mst/index.js'
+} from './features/index.js'
 
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'

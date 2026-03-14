@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 
-import { StratosBlobReader, StratosBlobTransactor } from '../src/blob/index.js'
+import { StratosBlobReader, StratosBlobTransactor } from '../src'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -15,8 +15,8 @@ import {
   stratosBlob,
   stratosRecordBlob,
   stratosRecord,
-} from '../src/db/index.js'
-import { BlobStore } from '../src/types.js'
+} from '../src'
+import { BlobStore } from '../src'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {

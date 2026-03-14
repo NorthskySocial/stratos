@@ -14,7 +14,7 @@ import {
   stratosBlob,
   stratosBacklink,
   stratosSeq,
-} from '../src/db/index.js'
+} from '../src'
 
 describe('stratos-db', () => {
   let db: StratosDb

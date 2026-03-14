@@ -11,7 +11,7 @@ import { eq } from 'drizzle-orm'
 import {
   StratosRecordReader,
   StratosRecordTransactor,
-} from '../src/record/index.js'
+} from '../src'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -19,7 +19,7 @@ import {
   StratosDb,
   stratosRecord,
   stratosBacklink,
-} from '../src/db/index.js'
+} from '../src'
 
 // Simple encoding for tests (just use JSON for simplicity)
 const encodeRecord = (data: unknown): Uint8Array => {

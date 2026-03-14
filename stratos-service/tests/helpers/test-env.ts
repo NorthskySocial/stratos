@@ -7,7 +7,7 @@ import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import type { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../../src/context.js'
-import { PostgresActorStore } from '../../src/adapters/postgres/actor-store.js'
+import { PostgresActorStore } from '../../src/adapters'
 import type { ActorStore } from '../../src/actor-store-types.js'
 import {
   PostgreSqlContainer,
