@@ -276,9 +276,11 @@ export class StratosActorSync {
       if (op.action === 'create' || op.action === 'update') {
         if (op.record) {
           await indexStratosRecord(this.db, uri, op.cid ?? '', op.record, commit.time)
+          console.log(`indexed record: uri=${uri} cid=${op.cid} seq=${commit.seq}`)
         }
       } else if (op.action === 'delete') {
         await deleteStratosRecord(this.db, uri)
+        console.log(`deleted record: uri=${uri} seq=${commit.seq}`)
       }
     }
 
