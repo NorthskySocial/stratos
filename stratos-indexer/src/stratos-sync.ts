@@ -267,10 +267,11 @@ export class StratosActorSync {
     commit: StratosCommitMessage,
   ): Promise<void> {
     for (const op of commit.ops) {
-      const collection = op.path.split('/')[0]
+      const trimmedPath = op.path.replace(/^\//, '')
+      const collection = trimmedPath.split('/')[0]
       if (collection !== STRATOS_POST_COLLECTION) continue
 
-      const uri = `at://${did}/${op.path}`
+      const uri = `at://${did}/${trimmedPath}`
 
       if (op.action === 'create' || op.action === 'update') {
         if (op.record) {
