@@ -81,11 +81,7 @@ export class Indexer {
           enrollmentCallback.onEnrollmentRemoved(did)
         },
       },
-      (err) =>
-        console.error(
-          { err: err.message },
-          'stratos service subscription error',
-        ),
+      (err) => console.error({ err: err.message }, err.message),
     )
     await this.stratosServiceSub.start()
     console.log('stratos service-level enrollment stream connected')
