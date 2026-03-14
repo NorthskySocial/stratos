@@ -124,7 +124,7 @@ const envSchema = z.object({
   // Admin auth (optional)
   STRATOS_ADMIN_PASSWORD: z.string().optional(),
   // External allow list (optional)
-  STRATOS_ALLOW_LIST_URL: z.string().url().optional(),
+  STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
   STRATOS_VALKEY_URL: z.string().url().optional(),
   STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),
 
@@ -323,7 +323,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       allowedDids: env.STRATOS_ALLOWED_DIDS,
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
       autoEnrollDomains: env.STRATOS_AUTO_ENROLL_DOMAINS,
-      allowListUrl: env.STRATOS_ALLOW_LIST_URL,
+      allowListUrl: env.STRATOS_ALLOW_LIST_URI,
       allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
       valkeyUrl: env.STRATOS_VALKEY_URL,
     },
