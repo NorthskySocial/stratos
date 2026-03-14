@@ -31,6 +31,8 @@ import {
 } from './records.js'
 import { registerHydrationHandlers } from '../features/index.js'
 import { StratosBlockStoreReader } from '../features/mst/index.js'
+import { extractBoundaryDomains } from '@northskysocial/stratos-core'
+import { BlobRef } from '@atproto/lexicon'
 import { Did } from '@atproto/api'
 
 type HandlerAuth = {
@@ -286,12 +288,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       return {
         encoding: 'application/json',
         body: {
-          blob: {
-            $type: 'blob',
-            ref: { $link: cid.toString() },
-            mimeType: contentType,
-            size: bytes.length,
-          },
+          blob: new BlobRef(cid, contentType, bytes.length),
         },
       }
     },
@@ -578,6 +575,89 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           cids,
           cursor: nextCursor,
         },
+      }
+    },
+  })
+
+  xrpc.method('com.atproto.sync.getBlob', {
+    auth: authVerifier.standard,
+    handler: async ({ params, auth }: HandlerContext) => {
+      const did = params.did as string
+      const cid = params.cid as string
+
+      if (!did || !cid) {
+        throw new InvalidRequestError('did and cid are required')
+      }
+
+      const { did: callerDid } = validateUserAuth(auth)
+
+      const exists = await ctx.actorStore.exists(did)
+      if (!exists) {
+        throw new InvalidRequestError('Blob not found', 'BlobNotFound')
+      }
+
+      const blobCid = CID.parse(cid)
+
+      const result = await ctx.actorStore.read(did, async (store) => {
+        // Check blob-to-record association for boundary gating
+        const recordUris = await store.blob.getRecordsForBlob(blobCid)
+        if (recordUris.length === 0) {
+          return null
+        }
+
+        // Blob inherits boundaries from its associated record(s);
+        // viewer must share a boundary with at least one linked record
+        if (callerDid !== did) {
+          const callerDomains =
+            await ctx.boundaryResolver.getBoundaries(callerDid)
+          let hasAccess = false
+          for (const uri of recordUris) {
+            const atUri = new AtUri(uri)
+            const rec = await store.record.getRecord(atUri, null)
+            if (rec) {
+              const recordDomains = extractBoundaryDomains(
+                rec.value as Record<string, unknown>,
+              )
+              if (recordDomains.length === 0) {
+                hasAccess = true
+                break
+              }
+              if (
+                callerDomains.some((d: string) => recordDomains.includes(d))
+              ) {
+                hasAccess = true
+                break
+              }
+            }
+          }
+          if (!hasAccess) {
+            return null
+          }
+        }
+
+        return store.blob.getBlob(blobCid)
+      })
+
+      if (!result) {
+        throw new InvalidRequestError('Blob not found', 'BlobNotFound')
+      }
+
+      // Collect the stream into bytes for the response
+      const chunks: Uint8Array[] = []
+      for await (const chunk of result.stream) {
+        chunks.push(chunk)
+      }
+      const totalLength = chunks.reduce((acc, c) => acc + c.length, 0)
+      const bytes = new Uint8Array(totalLength)
+      let offset = 0
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset)
+        offset += chunk.length
+      }
+
+      return {
+        encoding: result.mimeType || 'application/octet-stream',
+        body: bytes,
       }
     },
   })

@@ -12,6 +12,7 @@ import {
   assertStratosValidation,
   buildCommit,
   extractBoundaryDomains,
+  findBlobRefs,
   StratosValidationError,
   type MstWriteOp,
 } from '@northskysocial/stratos-core'
@@ -187,6 +188,25 @@ export async function createRecord(
       commitResult.rev,
     )
 
+    // Process blob references: make permanent and associate with record
+    const blobRefs = findBlobRefs(record)
+    if (blobRefs.length > 0) {
+      const preparedBlobs = []
+      for (const ref of blobRefs) {
+        const metadata = await store.blob.getBlobMetadata(ref.cid)
+        if (metadata) {
+          const blobRow = await store.blob.getBlobWithTempKey(ref.cid)
+          preparedBlobs.push({
+            ...ref,
+            tempKey: blobRow?.tempKey ?? undefined,
+          })
+        }
+      }
+      if (preparedBlobs.length > 0) {
+        await store.blob.processBlobs(uriStr, preparedBlobs)
+      }
+    }
+
     // Sequence the change
     await sequenceChange(store, {
       action: 'create',
@@ -292,6 +312,10 @@ export async function deleteRecord(
 
     // Delete from record index
     await store.record.deleteRecord(uri)
+
+    // Clean up blob associations and orphaned blobs
+    await store.blob.removeRecordBlobAssociations(uriStr)
+    await store.blob.deleteOrphanBlobs()
 
     // Build and sign MST commit
     const adapter = new StratosBlockStoreReader(store.repo)

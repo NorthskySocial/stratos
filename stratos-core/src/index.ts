@@ -8,7 +8,11 @@ export * from './record/index.js'
 export * from './mst/index.js'
 
 // Blob - export with renamed BlobMetadata to avoid conflict
-export { StratosBlobReader, StratosBlobTransactor } from './blob/index.js'
+export {
+  StratosBlobReader,
+  StratosBlobTransactor,
+  findBlobRefs,
+} from './blob/index.js'
 export type { BlobMetadata as BlobInfo } from './blob/reader.js'
 
 // Features - Enrollment exports Enrollment type (domain)
