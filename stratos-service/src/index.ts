@@ -1,4 +1,4 @@
-import http from 'node:http'
+import type http from 'node:http'
 import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
@@ -33,11 +33,12 @@ export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
  */
 export class StratosServer {
   public ctx: AppContext
-  public server: http.Server
+  public server: http.Server | null = null
+  private app: express.Application
 
-  constructor(ctx: AppContext, server: http.Server) {
+  constructor(ctx: AppContext, app: express.Application) {
     this.ctx = ctx
-    this.server = server
+    this.app = app
   }
 
   /**
@@ -213,11 +214,7 @@ export class StratosServer {
       },
     )
 
-    const server = http.createServer(app)
-
-    // WebSocket handling is set up automatically when xrpcServer.router is mounted on app
-
-    return new StratosServer(ctx, server)
+    return new StratosServer(ctx, app)
   }
 
   /**
@@ -227,7 +224,7 @@ export class StratosServer {
     const port = this.ctx.cfg.service.port
 
     return new Promise((resolve) => {
-      this.server.listen(port, () => {
+      this.server = this.app.listen(port, () => {
         this.ctx.logger?.info({ port }, 'stratos server started')
         resolve()
       })
@@ -239,6 +236,10 @@ export class StratosServer {
    */
   async stop(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (!this.server) {
+        destroyAppContext(this.ctx).then(resolve, reject)
+        return
+      }
       this.server.close(async (err) => {
         if (err) {
           reject(err)
