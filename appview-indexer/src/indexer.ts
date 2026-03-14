@@ -22,6 +22,26 @@ export class Indexer {
   async start(): Promise<void> {
     console.log('starting appview indexer')
 
+
+    this.healthServer = Deno.serve(
+      { port: this.config.health.port },
+      (req: Request) => {
+        if (new URL(req.url).pathname === '/health') {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              enrolledActors: this.enrolledDids.size,
+              activeActorSyncs:
+                this.stratosActorSync?.getActiveActors().length ?? 0,
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          )
+        }
+        return new Response('not found', { status: 404 })
+      },
+    )
+    console.log({ healthPort: this.config.health.port }, 'health server started')
+
     const db = createDatabase(this.config.db)
     this.db = db
 
@@ -115,25 +135,6 @@ export class Indexer {
     })
     this.pdsSubscription.start()
     console.log('PDS firehose connected')
-
-    // Health check endpoint
-    this.healthServer = Deno.serve(
-      { port: this.config.health.port },
-      (req: Request) => {
-        if (new URL(req.url).pathname === '/health') {
-          return new Response(
-            JSON.stringify({
-              ok: true,
-              enrolledActors: this.enrolledDids.size,
-              activeActorSyncs:
-                this.stratosActorSync?.getActiveActors().length ?? 0,
-            }),
-            { headers: { 'content-type': 'application/json' } },
-          )
-        }
-        return new Response('not found', { status: 404 })
-      },
-    )
 
     console.log(
       {
