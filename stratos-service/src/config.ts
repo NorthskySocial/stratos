@@ -134,6 +134,12 @@ const envSchema = z.object({
   // DPoP configuration
   STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
 
+  // Sync token for subscription authentication
+  STRATOS_SYNC_TOKEN: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+
   // User-Agent
   STRATOS_REPO_URL: z
     .string()
@@ -237,6 +243,7 @@ export interface StratosServiceConfig {
   dpop: {
     requireNonce: boolean
   }
+  syncToken?: string
   userAgent: {
     repoUrl: string
     operatorContact?: string
@@ -350,6 +357,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     dpop: {
       requireNonce: env.STRATOS_DPOP_REQUIRE_NONCE,
     },
+    syncToken: env.STRATOS_SYNC_TOKEN,
     userAgent: {
       repoUrl: env.STRATOS_REPO_URL,
       operatorContact: env.STRATOS_OPERATOR_CONTACT,

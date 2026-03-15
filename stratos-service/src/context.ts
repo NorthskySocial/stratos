@@ -55,12 +55,13 @@ import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
   PdsAgent,
+  ExternalAllowListProvider,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-} from './features/mst/index.js'
+} from './features/index.js'
 import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
@@ -93,10 +94,11 @@ import {
   migrateServicePgDb,
   closeServicePgDb,
 } from './db/pg.js'
-import { PgEnrollmentStoreWriter } from './adapters/postgres/enrollment-store.js'
-import { PostgresActorStore } from './adapters/postgres/actor-store.js'
+import { PgEnrollmentStoreWriter } from './adapters/index.js'
+import { PostgresActorStore } from './adapters/index.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
+import { RedisCache } from './adapters/redis-cache.js'
 
 /**
  * Actor store manager for Stratos
@@ -332,7 +334,6 @@ export class SqliteEnrollmentStore
         pdsEndpoint: record.pdsEndpoint ?? null,
         signingKeyDid: record.signingKeyDid,
         active: record.active ? 'true' : 'false',
-        enrollmentRkey: record.enrollmentRkey ?? null,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -341,7 +342,6 @@ export class SqliteEnrollmentStore
           pdsEndpoint: record.pdsEndpoint ?? null,
           signingKeyDid: record.signingKeyDid,
           active: record.active ? 'true' : 'false',
-          enrollmentRkey: record.enrollmentRkey ?? null,
         },
       })
 
@@ -385,31 +385,6 @@ export class SqliteEnrollmentStore
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-    }
-  }
-
-  async updateEnrollment(
-    did: string,
-    updates: Partial<Omit<EnrollmentRecord, 'did'>>,
-  ): Promise<void> {
-    const setValues: Record<string, unknown> = {}
-    if (updates.enrolledAt !== undefined)
-      setValues.enrolledAt = updates.enrolledAt
-    if (updates.pdsEndpoint !== undefined)
-      setValues.pdsEndpoint = updates.pdsEndpoint
-    if (updates.signingKeyDid !== undefined)
-      setValues.signingKeyDid = updates.signingKeyDid
-    if (updates.active !== undefined)
-      setValues.active = updates.active ? 'true' : 'false'
-    if (updates.enrollmentRkey !== undefined)
-      setValues.enrollmentRkey = updates.enrollmentRkey
-
-    if (Object.keys(setValues).length > 0) {
-      await this.db
-        .update(enrollment)
-        .set(setValues)
-        .where(eq(enrollment.did, did))
     }
   }
 
@@ -433,7 +408,6 @@ export class SqliteEnrollmentStore
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
     }))
   }
 
@@ -503,6 +477,7 @@ function createAuthVerifiers(
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
+  allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
   syncToken: string | undefined,
 ): AuthVerifiers {
@@ -517,7 +492,10 @@ function createAuthVerifiers(
         const did = authHeader.slice(7).trim()
         if (did.startsWith('did:')) {
           const isEnrolled = await enrollmentStore.isEnrolled(did)
-          if (isEnrolled) {
+          const isAllowed = allowListProvider
+            ? await allowListProvider.isAllowed(did)
+            : true
+          if (isEnrolled && isAllowed) {
             return { credentials: { type: 'user', did } }
           }
         }
@@ -594,31 +572,14 @@ function createAuthVerifiers(
         const did = authHeader.slice(7).trim()
         if (did.startsWith('did:')) {
           const isEnrolled = await enrollmentStore.isEnrolled(did)
-          if (isEnrolled) {
+          const isAllowed = allowListProvider
+            ? await allowListProvider.isAllowed(did)
+            : true
+          if (isEnrolled && isAllowed) {
             return { credentials: { type: 'user', did } }
           }
         }
         return { credentials: { type: 'none' } }
-      }
-
-      // Try service auth (Bearer JWT from AppView/indexer)
-      if (authHeader.startsWith('Bearer ')) {
-        try {
-          const serviceCtx = await verifyServiceAuth(
-            authHeader,
-            serviceDid,
-            undefined,
-            idResolver,
-          )
-          return {
-            credentials: {
-              type: 'service',
-              did: serviceCtx.iss,
-            },
-          }
-        } catch {
-          return { credentials: { type: 'none' } }
-        }
       }
 
       if (!authHeader.startsWith('DPoP ') || !dpopVerifier) {
@@ -691,24 +652,10 @@ function createAuthVerifiers(
       const params = ctx.params as Record<string, unknown>
       const tokenParam = params.syncToken
 
-      console.log('[subscribeAuth] request received', {
-        hasSyncToken: !!tokenParam,
-        hasServerToken: !!syncToken,
-        url: ctx.req.url,
-      })
-
       if (tokenParam && typeof tokenParam === 'string' && syncToken) {
         if (safeEqual(tokenParam, syncToken)) {
-          console.log('[subscribeAuth] sync token matched')
-          return {
-            credentials: {
-              type: 'service',
-              iss: 'sync-token',
-              aud: serviceDid,
-            },
-          }
+          return { credentials: { type: 'service', iss: 'sync-token', aud: serviceDid } }
         }
-        console.log('[subscribeAuth] sync token mismatch')
       }
 
       if (tokenParam && typeof tokenParam === 'string') {
@@ -781,6 +728,7 @@ export interface AppContext {
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
+  allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
   app: express.Application
   logger?: Logger
@@ -1022,6 +970,21 @@ export async function createAppContext(
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
 
+  // Initialize external allow list provider if configured
+  let allowListProvider: ExternalAllowListProvider | undefined
+  if (cfg.enrollment.allowListUrl) {
+    const cache = cfg.enrollment.valkeyUrl
+      ? new RedisCache(cfg.enrollment.valkeyUrl)
+      : undefined
+    allowListProvider = new ExternalAllowListProvider(
+      cfg.enrollment.allowListUrl,
+      cache,
+      cfg.enrollment.allowListBootstrapName,
+      logger,
+    )
+    await allowListProvider.start()
+  }
+
   // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
   // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
   const tokenVerifier = new PdsTokenVerifier({
@@ -1033,6 +996,7 @@ export async function createAppContext(
     serviceEndpoint: cfg.service.publicUrl,
     tokenVerifier,
     enrollmentStore,
+    allowListProvider,
   })
 
   const authVerifier = createAuthVerifiers(
@@ -1042,6 +1006,7 @@ export async function createAppContext(
     enrollmentStore,
     cfg.admin?.password,
     dpopVerifier,
+    allowListProvider,
     cfg.stratos.devMode === true,
     cfg.syncToken,
   )
@@ -1104,16 +1069,14 @@ export async function createAppContext(
     signingKey,
     signingDidKey,
     serviceDid,
+    allowListProvider,
     xrpcServer,
     app,
     logger,
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
-    destroy: async () => {
-      await actorStore.close?.()
-      await destroyBackend()
-    },
+    destroy: destroyBackend,
   }
 }
 
@@ -1121,5 +1084,8 @@ export async function createAppContext(
  * Cleanup application context
  */
 export async function destroyAppContext(ctx: AppContext): Promise<void> {
+  if (ctx.allowListProvider) {
+    await ctx.allowListProvider.stop()
+  }
   await ctx.destroy()
 }
