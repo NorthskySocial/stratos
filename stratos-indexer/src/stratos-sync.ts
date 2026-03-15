@@ -1,4 +1,3 @@
-import { WebSocket } from 'partysocket'
 import { decodeFirst } from '@atcute/cbor'
 import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
 import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
@@ -7,6 +6,7 @@ import { extractBoundaries } from './record-decoder.ts'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 const MAX_RECONNECT_DELAY_MS = 60_000
+const MAX_RECONNECT_ATTEMPTS = 20
 
 export interface StratosSyncConfig {
   stratosServiceUrl: string
@@ -46,6 +46,7 @@ export interface StratosSyncCallbacks {
 export class StratosServiceSubscription {
   private ws: WebSocket | null = null
   private running = false
+  private reconnectAttempt = 0
 
   constructor(
     private config: StratosSyncConfig,
@@ -76,6 +77,10 @@ export class StratosServiceSubscription {
     this.ws = new WebSocket(wsUrl)
     this.ws.binaryType = 'arraybuffer'
 
+    this.ws.addEventListener('open', () => {
+      this.reconnectAttempt = 0
+    })
+
     this.ws.onmessage = (e: MessageEvent) => {
       void this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
     }
@@ -96,7 +101,19 @@ export class StratosServiceSubscription {
           ),
         )
       }
+      this.scheduleReconnect()
     }
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.running) return
+
+    this.reconnectAttempt++
+    const delay = Math.min(
+      1000 * Math.pow(2, this.reconnectAttempt),
+      MAX_RECONNECT_DELAY_MS,
+    )
+    setTimeout(() => this.connect(), delay)
   }
 
   private async handleMessage(data: Uint8Array): Promise<void> {
@@ -127,17 +144,44 @@ export class StratosServiceSubscription {
 
 // --- Per-actor record streams ---
 
+export interface StratosActorSyncOptions {
+  maxConcurrentActorSyncs: number
+  maxActorQueueSize: number
+}
+
+interface ActorQueue {
+  pending: Uint8Array[]
+  active: boolean
+}
+
 export class StratosActorSync {
   private subscriptions = new Map<string, WebSocket>()
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private reconnectAttempts = new Map<string, number>()
   private running = false
+  private knownDids = new Set<string>()
+
+  // Per-actor bounded queues prevent unbounded concurrent DB operations during spikes
+  private actorQueues = new Map<string, ActorQueue>()
+  private activeSyncs = 0
+  private syncWaiters: Array<() => void> = []
+  private readonly maxConcurrentActorSyncs: number
+  private readonly maxActorQueueSize: number
 
   constructor(
     private db: Kysely<DatabaseSchemaType>,
     private config: StratosSyncConfig,
     private cursorManager: CursorManager,
     private onError?: (err: Error) => void,
-  ) {}
+    private onReferencedActor?: (did: string) => void,
+    options: StratosActorSyncOptions = {
+      maxConcurrentActorSyncs: 8,
+      maxActorQueueSize: 50,
+    },
+  ) {
+    this.maxConcurrentActorSyncs = options.maxConcurrentActorSyncs
+    this.maxActorQueueSize = options.maxActorQueueSize
+  }
 
   start(): void {
     this.running = true
@@ -150,11 +194,16 @@ export class StratosActorSync {
       clearTimeout(timer)
     }
     this.reconnectTimers.clear()
+    this.reconnectAttempts.clear()
 
     for (const ws of this.subscriptions.values()) {
       ws.close()
     }
     this.subscriptions.clear()
+
+    this.actorQueues.clear()
+    for (const waiter of this.syncWaiters) waiter()
+    this.syncWaiters = []
   }
 
   addActor(did: string, cursor?: number): void {
@@ -176,14 +225,16 @@ export class StratosActorSync {
       clearTimeout(timer)
       this.reconnectTimers.delete(did)
     }
+    this.reconnectAttempts.delete(did)
     this.cursorManager.removeStratosCursor(did)
+    this.actorQueues.delete(did)
   }
 
   getActiveActors(): string[] {
     return Array.from(this.subscriptions.keys())
   }
 
-  private subscribe(did: string, attempt = 0): void {
+  private subscribe(did: string): void {
     if (!this.running) return
 
     const cursor = this.cursorManager.getStratosCursor(did)
@@ -200,8 +251,12 @@ export class StratosActorSync {
     ws.binaryType = 'arraybuffer'
     this.subscriptions.set(did, ws)
 
+    ws.addEventListener('open', () => {
+      this.reconnectAttempts.delete(did)
+    })
+
     ws.onmessage = (e: MessageEvent) => {
-      void this.handleMessage(did, new Uint8Array(e.data as ArrayBuffer))
+      this.enqueueActorMessage(did, new Uint8Array(e.data as ArrayBuffer))
     }
 
     ws.addEventListener('close', (e: { code: number; reason: string }) => {
@@ -213,7 +268,7 @@ export class StratosActorSync {
           ),
         )
       }
-      this.scheduleReconnect(did, attempt)
+      this.scheduleReconnect(did)
     })
 
     ws.addEventListener('error', (e: Event & { error?: unknown }) => {
@@ -225,15 +280,75 @@ export class StratosActorSync {
     })
   }
 
-  private scheduleReconnect(did: string, attempt: number): void {
+  private scheduleReconnect(did: string): void {
     if (!this.running) return
+
+    const attempt = (this.reconnectAttempts.get(did) ?? 0) + 1
+    this.reconnectAttempts.set(did, attempt)
+
+    if (attempt > MAX_RECONNECT_ATTEMPTS) {
+      console.warn(
+        `max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached for ${did}, giving up`,
+      )
+      this.reconnectAttempts.delete(did)
+      return
+    }
 
     const delay = Math.min(1000 * Math.pow(2, attempt), MAX_RECONNECT_DELAY_MS)
     const timer = setTimeout(() => {
       this.reconnectTimers.delete(did)
-      void this.subscribe(did, attempt + 1)
+      this.subscribe(did)
     }, delay)
     this.reconnectTimers.set(did, timer)
+  }
+
+  private enqueueActorMessage(did: string, data: Uint8Array): void {
+    let q = this.actorQueues.get(did)
+    if (!q) {
+      q = { pending: [], active: false }
+      this.actorQueues.set(did, q)
+    }
+    if (q.pending.length >= this.maxActorQueueSize) {
+      // Drop oldest to prioritize new events during spikes
+      q.pending.shift()
+      console.warn({ did, limit: this.maxActorQueueSize }, 'actor sync queue full, dropping oldest message')
+    }
+    q.pending.push(data)
+    if (!q.active) {
+      void this.drainActorQueue(did)
+    }
+  }
+
+  private async drainActorQueue(did: string): Promise<void> {
+    const q = this.actorQueues.get(did)
+    if (!q || q.active) return
+
+    // Wait for a global processing slot to limit concurrent DB operations
+    if (this.activeSyncs >= this.maxConcurrentActorSyncs) {
+      await new Promise<void>((resolve) => this.syncWaiters.push(resolve))
+    }
+
+    q.active = true
+    this.activeSyncs++
+
+    try {
+      while (true) {
+        // Re-fetch queue in case removeActor was called
+        const current = this.actorQueues.get(did)
+        if (!current || current.pending.length === 0) break
+        const data = current.pending.shift()!
+        await this.handleMessage(did, data)
+      }
+    } finally {
+      q.active = false
+      this.activeSyncs--
+      this.syncWaiters.shift()?.()
+      // Restart drain if messages arrived while we were processing
+      const remaining = this.actorQueues.get(did)
+      if (remaining && remaining.pending.length > 0) {
+        void this.drainActorQueue(did)
+      }
+    }
   }
 
   private async handleMessage(did: string, data: Uint8Array): Promise<void> {
@@ -266,6 +381,9 @@ export class StratosActorSync {
     did: string,
     commit: StratosCommitMessage,
   ): Promise<void> {
+    const upserts: Array<{ uri: string; cid: string; record: Record<string, unknown> }> = []
+    const deletes: string[] = []
+
     for (const op of commit.ops) {
       const trimmedPath = op.path.replace(/^\//, '')
       const collection = trimmedPath.split('/')[0]
@@ -273,28 +391,90 @@ export class StratosActorSync {
 
       const uri = `at://${did}/${trimmedPath}`
 
-      if (op.action === 'create' || op.action === 'update') {
-        if (op.record) {
-          await indexStratosRecord(this.db, uri, op.cid ?? '', op.record, commit.time)
-        }
+      if ((op.action === 'create' || op.action === 'update') && op.record) {
+        upserts.push({ uri, cid: op.cid ?? '', record: op.record })
       } else if (op.action === 'delete') {
-        await deleteStratosRecord(this.db, uri)
+        deletes.push(uri)
       }
     }
 
+    if (upserts.length === 0 && deletes.length === 0) return
+
+    await batchIndexStratosRecords(this.db, upserts, deletes, commit.time)
+
+    for (const { uri, cid } of upserts) {
+      console.log(`indexed record: uri=${uri} cid=${cid} cursor=${commit.seq}`)
+    }
+    for (const uri of deletes) {
+      console.log(`deleted record: uri=${uri} cursor=${commit.seq}`)
+    }
+
     this.cursorManager.updateStratosCursor(did, commit.seq)
+
+    if (this.onReferencedActor) {
+      for (const { record } of upserts) {
+        for (const refDid of extractReferencedDids(record)) {
+          if (refDid !== did && !this.knownDids.has(refDid)) {
+            this.knownDids.add(refDid)
+            this.onReferencedActor(refDid)
+          }
+        }
+      }
+    }
   }
+  markKnown(dids: Iterable<string>): void {
+    for (const did of dids) {
+      this.knownDids.add(did)
+    }
+  }
+}
+
+function extractReferencedDids(record: Record<string, unknown>): string[] {
+  const dids: string[] = []
+
+  const reply = record.reply as
+    | {
+        root?: { uri?: string }
+        parent?: { uri?: string }
+      }
+    | undefined
+
+  if (reply?.root?.uri) {
+    const did = didFromUri(reply.root.uri)
+    if (did) dids.push(did)
+  }
+  if (reply?.parent?.uri) {
+    const did = didFromUri(reply.parent.uri)
+    if (did) dids.push(did)
+  }
+
+  const embed = record.embed as
+    | { record?: { uri?: string }; $type?: string }
+    | undefined
+
+  if (embed?.record?.uri) {
+    const did = didFromUri(embed.record.uri)
+    if (did) dids.push(did)
+  }
+
+  return dids
+}
+
+function didFromUri(uri: string): string | null {
+  if (!uri.startsWith('at://')) return null
+  const authority = uri.slice(5).split('/')[0]
+  return authority.startsWith('did:') ? authority : null
 }
 
 // --- Stratos record indexer ---
 
-export async function indexStratosRecord(
-  db: Kysely<DatabaseSchemaType>,
-  uri: string,
-  cid: string,
-  record: Record<string, unknown>,
-  timestamp: string,
-): Promise<void> {
+interface RecordUpsert {
+  uri: string
+  cid: string
+  record: Record<string, unknown>
+}
+
+function preparePostRow(uri: string, cid: string, record: Record<string, unknown>, timestamp: string) {
   const parts = uri.replace('at://', '').split('/')
   const creator = parts[0]
   const rkey = parts[2]
@@ -312,83 +492,101 @@ export async function indexStratosRecord(
       }
     | undefined
 
-  const embed = record.embed ? JSON.stringify(record.embed) : null
-  const facets = record.facets ? JSON.stringify(record.facets) : null
-  const labels = record.labels ? JSON.stringify(record.labels) : null
-  const langs = Array.isArray(record.langs)
-    ? (record.langs as string[]).join(',')
-    : null
-  const tags = Array.isArray(record.tags)
-    ? (record.tags as string[]).join(',')
-    : null
-  const boundaries = extractBoundaries(record)
+  return {
+    row: {
+      uri,
+      cid,
+      rkey,
+      creator,
+      text,
+      replyRoot: replyRef?.root?.uri ?? null,
+      replyRootCid: replyRef?.root?.cid ?? null,
+      replyParent: replyRef?.parent?.uri ?? null,
+      replyParentCid: replyRef?.parent?.cid ?? null,
+      embed: record.embed ? JSON.stringify(record.embed) : null,
+      facets: record.facets ? JSON.stringify(record.facets) : null,
+      langs: Array.isArray(record.langs) ? (record.langs as string[]).join(',') : null,
+      labels: record.labels ? JSON.stringify(record.labels) : null,
+      tags: Array.isArray(record.tags) ? (record.tags as string[]).join(',') : null,
+      createdAt,
+      indexedAt: timestamp,
+    },
+    boundaries: extractBoundaries(record),
+  }
+}
 
+async function batchIndexStratosRecords(
+  db: Kysely<DatabaseSchemaType>,
+  upserts: RecordUpsert[],
+  deletes: string[],
+  timestamp: string,
+): Promise<void> {
   await db.transaction().execute(async (tx: unknown) => {
     const trx = tx as Kysely<DatabaseSchemaType>
-    await trx
-      .insertInto('stratos_post' as never)
-      .values({
-        uri,
-        cid,
-        rkey,
-        creator,
-        text,
-        replyRoot: replyRef?.root?.uri ?? null,
-        replyRootCid: replyRef?.root?.cid ?? null,
-        replyParent: replyRef?.parent?.uri ?? null,
-        replyParentCid: replyRef?.parent?.cid ?? null,
-        embed,
-        facets,
-        langs,
-        labels,
-        tags,
-        createdAt,
-        indexedAt: timestamp,
-      } as never)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .onConflict((oc: any) =>
-        oc.column('uri' as never).doUpdateSet({
-          cid,
-          text,
-          embed,
-          facets,
-          langs,
-          labels,
-          tags,
-          indexedAt: timestamp,
-        } as never),
-      )
-      .execute()
 
-    await trx
-      .deleteFrom('stratos_post_boundary' as never)
-      .where('uri' as never, '=', uri)
-      .execute()
-
-    if (boundaries.length > 0) {
+    for (const deleteUri of deletes) {
       await trx
-        .insertInto('stratos_post_boundary' as never)
-        .values(boundaries.map((boundary) => ({ uri, boundary }) as never))
+        .deleteFrom('stratos_post_boundary' as never)
+        .where('uri' as never, '=', deleteUri)
+        .execute()
+      await trx
+        .deleteFrom('stratos_post' as never)
+        .where('uri' as never, '=', deleteUri)
         .execute()
     }
+
+    for (const { uri, cid, record } of upserts) {
+      const { row, boundaries } = preparePostRow(uri, cid, record, timestamp)
+
+      await trx
+        .insertInto('stratos_post' as never)
+        .values(row as never)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .onConflict((oc: any) =>
+          oc.column('uri' as never).doUpdateSet({
+            cid: row.cid,
+            text: row.text,
+            embed: row.embed,
+            facets: row.facets,
+            langs: row.langs,
+            labels: row.labels,
+            tags: row.tags,
+            indexedAt: row.indexedAt,
+          } as never),
+        )
+        .execute()
+
+      await trx
+        .deleteFrom('stratos_post_boundary' as never)
+        .where('uri' as never, '=', uri)
+        .execute()
+
+      if (boundaries.length > 0) {
+        await trx
+          .insertInto('stratos_post_boundary' as never)
+          .values(boundaries.map((boundary) => ({ uri, boundary }) as never))
+          .execute()
+      }
+    }
   })
+}
+
+// Keep single-record function for backfill compatibility
+export async function indexStratosRecord(
+  db: Kysely<DatabaseSchemaType>,
+  uri: string,
+  cid: string,
+  record: Record<string, unknown>,
+  timestamp: string,
+): Promise<void> {
+  await batchIndexStratosRecords(db, [{ uri, cid, record }], [], timestamp)
 }
 
 export async function deleteStratosRecord(
   db: Kysely<DatabaseSchemaType>,
   uri: string,
 ): Promise<void> {
-  await db.transaction().execute(async (tx: unknown) => {
-    const trx = tx as Kysely<DatabaseSchemaType>
-    await trx
-      .deleteFrom('stratos_post_boundary' as never)
-      .where('uri' as never, '=', uri)
-      .execute()
-    await trx
-      .deleteFrom('stratos_post' as never)
-      .where('uri' as never, '=', uri)
-      .execute()
-  })
+  await batchIndexStratosRecords(db, [], [uri], '')
 }
 
 // --- Shared utilities ---
