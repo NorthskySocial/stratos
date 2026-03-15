@@ -18,7 +18,7 @@ import {
   StratosServiceSubscription,
   StratosActorSync,
 } from './stratos-sync.ts'
-import { backfillRepos } from './backfill.ts'
+import { backfillRepos, backfillActors, backfillSingleActor } from './backfill.ts'
 
 export class Indexer {
   private db: Database | null = null
@@ -29,6 +29,7 @@ export class Indexer {
   private cursorManager: CursorManager | null = null
   private healthServer: Deno.HttpServer | null = null
   private enrolledDids = new Set<string>()
+  private backfilledDids = new Set<string>()
 
   constructor(private config: IndexerConfig) {}
 
@@ -152,12 +153,27 @@ export class Indexer {
       syncToken: this.config.stratos.syncToken,
     }
 
+    const backfillOpts = {
+      repoProvider: this.config.pds.repoProvider,
+      indexingService,
+      enrollmentCallback,
+      onError: (err: Error) => console.error({ err: err.message }, 'backfill error'),
+      onProgress: (processed: number) => {
+        if (processed % 100 === 0) {
+          console.log({ processed }, 'backfill progress')
+        }
+      },
+    }
+
     // Per-actor Stratos sync
     this.stratosActorSync = new StratosActorSync(
       (db as unknown as { db: unknown }).db as never,
       syncConfig,
       this.cursorManager,
       (err) => console.error({ err: err.message }, 'stratos actor sync error'),
+      this.config.pds.enrolledOnly
+        ? (did) => this.backfillReferencedActor(did, backfillOpts)
+        : undefined,
     )
     this.stratosActorSync.start()
 
@@ -182,22 +198,46 @@ export class Indexer {
     console.log('stratos service-level enrollment stream connected')
 
     // Backfill existing repos
-    console.log('starting repo backfill')
-    const backfilled = await backfillRepos({
-      repoProvider: this.config.pds.repoProvider,
-      indexingService,
-      enrollmentCallback,
-      onError: (err) => console.error({ err: err.message }, 'backfill error'),
-      onProgress: (processed) => {
-        if (processed % 100 === 0) {
-          console.log({ processed }, 'backfill progress')
-        }
-      },
-    })
-    console.log(
-      { count: backfilled, enrolledActors: this.enrolledDids.size },
-      'backfill complete',
-    )
+    console.log({
+      enrolledOnly: this.config.pds.enrolledOnly,
+    }, 'starting repo backfill')
+
+    if (this.config.pds.enrolledOnly) {
+      const enrolledFromDb = await rawDb
+        .selectFrom('stratos_enrollment' as never)
+        .select(['did' as never])
+        .execute() as Array<{ did: string }>
+
+      const didsToBackfill = new Set<string>(this.enrolledDids)
+      for (const row of enrolledFromDb) {
+        didsToBackfill.add(row.did)
+      }
+
+      const didsList = Array.from(didsToBackfill)
+      this.stratosActorSync.markKnown(didsToBackfill)
+
+      console.log({
+        fromDb: enrolledFromDb.length,
+        fromSubscription: this.enrolledDids.size,
+        total: didsList.length,
+      }, 'enrolled-only backfill targets')
+
+      const backfilled = await backfillActors(backfillOpts, didsList)
+      for (const did of didsList) {
+        this.backfilledDids.add(did)
+      }
+
+      console.log(
+        { count: backfilled, enrolledActors: this.enrolledDids.size },
+        'enrolled-only backfill complete',
+      )
+    } else {
+      const backfilled = await backfillRepos(backfillOpts)
+      console.log(
+        { count: backfilled, enrolledActors: this.enrolledDids.size },
+        'backfill complete',
+      )
+    }
 
     // PDS firehose via @atcute/firehose
     this.pdsFirehose = new PdsFirehose({
@@ -222,6 +262,19 @@ export class Indexer {
       },
       'stratos indexer started',
     )
+  }
+
+  private backfillReferencedActor(
+    did: string,
+    opts: Parameters<typeof backfillSingleActor>[0],
+  ): void {
+    if (this.backfilledDids.has(did)) return
+    this.backfilledDids.add(did)
+    console.log({ did }, 'backfilling referenced actor')
+    void backfillSingleActor(opts, did).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error({ did, err: message }, 'failed to backfill referenced actor')
+    })
   }
 
   async stop(): Promise<void> {
