@@ -16,6 +16,7 @@ import {
   NotEnrolledError,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore } from '../../oauth/routes.js'
+import type { EnrollmentEventEmitter } from '../../context.js'
 
 /**
  * Implementation of EnrollmentService port
@@ -25,6 +26,8 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     private enrollmentStore: EnrollmentStore,
     private actorStoreCreator: (did: string) => Promise<void>,
     private logger?: Logger,
+    private enrollmentEvents?: EnrollmentEventEmitter,
+    private serviceUrl?: string,
   ) {}
 
   async enroll(
@@ -49,6 +52,14 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       { did, boundaryCount: boundaries.length, durationMs: Date.now() - start },
       'user enrolled',
     )
+
+    this.enrollmentEvents?.emit('enrollment', {
+      did,
+      action: 'enroll',
+      service: this.serviceUrl,
+      boundaries,
+      time: now.toISOString(),
+    })
 
     return {
       did,
@@ -82,6 +93,12 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   async unenroll(did: string): Promise<void> {
     await this.enrollmentStore.unenroll(did)
     this.logger?.info({ did }, 'user unenrolled')
+
+    this.enrollmentEvents?.emit('enrollment', {
+      did,
+      action: 'unenroll',
+      time: new Date().toISOString(),
+    })
   }
 }
 
