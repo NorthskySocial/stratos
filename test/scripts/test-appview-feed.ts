@@ -86,7 +86,10 @@ async function run() {
     if (!user.did) continue
     try {
       const result = await enrollWithAppview(user.did)
-      pass(`Enrolled ${name} with AppView`, `boundaries=[${result.boundaries.join(',')}]`)
+      pass(
+        `Enrolled ${name} with AppView`,
+        `boundaries=[${result.boundaries.join(',')}]`,
+      )
     } catch (err) {
       fail(`Failed to enroll ${name} with AppView`, String(err))
     }
@@ -170,7 +173,10 @@ async function run() {
 
   try {
     const diag = await waitForIndexing(4, 30_000)
-    pass('AppView indexed all posts', `posts=${diag.posts} boundaries=${diag.boundaries}`)
+    pass(
+      'AppView indexed all posts',
+      `posts=${diag.posts} boundaries=${diag.boundaries}`,
+    )
   } catch (err) {
     fail('Indexing timeout', String(err))
     // Show diagnostics for debugging
@@ -266,7 +272,7 @@ async function run() {
     const feed = await getAuthorFeed(rei.did, rei.did)
     assert(
       feed.feed.length >= 2,
-      "Rei sees own posts in author feed",
+      'Rei sees own posts in author feed',
       `got ${feed.feed.length} posts`,
     )
 
@@ -283,7 +289,7 @@ async function run() {
   // ─────────────────────────────────────────────────────────────
   // Test 4: getAuthorFeed — cross-boundary denial
   // ─────────────────────────────────────────────────────────────
-  section("Test 4: Author feed — cross-boundary viewer gets empty")
+  section('Test 4: Author feed — cross-boundary viewer gets empty')
 
   try {
     const feed = await getAuthorFeed(kaoruko.did, rei.did)

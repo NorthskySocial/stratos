@@ -88,7 +88,10 @@ export class WorkerPool<T = unknown> {
   }
 
   private notifyDrain(): void {
-    while (this.queue.length < this.maxQueueSize && this.drainWaiters.length > 0) {
+    while (
+      this.queue.length < this.maxQueueSize &&
+      this.drainWaiters.length > 0
+    ) {
       const waiter = this.drainWaiters.shift()!
       waiter()
     }
