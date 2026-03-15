@@ -380,7 +380,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             rkey: enrollmentRkey,
             record: {
               service: serviceEndpoint,
-              boundaries: boundaries.map((value) => ({ value })),
+              boundaries: defaultBoundaries.map((value) => ({ value })),
               signingKey: userSigningKeyDid,
               attestation: {
                 sig: attestation.sig,
