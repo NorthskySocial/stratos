@@ -2,6 +2,7 @@ import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 
 import type { AppContext, EnrollmentEvent } from '../context.js'
+import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
 
 /**
  * Sequence event from stratos_seq table
@@ -126,7 +127,7 @@ function createActorSubscriptionHandler(ctx: AppContext) {
 
 /**
  * Create the service-level subscription handler.
- * Streams enrollment events to connected clients.
+ * Replays all current enrollments on connection, then streams new events.
  */
 function createServiceSubscriptionHandler(ctx: AppContext) {
   return async function* subscribeServiceEvents(
@@ -138,13 +139,45 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
       eventQueue.push(event)
     }
 
+    // Register listener before replay so we don't miss events
     ctx.enrollmentEvents.on('enrollment', onEnrollment)
 
     try {
+      // Replay all current enrollments so subscribers discover existing actors
+      const store = ctx.enrollmentStore as unknown as EnrollmentStoreReader
+      const replayedDids = new Set<string>()
+      let cursor: string | undefined
+      while (!signal.aborted) {
+        const page = await store.listEnrollments({
+          limit: 100,
+          cursor,
+        })
+        if (page.length === 0) break
+
+        for (const enrollment of page) {
+          if (signal.aborted) return
+          replayedDids.add(enrollment.did)
+          const boundaries = await store.getBoundaries(enrollment.did)
+          yield {
+            $type: 'zone.stratos.sync.subscribeRecords#enrollment',
+            did: enrollment.did,
+            action: 'enroll' as const,
+            boundaries,
+            time: enrollment.enrolledAt,
+          }
+        }
+        cursor = page[page.length - 1].did
+      }
+
+      // Stream real-time events, skipping any that were already replayed
       while (!signal.aborted) {
         while (eventQueue.length > 0) {
           if (signal.aborted) return
           const event = eventQueue.shift()!
+          if (event.action === 'enroll' && replayedDids.has(event.did)) {
+            continue
+          }
+          replayedDids.delete(event.did)
           yield {
             $type: 'zone.stratos.sync.subscribeRecords#enrollment',
             did: event.did,
