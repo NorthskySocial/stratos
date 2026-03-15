@@ -701,8 +701,15 @@ function createAuthVerifiers(
       const params = ctx.params as Record<string, unknown>
       const tokenParam = params.syncToken
 
+      console.log('[subscribeAuth] request received', {
+        hasSyncToken: !!tokenParam,
+        hasServerToken: !!syncToken,
+        url: ctx.req.url,
+      })
+
       if (tokenParam && typeof tokenParam === 'string' && syncToken) {
         if (safeEqual(tokenParam, syncToken)) {
+          console.log('[subscribeAuth] sync token matched')
           return {
             credentials: {
               type: 'service',
@@ -711,6 +718,7 @@ function createAuthVerifiers(
             },
           }
         }
+        console.log('[subscribeAuth] sync token mismatch')
       }
 
       if (tokenParam && typeof tokenParam === 'string') {
