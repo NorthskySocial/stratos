@@ -30,8 +30,10 @@ describe('loadConfig', () => {
     expect(config.identity.plcUrl).toBe('https://plc.directory')
     expect(config.health.port).toBe(3002)
     expect(config.worker.concurrency).toBe(4)
-    expect(config.worker.maxQueueSize).toBe(1000)
+    expect(config.worker.maxQueueSize).toBe(200)
     expect(config.worker.cursorFlushIntervalMs).toBe(5000)
+    expect(config.worker.actorSyncConcurrency).toBe(8)
+    expect(config.worker.actorSyncQueuePerActor).toBe(50)
   })
 
   it('uses custom values from environment variables', () => {
