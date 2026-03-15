@@ -74,7 +74,9 @@ describe('WorkerPool', () => {
     const pool = new WorkerPool<string>(1, 10, async () => {}, onError)
     await pool.stop()
 
-    await expect(pool.submit('naruto')).rejects.toThrow('worker pool is stopped')
+    await expect(pool.submit('naruto')).rejects.toThrow(
+      'worker pool is stopped',
+    )
   })
 
   it('applies backpressure when queue is full', async () => {

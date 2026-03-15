@@ -265,7 +265,9 @@ export function formatEvent(event: SeqEvent): CommitMessage {
 
   try {
     const decoded = cborDecode(event.event) as Record<string, unknown>
-    ops = Array.isArray(decoded.ops) ? (decoded.ops as RecordOp[]) : [decoded as unknown as RecordOp]
+    ops = Array.isArray(decoded.ops)
+      ? (decoded.ops as RecordOp[])
+      : [decoded as unknown as RecordOp]
   } catch {
     ops = []
   }
@@ -317,7 +319,11 @@ export function registerSubscribeRecords(ctx: AppContext): void {
     auth: ctx.authVerifier.subscribeAuth,
     handler: async function* ({ params, auth, signal }) {
       ctx.logger?.info(
-        { did: (params as Record<string, unknown>).did, authType: (auth as { credentials: { type: string } }).credentials.type },
+        {
+          did: (params as Record<string, unknown>).did,
+          authType: (auth as { credentials: { type: string } }).credentials
+            .type,
+        },
         'subscribeRecords connected',
       )
       const typedParams = params as unknown as SubscribeRecordsParams

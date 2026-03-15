@@ -14,11 +14,12 @@ import {
   processFirehoseWork,
   type EnrollmentCallback,
 } from './pds-firehose.ts'
+import { StratosServiceSubscription, StratosActorSync } from './stratos-sync.ts'
 import {
-  StratosServiceSubscription,
-  StratosActorSync,
-} from './stratos-sync.ts'
-import { backfillRepos, backfillActors, backfillSingleActor } from './backfill.ts'
+  backfillRepos,
+  backfillActors,
+  backfillSingleActor,
+} from './backfill.ts'
 
 export class Indexer {
   private db: Database | null = null
@@ -56,7 +57,10 @@ export class Indexer {
         return new Response('not found', { status: 404 })
       },
     )
-    console.log({ healthPort: this.config.health.port }, 'health server started')
+    console.log(
+      { healthPort: this.config.health.port },
+      'health server started',
+    )
 
     // Database
     const db = createDatabase(this.config.db)
@@ -72,7 +76,8 @@ export class Indexer {
     this.cursorManager = new CursorManager(
       this.config.worker.cursorFlushIntervalMs,
       async (state) => {
-        const rawDb = (db as unknown as { db: unknown }).db as Kysely<DatabaseSchemaType>
+        const rawDb = (db as unknown as { db: unknown })
+          .db as Kysely<DatabaseSchemaType>
         for (const [did, seq] of state.stratosCursors) {
           await rawDb
             .insertInto('stratos_sync_cursor' as never)
@@ -94,18 +99,22 @@ export class Indexer {
     )
 
     // Restore cursors from database
-    const rawDb = (db as unknown as { db: unknown }).db as Kysely<DatabaseSchemaType>
-    const savedCursors = await rawDb
+    const rawDb = (db as unknown as { db: unknown })
+      .db as Kysely<DatabaseSchemaType>
+    const savedCursors = (await rawDb
       .selectFrom('stratos_sync_cursor' as never)
       .select(['did' as never, 'seq' as never])
-      .execute() as Array<{ did: string; seq: number }>
+      .execute()) as Array<{ did: string; seq: number }>
     if (savedCursors.length > 0) {
       const cursorMap = new Map<string, number>()
       for (const row of savedCursors) {
         cursorMap.set(row.did, row.seq)
       }
       this.cursorManager.restore({ pdsSeq: 0, stratosCursors: cursorMap })
-      console.log({ count: savedCursors.length }, 'restored sync cursors from database')
+      console.log(
+        { count: savedCursors.length },
+        'restored sync cursors from database',
+      )
     }
 
     this.cursorManager.start()
@@ -157,7 +166,8 @@ export class Indexer {
       repoProvider: this.config.pds.repoProvider,
       indexingService,
       enrollmentCallback,
-      onError: (err: Error) => console.error({ err: err.message }, 'backfill error'),
+      onError: (err: Error) =>
+        console.error({ err: err.message }, 'backfill error'),
       onProgress: (processed: number) => {
         if (processed % 100 === 0) {
           console.log({ processed }, 'backfill progress')
@@ -198,15 +208,18 @@ export class Indexer {
     console.log('stratos service-level enrollment stream connected')
 
     // Backfill existing repos
-    console.log({
-      enrolledOnly: this.config.pds.enrolledOnly,
-    }, 'starting repo backfill')
+    console.log(
+      {
+        enrolledOnly: this.config.pds.enrolledOnly,
+      },
+      'starting repo backfill',
+    )
 
     if (this.config.pds.enrolledOnly) {
-      const enrolledFromDb = await rawDb
+      const enrolledFromDb = (await rawDb
         .selectFrom('stratos_enrollment' as never)
         .select(['did' as never])
-        .execute() as Array<{ did: string }>
+        .execute()) as Array<{ did: string }>
 
       const didsToBackfill = new Set<string>(this.enrolledDids)
       for (const row of enrolledFromDb) {
@@ -216,11 +229,14 @@ export class Indexer {
       const didsList = Array.from(didsToBackfill)
       this.stratosActorSync.markKnown(didsToBackfill)
 
-      console.log({
-        fromDb: enrolledFromDb.length,
-        fromSubscription: this.enrolledDids.size,
-        total: didsList.length,
-      }, 'enrolled-only backfill targets')
+      console.log(
+        {
+          fromDb: enrolledFromDb.length,
+          fromSubscription: this.enrolledDids.size,
+          total: didsList.length,
+        },
+        'enrolled-only backfill targets',
+      )
 
       const backfilled = await backfillActors(backfillOpts, didsList)
       for (const did of didsList) {
@@ -273,7 +289,10 @@ export class Indexer {
     console.log({ did }, 'backfilling referenced actor')
     void backfillSingleActor(opts, did).catch((err) => {
       const message = err instanceof Error ? err.message : String(err)
-      console.error({ did, err: message }, 'failed to backfill referenced actor')
+      console.error(
+        { did, err: message },
+        'failed to backfill referenced actor',
+      )
     })
   }
 

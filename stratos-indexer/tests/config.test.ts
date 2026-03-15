@@ -13,14 +13,17 @@ describe('loadConfig', () => {
   })
 
   it('loads config from environment variables', () => {
-    process.env.BSKY_DB_POSTGRES_URL = 'postgresql://shinji:eva01@localhost/nerv'
+    process.env.BSKY_DB_POSTGRES_URL =
+      'postgresql://shinji:eva01@localhost/nerv'
     process.env.BSKY_REPO_PROVIDER = 'wss://bsky.network'
     process.env.STRATOS_SERVICE_URL = 'https://stratos.tokyo-3.jp'
     process.env.STRATOS_SYNC_TOKEN = 'secret-token-from-seele'
 
     const config = loadConfig()
 
-    expect(config.db.postgresUrl).toBe('postgresql://shinji:eva01@localhost/nerv')
+    expect(config.db.postgresUrl).toBe(
+      'postgresql://shinji:eva01@localhost/nerv',
+    )
     expect(config.db.schema).toBe('bsky')
     expect(config.db.poolSize).toBe(10)
     expect(config.pds.repoProvider).toBe('wss://bsky.network')

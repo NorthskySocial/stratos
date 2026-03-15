@@ -700,7 +700,13 @@ function createAuthVerifiers(
       if (tokenParam && typeof tokenParam === 'string' && syncToken) {
         if (safeEqual(tokenParam, syncToken)) {
           console.log('[subscribeAuth] sync token matched')
-          return { credentials: { type: 'service', iss: 'sync-token', aud: serviceDid } }
+          return {
+            credentials: {
+              type: 'service',
+              iss: 'sync-token',
+              aud: serviceDid,
+            },
+          }
         }
         console.log('[subscribeAuth] sync token mismatch')
       }

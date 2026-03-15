@@ -38,7 +38,13 @@ export function enrollUser(
     db.exec(
       `INSERT INTO enrollment (did, enrolledAt, pdsEndpoint, enrollmentRkey, signingKeyDid) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(did) DO UPDATE SET enrolledAt = excluded.enrolledAt, pdsEndpoint = excluded.pdsEndpoint, enrollmentRkey = excluded.enrollmentRkey, signingKeyDid = excluded.signingKeyDid`,
-      [did, enrolledAt, pdsEndpoint ?? null, enrollmentRkey ?? null, signingKeyDid],
+      [
+        did,
+        enrolledAt,
+        pdsEndpoint ?? null,
+        enrollmentRkey ?? null,
+        signingKeyDid,
+      ],
     )
 
     if (boundaries && boundaries.length > 0) {
