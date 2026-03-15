@@ -343,8 +343,7 @@ function invokeResolveRoute(
       }
     }
     const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
-      (l) =>
-        l.route?.path === '/xrpc/zone.stratos.identity.resolveEnrollments',
+      (l) => l.route?.path === '/xrpc/zone.stratos.identity.resolveEnrollments',
     )
     if (!layer?.route) return reject(new Error('Route not registered'))
     const handler = layer.route.stack[0]?.handle
@@ -362,14 +361,19 @@ describe('resolveEnrollments endpoint', () => {
       getBoundaries: async (did) =>
         did === 'did:plc:gokusaiyan' ? ['capsule-corp.jp'] : [],
     })
-    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
-      async (did: string) => did === 'did:plc:gokusaiyan'
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled = async (
+      did: string,
+    ) => did === 'did:plc:gokusaiyan'
 
     registerEnrollmentHandlers(router, ctx)
     const res = await invokeResolveRoute(router, { did: 'did:plc:gokusaiyan' })
 
     expect(res.statusCode).toBe(200)
-    const body = res.body as { did: string; enrolled: boolean; boundaries: string[] }
+    const body = res.body as {
+      did: string
+      enrolled: boolean
+      boundaries: string[]
+    }
     expect(body.enrolled).toBe(true)
     expect(body.boundaries).toEqual(['capsule-corp.jp'])
   })
@@ -384,10 +388,16 @@ describe('resolveEnrollments endpoint', () => {
       async () => false
 
     registerEnrollmentHandlers(router, ctx)
-    const res = await invokeResolveRoute(router, { did: 'did:plc:vegetaprinceofallsaiyans' })
+    const res = await invokeResolveRoute(router, {
+      did: 'did:plc:vegetaprinceofallsaiyans',
+    })
 
     expect(res.statusCode).toBe(200)
-    const body = res.body as { did: string; enrolled: boolean; boundaries: string[] }
+    const body = res.body as {
+      did: string
+      enrolled: boolean
+      boundaries: string[]
+    }
     expect(body.enrolled).toBe(false)
     expect(body.boundaries).toEqual([])
   })

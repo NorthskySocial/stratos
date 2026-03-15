@@ -155,9 +155,7 @@ export async function fetchAppviewStratosPosts(
     const res = await session.fetchHandler(url.href, { method: 'GET' })
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
-      console.error(
-        `[stratos] getTimeline failed: ${res.status} ${errText}`,
-      )
+      console.error(`[stratos] getTimeline failed: ${res.status} ${errText}`)
       return []
     }
 
@@ -175,8 +173,7 @@ export function buildUnifiedFeed(
   stratosPosts: FeedPost[],
 ): FeedPost[] {
   return [...publicPosts, ...stratosPosts].sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
 }
 
@@ -195,9 +192,7 @@ export function filterByDomain(
   domain: string | null,
 ): FeedPost[] {
   if (!domain) return posts
-  return posts.filter(
-    (p) => !p.isPrivate || p.boundaries.includes(domain),
-  )
+  return posts.filter((p) => !p.isPrivate || p.boundaries.includes(domain))
 }
 
 export function feedStats(posts: FeedPost[]): {

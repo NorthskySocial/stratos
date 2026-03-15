@@ -3,9 +3,9 @@ import { IdResolver, MemoryCache } from '@atproto/identity'
 import { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import type { DbConfig, IdentityConfig } from './config.ts'
 
-const DID_CACHE_STALE_TTL = 5 * 60 * 1000   // 5 minutes
-const DID_CACHE_MAX_TTL = 60 * 60 * 1000     // 1 hour
-const DID_CACHE_SWEEP_INTERVAL = 60 * 1000   // sweep every 60s
+const DID_CACHE_STALE_TTL = 5 * 60 * 1000 // 5 minutes
+const DID_CACHE_MAX_TTL = 60 * 60 * 1000 // 1 hour
+const DID_CACHE_SWEEP_INTERVAL = 60 * 1000 // sweep every 60s
 const DID_CACHE_MAX_SIZE = 50_000
 
 export function createDatabase(cfg: DbConfig): Database {
