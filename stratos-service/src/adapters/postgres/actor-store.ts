@@ -955,12 +955,24 @@ export class PostgresActorStore implements ActorStore {
     content: Uint8Array,
   ) => Record<string, unknown>
   private readonly logger?: Logger
+  private readonly adminClient: ReturnType<typeof postgres>
+  private readonly adminDb: StratosPgDb
 
   constructor(config: PostgresActorStoreConfig) {
     this.connectionString = config.connectionString
     this.blobstore = config.blobstore
     this.cborToRecord = config.cborToRecord
     this.logger = config.logger
+    this.adminClient = postgres(this.connectionString, {
+      max: 3,
+      idle_timeout: 20,
+      connect_timeout: 10,
+    })
+    this.adminDb = drizzle({ client: this.adminClient })
+  }
+
+  async close(): Promise<void> {
+    await this.adminClient.end()
   }
 
   private async getSchemaName(did: string): Promise<string> {
@@ -968,43 +980,35 @@ export class PostgresActorStore implements ActorStore {
     return actorSchemaName(didHash)
   }
 
-  private createActorDb(schemaName: string): StratosPgDb {
-    const client = postgres(this.connectionString, {
-      max: 5,
-      connection: { search_path: schemaName },
-    })
-    return drizzle({ client, schema: pgActorSchema })
-  }
-
   async exists(did: string): Promise<boolean> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, { max: 1 })
-    const db = drizzle({ client })
-    try {
-      const rows = await db.execute(
-        sql`SELECT 1 FROM information_schema.schemata WHERE schema_name = ${schemaName} LIMIT 1`,
-      )
-      return rows.length > 0
-    } finally {
-      await client.end()
-    }
+    const rows = await this.adminDb.execute(
+      sql`SELECT 1 FROM information_schema.schemata WHERE schema_name = ${schemaName} LIMIT 1`,
+    )
+    return rows.length > 0
   }
 
   async create(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
-    const actorDb = this.createActorDb(schemaName)
-    await migrateStratosPgDb(actorDb, schemaName)
+    const client = postgres(this.connectionString, {
+      max: 2,
+      idle_timeout: 10,
+      connect_timeout: 10,
+      connection: { search_path: schemaName },
+    })
+    const actorDb = drizzle({ client, schema: pgActorSchema })
+    try {
+      await migrateStratosPgDb(actorDb, schemaName)
+    } finally {
+      await client.end()
+    }
   }
 
   async destroy(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, { max: 1 })
-    const db = drizzle({ client })
-    try {
-      await db.execute(sql.raw(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`))
-    } finally {
-      await client.end()
-    }
+    await this.adminDb.execute(
+      sql.raw(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`),
+    )
   }
 
   async read<T>(
@@ -1013,7 +1017,9 @@ export class PostgresActorStore implements ActorStore {
   ): Promise<T> {
     const schemaName = await this.getSchemaName(did)
     const client = postgres(this.connectionString, {
-      max: 5,
+      max: 1,
+      idle_timeout: 10,
+      connect_timeout: 10,
       connection: { search_path: schemaName },
     })
     const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
@@ -1043,7 +1049,9 @@ export class PostgresActorStore implements ActorStore {
   ): Promise<T> {
     const schemaName = await this.getSchemaName(did)
     const client = postgres(this.connectionString, {
-      max: 5,
+      max: 1,
+      idle_timeout: 10,
+      connect_timeout: 10,
       connection: { search_path: schemaName },
     })
     const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
@@ -1078,6 +1086,8 @@ export class PostgresActorStore implements ActorStore {
     const schemaName = await this.getSchemaName(did)
     const client = postgres(this.connectionString, {
       max: 1,
+      idle_timeout: 10,
+      connect_timeout: 10,
       connection: { search_path: schemaName },
     })
     const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
@@ -1101,6 +1111,8 @@ export class PostgresActorStore implements ActorStore {
     const schemaName = await this.getSchemaName(did)
     const client = postgres(this.connectionString, {
       max: 1,
+      idle_timeout: 10,
+      connect_timeout: 10,
       connection: { search_path: schemaName },
     })
     const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
@@ -1123,6 +1135,8 @@ export class PostgresActorStore implements ActorStore {
     const schemaName = await this.getSchemaName(did)
     const client = postgres(this.connectionString, {
       max: 1,
+      idle_timeout: 10,
+      connect_timeout: 10,
       connection: { search_path: schemaName },
     })
     const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
