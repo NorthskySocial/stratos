@@ -35,6 +35,8 @@ export interface WorkerConfig {
   concurrency: number
   maxQueueSize: number
   cursorFlushIntervalMs: number
+  actorSyncConcurrency: number
+  actorSyncQueuePerActor: number
 }
 
 export function loadConfig(): IndexerConfig {
@@ -60,8 +62,10 @@ export function loadConfig(): IndexerConfig {
     },
     worker: {
       concurrency: envInt('WORKER_CONCURRENCY', 4),
-      maxQueueSize: envInt('WORKER_MAX_QUEUE_SIZE', 1000),
+      maxQueueSize: envInt('WORKER_MAX_QUEUE_SIZE', 200),
       cursorFlushIntervalMs: envInt('CURSOR_FLUSH_INTERVAL_MS', 5000),
+      actorSyncConcurrency: envInt('ACTOR_SYNC_CONCURRENCY', 8),
+      actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 50),
     },
   }
 }
