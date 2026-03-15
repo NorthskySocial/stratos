@@ -51,9 +51,12 @@ export async function waitForHealthy(
 }
 
 /** Check enrollment status (no auth required) */
-export async function enrollmentStatus(
-  did: string,
-): Promise<{ did: string; enrolled: boolean; enrolledAt?: string }> {
+export async function enrollmentStatus(did: string): Promise<{
+  did: string
+  enrolled: boolean
+  enrolledAt?: string
+  enrollmentRkey?: string
+}> {
   const baseUrl = await getBaseUrl()
   const res = await fetch(
     `${baseUrl}/xrpc/zone.stratos.enrollment.status?did=${encodeURIComponent(did)}`,
@@ -66,6 +69,7 @@ export async function enrollmentStatus(
     did: string
     enrolled: boolean
     enrolledAt?: string
+    enrollmentRkey?: string
   }
 }
 
@@ -228,4 +232,28 @@ export async function deleteRecord(
     const errBody = await res.text()
     throw new Error(`deleteRecord failed: ${res.status} ${errBody}`)
   }
+}
+
+interface PdsListRecordsResponse {
+  records: Array<{ uri: string; cid: string; value: Record<string, unknown> }>
+  cursor?: string
+}
+
+/** List records from a user's PDS (unauthenticated, public collection) */
+export async function listPdsRecords(
+  pdsUrl: string,
+  repo: string,
+  collection: string,
+): Promise<PdsListRecordsResponse> {
+  const params = new URLSearchParams({ repo, collection })
+  const res = await fetch(
+    `${pdsUrl}/xrpc/com.atproto.repo.listRecords?${params}`,
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    throw new Error(`PDS listRecords failed: ${res.status} ${errBody}`)
+  }
+
+  return (await res.json()) as PdsListRecordsResponse
 }

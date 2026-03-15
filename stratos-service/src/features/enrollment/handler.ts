@@ -1,5 +1,30 @@
 import type { Router, Request, Response } from 'express'
+import type { BoundaryResolver } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
+
+const BOUNDARY_CACHE_TTL_MS = 60_000
+
+interface CacheEntry {
+  boundaries: string[]
+  expiresAt: number
+}
+
+export class CachedBoundaryResolver {
+  private cache = new Map<string, CacheEntry>()
+
+  constructor(private resolver: BoundaryResolver) {}
+
+  async getBoundaries(did: string): Promise<string[]> {
+    const now = Date.now()
+    const cached = this.cache.get(did)
+    if (cached && cached.expiresAt > now) {
+      return cached.boundaries
+    }
+    const boundaries = await this.resolver.getBoundaries(did)
+    this.cache.set(did, { boundaries, expiresAt: now + BOUNDARY_CACHE_TTL_MS })
+    return boundaries
+  }
+}
 
 /**
  * Attempt optional authentication
@@ -58,6 +83,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             enrolledAt: string
             active: boolean
             signingKey: string
+            enrollmentRkey?: string
             boundaries?: Array<{ value: string }>
             attestation?: { sig: Uint8Array; signingKey: string }
           } = {
@@ -66,6 +92,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             enrolledAt: enrollment.enrolledAt.toISOString(),
             active: enrollment.active,
             signingKey: enrollment.signingKeyDid,
+            enrollmentRkey: enrollment.enrollmentRkey,
           }
 
           // Only include boundaries if authenticated
@@ -132,6 +159,44 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
         res.status(500).json({
           error: 'InternalError',
           message: 'Failed to check enrollment status',
+        })
+      }
+    },
+  )
+
+  // zone.stratos.identity.resolveEnrollments — unauthenticated boundary lookup
+  const cachedResolver = new CachedBoundaryResolver(ctx.boundaryResolver)
+
+  router.get(
+    '/xrpc/zone.stratos.identity.resolveEnrollments',
+    async (req: Request, res: Response) => {
+      try {
+        const did = req.query.did as string | undefined
+        if (!did) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'did parameter required',
+          })
+        }
+
+        const enrolled = await ctx.enrollmentService.isEnrolled(did)
+        if (!enrolled) {
+          return res.json({ did, enrolled: false, boundaries: [] })
+        }
+
+        const boundaries = await cachedResolver.getBoundaries(did)
+        res.json({ did, enrolled: true, boundaries })
+      } catch (err) {
+        ctx.logger?.error(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            did: req.query.did,
+          },
+          'identity.resolveEnrollments failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to resolve enrollments',
         })
       }
     },
