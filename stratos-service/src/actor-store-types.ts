@@ -185,6 +185,7 @@ export interface ActorTransactor {
 }
 
 export interface ActorStore {
+  close?(): Promise<void>
   exists(did: string): Promise<boolean>
   create(did: string): Promise<void>
   destroy(did: string): Promise<void>
