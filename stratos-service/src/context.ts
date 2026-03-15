@@ -55,6 +55,7 @@ import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
   PdsAgent,
+  ExternalAllowListProvider,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
 import {
@@ -97,6 +98,7 @@ import { PgEnrollmentStoreWriter } from './adapters/postgres/enrollment-store.js
 import { PostgresActorStore } from './adapters/postgres/actor-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
+import { RedisCache } from './adapters/redis-cache.js'
 
 /**
  * Actor store manager for Stratos
@@ -503,6 +505,7 @@ function createAuthVerifiers(
   enrollmentStore: EnrollmentStore,
   adminPassword: string | undefined,
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
+  allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
   syncToken: string | undefined,
 ): AuthVerifiers {
@@ -517,7 +520,10 @@ function createAuthVerifiers(
         const did = authHeader.slice(7).trim()
         if (did.startsWith('did:')) {
           const isEnrolled = await enrollmentStore.isEnrolled(did)
-          if (isEnrolled) {
+          const isAllowed = allowListProvider
+            ? await allowListProvider.isAllowed(did)
+            : true
+          if (isEnrolled && isAllowed) {
             return { credentials: { type: 'user', did } }
           }
         }
@@ -594,7 +600,10 @@ function createAuthVerifiers(
         const did = authHeader.slice(7).trim()
         if (did.startsWith('did:')) {
           const isEnrolled = await enrollmentStore.isEnrolled(did)
-          if (isEnrolled) {
+          const isAllowed = allowListProvider
+            ? await allowListProvider.isAllowed(did)
+            : true
+          if (isEnrolled && isAllowed) {
             return { credentials: { type: 'user', did } }
           }
         }
@@ -781,6 +790,7 @@ export interface AppContext {
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
+  allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
   app: express.Application
   logger?: Logger
@@ -1022,6 +1032,21 @@ export async function createAppContext(
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
 
+  // Initialize external allow list provider if configured
+  let allowListProvider: ExternalAllowListProvider | undefined
+  if (cfg.enrollment.allowListUrl) {
+    const cache = cfg.enrollment.valkeyUrl
+      ? new RedisCache(cfg.enrollment.valkeyUrl)
+      : undefined
+    allowListProvider = new ExternalAllowListProvider(
+      cfg.enrollment.allowListUrl,
+      cache,
+      cfg.enrollment.allowListBootstrapName,
+      logger,
+    )
+    await allowListProvider.start()
+  }
+
   // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
   // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
   const tokenVerifier = new PdsTokenVerifier({
@@ -1033,6 +1058,7 @@ export async function createAppContext(
     serviceEndpoint: cfg.service.publicUrl,
     tokenVerifier,
     enrollmentStore,
+    allowListProvider,
   })
 
   const authVerifier = createAuthVerifiers(
@@ -1042,6 +1068,7 @@ export async function createAppContext(
     enrollmentStore,
     cfg.admin?.password,
     dpopVerifier,
+    allowListProvider,
     cfg.stratos.devMode === true,
     cfg.syncToken,
   )
@@ -1104,6 +1131,7 @@ export async function createAppContext(
     signingKey,
     signingDidKey,
     serviceDid,
+    allowListProvider,
     xrpcServer,
     app,
     logger,
@@ -1121,5 +1149,8 @@ export async function createAppContext(
  * Cleanup application context
  */
 export async function destroyAppContext(ctx: AppContext): Promise<void> {
+  if (ctx.allowListProvider) {
+    await ctx.allowListProvider.stop()
+  }
   await ctx.destroy()
 }
