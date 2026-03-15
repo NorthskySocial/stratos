@@ -1,4 +1,4 @@
-import type { EnrollmentConfig } from '../types.js'
+import { ENROLLMENT_MODE, EnrollmentConfig } from '../types.js'
 import type { EnrollmentValidationResult } from './types.js'
 
 /**
@@ -31,7 +31,7 @@ export function extractPdsEndpoint(didDoc: {
  * Check if a DID is in the allowlist
  */
 export function isDidAllowed(config: EnrollmentConfig, did: string): boolean {
-  if (config.mode === 'open') {
+  if (config.mode === ENROLLMENT_MODE.OPEN) {
     return true
   }
   return config.allowedDids?.includes(did) ?? false
@@ -44,7 +44,7 @@ export function isPdsAllowed(
   config: EnrollmentConfig,
   pdsEndpoint: string,
 ): boolean {
-  if (config.mode === 'open') {
+  if (config.mode === ENROLLMENT_MODE.OPEN) {
     return true
   }
 
@@ -74,15 +74,20 @@ export function validateEnrollmentEligibility(
   // Check if service is in open mode or DID is explicitly allowed
   if (isDidAllowed(config, did)) {
     // DID is allowed, pdsEndpoint is optional for enrollment permission
-    if (pdsEndpoint) {
-      return { allowed: true, pdsEndpoint }
+    return {
+      allowed: true,
+      pdsEndpoint: pdsEndpoint ?? undefined,
+      autoEnrollDomains: config.autoEnrollDomains,
     }
-    return { allowed: true }
   }
 
   // DID not in allowlist - check PDS endpoint allowlist
   if (pdsEndpoint && isPdsAllowed(config, pdsEndpoint)) {
-    return { allowed: true, pdsEndpoint }
+    return {
+      allowed: true,
+      pdsEndpoint,
+      autoEnrollDomains: config.autoEnrollDomains,
+    }
   }
 
   return { allowed: false, reason: 'NotInAllowlist' }

@@ -21,7 +21,7 @@ import {
   verifyCidIntegrity,
   resolveServiceSigningKey,
   fetchAndVerifyRecord,
-} from '../src/verification.js'
+} from '../src'
 
 const TEST_DID = 'did:plc:testverify' as const
 const TEST_COLLECTION = 'zone.stratos.feed.post'

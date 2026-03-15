@@ -48,24 +48,6 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
-  private async ensureDir(): Promise<void> {
-    await fs.mkdir(path.join(this.location, this.did), { recursive: true })
-  }
-
-  private async ensureTemp(): Promise<void> {
-    await fs.mkdir(path.join(this.tmpLocation, this.did), { recursive: true })
-  }
-
-  private async ensureQuarantine(): Promise<void> {
-    await fs.mkdir(path.join(this.quarantineLocation, this.did), {
-      recursive: true,
-    })
-  }
-
-  private genKey(): string {
-    return randomStr(32, 'base32')
-  }
-
   getTmpPath(key: string): string {
     return path.join(this.tmpLocation, this.did, key)
   }
@@ -191,6 +173,24 @@ export class DiskBlobStore implements BlobStore {
     if (errors.length > 0) {
       throw aggregateErrors(errors)
     }
+  }
+
+  private async ensureDir(): Promise<void> {
+    await fs.mkdir(path.join(this.location, this.did), { recursive: true })
+  }
+
+  private async ensureTemp(): Promise<void> {
+    await fs.mkdir(path.join(this.tmpLocation, this.did), { recursive: true })
+  }
+
+  private async ensureQuarantine(): Promise<void> {
+    await fs.mkdir(path.join(this.quarantineLocation, this.did), {
+      recursive: true,
+    })
+  }
+
+  private genKey(): string {
+    return randomStr(32, 'base32')
   }
 }
 

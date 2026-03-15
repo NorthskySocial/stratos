@@ -4,6 +4,7 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
 import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
+import { type AllowListProvider } from '../features/index.js'
 import { OAUTH_SCOPE } from './client.js'
 
 /**
@@ -39,6 +40,9 @@ export interface OAuthRoutesConfig {
   baseUrl: string
   serviceEndpoint: string
   defaultBoundaries?: string[]
+  /** External allow list provider (optional) */
+  allowListProvider?: AllowListProvider
+  /** Logger for OAuth events */
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
@@ -63,6 +67,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     idResolver,
     serviceEndpoint,
     defaultBoundaries = [],
+    allowListProvider,
     logger,
     devMode = false,
     dpopVerifier,
@@ -215,6 +220,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         enrollmentConfig,
         did,
         idResolver,
+        allowListProvider,
       )
 
       if (!enrollmentResult.allowed) {
@@ -250,12 +256,19 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           userSigningKeyDid,
         )
 
+        // Determine boundaries for enrollment
+        const boundaries =
+          enrollmentResult.autoEnrollDomains &&
+          enrollmentResult.autoEnrollDomains.length > 0
+            ? enrollmentResult.autoEnrollDomains
+            : defaultBoundaries
+
         // Create enrollment record
         await enrollmentStore.enroll({
           did,
           enrolledAt: new Date().toISOString(),
           pdsEndpoint: enrollmentResult.pdsEndpoint,
-          boundaries: defaultBoundaries,
+          boundaries,
           signingKeyDid: userSigningKeyDid,
           active: true,
         })
@@ -271,7 +284,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             rkey: 'self',
             record: {
               service: serviceEndpoint,
-              boundaries: defaultBoundaries.map((value) => ({ value })),
+              boundaries: boundaries.map((value) => ({ value })),
               signingKey: userSigningKeyDid,
               attestation: {
                 sig: attestation.sig,

@@ -21,7 +21,7 @@ import type { ActorTransactor } from '../actor-store-types.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-} from '../features/mst/index.js'
+} from '../features/index.js'
 import { Did } from '@atproto/api'
 
 /**

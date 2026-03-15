@@ -38,6 +38,8 @@ export interface DpopVerifierConfig {
   tokenVerifier: PdsTokenVerifier
   /** Enrollment store for checking enrollment status */
   enrollmentStore: EnrollmentStoreReader
+  /** Optional allow list provider */
+  allowListProvider?: import('../features/enrollment/allow-list.js').ExternalAllowListProvider
   /** DPoP secret for nonce generation (false to disable, undefined for random) */
   dpopSecret?: Uint8Array | string | false
   /** DPoP nonce rotation interval in ms */
@@ -60,7 +62,8 @@ export class DpopVerificationError extends Error {
       | 'token_inactive'
       | 'key_binding_mismatch'
       | 'not_enrolled'
-      | 'verification_failed',
+      | 'verification_failed'
+      | 'not_allowed',
     public readonly wwwAuthenticate?: string,
   ) {
     super(message)
@@ -304,6 +307,21 @@ export class DpopVerifier {
         `User ${did} is not enrolled`,
         'not_enrolled',
       )
+    }
+
+    // Check user is on allow list if provider is configured
+    if (this.config.allowListProvider) {
+      const isAllowed = await this.config.allowListProvider.isAllowed(did)
+      if (!isAllowed) {
+        this.config.logger?.warn(
+          { did, code: 'not_allowed' },
+          'DPoP auth failed: user not on allow list',
+        )
+        throw new DpopVerificationError(
+          `User ${did} is not on the allow list`,
+          'not_allowed',
+        )
+      }
     }
 
     this.config.logger?.debug(

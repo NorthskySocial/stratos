@@ -10,6 +10,7 @@ export * from './blob-store.js'
 export * from './repo-store.js'
 export * from './enrollment-store.js'
 export * from './sequence-store.js'
+export * from './cache.js'
 
 import type { RecordStoreReader, RecordStoreWriter } from './record-store.js'
 import type {

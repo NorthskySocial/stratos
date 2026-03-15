@@ -44,24 +44,33 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ### System Components
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         ATProtocol Network                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
-│  │  User's PDS  │◀──▶│Stratos Service │◀──▶│     AppView      │  │
-│  └──────────────┘    └──────────────────┘    └──────────────────┘  │
-│         │                     │                       │             │
-│         │ OAuth               │ Per-user              │ Indexed     │
-│         │ Authentication      │ SQLite / PG           │ Content     │
-│         ▼                     ▼                       ▼             │
-│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
-│  │   DID PLC    │    │   Blob Storage   │    │   PostgreSQL     │  │
-│  │              │    │  (Disk or S3)    │    │                  │  │
-│  └──────────────┘    └──────────────────┘    └──────────────────┘  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph ATProtocol ["ATProtocol Network"]
+        direction TB
+        subgraph Services [" "]
+            direction LR
+            PDS["User's PDS"]
+            Stratos["Stratos Service"]
+            AppView["AppView"]
+            PDS <--> Stratos
+            Stratos <--> AppView
+        end
+
+        subgraph Infrastructure [" "]
+            direction LR
+            DID["DID PLC"]
+            Blob["Blob Storage<br/>(Disk or S3)"]
+            Postgres["PostgreSQL"]
+        end
+
+        PDS -- "OAuth<br/>Authentication" --> DID
+        Stratos -- "Per-user<br/>SQLite / PG" --> Blob
+        AppView -- "Indexed<br/>Content" --> Postgres
+    end
+
+    style Services fill:none,stroke:none
+    style Infrastructure fill:none,stroke:none
 ```
 
 > **Note:** See [Blob Storage](#blob-storage) for configuration.
@@ -70,69 +79,56 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 #### 1. User Enrollment
 
-```
-User ──▶ Stratos /oauth/authorize?handle=user.bsky.social
-         │
-         ▼
-Stratos ──▶ User's PDS OAuth endpoint
-         │
-         ▼
-PDS ──▶ User authorizes Stratos
-         │
-         ▼
-PDS ──▶ Stratos /oauth/callback (with auth code)
-         │
-         ▼
-Stratos validates enrollment (DID/PDS allowlist)
-         │
-         ▼
-Creates enrollment record + per-user database (SQLite file or PostgreSQL schema)
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as Stratos
+    participant P as User's PDS
+
+    U->>S: /oauth/authorize?handle=user.bsky.social
+    S->>P: Request OAuth endpoint
+    P->>U: Prompt for authorization
+    U->>P: Authorize Stratos
+    P->>S: /oauth/callback (with auth code)
+    S->>S: Validate enrollment (DID/PDS allowlist)
+    S->>S: Create enrollment record + per-user database
 ```
 
 #### 2. Record Creation
 
-```
-Client ──▶ Stratos com.atproto.repo.createRecord
-           { collection: "zone.stratos.feed.post",
-             record: { text: "...", boundary: { values: [{ value: "fanart" }] } }
-           }
-         │
-         ▼
-Stratos validates:
-  - User is enrolled
-  - Record has valid boundary
-  - No cross-namespace embeds
-         │
-         ▼
-Stores record in per-user SQLite database
-         │
-         ▼
-Updates MST (Merkle Search Tree) and signs a new commit:
-  - Inserts record into MST via NodeWrangler
-  - Computes block diff (new/removed MST nodes)
-  - Signs commit with service secp256k1 key
-  - Persists commit block and updates repo root
-         │
-         ▼
-Sequences event to stratos_seq table
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Stratos
+    participant P as User's PDS
+
+    C->>S: com.atproto.repo.createRecord
+    Note right of C: collection: app.northsky.stratos.feed.post<br/>record: { text: "...", boundary: { values: [{ value: "fanart" }] } } }
+
+    S->>S: Validate User Enrollment, Valid Boundary, No cross-namespace embeds
+    S->>S: Store record in per-user SQLite database
+    S->>S: Sequence event to stratos_seq table
+    Note right of S: Updates MST (Merkle Search Tree) and signs a new commit:<br/>- Inserts record into MST via NodeWrangler<br/>- Computes block diff (new/removed MST nodes)<br/>- Signs commit with service secp256k1 key<br/>- Persists commit block and updates repo root
+
+    S->>P: putRecord(Stub with source field)
 ```
 
 #### 3. AppView Indexing
 
-```
-AppView ──▶ Stratos zone.stratos.sync.subscribeRecords (WebSocket)
-            { did: "<user-did>", cursor: 0 }
-         │
-         ▼
-Stratos streams commit events:
-  { $type: "zone.stratos.sync.subscribeRecords#commit",
-    seq: 1,
-    did: "did:plc:abc",
-    ops: [{ action: "create", path: "zone.stratos.feed.post/tid", record: {...} }]
-  }
-         │
-         ▼
-AppView indexes records with boundary metadata
+```mermaid
+sequenceDiagram
+    participant A as AppView
+    participant S as Stratos
+
+    A->>S: zone.stratos.sync.subscribeRecords (WebSocket)
+    Note right of A: { did: "<user-did>", cursor: 0 }
+
+    loop Commit events
+        S->>A: zone.stratos.sync.subscribeRecords#commit
+        Note right of S: { seq: 1, did: "did:plc:abc", ops: [...] }
+    end
+
+    A->>A: AppView indexes records with boundary metadata
 ```
 
 ### Repository & MST Architecture
@@ -141,24 +137,27 @@ Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit ch
 with the ATProto repo format. Every record write produces a signed commit that updates the MST root,
 enabling cryptographic verification of repository contents.
 
-```
-┌─────────────────────────────────────────────────┐
-│  Signed Commit (v3)                             │
-│  ┌───────────────────────────────────────────┐  │
-│  │ did:     "did:plc:user"                   │  │
-│  │ version: 3                                │  │
-│  │ data:    <MST root CID>                   │  │
-│  │ rev:     "2024..." (TID)                  │  │
-│  │ sig:     <secp256k1 signature>            │  │
-│  └───────────────────────────────────────────┘  │
-│                    │                            │
-│                    ▼                            │
-│  MST (Merkle Search Tree)                       │
-│  ┌───────────────────────────────────────────┐  │
-│  │ collection/rkey → record CID              │  │
-│  │ Sorted key-value tree of all records      │  │
-│  └───────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    Commit["Signed Commit (v3)"] --> MST["MST (Merkle Search Tree)"]
+
+    subgraph CommitInfo ["Signed Commit Content"]
+        direction TB
+        C1["did: 'did:plc:user'"]
+        C2["version: 3"]
+        C3["data: &lt;MST root CID&gt;"]
+        C4["rev: '2024...' (TID)"]
+        C5["sig: &lt;secp256k1 signature&gt;"]
+    end
+
+    subgraph MSTInfo ["MST Content"]
+        direction TB
+        M1["collection/rkey → record CID"]
+        M2["Sorted key-value tree of all records"]
+    end
+
+    Commit -.-> CommitInfo
+    MST -.-> MSTInfo
 ```
 
 Key capabilities:

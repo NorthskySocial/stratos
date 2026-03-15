@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { CID } from 'multiformats/cid'
 import * as AtcuteCid from '@atcute/cid'
 import { encode as cborEncode } from '@atcute/cbor'
-import { StratosBlockStoreReader } from '../src/features/mst/storage-adapter.js'
+import { StratosBlockStoreReader } from '../src/features'
 import { BlockMap } from '@northskysocial/stratos-core'
 
 const DAG_CBOR_CODEC = 0x71
