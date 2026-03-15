@@ -5,9 +5,20 @@
   import { init, signOut } from './lib/auth'
   import { discoverStratosEnrollment, STRATOS_URL, APPVIEW_URL, type StratosEnrollment } from './lib/stratos'
   import { createServiceAgent, createStratosAgent } from './lib/stratos-agent'
-  import { fetchPublicPosts, fetchRepoPublicPosts, fetchStratosPosts, fetchAppviewStratosPosts, buildUnifiedFeed, type FeedPost } from './lib/feed'
+  import {
+    fetchPublicPosts,
+    fetchRepoPublicPosts,
+    fetchStratosPosts,
+    fetchAppviewStratosPosts,
+    buildUnifiedFeed,
+    collectDomains,
+    filterByDomain,
+    feedStats,
+    resolveHandles,
+    type FeedPost,
+  } from './lib/feed'
   import LoginScreen from './lib/LoginScreen.svelte'
-  import EnrollmentIndicator from './lib/EnrollmentIndicator.svelte'
+  import Sidebar from './lib/Sidebar.svelte'
   import Composer from './lib/Composer.svelte'
   import Feed from './lib/Feed.svelte'
 
@@ -15,11 +26,25 @@
   let enrollment: StratosEnrollment | null = $state(null)
   let appviewAgent: Agent | null = $state(null)
   let stratosAgent: Agent | null = $state(null)
-  let posts: FeedPost[] = $state([])
+  let allPosts: FeedPost[] = $state([])
   let loading = $state(true)
   let did = $state('')
   let handle = $state('')
   let serviceUrl = $state(STRATOS_URL ?? '')
+  let activeFeed: string | null = $state(null)
+
+  let enrolledDomains = $derived(
+    enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
+  )
+
+  let allDomains = $derived(
+    Array.from(
+      new Set([...enrolledDomains, ...collectDomains(allPosts)]),
+    ).sort(),
+  )
+
+  let filteredPosts = $derived(filterByDomain(allPosts, activeFeed))
+  let stats = $derived(feedStats(filteredPosts))
 
   async function startup() {
     loading = true
@@ -74,7 +99,12 @@
       stratosPosts = await fetchStratosPosts(stratosAgent, session.sub)
     }
 
-    posts = buildUnifiedFeed(publicPosts, stratosPosts)
+    const unified = buildUnifiedFeed(publicPosts, stratosPosts)
+    allPosts = resolveHandles(unified, did, handle)
+  }
+
+  function handleSelectFeed(domain: string | null) {
+    activeFeed = domain
   }
 
   async function handleSignOut() {
@@ -83,9 +113,10 @@
     enrollment = null
     appviewAgent = null
     stratosAgent = null
-    posts = []
+    allPosts = []
     handle = ''
     did = ''
+    activeFeed = null
   }
 
   onMount(() => {
@@ -100,20 +131,50 @@
 {:else}
   <div class="app-layout">
     <aside class="sidebar">
-      <EnrollmentIndicator {handle} {enrollment} {serviceUrl} />
+      <Sidebar
+        {handle}
+        {enrollment}
+        {serviceUrl}
+        {allDomains}
+        {enrolledDomains}
+        postCount={stats.postCount}
+        userCount={stats.userCount}
+        {activeFeed}
+        onSelectFeed={handleSelectFeed}
+      />
     </aside>
 
     <main class="main">
       <header class="app-header">
         <div>
           <h1>Stratos</h1>
-          <p class="session-label">{did}</p>
+          <p class="session-label">@{handle}</p>
         </div>
         <button class="sign-out" onclick={handleSignOut}>Log Out</button>
       </header>
 
       <Composer {session} {enrollment} {stratosAgent} onpost={refreshFeed} />
-      <Feed {posts} loading={loading} />
+
+      <div class="feed-tabs">
+        <button
+          class="tab"
+          class:active={activeFeed === null}
+          onclick={() => handleSelectFeed(null)}
+        >
+          All
+        </button>
+        {#each enrolledDomains as domain}
+          <button
+            class="tab"
+            class:active={activeFeed === domain}
+            onclick={() => handleSelectFeed(domain)}
+          >
+            {domain}
+          </button>
+        {/each}
+      </div>
+
+      <Feed posts={filteredPosts} loading={loading} />
     </main>
   </div>
 {/if}
@@ -140,7 +201,6 @@
   }
 
   .sign-out {
-    margin: auto 1rem 1rem;
     padding: 0.45rem;
     background: none;
     border: 1px solid #ccc;
@@ -181,5 +241,33 @@
     color: #666;
     font-size: 0.85rem;
     word-break: break-all;
+  }
+
+  .feed-tabs {
+    display: flex;
+    border-bottom: 1px solid #eee;
+    padding: 0 1rem;
+    gap: 0;
+  }
+
+  .tab {
+    padding: 0.6rem 1rem;
+    border: none;
+    background: none;
+    font-size: 0.88rem;
+    cursor: pointer;
+    color: #666;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab:hover {
+    color: #333;
+  }
+
+  .tab.active {
+    color: #3730a3;
+    font-weight: 600;
+    border-bottom-color: #3730a3;
   }
 </style>

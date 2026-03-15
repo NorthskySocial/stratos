@@ -14,8 +14,19 @@
 
   let text = $state('')
   let isPrivate = $state(false)
+  let selectedDomain = $state('')
   let posting = $state(false)
   let error = $state('')
+
+  let domains = $derived(
+    enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
+  )
+
+  $effect(() => {
+    if (domains.length > 0 && !selectedDomain) {
+      selectedDomain = domains[0]
+    }
+  })
 
   async function handlePost() {
     if (!text.trim()) return
@@ -25,7 +36,7 @@
     try {
       const now = new Date().toISOString()
 
-      if (isPrivate && stratosAgent) {
+      if (isPrivate && stratosAgent && selectedDomain) {
         await stratosAgent.com.atproto.repo.createRecord({
           repo: session.sub,
           collection: 'zone.stratos.feed.post',
@@ -34,7 +45,7 @@
             text: text.trim(),
             boundary: {
               $type: 'zone.stratos.boundary.defs#Domains',
-              values: enrollment?.boundaries ?? [],
+              values: [{ value: selectedDomain }],
             },
             createdAt: now,
           },
@@ -65,23 +76,37 @@
 <div class="composer">
   <textarea
     bind:value={text}
-    placeholder={isPrivate ? 'Write a private post…' : 'Write a post…'}
+    placeholder={isPrivate ? `Post to ${selectedDomain || 'private'}…` : 'Write a post…'}
     disabled={posting}
     rows="3"
   ></textarea>
 
   <div class="composer-actions">
-    <label class="private-toggle" class:disabled={!enrollment}>
-      <input
-        type="checkbox"
-        bind:checked={isPrivate}
-        disabled={!enrollment || posting}
-      />
-      <span>Private</span>
-      {#if !enrollment}
-        <span class="tooltip">Enroll in Stratos to post privately</span>
+    <div class="left-actions">
+      <label class="private-toggle" class:disabled={!enrollment}>
+        <input
+          type="checkbox"
+          bind:checked={isPrivate}
+          disabled={!enrollment || posting}
+        />
+        <span>Private</span>
+        {#if !enrollment}
+          <span class="tooltip">Enroll in Stratos to post privately</span>
+        {/if}
+      </label>
+
+      {#if isPrivate && domains.length > 0}
+        <select
+          class="domain-select"
+          bind:value={selectedDomain}
+          disabled={posting}
+        >
+          {#each domains as domain}
+            <option value={domain}>{domain}</option>
+          {/each}
+        </select>
       {/if}
-    </label>
+    </div>
 
     <button onclick={handlePost} disabled={posting || !text.trim()}>
       {posting ? 'Posting…' : 'Post'}
@@ -123,6 +148,12 @@
     margin-top: 0.5rem;
   }
 
+  .left-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .private-toggle {
     display: flex;
     align-items: center;
@@ -158,6 +189,20 @@
 
   .private-toggle.disabled:hover .tooltip {
     display: block;
+  }
+
+  .domain-select {
+    padding: 0.3rem 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    background: white;
+    color: #333;
+  }
+
+  .domain-select:focus {
+    outline: none;
+    border-color: #8b5cf6;
   }
 
   button {
