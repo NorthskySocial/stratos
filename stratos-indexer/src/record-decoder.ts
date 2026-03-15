@@ -1,7 +1,8 @@
 import { fromUint8Array } from '@atcute/car'
 import { decode, fromBytes, toCidLink } from '@atcute/cbor'
+import { isCidLink, type CidLink } from '@atcute/cid'
 import { CID } from 'multiformats/cid'
-import { BlobRef } from '@atproto/lexicon'
+import { ipldToLex } from '@atproto/lexicon'
 
 export interface DecodedOp {
   action: 'create' | 'update' | 'delete'
@@ -61,65 +62,45 @@ function readCarBlocks(buffer: Uint8Array): Map<string, unknown> {
 }
 
 export function parseCid(
-  cid: { $link: string } | { bytes: Uint8Array } | CID | string,
+  cid: CidLink | { bytes: Uint8Array } | CID | string,
 ): CID {
   if (cid instanceof CID) return cid
   if (typeof cid === 'string') return CID.parse(cid)
-  if ('$link' in cid) return CID.parse(cid.$link)
+  if (isCidLink(cid)) return CID.parse(cid.$link)
   if ('bytes' in cid) return CID.decode(cid.bytes)
   throw new Error('invalid CID')
 }
 
 export function jsonToLex(val: Record<string, unknown>): unknown {
-  if (Array.isArray(val)) {
-    return val.map((item) => jsonToLex(item))
+  return ipldToLex(toIpld(val))
+}
+
+// Bridges both CBOR-decoded (CidLinkWrapper) and JSON-encoded ({$link}) CID
+// formats to multiformats/cid CID objects that @atproto/lexicon expects.
+function toIpld(val: unknown): unknown {
+  if (val == null || typeof val !== 'object') return val
+  if (Array.isArray(val)) return val.map(toIpld)
+  if (isCidLink(val)) return CID.parse((val as CidLink).$link)
+  if (val instanceof Uint8Array) return val
+
+  const obj = val as Record<string, unknown>
+  const keys = Object.keys(obj)
+
+  // JSON-encoded CID: { "$link": "bafyrei..." }
+  if (keys.length === 1 && typeof obj['$link'] === 'string') {
+    return CID.parse(obj['$link'] as string)
   }
 
-  if (val && typeof val === 'object') {
-    if (
-      '$link' in val &&
-      typeof val['$link'] === 'string' &&
-      Object.keys(val).length === 1
-    ) {
-      return CID.parse(val['$link'])
-    }
-    if ('bytes' in val && val['bytes'] instanceof Uint8Array) {
-      return CID.decode(val.bytes as Uint8Array)
-    }
-    if (
-      '$bytes' in val &&
-      typeof val['$bytes'] === 'string' &&
-      Object.keys(val).length === 1
-    ) {
-      return fromBytes({ $bytes: val.$bytes as string })
-    }
-    if (
-      val['$type'] === 'blob' ||
-      (typeof val['cid'] === 'string' && typeof val['mimeType'] === 'string')
-    ) {
-      if ('ref' in val && typeof val['size'] === 'number') {
-        return new BlobRef(
-          CID.decode((val.ref as { bytes: Uint8Array }).bytes),
-          val.mimeType as string,
-          val.size as number,
-        )
-      }
-      return new BlobRef(
-        CID.parse(val.cid as string),
-        val.mimeType as string,
-        -1,
-        val as never,
-      )
-    }
-
-    const result: Record<string, unknown> = {}
-    for (const key of Object.keys(val)) {
-      result[key] = jsonToLex(val[key] as Record<string, unknown>)
-    }
-    return result
+  // CBOR/JSON-encoded bytes: { "$bytes": "base64..." }
+  if (keys.length === 1 && typeof obj['$bytes'] === 'string') {
+    return fromBytes({ $bytes: obj['$bytes'] as string })
   }
 
-  return val
+  const result: Record<string, unknown> = {}
+  for (const key of keys) {
+    result[key] = toIpld(obj[key])
+  }
+  return result
 }
 
 export function extractBoundaries(record: Record<string, unknown>): string[] {
