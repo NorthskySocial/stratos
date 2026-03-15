@@ -367,6 +367,13 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           userSigningKeyDid,
         )
 
+        // Determine boundaries for enrollment
+        const boundaries =
+          enrollmentResult.autoEnrollDomains &&
+          enrollmentResult.autoEnrollDomains.length > 0
+            ? enrollmentResult.autoEnrollDomains
+            : defaultBoundaries
+
         // Write profile record to user's PDS for endpoint discovery
         // Uses putRecord with service DID as rkey for deterministic addressing
         const enrollmentRkey = serviceDIDToRkey(serviceDid)
@@ -380,7 +387,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             rkey: enrollmentRkey,
             record: {
               service: serviceEndpoint,
-              boundaries: defaultBoundaries.map((value) => ({ value })),
+              boundaries: boundaries.map((value) => ({ value })),
               signingKey: userSigningKeyDid,
               attestation: {
                 sig: attestation.sig,
@@ -407,7 +414,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           did,
           enrolledAt: new Date().toISOString(),
           pdsEndpoint: enrollmentResult.pdsEndpoint,
-          boundaries: defaultBoundaries,
+          boundaries,
           signingKeyDid: userSigningKeyDid,
           active: true,
           enrollmentRkey,
