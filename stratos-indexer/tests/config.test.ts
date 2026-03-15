@@ -24,6 +24,7 @@ describe('loadConfig', () => {
     expect(config.db.schema).toBe('bsky')
     expect(config.db.poolSize).toBe(10)
     expect(config.pds.repoProvider).toBe('wss://bsky.network')
+    expect(config.pds.enrolledOnly).toBe(false)
     expect(config.stratos.serviceUrl).toBe('https://stratos.tokyo-3.jp')
     expect(config.stratos.syncToken).toBe('secret-token-from-seele')
     expect(config.identity.plcUrl).toBe('https://plc.directory')
@@ -45,11 +46,13 @@ describe('loadConfig', () => {
     process.env.WORKER_CONCURRENCY = '8'
     process.env.WORKER_MAX_QUEUE_SIZE = '500'
     process.env.CURSOR_FLUSH_INTERVAL_MS = '10000'
+    process.env.BACKFILL_ENROLLED_ONLY = 'true'
 
     const config = loadConfig()
 
     expect(config.db.schema).toBe('custom_schema')
     expect(config.db.poolSize).toBe(25)
+    expect(config.pds.enrolledOnly).toBe(true)
     expect(config.identity.plcUrl).toBe('https://plc.custom.com')
     expect(config.health.port).toBe(9090)
     expect(config.worker.concurrency).toBe(8)

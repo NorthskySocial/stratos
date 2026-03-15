@@ -40,6 +40,34 @@ export async function backfillRepos(opts: BackfillOptions): Promise<number> {
   return processed
 }
 
+export async function backfillActors(
+  opts: BackfillOptions,
+  dids: string[],
+): Promise<number> {
+  let processed = 0
+
+  for (const did of dids) {
+    try {
+      await backfillViaListRecords(opts, did)
+      processed++
+      opts.onProgress?.(processed)
+    } catch (err) {
+      opts.onError?.(
+        new Error(`failed to backfill repo ${did}`, { cause: err }),
+      )
+    }
+  }
+
+  return processed
+}
+
+export async function backfillSingleActor(
+  opts: BackfillOptions,
+  did: string,
+): Promise<void> {
+  await backfillViaListRecords(opts, did)
+}
+
 async function backfillViaListRecords(
   opts: BackfillOptions,
   did: string,

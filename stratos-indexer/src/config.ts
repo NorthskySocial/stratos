@@ -15,6 +15,7 @@ export interface DbConfig {
 
 export interface PdsConfig {
   repoProvider: string
+  enrolledOnly: boolean
 }
 
 export interface StratosConfig {
@@ -45,6 +46,7 @@ export function loadConfig(): IndexerConfig {
     },
     pds: {
       repoProvider: requireEnv('BSKY_REPO_PROVIDER'),
+      enrolledOnly: envBool('BACKFILL_ENROLLED_ONLY', false),
     },
     stratos: {
       serviceUrl: requireEnv('STRATOS_SERVICE_URL'),
@@ -74,6 +76,12 @@ function requireEnv(key: string): string {
 
 function env(key: string, defaultValue: string): string {
   return process.env[key] ?? defaultValue
+}
+
+function envBool(key: string, defaultValue: boolean): boolean {
+  const raw = process.env[key]
+  if (!raw) return defaultValue
+  return raw === '1' || raw.toLowerCase() === 'true'
 }
 
 function envInt(key: string, defaultValue: number): number {
