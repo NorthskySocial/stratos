@@ -163,7 +163,6 @@ export class StratosServer {
       serviceEndpoint: cfg.service.publicUrl,
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
-      allowListProvider: ctx.allowListProvider,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
@@ -226,7 +225,11 @@ export class StratosServer {
 
     return new Promise((resolve) => {
       this.server = this.app.listen(port, () => {
-        this.ctx.logger?.info({ port }, 'stratos server started')
+        const upgradeListeners = this.server?.listenerCount('upgrade') ?? 0
+        this.ctx.logger?.info(
+          { port, upgradeListeners },
+          'stratos server started',
+        )
         resolve()
       })
     })

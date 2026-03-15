@@ -391,6 +391,30 @@ export class SqliteEnrollmentStore
     }
   }
 
+  async updateEnrollment(
+    did: string,
+    updates: Partial<Omit<EnrollmentRecord, 'did'>>,
+  ): Promise<void> {
+    const setValues: Record<string, unknown> = {}
+    if (updates.enrolledAt !== undefined)
+      setValues.enrolledAt = updates.enrolledAt
+    if (updates.pdsEndpoint !== undefined)
+      setValues.pdsEndpoint = updates.pdsEndpoint
+    if (updates.signingKeyDid !== undefined)
+      setValues.signingKeyDid = updates.signingKeyDid
+    if (updates.active !== undefined)
+      setValues.active = updates.active ? 'true' : 'false'
+    if (updates.enrollmentRkey !== undefined)
+      setValues.enrollmentRkey = updates.enrollmentRkey
+
+    if (Object.keys(setValues).length > 0) {
+      await this.db
+        .update(enrollment)
+        .set(setValues)
+        .where(eq(enrollment.did, did))
+    }
+  }
+
   async listEnrollments(
     options?: ListEnrollmentsOptions,
   ): Promise<StoredEnrollment[]> {
@@ -430,31 +454,6 @@ export class SqliteEnrollmentStore
       .where(eq(enrollmentBoundary.did, did))
 
     return rows.map((r) => r.boundary)
-  }
-
-  async updateEnrollment(
-    did: string,
-    updates: Partial<Omit<EnrollmentRecord, 'did'>>,
-  ): Promise<void> {
-    const setValues: Record<string, unknown> = {}
-
-    if (updates.enrolledAt !== undefined)
-      setValues.enrolledAt = updates.enrolledAt
-    if (updates.pdsEndpoint !== undefined)
-      setValues.pdsEndpoint = updates.pdsEndpoint
-    if (updates.signingKeyDid !== undefined)
-      setValues.signingKeyDid = updates.signingKeyDid
-    if (updates.active !== undefined)
-      setValues.active = updates.active ? 'true' : 'false'
-    if (updates.enrollmentRkey !== undefined)
-      setValues.enrollmentRkey = updates.enrollmentRkey
-
-    if (Object.keys(setValues).length > 0) {
-      await this.db
-        .update(enrollment)
-        .set(setValues)
-        .where(eq(enrollment.did, did))
-    }
   }
 }
 
@@ -611,6 +610,26 @@ function createAuthVerifiers(
         return { credentials: { type: 'none' } }
       }
 
+      // Try service auth (Bearer JWT from AppView/indexer)
+      if (authHeader.startsWith('Bearer ')) {
+        try {
+          const serviceCtx = await verifyServiceAuth(
+            authHeader,
+            serviceDid,
+            undefined,
+            idResolver,
+          )
+          return {
+            credentials: {
+              type: 'service',
+              did: serviceCtx.iss,
+            },
+          }
+        } catch {
+          return { credentials: { type: 'none' } }
+        }
+      }
+
       if (!authHeader.startsWith('DPoP ') || !dpopVerifier) {
         return { credentials: { type: 'none' } }
       }
@@ -681,8 +700,15 @@ function createAuthVerifiers(
       const params = ctx.params as Record<string, unknown>
       const tokenParam = params.syncToken
 
+      console.log('[subscribeAuth] request received', {
+        hasSyncToken: !!tokenParam,
+        hasServerToken: !!syncToken,
+        url: ctx.req.url,
+      })
+
       if (tokenParam && typeof tokenParam === 'string' && syncToken) {
         if (safeEqual(tokenParam, syncToken)) {
+          console.log('[subscribeAuth] sync token matched')
           return {
             credentials: {
               type: 'service',
@@ -691,6 +717,7 @@ function createAuthVerifiers(
             },
           }
         }
+        console.log('[subscribeAuth] sync token mismatch')
       }
 
       if (tokenParam && typeof tokenParam === 'string') {
@@ -1111,7 +1138,10 @@ export async function createAppContext(
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
-    destroy: destroyBackend,
+    destroy: async () => {
+      await actorStore.close?.()
+      await destroyBackend()
+    },
   }
 }
 

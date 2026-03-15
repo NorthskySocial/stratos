@@ -957,6 +957,8 @@ export class PostgresActorStore implements ActorStore {
   private readonly logger?: Logger
   private readonly adminClient: ReturnType<typeof postgres>
   private readonly adminDb: StratosPgDb
+  private readonly actorClient: ReturnType<typeof postgres>
+  private readonly actorDb: StratosPgDb
 
   constructor(config: PostgresActorStoreConfig) {
     this.connectionString = config.connectionString
@@ -969,10 +971,18 @@ export class PostgresActorStore implements ActorStore {
       connect_timeout: 10,
     })
     this.adminDb = drizzle({ client: this.adminClient })
+    // Shared pool for all per-actor operations; search_path set per transaction via SET LOCAL
+    this.actorClient = postgres(this.connectionString, {
+      max: 15,
+      idle_timeout: 20,
+      connect_timeout: 10,
+    })
+    this.actorDb = drizzle({ client: this.actorClient, schema: pgActorSchema })
   }
 
   async close(): Promise<void> {
     await this.adminClient.end()
+    await this.actorClient.end()
   }
 
   private async getSchemaName(did: string): Promise<string> {
@@ -1016,31 +1026,20 @@ export class PostgresActorStore implements ActorStore {
     fn: (store: ActorReader) => T | PromiseLike<T>,
   ): Promise<T> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 1,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
-    })
-    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
     const blobStore = this.blobstore(did)
 
-    try {
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      const txDb = tx as unknown as StratosPgDb
       const store: ActorReader = {
         did,
-        record: new PgActorRecordReader(
-          actorDb,
-          this.cborToRecord,
-          this.logger,
-        ),
-        repo: new PgActorRepoReader(actorDb, this.logger),
-        blob: new PgActorBlobReader(actorDb, blobStore, this.logger),
-        sequence: new PgSequenceOps(actorDb),
+        record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(txDb, this.logger),
+        blob: new PgActorBlobReader(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
       }
-      return await fn(store)
-    } finally {
-      await client.end()
-    }
+      return fn(store)
+    })
   }
 
   async transact<T>(
@@ -1048,34 +1047,24 @@ export class PostgresActorStore implements ActorStore {
     fn: (store: ActorTransactor) => T | PromiseLike<T>,
   ): Promise<T> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 1,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
-    })
-    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
     const blobStore = this.blobstore(did)
 
-    try {
-      return await actorDb.transaction(async (tx) => {
-        const txDb = tx as unknown as StratosPgDb
-        const store: ActorTransactor = {
-          did,
-          record: new PgActorRecordTransactor(
-            txDb,
-            this.cborToRecord,
-            this.logger,
-          ),
-          repo: new PgActorRepoTransactor(txDb, this.logger),
-          blob: new PgActorBlobTransactor(txDb, blobStore, this.logger),
-          sequence: new PgSequenceOps(txDb),
-        }
-        return fn(store)
-      })
-    } finally {
-      await client.end()
-    }
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      const txDb = tx as unknown as StratosPgDb
+      const store: ActorTransactor = {
+        did,
+        record: new PgActorRecordTransactor(
+          txDb,
+          this.cborToRecord,
+          this.logger,
+        ),
+        repo: new PgActorRepoTransactor(txDb, this.logger),
+        blob: new PgActorBlobTransactor(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
+      }
+      return fn(store)
+    })
   }
 
   getBlobStore(did: string): BlobStore {
@@ -1084,17 +1073,12 @@ export class PostgresActorStore implements ActorStore {
 
   async createSigningKey(did: string): Promise<crypto.P256Keypair> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 1,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
-    })
-    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
-    try {
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
       const keypair = await crypto.P256Keypair.create({ exportable: true })
       const exported = await (keypair as crypto.ExportableKeypair).export()
-      await actorDb
+      const txDb = tx as unknown as StratosPgDb
+      await txDb
         .insert(pgStratosSigningKey)
         .values({ did, key: Buffer.from(exported) })
         .onConflictDoUpdate({
@@ -1102,22 +1086,15 @@ export class PostgresActorStore implements ActorStore {
           set: { key: Buffer.from(exported) },
         })
       return keypair
-    } finally {
-      await client.end()
-    }
+    })
   }
 
   async loadSigningKey(did: string): Promise<crypto.P256Keypair | null> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 1,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
-    })
-    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
-    try {
-      const rows = await actorDb
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      const txDb = tx as unknown as StratosPgDb
+      const rows = await txDb
         .select({ key: pgStratosSigningKey.key })
         .from(pgStratosSigningKey)
         .where(eq(pgStratosSigningKey.did, did))
@@ -1126,26 +1103,17 @@ export class PostgresActorStore implements ActorStore {
       return crypto.P256Keypair.import(new Uint8Array(rows[0].key), {
         exportable: true,
       })
-    } finally {
-      await client.end()
-    }
+    })
   }
 
   async deleteSigningKey(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 1,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
-    })
-    const actorDb: StratosPgDb = drizzle({ client, schema: pgActorSchema })
-    try {
-      await actorDb
+    await this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      const txDb = tx as unknown as StratosPgDb
+      await txDb
         .delete(pgStratosSigningKey)
         .where(eq(pgStratosSigningKey.did, did))
-    } finally {
-      await client.end()
-    }
+    })
   }
 }
