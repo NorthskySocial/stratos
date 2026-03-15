@@ -11,7 +11,7 @@ export {
   indexStratosRecord,
   deleteStratosRecord,
 } from './stratos-sync.ts'
-export { backfillRepos } from './backfill.ts'
+export { backfillRepos, backfillActors, backfillSingleActor } from './backfill.ts'
 export {
   decodeCommitOps,
   parseCid,
