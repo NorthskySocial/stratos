@@ -149,12 +149,14 @@ export class StratosActorSync {
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private reconnectAttempts = new Map<string, number>()
   private running = false
+  private knownDids = new Set<string>()
 
   constructor(
     private db: Kysely<DatabaseSchemaType>,
     private config: StratosSyncConfig,
     private cursorManager: CursorManager,
     private onError?: (err: Error) => void,
+    private onReferencedActor?: (did: string) => void,
   ) {}
 
   start(): void {
@@ -330,7 +332,60 @@ export class StratosActorSync {
     }
 
     this.cursorManager.updateStratosCursor(did, commit.seq)
+
+    if (this.onReferencedActor) {
+      for (const { record } of upserts) {
+        for (const refDid of extractReferencedDids(record)) {
+          if (refDid !== did && !this.knownDids.has(refDid)) {
+            this.knownDids.add(refDid)
+            this.onReferencedActor(refDid)
+          }
+        }
+      }
+    }
   }
+  markKnown(dids: Iterable<string>): void {
+    for (const did of dids) {
+      this.knownDids.add(did)
+    }
+  }
+}
+
+function extractReferencedDids(record: Record<string, unknown>): string[] {
+  const dids: string[] = []
+
+  const reply = record.reply as
+    | {
+        root?: { uri?: string }
+        parent?: { uri?: string }
+      }
+    | undefined
+
+  if (reply?.root?.uri) {
+    const did = didFromUri(reply.root.uri)
+    if (did) dids.push(did)
+  }
+  if (reply?.parent?.uri) {
+    const did = didFromUri(reply.parent.uri)
+    if (did) dids.push(did)
+  }
+
+  const embed = record.embed as
+    | { record?: { uri?: string }; $type?: string }
+    | undefined
+
+  if (embed?.record?.uri) {
+    const did = didFromUri(embed.record.uri)
+    if (did) dids.push(did)
+  }
+
+  return dids
+}
+
+function didFromUri(uri: string): string | null {
+  if (!uri.startsWith('at://')) return null
+  const authority = uri.slice(5).split('/')[0]
+  return authority.startsWith('did:') ? authority : null
 }
 
 // --- Stratos record indexer ---
