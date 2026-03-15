@@ -123,6 +123,7 @@ describe('Status endpoint with authentication', () => {
                   pdsEndpoint: 'https://pds.example.com',
                   signingKeyDid: 'did:key:zDnaeTestUser123',
                   active: true,
+                  enrollmentRkey: 'did:web:stratos.example.com',
                 }
               }
               return null
@@ -150,6 +151,9 @@ describe('Status endpoint with authentication', () => {
 
           // signingKey should be included when enrollment has one
           expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // enrollmentRkey should be included
+          expect(body.enrollmentRkey).toBe('did:web:stratos.example.com')
 
           // Boundaries should be included when authenticated
           const returnedBoundaries = body.boundaries as Array<{ value: string }>
@@ -202,6 +206,7 @@ describe('Status endpoint with authentication', () => {
                   pdsEndpoint: 'https://pds.example.com',
                   signingKeyDid: 'did:key:zDnaeTestUser123',
                   active: true,
+                  enrollmentRkey: 'did:web:stratos.example.com',
                 }
               }
               return null
@@ -222,6 +227,9 @@ describe('Status endpoint with authentication', () => {
 
           // signingKey should still be present even when unauthenticated
           expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // enrollmentRkey should be present even when unauthenticated
+          expect(body.enrollmentRkey).toBe('did:web:stratos.example.com')
 
           // Boundaries and attestation should NOT be included when not authenticated
           expect(body.boundaries).toBeUndefined()
@@ -297,5 +305,124 @@ describe('Status endpoint route registration', () => {
     expect(res.statusCode).toBe(400)
     const body = res.body as Record<string, unknown>
     expect(body.error).toBe('InvalidRequest')
+  })
+})
+
+// --- resolveEnrollments endpoint tests ---
+
+function invokeResolveRoute(
+  router: Router,
+  query: Record<string, string>,
+): Promise<MockResponse> {
+  return new Promise((resolve, reject) => {
+    let statusCode = 200
+    const req = {
+      query,
+      headers: {},
+      method: 'GET',
+      url: '/xrpc/zone.stratos.identity.resolveEnrollments',
+    } as unknown as express.Request
+    const res = {
+      status(code: number) {
+        statusCode = code
+        return res
+      },
+      json(body: unknown) {
+        resolve({ statusCode, body })
+        return res
+      },
+      setHeader() {
+        return res
+      },
+    } as unknown as express.Response
+
+    type RouteLayer = {
+      route?: {
+        path: string
+        stack: Array<{ handle: Function }>
+      }
+    }
+    const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
+      (l) =>
+        l.route?.path === '/xrpc/zone.stratos.identity.resolveEnrollments',
+    )
+    if (!layer?.route) return reject(new Error('Route not registered'))
+    const handler = layer.route.stack[0]?.handle
+    if (!handler) return reject(new Error('No handler on route'))
+
+    Promise.resolve(handler(req, res, () => {})).catch(reject)
+  })
+}
+
+describe('resolveEnrollments endpoint', () => {
+  it('returns boundaries for enrolled user', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async (did) =>
+        did === 'did:plc:gokusaiyan' ? ['capsule-corp.jp'] : [],
+    })
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
+      async (did: string) => did === 'did:plc:gokusaiyan'
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeResolveRoute(router, { did: 'did:plc:gokusaiyan' })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.body as { did: string; enrolled: boolean; boundaries: string[] }
+    expect(body.enrolled).toBe(true)
+    expect(body.boundaries).toEqual(['capsule-corp.jp'])
+  })
+
+  it('returns empty boundaries for non-enrolled user', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => [],
+    })
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
+      async () => false
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeResolveRoute(router, { did: 'did:plc:vegetaprinceofallsaiyans' })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.body as { did: string; enrolled: boolean; boundaries: string[] }
+    expect(body.enrolled).toBe(false)
+    expect(body.boundaries).toEqual([])
+  })
+
+  it('returns 400 when did is missing', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => [],
+    })
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeResolveRoute(router, {})
+
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('caches boundaries across calls', async () => {
+    const router = express.Router()
+    let callCount = 0
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => {
+        callCount++
+        return ['west-city.jp']
+      },
+    })
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
+      async () => true
+
+    registerEnrollmentHandlers(router, ctx)
+
+    await invokeResolveRoute(router, { did: 'did:plc:bulmabrief' })
+    await invokeResolveRoute(router, { did: 'did:plc:bulmabrief' })
+
+    expect(callCount).toBe(1)
   })
 })

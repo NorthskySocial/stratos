@@ -160,6 +160,7 @@ export class StratosServer {
       idResolver: ctx.idResolver,
       baseUrl: cfg.service.publicUrl,
       serviceEndpoint: cfg.service.publicUrl,
+      serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
       allowListProvider: ctx.allowListProvider,
       logger: ctx.logger,
