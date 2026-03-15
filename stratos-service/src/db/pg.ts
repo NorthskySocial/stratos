@@ -20,7 +20,7 @@ export type ServicePgDb = PostgresJsDatabase<typeof pgSchema> & {
 }
 
 export function createServicePgDb(connectionString: string): ServicePgDb {
-  const client = postgres(connectionString, { max: 10 })
+  const client = postgres(connectionString, { max: 5, idle_timeout: 20 })
   return drizzle({ client, schema: pgSchema }) as unknown as ServicePgDb
 }
 
