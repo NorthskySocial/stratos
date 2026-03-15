@@ -1,16 +1,17 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
+import { decode as cborDecode } from '@atproto/lex-cbor'
 
 import type { AppContext } from '../context.js'
 
 /**
  * Sequence event from stratos_seq table
  */
-interface SeqEvent {
+export interface SeqEvent {
   seq: number
   did: string
   time: string
   rev: string
-  event: string // JSON-encoded event
+  event: Uint8Array
 }
 
 /**
@@ -180,17 +181,17 @@ async function getEventsSince(
       return rows.map((row): SeqEvent => {
         let rev = ''
         try {
-          const parsed = JSON.parse(row.event.toString('utf-8'))
-          rev = parsed.rev ?? ''
+          const decoded = cborDecode(row.event) as Record<string, unknown>
+          rev = (decoded.rev as string) ?? ''
         } catch {
-          // Ignore parse errors
+          // Ignore decode errors
         }
         return {
           seq: row.seq,
           did: row.did,
           time: row.sequencedAt,
           rev,
-          event: row.event.toString('utf-8'),
+          event: row.event,
         }
       })
     })
@@ -199,12 +200,14 @@ async function getEventsSince(
   }
 }
 
-function formatEvent(event: SeqEvent): CommitMessage {
+export function formatEvent(event: SeqEvent): CommitMessage {
   let ops: RecordOp[]
 
   try {
-    const parsed = JSON.parse(event.event)
-    ops = Array.isArray(parsed.ops) ? parsed.ops : [parsed]
+    const decoded = cborDecode(event.event) as Record<string, unknown>
+    ops = Array.isArray(decoded.ops)
+      ? (decoded.ops as RecordOp[])
+      : [decoded as unknown as RecordOp]
   } catch {
     ops = []
   }
@@ -219,16 +222,17 @@ function formatEvent(event: SeqEvent): CommitMessage {
   }
 }
 
-function matchesDomain(event: SeqEvent, domain: string): boolean {
+export function matchesDomain(event: SeqEvent, domain: string): boolean {
   try {
-    const parsed = JSON.parse(event.event)
-    const ops = Array.isArray(parsed.ops) ? parsed.ops : [parsed]
+    const decoded = cborDecode(event.event) as Record<string, unknown>
+    const ops = Array.isArray(decoded.ops) ? decoded.ops : [decoded]
 
-    for (const op of ops) {
-      if (op.record?.boundary?.values) {
-        const domains = op.record.boundary.values.map(
-          (d: { value: string }) => d.value,
-        )
+    for (const op of ops as Record<string, unknown>[]) {
+      const record = op.record as Record<string, unknown> | undefined
+      const boundary = record?.boundary as Record<string, unknown> | undefined
+      const values = boundary?.values as Array<{ value: string }> | undefined
+      if (values) {
+        const domains = values.map((d) => d.value)
         if (domains.includes(domain)) {
           return true
         }
@@ -237,7 +241,7 @@ function matchesDomain(event: SeqEvent, domain: string): boolean {
 
     return false
   } catch {
-    return true // Include it if we can't parse
+    return true // Include it if we can't decode
   }
 }
 
