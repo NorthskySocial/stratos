@@ -23,7 +23,7 @@ import { registerEnrollmentHandlers } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-} from './features/index.js'
+} from './features/mst/index.js'
 
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
@@ -163,7 +163,6 @@ export class StratosServer {
       serviceEndpoint: cfg.service.publicUrl,
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
-      allowListProvider: ctx.allowListProvider,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
@@ -227,7 +226,10 @@ export class StratosServer {
     return new Promise((resolve) => {
       this.server = this.app.listen(port, () => {
         const upgradeListeners = this.server?.listenerCount('upgrade') ?? 0
-        this.ctx.logger?.info({ port, upgradeListeners }, 'stratos server started')
+        this.ctx.logger?.info(
+          { port, upgradeListeners },
+          'stratos server started',
+        )
         resolve()
       })
     })
