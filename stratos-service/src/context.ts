@@ -1110,7 +1110,10 @@ export async function createAppContext(
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
-    destroy: destroyBackend,
+    destroy: async () => {
+      await actorStore.close?.()
+      await destroyBackend()
+    },
   }
 }
 
