@@ -226,7 +226,10 @@ export class StratosServer {
     return new Promise((resolve) => {
       this.server = this.app.listen(port, () => {
         const upgradeListeners = this.server?.listenerCount('upgrade') ?? 0
-        this.ctx.logger?.info({ port, upgradeListeners }, 'stratos server started')
+        this.ctx.logger?.info(
+          { port, upgradeListeners },
+          'stratos server started',
+        )
         resolve()
       })
     })

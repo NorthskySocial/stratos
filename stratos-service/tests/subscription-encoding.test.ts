@@ -13,9 +13,7 @@ import {
   type SeqEvent,
 } from '../src/subscription/subscribe-records.js'
 
-function createCborEvent(
-  event: Record<string, unknown>,
-): Uint8Array {
+function createCborEvent(event: Record<string, unknown>): Uint8Array {
   return new Uint8Array(cborEncode(event))
 }
 
@@ -69,8 +67,18 @@ describe('Subscription CBOR encoding roundtrip', () => {
       const eventData = {
         rev: 'rev456',
         ops: [
-          { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'cid1', record: { text: 'First post' } },
-          { action: 'create', path: 'zone.stratos.feed.post/b', cid: 'cid2', record: { text: 'Second post' } },
+          {
+            action: 'create',
+            path: 'zone.stratos.feed.post/a',
+            cid: 'cid1',
+            record: { text: 'First post' },
+          },
+          {
+            action: 'create',
+            path: 'zone.stratos.feed.post/b',
+            cid: 'cid2',
+            record: { text: 'Second post' },
+          },
         ],
       }
 
@@ -83,9 +91,12 @@ describe('Subscription CBOR encoding roundtrip', () => {
     })
 
     it('returns empty ops for invalid CBOR data', () => {
-      const seqEvent = createSeqEvent({}, {
-        event: new Uint8Array([0xFF, 0xFE, 0xFD]),
-      })
+      const seqEvent = createSeqEvent(
+        {},
+        {
+          event: new Uint8Array([0xff, 0xfe, 0xfd]),
+        },
+      )
       const result = formatEvent(seqEvent)
 
       expect(result.ops).toEqual([])
@@ -168,9 +179,12 @@ describe('Subscription CBOR encoding roundtrip', () => {
     })
 
     it('returns true for undecable data (fail-open)', () => {
-      const seqEvent = createSeqEvent({}, {
-        event: new Uint8Array([0xFF, 0xFE, 0xFD]),
-      })
+      const seqEvent = createSeqEvent(
+        {},
+        {
+          event: new Uint8Array([0xff, 0xfe, 0xfd]),
+        },
+      )
       expect(matchesDomain(seqEvent, 'anything')).toBe(true)
     })
 

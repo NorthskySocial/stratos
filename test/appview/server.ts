@@ -21,12 +21,15 @@ import { decodeFirst } from 'npm:@atcute/cbor@1.0.0'
 const PORT = parseInt(Deno.env.get('APPVIEW_PORT') ?? '3200')
 const STRATOS_URL = Deno.env.get('STRATOS_URL') ?? 'http://localhost:3100'
 const PG_URL =
-  Deno.env.get('APPVIEW_PG_URL') ?? 'postgres://stratos:stratos@localhost:5432/appview'
+  Deno.env.get('APPVIEW_PG_URL') ??
+  'postgres://stratos:stratos@localhost:5432/appview'
 const SYNC_TOKEN = Deno.env.get('APPVIEW_SYNC_TOKEN') ?? 'test-sync-token'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 
-console.log(`[appview] config: port=${PORT} stratos=${STRATOS_URL} pg=${PG_URL}`)
+console.log(
+  `[appview] config: port=${PORT} stratos=${STRATOS_URL} pg=${PG_URL}`,
+)
 
 // ---------------------------------------------------------------------------
 // PostgreSQL
@@ -150,14 +153,21 @@ async function indexRecord(
       : new Date().toISOString()
 
   const replyRef = record.reply as
-    | { root?: { uri?: string; cid?: string }; parent?: { uri?: string; cid?: string } }
+    | {
+        root?: { uri?: string; cid?: string }
+        parent?: { uri?: string; cid?: string }
+      }
     | undefined
 
   const embed = record.embed ? JSON.stringify(record.embed) : null
   const facets = record.facets ? JSON.stringify(record.facets) : null
   const labels = record.labels ? JSON.stringify(record.labels) : null
-  const langs = Array.isArray(record.langs) ? (record.langs as string[]).join(',') : null
-  const tags = Array.isArray(record.tags) ? (record.tags as string[]).join(',') : null
+  const langs = Array.isArray(record.langs)
+    ? (record.langs as string[]).join(',')
+    : null
+  const tags = Array.isArray(record.tags)
+    ? (record.tags as string[]).join(',')
+    : null
 
   const boundaries = extractBoundaries(record)
 
@@ -217,7 +227,8 @@ async function upsertEnrollment(enrollment: {
 }
 
 async function getBoundaries(did: string): Promise<string[]> {
-  const rows = await sql`SELECT boundaries FROM stratos_enrollment WHERE did = ${did}`
+  const rows =
+    await sql`SELECT boundaries FROM stratos_enrollment WHERE did = ${did}`
   if (rows.length === 0 || !rows[0].boundaries) {
     // Lazy fetch from Stratos
     return fetchBoundariesFromStratos(did)
@@ -241,7 +252,9 @@ async function fetchBoundariesFromStratos(did: string): Promise<string[]> {
     }
     if (!body.enrolled) return []
     const boundaries = (body.boundaries ?? []).map((b) => b.value)
-    console.log(`[enrollment] fetched boundaries for ${did}: [${boundaries.join(',')}]`)
+    console.log(
+      `[enrollment] fetched boundaries for ${did}: [${boundaries.join(',')}]`,
+    )
     await upsertEnrollment({
       did: body.did,
       serviceUrl: STRATOS_URL,
@@ -323,7 +336,9 @@ function connectServiceSubscription(attempt = 0) {
           boundaries: string[]
           time: string
         }
-        console.log(`[sync] enrollment event: ${enrollment.action} ${enrollment.did}`)
+        console.log(
+          `[sync] enrollment event: ${enrollment.action} ${enrollment.did}`,
+        )
 
         if (enrollment.action === 'enroll') {
           await upsertEnrollment({
@@ -363,7 +378,11 @@ async function subscribeActor(did: string, attempt = 0) {
   const cursor = await getSyncCursor(did)
   // Always send cursor (0 for initial sync) to get all historical events
   const cursorValue = cursor ?? 0
-  const params: Record<string, string> = { did, syncToken: SYNC_TOKEN, cursor: String(cursorValue) }
+  const params: Record<string, string> = {
+    did,
+    syncToken: SYNC_TOKEN,
+    cursor: String(cursorValue),
+  }
 
   const wsUrl = buildWsUrl(params)
   console.log(`[sync] subscribing to actor ${did} cursor=${cursorValue}`)
@@ -429,13 +448,10 @@ async function subscribeActor(did: string, attempt = 0) {
     actorSubscriptions.delete(did)
     if (!running) return
     const delay = Math.min(1000 * Math.pow(2, attempt), 60_000)
-    const timer = setTimeout(
-      () => {
-        actorReconnectTimers.delete(did)
-        void subscribeActor(did, attempt + 1)
-      },
-      delay,
-    ) as unknown as number
+    const timer = setTimeout(() => {
+      actorReconnectTimers.delete(did)
+      void subscribeActor(did, attempt + 1)
+    }, delay) as unknown as number
     actorReconnectTimers.set(did, timer)
   }
 
@@ -485,13 +501,18 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function errorResponse(message: string, status: number, error?: string): Response {
+function errorResponse(
+  message: string,
+  status: number,
+  error?: string,
+): Response {
   return jsonResponse({ error: error ?? 'InvalidRequest', message }, status)
 }
 
 async function handleGetTimeline(req: Request): Promise<Response> {
   const viewer = extractDid(req)
-  if (!viewer) return errorResponse('Authentication required', 401, 'AuthRequired')
+  if (!viewer)
+    return errorResponse('Authentication required', 401, 'AuthRequired')
 
   const url = new URL(req.url)
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50'), 100)
@@ -516,9 +537,11 @@ async function handleGetTimeline(req: Request): Promise<Response> {
       ORDER BY p.uri, p."sortAt" DESC
     `
     // Re-sort after DISTINCT ON
-    rows = rows.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-      (b.sortAt as string).localeCompare(a.sortAt as string),
-    ).slice(0, limit + 1)
+    rows = rows
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+        (b.sortAt as string).localeCompare(a.sortAt as string),
+      )
+      .slice(0, limit + 1)
   } else {
     rows = await sql`
       SELECT DISTINCT ON (p.uri) p.*
@@ -527,14 +550,18 @@ async function handleGetTimeline(req: Request): Promise<Response> {
       WHERE pb.boundary = ANY(${viewerBoundaries})
       ORDER BY p.uri, p."sortAt" DESC
     `
-    rows = rows.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-      (b.sortAt as string).localeCompare(a.sortAt as string),
-    ).slice(0, limit + 1)
+    rows = rows
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+        (b.sortAt as string).localeCompare(a.sortAt as string),
+      )
+      .slice(0, limit + 1)
   }
 
   const hasMore = rows.length > limit
   const posts = hasMore ? rows.slice(0, limit) : rows
-  const nextCursor = hasMore ? (posts[posts.length - 1]?.sortAt as string) : undefined
+  const nextCursor = hasMore
+    ? (posts[posts.length - 1]?.sortAt as string)
+    : undefined
 
   const feed = posts.map(formatFeedViewPost)
   return jsonResponse({ feed, cursor: nextCursor })
@@ -542,7 +569,8 @@ async function handleGetTimeline(req: Request): Promise<Response> {
 
 async function handleGetAuthorFeed(req: Request): Promise<Response> {
   const viewer = extractDid(req)
-  if (!viewer) return errorResponse('Authentication required', 401, 'AuthRequired')
+  if (!viewer)
+    return errorResponse('Authentication required', 401, 'AuthRequired')
 
   const url = new URL(req.url)
   const actor = url.searchParams.get('actor')
@@ -581,13 +609,17 @@ async function handleGetAuthorFeed(req: Request): Promise<Response> {
     `
   }
 
-  rows = rows.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-    (b.sortAt as string).localeCompare(a.sortAt as string),
-  ).slice(0, limit + 1)
+  rows = rows
+    .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+      (b.sortAt as string).localeCompare(a.sortAt as string),
+    )
+    .slice(0, limit + 1)
 
   const hasMore = rows.length > limit
   const posts = hasMore ? rows.slice(0, limit) : rows
-  const nextCursor = hasMore ? (posts[posts.length - 1]?.sortAt as string) : undefined
+  const nextCursor = hasMore
+    ? (posts[posts.length - 1]?.sortAt as string)
+    : undefined
 
   const feed = posts.map(formatFeedViewPost)
   return jsonResponse({ feed, cursor: nextCursor })
@@ -595,14 +627,16 @@ async function handleGetAuthorFeed(req: Request): Promise<Response> {
 
 async function handleGetPost(req: Request): Promise<Response> {
   const viewer = extractDid(req)
-  if (!viewer) return errorResponse('Authentication required', 401, 'AuthRequired')
+  if (!viewer)
+    return errorResponse('Authentication required', 401, 'AuthRequired')
 
   const url = new URL(req.url)
   const uri = url.searchParams.get('uri')
   if (!uri) return errorResponse('uri parameter required', 400)
 
   const rows = await sql`SELECT * FROM stratos_post WHERE uri = ${uri}`
-  if (rows.length === 0) return errorResponse('Post not found', 400, 'PostNotFound')
+  if (rows.length === 0)
+    return errorResponse('Post not found', 400, 'PostNotFound')
 
   const post = rows[0]
   const boundaryRows = await sql`
@@ -662,7 +696,8 @@ async function handleHealth(): Promise<Response> {
 
 async function handleDiagnostics(): Promise<Response> {
   const [posts] = await sql`SELECT COUNT(*) as count FROM stratos_post`
-  const [boundaries] = await sql`SELECT COUNT(*) as count FROM stratos_post_boundary`
+  const [boundaries] =
+    await sql`SELECT COUNT(*) as count FROM stratos_post_boundary`
   const enrollments = await sql`SELECT did, boundaries FROM stratos_enrollment`
   const cursors = await sql`SELECT did, seq FROM stratos_sync_cursor`
 
@@ -685,7 +720,11 @@ async function handleAdminEnroll(req: Request): Promise<Response> {
   if (!body.did) return errorResponse('did is required', 400)
 
   const boundaries = await fetchBoundariesFromStratos(body.did)
-  return jsonResponse({ did: body.did, boundaries, subscribed: actorSubscriptions.has(body.did) })
+  return jsonResponse({
+    did: body.did,
+    boundaries,
+    subscribed: actorSubscriptions.has(body.did),
+  })
 }
 
 function routeRequest(req: Request): Promise<Response> | Response {

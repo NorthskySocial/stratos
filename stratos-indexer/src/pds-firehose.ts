@@ -164,9 +164,7 @@ export class PdsFirehose {
     })()
   }
 
-  private classifyMessage(
-    message: SubscribeReposMessage,
-  ): FirehoseWork | null {
+  private classifyMessage(message: SubscribeReposMessage): FirehoseWork | null {
     switch (message.$type) {
       case 'com.atproto.sync.subscribeRepos#commit':
         return { type: 'commit', message }
@@ -249,7 +247,9 @@ async function processCommit(
       uri,
       parseCid(op.cid),
       jsonToLex(op.record),
-      op.action === 'create' ? ('create' as WriteOpAction) : ('update' as WriteOpAction),
+      op.action === 'create'
+        ? ('create' as WriteOpAction)
+        : ('update' as WriteOpAction),
       message.time,
     )
 

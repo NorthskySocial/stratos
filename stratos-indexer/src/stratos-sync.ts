@@ -87,10 +87,10 @@ export class StratosServiceSubscription {
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
       const cause =
-        e.error instanceof Error ? e.error.message : String(e.error ?? 'unknown')
-      this.onError?.(
-        new Error(`service subscription ws error: ${cause}`),
-      )
+        e.error instanceof Error
+          ? e.error.message
+          : String(e.error ?? 'unknown')
+      this.onError?.(new Error(`service subscription ws error: ${cause}`))
     }
 
     this.ws.onclose = (e: { code: number; reason: string }) => {
@@ -246,7 +246,7 @@ export class StratosActorSync {
       const cause =
         e instanceof Error
           ? e.message
-          : (e as { error?: unknown }).error ?? 'unknown'
+          : ((e as { error?: unknown }).error ?? 'unknown')
       this.onError?.(new Error(`actor sync ws error for ${did}: ${cause}`))
     })
   }
@@ -303,7 +303,11 @@ export class StratosActorSync {
     did: string,
     commit: StratosCommitMessage,
   ): Promise<void> {
-    const upserts: Array<{ uri: string; cid: string; record: Record<string, unknown> }> = []
+    const upserts: Array<{
+      uri: string
+      cid: string
+      record: Record<string, unknown>
+    }> = []
     const deletes: string[] = []
 
     for (const op of commit.ops) {
@@ -396,7 +400,12 @@ interface RecordUpsert {
   record: Record<string, unknown>
 }
 
-function preparePostRow(uri: string, cid: string, record: Record<string, unknown>, timestamp: string) {
+function preparePostRow(
+  uri: string,
+  cid: string,
+  record: Record<string, unknown>,
+  timestamp: string,
+) {
   const parts = uri.replace('at://', '').split('/')
   const creator = parts[0]
   const rkey = parts[2]
@@ -427,9 +436,13 @@ function preparePostRow(uri: string, cid: string, record: Record<string, unknown
       replyParentCid: replyRef?.parent?.cid ?? null,
       embed: record.embed ? JSON.stringify(record.embed) : null,
       facets: record.facets ? JSON.stringify(record.facets) : null,
-      langs: Array.isArray(record.langs) ? (record.langs as string[]).join(',') : null,
+      langs: Array.isArray(record.langs)
+        ? (record.langs as string[]).join(',')
+        : null,
       labels: record.labels ? JSON.stringify(record.labels) : null,
-      tags: Array.isArray(record.tags) ? (record.tags as string[]).join(',') : null,
+      tags: Array.isArray(record.tags)
+        ? (record.tags as string[]).join(',')
+        : null,
       createdAt,
       indexedAt: timestamp,
     },
