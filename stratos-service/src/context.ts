@@ -611,6 +611,26 @@ function createAuthVerifiers(
         return { credentials: { type: 'none' } }
       }
 
+      // Try service auth (Bearer JWT from AppView/indexer)
+      if (authHeader.startsWith('Bearer ')) {
+        try {
+          const serviceCtx = await verifyServiceAuth(
+            authHeader,
+            serviceDid,
+            undefined,
+            idResolver,
+          )
+          return {
+            credentials: {
+              type: 'service',
+              did: serviceCtx.iss,
+            },
+          }
+        } catch {
+          return { credentials: { type: 'none' } }
+        }
+      }
+
       if (!authHeader.startsWith('DPoP ') || !dpopVerifier) {
         return { credentials: { type: 'none' } }
       }
@@ -1111,7 +1131,10 @@ export async function createAppContext(
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
-    destroy: destroyBackend,
+    destroy: async () => {
+      await actorStore.close?.()
+      await destroyBackend()
+    },
   }
 }
 
