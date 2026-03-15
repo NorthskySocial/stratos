@@ -1033,11 +1033,7 @@ export class PostgresActorStore implements ActorStore {
       const txDb = tx as unknown as StratosPgDb
       const store: ActorReader = {
         did,
-        record: new PgActorRecordReader(
-          txDb,
-          this.cborToRecord,
-          this.logger,
-        ),
+        record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
         repo: new PgActorRepoReader(txDb, this.logger),
         blob: new PgActorBlobReader(txDb, blobStore, this.logger),
         sequence: new PgSequenceOps(txDb),

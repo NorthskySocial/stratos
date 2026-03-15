@@ -352,7 +352,11 @@ export function registerSubscribeRecords(ctx: AppContext): void {
     auth: ctx.authVerifier.subscribeAuth,
     handler: async function* ({ params, auth, signal }) {
       ctx.logger?.info(
-        { did: (params as Record<string, unknown>).did, authType: (auth as { credentials: { type: string } }).credentials.type },
+        {
+          did: (params as Record<string, unknown>).did,
+          authType: (auth as { credentials: { type: string } }).credentials
+            .type,
+        },
         'subscribeRecords connected',
       )
       const typedParams = params as unknown as SubscribeRecordsParams
