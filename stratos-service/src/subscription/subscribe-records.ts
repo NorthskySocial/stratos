@@ -351,6 +351,14 @@ export function registerSubscribeRecords(ctx: AppContext): void {
   ctx.xrpcServer.streamMethod('zone.stratos.sync.subscribeRecords', {
     auth: ctx.authVerifier.subscribeAuth,
     handler: async function* ({ params, auth, signal }) {
+      ctx.logger?.info(
+        {
+          did: (params as Record<string, unknown>).did,
+          authType: (auth as { credentials: { type: string } }).credentials
+            .type,
+        },
+        'subscribeRecords connected',
+      )
       const typedParams = params as unknown as SubscribeRecordsParams
       const typedAuth = auth as {
         credentials: {
