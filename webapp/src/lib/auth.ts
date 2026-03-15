@@ -19,7 +19,8 @@ function buildClientMetadata(): OAuthClientMetadataInput {
     client_name: 'Stratos',
     client_uri: origin,
     redirect_uris: [`${origin}/`],
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     token_endpoint_auth_method: 'none',
@@ -51,7 +52,8 @@ export async function init(): Promise<OAuthSession | null> {
 export async function signIn(handle: string): Promise<void> {
   const oauthClient = getClient()
   await oauthClient.signIn(handle, {
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
     signal: new AbortController().signal,
   })
 }
