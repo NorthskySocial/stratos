@@ -229,6 +229,14 @@ export class Indexer {
       const didsList = Array.from(didsToBackfill)
       this.stratosActorSync.markKnown(didsToBackfill)
 
+      // Start actor sync subscriptions for all enrolled actors so new
+      // stratos records are indexed in real-time, independent of
+      // the PDS firehose backlog position.
+      for (const did of didsList) {
+        this.enrolledDids.add(did)
+        this.stratosActorSync.addActor(did)
+      }
+
       console.log(
         {
           fromDb: enrolledFromDb.length,
