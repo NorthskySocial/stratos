@@ -413,7 +413,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         const agent = new Agent(oauthSession)
         await agent.com.atproto.repo.deleteRecord({
           repo: did,
-          collection: 'app.northsky.stratos.actor.enrollment',
+          collection: 'zone.stratos.actor.enrollment',
           rkey: 'self',
         })
       } catch (err) {
