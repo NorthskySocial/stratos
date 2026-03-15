@@ -144,6 +144,16 @@ export class StratosServiceSubscription {
 
 // --- Per-actor record streams ---
 
+export interface StratosActorSyncOptions {
+  maxConcurrentActorSyncs: number
+  maxActorQueueSize: number
+}
+
+interface ActorQueue {
+  pending: Uint8Array[]
+  active: boolean
+}
+
 export class StratosActorSync {
   private subscriptions = new Map<string, WebSocket>()
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -151,13 +161,27 @@ export class StratosActorSync {
   private running = false
   private knownDids = new Set<string>()
 
+  // Per-actor bounded queues prevent unbounded concurrent DB operations during spikes
+  private actorQueues = new Map<string, ActorQueue>()
+  private activeSyncs = 0
+  private syncWaiters: Array<() => void> = []
+  private readonly maxConcurrentActorSyncs: number
+  private readonly maxActorQueueSize: number
+
   constructor(
     private db: Kysely<DatabaseSchemaType>,
     private config: StratosSyncConfig,
     private cursorManager: CursorManager,
     private onError?: (err: Error) => void,
     private onReferencedActor?: (did: string) => void,
-  ) {}
+    options: StratosActorSyncOptions = {
+      maxConcurrentActorSyncs: 8,
+      maxActorQueueSize: 50,
+    },
+  ) {
+    this.maxConcurrentActorSyncs = options.maxConcurrentActorSyncs
+    this.maxActorQueueSize = options.maxActorQueueSize
+  }
 
   start(): void {
     this.running = true
@@ -176,6 +200,10 @@ export class StratosActorSync {
       ws.close()
     }
     this.subscriptions.clear()
+
+    this.actorQueues.clear()
+    for (const waiter of this.syncWaiters) waiter()
+    this.syncWaiters = []
   }
 
   addActor(did: string, cursor?: number): void {
@@ -199,6 +227,7 @@ export class StratosActorSync {
     }
     this.reconnectAttempts.delete(did)
     this.cursorManager.removeStratosCursor(did)
+    this.actorQueues.delete(did)
   }
 
   getActiveActors(): string[] {
@@ -227,7 +256,7 @@ export class StratosActorSync {
     })
 
     ws.onmessage = (e: MessageEvent) => {
-      void this.handleMessage(did, new Uint8Array(e.data as ArrayBuffer))
+      this.enqueueActorMessage(did, new Uint8Array(e.data as ArrayBuffer))
     }
 
     ws.addEventListener('close', (e: { code: number; reason: string }) => {
@@ -271,6 +300,55 @@ export class StratosActorSync {
       this.subscribe(did)
     }, delay)
     this.reconnectTimers.set(did, timer)
+  }
+
+  private enqueueActorMessage(did: string, data: Uint8Array): void {
+    let q = this.actorQueues.get(did)
+    if (!q) {
+      q = { pending: [], active: false }
+      this.actorQueues.set(did, q)
+    }
+    if (q.pending.length >= this.maxActorQueueSize) {
+      // Drop oldest to prioritize new events during spikes
+      q.pending.shift()
+      console.warn({ did, limit: this.maxActorQueueSize }, 'actor sync queue full, dropping oldest message')
+    }
+    q.pending.push(data)
+    if (!q.active) {
+      void this.drainActorQueue(did)
+    }
+  }
+
+  private async drainActorQueue(did: string): Promise<void> {
+    const q = this.actorQueues.get(did)
+    if (!q || q.active) return
+
+    // Wait for a global processing slot to limit concurrent DB operations
+    if (this.activeSyncs >= this.maxConcurrentActorSyncs) {
+      await new Promise<void>((resolve) => this.syncWaiters.push(resolve))
+    }
+
+    q.active = true
+    this.activeSyncs++
+
+    try {
+      while (true) {
+        // Re-fetch queue in case removeActor was called
+        const current = this.actorQueues.get(did)
+        if (!current || current.pending.length === 0) break
+        const data = current.pending.shift()!
+        await this.handleMessage(did, data)
+      }
+    } finally {
+      q.active = false
+      this.activeSyncs--
+      this.syncWaiters.shift()?.()
+      // Restart drain if messages arrived while we were processing
+      const remaining = this.actorQueues.get(did)
+      if (remaining && remaining.pending.length > 0) {
+        void this.drainActorQueue(did)
+      }
+    }
   }
 
   private async handleMessage(did: string, data: Uint8Array): Promise<void> {

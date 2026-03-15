@@ -31,6 +31,8 @@ export class Indexer {
   private healthServer: Deno.HttpServer | null = null
   private enrolledDids = new Set<string>()
   private backfilledDids = new Set<string>()
+  private activeBackfills = 0
+  private readonly maxConcurrentBackfills = 2
 
   constructor(private config: IndexerConfig) {}
 
@@ -184,6 +186,10 @@ export class Indexer {
       this.config.pds.enrolledOnly
         ? (did) => this.backfillReferencedActor(did, backfillOpts)
         : undefined,
+      {
+        maxConcurrentActorSyncs: this.config.worker.actorSyncConcurrency,
+        maxActorQueueSize: this.config.worker.actorSyncQueuePerActor,
+      },
     )
     this.stratosActorSync.start()
 
@@ -283,6 +289,8 @@ export class Indexer {
         enrolledActors: this.enrolledDids.size,
         workerConcurrency: this.config.worker.concurrency,
         maxQueueSize: this.config.worker.maxQueueSize,
+        actorSyncConcurrency: this.config.worker.actorSyncConcurrency,
+        actorSyncQueuePerActor: this.config.worker.actorSyncQueuePerActor,
       },
       'stratos indexer started',
     )
@@ -295,13 +303,25 @@ export class Indexer {
     if (this.backfilledDids.has(did)) return
     this.backfilledDids.add(did)
     console.log({ did }, 'backfilling referenced actor')
-    void backfillSingleActor(opts, did).catch((err) => {
+    void this.runBackfill(did, opts)
+  }
+
+  private async runBackfill(
+    did: string,
+    opts: Parameters<typeof backfillSingleActor>[0],
+  ): Promise<void> {
+    while (this.activeBackfills >= this.maxConcurrentBackfills) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500))
+    }
+    this.activeBackfills++
+    try {
+      await backfillSingleActor(opts, did)
+    } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error(
-        { did, err: message },
-        'failed to backfill referenced actor',
-      )
-    })
+      console.error({ did, err: message }, 'failed to backfill referenced actor')
+    } finally {
+      this.activeBackfills--
+    }
   }
 
   async stop(): Promise<void> {
