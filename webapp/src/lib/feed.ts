@@ -7,6 +7,7 @@ interface FeedViewPost {
     cid: string
     record?: Record<string, unknown>
     indexedAt?: string
+    author?: { did: string; handle: string }
   }
   reason?: unknown
 }
@@ -23,6 +24,23 @@ export interface FeedPost {
   createdAt: string
   isPrivate: boolean
   hasReply: boolean
+  author: string
+  authorHandle: string
+  boundaries: string[]
+}
+
+function authorFromUri(uri: string): string {
+  return uri.replace('at://', '').split('/')[0]
+}
+
+function boundariesFromRecord(record: Record<string, unknown>): string[] {
+  const boundary = record.boundary as
+    | { values?: Array<{ value?: string }> }
+    | undefined
+  if (!boundary?.values || !Array.isArray(boundary.values)) return []
+  return boundary.values
+    .map((v) => v.value)
+    .filter((v): v is string => typeof v === 'string')
 }
 
 function mapFeedViewPosts(
@@ -30,11 +48,12 @@ function mapFeedViewPosts(
   isPrivate: boolean,
 ): FeedPost[] {
   return feed.flatMap((item) => {
-    if (!item.post || item.reason) {
-      return []
-    }
+    if (!item.post || item.reason) return []
 
     const val = item.post.record ?? {}
+    const did = item.post.author?.did ?? authorFromUri(item.post.uri)
+    const handle = item.post.author?.handle ?? ''
+
     return [
       {
         uri: item.post.uri,
@@ -43,6 +62,9 @@ function mapFeedViewPosts(
         createdAt: (val.createdAt as string) ?? item.post.indexedAt ?? '',
         isPrivate,
         hasReply: !!val.reply,
+        author: did,
+        authorHandle: handle !== did ? handle : '',
+        boundaries: boundariesFromRecord(val),
       },
     ]
   })
@@ -67,6 +89,9 @@ export async function fetchRepoPublicPosts(
         createdAt: (val.createdAt as string) ?? '',
         isPrivate: false,
         hasReply: !!val.reply,
+        author: did,
+        authorHandle: '',
+        boundaries: [],
       }
     })
   } catch {
@@ -109,6 +134,9 @@ export async function fetchStratosPosts(
         createdAt: (val.createdAt as string) ?? '',
         isPrivate: true,
         hasReply: !!val.reply,
+        author: authorFromUri(r.uri),
+        authorHandle: '',
+        boundaries: boundariesFromRecord(val),
       }
     })
   } catch {
@@ -147,6 +175,50 @@ export function buildUnifiedFeed(
   stratosPosts: FeedPost[],
 ): FeedPost[] {
   return [...publicPosts, ...stratosPosts].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
+}
+
+export function collectDomains(posts: FeedPost[]): string[] {
+  const domains = new Set<string>()
+  for (const post of posts) {
+    for (const b of post.boundaries) {
+      domains.add(b)
+    }
+  }
+  return Array.from(domains).sort()
+}
+
+export function filterByDomain(
+  posts: FeedPost[],
+  domain: string | null,
+): FeedPost[] {
+  if (!domain) return posts
+  return posts.filter(
+    (p) => !p.isPrivate || p.boundaries.includes(domain),
+  )
+}
+
+export function feedStats(posts: FeedPost[]): {
+  postCount: number
+  userCount: number
+} {
+  const authors = new Set<string>()
+  for (const p of posts) authors.add(p.author)
+  return { postCount: posts.length, userCount: authors.size }
+}
+
+export function resolveHandles(
+  posts: FeedPost[],
+  currentDid: string,
+  currentHandle: string,
+): FeedPost[] {
+  return posts.map((p) => {
+    if (p.authorHandle) return p
+    if (p.author === currentDid && currentHandle) {
+      return { ...p, authorHandle: currentHandle }
+    }
+    return p
+  })
 }
