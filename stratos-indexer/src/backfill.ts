@@ -108,9 +108,7 @@ async function backfillViaListRecords(
 
         if (uri.collection === ENROLLMENT_COLLECTION) {
           const serviceUrl =
-            typeof record.value.service === 'string'
-              ? record.value.service
-              : ''
+            typeof record.value.service === 'string' ? record.value.service : ''
           const boundaries = extractBoundaries(record.value)
           if (serviceUrl) {
             opts.enrollmentCallback.onEnrollmentDiscovered(

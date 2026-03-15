@@ -318,7 +318,10 @@ export class Indexer {
       await backfillSingleActor(opts, did)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error({ did, err: message }, 'failed to backfill referenced actor')
+      console.error(
+        { did, err: message },
+        'failed to backfill referenced actor',
+      )
     } finally {
       this.activeBackfills--
     }

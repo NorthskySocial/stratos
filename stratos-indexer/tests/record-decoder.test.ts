@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { extractBoundaries, parseCid, jsonToLex } from '../src/record-decoder.ts'
+import {
+  extractBoundaries,
+  parseCid,
+  jsonToLex,
+} from '../src/record-decoder.ts'
 import { CID } from 'multiformats/cid'
 
 describe('extractBoundaries', () => {

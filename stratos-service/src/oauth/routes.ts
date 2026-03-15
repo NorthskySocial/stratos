@@ -4,6 +4,7 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
 import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
+import type { AllowListProvider } from '../features/enrollment/allow-list.js'
 import { OAUTH_SCOPE } from './client.js'
 
 /**
@@ -54,6 +55,7 @@ export interface OAuthRoutesConfig {
   serviceEndpoint: string
   serviceDid: string
   defaultBoundaries?: string[]
+  allowListProvider?: AllowListProvider
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
@@ -162,6 +164,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     serviceEndpoint,
     serviceDid,
     defaultBoundaries = [],
+    allowListProvider,
     logger,
     devMode = false,
     dpopVerifier,
@@ -314,6 +317,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         enrollmentConfig,
         did,
         idResolver,
+        allowListProvider,
       )
 
       if (!enrollmentResult.allowed) {

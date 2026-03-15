@@ -32,16 +32,20 @@ describe('backfillActors', () => {
     const asuka = 'did:plc:asuka-langley'
     const rei = 'did:plc:rei-ayanami'
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async (input: string | URL | Request) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: string | URL | Request) => {
         const url =
-          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
         if (url.includes('listRecords')) {
           return new Response(JSON.stringify({ records: [] }), { status: 200 })
         }
         return new Response('not found', { status: 404 })
-      },
-    )
+      })
 
     const opts = makeOpts()
     const count = await backfillActors(opts, [shinji, asuka, rei])
@@ -64,9 +68,12 @@ describe('backfillActors', () => {
   })
 
   it('does not call listRepos', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async () => new Response(JSON.stringify({ records: [] }), { status: 200 }),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ records: [] }), { status: 200 }),
+      )
 
     const opts = makeOpts()
     await backfillActors(opts, ['did:plc:misato-katsuragi'])
@@ -97,7 +104,8 @@ describe('backfillActors', () => {
   })
 
   it('discovers enrollments during actor backfill', async () => {
-    const validCid = 'bafyreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe'
+    const validCid =
+      'bafyreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe'
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       return new Response(
@@ -137,9 +145,11 @@ describe('backfillSingleActor', () => {
   })
 
   it('backfills a single actor', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ records: [] }), { status: 200 }),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ records: [] }), { status: 200 }),
+      )
 
     const opts = makeOpts()
     await backfillSingleActor(opts, 'did:plc:toji-suzuhara')
@@ -156,10 +166,15 @@ describe('backfillRepos', () => {
   })
 
   it('iterates all repos via listRepos', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async (input: string | URL | Request) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: string | URL | Request) => {
         const url =
-          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
         if (url.includes('listRepos')) {
           return new Response(
             JSON.stringify({
@@ -172,8 +187,7 @@ describe('backfillRepos', () => {
           )
         }
         return new Response(JSON.stringify({ records: [] }), { status: 200 })
-      },
-    )
+      })
 
     const opts = makeOpts()
     const count = await backfillRepos(opts)
