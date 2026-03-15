@@ -4,10 +4,11 @@
     "npm:@atcute/atproto@^3.1.10": "3.1.10",
     "npm:@atcute/car@^5.1.1": "5.1.1",
     "npm:@atcute/cbor@^2.3.2": "2.3.2",
+    "npm:@atcute/cid@^2.4.1": "2.4.1",
     "npm:@atcute/firehose@0.1": "0.1.0",
     "npm:@atproto/bsky@^0.0.214": "0.0.214_@bufbuild+protobuf@1.10.1_@connectrpc+connect@1.7.0__@bufbuild+protobuf@1.10.1_@connectrpc+connect-node@1.7.0__@bufbuild+protobuf@1.10.1__@connectrpc+connect@1.7.0___@bufbuild+protobuf@1.10.1",
     "npm:@atproto/identity@~0.4.8": "0.4.12",
-    "npm:@atproto/lexicon@~0.4.12": "0.4.14",
+    "npm:@atproto/lexicon@~0.6.1": "0.6.2",
     "npm:@atproto/repo@~0.8.1": "0.8.12",
     "npm:@atproto/syntax@0.4": "0.4.3",
     "npm:multiformats@9.9.0": "9.9.0",
@@ -113,7 +114,7 @@
       "integrity": "sha512-s35MIJerGT/pKe2xJtKKswqlIr/ola2r2iURBKBL0Mk1OKe6jP4YvTMh1N2d2PEANFzNNTbKoDaLfJPo2Uvc/w==",
       "dependencies": [
         "@atproto/common-web",
-        "@atproto/lexicon@0.6.2",
+        "@atproto/lexicon",
         "@atproto/syntax@0.4.3",
         "@atproto/xrpc",
         "await-lock",
@@ -132,7 +133,7 @@
         "@atproto/crypto@0.4.5",
         "@atproto/did",
         "@atproto/identity",
-        "@atproto/lexicon@0.6.2",
+        "@atproto/lexicon",
         "@atproto/repo",
         "@atproto/sync",
         "@atproto/syntax@0.4.3",
@@ -270,16 +271,6 @@
         "tslib"
       ]
     },
-    "@atproto/lexicon@0.4.14": {
-      "integrity": "sha512-jiKpmH1QER3Gvc7JVY5brwrfo+etFoe57tKPQX/SmPwjvUsFnJAow5xLIryuBaJgFAhnTZViXKs41t//pahGHQ==",
-      "dependencies": [
-        "@atproto/common-web",
-        "@atproto/syntax@0.4.3",
-        "iso-datestring-validator",
-        "multiformats",
-        "zod"
-      ]
-    },
     "@atproto/lexicon@0.6.2": {
       "integrity": "sha512-p3Ly6hinVZW0ETuAXZMeUGwuMm3g8HvQMQ41yyEE6AL0hAkfeKFaZKos6BdBrr6CjkpbrDZqE8M+5+QOceysMw==",
       "dependencies": [
@@ -296,7 +287,7 @@
         "@atproto/common@0.5.14",
         "@atproto/common-web",
         "@atproto/crypto@0.4.5",
-        "@atproto/lexicon@0.6.2",
+        "@atproto/lexicon",
         "@ipld/dag-cbor",
         "multiformats",
         "uint8arrays",
@@ -309,7 +300,7 @@
       "dependencies": [
         "@atproto/common@0.5.14",
         "@atproto/identity",
-        "@atproto/lexicon@0.6.2",
+        "@atproto/lexicon",
         "@atproto/repo",
         "@atproto/syntax@0.5.0",
         "@atproto/xrpc-server",
@@ -347,7 +338,7 @@
         "@atproto/lex-data",
         "@atproto/lex-json",
         "@atproto/lex-schema",
-        "@atproto/lexicon@0.6.2",
+        "@atproto/lexicon",
         "@atproto/ws-client",
         "@atproto/xrpc",
         "express",
@@ -360,7 +351,7 @@
     "@atproto/xrpc@0.7.7": {
       "integrity": "sha512-K1ZyO/BU8JNtXX5dmPp7b5UrkLMMqpsIa/Lrj5D3Su+j1Xwq1m6QJ2XJ1AgjEjkI1v4Muzm7klianLE6XGxtmA==",
       "dependencies": [
-        "@atproto/lexicon@0.6.2",
+        "@atproto/lexicon",
         "zod"
       ]
     },
@@ -2215,10 +2206,11 @@
         "npm:@atcute/atproto@^3.1.10",
         "npm:@atcute/car@^5.1.1",
         "npm:@atcute/cbor@^2.3.2",
+        "npm:@atcute/cid@^2.4.1",
         "npm:@atcute/firehose@0.1",
         "npm:@atproto/bsky@^0.0.214",
         "npm:@atproto/identity@~0.4.8",
-        "npm:@atproto/lexicon@~0.4.12",
+        "npm:@atproto/lexicon@~0.6.1",
         "npm:@atproto/repo@~0.8.1",
         "npm:@atproto/syntax@0.4",
         "npm:multiformats@9.9.0",
