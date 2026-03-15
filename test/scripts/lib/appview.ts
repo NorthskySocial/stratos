@@ -12,7 +12,11 @@ export async function enrollWithAppview(
     body: JSON.stringify({ did }),
   })
   if (!res.ok) throw new Error(`AppView enroll failed: ${res.status}`)
-  return (await res.json()) as { did: string; boundaries: string[]; subscribed: boolean }
+  return (await res.json()) as {
+    did: string
+    boundaries: string[]
+    subscribed: boolean
+  }
 }
 
 export interface FeedViewPost {
@@ -237,9 +241,7 @@ export async function getTimelineUnauthenticated(): Promise<{
   status: number
   error: string
 }> {
-  const res = await fetch(
-    `${APPVIEW_URL}/xrpc/zone.stratos.feed.getTimeline`,
-  )
+  const res = await fetch(`${APPVIEW_URL}/xrpc/zone.stratos.feed.getTimeline`)
   const body = await res.text()
   return { ok: res.ok, status: res.status, error: body }
 }
