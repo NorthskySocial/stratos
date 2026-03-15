@@ -5,7 +5,7 @@ A simple demo SPA for interacting with the Stratos private namespace service. Bu
 ## Features
 
 - **AT Protocol OAuth** — Sign in with any handle via `@atproto/oauth-client-browser`
-- **Unified feed** — Shows public (`app.bsky.feed.post`) and private (`zone.stratos.feed.post`) posts together, sorted by time
+- **Unified feed** — Reads public author posts and Stratos author posts via the deployed appview, then merges them client-side
 - **Enrollment status** — Indicates whether the signed-in user is enrolled in Stratos, with an enrollment trigger button
 - **Post creation** — Write public or private posts with a toggle; private posts are stored on Stratos with boundary restrictions
 
