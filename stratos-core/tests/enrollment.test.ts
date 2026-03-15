@@ -4,8 +4,8 @@ import {
   isDidAllowed,
   isPdsAllowed,
   validateEnrollmentEligibility,
-} from '../src/enrollment/domain.js'
-import type { EnrollmentConfig } from '../src/types.js'
+} from '../src'
+import type { EnrollmentConfig } from '../src'
 
 describe('Enrollment Domain Logic', () => {
   describe('extractPdsEndpoint', () => {

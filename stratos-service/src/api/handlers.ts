@@ -30,7 +30,7 @@ import {
   type BatchWriteOp,
 } from './records.js'
 import { registerHydrationHandlers } from '../features/index.js'
-import { StratosBlockStoreReader } from '../features/mst/index.js'
+import { StratosBlockStoreReader } from '../features/index.js'
 import { Did } from '@atproto/api'
 
 type HandlerAuth = {

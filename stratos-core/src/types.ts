@@ -1,5 +1,10 @@
 import { CID } from 'multiformats/cid'
 
+export enum ENROLLMENT_MODE {
+  OPEN = 'open',
+  ALLOWLIST = 'allowlist',
+}
+
 /**
  * Configuration for stratos domain validation
  */
@@ -15,11 +20,17 @@ export interface StratosConfig {
  */
 export interface EnrollmentConfig {
   /** Enrollment mode: 'open' allows anyone, 'allowlist' restricts to configured DIDs/PDS */
-  mode: 'open' | 'allowlist'
+  mode: ENROLLMENT_MODE
   /** Explicit list of DIDs allowed to enroll */
   allowedDids?: string[]
   /** List of PDS endpoints whose users are allowed to enroll */
   allowedPdsEndpoints?: string[]
+  /** Domains to automatically enroll users to */
+  autoEnrollDomains?: string[]
+  /** URL to fetch a list of allowed DIDs (optional) */
+  allowListUrl?: string
+  /** Friendly name for the collection in Valkey (optional) */
+  allowListBootstrapName?: string
 }
 
 /**

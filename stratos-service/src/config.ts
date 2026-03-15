@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 
 /**
  * Environment variable schema for stratos service
@@ -39,10 +40,21 @@ const envSchema = z.object({
       .map((d) => d.trim())
       .filter((d) => d.length > 0),
   ),
+  STRATOS_AUTO_ENROLL_DOMAINS: z
+    .string()
+    .default('')
+    .transform((s) =>
+      s
+        .split(',')
+        .map((d) => d.trim())
+        .filter((d) => d.length > 0),
+    ),
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 
   // Enrollment
-  STRATOS_ENROLLMENT_MODE: z.enum(['open', 'allowlist']).default('allowlist'),
+  STRATOS_ENROLLMENT_MODE: z
+    .enum(ENROLLMENT_MODE)
+    .default(ENROLLMENT_MODE.ALLOWLIST),
   STRATOS_ALLOWED_DIDS: z
     .string()
     .default('')
@@ -111,6 +123,10 @@ const envSchema = z.object({
 
   // Admin auth (optional)
   STRATOS_ADMIN_PASSWORD: z.string().optional(),
+  // External allow list (optional)
+  STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
+  STRATOS_VALKEY_URL: z.string().url().optional(),
+  STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),
 
   // Dev mode (allows Bearer DID auth without DPoP for test scripts)
   STRATOS_DEV_MODE: z.coerce.boolean().default(false),
@@ -192,9 +208,13 @@ export interface StratosServiceConfig {
     importMaxBytes: number
   }
   enrollment: {
-    mode: 'open' | 'allowlist'
+    mode: ENROLLMENT_MODE
     allowedDids: string[]
     allowedPdsEndpoints: string[]
+    autoEnrollDomains?: string[]
+    allowListUrl?: string
+    allowListBootstrapName?: string
+    valkeyUrl?: string
   }
   identity: {
     plcUrl: string
@@ -302,6 +322,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
       mode: env.STRATOS_ENROLLMENT_MODE,
       allowedDids: env.STRATOS_ALLOWED_DIDS,
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
+      autoEnrollDomains: env.STRATOS_AUTO_ENROLL_DOMAINS,
+      allowListUrl: env.STRATOS_ALLOW_LIST_URI,
+      allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
+      valkeyUrl: env.STRATOS_VALKEY_URL,
     },
     identity: {
       plcUrl: env.STRATOS_PLC_URL,

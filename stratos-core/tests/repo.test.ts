@@ -12,7 +12,7 @@ import {
   StratosSqlRepoTransactor,
   BlockMap,
   CidSet,
-} from '../src/repo/index.js'
+} from '../src'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -20,7 +20,7 @@ import {
   StratosDb,
   stratosRepoRoot,
   stratosRepoBlock,
-} from '../src/db/index.js'
+} from '../src'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {

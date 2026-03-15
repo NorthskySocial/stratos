@@ -23,7 +23,7 @@ import { registerEnrollmentHandlers } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-} from './features/mst/index.js'
+} from './features/index.js'
 
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
@@ -161,6 +161,7 @@ export class StratosServer {
       baseUrl: cfg.service.publicUrl,
       serviceEndpoint: cfg.service.publicUrl,
       defaultBoundaries: cfg.stratos.allowedDomains,
+      allowListProvider: ctx.allowListProvider,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,

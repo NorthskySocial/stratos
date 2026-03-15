@@ -23,13 +23,13 @@ import {
   cborToRecord,
   createCid,
 } from './helpers/test-env.js'
-import { PostgresActorStore } from '../src/adapters/postgres/actor-store.js'
+import { PostgresActorStore } from '../src/adapters'
 import {
   createServicePgDb,
   migrateServicePgDb,
   type ServicePgDb,
 } from '../src/db/pg.js'
-import { PgEnrollmentStoreWriter } from '../src/adapters/postgres/enrollment-store.js'
+import { PgEnrollmentStoreWriter } from '../src/adapters'
 import type { ActorStore } from '../src/actor-store-types.js'
 import postgres from 'postgres'
 

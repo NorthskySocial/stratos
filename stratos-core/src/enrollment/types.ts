@@ -20,4 +20,5 @@ export interface EnrollmentValidationResult {
   allowed: boolean
   reason?: import('../shared/errors.js').EnrollmentDenialReason
   pdsEndpoint?: string
+  autoEnrollDomains?: string[]
 }

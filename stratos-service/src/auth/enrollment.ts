@@ -7,6 +7,7 @@ import {
   isDidAllowed,
   validateEnrollmentEligibility,
 } from '@northskysocial/stratos-core'
+import { type AllowListProvider } from '../features/index.js'
 
 // Re-export for convenience
 export {
@@ -23,6 +24,7 @@ export interface EnrollmentResult {
   allowed: boolean
   reason?: EnrollmentDenialReason
   pdsEndpoint?: string
+  autoEnrollDomains?: string[]
 }
 
 /**
@@ -31,18 +33,31 @@ export interface EnrollmentResult {
  * @param config - Enrollment configuration
  * @param did - User's DID
  * @param idResolver - Identity resolver for DID resolution
+ * @param allowListProvider - Provider for external allow list (optional)
  * @returns Enrollment result with allowed status and reason
  */
 export async function validateEnrollment(
   config: EnrollmentConfig,
   did: string,
   idResolver: IdResolver,
+  allowListProvider?: AllowListProvider,
 ): Promise<EnrollmentResult> {
   // First check if DID is explicitly allowed (open mode or DID allowlist)
   // This doesn't require DID resolution - return immediately
   if (isDidAllowed(config, did)) {
     // DID is allowed without needing PDS resolution
-    return { allowed: true }
+    return {
+      allowed: true,
+      autoEnrollDomains: config.autoEnrollDomains,
+    }
+  }
+
+  // Check external allow list provider if available
+  if (allowListProvider && (await allowListProvider.isAllowed(did))) {
+    return {
+      allowed: true,
+      autoEnrollDomains: config.autoEnrollDomains,
+    }
   }
 
   // DID is not in DID allowlist
@@ -76,13 +91,24 @@ export async function validateEnrollment(
 
 /**
  * Assert that enrollment is allowed, throwing if not
+ *
+ * @param config - Enrollment configuration
+ * @param did - User's DID
+ * @param idResolver - Identity resolver for DID resolution
+ * @param allowListProvider - Provider for external allow list (optional)
  */
 export async function assertEnrollment(
   config: EnrollmentConfig,
   did: string,
   idResolver: IdResolver,
+  allowListProvider?: AllowListProvider,
 ): Promise<{ pdsEndpoint?: string }> {
-  const result = await validateEnrollment(config, did, idResolver)
+  const result = await validateEnrollment(
+    config,
+    did,
+    idResolver,
+    allowListProvider,
+  )
 
   if (!result.allowed) {
     const messages: Record<EnrollmentDenialReason, string> = {

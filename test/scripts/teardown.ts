@@ -8,13 +8,7 @@ import { deleteAccount } from './lib/pds.ts'
 import { stopNgrok } from './lib/ngrok.ts'
 import { isPostgres } from './lib/backend.ts'
 
-async function run() {
-  section('Teardown')
-
-  // Stop ngrok if running
-  await stopNgrok()
-
-  // Delete test accounts from PDS
+async function deleteTestAccounts() {
   info('Deleting test accounts from PDS...')
   const state = await loadState()
   for (const [name, user] of Object.entries(state.users)) {
@@ -29,8 +23,9 @@ async function run() {
       warn(`Failed to delete ${name}: ${err}`)
     }
   }
+}
 
-  // Stop Docker Compose
+async function stopDockerCompose() {
   info('Stopping Stratos container...')
   try {
     const composeArgs = ['compose', '-f', 'docker-compose.test.yml']
@@ -52,8 +47,9 @@ async function run() {
   } catch (err) {
     fail('Failed to stop container', String(err))
   }
+}
 
-  // // Clean up test data
+async function cleanUpTestData() {
   info('Removing test-data directory...')
   try {
     // await Deno.remove(TEST_DATA_DIR, { recursive: true })
@@ -65,7 +61,14 @@ async function run() {
       warn(`Could not remove test-data: ${err}`)
     }
   }
+}
 
+async function run() {
+  section('Teardown')
+  await stopNgrok()
+  await deleteTestAccounts()
+  await stopDockerCompose()
+  await cleanUpTestData()
   info('Teardown complete')
 }
 

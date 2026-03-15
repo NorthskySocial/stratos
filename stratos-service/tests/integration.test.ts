@@ -2,7 +2,7 @@
  * Integration tests for Stratos service
  * Tests the complete flow from enrollment to record operations
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -11,23 +11,24 @@ import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 
-import { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
-
 import {
-  assertStratosValidation,
   assertBskyNoCrossNamespaceEmbed,
-  isStratosUri,
+  assertStratosValidation,
+  BlobStore,
+  BlobStoreCreator,
+  ENROLLMENT_MODE,
+  extractBoundaryDomains,
   isBskyUri,
   isStratosCollection,
-  extractBoundaryDomains,
+  isStratosUri,
 } from '@northskysocial/stratos-core'
 
-import { StratosActorStore, SqliteEnrollmentStore } from '../src/context.js'
-import { validateEnrollment, EnrollmentConfig } from '../src/auth'
+import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
+import { EnrollmentConfig, validateEnrollment } from '../src/auth'
 import {
+  closeServiceDb,
   createServiceDb,
   migrateServiceDb,
-  closeServiceDb,
   ServiceDb,
 } from '../src/db'
 
@@ -176,7 +177,7 @@ describe('Integration: Full Stratos Flow', () => {
   describe('Enrollment Flow', () => {
     it('should validate enrollment for open mode', async () => {
       const config: EnrollmentConfig = {
-        mode: 'open',
+        mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
@@ -189,7 +190,7 @@ describe('Integration: Full Stratos Flow', () => {
 
     it('should validate enrollment for allowlist mode with allowed DID', async () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [testDid],
         allowedPdsEndpoints: [],
       }
@@ -202,7 +203,7 @@ describe('Integration: Full Stratos Flow', () => {
 
     it('should validate enrollment for allowlist mode with allowed PDS', async () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
       }
@@ -227,7 +228,7 @@ describe('Integration: Full Stratos Flow', () => {
 
     it('should reject enrollment when DID cannot be resolved', async () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
       }
