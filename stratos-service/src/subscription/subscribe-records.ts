@@ -205,7 +205,9 @@ export function formatEvent(event: SeqEvent): CommitMessage {
 
   try {
     const decoded = cborDecode(event.event) as Record<string, unknown>
-    ops = Array.isArray(decoded.ops) ? (decoded.ops as RecordOp[]) : [decoded as unknown as RecordOp]
+    ops = Array.isArray(decoded.ops)
+      ? (decoded.ops as RecordOp[])
+      : [decoded as unknown as RecordOp]
   } catch {
     ops = []
   }
