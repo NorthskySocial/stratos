@@ -8,6 +8,7 @@ import {
   createIndexingService,
 } from './db.ts'
 import { WorkerPool } from './worker-pool.ts'
+import { HandleDedup } from './handle-dedup.ts'
 import { CursorManager } from './cursor-manager.ts'
 import {
   PdsFirehose,
@@ -28,6 +29,7 @@ export class Indexer {
   private stratosActorSync: StratosActorSync | null = null
   private workerPool: WorkerPool<unknown> | null = null
   private cursorManager: CursorManager | null = null
+  private handleDedup: HandleDedup | null = null
   private healthServer: Deno.HttpServer | null = null
   private enrolledDids = new Set<string>()
   private backfilledDids = new Set<string>()
@@ -135,6 +137,10 @@ export class Indexer {
 
     this.cursorManager.start()
 
+    // Handle dedup — skip redundant indexHandle calls for recently-seen DIDs
+    const handleDedup = new HandleDedup()
+    this.handleDedup = handleDedup
+
     // Enrollment callbacks (defined first, referenced by worker pool and subscriptions)
     const enrollmentCallback: EnrollmentCallback = {
       onEnrollmentDiscovered: (
@@ -170,6 +176,7 @@ export class Indexer {
           indexingService,
           background,
           enrollmentCallback,
+          handleDedup,
         )
       },
       (err) => console.error({ err: err.message }, 'worker pool error'),
@@ -301,6 +308,7 @@ export class Indexer {
       workerPool: workerPool as never,
       cursorManager: this.cursorManager,
       enrollmentCallback,
+      handleDedup,
       onError: (err) =>
         console.error({ err: err.message }, 'pds firehose error'),
     })
@@ -357,6 +365,7 @@ export class Indexer {
     this.pdsFirehose?.stop()
     this.stratosServiceSub?.stop()
     this.stratosActorSync?.stop()
+    this.handleDedup?.stop()
 
     if (this.workerPool) {
       await this.workerPool.stop()
