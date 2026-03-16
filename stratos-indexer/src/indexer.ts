@@ -134,6 +134,9 @@ export class Indexer {
           { did, boundaries },
           'enrollment discovered, starting actor sync',
         )
+        background.add(() =>
+          indexingService.indexHandle(did, new Date().toISOString()),
+        )
         void this.stratosActorSync?.addActor(did)
       },
       onEnrollmentRemoved: (did: string) => {
@@ -190,6 +193,10 @@ export class Indexer {
         maxConcurrentActorSyncs: this.config.worker.actorSyncConcurrency,
         maxActorQueueSize: this.config.worker.actorSyncQueuePerActor,
       },
+      (did) =>
+        background.add(() =>
+          indexingService.indexHandle(did, new Date().toISOString()),
+        ),
     )
     this.stratosActorSync.start()
 
@@ -241,6 +248,9 @@ export class Indexer {
       for (const did of didsList) {
         this.enrolledDids.add(did)
         this.stratosActorSync.addActor(did)
+        background.add(() =>
+          indexingService.indexHandle(did, new Date().toISOString()),
+        )
       }
 
       console.log(
