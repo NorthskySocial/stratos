@@ -76,7 +76,8 @@ function createCtx(opts: {
   return {
     enrollmentService: {
       getEnrollment: opts.getEnrollment,
-      isEnrolled: async (did: string) => (await opts.getEnrollment(did)) !== null,
+      isEnrolled: async (did: string) =>
+        (await opts.getEnrollment(did)) !== null,
       enroll: vi.fn(),
       unenroll: vi.fn(),
     },
@@ -291,7 +292,9 @@ describe('Status endpoint route registration', () => {
     })
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
-    await expect(invokeMethod(server, 'zone.stratos.enrollment.status', {})).rejects.toThrow('did parameter required')
+    await expect(
+      invokeMethod(server, 'zone.stratos.enrollment.status', {}),
+    ).rejects.toThrow('did parameter required')
   })
 })
 
@@ -441,7 +444,13 @@ describe('Unenroll endpoint', () => {
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
 
-    await expect(invokeMethod(server, 'zone.stratos.enrollment.unenroll', {}, { credentials: { type: 'none' } }))
-      .rejects.toThrow('Authentication required')
+    await expect(
+      invokeMethod(
+        server,
+        'zone.stratos.enrollment.unenroll',
+        {},
+        { credentials: { type: 'none' } },
+      ),
+    ).rejects.toThrow('Authentication required')
   })
 })

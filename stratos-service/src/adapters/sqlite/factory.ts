@@ -71,7 +71,9 @@ export class SqliteStorageFactory implements StorageFactory {
 
   private readonly dataDir: string
   private readonly serviceDb: ServiceDb
-  private readonly cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private readonly cborToRecord: (
+    content: Uint8Array,
+  ) => Record<string, unknown>
   private readonly blobContentStoreCreator: (did: string) => BlobContentStore
 
   constructor(config: SqliteStorageFactoryConfig) {

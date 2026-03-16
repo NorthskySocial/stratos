@@ -62,7 +62,10 @@ export function registerEnrollmentHandlers(
       const did = params.did as string
 
       if (!did) {
-        throw new InvalidRequestError('did parameter required', 'InvalidRequest')
+        throw new InvalidRequestError(
+          'did parameter required',
+          'InvalidRequest',
+        )
       }
 
       const typedAuth = auth as HandlerAuth | undefined
