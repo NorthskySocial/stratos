@@ -178,6 +178,7 @@ export class StratosActorSync {
       maxConcurrentActorSyncs: 8,
       maxActorQueueSize: 50,
     },
+    private onHandleNeeded?: (did: string) => void,
   ) {
     this.maxConcurrentActorSyncs = options.maxConcurrentActorSyncs
     this.maxActorQueueSize = options.maxActorQueueSize
@@ -406,6 +407,12 @@ export class StratosActorSync {
     }
 
     if (upserts.length === 0 && deletes.length === 0) return
+
+    // Resolve the post creator's handle if not already known
+    if (upserts.length > 0 && !this.knownDids.has(did)) {
+      this.knownDids.add(did)
+      this.onHandleNeeded?.(did)
+    }
 
     await batchIndexStratosRecords(this.db, upserts, deletes, commit.time)
 
