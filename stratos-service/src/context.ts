@@ -57,7 +57,7 @@ import {
   PdsAgent,
   ExternalAllowListProvider,
 } from './features/index.js'
-import { StubWriterServiceImpl } from './features/index.js'
+import { StubWriterServiceImpl, BackgroundStubQueue } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
@@ -784,6 +784,7 @@ export interface AppContext {
   enrollmentService: EnrollmentService
   boundaryResolver: BoundaryResolver
   stubWriter: StubWriterService
+  stubQueue: BackgroundStubQueue
   authVerifier: AuthVerifiers
   idResolver: IdResolver
   oauthClient: NodeOAuthClient
@@ -1086,6 +1087,8 @@ export async function createAppContext(
     }
   }, serviceDidWithFragment)
 
+  const stubQueue = new BackgroundStubQueue(stubWriter, logger)
+
   const app = express()
   // Note: express.json() is applied in index.ts with exclusion for /xrpc/ routes
 
@@ -1125,6 +1128,7 @@ export async function createAppContext(
     enrollmentService,
     boundaryResolver,
     stubWriter,
+    stubQueue,
     authVerifier,
     idResolver,
     oauthClient,
@@ -1139,6 +1143,7 @@ export async function createAppContext(
     dpopVerifier,
     enrollmentEvents,
     destroy: async () => {
+      await stubQueue.drain()
       await actorStore.close?.()
       await destroyBackend()
     },
