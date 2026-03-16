@@ -973,7 +973,7 @@ export class PostgresActorStore implements ActorStore {
     this.adminDb = drizzle({ client: this.adminClient })
     // Shared pool for all per-actor operations; search_path set per transaction via SET LOCAL
     this.actorClient = postgres(this.connectionString, {
-      max: 15,
+      max: 100,
       idle_timeout: 20,
       connect_timeout: 10,
     })
