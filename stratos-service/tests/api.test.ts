@@ -94,7 +94,6 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
-
 // Create minimal app context for testing API functions
 interface TestContext {
   actorStore: StratosActorStore

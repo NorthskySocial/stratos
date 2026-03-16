@@ -130,7 +130,9 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
 }
 
 // Mock IdResolver
-function createMockIdResolver(didDoc: { id: string; service?: unknown[] } | null) {
+function createMockIdResolver(
+  didDoc: { id: string; service?: unknown[] } | null,
+) {
   return {
     did: {
       resolve: vi.fn().mockResolvedValue(didDoc),

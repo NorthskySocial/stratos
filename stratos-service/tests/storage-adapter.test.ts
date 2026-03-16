@@ -13,7 +13,9 @@ async function makeCid(data: string): Promise<CID> {
   return CID.parse(AtcuteCid.toString(atcuteCid))
 }
 
-function createMockRepoReader(blocks: Map<string, Uint8Array>): ActorRepoReader {
+function createMockRepoReader(
+  blocks: Map<string, Uint8Array>,
+): ActorRepoReader {
   return {
     getBytes: vi.fn(async (cid: CID) => blocks.get(cid.toString()) ?? null),
     has: vi.fn(async (cid: CID) => blocks.has(cid.toString())),
@@ -55,7 +57,9 @@ describe('StratosBlockStoreReader', () => {
 
     it('should return null for a missing block', async () => {
       const cid = await makeCid('nonexistent')
-      const reader = new StratosBlockStoreReader(createMockRepoReader(new Map()))
+      const reader = new StratosBlockStoreReader(
+        createMockRepoReader(new Map()),
+      )
 
       const result = await reader.get(cid.toString())
       expect(result).toBeNull()
@@ -91,7 +95,9 @@ describe('StratosBlockStoreReader', () => {
 
     it('should return false for a missing block', async () => {
       const cid = await makeCid('missing')
-      const reader = new StratosBlockStoreReader(createMockRepoReader(new Map()))
+      const reader = new StratosBlockStoreReader(
+        createMockRepoReader(new Map()),
+      )
 
       expect(await reader.has(cid.toString())).toBe(false)
     })
@@ -132,7 +138,9 @@ describe('StratosBlockStoreReader', () => {
     it('should return all missing when nothing is found', async () => {
       const cid1 = await makeCid('missing-1')
       const cid2 = await makeCid('missing-2')
-      const reader = new StratosBlockStoreReader(createMockRepoReader(new Map()))
+      const reader = new StratosBlockStoreReader(
+        createMockRepoReader(new Map()),
+      )
 
       const result = await reader.getMany([cid1.toString(), cid2.toString()])
 

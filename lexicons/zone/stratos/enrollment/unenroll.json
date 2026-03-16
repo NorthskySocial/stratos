@@ -23,10 +23,7 @@
           }
         }
       },
-      "errors": [
-        { "name": "NotEnrolled" },
-        { "name": "AuthRequired" }
-      ]
+      "errors": [{ "name": "NotEnrolled" }, { "name": "AuthRequired" }]
     }
   }
 }
