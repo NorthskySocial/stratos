@@ -208,7 +208,7 @@ export async function createRecord(
     }
   })
 
-  // Write stub to user's PDS
+  // Write stub to user's PDS (background, non-blocking)
   const recordObj = record as Record<string, unknown>
   const createdAt =
     typeof recordObj.createdAt === 'string'
@@ -218,26 +218,14 @@ export async function createRecord(
   const recordType =
     typeof recordObj.$type === 'string' ? recordObj.$type : collection
 
-  try {
-    await ctx.stubWriter.writeStub(
-      callerDid,
-      collection,
-      rkey,
-      recordType,
-      result.cid,
-      createdAt,
-    )
-  } catch (err) {
-    ctx.logger?.warn(
-      {
-        err: err instanceof Error ? err.message : String(err),
-        did: callerDid,
-        collection,
-        rkey,
-      },
-      'failed to write stub to PDS',
-    )
-  }
+  ctx.stubQueue.enqueueWrite(
+    callerDid,
+    collection,
+    rkey,
+    recordType,
+    result.cid,
+    createdAt,
+  )
 
   return {
     uri: result.uri.toString(),
@@ -326,20 +314,8 @@ export async function deleteRecord(
     }
   })
 
-  // Delete stub from user's PDS
-  try {
-    await ctx.stubWriter.deleteStub(callerDid, collection, rkey)
-  } catch (err) {
-    ctx.logger?.warn(
-      {
-        err: err instanceof Error ? err.message : String(err),
-        did: callerDid,
-        collection,
-        rkey,
-      },
-      'failed to delete stub from PDS',
-    )
-  }
+  // Delete stub from user's PDS (background, non-blocking)
+  ctx.stubQueue.enqueueDelete(callerDid, collection, rkey)
 
   return result
 }
@@ -452,7 +428,7 @@ export async function updateRecord(
     }
   })
 
-  // Update stub on PDS
+  // Update stub on PDS (background, non-blocking)
   const recordObj = record as Record<string, unknown>
   const createdAt =
     typeof recordObj.createdAt === 'string'
@@ -461,26 +437,14 @@ export async function updateRecord(
   const recordType =
     typeof recordObj.$type === 'string' ? recordObj.$type : collection
 
-  try {
-    await ctx.stubWriter.writeStub(
-      callerDid,
-      collection,
-      rkey,
-      recordType,
-      result.cid,
-      createdAt,
-    )
-  } catch (err) {
-    ctx.logger?.warn(
-      {
-        err: err instanceof Error ? err.message : String(err),
-        did: callerDid,
-        collection,
-        rkey,
-      },
-      'failed to update stub on PDS',
-    )
-  }
+  ctx.stubQueue.enqueueWrite(
+    callerDid,
+    collection,
+    rkey,
+    recordType,
+    result.cid,
+    createdAt,
+  )
 
   return {
     uri: result.uri.toString(),
