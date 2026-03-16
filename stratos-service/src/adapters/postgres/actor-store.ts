@@ -320,20 +320,9 @@ export class PgActorRecordTransactor extends PgActorRecordReader {
       throw new Error('Expected indexed URI to contain a record key')
     }
 
-    await this.db
-      .insert(pgStratosRecord)
-      .values({
-        ...row,
-        takedownRef: null,
-      })
-      .onConflictDoUpdate({
-        target: pgStratosRecord.uri,
-        set: {
-          cid: row.cid,
-          repoRev: repoRev,
-          indexedAt: row.indexedAt,
-        },
-      })
+    await this.db.execute(
+      sql`INSERT INTO stratos_record (uri, cid, collection, rkey, "repoRev", "indexedAt", "takedownRef") VALUES (${row.uri}, ${row.cid}, ${row.collection}, ${row.rkey}, ${row.repoRev}, ${row.indexedAt}, ${null}) ON CONFLICT (uri) DO UPDATE SET cid = ${row.cid}, "repoRev" = ${row.repoRev}, "indexedAt" = ${row.indexedAt}`,
+    )
 
     if (record !== null) {
       const backlinks = getStratosBacklinks(uri, record)
@@ -415,10 +404,9 @@ export class PgActorRepoReader {
   }
 
   async getRootDetailed(): Promise<{ cid: CID; rev: string } | null> {
-    const res = await this.db
-      .select({ cid: pgStratosRepoRoot.cid, rev: pgStratosRepoRoot.rev })
-      .from(pgStratosRepoRoot)
-      .limit(1)
+    const res = (await this.db.execute(
+      sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1`,
+    )) as unknown as { cid: string; rev: string }[]
     if (res.length === 0) return null
     return {
       cid: CID.parse(res[0].cid),
@@ -429,11 +417,10 @@ export class PgActorRepoReader {
   async getBytes(cid: CID): Promise<Uint8Array | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
-    const found = await this.db
-      .select({ content: pgStratosRepoBlock.content })
-      .from(pgStratosRepoBlock)
-      .where(eq(pgStratosRepoBlock.cid, cid.toString()))
-      .limit(1)
+    const cidStr = cid.toString()
+    const found = (await this.db.execute(
+      sql`SELECT content FROM stratos_repo_block WHERE cid = ${cidStr} LIMIT 1`,
+    )) as unknown as { content: Buffer }[]
     if (found.length === 0) return null
     const content = new Uint8Array(found[0].content)
     this.cache.set(cid, content)
@@ -566,34 +553,19 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
   }
 
   async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
-    await this.db
-      .insert(pgStratosRepoRoot)
-      .values({
-        did,
-        cid: cid.toString(),
-        rev,
-        indexedAt: new Date().toISOString(),
-      })
-      .onConflictDoUpdate({
-        target: pgStratosRepoRoot.did,
-        set: {
-          cid: cid.toString(),
-          rev,
-          indexedAt: new Date().toISOString(),
-        },
-      })
+    const cidStr = cid.toString()
+    const indexedAt = new Date().toISOString()
+    await this.db.execute(
+      sql`INSERT INTO stratos_repo_root (did, cid, rev, "indexedAt") VALUES (${did}, ${cidStr}, ${rev}, ${indexedAt}) ON CONFLICT (did) DO UPDATE SET cid = ${cidStr}, rev = ${rev}, "indexedAt" = ${indexedAt}`,
+    )
   }
 
   async putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void> {
-    await this.db
-      .insert(pgStratosRepoBlock)
-      .values({
-        cid: cid.toString(),
-        repoRev: rev,
-        size: bytes.length,
-        content: Buffer.from(bytes),
-      })
-      .onConflictDoNothing()
+    const cidStr = cid.toString()
+    const content = Buffer.from(bytes)
+    await this.db.execute(
+      sql`INSERT INTO stratos_repo_block (cid, "repoRev", size, content) VALUES (${cidStr}, ${rev}, ${bytes.length}, ${content}) ON CONFLICT DO NOTHING`,
+    )
 
     this.cache.set(cid, bytes)
   }
@@ -931,7 +903,9 @@ export class PgSequenceOps implements SequenceOperations {
     invalidated: number
     sequencedAt: string
   }): Promise<void> {
-    await this.db.insert(pgStratosSeq).values(event)
+    await this.db.execute(
+      sql`INSERT INTO stratos_seq (did, "eventType", event, invalidated, "sequencedAt") VALUES (${event.did}, ${event.eventType}, ${event.event}, ${event.invalidated}, ${event.sequencedAt})`,
+    )
   }
 }
 
