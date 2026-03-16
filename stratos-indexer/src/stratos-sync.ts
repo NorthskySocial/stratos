@@ -176,7 +176,7 @@ export class StratosActorSync {
     private onReferencedActor?: (did: string) => void,
     options: StratosActorSyncOptions = {
       maxConcurrentActorSyncs: 8,
-      maxActorQueueSize: 50,
+      maxActorQueueSize: 10,
     },
     private onHandleNeeded?: (did: string) => void,
   ) {

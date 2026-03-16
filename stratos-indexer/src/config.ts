@@ -63,10 +63,10 @@ export function loadConfig(): IndexerConfig {
     },
     worker: {
       concurrency: envInt('WORKER_CONCURRENCY', 4),
-      maxQueueSize: envInt('WORKER_MAX_QUEUE_SIZE', 200),
+      maxQueueSize: envInt('WORKER_MAX_QUEUE_SIZE', 100),
       cursorFlushIntervalMs: envInt('CURSOR_FLUSH_INTERVAL_MS', 5000),
       actorSyncConcurrency: envInt('ACTOR_SYNC_CONCURRENCY', 8),
-      actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 50),
+      actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 10),
       backgroundQueueConcurrency: envInt('BACKGROUND_QUEUE_CONCURRENCY', 10),
     },
   }
