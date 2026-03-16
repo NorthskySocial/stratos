@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { CID } from 'multiformats/cid'
 import * as AtcuteCid from '@atcute/cid'
-import { encode as cborEncode } from '@atcute/cbor'
 import { StratosBlockStoreReader } from '../src/features'
 import { BlockMap } from '@northskysocial/stratos-core'
+import type { ActorRepoReader } from '../src/actor-store-types.js'
 
 const DAG_CBOR_CODEC = 0x71
 
@@ -13,7 +13,7 @@ async function makeCid(data: string): Promise<CID> {
   return CID.parse(AtcuteCid.toString(atcuteCid))
 }
 
-function createMockRepoReader(blocks: Map<string, Uint8Array>) {
+function createMockRepoReader(blocks: Map<string, Uint8Array>): ActorRepoReader {
   return {
     getBytes: vi.fn(async (cid: CID) => blocks.get(cid.toString()) ?? null),
     has: vi.fn(async (cid: CID) => blocks.has(cid.toString())),
@@ -38,7 +38,7 @@ function createMockRepoReader(blocks: Map<string, Uint8Array>) {
     countBlocks: vi.fn(async () => 0),
     listExistingBlocks: vi.fn(async () => ({ toList: () => [] })),
     getBlockRange: vi.fn(async () => []),
-  }
+  } as unknown as ActorRepoReader
 }
 
 describe('StratosBlockStoreReader', () => {
@@ -47,9 +47,7 @@ describe('StratosBlockStoreReader', () => {
       const cid = await makeCid('test-block-1')
       const bytes = new TextEncoder().encode('test-block-1')
       const blocks = new Map<string, Uint8Array>([[cid.toString(), bytes]])
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(blocks) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(blocks))
 
       const result = await reader.get(cid.toString())
       expect(result).toEqual(bytes)
@@ -57,9 +55,7 @@ describe('StratosBlockStoreReader', () => {
 
     it('should return null for a missing block', async () => {
       const cid = await makeCid('nonexistent')
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(new Map()) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(new Map()))
 
       const result = await reader.get(cid.toString())
       expect(result).toBeNull()
@@ -70,7 +66,7 @@ describe('StratosBlockStoreReader', () => {
       const bytes = new TextEncoder().encode('delegate-test')
       const blocks = new Map<string, Uint8Array>([[cid.toString(), bytes]])
       const mockReader = createMockRepoReader(blocks)
-      const reader = new StratosBlockStoreReader(mockReader as any)
+      const reader = new StratosBlockStoreReader(mockReader)
 
       await reader.get(cid.toString())
 
@@ -88,18 +84,14 @@ describe('StratosBlockStoreReader', () => {
       const blocks = new Map<string, Uint8Array>([
         [cid.toString(), new Uint8Array([1])],
       ])
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(blocks) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(blocks))
 
       expect(await reader.has(cid.toString())).toBe(true)
     })
 
     it('should return false for a missing block', async () => {
       const cid = await makeCid('missing')
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(new Map()) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(new Map()))
 
       expect(await reader.has(cid.toString())).toBe(false)
     })
@@ -111,9 +103,7 @@ describe('StratosBlockStoreReader', () => {
       const cid2 = await makeCid('missing-block')
       const bytes1 = new TextEncoder().encode('found-block')
       const blocks = new Map<string, Uint8Array>([[cid1.toString(), bytes1]])
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(blocks) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(blocks))
 
       const result = await reader.getMany([cid1.toString(), cid2.toString()])
 
@@ -131,9 +121,7 @@ describe('StratosBlockStoreReader', () => {
         [cid1.toString(), bytes1],
         [cid2.toString(), bytes2],
       ])
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(blocks) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(blocks))
 
       const result = await reader.getMany([cid1.toString(), cid2.toString()])
 
@@ -144,9 +132,7 @@ describe('StratosBlockStoreReader', () => {
     it('should return all missing when nothing is found', async () => {
       const cid1 = await makeCid('missing-1')
       const cid2 = await makeCid('missing-2')
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(new Map()) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(new Map()))
 
       const result = await reader.getMany([cid1.toString(), cid2.toString()])
 
@@ -166,9 +152,7 @@ describe('StratosBlockStoreReader', () => {
       expect(multiformatsCid.toString()).toBe(cidStr)
 
       const blocks = new Map<string, Uint8Array>([[cidStr, data]])
-      const reader = new StratosBlockStoreReader(
-        createMockRepoReader(blocks) as any,
-      )
+      const reader = new StratosBlockStoreReader(createMockRepoReader(blocks))
 
       const result = await reader.get(cidStr)
       expect(result).toEqual(data)

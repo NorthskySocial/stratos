@@ -1,5 +1,5 @@
 import path from 'node:path'
-import fs from 'node:fs/promises'
+import * as fs from 'node:fs/promises'
 import { readFileSync, readdirSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
@@ -55,6 +55,7 @@ import {
   EnrollmentBoundaryResolver,
   PdsAgent,
   ExternalAllowListProvider,
+  ProfileRecordWriterImpl,
 } from './features/index.js'
 import { StubWriterServiceImpl } from './features/index.js'
 import {
@@ -712,6 +713,7 @@ export interface AppContext {
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore
   enrollmentService: EnrollmentService
+  profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   boundaryResolver: BoundaryResolver
   stubWriter: StubWriterService
   authVerifier: AuthVerifiers
@@ -944,6 +946,15 @@ export async function createAppContext(
   // Resolves per-user boundaries from storage
   const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
 
+  const profileRecordWriter = new ProfileRecordWriterImpl(async (did) => {
+    try {
+      const session = await oauthClient.restore(did)
+      return { api: new Agent(session) }
+    } catch {
+      return null
+    }
+  })
+
   // Initialize external allow list provider if configured
   let allowListProvider: ExternalAllowListProvider | undefined
   if (cfg.enrollment.allowListUrl) {
@@ -1034,6 +1045,7 @@ export async function createAppContext(
     actorStore,
     enrollmentStore,
     enrollmentService,
+    profileRecordWriter,
     boundaryResolver,
     stubWriter,
     authVerifier,

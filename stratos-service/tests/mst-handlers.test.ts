@@ -6,7 +6,7 @@
  * - MST inclusion proof CAR building
  * - Full repo CAR building from iterateCarBlocks
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { CID } from 'multiformats/cid'
 import * as AtcuteCid from '@atcute/cid'
 import type { CidLink } from '@atcute/cid'
@@ -276,7 +276,6 @@ describe('MST inclusion proof CAR', () => {
     const commitCidStr = AtcuteCid.toString(commitCid)
 
     // Collect all blocks: commit + proof nodes + record
-    const allCids = new Set<string>([commitCidStr, ...proofCids, recordCid])
     const blockStore = new Map<string, Uint8Array>()
     blockStore.set(commitCidStr, commitBytes)
 
@@ -396,6 +395,7 @@ describe('Full repo CAR building', () => {
     ]
 
     // Add MST node blocks from overlay
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const [cidStr, bytes] of (overlay as any).upper.blocks) {
       allBlocks.push({ cid: cidStr, bytes })
     }
@@ -464,6 +464,7 @@ describe('Import repo CAR verification', () => {
     allBlocks.set(commitCidStr, commitBytes)
     allBlocks.set(recordCidStr, recordData)
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const [cidStr, bytes] of (overlay as any).upper.blocks) {
       allBlocks.set(cidStr, bytes)
     }

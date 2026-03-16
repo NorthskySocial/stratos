@@ -122,6 +122,7 @@ describe('Stratos Lexicons', () => {
       const server = new XrpcServer(allLexicons)
 
       // Access the internal lexicon store via the lex property
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const lexStore = (server as any).lex
 
       // Verify ATProto methods are available
@@ -137,6 +138,7 @@ describe('Stratos Lexicons', () => {
       const server = new XrpcServer(allLexicons)
 
       // Access the internal lexicon store
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const lexStore = (server as any).lex
 
       // Verify Stratos methods are available

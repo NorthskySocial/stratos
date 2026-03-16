@@ -185,7 +185,7 @@ export class StratosServer {
     app.use('/oauth', oauthRoutes)
 
     registerHandlers(ctx.xrpcServer, ctx)
-    registerEnrollmentHandlers(app, ctx)
+    registerEnrollmentHandlers(ctx.xrpcServer, ctx)
     registerSubscribeRecords(ctx)
     app.use(ctx.xrpcServer.router)
 

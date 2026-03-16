@@ -9,8 +9,7 @@ const ENROLLMENT_RKEY = 'self'
 const decodeBytes = (val: unknown): Uint8Array | null => {
   if (val instanceof Uint8Array) return val
   if (typeof val === 'object' && val !== null && '$bytes' in val) {
-    const b64 = (val as { $bytes: string }).$bytes
-    if (typeof b64 !== 'string') return null
+    const b64: string = (val as { $bytes: string }).$bytes
     const binary = atob(b64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {

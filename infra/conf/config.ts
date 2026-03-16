@@ -19,7 +19,7 @@ const config: StratosConfig = {
 
     // serviceFragment: 'atproto_pns',
     // retentionDays: '30',
-    enrollmentMode: 'open',
+    enrollmentmode: ENROLLMENT_MODE.OPEN,
     // allowedDids: '',
     // allowedPdsEndpoints: '',
     // plcUrl: 'https://plc.directory',

@@ -61,7 +61,7 @@ function rowToEvent(row: {
   }
 
   const { collection, rkey } = decoded?.path
-    ? parsePath(decoded.path)
+    ? parsePath(decoded!.path)
     : { collection: '', rkey: '' }
 
   return {
@@ -72,7 +72,7 @@ function rowToEvent(row: {
     rkey,
     uri: `at://${row.did}/${collection}/${rkey}`,
     cid: decoded?.cid ?? null,
-    rev: '', // Not stored in current schema
+    rev: '', // Not stored in the current schema
     event: row.event,
     sequencedAt: row.sequencedAt,
   }

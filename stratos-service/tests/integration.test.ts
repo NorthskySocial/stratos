@@ -3,7 +3,7 @@
  * Tests the complete flow from enrollment to record operations
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
@@ -23,6 +23,7 @@ import {
   isStratosUri,
 } from '@northskysocial/stratos-core'
 
+import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import { EnrollmentConfig, validateEnrollment } from '../src/auth'
 import {
@@ -129,12 +130,12 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
 }
 
 // Mock IdResolver
-function createMockIdResolver(didDoc: { id: string; service?: any[] } | null) {
+function createMockIdResolver(didDoc: { id: string; service?: unknown[] } | null) {
   return {
     did: {
       resolve: vi.fn().mockResolvedValue(didDoc),
     },
-  } as any
+  } as unknown as IdResolver
 }
 
 describe('Integration: Full Stratos Flow', () => {

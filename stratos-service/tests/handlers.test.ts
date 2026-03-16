@@ -5,11 +5,11 @@
  * - describeRepo: handleIsCorrect now actually resolves handle → DID
  * - getBlobStore: new method on StratosActorStore
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
@@ -304,8 +304,7 @@ describe('sync.getRecord CAR building', () => {
 
     // Read back and verify we get the exact same bytes
     const result = await actorStore.read(testDid, async (store) => {
-      const storedBytes = await store.repo.getBytes(recordCid)
-      return storedBytes
+      return await store.repo.getBytes(recordCid)
     })
 
     expect(result).not.toBeNull()
@@ -446,13 +445,11 @@ describe('describeRepo handleIsCorrect', () => {
     }
 
     // Simulate the handler logic
-    let didDoc: unknown
     let resolvedHandle: string | undefined
     let handleIsCorrect = false
 
     const resolved = await mockIdResolver.did.resolve(repo)
     if (resolved) {
-      didDoc = resolved
       const alsoKnownAs = (resolved as { alsoKnownAs?: string[] }).alsoKnownAs
       if (alsoKnownAs) {
         const atHandle = alsoKnownAs.find((aka: string) =>
@@ -655,7 +652,7 @@ describe('describeRepo handleIsCorrect', () => {
       },
     }
 
-    let handleIsCorrect = false
+    const handleIsCorrect = false
     try {
       await mockIdResolver.did.resolve(repo)
     } catch {

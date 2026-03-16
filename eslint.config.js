@@ -26,6 +26,9 @@ export default tseslint.config(
         Deno: 'readonly',
       },
     },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+    },
   },
   {
     files: ['test/scripts/**/*.ts'],
