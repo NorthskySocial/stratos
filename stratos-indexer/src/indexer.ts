@@ -72,6 +72,7 @@ export class Indexer {
     const { indexingService, background } = createIndexingService(
       db,
       idResolver,
+      this.config,
     )
 
     // Cursor manager with periodic flush to database
