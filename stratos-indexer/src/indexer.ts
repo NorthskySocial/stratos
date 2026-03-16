@@ -81,19 +81,32 @@ export class Indexer {
       async (state) => {
         const rawDb = (db as unknown as { db: unknown })
           .db as Kysely<DatabaseSchemaType>
-        for (const [did, seq] of state.stratosCursors) {
+
+        if (state.stratosCursors.size > 0) {
+          const now = new Date().toISOString()
+          const values = Array.from(state.stratosCursors, ([did, seq]) => ({
+            did,
+            seq,
+            updatedAt: now,
+          }))
+
+          // Batch upsert all actor cursors in a single statement
           await rawDb
             .insertInto('stratos_sync_cursor' as never)
-            .values({ did, seq, updatedAt: new Date().toISOString() } as never)
+            .values(values as never)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .onConflict((oc: any) =>
               oc.column('did' as never).doUpdateSet({
-                seq,
-                updatedAt: new Date().toISOString(),
+                seq: (eb: unknown) =>
+                  (eb as { ref: (col: string) => unknown }).ref(
+                    'excluded.seq' as never,
+                  ),
+                updatedAt: now,
               } as never),
             )
             .execute()
         }
+
         console.log(
           { pdsSeq: state.pdsSeq, actorCursors: state.stratosCursors.size },
           'cursor flush',
