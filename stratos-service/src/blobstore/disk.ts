@@ -1,5 +1,5 @@
 import fsSync from 'node:fs'
-import fs from 'node:fs/promises'
+import * as fs from 'node:fs/promises'
 import path from 'node:path'
 import { CID } from 'multiformats/cid'
 import {

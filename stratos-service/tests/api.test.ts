@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 
-import { BlobStore, ENROLLMENT_MODE } from '@northskysocial/stratos-core'
+import { BlobStore } from '@northskysocial/stratos-core'
 import {
   closeServiceDb,
   createServiceDb,
@@ -15,7 +15,6 @@ import {
   ServiceDb,
 } from '../src/db'
 
-import { StratosServiceConfig } from '../src'
 import {
   AppContext,
   SqliteEnrollmentStore,
@@ -95,43 +94,6 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
-// Create a minimal test config
-function createTestConfig(dataDir: string): StratosServiceConfig {
-  return {
-    service: {
-      did: 'did:web:stratos.test',
-      serviceFragment: 'atproto_pns',
-      port: 3100,
-      publicUrl: 'https://stratos.test',
-    },
-    storage: {
-      backend: 'sqlite',
-      dataDir,
-    },
-    blobstore: {
-      provider: 'disk',
-      location: `${dataDir}/blobs`,
-    },
-    stratos: {
-      allowedDomains: ['example.com', 'test.com'],
-      retentionDays: 30,
-    },
-    enrollment: {
-      mode: ENROLLMENT_MODE.OPEN,
-      allowedDids: [],
-      allowedPdsEndpoints: [],
-    },
-    identity: {
-      plcUrl: 'https://plc.directory',
-    },
-    logging: {
-      level: 'info',
-    },
-    dpop: {
-      requireNonce: false,
-    },
-  }
-}
 
 // Create minimal app context for testing API functions
 interface TestContext {

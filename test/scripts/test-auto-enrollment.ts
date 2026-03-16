@@ -14,7 +14,7 @@ async function restartStratosWithAutoEnroll(domains: string) {
   const state = await loadState()
   const envVars: Record<string, string> = {
     STRATOS_AUTO_ENROLL_DOMAINS: domains,
-    STRATOS_ENROLLMENT_MODE: 'open', // Ensure we can enroll
+    STRATOS_ENROLLMENT_mode: ENROLLMENT_MODE.OPEN, // Ensure we can enroll
   }
 
   if (state.ngrokUrl) {

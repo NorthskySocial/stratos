@@ -19,7 +19,7 @@ export interface StratosConfig {
  * Enrollment configuration for the stratos service
  */
 export interface EnrollmentConfig {
-  /** Enrollment mode: 'open' allows anyone, 'allowlist' restricts to configured DIDs/PDS */
+  /** Enrollment mode: ENROLLMENT_MODE.OPEN allows anyone, 'allowlist' restricts to configured DIDs/PDS */
   mode: ENROLLMENT_MODE
   /** Explicit list of DIDs allowed to enroll */
   allowedDids?: string[]

@@ -255,7 +255,7 @@ export class StratosRecordReader {
 
   async getRecordBacklinks(opts: GetBacklinksOpts) {
     const { collection, path, linkTo } = opts
-    return await this.db
+    return this.db
       .select({
         uri: stratosRecord.uri,
         cid: stratosRecord.cid,

@@ -69,10 +69,10 @@ export interface SqliteStorageFactoryConfig {
 export class SqliteStorageFactory implements StorageFactory {
   readonly backend: StorageBackend = 'sqlite'
 
-  private dataDir: string
-  private serviceDb: ServiceDb
-  private cborToRecord: (content: Uint8Array) => Record<string, unknown>
-  private blobContentStoreCreator: (did: string) => BlobContentStore
+  private readonly dataDir: string
+  private readonly serviceDb: ServiceDb
+  private readonly cborToRecord: (content: Uint8Array) => Record<string, unknown>
+  private readonly blobContentStoreCreator: (did: string) => BlobContentStore
 
   constructor(config: SqliteStorageFactoryConfig) {
     this.dataDir = config.dataDir
