@@ -8,6 +8,7 @@ import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/index
 import type { BackgroundQueue } from '@atproto/bsky'
 import type { WorkerPool } from './worker-pool.ts'
 import type { CursorManager } from './cursor-manager.ts'
+import type { HandleDedup } from './handle-dedup.ts'
 import {
   decodeCommitOps,
   parseCid,
@@ -69,6 +70,7 @@ export interface PdsFirehoseOptions {
   workerPool: WorkerPool<FirehoseWork>
   cursorManager: CursorManager
   enrollmentCallback: EnrollmentCallback
+  handleDedup: HandleDedup
   onError?: (err: Error) => void
 }
 
@@ -185,6 +187,7 @@ export async function processFirehoseWork(
   indexingService: IndexingService,
   background: BackgroundQueue,
   enrollmentCallback: EnrollmentCallback,
+  handleDedup: HandleDedup,
 ): Promise<void> {
   switch (work.type) {
     case 'commit':
@@ -193,6 +196,7 @@ export async function processFirehoseWork(
         indexingService,
         background,
         enrollmentCallback,
+        handleDedup,
       )
       break
     case 'identity':
@@ -216,10 +220,13 @@ async function processCommit(
   indexingService: IndexingService,
   background: BackgroundQueue,
   enrollmentCallback: EnrollmentCallback,
+  handleDedup: HandleDedup,
 ): Promise<void> {
   const did = message.repo
 
-  background.add(() => indexingService.indexHandle(did, message.time))
+  if (handleDedup.shouldIndex(did)) {
+    background.add(() => indexingService.indexHandle(did, message.time))
+  }
 
   await indexingService.setCommitLastSeen(
     did,
