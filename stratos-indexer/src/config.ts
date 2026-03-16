@@ -37,6 +37,7 @@ export interface WorkerConfig {
   cursorFlushIntervalMs: number
   actorSyncConcurrency: number
   actorSyncQueuePerActor: number
+  backgroundQueueConcurrency: number
 }
 
 export function loadConfig(): IndexerConfig {
@@ -66,6 +67,7 @@ export function loadConfig(): IndexerConfig {
       cursorFlushIntervalMs: envInt('CURSOR_FLUSH_INTERVAL_MS', 5000),
       actorSyncConcurrency: envInt('ACTOR_SYNC_CONCURRENCY', 8),
       actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 50),
+      backgroundQueueConcurrency: envInt('BACKGROUND_QUEUE_CONCURRENCY', 10),
     },
   }
 }
