@@ -85,6 +85,8 @@ export interface PdsTokenVerifierConfig {
   jwksCacheMaxAge?: number
   /** Time before expiry to start background refresh (default: 15 seconds) */
   jwksRefreshBeforeExpiry?: number
+  /** Maximum age of cached verification results in ms (default: 60 seconds) */
+  verifyCacheMaxAge?: number
   /** Optional fetch implementation for testing */
   fetch?: typeof globalThis.fetch
 }
@@ -97,6 +99,11 @@ interface JwksCacheEntry {
   fetchedAt: number
   /** Whether a background refresh is in progress */
   refreshing?: boolean
+}
+
+interface VerifyCacheEntry {
+  result: TokenVerificationResult
+  cachedAt: number
 }
 
 /**
@@ -118,18 +125,22 @@ export class PdsTokenVerifier implements TokenVerifier {
   private readonly audience?: string
   private readonly jwksCacheMaxAge: number
   private readonly jwksRefreshBeforeExpiry: number
+  private readonly verifyCacheMaxAge: number
   private readonly fetch: typeof globalThis.fetch
 
   /** Cache of JWKS by issuer URL */
   private readonly jwksCache = new Map<string, JwksCacheEntry>()
   /** Cache of OAuth metadata by issuer URL */
   private readonly metadataCache = new Map<string, OAuthServerMetadata>()
+  /** Cache of verification results by access token */
+  private readonly verifyCache = new Map<string, VerifyCacheEntry>()
 
   constructor(config: PdsTokenVerifierConfig) {
     this.idResolver = config.idResolver
     this.audience = config.audience
     this.jwksCacheMaxAge = config.jwksCacheMaxAge ?? 60 * 1000 // 1 minute
     this.jwksRefreshBeforeExpiry = config.jwksRefreshBeforeExpiry ?? 15 * 1000 // 15 seconds
+    this.verifyCacheMaxAge = config.verifyCacheMaxAge ?? 60 * 1000 // 1 minute
     this.fetch = config.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
@@ -331,6 +342,59 @@ export class PdsTokenVerifier implements TokenVerifier {
    * Verify an access token
    */
   async verify(token: string): Promise<TokenVerificationResult> {
+    // Check verification cache
+    const cached = this.verifyCache.get(token)
+    if (cached) {
+      const age = Date.now() - cached.cachedAt
+      if (age < this.verifyCacheMaxAge) {
+        // Don't serve cached results for tokens that have expired since caching
+        if (cached.result.active && cached.result.exp !== undefined) {
+          const nowSec = Math.floor(Date.now() / 1000)
+          if (nowSec > cached.result.exp + 30) {
+            this.verifyCache.delete(token)
+          } else {
+            return cached.result
+          }
+        } else {
+          return cached.result
+        }
+      } else {
+        this.verifyCache.delete(token)
+      }
+    }
+
+    const result = await this.verifyUncached(token)
+
+    // Cache active results; skip caching transient failures
+    if (result.active) {
+      this.verifyCache.set(token, { result, cachedAt: Date.now() })
+      this.evictVerifyCache()
+    }
+
+    return result
+  }
+
+  private evictVerifyCache(): void {
+    if (this.verifyCache.size <= 1000) return
+    const now = Date.now()
+    for (const [key, entry] of this.verifyCache) {
+      if (now - entry.cachedAt >= this.verifyCacheMaxAge) {
+        this.verifyCache.delete(key)
+      }
+    }
+    // If still over limit, drop oldest entries
+    if (this.verifyCache.size > 1000) {
+      const excess = this.verifyCache.size - 1000
+      let removed = 0
+      for (const key of this.verifyCache.keys()) {
+        if (removed >= excess) break
+        this.verifyCache.delete(key)
+        removed++
+      }
+    }
+  }
+
+  private async verifyUncached(token: string): Promise<TokenVerificationResult> {
     try {
       // 1. Decode token to get issuer (without verification)
       const unsafeClaims = this.decodeTokenUnsafe(token)
@@ -506,6 +570,7 @@ export class PdsTokenVerifier implements TokenVerifier {
   clearCache(): void {
     this.jwksCache.clear()
     this.metadataCache.clear()
+    this.verifyCache.clear()
   }
 }
 
