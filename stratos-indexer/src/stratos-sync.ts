@@ -168,6 +168,12 @@ export class StratosActorSync {
   private readonly maxConcurrentActorSyncs: number
   private readonly maxActorQueueSize: number
 
+  // Periodic stats instead of per-record logging
+  private indexedCount = 0
+  private deletedCount = 0
+  private statsTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly STATS_INTERVAL_MS = 10_000
+
   constructor(
     private db: Kysely<DatabaseSchemaType>,
     private config: StratosSyncConfig,
@@ -186,10 +192,29 @@ export class StratosActorSync {
 
   start(): void {
     this.running = true
+    this.statsTimer = setInterval(() => {
+      if (this.indexedCount > 0 || this.deletedCount > 0) {
+        console.log(
+          {
+            indexed: this.indexedCount,
+            deleted: this.deletedCount,
+            activeActors: this.subscriptions.size,
+          },
+          'stratos sync stats',
+        )
+        this.indexedCount = 0
+        this.deletedCount = 0
+      }
+    }, StratosActorSync.STATS_INTERVAL_MS)
   }
 
   stop(): void {
     this.running = false
+
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer)
+      this.statsTimer = null
+    }
 
     for (const timer of this.reconnectTimers.values()) {
       clearTimeout(timer)
@@ -416,12 +441,8 @@ export class StratosActorSync {
 
     await batchIndexStratosRecords(this.db, upserts, deletes, commit.time)
 
-    for (const { uri, cid } of upserts) {
-      console.log(`indexed record: uri=${uri} cid=${cid} cursor=${commit.seq}`)
-    }
-    for (const uri of deletes) {
-      console.log(`deleted record: uri=${uri} cursor=${commit.seq}`)
-    }
+    this.indexedCount += upserts.length
+    this.deletedCount += deletes.length
 
     this.cursorManager.updateStratosCursor(did, commit.seq)
 
