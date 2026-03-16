@@ -45,7 +45,7 @@ export function loadConfig(): IndexerConfig {
     db: {
       postgresUrl: requireEnv('BSKY_DB_POSTGRES_URL'),
       schema: env('BSKY_DB_POSTGRES_SCHEMA', 'bsky'),
-      poolSize: envInt('BSKY_DB_POOL_SIZE', 10),
+      poolSize: envInt('BSKY_DB_POOL_SIZE', 20),
     },
     pds: {
       repoProvider: requireEnv('BSKY_REPO_PROVIDER'),
