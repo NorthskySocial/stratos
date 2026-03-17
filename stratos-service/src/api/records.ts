@@ -161,12 +161,15 @@ export async function createRecord(
     // Store the record block
     await store.repo.putBlock(cid, recordBytes, rev)
 
-    // Build and sign MST commit
+    // Preload MST blocks and build commit
     const adapter = new StratosBlockStoreReader(store.repo)
-    const currentRoot = await store.repo.getRoot()
+    const rootDetails = await store.repo.getRootDetailed()
+    if (rootDetails) {
+      await store.repo.preloadBlocksForRev(rootDetails.rev)
+    }
     const unsigned = await buildCommit(
       adapter,
-      currentRoot?.toString() ?? null,
+      rootDetails?.cid.toString() ?? null,
       {
         did: callerDid,
         writes: [{ action: 'create', collection, rkey, cid: cid.toString() }],
@@ -281,12 +284,15 @@ export async function deleteRecord(
     // Delete from record index
     await store.record.deleteRecord(uri)
 
-    // Build and sign MST commit
+    // Preload MST blocks and build commit
     const adapter = new StratosBlockStoreReader(store.repo)
-    const currentRoot = await store.repo.getRoot()
+    const rootDetails = await store.repo.getRootDetailed()
+    if (rootDetails) {
+      await store.repo.preloadBlocksForRev(rootDetails.rev)
+    }
     const unsigned = await buildCommit(
       adapter,
-      currentRoot?.toString() ?? null,
+      rootDetails?.cid.toString() ?? null,
       {
         did: callerDid,
         writes: [{ action: 'delete', collection, rkey, cid: null }],
@@ -381,12 +387,15 @@ export async function updateRecord(
     // Store the record block
     await store.repo.putBlock(cid, recordBytes, rev)
 
-    // Build and sign MST commit
+    // Preload MST blocks and build commit
     const adapter = new StratosBlockStoreReader(store.repo)
-    const currentRoot = await store.repo.getRoot()
+    const rootDetails = await store.repo.getRootDetailed()
+    if (rootDetails) {
+      await store.repo.preloadBlocksForRev(rootDetails.rev)
+    }
     const unsigned = await buildCommit(
       adapter,
-      currentRoot?.toString() ?? null,
+      rootDetails?.cid.toString() ?? null,
       {
         did: callerDid,
         writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
@@ -701,12 +710,15 @@ export async function applyWritesBatch(
       }
     }
 
-    // Single MST commit for all operations
+    // Preload MST blocks and build single commit for all operations
     const adapter = new StratosBlockStoreReader(store.repo)
-    const currentRoot = await store.repo.getRoot()
+    const rootDetails = await store.repo.getRootDetailed()
+    if (rootDetails) {
+      await store.repo.preloadBlocksForRev(rootDetails.rev)
+    }
     const unsigned = await buildCommit(
       adapter,
-      currentRoot?.toString() ?? null,
+      rootDetails?.cid.toString() ?? null,
       {
         did: callerDid,
         writes: mstOps,

@@ -526,6 +526,18 @@ export class PgActorRepoReader {
     return Number(res[0]?.count ?? 0)
   }
 
+  async preloadBlocksForRev(rev: string): Promise<void> {
+    const res = (await this.db.execute(
+      sql`SELECT cid, content FROM stratos_repo_block WHERE "repoRev" = ${rev} LIMIT 15`,
+    )) as unknown as { cid: string; content: Buffer }[]
+    for (const row of res) {
+      const cid = CID.parse(row.cid)
+      if (!this.cache.has(cid)) {
+        this.cache.set(cid, new Uint8Array(row.content))
+      }
+    }
+  }
+
   async listExistingBlocks(): Promise<CidSet> {
     const cids = new CidSet()
     let lastCid: string | undefined = ''
