@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { StratosActorSync } from '../src/stratos-sync.ts'
 
 function createTestSync(
-  opts: { maxConcurrentActorSyncs?: number; maxActorQueueSize?: number } = {},
+  opts: {
+    maxConcurrentActorSyncs?: number
+    maxActorQueueSize?: number
+    globalMaxPending?: number
+    drainDelayMs?: number
+  } = {},
 ) {
   const errors: Error[] = []
   const cursorManager = {
@@ -20,6 +25,8 @@ function createTestSync(
     {
       maxConcurrentActorSyncs: opts.maxConcurrentActorSyncs ?? 1,
       maxActorQueueSize: opts.maxActorQueueSize ?? 10,
+      globalMaxPending: opts.globalMaxPending ?? 500,
+      drainDelayMs: opts.drainDelayMs ?? 0,
     },
   )
 
@@ -182,5 +189,89 @@ describe('enqueueActorMessage overflow triggers close-and-reconnect', () => {
     ;(sync as any).enqueueActorMessage('did:plc:trunks', new Uint8Array(0))
 
     expect(closeAndReconnect).toHaveBeenCalledWith('did:plc:trunks')
+  })
+
+  it('calls closeAndReconnectActor when global pending count exceeds cap', () => {
+    const { sync } = createTestSync({
+      maxActorQueueSize: 100,
+      globalMaxPending: 5,
+    })
+
+    setPrivate(sync, 'globalPendingCount', 5)
+
+    const closeAndReconnect = vi.fn()
+    setPrivate(sync, 'closeAndReconnectActor', closeAndReconnect)
+    ;(sync as any).enqueueActorMessage('did:plc:bulma', new Uint8Array(0))
+
+    expect(closeAndReconnect).toHaveBeenCalledWith('did:plc:bulma')
+  })
+})
+
+describe('globalPendingCount tracking', () => {
+  it('increments on enqueue and decrements on drain', async () => {
+    const { sync } = createTestSync({
+      maxConcurrentActorSyncs: 1,
+      globalMaxPending: 500,
+      drainDelayMs: 0,
+    })
+
+    setPrivate(
+      sync,
+      'handleMessage',
+      vi.fn().mockResolvedValue(undefined),
+    )
+
+    // Block drains by saturating the semaphore
+    setPrivate(sync, 'activeSyncs', 1)
+
+    ;(sync as any).enqueueActorMessage('did:plc:krillin', new Uint8Array(0))
+    ;(sync as any).enqueueActorMessage('did:plc:krillin', new Uint8Array(0))
+    ;(sync as any).enqueueActorMessage('did:plc:yamcha', new Uint8Array(0))
+
+    // Messages queued but not drained due to semaphore
+    expect(getPrivate(sync, 'globalPendingCount')).toBe(3)
+
+    // Unblock drains
+    setPrivate(sync, 'activeSyncs', 0)
+    const syncWaiters: Array<() => void> = getPrivate(sync, 'syncWaiters')
+    while (syncWaiters.length > 0) syncWaiters.shift()?.()
+
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(getPrivate(sync, 'globalPendingCount')).toBe(0)
+  })
+})
+
+describe('drain delay throttles processing', () => {
+  it('introduces delay between messages when drainDelayMs > 0', async () => {
+    const { sync } = createTestSync({
+      maxConcurrentActorSyncs: 10,
+      drainDelayMs: 20,
+    })
+
+    const callTimestamps: number[] = []
+    setPrivate(sync, 'handleMessage', vi.fn(async () => {
+      callTimestamps.push(Date.now())
+    }))
+
+    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    actorQueues.set('did:plc:tien', {
+      pending: [
+        new Uint8Array(0),
+        new Uint8Array(0),
+        new Uint8Array(0),
+      ],
+      active: false,
+      draining: false,
+    })
+    setPrivate(sync, 'globalPendingCount', 3)
+
+    await (sync as any).drainActorQueue('did:plc:tien')
+
+    expect(callTimestamps).toHaveLength(3)
+    const gap1 = callTimestamps[1] - callTimestamps[0]
+    const gap2 = callTimestamps[2] - callTimestamps[1]
+    expect(gap1).toBeGreaterThanOrEqual(15)
+    expect(gap2).toBeGreaterThanOrEqual(15)
   })
 })

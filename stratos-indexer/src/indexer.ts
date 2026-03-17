@@ -213,6 +213,8 @@ export class Indexer {
       {
         maxConcurrentActorSyncs: this.config.worker.actorSyncConcurrency,
         maxActorQueueSize: this.config.worker.actorSyncQueuePerActor,
+        globalMaxPending: this.config.worker.actorSyncGlobalMaxPending,
+        drainDelayMs: this.config.worker.actorSyncDrainDelayMs,
       },
       (did) =>
         background.add(() =>

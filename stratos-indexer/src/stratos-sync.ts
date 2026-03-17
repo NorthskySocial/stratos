@@ -147,6 +147,8 @@ export class StratosServiceSubscription {
 export interface StratosActorSyncOptions {
   maxConcurrentActorSyncs: number
   maxActorQueueSize: number
+  globalMaxPending: number
+  drainDelayMs: number
 }
 
 interface ActorQueue {
@@ -168,6 +170,9 @@ export class StratosActorSync {
   private syncWaiters: Array<() => void> = []
   private readonly maxConcurrentActorSyncs: number
   private readonly maxActorQueueSize: number
+  private readonly globalMaxPending: number
+  private readonly drainDelayMs: number
+  private globalPendingCount = 0
 
   // Periodic stats instead of per-record logging
   private indexedCount = 0
@@ -184,11 +189,15 @@ export class StratosActorSync {
     options: StratosActorSyncOptions = {
       maxConcurrentActorSyncs: 8,
       maxActorQueueSize: 10,
+      globalMaxPending: 500,
+      drainDelayMs: 5,
     },
     private onHandleNeeded?: (did: string) => void,
   ) {
     this.maxConcurrentActorSyncs = options.maxConcurrentActorSyncs
     this.maxActorQueueSize = options.maxActorQueueSize
+    this.globalMaxPending = options.globalMaxPending
+    this.drainDelayMs = options.drainDelayMs
   }
 
   start(): void {
@@ -335,11 +344,15 @@ export class StratosActorSync {
       q = { pending: [], active: false, draining: false }
       this.actorQueues.set(did, q)
     }
-    if (q.pending.length >= this.maxActorQueueSize) {
+    if (
+      q.pending.length >= this.maxActorQueueSize ||
+      this.globalPendingCount >= this.globalMaxPending
+    ) {
       this.closeAndReconnectActor(did)
       return
     }
     q.pending.push(data)
+    this.globalPendingCount++
     if (!q.active && !q.draining) {
       void this.drainActorQueue(did)
     }
@@ -377,7 +390,11 @@ export class StratosActorSync {
         const current = this.actorQueues.get(did)
         if (!current || current.pending.length === 0) break
         const data = current.pending.shift()!
+        this.globalPendingCount--
         await this.handleMessage(did, data)
+        if (this.drainDelayMs > 0 && current.pending.length > 0) {
+          await new Promise<void>((r) => setTimeout(r, this.drainDelayMs))
+        }
       }
     } finally {
       q.active = false
