@@ -43,6 +43,7 @@ const phases: Phase[] = [
   { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
   { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
   { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
+  { name: 'Unenrollment', script: 'test-unenrollment.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },
 ]
 
