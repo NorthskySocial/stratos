@@ -41,17 +41,19 @@ export function createIdResolver(cfg: IdentityConfig): IdResolver {
   })
 }
 
-/**
- * The upstream BackgroundQueue uses PQueue with no concurrency limit, which
- * causes unbounded promise accumulation under high load. This wrapper
- * replaces the internal queue with a concurrency-limited one.
- */
-function capBackgroundQueueConcurrency(
+function capBackgroundQueue(
   background: BackgroundQueue,
   concurrency: number,
+  maxSize: number,
 ): void {
   const limited = new PQueue({ concurrency })
   ;(background as unknown as { queue: PQueue }).queue = limited
+
+  const originalAdd = background.add.bind(background)
+  background.add = (task) => {
+    if (limited.size + limited.pending >= maxSize) return
+    originalAdd(task)
+  }
 }
 
 export function createIndexingService(
@@ -60,9 +62,10 @@ export function createIndexingService(
   config: IndexerConfig,
 ): { indexingService: IndexingService; background: BackgroundQueue } {
   const background = new BackgroundQueue(db)
-  capBackgroundQueueConcurrency(
+  capBackgroundQueue(
     background,
     config.worker.backgroundQueueConcurrency,
+    config.worker.backgroundQueueMaxSize,
   )
   const indexingService = new IndexingService(db, idResolver, background)
   return { indexingService, background }
