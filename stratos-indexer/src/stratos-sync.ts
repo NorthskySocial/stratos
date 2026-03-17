@@ -152,6 +152,7 @@ export interface StratosActorSyncOptions {
 interface ActorQueue {
   pending: Uint8Array[]
   active: boolean
+  draining: boolean
 }
 
 export class StratosActorSync {
@@ -331,38 +332,48 @@ export class StratosActorSync {
   private enqueueActorMessage(did: string, data: Uint8Array): void {
     let q = this.actorQueues.get(did)
     if (!q) {
-      q = { pending: [], active: false }
+      q = { pending: [], active: false, draining: false }
       this.actorQueues.set(did, q)
     }
     if (q.pending.length >= this.maxActorQueueSize) {
-      // Drop oldest to prioritize new events during spikes
-      q.pending.shift()
-      console.warn(
-        { did, limit: this.maxActorQueueSize },
-        'actor sync queue full, dropping oldest message',
-      )
+      this.closeAndReconnectActor(did)
+      return
     }
     q.pending.push(data)
-    if (!q.active) {
+    if (!q.active && !q.draining) {
       void this.drainActorQueue(did)
     }
   }
 
+  private closeAndReconnectActor(did: string): void {
+    const ws = this.subscriptions.get(did)
+    if (ws) {
+      ws.close()
+      this.subscriptions.delete(did)
+    }
+    const q = this.actorQueues.get(did)
+    if (q) {
+      q.pending.length = 0
+    }
+    this.scheduleReconnect(did)
+  }
+
   private async drainActorQueue(did: string): Promise<void> {
     const q = this.actorQueues.get(did)
-    if (!q || q.active) return
+    if (!q || q.active || q.draining) return
 
-    // Wait for a global processing slot to limit concurrent DB operations
+    q.draining = true
+
     if (this.activeSyncs >= this.maxConcurrentActorSyncs) {
       await new Promise<void>((resolve) => this.syncWaiters.push(resolve))
     }
 
     q.active = true
+    q.draining = false
     this.activeSyncs++
 
     try {
       while (true) {
-        // Re-fetch queue in case removeActor was called
         const current = this.actorQueues.get(did)
         if (!current || current.pending.length === 0) break
         const data = current.pending.shift()!
@@ -372,9 +383,8 @@ export class StratosActorSync {
       q.active = false
       this.activeSyncs--
       this.syncWaiters.shift()?.()
-      // Restart drain if messages arrived while we were processing
       const remaining = this.actorQueues.get(did)
-      if (remaining && remaining.pending.length > 0) {
+      if (remaining && remaining.pending.length > 0 && !remaining.draining) {
         void this.drainActorQueue(did)
       }
     }
