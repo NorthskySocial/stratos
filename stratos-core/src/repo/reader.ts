@@ -258,6 +258,23 @@ export class StratosSqlRepoReader {
     return res[0]?.count ?? 0
   }
 
+  async preloadBlocksForRev(rev: string): Promise<void> {
+    const res = await this.db
+      .select({
+        cid: stratosRepoBlock.cid,
+        content: stratosRepoBlock.content,
+      })
+      .from(stratosRepoBlock)
+      .where(eq(stratosRepoBlock.repoRev, rev))
+      .limit(15)
+    for (const row of res) {
+      const cid = CID.parse(row.cid)
+      if (!this.cache.has(cid)) {
+        this.cache.set(cid, row.content as Uint8Array)
+      }
+    }
+  }
+
   async listExistingBlocks(): Promise<CidSet> {
     const cids = new CidSet()
     let lastCid: string | undefined = ''
