@@ -149,16 +149,16 @@ export async function createRecord(
     await validateWritableRecord(ctx, callerDid, collection, record)
   }
 
+  // Pre-compute CPU-bound work outside the transaction
+  const uriStr = `at://${callerDid}/${collection}/${rkey}`
+  const uri = new AtUri(uriStr)
+  const recordBytes = encodeRecord(record)
+  const cid = await computeCid(record)
+  const rev = TID.nextStr()
+
   // Perform the write
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    // Create the record in the database
-    const uriStr = `at://${callerDid}/${collection}/${rkey}`
-    const uri = new AtUri(uriStr)
-    const recordBytes = encodeRecord(record)
-    const cid = await computeCid(record)
-
     // Store the record block
-    const rev = TID.nextStr()
     await store.repo.putBlock(cid, recordBytes, rev)
 
     // Build and sign MST commit
@@ -365,20 +365,20 @@ export async function updateRecord(
     await validateWritableRecord(ctx, callerDid, collection, record)
   }
 
-  const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    const uriStr = `at://${callerDid}/${collection}/${rkey}`
-    const uri = new AtUri(uriStr)
+  // Pre-compute CPU-bound work outside the transaction
+  const uriStr = `at://${callerDid}/${collection}/${rkey}`
+  const uri = new AtUri(uriStr)
+  const recordBytes = encodeRecord(record)
+  const cid = await computeCid(record)
+  const rev = TID.nextStr()
 
+  const result = await ctx.actorStore.transact(callerDid, async (store) => {
     const existing = await store.record.getRecord(uri, null)
     if (!existing) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 
-    const recordBytes = encodeRecord(record)
-    const cid = await computeCid(record)
-
     // Store the record block
-    const rev = TID.nextStr()
     await store.repo.putBlock(cid, recordBytes, rev)
 
     // Build and sign MST commit
@@ -625,6 +625,34 @@ export async function applyWritesBatch(
     await ctx.actorStore.create(callerDid)
   }
 
+  // Pre-compute CPU-bound work outside the transaction
+  const precomputed = await Promise.all(
+    ops.map(async (op) => {
+      const rkey = op.action === 'create' ? op.rkey || TID.nextStr() : op.rkey
+      const uriStr = `at://${callerDid}/${op.collection}/${rkey}`
+      const uri = new AtUri(uriStr)
+
+      if (op.action === 'delete') {
+        return { op, rkey, uriStr, uri, action: 'delete' as const }
+      }
+
+      await validateWritableRecord(ctx, callerDid, op.collection, op.record)
+      const recordBytes = encodeRecord(op.record)
+      const cid = await computeCid(op.record)
+      const tempRev = TID.nextStr()
+      return {
+        op,
+        rkey,
+        uriStr,
+        uri,
+        action: op.action,
+        recordBytes,
+        cid,
+        tempRev,
+      }
+    }),
+  )
+
   return await ctx.actorStore.transact(callerDid, async (store) => {
     const mstOps: MstWriteOp[] = []
     const indexOps: Array<{
@@ -635,49 +663,40 @@ export async function applyWritesBatch(
       action: 'create' | 'update' | 'delete'
     }> = []
 
-    for (const op of ops) {
-      const rkey = op.action === 'create' ? op.rkey || TID.nextStr() : op.rkey
-      const uriStr = `at://${callerDid}/${op.collection}/${rkey}`
-      const uri = new AtUri(uriStr)
-
-      if (op.action === 'delete') {
-        const existing = await store.record.getRecord(uri, null)
+    for (const pre of precomputed) {
+      if (pre.action === 'delete') {
+        const existing = await store.record.getRecord(pre.uri, null)
         if (!existing) {
           throw new InvalidRequestError('Record not found', 'RecordNotFound')
         }
         mstOps.push({
           action: 'delete',
-          collection: op.collection,
-          rkey,
+          collection: pre.op.collection,
+          rkey: pre.rkey,
           cid: null,
         })
         indexOps.push({
-          uri,
-          uriStr,
+          uri: pre.uri,
+          uriStr: pre.uriStr,
           cid: null,
           record: undefined,
           action: 'delete',
         })
       } else {
-        await validateWritableRecord(ctx, callerDid, op.collection, op.record)
-
-        const recordBytes = encodeRecord(op.record)
-        const cid = await computeCid(op.record)
-        const tempRev = TID.nextStr()
-        await store.repo.putBlock(cid, recordBytes, tempRev)
+        await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
 
         mstOps.push({
-          action: op.action,
-          collection: op.collection,
-          rkey,
-          cid: cid.toString(),
+          action: pre.action,
+          collection: pre.op.collection,
+          rkey: pre.rkey,
+          cid: pre.cid.toString(),
         })
         indexOps.push({
-          uri,
-          uriStr,
-          cid,
-          record: op.record,
-          action: op.action,
+          uri: pre.uri,
+          uriStr: pre.uriStr,
+          cid: pre.cid,
+          record: pre.op.record,
+          action: pre.action,
         })
       }
     }
