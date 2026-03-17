@@ -933,6 +933,7 @@ export class PostgresActorStore implements ActorStore {
   private readonly adminDb: StratosPgDb
   private readonly actorClient: ReturnType<typeof postgres>
   private readonly actorDb: StratosPgDb
+  private readonly schemaNameCache = new Map<string, string>()
 
   constructor(config: PostgresActorStoreConfig) {
     this.connectionString = config.connectionString
@@ -960,8 +961,12 @@ export class PostgresActorStore implements ActorStore {
   }
 
   private async getSchemaName(did: string): Promise<string> {
+    const cached = this.schemaNameCache.get(did)
+    if (cached !== undefined) return cached
     const didHash = await crypto.sha256Hex(did)
-    return actorSchemaName(didHash)
+    const name = actorSchemaName(didHash)
+    this.schemaNameCache.set(did, name)
+    return name
   }
 
   async exists(did: string): Promise<boolean> {
