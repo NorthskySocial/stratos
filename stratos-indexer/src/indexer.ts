@@ -46,6 +46,8 @@ export class Indexer {
       { port: this.config.health.port },
       (req: Request) => {
         if (new URL(req.url).pathname === '/health') {
+          const mem = Deno.memoryUsage()
+          const actorSyncStats = this.stratosActorSync?.getStats()
           return new Response(
             JSON.stringify({
               ok: true,
@@ -54,6 +56,13 @@ export class Indexer {
                 this.stratosActorSync?.getActiveActors().length ?? 0,
               workerPoolPending: this.workerPool?.pendingCount ?? 0,
               workerPoolActive: this.workerPool?.runningCount ?? 0,
+              actorSync: actorSyncStats ?? null,
+              memory: {
+                rss: mem.rss,
+                heapTotal: mem.heapTotal,
+                heapUsed: mem.heapUsed,
+                external: mem.external,
+              },
             }),
             { headers: { 'content-type': 'application/json' } },
           )
