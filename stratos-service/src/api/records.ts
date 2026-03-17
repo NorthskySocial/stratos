@@ -190,16 +190,6 @@ export async function createRecord(
       commitResult.rev,
     )
 
-    // Sequence the change
-    await sequenceChange(store, {
-      action: 'create',
-      uri: uriStr,
-      cid: cid.toString(),
-      record,
-      commitCid: commitResult.commitCid.toString(),
-      rev: commitResult.rev,
-    })
-
     return {
       uri,
       cid,
@@ -209,6 +199,16 @@ export async function createRecord(
         rev: commitResult.rev,
       },
     }
+  })
+
+  // Sequence the change (deferred, non-blocking)
+  deferSequenceChange(ctx, callerDid, {
+    action: 'create',
+    uri: uriStr,
+    cid: cid.toString(),
+    record,
+    commitCid: result.commit.cid,
+    rev: result.commit.rev,
   })
 
   // Write stub to user's PDS (background, non-blocking)
@@ -304,20 +304,20 @@ export async function deleteRecord(
       unsigned,
     )
 
-    // Sequence the change
-    await sequenceChange(store, {
-      action: 'delete',
-      uri: uriStr,
-      commitCid: commitResult.commitCid.toString(),
-      rev: commitResult.rev,
-    })
-
     return {
       commit: {
         cid: commitResult.commitCid.toString(),
         rev: commitResult.rev,
       },
     }
+  })
+
+  // Sequence the change (deferred, non-blocking)
+  deferSequenceChange(ctx, callerDid, {
+    action: 'delete',
+    uri: uriStr,
+    commitCid: result.commit.cid,
+    rev: result.commit.rev,
   })
 
   // Delete stub from user's PDS (background, non-blocking)
@@ -416,16 +416,6 @@ export async function updateRecord(
       commitResult.rev,
     )
 
-    // Sequence the change
-    await sequenceChange(store, {
-      action: 'update',
-      uri: uriStr,
-      cid: cid.toString(),
-      record,
-      commitCid: commitResult.commitCid.toString(),
-      rev: commitResult.rev,
-    })
-
     return {
       uri,
       cid,
@@ -435,6 +425,16 @@ export async function updateRecord(
         rev: commitResult.rev,
       },
     }
+  })
+
+  // Sequence the change (deferred, non-blocking)
+  deferSequenceChange(ctx, callerDid, {
+    action: 'update',
+    uri: uriStr,
+    cid: cid.toString(),
+    record,
+    commitCid: result.commit.cid,
+    rev: result.commit.rev,
   })
 
   // Update stub on PDS (background, non-blocking)
@@ -662,7 +662,7 @@ export async function applyWritesBatch(
     }),
   )
 
-  return await ctx.actorStore.transact(callerDid, async (store) => {
+  const result = await ctx.actorStore.transact(callerDid, async (store) => {
     const mstOps: MstWriteOp[] = []
     const indexOps: Array<{
       uri: AtUri
@@ -730,17 +730,11 @@ export async function applyWritesBatch(
       unsigned,
     )
 
-    // Index records and sequence changes
+    // Index records
     const results: Array<{ uri?: string; cid?: string }> = []
     for (const indexOp of indexOps) {
       if (indexOp.action === 'delete') {
         await store.record.deleteRecord(indexOp.uri)
-        await sequenceChange(store, {
-          action: 'delete',
-          uri: indexOp.uriStr,
-          commitCid: commitResult.commitCid.toString(),
-          rev: commitResult.rev,
-        })
         results.push({})
       } else {
         await store.record.indexRecord(
@@ -750,14 +744,6 @@ export async function applyWritesBatch(
           indexOp.action,
           commitResult.rev,
         )
-        await sequenceChange(store, {
-          action: indexOp.action,
-          uri: indexOp.uriStr,
-          cid: indexOp.cid!.toString(),
-          record: indexOp.record,
-          commitCid: commitResult.commitCid.toString(),
-          rev: commitResult.rev,
-        })
         results.push({ uri: indexOp.uriStr, cid: indexOp.cid!.toString() })
       }
     }
@@ -770,6 +756,32 @@ export async function applyWritesBatch(
       },
     }
   })
+
+  // Sequence all changes (deferred, non-blocking)
+  deferSequenceChanges(
+    ctx,
+    callerDid,
+    precomputed.map((pre) => {
+      if (pre.action === 'delete') {
+        return {
+          action: 'delete' as const,
+          uri: pre.uriStr,
+          commitCid: result.commit.cid,
+          rev: result.commit.rev,
+        }
+      }
+      return {
+        action: pre.action,
+        uri: pre.uriStr,
+        cid: pre.cid.toString(),
+        record: pre.op.record,
+        commitCid: result.commit.cid,
+        rev: result.commit.rev,
+      }
+    }),
+  )
+
+  return result
 }
 
 function encodeRecord(record: unknown): Uint8Array {
@@ -813,4 +825,49 @@ async function sequenceChange(
     invalidated: 0,
     sequencedAt: new Date().toISOString(),
   })
+}
+
+type SequenceOp = {
+  action: 'create' | 'update' | 'delete'
+  uri: string
+  cid?: string
+  record?: unknown
+  commitCid: string
+  rev: string
+}
+
+function deferSequenceChange(
+  ctx: AppContext,
+  callerDid: string,
+  op: SequenceOp,
+): void {
+  ctx.actorStore
+    .transact(callerDid, async (store) => {
+      await sequenceChange(store, op)
+    })
+    .catch((err) => {
+      ctx.logger?.error(
+        { err, did: callerDid, uri: op.uri },
+        'failed to sequence change',
+      )
+    })
+}
+
+function deferSequenceChanges(
+  ctx: AppContext,
+  callerDid: string,
+  ops: SequenceOp[],
+): void {
+  ctx.actorStore
+    .transact(callerDid, async (store) => {
+      for (const op of ops) {
+        await sequenceChange(store, op)
+      }
+    })
+    .catch((err) => {
+      ctx.logger?.error(
+        { err, did: callerDid },
+        'failed to sequence batch changes',
+      )
+    })
 }
