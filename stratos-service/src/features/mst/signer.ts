@@ -4,7 +4,10 @@ import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Keypair } from '@atproto/crypto'
 import type { ActorRepoTransactor } from '../../actor-store-types.js'
-import { type UnsignedCommitData } from '@northskysocial/stratos-core'
+import {
+  type UnsignedCommitData,
+  BlockMap,
+} from '@northskysocial/stratos-core'
 
 export interface SignedCommitResult {
   commitCid: CID
@@ -38,9 +41,12 @@ export async function signAndPersistCommit(
   const commitCidStr = cidToString(atcuteCid)
   const commitCid = CID.parse(commitCidStr)
 
+  const allBlocks = new BlockMap()
   for (const [cidStr, bytes] of unsigned.newBlocks) {
-    await repoTransactor.putBlock(CID.parse(cidStr), bytes, unsigned.rev)
+    allBlocks.set(CID.parse(cidStr), bytes)
   }
+  allBlocks.set(commitCid, commitBytes)
+  await repoTransactor.putBlocks(allBlocks, unsigned.rev)
 
   if (unsigned.removedCids.length > 0) {
     await repoTransactor.deleteBlocks(
@@ -48,7 +54,6 @@ export async function signAndPersistCommit(
     )
   }
 
-  await repoTransactor.putBlock(commitCid, commitBytes, unsigned.rev)
   await repoTransactor.updateRoot(commitCid, unsigned.rev, unsigned.did)
 
   return {
