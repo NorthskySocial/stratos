@@ -162,7 +162,10 @@ export class StratosActorSync {
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private reconnectAttempts = new Map<string, number>()
   private running = false
-  private knownDids = new Set<string>()
+  private knownDids = new Map<string, number>()
+  private knownDidsSweepTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly KNOWN_DIDS_TTL_MS = 30 * 60 * 1000
+  private static readonly KNOWN_DIDS_SWEEP_MS = 60 * 1000
 
   // Per-actor bounded queues prevent unbounded concurrent DB operations during spikes
   private actorQueues = new Map<string, ActorQueue>()
@@ -216,6 +219,13 @@ export class StratosActorSync {
         this.deletedCount = 0
       }
     }, StratosActorSync.STATS_INTERVAL_MS)
+
+    this.knownDidsSweepTimer = setInterval(() => {
+      const cutoff = Date.now() - StratosActorSync.KNOWN_DIDS_TTL_MS
+      for (const [did, ts] of this.knownDids) {
+        if (ts < cutoff) this.knownDids.delete(did)
+      }
+    }, StratosActorSync.KNOWN_DIDS_SWEEP_MS)
   }
 
   stop(): void {
@@ -225,6 +235,11 @@ export class StratosActorSync {
       clearInterval(this.statsTimer)
       this.statsTimer = null
     }
+    if (this.knownDidsSweepTimer) {
+      clearInterval(this.knownDidsSweepTimer)
+      this.knownDidsSweepTimer = null
+    }
+    this.knownDids.clear()
 
     for (const timer of this.reconnectTimers.values()) {
       clearTimeout(timer)
@@ -462,7 +477,7 @@ export class StratosActorSync {
 
     // Resolve the post creator's handle if not already known
     if (upserts.length > 0 && !this.knownDids.has(did)) {
-      this.knownDids.add(did)
+      this.knownDids.set(did, Date.now())
       this.onHandleNeeded?.(did)
     }
 
@@ -477,7 +492,7 @@ export class StratosActorSync {
       for (const { record } of upserts) {
         for (const refDid of extractReferencedDids(record)) {
           if (refDid !== did && !this.knownDids.has(refDid)) {
-            this.knownDids.add(refDid)
+            this.knownDids.set(refDid, Date.now())
             this.onReferencedActor(refDid)
           }
         }
@@ -485,8 +500,23 @@ export class StratosActorSync {
     }
   }
   markKnown(dids: Iterable<string>): void {
+    const now = Date.now()
     for (const did of dids) {
-      this.knownDids.add(did)
+      this.knownDids.set(did, now)
+    }
+  }
+
+  getStats(): {
+    knownDids: number
+    actorQueues: number
+    globalPendingCount: number
+    activeSyncs: number
+  } {
+    return {
+      knownDids: this.knownDids.size,
+      actorQueues: this.actorQueues.size,
+      globalPendingCount: this.globalPendingCount,
+      activeSyncs: this.activeSyncs,
     }
   }
 }
