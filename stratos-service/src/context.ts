@@ -96,6 +96,7 @@ import {
 } from './db/pg.js'
 import { PgEnrollmentStoreWriter } from './adapters/index.js'
 import { PostgresActorStore } from './adapters/index.js'
+import { CachedEnrollmentStore } from './adapters/cached-enrollment-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 import { RedisCache } from './adapters/redis-cache.js'
@@ -902,7 +903,10 @@ export async function createAppContext(
       'postgres service database preflight passed',
     )
     await migrateServicePgDb(pgDb)
-    enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    const pgEnrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore)
+    await cachedEnrollmentStore.warm()
+    enrollmentStore = cachedEnrollmentStore
     oauthStores = createPgOAuthStores(pgDb)
     destroyBackend = async () => {
       await closeServicePgDb(pgDb)
