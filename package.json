@@ -14,10 +14,13 @@
     "clean": "pnpm -r run clean",
     "lint": "eslint test && pnpm -r run lint",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest",
     "codegen": "pnpm --filter stratos-service run codegen",
     "e2etest": "deno run -A test/scripts/run-all.ts",
-    "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct"
+    "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct",
+    "test:integration": "pnpm e2etest",
+    "test:integration:direct": "pnpm e2etestdirect"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
