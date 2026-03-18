@@ -166,17 +166,21 @@ describe('signAndPersistCommit', () => {
 
     await signAndPersistCommit(transactor as any, keypair, unsigned)
 
+    // All blocks persisted in a single batch call
+    expect(transactor.putBlocks).toHaveBeenCalledOnce()
+    const [blockMap, rev] = transactor.putBlocks.mock.calls[0] as [BlockMap, string]
+    expect(rev).toBe(unsigned.rev)
+
     // newBlocks + 1 commit block
     const expectedBlockCount = unsigned.newBlocks.size + 1
-    expect(transactor.putBlock).toHaveBeenCalledTimes(expectedBlockCount)
+    expect(blockMap.size()).toBe(expectedBlockCount)
 
-    // Each newBlock should have been persisted with the correct rev
+    // Each newBlock should be present in the batch
     for (const [cidStr] of unsigned.newBlocks) {
-      const matchingCall = transactor.putBlock.mock.calls.find(
-        (call: [CID, Uint8Array, string]) => call[0].toString() === cidStr,
+      const found = [...blockMap.entries()].some(
+        ([key]) => key === cidStr,
       )
-      expect(matchingCall).toBeDefined()
-      expect(matchingCall![2]).toBe(unsigned.rev)
+      expect(found).toBe(true)
     }
   })
 
@@ -366,9 +370,13 @@ describe('signAndPersistCommit', () => {
       unsigned,
     )
 
-    // The last putBlock call should be for the commit block itself
-    const lastCall = transactor.putBlock.mock.calls.at(-1)!
-    expect(lastCall[0].toString()).toBe(result.commitCid.toString())
-    expect(lastCall[1]).toEqual(result.commitBytes)
+    // The commit block should be included in the batch putBlocks call
+    expect(transactor.putBlocks).toHaveBeenCalledOnce()
+    const [blockMap] = transactor.putBlocks.mock.calls[0] as [BlockMap]
+    const commitEntry = [...blockMap.entries()].find(
+      ([key]) => key === result.commitCid.toString(),
+    )
+    expect(commitEntry).toBeDefined()
+    expect(commitEntry![1]).toEqual(result.commitBytes)
   })
 })
