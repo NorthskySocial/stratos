@@ -27,6 +27,7 @@ const envSchema = z.object({
   STRATOS_PG_ACTOR_POOL_SIZE: z.coerce.number().int().positive().optional(),
   STRATOS_PG_ADMIN_POOL_SIZE: z.coerce.number().int().positive().optional(),
   STRATOS_BLOCK_CACHE_SIZE: z.coerce.number().int().positive().optional(),
+  STRATOS_COMMIT_POOL_SIZE: z.coerce.number().int().positive().optional(),
   STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
   // S3 storage (optional)
@@ -211,6 +212,7 @@ export interface StratosServiceConfig {
     pgActorPoolSize?: number
     pgAdminPoolSize?: number
     blockCacheSize?: number
+    commitPoolSize?: number
   }
   blobstore: BlobstoreConfig
   stratos: {
@@ -326,6 +328,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       pgActorPoolSize: env.STRATOS_PG_ACTOR_POOL_SIZE,
       pgAdminPoolSize: env.STRATOS_PG_ADMIN_POOL_SIZE,
       blockCacheSize: env.STRATOS_BLOCK_CACHE_SIZE,
+      commitPoolSize: env.STRATOS_COMMIT_POOL_SIZE,
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {

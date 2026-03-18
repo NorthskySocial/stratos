@@ -6,7 +6,6 @@ import cookieParser from 'cookie-parser'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
-import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type AppContext,
@@ -170,7 +169,7 @@ export class StratosServer {
         await ctx.actorStore.create(did)
         await ctx.actorStore.transact(did, async (store) => {
           const adapter = new StratosBlockStoreReader(store.repo)
-          const unsigned = await buildCommit(adapter, null, {
+          const unsigned = await ctx.commitPool.buildCommit(adapter, null, {
             did,
             writes: [],
           })
