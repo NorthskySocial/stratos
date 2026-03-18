@@ -647,6 +647,10 @@ async function batchIndexStratosRecords(
           oc.column('uri' as never).doUpdateSet({
             cid: row.cid,
             text: row.text,
+            replyRoot: row.replyRoot,
+            replyRootCid: row.replyRootCid,
+            replyParent: row.replyParent,
+            replyParentCid: row.replyParentCid,
             embed: row.embed,
             facets: row.facets,
             langs: row.langs,

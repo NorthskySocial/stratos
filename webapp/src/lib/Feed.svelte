@@ -14,7 +14,13 @@
 </script>
 
 {#snippet threadNode(node: ThreadNode)}
-  <div class="thread-node" class:reply={node.depth > 0} style="--depth: {Math.min(node.depth, 4)}">
+  <div
+    class="thread-node"
+    class:reply={node.depth > 0}
+    class:shade-even={node.depth > 0 && node.depth % 2 === 0}
+    class:shade-odd={node.depth > 0 && node.depth % 2 === 1}
+    style="--depth: {Math.min(node.depth, 4)}"
+  >
     {#if node.depth > 0}
       <div class="thread-line"></div>
     {/if}
@@ -64,6 +70,22 @@
 
   .thread-node.reply {
     border-top: none;
+  }
+
+  .thread-node.shade-odd {
+    background: #f7f7f8;
+  }
+
+  .thread-node.shade-even {
+    background: #efeff1;
+  }
+
+  .thread-node.shade-odd :global(.post-card.private) {
+    background: #f5f0fa;
+  }
+
+  .thread-node.shade-even :global(.post-card.private) {
+    background: #ece5f5;
   }
 
   .thread-line {
