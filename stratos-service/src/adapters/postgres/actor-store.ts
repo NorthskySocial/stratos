@@ -932,10 +932,11 @@ export interface PostgresActorStoreConfig {
   blobstore: BlobStoreCreator
   cborToRecord: (content: Uint8Array) => Record<string, unknown>
   logger?: Logger
+  actorPoolSize?: number
+  adminPoolSize?: number
 }
 
 export class PostgresActorStore implements ActorStore {
-  private readonly connectionString: string
   private readonly blobstore: BlobStoreCreator
   private readonly cborToRecord: (
     content: Uint8Array,
@@ -948,19 +949,17 @@ export class PostgresActorStore implements ActorStore {
   private readonly schemaNameCache = new Map<string, string>()
 
   constructor(config: PostgresActorStoreConfig) {
-    this.connectionString = config.connectionString
     this.blobstore = config.blobstore
     this.cborToRecord = config.cborToRecord
     this.logger = config.logger
-    this.adminClient = postgres(this.connectionString, {
-      max: 3,
+    this.adminClient = postgres(config.connectionString, {
+      max: config.adminPoolSize ?? 3,
       idle_timeout: 20,
       connect_timeout: 10,
     })
     this.adminDb = drizzle({ client: this.adminClient })
-    // Shared pool for all per-actor operations; search_path set per transaction via SET LOCAL
-    this.actorClient = postgres(this.connectionString, {
-      max: 100,
+    this.actorClient = postgres(config.connectionString, {
+      max: config.actorPoolSize ?? 30,
       idle_timeout: 20,
       connect_timeout: 10,
     })
@@ -991,18 +990,13 @@ export class PostgresActorStore implements ActorStore {
 
   async create(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 2,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
+    await this.adminDb.execute(
+      sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`),
+    )
+    await this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      await migrateStratosPgDb(tx as unknown as StratosPgDb)
     })
-    const actorDb = drizzle({ client, schema: pgActorSchema })
-    try {
-      await migrateStratosPgDb(actorDb, schemaName)
-    } finally {
-      await client.end()
-    }
   }
 
   async destroy(did: string): Promise<void> {

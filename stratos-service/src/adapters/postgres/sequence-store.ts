@@ -65,58 +65,79 @@ function rowToEvent(row: {
 }
 
 export class PgSequenceStoreReader implements SequenceStoreReader {
-  constructor(protected db: StratosPgDb | StratosPgDbOrTx) {}
+  constructor(
+    protected db: StratosPgDb | StratosPgDbOrTx,
+    protected schemaName?: string,
+  ) {}
+
+  protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
+    if (!this.schemaName) {
+      return fn(this.db as StratosPgDb)
+    }
+    return (this.db as StratosPgDb).transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${this.schemaName}"`))
+      return fn(tx as unknown as StratosPgDb)
+    })
+  }
 
   async getLatestSeq(): Promise<number | null> {
-    const rows = await this.db
-      .select({ seq: pgStratosSeq.seq })
-      .from(pgStratosSeq)
-      .orderBy(desc(pgStratosSeq.seq))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ seq: pgStratosSeq.seq })
+        .from(pgStratosSeq)
+        .orderBy(desc(pgStratosSeq.seq))
+        .limit(1)
 
-    return rows[0]?.seq ?? null
+      return rows[0]?.seq ?? null
+    })
   }
 
   async getEventsSince(
     seq: number,
     options?: GetEventsSinceOptions,
   ): Promise<SequenceEvent[]> {
-    const limit = options?.limit ?? 1000
+    return this.withDb(async (db) => {
+      const limit = options?.limit ?? 1000
 
-    const rows = await this.db
-      .select()
-      .from(pgStratosSeq)
-      .where(gt(pgStratosSeq.seq, seq))
-      .orderBy(asc(pgStratosSeq.seq))
-      .limit(limit)
+      const rows = await db
+        .select()
+        .from(pgStratosSeq)
+        .where(gt(pgStratosSeq.seq, seq))
+        .orderBy(asc(pgStratosSeq.seq))
+        .limit(limit)
 
-    return rows.map(rowToEvent)
+      return rows.map(rowToEvent)
+    })
   }
 
   async getEvent(seq: number): Promise<SequenceEvent | null> {
-    const rows = await this.db
-      .select()
-      .from(pgStratosSeq)
-      .where(eq(pgStratosSeq.seq, seq))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select()
+        .from(pgStratosSeq)
+        .where(eq(pgStratosSeq.seq, seq))
+        .limit(1)
 
-    const row = rows[0]
-    if (!row) return null
+      const row = rows[0]
+      if (!row) return null
 
-    return rowToEvent(row)
+      return rowToEvent(row)
+    })
   }
 
   async getEventsRange(
     startSeq: number,
     endSeq: number,
   ): Promise<SequenceEvent[]> {
-    const rows = await this.db
-      .select()
-      .from(pgStratosSeq)
-      .where(and(gt(pgStratosSeq.seq, startSeq), lte(pgStratosSeq.seq, endSeq)))
-      .orderBy(asc(pgStratosSeq.seq))
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select()
+        .from(pgStratosSeq)
+        .where(and(gt(pgStratosSeq.seq, startSeq), lte(pgStratosSeq.seq, endSeq)))
+        .orderBy(asc(pgStratosSeq.seq))
 
-    return rows.map(rowToEvent)
+      return rows.map(rowToEvent)
+    })
   }
 }
 
