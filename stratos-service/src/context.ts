@@ -1006,6 +1006,7 @@ export async function createAppContext(
       logger,
       actorPoolSize: cfg.storage.pgActorPoolSize,
       adminPoolSize: cfg.storage.pgAdminPoolSize,
+      blockCacheSize: cfg.storage.blockCacheSize,
     })
   } else {
     actorStore = new StratosActorStore({
