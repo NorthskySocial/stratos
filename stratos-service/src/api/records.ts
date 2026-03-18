@@ -12,7 +12,6 @@ import {
   assertStratosValidation,
   extractBoundaryDomains,
   StratosValidationError,
-  buildCommit,
   type MstWriteOp,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
@@ -116,7 +115,7 @@ async function prepareCommit(
     const rootCid = rootDetails?.cid.toString() ?? null
 
     const storage = new StratosBlockStoreReader(reader.repo)
-    const unsigned = await buildCommit(storage, rootCid, { did, writes })
+    const unsigned = await ctx.commitPool.buildCommit(storage, rootCid, { did, writes })
 
     return { unsigned, rootCid }
   })
@@ -191,17 +190,16 @@ export async function createRecord(
     { action: 'create', collection, rkey, cid: cid.toString() },
   ]
 
-  // Build MST commit and persist inside a single transaction to avoid
-  // acquiring two pool connections per request
-  const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    const rootDetails = await store.repo.getRootDetailed()
-    const rootCid = rootDetails?.cid.toString() ?? null
+  // Build MST commit off-thread via worker pool, then persist inside a single transaction
+  const prepared = await prepareCommit(ctx, callerDid, writes)
 
-    const storage = new StratosBlockStoreReader(store.repo)
-    const unsigned = await buildCommit(storage, rootCid, {
-      did: callerDid,
-      writes,
-    })
+  const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    // Optimistic lock: verify repo root hasn't changed since we read the MST
+    const currentRoot = await store.repo.getRootDetailed()
+    assertRootUnchanged(
+      currentRoot?.cid.toString() ?? null,
+      prepared.rootCid,
+    )
 
     // Store the record block
     await store.repo.putBlock(cid, recordBytes, rev)
@@ -209,7 +207,7 @@ export async function createRecord(
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
-      unsigned,
+      prepared.unsigned,
     )
 
     // Index the record
@@ -697,14 +695,14 @@ export async function applyWritesBatch(
     cid: pre.action === 'delete' ? null : pre.cid!.toString(),
   }))
 
-  // Build commit outside the transaction using on-demand block reads
+  // Build commit outside the transaction using worker pool
   const { rootCid, unsigned } = await ctx.actorStore.read(
     callerDid,
     async (reader) => {
       const rootDetails = await reader.repo.getRootDetailed()
       const rootCid = rootDetails?.cid.toString() ?? null
       const storage = new StratosBlockStoreReader(reader.repo)
-      const unsigned = await buildCommit(storage, rootCid, { did: callerDid, writes: mstOps })
+      const unsigned = await ctx.commitPool.buildCommit(storage, rootCid, { did: callerDid, writes: mstOps })
       return { rootCid, unsigned }
     },
   )

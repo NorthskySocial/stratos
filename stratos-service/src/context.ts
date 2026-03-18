@@ -62,7 +62,6 @@ import {
   StratosBlockStoreReader,
   signAndPersistCommit,
 } from './features/index.js'
-import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type StratosServiceConfig,
@@ -97,6 +96,7 @@ import {
 import { PgEnrollmentStoreWriter } from './adapters/index.js'
 import { PostgresActorStore } from './adapters/index.js'
 import { CachedEnrollmentStore } from './adapters/cached-enrollment-store.js'
+import { CommitPool } from './worker/commit-pool.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 import { RedisCache } from './adapters/redis-cache.js'
@@ -791,6 +791,7 @@ export interface AppContext {
   oauthClient: NodeOAuthClient
   signingKey: crypto.Keypair
   signingDidKey: string
+  commitPool: CommitPool
   serviceDid: string
   allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
@@ -976,6 +977,9 @@ export async function createAppContext(
 
   const signingDidKey = signingKey.did()
 
+  const commitPoolSize = cfg.storage.commitPoolSize ?? Math.max(1, (await import('node:os')).availableParallelism() - 1)
+  const commitPool = new CommitPool(commitPoolSize)
+
   const oauthClient = await createOAuthClient(
     {
       clientId:
@@ -1028,7 +1032,7 @@ export async function createAppContext(
       // Initialize repo with an empty signed commit so it's valid from enrollment
       await actorStore.transact(did, async (store) => {
         const adapter = new StratosBlockStoreReader(store.repo)
-        const unsigned = await buildCommit(adapter, null, { did, writes: [] })
+        const unsigned = await commitPool.buildCommit(adapter, null, { did, writes: [] })
         await signAndPersistCommit(store.repo, signingKey, unsigned)
       })
     },
@@ -1141,6 +1145,7 @@ export async function createAppContext(
     oauthClient,
     signingKey,
     signingDidKey,
+    commitPool,
     serviceDid,
     allowListProvider,
     xrpcServer,
@@ -1151,6 +1156,7 @@ export async function createAppContext(
     enrollmentEvents,
     destroy: async () => {
       await stubQueue.drain()
+      await commitPool.destroy()
       await actorStore.close?.()
       await destroyBackend()
     },
