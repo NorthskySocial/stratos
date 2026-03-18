@@ -118,7 +118,7 @@ async function prepareCommit(
     const adapter = new StratosBlockStoreReader(reader.repo)
     const rootDetails = await reader.repo.getRootDetailed()
     if (rootDetails) {
-      await reader.repo.preloadBlocksForRev(rootDetails.rev)
+      await reader.repo.preloadRootSpine(rootDetails.cid)
     }
     const unsigned = await buildCommit(
       adapter,
@@ -746,7 +746,7 @@ export async function applyWritesBatch(
     const adapter = new StratosBlockStoreReader(store.repo)
     const rootDetails = await store.repo.getRootDetailed()
     if (rootDetails) {
-      await store.repo.preloadBlocksForRev(rootDetails.rev)
+      await store.repo.preloadRootSpine(rootDetails.cid)
     }
     const unsigned = await buildCommit(
       adapter,

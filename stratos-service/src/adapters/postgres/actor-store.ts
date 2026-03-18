@@ -4,6 +4,7 @@ import { eq, gt, lt, and, asc, desc, inArray, isNull, sql } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { AtUri } from '@atproto/syntax'
 import * as crypto from '@atproto/crypto'
+import { decode as cborDecode, type CidLink } from '@atcute/cbor'
 
 import {
   type StratosPgDb,
@@ -535,6 +536,36 @@ export class PgActorRepoReader {
       if (!this.cache.has(cid)) {
         this.cache.set(cid, new Uint8Array(row.content))
       }
+    }
+  }
+
+  async preloadRootSpine(commitCid: CID): Promise<void> {
+    const commitBytes = await this.getBytes(commitCid)
+    if (!commitBytes) return
+
+    const commit = cborDecode(commitBytes) as { data: CidLink }
+    const mstRootCid = CID.parse(commit.data.$link)
+
+    const rootBytes = await this.getBytes(mstRootCid)
+    if (!rootBytes) return
+
+    const rootNode = cborDecode(rootBytes) as {
+      l: CidLink | null
+      e: Array<{ t: CidLink | null }>
+    }
+
+    const childCids: CID[] = []
+    if (rootNode.l) {
+      childCids.push(CID.parse(rootNode.l.$link))
+    }
+    for (const entry of rootNode.e) {
+      if (entry.t) {
+        childCids.push(CID.parse(entry.t.$link))
+      }
+    }
+
+    if (childCids.length > 0) {
+      await this.getBlocks(childCids)
     }
   }
 

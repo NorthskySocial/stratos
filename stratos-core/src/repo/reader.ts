@@ -1,5 +1,6 @@
 import { eq, gt, inArray, desc, asc, sql, and } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
+import { decode as cborDecode, type CidLink } from '@atcute/cbor'
 import {
   StratosDbOrTx,
   stratosRepoRoot,
@@ -272,6 +273,36 @@ export class StratosSqlRepoReader {
       if (!this.cache.has(cid)) {
         this.cache.set(cid, row.content as Uint8Array)
       }
+    }
+  }
+
+  async preloadRootSpine(commitCid: CID): Promise<void> {
+    const commitBytes = await this.getBytes(commitCid)
+    if (!commitBytes) return
+
+    const commit = cborDecode(commitBytes) as { data: CidLink }
+    const mstRootCid = CID.parse(commit.data.$link)
+
+    const rootBytes = await this.getBytes(mstRootCid)
+    if (!rootBytes) return
+
+    const rootNode = cborDecode(rootBytes) as {
+      l: CidLink | null
+      e: Array<{ t: CidLink | null }>
+    }
+
+    const childCids: CID[] = []
+    if (rootNode.l) {
+      childCids.push(CID.parse(rootNode.l.$link))
+    }
+    for (const entry of rootNode.e) {
+      if (entry.t) {
+        childCids.push(CID.parse(entry.t.$link))
+      }
+    }
+
+    if (childCids.length > 0) {
+      await this.getBlocks(childCids)
     }
   }
 
