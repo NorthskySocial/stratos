@@ -1002,6 +1002,8 @@ export async function createAppContext(
       blobstore,
       cborToRecord,
       logger,
+      actorPoolSize: cfg.storage.pgActorPoolSize,
+      adminPoolSize: cfg.storage.pgAdminPoolSize,
     })
   } else {
     actorStore = new StratosActorStore({
