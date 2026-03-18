@@ -1,5 +1,5 @@
 import { CID } from 'multiformats/cid'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type {
   BlobMetadataReader,
   BlobMetadataWriter,
@@ -13,74 +13,95 @@ import {
 } from '@northskysocial/stratos-core'
 
 export class PgBlobMetadataReader implements BlobMetadataReader {
-  constructor(protected db: StratosPgDb | StratosPgDbOrTx) {}
+  constructor(
+    protected db: StratosPgDb | StratosPgDbOrTx,
+    protected schemaName?: string,
+  ) {}
+
+  protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
+    if (!this.schemaName) {
+      return fn(this.db as StratosPgDb)
+    }
+    return (this.db as StratosPgDb).transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${this.schemaName}"`))
+      return fn(tx as unknown as StratosPgDb)
+    })
+  }
 
   async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
-    const rows = await this.db
-      .select()
-      .from(pgStratosBlob)
-      .where(eq(pgStratosBlob.cid, cid.toString()))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select()
+        .from(pgStratosBlob)
+        .where(eq(pgStratosBlob.cid, cid.toString()))
+        .limit(1)
 
-    const row = rows[0]
-    if (!row) return null
+      const row = rows[0]
+      if (!row) return null
 
-    return {
-      cid,
-      mimeType: row.mimeType,
-      size: row.size,
-      width: row.width ?? undefined,
-      height: row.height ?? undefined,
-      createdAt: row.createdAt,
-      takedownRef: row.takedownRef ?? undefined,
-    }
+      return {
+        cid,
+        mimeType: row.mimeType,
+        size: row.size,
+        width: row.width ?? undefined,
+        height: row.height ?? undefined,
+        createdAt: row.createdAt,
+        takedownRef: row.takedownRef ?? undefined,
+      }
+    })
   }
 
   async hasBlob(cid: CID): Promise<boolean> {
-    const rows = await this.db
-      .select({ cid: pgStratosBlob.cid })
-      .from(pgStratosBlob)
-      .where(eq(pgStratosBlob.cid, cid.toString()))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ cid: pgStratosBlob.cid })
+        .from(pgStratosBlob)
+        .where(eq(pgStratosBlob.cid, cid.toString()))
+        .limit(1)
 
-    return rows.length > 0
+      return rows.length > 0
+    })
   }
 
   async listBlobsForRecord(recordUri: string): Promise<BlobMetadata[]> {
-    const rows = await this.db
-      .select({
-        cid: pgStratosBlob.cid,
-        mimeType: pgStratosBlob.mimeType,
-        size: pgStratosBlob.size,
-        width: pgStratosBlob.width,
-        height: pgStratosBlob.height,
-        createdAt: pgStratosBlob.createdAt,
-        takedownRef: pgStratosBlob.takedownRef,
-      })
-      .from(pgStratosRecordBlob)
-      .innerJoin(
-        pgStratosBlob,
-        eq(pgStratosBlob.cid, pgStratosRecordBlob.blobCid),
-      )
-      .where(eq(pgStratosRecordBlob.recordUri, recordUri))
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({
+          cid: pgStratosBlob.cid,
+          mimeType: pgStratosBlob.mimeType,
+          size: pgStratosBlob.size,
+          width: pgStratosBlob.width,
+          height: pgStratosBlob.height,
+          createdAt: pgStratosBlob.createdAt,
+          takedownRef: pgStratosBlob.takedownRef,
+        })
+        .from(pgStratosRecordBlob)
+        .innerJoin(
+          pgStratosBlob,
+          eq(pgStratosBlob.cid, pgStratosRecordBlob.blobCid),
+        )
+        .where(eq(pgStratosRecordBlob.recordUri, recordUri))
 
-    return rows.map((row) => ({
-      cid: CID.parse(row.cid),
-      mimeType: row.mimeType,
-      size: row.size,
-      width: row.width ?? undefined,
-      height: row.height ?? undefined,
-      createdAt: row.createdAt,
-      takedownRef: row.takedownRef ?? undefined,
-    }))
+      return rows.map((row) => ({
+        cid: CID.parse(row.cid),
+        mimeType: row.mimeType,
+        size: row.size,
+        width: row.width ?? undefined,
+        height: row.height ?? undefined,
+        createdAt: row.createdAt,
+        takedownRef: row.takedownRef ?? undefined,
+      }))
+    })
   }
 
   async listAllBlobCids(): Promise<CID[]> {
-    const rows = await this.db
-      .select({ cid: pgStratosBlob.cid })
-      .from(pgStratosBlob)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ cid: pgStratosBlob.cid })
+        .from(pgStratosBlob)
 
-    return rows.map((row) => CID.parse(row.cid))
+      return rows.map((row) => CID.parse(row.cid))
+    })
   }
 }
 
