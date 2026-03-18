@@ -3,9 +3,10 @@
 
   interface Props {
     post: FeedPost
+    onreply: (post: FeedPost) => void
   }
 
-  let { post }: Props = $props()
+  let { post, onreply }: Props = $props()
 
   function formatTime(iso: string): string {
     try {
@@ -29,9 +30,19 @@
     if (did.length <= 24) return did
     return did.slice(0, 16) + '…' + did.slice(-6)
   }
+
+  function parentAuthor(uri: string): string {
+    return uri.replace('at://', '').split('/')[0]
+  }
 </script>
 
 <article class="post-card" class:private={post.isPrivate}>
+  {#if post.reply}
+    <div class="reply-context">
+      ↩ replying to {shortDid(parentAuthor(post.reply.parent.uri))}
+    </div>
+  {/if}
+
   <div class="post-header">
     <span class="author">
       @{post.authorHandle || shortDid(post.author)}
@@ -46,12 +57,13 @@
     {#each post.boundaries as domain}
       <span class="domain-badge">{domain}</span>
     {/each}
-    {#if post.hasReply}
-      <span class="reply-badge">Reply</span>
-    {/if}
   </div>
 
   <p class="post-text">{post.text}</p>
+
+  <div class="post-actions">
+    <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
+  </div>
 </article>
 
 <style>
@@ -64,6 +76,15 @@
   .post-card.private {
     border-left: 3px solid #8b5cf6;
     background: #faf5ff;
+  }
+
+  .reply-context {
+    font-size: 0.78rem;
+    color: #888;
+    margin-bottom: 0.3rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .post-header {
@@ -118,19 +139,29 @@
     border-radius: 4px;
   }
 
-  .reply-badge {
-    display: inline-block;
-    background: #f3f4f6;
-    color: #6b7280;
-    font-size: 0.7rem;
-    padding: 0.1rem 0.45rem;
-    border-radius: 4px;
-  }
-
   .post-text {
     margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 1.45;
+  }
+
+  .post-actions {
+    margin-top: 0.4rem;
+  }
+
+  .reply-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  .reply-btn:hover {
+    background: #f3f4f6;
+    color: #333;
   }
 </style>
