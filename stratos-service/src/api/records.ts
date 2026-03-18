@@ -14,6 +14,7 @@ import {
   extractBoundaryDomains,
   StratosValidationError,
   type MstWriteOp,
+  type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext } from '../context.js'
@@ -103,6 +104,43 @@ async function validateWritableRecord(
   await assertCallerCanWriteDomains(ctx, callerDid, collection, record)
 }
 
+interface PreparedCommit {
+  unsigned: UnsignedCommitData
+  rootCid: string | null
+}
+
+async function prepareCommit(
+  ctx: AppContext,
+  did: string,
+  writes: MstWriteOp[],
+): Promise<PreparedCommit> {
+  return ctx.actorStore.read(did, async (reader) => {
+    const adapter = new StratosBlockStoreReader(reader.repo)
+    const rootDetails = await reader.repo.getRootDetailed()
+    if (rootDetails) {
+      await reader.repo.preloadBlocksForRev(rootDetails.rev)
+    }
+    const unsigned = await buildCommit(
+      adapter,
+      rootDetails?.cid.toString() ?? null,
+      { did, writes },
+    )
+    return { unsigned, rootCid: rootDetails?.cid.toString() ?? null }
+  })
+}
+
+function assertRootUnchanged(
+  currentRootCid: string | null,
+  expectedRootCid: string | null,
+): void {
+  if (currentRootCid !== expectedRootCid) {
+    throw new InvalidRequestError(
+      'Concurrent modification detected, please retry',
+      'ConcurrentModification',
+    )
+  }
+}
+
 /**
  * Create a new record in the stratos store
  */
@@ -156,29 +194,27 @@ export async function createRecord(
   const cid = await computeCid(record)
   const rev = TID.nextStr()
 
+  // Build MST commit outside the write transaction to reduce connection hold time
+  const prepared = await prepareCommit(ctx, callerDid, [
+    { action: 'create', collection, rkey, cid: cid.toString() },
+  ])
+
   // Perform the write
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    // Optimistic lock: verify repo root hasn't changed since we read the MST
+    const currentRoot = await store.repo.getRootDetailed()
+    assertRootUnchanged(
+      currentRoot?.cid.toString() ?? null,
+      prepared.rootCid,
+    )
+
     // Store the record block
     await store.repo.putBlock(cid, recordBytes, rev)
 
-    // Preload MST blocks and build commit
-    const adapter = new StratosBlockStoreReader(store.repo)
-    const rootDetails = await store.repo.getRootDetailed()
-    if (rootDetails) {
-      await store.repo.preloadBlocksForRev(rootDetails.rev)
-    }
-    const unsigned = await buildCommit(
-      adapter,
-      rootDetails?.cid.toString() ?? null,
-      {
-        did: callerDid,
-        writes: [{ action: 'create', collection, rkey, cid: cid.toString() }],
-      },
-    )
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
-      unsigned,
+      prepared.unsigned,
     )
 
     // Index the record
@@ -274,7 +310,19 @@ export async function deleteRecord(
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUri(uriStr)
 
+  // Build MST commit outside the write transaction to reduce connection hold time
+  const prepared = await prepareCommit(ctx, callerDid, [
+    { action: 'delete', collection, rkey, cid: null },
+  ])
+
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    // Optimistic lock: verify repo root hasn't changed since we read the MST
+    const currentRoot = await store.repo.getRootDetailed()
+    assertRootUnchanged(
+      currentRoot?.cid.toString() ?? null,
+      prepared.rootCid,
+    )
+
     // Check if record exists
     const existing = await store.record.getRecord(uri, null)
     if (!existing) {
@@ -284,24 +332,10 @@ export async function deleteRecord(
     // Delete from record index
     await store.record.deleteRecord(uri)
 
-    // Preload MST blocks and build commit
-    const adapter = new StratosBlockStoreReader(store.repo)
-    const rootDetails = await store.repo.getRootDetailed()
-    if (rootDetails) {
-      await store.repo.preloadBlocksForRev(rootDetails.rev)
-    }
-    const unsigned = await buildCommit(
-      adapter,
-      rootDetails?.cid.toString() ?? null,
-      {
-        did: callerDid,
-        writes: [{ action: 'delete', collection, rkey, cid: null }],
-      },
-    )
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
-      unsigned,
+      prepared.unsigned,
     )
 
     return {
@@ -378,7 +412,19 @@ export async function updateRecord(
   const cid = await computeCid(record)
   const rev = TID.nextStr()
 
+  // Build MST commit outside the write transaction to reduce connection hold time
+  const prepared = await prepareCommit(ctx, callerDid, [
+    { action: 'update', collection, rkey, cid: cid.toString() },
+  ])
+
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    // Optimistic lock: verify repo root hasn't changed since we read the MST
+    const currentRoot = await store.repo.getRootDetailed()
+    assertRootUnchanged(
+      currentRoot?.cid.toString() ?? null,
+      prepared.rootCid,
+    )
+
     const existing = await store.record.getRecord(uri, null)
     if (!existing) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
@@ -387,24 +433,10 @@ export async function updateRecord(
     // Store the record block
     await store.repo.putBlock(cid, recordBytes, rev)
 
-    // Preload MST blocks and build commit
-    const adapter = new StratosBlockStoreReader(store.repo)
-    const rootDetails = await store.repo.getRootDetailed()
-    if (rootDetails) {
-      await store.repo.preloadBlocksForRev(rootDetails.rev)
-    }
-    const unsigned = await buildCommit(
-      adapter,
-      rootDetails?.cid.toString() ?? null,
-      {
-        did: callerDid,
-        writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
-      },
-    )
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
-      unsigned,
+      prepared.unsigned,
     )
 
     // Index the record
