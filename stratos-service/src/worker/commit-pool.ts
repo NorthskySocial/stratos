@@ -95,7 +95,7 @@ export class CommitPool {
             const found: [string, Uint8Array][] = Array.from(
               result.found.entries(),
             )
-            const transferables = found.map(([, v]) => v.buffer)
+            const transferables = found.map(([, v]) => v.buffer as ArrayBuffer)
             port1.postMessage(
               { requestId: msg.requestId, found, missing: result.missing },
               transferables,
