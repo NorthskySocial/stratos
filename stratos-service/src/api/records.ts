@@ -10,7 +10,6 @@ import { AtUri } from '@atproto/syntax'
 
 import {
   assertStratosValidation,
-  buildCommit,
   extractBoundaryDomains,
   StratosValidationError,
   type MstWriteOp,
@@ -18,11 +17,8 @@ import {
 } from '@northskysocial/stratos-core'
 
 import type { AppContext } from '../context.js'
-import type { ActorTransactor } from '../actor-store-types.js'
-import {
-  StratosBlockStoreReader,
-  signAndPersistCommit,
-} from '../features/index.js'
+import type { ActorTransactor, ActorRepoReader } from '../actor-store-types.js'
+import { signAndPersistCommit } from '../features/index.js'
 import { Did } from '@atproto/api'
 
 /**
@@ -109,24 +105,49 @@ interface PreparedCommit {
   rootCid: string | null
 }
 
+async function collectAllBlocks(
+  repo: ActorRepoReader,
+): Promise<Map<string, Uint8Array>> {
+  const blocks = new Map<string, Uint8Array>()
+  let cursor: { rev: string; cid: string } | undefined
+  do {
+    const batch = await repo.getBlockRange(undefined, cursor)
+    for (const row of batch) {
+      blocks.set(row.cid, row.content)
+    }
+    const last = batch.at(-1)
+    if (last) {
+      cursor = { rev: last.repoRev, cid: last.cid }
+    }
+    if (batch.length < 500) break
+  } while (cursor)
+  return blocks
+}
+
 async function prepareCommit(
   ctx: AppContext,
   did: string,
   writes: MstWriteOp[],
 ): Promise<PreparedCommit> {
-  return ctx.actorStore.read(did, async (reader) => {
-    const adapter = new StratosBlockStoreReader(reader.repo)
-    const rootDetails = await reader.repo.getRootDetailed()
-    if (rootDetails) {
-      await reader.repo.preloadRootSpine(rootDetails.cid)
-    }
-    const unsigned = await buildCommit(
-      adapter,
-      rootDetails?.cid.toString() ?? null,
-      { did, writes },
-    )
-    return { unsigned, rootCid: rootDetails?.cid.toString() ?? null }
-  })
+  const { rootCid, blocks } = await ctx.actorStore.read(
+    did,
+    async (reader) => {
+      const rootDetails = await reader.repo.getRootDetailed()
+      const allBlocks = await collectAllBlocks(reader.repo)
+      return {
+        rootCid: rootDetails?.cid.toString() ?? null,
+        blocks: allBlocks,
+      }
+    },
+  )
+
+  const input = { did, writes }
+  const unsigned = await ctx.commitPool.buildCommit(
+    blocks,
+    rootCid,
+    input,
+  )
+  return { unsigned, rootCid }
 }
 
 function assertRootUnchanged(
@@ -694,68 +715,53 @@ export async function applyWritesBatch(
     }),
   )
 
-  const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    const mstOps: MstWriteOp[] = []
-    const indexOps: Array<{
-      uri: AtUri
-      uriStr: string
-      cid: CID | null
-      record: unknown
-      action: 'create' | 'update' | 'delete'
-    }> = []
+  // Build MST ops from precomputed data
+  const mstOps: MstWriteOp[] = precomputed.map((pre) => ({
+    action: pre.action,
+    collection: pre.op.collection,
+    rkey: pre.rkey,
+    cid: pre.action === 'delete' ? null : pre.cid!.toString(),
+  }))
 
+  // Collect blocks and build commit outside the transaction
+  const { rootCid, blocks } = await ctx.actorStore.read(
+    callerDid,
+    async (reader) => {
+      const rootDetails = await reader.repo.getRootDetailed()
+      const allBlocks = await collectAllBlocks(reader.repo)
+      return {
+        rootCid: rootDetails?.cid.toString() ?? null,
+        blocks: allBlocks,
+      }
+    },
+  )
+
+  const unsigned = await ctx.commitPool.buildCommit(
+    blocks,
+    rootCid,
+    { did: callerDid, writes: mstOps },
+  )
+
+  const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    // Optimistic lock: verify repo root hasn't changed since we read the MST
+    const currentRoot = await store.repo.getRootDetailed()
+    assertRootUnchanged(
+      currentRoot?.cid.toString() ?? null,
+      rootCid,
+    )
+
+    // Store record blocks and check existence for deletes
     for (const pre of precomputed) {
       if (pre.action === 'delete') {
         const existing = await store.record.getRecord(pre.uri, null)
         if (!existing) {
           throw new InvalidRequestError('Record not found', 'RecordNotFound')
         }
-        mstOps.push({
-          action: 'delete',
-          collection: pre.op.collection,
-          rkey: pre.rkey,
-          cid: null,
-        })
-        indexOps.push({
-          uri: pre.uri,
-          uriStr: pre.uriStr,
-          cid: null,
-          record: undefined,
-          action: 'delete',
-        })
       } else {
         await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
-
-        mstOps.push({
-          action: pre.action,
-          collection: pre.op.collection,
-          rkey: pre.rkey,
-          cid: pre.cid.toString(),
-        })
-        indexOps.push({
-          uri: pre.uri,
-          uriStr: pre.uriStr,
-          cid: pre.cid,
-          record: pre.op.record,
-          action: pre.action,
-        })
       }
     }
 
-    // Preload MST blocks and build single commit for all operations
-    const adapter = new StratosBlockStoreReader(store.repo)
-    const rootDetails = await store.repo.getRootDetailed()
-    if (rootDetails) {
-      await store.repo.preloadRootSpine(rootDetails.cid)
-    }
-    const unsigned = await buildCommit(
-      adapter,
-      rootDetails?.cid.toString() ?? null,
-      {
-        did: callerDid,
-        writes: mstOps,
-      },
-    )
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
@@ -764,19 +770,19 @@ export async function applyWritesBatch(
 
     // Index records
     const results: Array<{ uri?: string; cid?: string }> = []
-    for (const indexOp of indexOps) {
-      if (indexOp.action === 'delete') {
-        await store.record.deleteRecord(indexOp.uri)
+    for (const pre of precomputed) {
+      if (pre.action === 'delete') {
+        await store.record.deleteRecord(pre.uri)
         results.push({})
       } else {
         await store.record.indexRecord(
-          indexOp.uri,
-          indexOp.cid!,
-          indexOp.record as Record<string, unknown>,
-          indexOp.action,
+          pre.uri,
+          pre.cid!,
+          pre.op.record as Record<string, unknown>,
+          pre.action,
           commitResult.rev,
         )
-        results.push({ uri: indexOp.uriStr, cid: indexOp.cid!.toString() })
+        results.push({ uri: pre.uriStr, cid: pre.cid!.toString() })
       }
     }
 
