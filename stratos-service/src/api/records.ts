@@ -12,6 +12,7 @@ import {
   assertStratosValidation,
   extractBoundaryDomains,
   StratosValidationError,
+  buildCommit,
   type MstWriteOp,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
@@ -115,7 +116,7 @@ async function prepareCommit(
     const rootCid = rootDetails?.cid.toString() ?? null
 
     const storage = new StratosBlockStoreReader(reader.repo)
-    const unsigned = await ctx.commitPool.buildCommit(storage, rootCid, { did, writes })
+    const unsigned = await buildCommit(storage, rootCid, { did, writes })
 
     return { unsigned, rootCid }
   })
@@ -702,7 +703,7 @@ export async function applyWritesBatch(
       const rootDetails = await reader.repo.getRootDetailed()
       const rootCid = rootDetails?.cid.toString() ?? null
       const storage = new StratosBlockStoreReader(reader.repo)
-      const unsigned = await ctx.commitPool.buildCommit(storage, rootCid, { did: callerDid, writes: mstOps })
+      const unsigned = await buildCommit(storage, rootCid, { did: callerDid, writes: mstOps })
       return { rootCid, unsigned }
     },
   )
