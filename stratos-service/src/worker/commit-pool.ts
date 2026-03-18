@@ -16,6 +16,7 @@ const WORKER_PATH = path.resolve(
 interface PendingTask {
   resolve: (result: UnsignedCommitData) => void
   reject: (error: Error) => void
+  port: import('node:worker_threads').MessagePort
 }
 
 interface QueuedTask {
@@ -94,11 +95,11 @@ export class CommitPool {
             const found: [string, Uint8Array][] = Array.from(
               result.found.entries(),
             )
-            port1.postMessage({
-              requestId: msg.requestId,
-              found,
-              missing: result.missing,
-            })
+            const transferables = found.map(([, v]) => v.buffer)
+            port1.postMessage(
+              { requestId: msg.requestId, found, missing: result.missing },
+              transferables,
+            )
             break
           }
           case 'has': {
@@ -118,7 +119,7 @@ export class CommitPool {
     })
 
     return new Promise((resolve, reject) => {
-      this.pendingTasks.set(taskId, { resolve, reject })
+      this.pendingTasks.set(taskId, { resolve, reject, port: port1 })
 
       workerState.worker.postMessage(
         { type: 'buildCommit', taskId, commitCid, input, port: port2 },
@@ -135,6 +136,7 @@ export class CommitPool {
       const task = this.pendingTasks.get(msg.taskId)
       if (task) {
         this.pendingTasks.delete(msg.taskId)
+        task.port.close()
         const raw = msg.result as {
           did: string
           version: 3
@@ -162,6 +164,7 @@ export class CommitPool {
       const task = this.pendingTasks.get(msg.taskId)
       if (task) {
         this.pendingTasks.delete(msg.taskId)
+        task.port.close()
         task.reject(new Error(msg.error ?? 'Worker commit failed'))
       }
       this.markWorkerAvailable(worker)
@@ -171,6 +174,7 @@ export class CommitPool {
   private handleWorkerError(worker: Worker, err: Error): void {
     // Reject all pending tasks for this worker
     for (const [taskId, task] of this.pendingTasks) {
+      task.port.close()
       task.reject(err instanceof Error ? err : new Error(String(err)))
       this.pendingTasks.delete(taskId)
     }
