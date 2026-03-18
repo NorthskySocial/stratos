@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:northsky": "vite --mode northsky",
     "build": "vite build",
+    "build:northsky": "vite build --mode northsky",
     "preview": "vite preview"
   },
   "dependencies": {

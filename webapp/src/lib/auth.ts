@@ -7,6 +7,9 @@ import type { OAuthClientMetadataInput } from '@atproto/oauth-types'
 let client: BrowserOAuthClient | null = null
 let currentSession: OAuthSession | null = null
 
+const HANDLE_RESOLVER =
+  import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER ?? 'https://bsky.social'
+
 function isLoopback(): boolean {
   const h = window.location.hostname
   return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
@@ -32,7 +35,7 @@ function buildClientMetadata(): OAuthClientMetadataInput {
 function getClient(): BrowserOAuthClient {
   if (!client) {
     client = new BrowserOAuthClient({
-      handleResolver: 'https://bsky.social',
+      handleResolver: HANDLE_RESOLVER,
       responseMode: 'query',
       ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
     })
