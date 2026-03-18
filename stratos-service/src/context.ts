@@ -61,7 +61,6 @@ import { StubWriterServiceImpl, BackgroundStubQueue } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
-  CommitPool,
 } from './features/index.js'
 import { buildCommit } from '@northskysocial/stratos-core'
 
@@ -792,7 +791,6 @@ export interface AppContext {
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
-  commitPool: CommitPool
   allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
   app: express.Application
@@ -1017,8 +1015,6 @@ export async function createAppContext(
     })
   }
 
-  const commitPool = new CommitPool(cfg.storage.commitPoolSize)
-
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
 
   const enrollmentService = new EnrollmentServiceImpl(
@@ -1142,7 +1138,6 @@ export async function createAppContext(
     signingKey,
     signingDidKey,
     serviceDid,
-    commitPool,
     allowListProvider,
     xrpcServer,
     app,
@@ -1152,7 +1147,6 @@ export async function createAppContext(
     enrollmentEvents,
     destroy: async () => {
       await stubQueue.drain()
-      await commitPool.destroy()
       await actorStore.close?.()
       await destroyBackend()
     },
