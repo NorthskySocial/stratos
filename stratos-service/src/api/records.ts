@@ -12,13 +12,14 @@ import {
   assertStratosValidation,
   extractBoundaryDomains,
   StratosValidationError,
+  buildCommit,
   type MstWriteOp,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext } from '../context.js'
-import type { ActorTransactor, ActorRepoReader } from '../actor-store-types.js'
-import { signAndPersistCommit } from '../features/index.js'
+import type { ActorTransactor } from '../actor-store-types.js'
+import { signAndPersistCommit, StratosBlockStoreReader } from '../features/index.js'
 import { Did } from '@atproto/api'
 
 /**
@@ -105,49 +106,20 @@ interface PreparedCommit {
   rootCid: string | null
 }
 
-async function collectAllBlocks(
-  repo: ActorRepoReader,
-): Promise<Map<string, Uint8Array>> {
-  const blocks = new Map<string, Uint8Array>()
-  let cursor: { rev: string; cid: string } | undefined
-  do {
-    const batch = await repo.getBlockRange(undefined, cursor)
-    for (const row of batch) {
-      blocks.set(row.cid, row.content)
-    }
-    const last = batch.at(-1)
-    if (last) {
-      cursor = { rev: last.repoRev, cid: last.cid }
-    }
-    if (batch.length < 500) break
-  } while (cursor)
-  return blocks
-}
-
 async function prepareCommit(
   ctx: AppContext,
   did: string,
   writes: MstWriteOp[],
 ): Promise<PreparedCommit> {
-  const { rootCid, blocks } = await ctx.actorStore.read(
-    did,
-    async (reader) => {
-      const rootDetails = await reader.repo.getRootDetailed()
-      const allBlocks = await collectAllBlocks(reader.repo)
-      return {
-        rootCid: rootDetails?.cid.toString() ?? null,
-        blocks: allBlocks,
-      }
-    },
-  )
+  return await ctx.actorStore.read(did, async (reader) => {
+    const rootDetails = await reader.repo.getRootDetailed()
+    const rootCid = rootDetails?.cid.toString() ?? null
 
-  const input = { did, writes }
-  const unsigned = await ctx.commitPool.buildCommit(
-    blocks,
-    rootCid,
-    input,
-  )
-  return { unsigned, rootCid }
+    const storage = new StratosBlockStoreReader(reader.repo)
+    const unsigned = await buildCommit(storage, rootCid, { did, writes })
+
+    return { unsigned, rootCid }
+  })
 }
 
 function assertRootUnchanged(
@@ -723,23 +695,16 @@ export async function applyWritesBatch(
     cid: pre.action === 'delete' ? null : pre.cid!.toString(),
   }))
 
-  // Collect blocks and build commit outside the transaction
-  const { rootCid, blocks } = await ctx.actorStore.read(
+  // Build commit outside the transaction using on-demand block reads
+  const { rootCid, unsigned } = await ctx.actorStore.read(
     callerDid,
     async (reader) => {
       const rootDetails = await reader.repo.getRootDetailed()
-      const allBlocks = await collectAllBlocks(reader.repo)
-      return {
-        rootCid: rootDetails?.cid.toString() ?? null,
-        blocks: allBlocks,
-      }
+      const rootCid = rootDetails?.cid.toString() ?? null
+      const storage = new StratosBlockStoreReader(reader.repo)
+      const unsigned = await buildCommit(storage, rootCid, { did: callerDid, writes: mstOps })
+      return { rootCid, unsigned }
     },
-  )
-
-  const unsigned = await ctx.commitPool.buildCommit(
-    blocks,
-    rootCid,
-    { did: callerDid, writes: mstOps },
   )
 
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
