@@ -187,19 +187,21 @@ export async function createRecord(
   const cid = await computeCid(record)
   const rev = TID.nextStr()
 
-  // Build MST commit outside the write transaction to reduce connection hold time
-  const prepared = await prepareCommit(ctx, callerDid, [
+  const writes: MstWriteOp[] = [
     { action: 'create', collection, rkey, cid: cid.toString() },
-  ])
+  ]
 
-  // Perform the write
+  // Build MST commit and persist inside a single transaction to avoid
+  // acquiring two pool connections per request
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    // Optimistic lock: verify repo root hasn't changed since we read the MST
-    const currentRoot = await store.repo.getRootDetailed()
-    assertRootUnchanged(
-      currentRoot?.cid.toString() ?? null,
-      prepared.rootCid,
-    )
+    const rootDetails = await store.repo.getRootDetailed()
+    const rootCid = rootDetails?.cid.toString() ?? null
+
+    const storage = new StratosBlockStoreReader(store.repo)
+    const unsigned = await buildCommit(storage, rootCid, {
+      did: callerDid,
+      writes,
+    })
 
     // Store the record block
     await store.repo.putBlock(cid, recordBytes, rev)
@@ -207,7 +209,7 @@ export async function createRecord(
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
-      prepared.unsigned,
+      unsigned,
     )
 
     // Index the record
