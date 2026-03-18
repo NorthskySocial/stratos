@@ -1044,18 +1044,27 @@ export class PostgresActorStore implements ActorStore {
     const schemaName = await this.getSchemaName(did)
     const blobStore = this.blobstore(did)
 
-    return this.actorDb.transaction(async (tx) => {
-      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
-      const txDb = tx as unknown as StratosPgDb
+    const connection = await this.actorClient.reserve()
+    try {
+      await connection`SET search_path TO ${connection(schemaName)}`
+      // Share pool client's options so drizzle can initialize parsers
+      ;(connection as unknown as { options: unknown }).options =
+        this.actorClient.options
+      const connDb = drizzle({
+        client: connection,
+        schema: pgActorSchema,
+      }) as unknown as StratosPgDb
       const store: ActorReader = {
         did,
-        record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
-        repo: new PgActorRepoReader(txDb, this.logger),
-        blob: new PgActorBlobReader(txDb, blobStore, this.logger),
-        sequence: new PgSequenceOps(txDb),
+        record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(connDb, this.logger),
+        blob: new PgActorBlobReader(connDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(connDb),
       }
-      return fn(store)
-    })
+      return await fn(store)
+    } finally {
+      connection.release()
+    }
   }
 
   async transact<T>(
