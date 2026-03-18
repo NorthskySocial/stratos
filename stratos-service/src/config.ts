@@ -24,6 +24,8 @@ const envSchema = z.object({
   STRATOS_PG_SSLMODE: z
     .enum(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])
     .optional(),
+  STRATOS_PG_ACTOR_POOL_SIZE: z.coerce.number().int().positive().optional(),
+  STRATOS_PG_ADMIN_POOL_SIZE: z.coerce.number().int().positive().optional(),
   STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
   // S3 storage (optional)
@@ -205,6 +207,8 @@ export interface StratosServiceConfig {
     backend: 'sqlite' | 'postgres'
     dataDir: string
     postgresUrl?: string
+    pgActorPoolSize?: number
+    pgAdminPoolSize?: number
   }
   blobstore: BlobstoreConfig
   stratos: {
@@ -317,6 +321,8 @@ export function envToConfig(env: Env): StratosServiceConfig {
       backend: env.STORAGE_BACKEND,
       dataDir: env.STRATOS_DATA_DIR,
       postgresUrl: env.STRATOS_POSTGRES_URL ?? buildPostgresUrl(env),
+      pgActorPoolSize: env.STRATOS_PG_ACTOR_POOL_SIZE,
+      pgAdminPoolSize: env.STRATOS_PG_ADMIN_POOL_SIZE,
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {

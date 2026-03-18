@@ -959,7 +959,7 @@ export class PostgresActorStore implements ActorStore {
     })
     this.adminDb = drizzle({ client: this.adminClient })
     this.actorClient = postgres(config.connectionString, {
-      max: config.actorPoolSize ?? 30,
+      max: config.actorPoolSize ?? 50,
       idle_timeout: 20,
       connect_timeout: 10,
     })
