@@ -27,6 +27,7 @@
   let appviewAgent: Agent | null = $state(null)
   let stratosAgent: Agent | null = $state(null)
   let allPosts: FeedPost[] = $state([])
+  let replyingTo: FeedPost | null = $state(null)
   let loading = $state(true)
   let did = $state('')
   let handle = $state('')
@@ -107,6 +108,14 @@
     activeFeed = domain
   }
 
+  function handleReply(post: FeedPost) {
+    replyingTo = post
+  }
+
+  function cancelReply() {
+    replyingTo = null
+  }
+
   async function handleSignOut() {
     await signOut()
     session = null
@@ -153,7 +162,7 @@
         <button class="sign-out" onclick={handleSignOut}>Log Out</button>
       </header>
 
-      <Composer {session} {enrollment} {stratosAgent} onpost={refreshFeed} />
+      <Composer {session} {enrollment} {stratosAgent} {replyingTo} onpost={refreshFeed} oncancelreply={cancelReply} />
 
       <div class="feed-tabs">
         <button
@@ -174,7 +183,7 @@
         {/each}
       </div>
 
-      <Feed posts={filteredPosts} loading={loading} />
+      <Feed posts={filteredPosts} loading={loading} onreply={handleReply} />
     </main>
   </div>
 {/if}

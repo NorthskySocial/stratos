@@ -2,15 +2,18 @@
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
   import type { StratosEnrollment } from './stratos'
+  import type { FeedPost, ReplyRef } from './feed'
 
   interface Props {
     session: OAuthSession
     enrollment: StratosEnrollment | null
     stratosAgent: Agent | null
+    replyingTo: FeedPost | null
     onpost: () => void
+    oncancelreply: () => void
   }
 
-  let { session, enrollment, stratosAgent, onpost }: Props = $props()
+  let { session, enrollment, stratosAgent, replyingTo, onpost, oncancelreply }: Props = $props()
 
   let text = $state('')
   let isPrivate = $state(false)
@@ -28,6 +31,23 @@
     }
   })
 
+  $effect(() => {
+    if (replyingTo?.isPrivate) {
+      isPrivate = true
+    }
+  })
+
+  function buildReplyRef(parent: FeedPost): ReplyRef {
+    const parentRef = { uri: parent.uri, cid: parent.cid }
+    const rootRef = parent.reply ? parent.reply.root : parentRef
+    return { root: rootRef, parent: parentRef }
+  }
+
+  function shortDid(did: string): string {
+    if (did.length <= 24) return did
+    return did.slice(0, 16) + '…' + did.slice(-6)
+  }
+
   async function handlePost() {
     if (!text.trim()) return
     posting = true
@@ -35,6 +55,7 @@
 
     try {
       const now = new Date().toISOString()
+      const replyRef = replyingTo ? buildReplyRef(replyingTo) : undefined
 
       if (isPrivate && stratosAgent && selectedDomain) {
         await stratosAgent.com.atproto.repo.createRecord({
@@ -47,6 +68,7 @@
               $type: 'zone.stratos.boundary.defs#Domains',
               values: [{ value: selectedDomain }],
             },
+            ...(replyRef ? { reply: replyRef } : {}),
             createdAt: now,
           },
         })
@@ -58,12 +80,14 @@
           record: {
             $type: 'app.bsky.feed.post',
             text: text.trim(),
+            ...(replyRef ? { reply: replyRef } : {}),
             createdAt: now,
           },
         })
       }
 
       text = ''
+      oncancelreply()
       onpost()
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to create post'
@@ -74,6 +98,13 @@
 </script>
 
 <div class="composer">
+  {#if replyingTo}
+    <div class="reply-indicator">
+      <span>Replying to @{replyingTo.authorHandle || shortDid(replyingTo.author)}</span>
+      <button class="cancel-reply" onclick={oncancelreply}>✕</button>
+    </div>
+  {/if}
+
   <textarea
     bind:value={text}
     placeholder={isPrivate ? `Post to ${selectedDomain || 'private'}…` : 'Write a post…'}
@@ -122,6 +153,33 @@
   .composer {
     padding: 1rem;
     border-bottom: 1px solid #eee;
+  }
+
+  .reply-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f0f4ff;
+    border: 1px solid #d0d9f0;
+    border-radius: 6px;
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: #3730a3;
+  }
+
+  .cancel-reply {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 0.3rem;
+    line-height: 1;
+  }
+
+  .cancel-reply:hover {
+    color: #333;
   }
 
   textarea {
