@@ -23,6 +23,7 @@ import {
   getStratosBacklinks,
   BlockMap,
   CidSet,
+  LruBlockCache,
   type Logger,
   type BlobStore,
   type BlobStoreCreator,
@@ -389,6 +390,7 @@ export class PgActorRepoReader {
   constructor(
     protected db: StratosPgDbOrTx,
     protected logger?: Logger,
+    protected lru?: LruBlockCache,
   ) {}
 
   async hasRoot(): Promise<boolean> {
@@ -419,12 +421,18 @@ export class PgActorRepoReader {
     const cached = this.cache.get(cid)
     if (cached) return cached
     const cidStr = cid.toString()
+    const lruCached = this.lru?.get(cidStr)
+    if (lruCached) {
+      this.cache.set(cid, lruCached)
+      return lruCached
+    }
     const found = (await this.db.execute(
       sql`SELECT content FROM stratos_repo_block WHERE cid = ${cidStr} LIMIT 1`,
     )) as unknown as { content: Buffer }[]
     if (found.length === 0) return null
     const content = new Uint8Array(found[0].content)
     this.cache.set(cid, content)
+    this.lru?.set(cidStr, content)
     return content
   }
 
@@ -436,6 +444,24 @@ export class PgActorRepoReader {
   async getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }> {
     const cached = this.cache.getMany(cids)
     if (cached.missing.length < 1) return cached
+
+    if (this.lru) {
+      const stillMissing: CID[] = []
+      for (const cid of cached.missing) {
+        const lruHit = this.lru.get(cid.toString())
+        if (lruHit) {
+          cached.blocks.set(cid, lruHit)
+          this.cache.set(cid, lruHit)
+        } else {
+          stillMissing.push(cid)
+        }
+      }
+      if (stillMissing.length === 0) {
+        return { blocks: cached.blocks, missing: [] }
+      }
+      cached.missing = stillMissing
+    }
+
     const missing = new CidSet(cached.missing)
     const missingStr = cached.missing.map((c) => c.toString())
     const blocks = new BlockMap()
@@ -451,7 +477,9 @@ export class PgActorRepoReader {
         .where(inArray(pgStratosRepoBlock.cid, batch))
       for (const row of res) {
         const cid = CID.parse(row.cid)
-        blocks.set(cid, new Uint8Array(row.content))
+        const content = new Uint8Array(row.content)
+        blocks.set(cid, content)
+        this.lru?.set(row.cid, content)
         missing.delete(cid)
       }
     }
@@ -513,11 +541,11 @@ export class PgActorRepoReader {
     }
 
     const res = await query
-    return res.map((row) => ({
-      cid: row.cid,
-      repoRev: row.repoRev,
-      content: new Uint8Array(row.content),
-    }))
+    return res.map((row) => {
+      const content = new Uint8Array(row.content)
+      this.lru?.set(row.cid, content)
+      return { cid: row.cid, repoRev: row.repoRev, content }
+    })
   }
 
   async countBlocks(): Promise<number> {
@@ -534,7 +562,9 @@ export class PgActorRepoReader {
     for (const row of res) {
       const cid = CID.parse(row.cid)
       if (!this.cache.has(cid)) {
-        this.cache.set(cid, new Uint8Array(row.content))
+        const content = new Uint8Array(row.content)
+        this.cache.set(cid, content)
+        this.lru?.set(row.cid, content)
       }
     }
   }
@@ -591,8 +621,8 @@ export class PgActorRepoReader {
 // ─── Repo Transactor ────────────────────────────────────────────────────────
 
 export class PgActorRepoTransactor extends PgActorRepoReader {
-  constructor(db: StratosPgDbOrTx, logger?: Logger) {
-    super(db, logger)
+  constructor(db: StratosPgDbOrTx, logger?: Logger, lru?: LruBlockCache) {
+    super(db, logger, lru)
   }
 
   async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
@@ -611,6 +641,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     )
 
     this.cache.set(cid, bytes)
+    this.lru?.set(cidStr, bytes)
   }
 
   async putBlocks(blocks: BlockMap, rev: string): Promise<void> {
@@ -629,6 +660,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
         content: Buffer.from(content),
       })
       this.cache.set(CID.parse(cidStr), content)
+      this.lru?.set(cidStr, content)
     }
 
     if (values.length === 0) return
@@ -647,6 +679,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
       .delete(pgStratosRepoBlock)
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
     this.cache.delete(cid)
+    this.lru?.delete(cid.toString())
   }
 
   async deleteBlocks(cids: CID[]): Promise<void> {
@@ -660,6 +693,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     }
     for (const cid of cids) {
       this.cache.delete(cid)
+      this.lru?.delete(cid.toString())
     }
   }
 
@@ -965,6 +999,7 @@ export interface PostgresActorStoreConfig {
   logger?: Logger
   actorPoolSize?: number
   adminPoolSize?: number
+  blockCacheSize?: number
 }
 
 export class PostgresActorStore implements ActorStore {
@@ -978,11 +1013,13 @@ export class PostgresActorStore implements ActorStore {
   private readonly actorClient: ReturnType<typeof postgres>
   private readonly actorDb: StratosPgDb
   private readonly schemaNameCache = new Map<string, string>()
+  private readonly blockCache: LruBlockCache
 
   constructor(config: PostgresActorStoreConfig) {
     this.blobstore = config.blobstore
     this.cborToRecord = config.cborToRecord
     this.logger = config.logger
+    this.blockCache = new LruBlockCache(config.blockCacheSize ?? 5000)
     this.adminClient = postgres(config.connectionString, {
       max: config.adminPoolSize ?? 3,
       idle_timeout: 20,
@@ -1057,7 +1094,7 @@ export class PostgresActorStore implements ActorStore {
       const store: ActorReader = {
         did,
         record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
-        repo: new PgActorRepoReader(connDb, this.logger),
+        repo: new PgActorRepoReader(connDb, this.logger, this.blockCache),
         blob: new PgActorBlobReader(connDb, blobStore, this.logger),
         sequence: new PgSequenceOps(connDb),
       }
@@ -1084,7 +1121,7 @@ export class PostgresActorStore implements ActorStore {
           this.cborToRecord,
           this.logger,
         ),
-        repo: new PgActorRepoTransactor(txDb, this.logger),
+        repo: new PgActorRepoTransactor(txDb, this.logger, this.blockCache),
         blob: new PgActorBlobTransactor(txDb, blobStore, this.logger),
         sequence: new PgSequenceOps(txDb),
       }
