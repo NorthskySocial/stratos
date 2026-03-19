@@ -169,6 +169,7 @@ export class StratosActorStore implements ActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
+  private readonly existsCache = new Set<string>()
   private readonly cborToRecord: (
     content: Uint8Array,
   ) => Record<string, unknown>
@@ -186,8 +187,11 @@ export class StratosActorStore implements ActorStore {
   }
 
   async exists(did: string): Promise<boolean> {
+    if (this.existsCache.has(did)) return true
     const { dbLocation } = await this.getLocation(did)
-    return fileExists(dbLocation)
+    const found = await fileExists(dbLocation)
+    if (found) this.existsCache.add(did)
+    return found
   }
 
   async create(did: string): Promise<void> {
@@ -201,11 +205,13 @@ export class StratosActorStore implements ActorStore {
     } finally {
       await closeStratosDb(db)
     }
+    this.existsCache.add(did)
   }
 
   async destroy(did: string): Promise<void> {
     const { directory } = await this.getLocation(did)
     await fs.rm(directory, { recursive: true, force: true })
+    this.existsCache.delete(did)
   }
 
   async read<T>(
