@@ -18,7 +18,7 @@ import {
 
 import type { AppContext } from '../context.js'
 import type { ActorTransactor } from '../actor-store-types.js'
-import { signAndPersistCommit, StratosBlockStoreReader, type ExtraBlock } from '../features/index.js'
+import { signCommit, signAndPersistCommit, StratosBlockStoreReader } from '../features/index.js'
 import { Did } from '@atproto/api'
 
 export interface WritePhases {
@@ -32,10 +32,7 @@ export interface WritePhases {
   transact?: number
   transactLockCheck?: number
   transactSign?: number
-  transactPutBlocks?: number
-  transactDeleteBlocks?: number
-  transactUpdateRoot?: number
-  transactIndex?: number
+  transactPersist?: number
 }
 
 /**
@@ -222,31 +219,39 @@ export async function createRecord(
       )
       phases.transactLockCheck = performance.now() - ti
 
-      const commitResult = await signAndPersistCommit(
-        store.repo,
+      ti = performance.now()
+      const signed = await signCommit(
         ctx.signingKey,
         prepared.unsigned,
-        phases,
         [{ cid, bytes: recordBytes }],
       )
+      phases.transactSign = performance.now() - ti
 
       ti = performance.now()
-      await store.record.indexRecord(
-        uri,
-        cid,
-        record as Record<string, unknown>,
-        'create',
-        commitResult.rev,
-      )
-      phases.transactIndex = performance.now() - ti
+      const persistOps: Promise<void>[] = [
+        store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
+        store.repo.updateRoot(signed.commitCid, prepared.unsigned.rev, callerDid),
+        store.record.indexRecord(
+          uri,
+          cid,
+          record as Record<string, unknown>,
+          'create',
+          prepared.unsigned.rev,
+        ),
+      ]
+      if (signed.removedCids.length > 0) {
+        persistOps.push(store.repo.deleteBlocks(signed.removedCids))
+      }
+      await Promise.all(persistOps)
+      phases.transactPersist = performance.now() - ti
 
       return {
         uri,
         cid,
         cidStr: cid.toString(),
         commit: {
-          cid: commitResult.commitCid.toString(),
-          rev: commitResult.rev,
+          cid: signed.commitCid.toString(),
+          rev: signed.rev,
         },
       }
     },
@@ -364,20 +369,28 @@ export async function deleteRecord(
       }
 
       ti = performance.now()
-      await store.record.deleteRecord(uri)
-      phases.transactIndex = performance.now() - ti
-
-      const commitResult = await signAndPersistCommit(
-        store.repo,
+      const signed = await signCommit(
         ctx.signingKey,
         prepared.unsigned,
-        phases,
       )
+      phases.transactSign = performance.now() - ti
+
+      ti = performance.now()
+      const persistOps: Promise<void>[] = [
+        store.record.deleteRecord(uri),
+        store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
+        store.repo.updateRoot(signed.commitCid, prepared.unsigned.rev, callerDid),
+      ]
+      if (signed.removedCids.length > 0) {
+        persistOps.push(store.repo.deleteBlocks(signed.removedCids))
+      }
+      await Promise.all(persistOps)
+      phases.transactPersist = performance.now() - ti
 
       return {
         commit: {
-          cid: commitResult.commitCid.toString(),
-          rev: commitResult.rev,
+          cid: signed.commitCid.toString(),
+          rev: signed.rev,
         },
       }
     },
@@ -492,31 +505,39 @@ export async function updateRecord(
         throw new InvalidRequestError('Record not found', 'RecordNotFound')
       }
 
-      const commitResult = await signAndPersistCommit(
-        store.repo,
+      ti = performance.now()
+      const signed = await signCommit(
         ctx.signingKey,
         prepared.unsigned,
-        phases,
         [{ cid, bytes: recordBytes }],
       )
+      phases.transactSign = performance.now() - ti
 
       ti = performance.now()
-      await store.record.indexRecord(
-        uri,
-        cid,
-        record as Record<string, unknown>,
-        'update',
-        commitResult.rev,
-      )
-      phases.transactIndex = performance.now() - ti
+      const persistOps: Promise<void>[] = [
+        store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
+        store.repo.updateRoot(signed.commitCid, prepared.unsigned.rev, callerDid),
+        store.record.indexRecord(
+          uri,
+          cid,
+          record as Record<string, unknown>,
+          'update',
+          prepared.unsigned.rev,
+        ),
+      ]
+      if (signed.removedCids.length > 0) {
+        persistOps.push(store.repo.deleteBlocks(signed.removedCids))
+      }
+      await Promise.all(persistOps)
+      phases.transactPersist = performance.now() - ti
 
       return {
         uri,
         cid,
         cidStr: cid.toString(),
         commit: {
-          cid: commitResult.commitCid.toString(),
-          rev: commitResult.rev,
+          cid: signed.commitCid.toString(),
+          rev: signed.rev,
         },
       }
     },
