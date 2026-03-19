@@ -115,10 +115,6 @@ async function prepareCommit(
     const rootDetails = await reader.repo.getRootDetailed()
     const rootCid = rootDetails?.cid.toString() ?? null
 
-    if (rootDetails) {
-      await reader.repo.preloadMstBlocks(rootDetails.cid)
-    }
-
     const storage = new StratosBlockStoreReader(reader.repo)
     const unsigned = await buildCommit(storage, rootCid, { did, writes })
 
