@@ -904,7 +904,9 @@ export async function createAppContext(
     )
     await migrateServicePgDb(pgDb)
     const pgEnrollmentStore = new PgEnrollmentStoreWriter(pgDb)
-    const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore)
+    const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore, {
+      cacheTtlMs: 5 * 60 * 1000,
+    })
     await cachedEnrollmentStore.warm()
     enrollmentStore = cachedEnrollmentStore
     oauthStores = createPgOAuthStores(pgDb)
@@ -1060,6 +1062,9 @@ export async function createAppContext(
   const tokenVerifier = new PdsTokenVerifier({
     idResolver,
     fetch: fetchWithUserAgent,
+    jwksCacheMaxAge: 10 * 60 * 1000,
+    verifyCacheMaxAge: 5 * 60 * 1000,
+    verifyCacheMaxSize: 10_000,
   })
   const dpopVerifier = new DpopVerifier({
     serviceDid: cfg.service.did,
