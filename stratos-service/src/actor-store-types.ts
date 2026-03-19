@@ -199,6 +199,14 @@ export interface ActorStore {
     did: string,
     fn: (store: ActorTransactor) => T | PromiseLike<T>,
   ): Promise<T>
+  readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
+  ): Promise<T>
   getBlobStore(did: string): BlobStore
   createSigningKey(did: string): Promise<import('@atproto/crypto').P256Keypair>
   loadSigningKey(

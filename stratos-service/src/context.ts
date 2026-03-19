@@ -267,6 +267,49 @@ export class StratosActorStore implements ActorStore {
     }
   }
 
+  async readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
+  ): Promise<T> {
+    const { dbLocation } = await this.getLocation(did)
+    const db = createStratosDb(dbLocation)
+    await db._initialized
+    const blobStore = this.blobstore(did)
+
+    try {
+      const reader: ActorReader = {
+        did,
+        record: new StratosRecordReader(db, this.cborToRecord, this.logger),
+        repo: new StratosSqlRepoReader(db),
+        blob: new StratosBlobReader(db, blobStore, this.logger),
+        sequence: new SqliteSequenceOps(db),
+      }
+      const readResult = await readFn(reader) as Awaited<R>
+
+      return await db.transaction(async (tx) => {
+        const txDb = tx as unknown as StratosDbOrTx
+        const transactor: ActorTransactor = {
+          did,
+          record: new StratosRecordTransactor(
+            txDb,
+            this.cborToRecord,
+            this.logger,
+          ),
+          repo: new StratosSqlRepoTransactor(txDb),
+          blob: new StratosBlobTransactor(txDb, blobStore, this.logger),
+          sequence: new SqliteSequenceOps(txDb),
+        }
+        return transactFn(readResult, transactor)
+      })
+    } finally {
+      await closeStratosDb(db)
+    }
+  }
+
   getBlobStore(did: string): BlobStore {
     return this.blobstore(did)
   }

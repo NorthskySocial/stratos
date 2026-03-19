@@ -1137,6 +1137,61 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  async readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
+  ): Promise<T> {
+    const schemaName = await this.getSchemaName(did)
+    const blobStore = this.blobstore(did)
+
+    const connection = await this.actorClient.reserve()
+    try {
+      await connection`SET search_path TO ${connection(schemaName)}`
+      ;(connection as unknown as { options: unknown }).options =
+        this.actorClient.options
+      const connDb = drizzle({
+        client: connection,
+        schema: pgActorSchema,
+      }) as unknown as StratosPgDb
+
+      const reader: ActorReader = {
+        did,
+        record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(connDb, this.logger, this.blockCache),
+        blob: new PgActorBlobReader(connDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(connDb),
+      }
+      const readResult = await readFn(reader) as Awaited<R>
+
+      await connection`BEGIN`
+      try {
+        const transactor: ActorTransactor = {
+          did,
+          record: new PgActorRecordTransactor(
+            connDb,
+            this.cborToRecord,
+            this.logger,
+          ),
+          repo: new PgActorRepoTransactor(connDb, this.logger, this.blockCache),
+          blob: new PgActorBlobTransactor(connDb, blobStore, this.logger),
+          sequence: new PgSequenceOps(connDb),
+        }
+        const result = await transactFn(readResult, transactor)
+        await connection`COMMIT`
+        return result
+      } catch (err) {
+        await connection`ROLLBACK`
+        throw err
+      }
+    } finally {
+      connection.release()
+    }
+  }
+
   getBlobStore(did: string): BlobStore {
     return this.blobstore(did)
   }
