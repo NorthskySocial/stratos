@@ -87,6 +87,8 @@ export interface PdsTokenVerifierConfig {
   jwksRefreshBeforeExpiry?: number
   /** Maximum age of cached verification results in ms (default: 60 seconds) */
   verifyCacheMaxAge?: number
+  /** Maximum number of cached verification results (default: 1000) */
+  verifyCacheMaxSize?: number
   /** Optional fetch implementation for testing */
   fetch?: typeof globalThis.fetch
 }
@@ -126,6 +128,7 @@ export class PdsTokenVerifier implements TokenVerifier {
   private readonly jwksCacheMaxAge: number
   private readonly jwksRefreshBeforeExpiry: number
   private readonly verifyCacheMaxAge: number
+  private readonly verifyCacheMaxSize: number
   private readonly fetch: typeof globalThis.fetch
 
   /** Cache of JWKS by issuer URL */
@@ -141,6 +144,7 @@ export class PdsTokenVerifier implements TokenVerifier {
     this.jwksCacheMaxAge = config.jwksCacheMaxAge ?? 60 * 1000 // 1 minute
     this.jwksRefreshBeforeExpiry = config.jwksRefreshBeforeExpiry ?? 15 * 1000 // 15 seconds
     this.verifyCacheMaxAge = config.verifyCacheMaxAge ?? 60 * 1000 // 1 minute
+    this.verifyCacheMaxSize = config.verifyCacheMaxSize ?? 1_000
     this.fetch = config.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
@@ -375,7 +379,7 @@ export class PdsTokenVerifier implements TokenVerifier {
   }
 
   private evictVerifyCache(): void {
-    if (this.verifyCache.size <= 1000) return
+    if (this.verifyCache.size <= this.verifyCacheMaxSize) return
     const now = Date.now()
     for (const [key, entry] of this.verifyCache) {
       if (now - entry.cachedAt >= this.verifyCacheMaxAge) {
@@ -383,8 +387,8 @@ export class PdsTokenVerifier implements TokenVerifier {
       }
     }
     // If still over limit, drop oldest entries
-    if (this.verifyCache.size > 1000) {
-      const excess = this.verifyCache.size - 1000
+    if (this.verifyCache.size > this.verifyCacheMaxSize) {
+      const excess = this.verifyCache.size - this.verifyCacheMaxSize
       let removed = 0
       for (const key of this.verifyCache.keys()) {
         if (removed >= excess) break
