@@ -32,6 +32,9 @@ workloads.
 | `BACKGROUND_QUEUE_CONCURRENCY` | `10`    | Maximum concurrent tasks in the background queue (handle resolution, DID indexing). The upstream `BackgroundQueue` defaults to unlimited — this cap prevents unbounded promise accumulation. |
 | `ACTOR_SYNC_CONCURRENCY`       | `8`     | Maximum concurrent per-actor Stratos WebSocket drains. Each active drain holds a DB connection while processing.                                                                             |
 | `ACTOR_SYNC_QUEUE_PER_ACTOR`   | `10`    | Maximum buffered WebSocket messages per actor. When exceeded, the oldest message is dropped. Keep this low to bound memory under high write rates.                                           |
+| `ACTOR_SYNC_GLOBAL_MAX_PENDING`| `500`   | Maximum total pending messages across all actor sync queues. When exceeded, new messages are dropped until the queue drains.                                                                  |
+| `ACTOR_SYNC_DRAIN_DELAY_MS`    | `5`     | Delay in milliseconds between processing batches in actor sync drains. Prevents a single actor from monopolizing a worker.                                                                   |
+| `BACKGROUND_QUEUE_MAX_SIZE`    | `1000`  | Maximum items in the background queue (handle resolution, DID indexing). Tasks submitted beyond this limit are dropped to prevent unbounded memory growth.                                   |
 
 ### Timing
 
@@ -51,6 +54,12 @@ workloads.
 | ------------------------ | ------- | ------------------------------------------------------------------------------------------- |
 | `BACKFILL_ENROLLED_ONLY` | `false` | When `true`, only backfill actors that are enrolled in Stratos (skips full PDS repo crawl). |
 
+### Memory
+
+| Variable    | Default | Description                                                                                                                                                                                                 |
+| ----------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MEM_LIMIT` | —       | Override V8 heap size in megabytes. When set, this value is used directly as `--max-old-space-size`. When unset, the heap is auto-sized to 80% of the container's cgroup memory limit (or host memory as fallback). |
+
 ### Health
 
 | Variable      | Default | Description                                         |
@@ -64,9 +73,12 @@ workloads.
 Reduce queue sizes and concurrency:
 
 ```
+MEM_LIMIT=2048
 WORKER_MAX_QUEUE_SIZE=50
 ACTOR_SYNC_QUEUE_PER_ACTOR=5
+ACTOR_SYNC_GLOBAL_MAX_PENDING=200
 BACKGROUND_QUEUE_CONCURRENCY=5
+BACKGROUND_QUEUE_MAX_SIZE=500
 ACTOR_SYNC_CONCURRENCY=4
 ```
 
@@ -75,11 +87,13 @@ ACTOR_SYNC_CONCURRENCY=4
 Increase pool and concurrency:
 
 ```
-BSKY_DB_POOL_SIZE=30
+BSKY_DB_POOL_SIZE=40
 WORKER_CONCURRENCY=8
-BACKGROUND_QUEUE_CONCURRENCY=15
-ACTOR_SYNC_CONCURRENCY=12
 WORKER_MAX_QUEUE_SIZE=200
+BACKGROUND_QUEUE_CONCURRENCY=15
+BACKGROUND_QUEUE_MAX_SIZE=2000
+ACTOR_SYNC_CONCURRENCY=12
+ACTOR_SYNC_GLOBAL_MAX_PENDING=1000
 ```
 
 ### Connection pool sizing

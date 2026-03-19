@@ -32,7 +32,9 @@ export class Indexer {
   private handleDedup: HandleDedup | null = null
   private healthServer: Deno.HttpServer | null = null
   private enrolledDids = new Set<string>()
-  private backfilledDids = new Set<string>()
+  private backfilledDids = new Map<string, number>()
+  private backfilledDidsSweepTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly BACKFILLED_TTL_MS = 30 * 60 * 1000
   private activeBackfills = 0
   private readonly maxConcurrentBackfills = 2
 
@@ -40,6 +42,13 @@ export class Indexer {
 
   async start(): Promise<void> {
     console.log('starting stratos indexer')
+
+    this.backfilledDidsSweepTimer = setInterval(() => {
+      const cutoff = Date.now() - Indexer.BACKFILLED_TTL_MS
+      for (const [did, ts] of this.backfilledDids) {
+        if (ts < cutoff) this.backfilledDids.delete(did)
+      }
+    }, 60_000)
 
     // Health server
     this.healthServer = Deno.serve(
@@ -295,8 +304,9 @@ export class Indexer {
       )
 
       const backfilled = await backfillActors(backfillOpts, didsList)
+      const now = Date.now()
       for (const did of didsList) {
-        this.backfilledDids.add(did)
+        this.backfilledDids.set(did, now)
       }
 
       console.log(
@@ -326,6 +336,23 @@ export class Indexer {
     this.pdsFirehose.start()
     console.log('PDS firehose connected')
 
+    setInterval(() => {
+      const mem = Deno.memoryUsage()
+      console.log(
+        {
+          rss: Math.round(mem.rss / 1024 / 1024),
+          heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+          heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+          external: Math.round(mem.external / 1024 / 1024),
+          enrolledDids: this.enrolledDids.size,
+          backfilledDids: this.backfilledDids.size,
+          workerPending: this.workerPool?.pendingCount ?? 0,
+          workerActive: this.workerPool?.runningCount ?? 0,
+        },
+        'memory stats (MB)',
+      )
+    }, 30_000)
+
     console.log(
       {
         healthPort: this.config.health.port,
@@ -344,7 +371,7 @@ export class Indexer {
     opts: Parameters<typeof backfillSingleActor>[0],
   ): void {
     if (this.backfilledDids.has(did)) return
-    this.backfilledDids.add(did)
+    this.backfilledDids.set(did, Date.now())
     console.log({ did }, 'backfilling referenced actor')
     void this.runBackfill(did, opts)
   }
@@ -377,6 +404,12 @@ export class Indexer {
     this.stratosServiceSub?.stop()
     this.stratosActorSync?.stop()
     this.handleDedup?.stop()
+
+    if (this.backfilledDidsSweepTimer) {
+      clearInterval(this.backfilledDidsSweepTimer)
+      this.backfilledDidsSweepTimer = null
+    }
+    this.backfilledDids.clear()
 
     if (this.workerPool) {
       await this.workerPool.stop()
