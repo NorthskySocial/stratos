@@ -570,37 +570,32 @@ export class PgActorRepoReader {
   }
 
   async preloadRootSpine(commitCid: CID): Promise<void> {
-    await this.preloadMstBlocks(commitCid)
-  }
-
-  async preloadMstBlocks(commitCid: CID): Promise<void> {
     const commitBytes = await this.getBytes(commitCid)
     if (!commitBytes) return
 
     const commit = cborDecode(commitBytes) as { data: CidLink }
     const mstRootCid = CID.parse(commit.data.$link)
 
-    let currentLevel = [mstRootCid]
-    while (currentLevel.length > 0) {
-      const { blocks } = await this.getBlocks(currentLevel)
-      const nextLevel: CID[] = []
-      for (const [, bytes] of blocks.entries()) {
-        const node = cborDecode(bytes) as {
-          l: CidLink | null
-          e: Array<{ t: CidLink | null }>
-        }
-        if (node.l) {
-          const cid = CID.parse(node.l.$link)
-          if (!this.cache.has(cid)) nextLevel.push(cid)
-        }
-        for (const entry of node.e) {
-          if (entry.t) {
-            const cid = CID.parse(entry.t.$link)
-            if (!this.cache.has(cid)) nextLevel.push(cid)
-          }
-        }
+    const rootBytes = await this.getBytes(mstRootCid)
+    if (!rootBytes) return
+
+    const rootNode = cborDecode(rootBytes) as {
+      l: CidLink | null
+      e: Array<{ t: CidLink | null }>
+    }
+
+    const childCids: CID[] = []
+    if (rootNode.l) {
+      childCids.push(CID.parse(rootNode.l.$link))
+    }
+    for (const entry of rootNode.e) {
+      if (entry.t) {
+        childCids.push(CID.parse(entry.t.$link))
       }
-      currentLevel = nextLevel
+    }
+
+    if (childCids.length > 0) {
+      await this.getBlocks(childCids)
     }
   }
 

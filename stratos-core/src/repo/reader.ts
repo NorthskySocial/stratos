@@ -306,37 +306,6 @@ export class StratosSqlRepoReader {
     }
   }
 
-  async preloadMstBlocks(commitCid: CID): Promise<void> {
-    const commitBytes = await this.getBytes(commitCid)
-    if (!commitBytes) return
-
-    const commit = cborDecode(commitBytes) as { data: CidLink }
-    const mstRootCid = CID.parse(commit.data.$link)
-
-    let currentLevel = [mstRootCid]
-    while (currentLevel.length > 0) {
-      const { blocks } = await this.getBlocks(currentLevel)
-      const nextLevel: CID[] = []
-      for (const [, bytes] of blocks.entries()) {
-        const node = cborDecode(bytes) as {
-          l: CidLink | null
-          e: Array<{ t: CidLink | null }>
-        }
-        if (node.l) {
-          const cid = CID.parse(node.l.$link)
-          if (!this.cache.has(cid)) nextLevel.push(cid)
-        }
-        for (const entry of node.e) {
-          if (entry.t) {
-            const cid = CID.parse(entry.t.$link)
-            if (!this.cache.has(cid)) nextLevel.push(cid)
-          }
-        }
-      }
-      currentLevel = nextLevel
-    }
-  }
-
   async listExistingBlocks(): Promise<CidSet> {
     const cids = new CidSet()
     let lastCid: string | undefined = ''

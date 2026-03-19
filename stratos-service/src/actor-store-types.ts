@@ -108,7 +108,6 @@ export interface ActorRepoReader {
   getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }>
   preloadBlocksForRev(rev: string): Promise<void>
   preloadRootSpine(commitCid: CID): Promise<void>
-  preloadMstBlocks(commitCid: CID): Promise<void>
   iterateCarBlocks(since?: string): AsyncIterable<CarBlock>
   getBlockRange(
     since?: string,
