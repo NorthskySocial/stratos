@@ -233,6 +233,8 @@ export class Indexer {
         maxActorQueueSize: this.config.worker.actorSyncQueuePerActor,
         globalMaxPending: this.config.worker.actorSyncGlobalMaxPending,
         drainDelayMs: this.config.worker.actorSyncDrainDelayMs,
+        maxConnections: this.config.worker.actorSyncMaxConnections,
+        connectDelayMs: this.config.worker.actorSyncConnectDelayMs,
       },
       (did) =>
         background.add(() =>
@@ -338,6 +340,7 @@ export class Indexer {
 
     setInterval(() => {
       const mem = Deno.memoryUsage()
+      const syncStats = this.stratosActorSync?.getStats()
       console.log(
         {
           rss: Math.round(mem.rss / 1024 / 1024),
@@ -348,6 +351,8 @@ export class Indexer {
           backfilledDids: this.backfilledDids.size,
           workerPending: this.workerPool?.pendingCount ?? 0,
           workerActive: this.workerPool?.runningCount ?? 0,
+          activeConnections: syncStats?.activeConnections ?? 0,
+          waitingActors: syncStats?.waitingActors ?? 0,
         },
         'memory stats (MB)',
       )
@@ -361,6 +366,8 @@ export class Indexer {
         maxQueueSize: this.config.worker.maxQueueSize,
         actorSyncConcurrency: this.config.worker.actorSyncConcurrency,
         actorSyncQueuePerActor: this.config.worker.actorSyncQueuePerActor,
+        actorSyncMaxConnections: this.config.worker.actorSyncMaxConnections,
+        actorSyncConnectDelayMs: this.config.worker.actorSyncConnectDelayMs,
       },
       'stratos indexer started',
     )

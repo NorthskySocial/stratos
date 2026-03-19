@@ -39,6 +39,8 @@ export interface WorkerConfig {
   actorSyncQueuePerActor: number
   actorSyncGlobalMaxPending: number
   actorSyncDrainDelayMs: number
+  actorSyncMaxConnections: number
+  actorSyncConnectDelayMs: number
   backgroundQueueConcurrency: number
   backgroundQueueMaxSize: number
 }
@@ -72,6 +74,8 @@ export function loadConfig(): IndexerConfig {
       actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 10),
       actorSyncGlobalMaxPending: envInt('ACTOR_SYNC_GLOBAL_MAX_PENDING', 500),
       actorSyncDrainDelayMs: envInt('ACTOR_SYNC_DRAIN_DELAY_MS', 5),
+      actorSyncMaxConnections: envInt('ACTOR_SYNC_MAX_CONNECTIONS', 20),
+      actorSyncConnectDelayMs: envInt('ACTOR_SYNC_CONNECT_DELAY_MS', 200),
       backgroundQueueConcurrency: envInt('BACKGROUND_QUEUE_CONCURRENCY', 10),
       backgroundQueueMaxSize: envInt('BACKGROUND_QUEUE_MAX_SIZE', 1000),
     },
