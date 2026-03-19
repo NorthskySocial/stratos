@@ -1013,6 +1013,7 @@ export class PostgresActorStore implements ActorStore {
   private readonly actorClient: ReturnType<typeof postgres>
   private readonly actorDb: StratosPgDb
   private readonly schemaNameCache = new Map<string, string>()
+  private readonly existsCache = new Set<string>()
   private readonly blockCache: LruBlockCache
 
   constructor(config: PostgresActorStoreConfig) {
@@ -1049,11 +1050,16 @@ export class PostgresActorStore implements ActorStore {
   }
 
   async exists(did: string): Promise<boolean> {
+    if (this.existsCache.has(did)) return true
     const schemaName = await this.getSchemaName(did)
     const rows = await this.adminDb.execute(
       sql`SELECT 1 FROM information_schema.schemata WHERE schema_name = ${schemaName} LIMIT 1`,
     )
-    return rows.length > 0
+    if (rows.length > 0) {
+      this.existsCache.add(did)
+      return true
+    }
+    return false
   }
 
   async create(did: string): Promise<void> {
@@ -1065,6 +1071,7 @@ export class PostgresActorStore implements ActorStore {
       await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
       await migrateStratosPgDb(tx as unknown as StratosPgDb)
     })
+    this.existsCache.add(did)
   }
 
   async destroy(did: string): Promise<void> {
@@ -1072,6 +1079,7 @@ export class PostgresActorStore implements ActorStore {
     await this.adminDb.execute(
       sql.raw(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`),
     )
+    this.existsCache.delete(did)
   }
 
   async read<T>(
