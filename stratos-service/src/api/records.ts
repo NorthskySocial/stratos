@@ -28,7 +28,11 @@ export interface WritePhases {
   validation?: number
   encode?: number
   prepareCommit?: number
+  prepareCommitConnAcquire?: number
+  prepareCommitGetRoot?: number
+  prepareCommitBuild?: number
   transact?: number
+  transactConnAcquire?: number
   transactLockCheck?: number
   transactPutBlock?: number
   transactSign?: number
@@ -126,13 +130,21 @@ async function prepareCommit(
   ctx: AppContext,
   did: string,
   writes: MstWriteOp[],
+  phases?: WritePhases,
 ): Promise<PreparedCommit> {
+  const readStart = performance.now()
   return await ctx.actorStore.read(did, async (reader) => {
+    if (phases) phases.prepareCommitConnAcquire = performance.now() - readStart
+
+    let ts = performance.now()
     const rootDetails = await reader.repo.getRootDetailed()
     const rootCid = rootDetails?.cid.toString() ?? null
+    if (phases) phases.prepareCommitGetRoot = performance.now() - ts
 
+    ts = performance.now()
     const storage = new StratosBlockStoreReader(reader.repo)
     const unsigned = await buildCommit(storage, rootCid, { did, writes })
+    if (phases) phases.prepareCommitBuild = performance.now() - ts
 
     return { unsigned, rootCid }
   })
@@ -218,11 +230,13 @@ export async function createRecord(
 
   // Build MST commit outside the transaction
   t0 = performance.now()
-  const prepared = await prepareCommit(ctx, callerDid, writes)
+  const prepared = await prepareCommit(ctx, callerDid, writes, phases)
   phases.prepareCommit = performance.now() - t0
 
   t0 = performance.now()
+  const txStart = performance.now()
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    phases.transactConnAcquire = performance.now() - txStart
     // Optimistic lock: verify repo root hasn't changed since we read the MST
     let ti = performance.now()
     const currentRoot = await store.repo.getRootDetailed()
@@ -346,11 +360,13 @@ export async function deleteRecord(
   let t0 = performance.now()
   const prepared = await prepareCommit(ctx, callerDid, [
     { action: 'delete', collection, rkey, cid: null },
-  ])
+  ], phases)
   phases.prepareCommit = performance.now() - t0
 
   t0 = performance.now()
+  const txStart = performance.now()
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    phases.transactConnAcquire = performance.now() - txStart
     // Optimistic lock: verify repo root hasn't changed since we read the MST
     let ti = performance.now()
     const currentRoot = await store.repo.getRootDetailed()
@@ -464,11 +480,13 @@ export async function updateRecord(
   t0 = performance.now()
   const prepared = await prepareCommit(ctx, callerDid, [
     { action: 'update', collection, rkey, cid: cid.toString() },
-  ])
+  ], phases)
   phases.prepareCommit = performance.now() - t0
 
   t0 = performance.now()
+  const txStart = performance.now()
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
+    phases.transactConnAcquire = performance.now() - txStart
     // Optimistic lock: verify repo root hasn't changed since we read the MST
     let ti = performance.now()
     const currentRoot = await store.repo.getRootDetailed()
