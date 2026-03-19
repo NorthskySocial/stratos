@@ -149,6 +149,8 @@ export interface StratosActorSyncOptions {
   maxActorQueueSize: number
   globalMaxPending: number
   drainDelayMs: number
+  maxConnections: number
+  connectDelayMs: number
 }
 
 interface ActorQueue {
@@ -166,6 +168,12 @@ export class StratosActorSync {
   private knownDidsSweepTimer: ReturnType<typeof setInterval> | null = null
   private static readonly KNOWN_DIDS_TTL_MS = 30 * 60 * 1000
   private static readonly KNOWN_DIDS_SWEEP_MS = 60 * 1000
+
+  // Connection management — limits total open WebSockets to prevent native memory exhaustion
+  private waitingActors: string[] = []
+  private readonly maxConnections: number
+  private readonly connectDelayMs: number
+  private connectTimer: ReturnType<typeof setTimeout> | null = null
 
   // Per-actor bounded queues prevent unbounded concurrent DB operations during spikes
   private actorQueues = new Map<string, ActorQueue>()
@@ -194,6 +202,8 @@ export class StratosActorSync {
       maxActorQueueSize: 10,
       globalMaxPending: 500,
       drainDelayMs: 5,
+      maxConnections: 20,
+      connectDelayMs: 200,
     },
     private onHandleNeeded?: (did: string) => void,
   ) {
@@ -201,6 +211,8 @@ export class StratosActorSync {
     this.maxActorQueueSize = options.maxActorQueueSize
     this.globalMaxPending = options.globalMaxPending
     this.drainDelayMs = options.drainDelayMs
+    this.maxConnections = options.maxConnections
+    this.connectDelayMs = options.connectDelayMs
   }
 
   start(): void {
@@ -239,7 +251,12 @@ export class StratosActorSync {
       clearInterval(this.knownDidsSweepTimer)
       this.knownDidsSweepTimer = null
     }
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer)
+      this.connectTimer = null
+    }
     this.knownDids.clear()
+    this.waitingActors = []
 
     for (const timer of this.reconnectTimers.values()) {
       clearTimeout(timer)
@@ -259,13 +276,22 @@ export class StratosActorSync {
 
   addActor(did: string, cursor?: number): void {
     if (this.subscriptions.has(did)) return
+    if (this.waitingActors.includes(did)) return
     if (cursor !== undefined) {
       this.cursorManager.updateStratosCursor(did, cursor)
     }
-    this.subscribe(did)
+    if (this.subscriptions.size >= this.maxConnections) {
+      this.waitingActors.push(did)
+      return
+    }
+    this.scheduleConnect(did)
   }
 
   removeActor(did: string): void {
+    const idx = this.waitingActors.indexOf(did)
+    if (idx !== -1) {
+      this.waitingActors.splice(idx, 1)
+    }
     const ws = this.subscriptions.get(did)
     if (ws) {
       ws.close()
@@ -279,10 +305,34 @@ export class StratosActorSync {
     this.reconnectAttempts.delete(did)
     this.cursorManager.removeStratosCursor(did)
     this.actorQueues.delete(did)
+    this.promoteWaitingActor()
   }
 
   getActiveActors(): string[] {
     return Array.from(this.subscriptions.keys())
+  }
+
+  getWaitingActorCount(): number {
+    return this.waitingActors.length
+  }
+
+  private promoteWaitingActor(): void {
+    if (this.waitingActors.length === 0) return
+    if (this.subscriptions.size >= this.maxConnections) return
+    const nextDid = this.waitingActors.shift()!
+    this.scheduleConnect(nextDid)
+  }
+
+  private scheduleConnect(did: string): void {
+    if (!this.running) return
+    if (this.connectDelayMs <= 0) {
+      this.subscribe(did)
+      return
+    }
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null
+      this.subscribe(did)
+    }, this.connectDelayMs)
   }
 
   private subscribe(did: string): void {
@@ -320,6 +370,7 @@ export class StratosActorSync {
         )
       }
       this.scheduleReconnect(did)
+      this.promoteWaitingActor()
     })
 
     ws.addEventListener('error', (e: Event & { error?: unknown }) => {
@@ -345,9 +396,22 @@ export class StratosActorSync {
       return
     }
 
+    if (this.subscriptions.size >= this.maxConnections) {
+      if (!this.waitingActors.includes(did)) {
+        this.waitingActors.push(did)
+      }
+      return
+    }
+
     const delay = Math.min(1000 * Math.pow(2, attempt), MAX_RECONNECT_DELAY_MS)
     const timer = setTimeout(() => {
       this.reconnectTimers.delete(did)
+      if (this.subscriptions.size >= this.maxConnections) {
+        if (!this.waitingActors.includes(did)) {
+          this.waitingActors.push(did)
+        }
+        return
+      }
       this.subscribe(did)
     }, delay)
     this.reconnectTimers.set(did, timer)
@@ -381,9 +445,11 @@ export class StratosActorSync {
     }
     const q = this.actorQueues.get(did)
     if (q) {
+      this.globalPendingCount -= q.pending.length
       q.pending.length = 0
     }
     this.scheduleReconnect(did)
+    this.promoteWaitingActor()
   }
 
   private async drainActorQueue(did: string): Promise<void> {
@@ -511,12 +577,16 @@ export class StratosActorSync {
     actorQueues: number
     globalPendingCount: number
     activeSyncs: number
+    activeConnections: number
+    waitingActors: number
   } {
     return {
       knownDids: this.knownDids.size,
       actorQueues: this.actorQueues.size,
       globalPendingCount: this.globalPendingCount,
       activeSyncs: this.activeSyncs,
+      activeConnections: this.subscriptions.size,
+      waitingActors: this.waitingActors.length,
     }
   }
 }
