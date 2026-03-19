@@ -32,6 +32,9 @@ export interface WritePhases {
   transact?: number
   transactLockCheck?: number
   transactSign?: number
+  transactPutBlocks?: number
+  transactDeleteBlocks?: number
+  transactUpdateRoot?: number
   transactPersist?: number
 }
 
