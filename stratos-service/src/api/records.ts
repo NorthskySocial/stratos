@@ -22,6 +22,22 @@ import type { ActorTransactor } from '../actor-store-types.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../features/index.js'
 import { Did } from '@atproto/api'
 
+export interface WritePhases {
+  enrollment?: number
+  actorExists?: number
+  validation?: number
+  encode?: number
+  prepareCommit?: number
+  transact?: number
+  transactLockCheck?: number
+  transactPutBlock?: number
+  transactSign?: number
+  transactPutBlocks?: number
+  transactDeleteBlocks?: number
+  transactUpdateRoot?: number
+  transactIndex?: number
+}
+
 /**
  * Record creation input
  */
@@ -141,7 +157,8 @@ export async function createRecord(
   ctx: AppContext,
   input: CreateRecordInput,
   callerDid: string,
-): Promise<CreateRecordOutput> {
+): Promise<CreateRecordOutput & { phases?: WritePhases }> {
+  const phases: WritePhases = {}
   const { repo, collection, record, validate = true } = input
 
   // Must be creating record for self
@@ -161,7 +178,9 @@ export async function createRecord(
   const rkey = input.rkey ?? TID.nextStr()
 
   // Check if enrolled
+  let t0 = performance.now()
   const isEnrolled = await ctx.enrollmentStore.isEnrolled(callerDid)
+  phases.enrollment = performance.now() - t0
   if (!isEnrolled) {
     throw new InvalidRequestError(
       'User is not enrolled in this Stratos service',
@@ -170,48 +189,63 @@ export async function createRecord(
   }
 
   // Check if actor store exists, create if not
+  t0 = performance.now()
   const exists = await ctx.actorStore.exists(callerDid)
   if (!exists) {
     await ctx.actorStore.create(callerDid)
   }
+  phases.actorExists = performance.now() - t0
 
   // Validate the record if requested
   if (validate) {
+    t0 = performance.now()
     await validateWritableRecord(ctx, callerDid, collection, record)
+    phases.validation = performance.now() - t0
   }
 
   // Pre-compute CPU-bound work outside the transaction
+  t0 = performance.now()
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUri(uriStr)
   const recordBytes = encodeRecord(record)
   const cid = await computeCid(record)
   const rev = TID.nextStr()
+  phases.encode = performance.now() - t0
 
   const writes: MstWriteOp[] = [
     { action: 'create', collection, rkey, cid: cid.toString() },
   ]
 
-  // Build MST commit off-thread via worker pool, then persist inside a single transaction
+  // Build MST commit outside the transaction
+  t0 = performance.now()
   const prepared = await prepareCommit(ctx, callerDid, writes)
+  phases.prepareCommit = performance.now() - t0
 
+  t0 = performance.now()
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
     // Optimistic lock: verify repo root hasn't changed since we read the MST
+    let ti = performance.now()
     const currentRoot = await store.repo.getRootDetailed()
     assertRootUnchanged(
       currentRoot?.cid.toString() ?? null,
       prepared.rootCid,
     )
+    phases.transactLockCheck = performance.now() - ti
 
     // Store the record block
+    ti = performance.now()
     await store.repo.putBlock(cid, recordBytes, rev)
+    phases.transactPutBlock = performance.now() - ti
 
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
       prepared.unsigned,
+      phases,
     )
 
     // Index the record
+    ti = performance.now()
     await store.record.indexRecord(
       uri,
       cid,
@@ -219,6 +253,7 @@ export async function createRecord(
       'create',
       commitResult.rev,
     )
+    phases.transactIndex = performance.now() - ti
 
     return {
       uri,
@@ -230,6 +265,7 @@ export async function createRecord(
       },
     }
   })
+  phases.transact = performance.now() - t0
 
   // Sequence the change (deferred, non-blocking)
   deferSequenceChange(ctx, callerDid, {
@@ -264,6 +300,7 @@ export async function createRecord(
     uri: result.uri.toString(),
     cid: result.cid.toString(),
     commit: result.commit,
+    phases,
   }
 }
 
@@ -285,7 +322,8 @@ export async function deleteRecord(
   ctx: AppContext,
   input: DeleteRecordInput,
   callerDid: string,
-): Promise<{ commit?: { cid: string; rev: string } }> {
+): Promise<{ commit?: { cid: string; rev: string }; phases?: WritePhases }> {
+  const phases: WritePhases = {}
   const { repo, collection, rkey } = input
 
   // Must be deleting own record
@@ -305,17 +343,22 @@ export async function deleteRecord(
   const uri = new AtUri(uriStr)
 
   // Build MST commit outside the write transaction to reduce connection hold time
+  let t0 = performance.now()
   const prepared = await prepareCommit(ctx, callerDid, [
     { action: 'delete', collection, rkey, cid: null },
   ])
+  phases.prepareCommit = performance.now() - t0
 
+  t0 = performance.now()
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
     // Optimistic lock: verify repo root hasn't changed since we read the MST
+    let ti = performance.now()
     const currentRoot = await store.repo.getRootDetailed()
     assertRootUnchanged(
       currentRoot?.cid.toString() ?? null,
       prepared.rootCid,
     )
+    phases.transactLockCheck = performance.now() - ti
 
     // Check if record exists
     const existing = await store.record.getRecord(uri, null)
@@ -324,12 +367,15 @@ export async function deleteRecord(
     }
 
     // Delete from record index
+    ti = performance.now()
     await store.record.deleteRecord(uri)
+    phases.transactIndex = performance.now() - ti
 
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
       prepared.unsigned,
+      phases,
     )
 
     return {
@@ -339,6 +385,7 @@ export async function deleteRecord(
       },
     }
   })
+  phases.transact = performance.now() - t0
 
   // Sequence the change (deferred, non-blocking)
   deferSequenceChange(ctx, callerDid, {
@@ -351,7 +398,7 @@ export async function deleteRecord(
   // Delete stub from user's PDS (background, non-blocking)
   ctx.stubQueue.enqueueDelete(callerDid, collection, rkey)
 
-  return result
+  return { ...result, phases }
 }
 
 export interface UpdateRecordInput {
@@ -376,7 +423,8 @@ export async function updateRecord(
   ctx: AppContext,
   input: UpdateRecordInput,
   callerDid: string,
-): Promise<UpdateRecordOutput> {
+): Promise<UpdateRecordOutput & { phases?: WritePhases }> {
+  const phases: WritePhases = {}
   const { repo, collection, rkey, record, validate = true } = input
 
   if (repo !== callerDid) {
@@ -390,34 +438,45 @@ export async function updateRecord(
     )
   }
 
+  let t0 = performance.now()
   const exists = await ctx.actorStore.exists(callerDid)
   if (!exists) {
     throw new InvalidRequestError('Repo not found', 'RepoNotFound')
   }
+  phases.actorExists = performance.now() - t0
 
   if (validate) {
+    t0 = performance.now()
     await validateWritableRecord(ctx, callerDid, collection, record)
+    phases.validation = performance.now() - t0
   }
 
   // Pre-compute CPU-bound work outside the transaction
+  t0 = performance.now()
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUri(uriStr)
   const recordBytes = encodeRecord(record)
   const cid = await computeCid(record)
   const rev = TID.nextStr()
+  phases.encode = performance.now() - t0
 
   // Build MST commit outside the write transaction to reduce connection hold time
+  t0 = performance.now()
   const prepared = await prepareCommit(ctx, callerDid, [
     { action: 'update', collection, rkey, cid: cid.toString() },
   ])
+  phases.prepareCommit = performance.now() - t0
 
+  t0 = performance.now()
   const result = await ctx.actorStore.transact(callerDid, async (store) => {
     // Optimistic lock: verify repo root hasn't changed since we read the MST
+    let ti = performance.now()
     const currentRoot = await store.repo.getRootDetailed()
     assertRootUnchanged(
       currentRoot?.cid.toString() ?? null,
       prepared.rootCid,
     )
+    phases.transactLockCheck = performance.now() - ti
 
     const existing = await store.record.getRecord(uri, null)
     if (!existing) {
@@ -425,15 +484,19 @@ export async function updateRecord(
     }
 
     // Store the record block
+    ti = performance.now()
     await store.repo.putBlock(cid, recordBytes, rev)
+    phases.transactPutBlock = performance.now() - ti
 
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
       prepared.unsigned,
+      phases,
     )
 
     // Index the record
+    ti = performance.now()
     await store.record.indexRecord(
       uri,
       cid,
@@ -441,6 +504,7 @@ export async function updateRecord(
       'update',
       commitResult.rev,
     )
+    phases.transactIndex = performance.now() - ti
 
     return {
       uri,
@@ -452,6 +516,7 @@ export async function updateRecord(
       },
     }
   })
+  phases.transact = performance.now() - t0
 
   // Sequence the change (deferred, non-blocking)
   deferSequenceChange(ctx, callerDid, {
@@ -485,6 +550,7 @@ export async function updateRecord(
     uri: result.uri.toString(),
     cid: result.cid.toString(),
     commit: result.commit,
+    phases,
   }
 }
 

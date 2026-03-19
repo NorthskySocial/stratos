@@ -8,6 +8,7 @@ import {
   type UnsignedCommitData,
   BlockMap,
 } from '@northskysocial/stratos-core'
+import type { WritePhases } from '../../api/records.js'
 
 export interface SignedCommitResult {
   commitCid: CID
@@ -19,7 +20,9 @@ export async function signAndPersistCommit(
   repoTransactor: ActorRepoTransactor,
   signingKey: Keypair,
   unsigned: UnsignedCommitData,
+  phases?: WritePhases,
 ): Promise<SignedCommitResult> {
+  let t0 = performance.now()
   const unsignedCommit = {
     did: unsigned.did,
     version: unsigned.version as 3,
@@ -40,21 +43,28 @@ export async function signAndPersistCommit(
   const atcuteCid = await cidCreate(0x71, commitBytes)
   const commitCidStr = cidToString(atcuteCid)
   const commitCid = CID.parse(commitCidStr)
+  if (phases) phases.transactSign = performance.now() - t0
 
   const allBlocks = new BlockMap()
   for (const [cidStr, bytes] of unsigned.newBlocks) {
     allBlocks.set(CID.parse(cidStr), bytes)
   }
   allBlocks.set(commitCid, commitBytes)
+  t0 = performance.now()
   await repoTransactor.putBlocks(allBlocks, unsigned.rev)
+  if (phases) phases.transactPutBlocks = performance.now() - t0
 
   if (unsigned.removedCids.length > 0) {
+    t0 = performance.now()
     await repoTransactor.deleteBlocks(
       unsigned.removedCids.map((s) => CID.parse(s)),
     )
+    if (phases) phases.transactDeleteBlocks = performance.now() - t0
   }
 
+  t0 = performance.now()
   await repoTransactor.updateRoot(commitCid, unsigned.rev, unsigned.did)
+  if (phases) phases.transactUpdateRoot = performance.now() - t0
 
   return {
     commitCid,

@@ -125,14 +125,15 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           did,
         )
 
+        const { phases, ...body_result } = result
         ctx.logger?.info(
-          { uri: result.uri, durationMs: Date.now() - start },
+          { uri: body_result.uri, durationMs: Date.now() - start, phases },
           'record created',
         )
 
         return {
           encoding: 'application/json',
-          body: result,
+          body: body_result,
         }
       } catch (err) {
         console.error(
@@ -191,19 +192,21 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
           did,
         )
 
+        const { phases, ...delete_result } = result
         ctx.logger?.info(
           {
             repo: body.repo,
             collection: body.collection,
             rkey: body.rkey,
             durationMs: Date.now() - start,
+            phases,
           },
           'record deleted',
         )
 
         return {
           encoding: 'application/json',
-          body: result,
+          body: delete_result,
         }
       } catch (err) {
         ctx.logger?.error(
