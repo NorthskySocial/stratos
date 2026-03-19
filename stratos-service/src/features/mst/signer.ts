@@ -50,23 +50,17 @@ export async function signAndPersistCommit(
     allBlocks.set(CID.parse(cidStr), bytes)
   }
   allBlocks.set(commitCid, commitBytes)
+  t0 = performance.now()
+  await repoTransactor.putBlocks(allBlocks, unsigned.rev)
+  if (phases) phases.transactPutBlocks = performance.now() - t0
 
-  const putBlocksOp = async () => {
-    const t = performance.now()
-    await repoTransactor.putBlocks(allBlocks, unsigned.rev)
-    if (phases) phases.transactPutBlocks = performance.now() - t
-  }
-
-  const deleteBlocksOp = async () => {
-    if (unsigned.removedCids.length === 0) return
-    const t = performance.now()
+  if (unsigned.removedCids.length > 0) {
+    t0 = performance.now()
     await repoTransactor.deleteBlocks(
       unsigned.removedCids.map((s) => CID.parse(s)),
     )
-    if (phases) phases.transactDeleteBlocks = performance.now() - t
+    if (phases) phases.transactDeleteBlocks = performance.now() - t0
   }
-
-  await Promise.all([putBlocksOp(), deleteBlocksOp()])
 
   t0 = performance.now()
   await repoTransactor.updateRoot(commitCid, unsigned.rev, unsigned.did)
