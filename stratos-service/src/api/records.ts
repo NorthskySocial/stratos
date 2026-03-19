@@ -19,7 +19,7 @@ import {
 
 import type { AppContext } from '../context.js'
 import type { ActorTransactor } from '../actor-store-types.js'
-import { signAndPersistCommit, StratosBlockStoreReader } from '../features/index.js'
+import { signAndPersistCommit, StratosBlockStoreReader, type ExtraBlock } from '../features/index.js'
 import { Did } from '@atproto/api'
 
 export interface WritePhases {
@@ -34,7 +34,6 @@ export interface WritePhases {
   transact?: number
   transactConnAcquire?: number
   transactLockCheck?: number
-  transactPutBlock?: number
   transactSign?: number
   transactPutBlocks?: number
   transactDeleteBlocks?: number
@@ -246,16 +245,12 @@ export async function createRecord(
     )
     phases.transactLockCheck = performance.now() - ti
 
-    // Store the record block
-    ti = performance.now()
-    await store.repo.putBlock(cid, recordBytes, rev)
-    phases.transactPutBlock = performance.now() - ti
-
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
       prepared.unsigned,
       phases,
+      [{ cid, bytes: recordBytes }],
     )
 
     // Index the record
@@ -501,16 +496,12 @@ export async function updateRecord(
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 
-    // Store the record block
-    ti = performance.now()
-    await store.repo.putBlock(cid, recordBytes, rev)
-    phases.transactPutBlock = performance.now() - ti
-
     const commitResult = await signAndPersistCommit(
       store.repo,
       ctx.signingKey,
       prepared.unsigned,
       phases,
+      [{ cid, bytes: recordBytes }],
     )
 
     // Index the record
