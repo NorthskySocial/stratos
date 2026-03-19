@@ -16,11 +16,17 @@ export interface SignedCommitResult {
   rev: string
 }
 
+export interface ExtraBlock {
+  cid: CID
+  bytes: Uint8Array
+}
+
 export async function signAndPersistCommit(
   repoTransactor: ActorRepoTransactor,
   signingKey: Keypair,
   unsigned: UnsignedCommitData,
   phases?: WritePhases,
+  extraBlocks?: ExtraBlock[],
 ): Promise<SignedCommitResult> {
   let t0 = performance.now()
   const unsignedCommit = {
@@ -46,6 +52,11 @@ export async function signAndPersistCommit(
   if (phases) phases.transactSign = performance.now() - t0
 
   const allBlocks = new BlockMap()
+  if (extraBlocks) {
+    for (const block of extraBlocks) {
+      allBlocks.set(block.cid, block.bytes)
+    }
+  }
   for (const [cidStr, bytes] of unsigned.newBlocks) {
     allBlocks.set(CID.parse(cidStr), bytes)
   }
