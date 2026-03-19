@@ -14,7 +14,6 @@ import {
   StratosValidationError,
   buildCommit,
   type MstWriteOp,
-  type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
 
 import type { AppContext } from '../context.js'
@@ -27,12 +26,10 @@ export interface WritePhases {
   actorExists?: number
   validation?: number
   encode?: number
-  prepareCommit?: number
-  prepareCommitConnAcquire?: number
+  connAcquire?: number
   prepareCommitGetRoot?: number
   prepareCommitBuild?: number
   transact?: number
-  transactConnAcquire?: number
   transactLockCheck?: number
   transactSign?: number
   transactPutBlocks?: number
@@ -120,35 +117,6 @@ async function validateWritableRecord(
   await assertCallerCanWriteDomains(ctx, callerDid, collection, record)
 }
 
-interface PreparedCommit {
-  unsigned: UnsignedCommitData
-  rootCid: string | null
-}
-
-async function prepareCommit(
-  ctx: AppContext,
-  did: string,
-  writes: MstWriteOp[],
-  phases?: WritePhases,
-): Promise<PreparedCommit> {
-  const readStart = performance.now()
-  return await ctx.actorStore.read(did, async (reader) => {
-    if (phases) phases.prepareCommitConnAcquire = performance.now() - readStart
-
-    let ts = performance.now()
-    const rootDetails = await reader.repo.getRootDetailed()
-    const rootCid = rootDetails?.cid.toString() ?? null
-    if (phases) phases.prepareCommitGetRoot = performance.now() - ts
-
-    ts = performance.now()
-    const storage = new StratosBlockStoreReader(reader.repo)
-    const unsigned = await buildCommit(storage, rootCid, { did, writes })
-    if (phases) phases.prepareCommitBuild = performance.now() - ts
-
-    return { unsigned, rootCid }
-  })
-}
-
 function assertRootUnchanged(
   currentRootCid: string | null,
   expectedRootCid: string | null,
@@ -227,53 +195,62 @@ export async function createRecord(
     { action: 'create', collection, rkey, cid: cid.toString() },
   ]
 
-  // Build MST commit outside the transaction
   t0 = performance.now()
-  const prepared = await prepareCommit(ctx, callerDid, writes, phases)
-  phases.prepareCommit = performance.now() - t0
+  const result = await ctx.actorStore.readThenTransact(
+    callerDid,
+    async (reader) => {
+      phases.connAcquire = performance.now() - t0
 
-  t0 = performance.now()
-  const txStart = performance.now()
-  const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    phases.transactConnAcquire = performance.now() - txStart
-    // Optimistic lock: verify repo root hasn't changed since we read the MST
-    let ti = performance.now()
-    const currentRoot = await store.repo.getRootDetailed()
-    assertRootUnchanged(
-      currentRoot?.cid.toString() ?? null,
-      prepared.rootCid,
-    )
-    phases.transactLockCheck = performance.now() - ti
+      let ts = performance.now()
+      const rootDetails = await reader.repo.getRootDetailed()
+      const rootCid = rootDetails?.cid.toString() ?? null
+      phases.prepareCommitGetRoot = performance.now() - ts
 
-    const commitResult = await signAndPersistCommit(
-      store.repo,
-      ctx.signingKey,
-      prepared.unsigned,
-      phases,
-      [{ cid, bytes: recordBytes }],
-    )
+      ts = performance.now()
+      const storage = new StratosBlockStoreReader(reader.repo)
+      const unsigned = await buildCommit(storage, rootCid, { did: callerDid, writes })
+      phases.prepareCommitBuild = performance.now() - ts
 
-    // Index the record
-    ti = performance.now()
-    await store.record.indexRecord(
-      uri,
-      cid,
-      record as Record<string, unknown>,
-      'create',
-      commitResult.rev,
-    )
-    phases.transactIndex = performance.now() - ti
+      return { unsigned, rootCid }
+    },
+    async (prepared, store) => {
+      let ti = performance.now()
+      const currentRoot = await store.repo.getRootDetailed()
+      assertRootUnchanged(
+        currentRoot?.cid.toString() ?? null,
+        prepared.rootCid,
+      )
+      phases.transactLockCheck = performance.now() - ti
 
-    return {
-      uri,
-      cid,
-      cidStr: cid.toString(),
-      commit: {
-        cid: commitResult.commitCid.toString(),
-        rev: commitResult.rev,
-      },
-    }
-  })
+      const commitResult = await signAndPersistCommit(
+        store.repo,
+        ctx.signingKey,
+        prepared.unsigned,
+        phases,
+        [{ cid, bytes: recordBytes }],
+      )
+
+      ti = performance.now()
+      await store.record.indexRecord(
+        uri,
+        cid,
+        record as Record<string, unknown>,
+        'create',
+        commitResult.rev,
+      )
+      phases.transactIndex = performance.now() - ti
+
+      return {
+        uri,
+        cid,
+        cidStr: cid.toString(),
+        commit: {
+          cid: commitResult.commitCid.toString(),
+          rev: commitResult.rev,
+        },
+      }
+    },
+  )
   phases.transact = performance.now() - t0
 
   // Sequence the change (deferred, non-blocking)
@@ -351,51 +328,60 @@ export async function deleteRecord(
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUri(uriStr)
 
-  // Build MST commit outside the write transaction to reduce connection hold time
   let t0 = performance.now()
-  const prepared = await prepareCommit(ctx, callerDid, [
-    { action: 'delete', collection, rkey, cid: null },
-  ], phases)
-  phases.prepareCommit = performance.now() - t0
+  const result = await ctx.actorStore.readThenTransact(
+    callerDid,
+    async (reader) => {
+      phases.connAcquire = performance.now() - t0
 
-  t0 = performance.now()
-  const txStart = performance.now()
-  const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    phases.transactConnAcquire = performance.now() - txStart
-    // Optimistic lock: verify repo root hasn't changed since we read the MST
-    let ti = performance.now()
-    const currentRoot = await store.repo.getRootDetailed()
-    assertRootUnchanged(
-      currentRoot?.cid.toString() ?? null,
-      prepared.rootCid,
-    )
-    phases.transactLockCheck = performance.now() - ti
+      let ts = performance.now()
+      const rootDetails = await reader.repo.getRootDetailed()
+      const rootCid = rootDetails?.cid.toString() ?? null
+      phases.prepareCommitGetRoot = performance.now() - ts
 
-    // Check if record exists
-    const existing = await store.record.getRecord(uri, null)
-    if (!existing) {
-      throw new InvalidRequestError('Record not found', 'RecordNotFound')
-    }
+      ts = performance.now()
+      const storage = new StratosBlockStoreReader(reader.repo)
+      const unsigned = await buildCommit(storage, rootCid, {
+        did: callerDid,
+        writes: [{ action: 'delete', collection, rkey, cid: null }],
+      })
+      phases.prepareCommitBuild = performance.now() - ts
 
-    // Delete from record index
-    ti = performance.now()
-    await store.record.deleteRecord(uri)
-    phases.transactIndex = performance.now() - ti
+      return { unsigned, rootCid }
+    },
+    async (prepared, store) => {
+      let ti = performance.now()
+      const currentRoot = await store.repo.getRootDetailed()
+      assertRootUnchanged(
+        currentRoot?.cid.toString() ?? null,
+        prepared.rootCid,
+      )
+      phases.transactLockCheck = performance.now() - ti
 
-    const commitResult = await signAndPersistCommit(
-      store.repo,
-      ctx.signingKey,
-      prepared.unsigned,
-      phases,
-    )
+      const existing = await store.record.getRecord(uri, null)
+      if (!existing) {
+        throw new InvalidRequestError('Record not found', 'RecordNotFound')
+      }
 
-    return {
-      commit: {
-        cid: commitResult.commitCid.toString(),
-        rev: commitResult.rev,
-      },
-    }
-  })
+      ti = performance.now()
+      await store.record.deleteRecord(uri)
+      phases.transactIndex = performance.now() - ti
+
+      const commitResult = await signAndPersistCommit(
+        store.repo,
+        ctx.signingKey,
+        prepared.unsigned,
+        phases,
+      )
+
+      return {
+        commit: {
+          cid: commitResult.commitCid.toString(),
+          rev: commitResult.rev,
+        },
+      }
+    },
+  )
   phases.transact = performance.now() - t0
 
   // Sequence the change (deferred, non-blocking)
@@ -471,60 +457,70 @@ export async function updateRecord(
   const rev = TID.nextStr()
   phases.encode = performance.now() - t0
 
-  // Build MST commit outside the write transaction to reduce connection hold time
   t0 = performance.now()
-  const prepared = await prepareCommit(ctx, callerDid, [
-    { action: 'update', collection, rkey, cid: cid.toString() },
-  ], phases)
-  phases.prepareCommit = performance.now() - t0
+  const result = await ctx.actorStore.readThenTransact(
+    callerDid,
+    async (reader) => {
+      phases.connAcquire = performance.now() - t0
 
-  t0 = performance.now()
-  const txStart = performance.now()
-  const result = await ctx.actorStore.transact(callerDid, async (store) => {
-    phases.transactConnAcquire = performance.now() - txStart
-    // Optimistic lock: verify repo root hasn't changed since we read the MST
-    let ti = performance.now()
-    const currentRoot = await store.repo.getRootDetailed()
-    assertRootUnchanged(
-      currentRoot?.cid.toString() ?? null,
-      prepared.rootCid,
-    )
-    phases.transactLockCheck = performance.now() - ti
+      let ts = performance.now()
+      const rootDetails = await reader.repo.getRootDetailed()
+      const rootCid = rootDetails?.cid.toString() ?? null
+      phases.prepareCommitGetRoot = performance.now() - ts
 
-    const existing = await store.record.getRecord(uri, null)
-    if (!existing) {
-      throw new InvalidRequestError('Record not found', 'RecordNotFound')
-    }
+      ts = performance.now()
+      const storage = new StratosBlockStoreReader(reader.repo)
+      const unsigned = await buildCommit(storage, rootCid, {
+        did: callerDid,
+        writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
+      })
+      phases.prepareCommitBuild = performance.now() - ts
 
-    const commitResult = await signAndPersistCommit(
-      store.repo,
-      ctx.signingKey,
-      prepared.unsigned,
-      phases,
-      [{ cid, bytes: recordBytes }],
-    )
+      return { unsigned, rootCid }
+    },
+    async (prepared, store) => {
+      let ti = performance.now()
+      const currentRoot = await store.repo.getRootDetailed()
+      assertRootUnchanged(
+        currentRoot?.cid.toString() ?? null,
+        prepared.rootCid,
+      )
+      phases.transactLockCheck = performance.now() - ti
 
-    // Index the record
-    ti = performance.now()
-    await store.record.indexRecord(
-      uri,
-      cid,
-      record as Record<string, unknown>,
-      'update',
-      commitResult.rev,
-    )
-    phases.transactIndex = performance.now() - ti
+      const existing = await store.record.getRecord(uri, null)
+      if (!existing) {
+        throw new InvalidRequestError('Record not found', 'RecordNotFound')
+      }
 
-    return {
-      uri,
-      cid,
-      cidStr: cid.toString(),
-      commit: {
-        cid: commitResult.commitCid.toString(),
-        rev: commitResult.rev,
-      },
-    }
-  })
+      const commitResult = await signAndPersistCommit(
+        store.repo,
+        ctx.signingKey,
+        prepared.unsigned,
+        phases,
+        [{ cid, bytes: recordBytes }],
+      )
+
+      ti = performance.now()
+      await store.record.indexRecord(
+        uri,
+        cid,
+        record as Record<string, unknown>,
+        'update',
+        commitResult.rev,
+      )
+      phases.transactIndex = performance.now() - ti
+
+      return {
+        uri,
+        cid,
+        cidStr: cid.toString(),
+        commit: {
+          cid: commitResult.commitCid.toString(),
+          rev: commitResult.rev,
+        },
+      }
+    },
+  )
   phases.transact = performance.now() - t0
 
   // Sequence the change (deferred, non-blocking)
