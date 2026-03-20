@@ -1,6 +1,5 @@
 import type {
   EnrollmentStoreWriter,
-  EnrollmentStoreReader,
   StoredEnrollment,
   ListEnrollmentsOptions,
 } from '@northskysocial/stratos-core'

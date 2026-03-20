@@ -229,7 +229,6 @@ export async function createRecord(
   const uri = new AtUri(uriStr)
   const recordBytes = encodeRecord(record)
   const cid = await computeCid(record)
-  const rev = TID.nextStr()
   phases.encode = performance.now() - t0
 
   const writes: MstWriteOp[] = [
@@ -525,7 +524,6 @@ export async function updateRecord(
   const uri = new AtUri(uriStr)
   const recordBytes = encodeRecord(record)
   const cid = await computeCid(record)
-  const rev = TID.nextStr()
   phases.encode = performance.now() - t0
 
   t0 = performance.now()
