@@ -15,6 +15,7 @@ import {
   buildCommit,
   type MstWriteOp,
 } from '@northskysocial/stratos-core'
+import { MissingBlockError } from '@atcute/mst'
 
 import type { AppContext } from '../context.js'
 import type { ActorTransactor } from '../actor-store-types.js'
@@ -134,14 +135,15 @@ function assertRootUnchanged(
   }
 }
 
-const MAX_CONCURRENCY_RETRIES = 2
+const MAX_CONCURRENCY_RETRIES = 4
 const BASE_RETRY_DELAY_MS = 25
 
-function isConcurrentModificationError(err: unknown): boolean {
+function isRetriableWriteError(err: unknown): boolean {
   return (
-    err instanceof InvalidRequestError &&
-    (err as { customErrorName?: string }).customErrorName ===
-      'ConcurrentModification'
+    (err instanceof InvalidRequestError &&
+      (err as { customErrorName?: string }).customErrorName ===
+        'ConcurrentModification') ||
+    err instanceof MissingBlockError
   )
 }
 
@@ -154,10 +156,7 @@ async function withConcurrencyRetry<T>(
       const result = await fn(attempt)
       return { result, retries: attempt }
     } catch (err) {
-      if (
-        !isConcurrentModificationError(err) ||
-        attempt >= MAX_CONCURRENCY_RETRIES
-      ) {
+      if (!isRetriableWriteError(err) || attempt >= MAX_CONCURRENCY_RETRIES) {
         throw err
       }
       const jitter = Math.random() * BASE_RETRY_DELAY_MS
@@ -387,7 +386,7 @@ export async function deleteRecord(
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUri(uriStr)
 
-  let t0 = performance.now()
+  const t0 = performance.now()
   const { result, retries } = await withConcurrencyRetry(async () => {
     const attemptT0 = performance.now()
     return ctx.actorStore.readThenTransact(
