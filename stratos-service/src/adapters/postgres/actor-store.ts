@@ -1159,20 +1159,18 @@ export class PostgresActorStore implements ActorStore {
         schema: pgActorSchema,
       }) as unknown as StratosPgDb
 
-      // Acquire lock before the read phase to prevent concurrent writers from
-      // deleting MST blocks mid-traversal (causes "missing block in store")
+      const reader: ActorReader = {
+        did,
+        record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(connDb, this.logger, this.blockCache),
+        blob: new PgActorBlobReader(connDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(connDb),
+      }
+      const readResult = (await readFn(reader)) as Awaited<R>
+
       await connection`BEGIN`
       await connection`SELECT pg_advisory_xact_lock(hashtext(${did}))`
       try {
-        const reader: ActorReader = {
-          did,
-          record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
-          repo: new PgActorRepoReader(connDb, this.logger, this.blockCache),
-          blob: new PgActorBlobReader(connDb, blobStore, this.logger),
-          sequence: new PgSequenceOps(connDb),
-        }
-        const readResult = (await readFn(reader)) as Awaited<R>
-
         const transactor: ActorTransactor = {
           did,
           record: new PgActorRecordTransactor(
