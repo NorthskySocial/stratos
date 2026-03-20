@@ -4,10 +4,7 @@ import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Keypair } from '@atproto/crypto'
 import type { ActorRepoTransactor } from '../../actor-store-types.js'
-import {
-  type UnsignedCommitData,
-  BlockMap,
-} from '@northskysocial/stratos-core'
+import { type UnsignedCommitData, BlockMap } from '@northskysocial/stratos-core'
 import type { WritePhases } from '../../api/records.js'
 
 export interface SignedCommitResult {

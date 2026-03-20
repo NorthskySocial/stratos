@@ -133,7 +133,9 @@ export class PgSequenceStoreReader implements SequenceStoreReader {
       const rows = await db
         .select()
         .from(pgStratosSeq)
-        .where(and(gt(pgStratosSeq.seq, startSeq), lte(pgStratosSeq.seq, endSeq)))
+        .where(
+          and(gt(pgStratosSeq.seq, startSeq), lte(pgStratosSeq.seq, endSeq)),
+        )
         .orderBy(asc(pgStratosSeq.seq))
 
       return rows.map(rowToEvent)

@@ -235,11 +235,7 @@ async function processCommit(
     background.add(() => indexingService.indexHandle(did, timestamp))
   }
 
-  await indexingService.setCommitLastSeen(
-    did,
-    parseCid(commitCid),
-    rev,
-  )
+  await indexingService.setCommitLastSeen(did, parseCid(commitCid), rev)
 
   const blocks = fromBytes(rawBlocks)
   if (!blocks?.length) return

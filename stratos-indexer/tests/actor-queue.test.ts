@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { CursorManager } from '../src/cursor-manager.ts'
 import { StratosActorSync } from '../src/stratos-sync.ts'
+
+interface ActorQueue {
+  pending: Uint8Array[]
+  active: boolean
+  draining: boolean
+}
 
 function createTestSync(
   opts: {
@@ -17,9 +24,9 @@ function createTestSync(
   }
 
   const sync = new StratosActorSync(
-    {} as any,
+    {} as unknown as ConstructorParameters<typeof StratosActorSync>[0],
     { stratosServiceUrl: 'ws://localhost', syncToken: 'test' },
-    cursorManager as any,
+    cursorManager as unknown as CursorManager,
     (err) => errors.push(err),
     undefined,
     {
@@ -34,11 +41,11 @@ function createTestSync(
 }
 
 function getPrivate(sync: StratosActorSync, field: string) {
-  return (sync as any)[field]
+  return (sync as unknown as Record<string, unknown>)[field]
 }
 
 function setPrivate(sync: StratosActorSync, field: string, value: unknown) {
-  ;(sync as any)[field] = value
+  ;(sync as unknown as Record<string, unknown>)[field] = value
 }
 
 describe('ActorQueue drain race condition fix', () => {
@@ -49,7 +56,10 @@ describe('ActorQueue drain race condition fix', () => {
   })
 
   it('sets draining flag before awaiting semaphore', async () => {
-    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
+      string,
+      ActorQueue
+    >
     actorQueues.set('did:plc:goku', {
       pending: [new Uint8Array(0)],
       active: false,
@@ -58,12 +68,13 @@ describe('ActorQueue drain race condition fix', () => {
 
     setPrivate(sync, 'activeSyncs', 1)
 
-    const handleMessage = vi
-      .fn()
-      .mockResolvedValue(undefined)
+    const handleMessage = vi.fn().mockResolvedValue(undefined)
     setPrivate(sync, 'handleMessage', handleMessage)
 
-    const drainPromise = (sync as any).drainActorQueue('did:plc:goku')
+    const drainPromise = getPrivate(sync, 'drainActorQueue') as (
+      did: string,
+    ) => Promise<void>
+    const drainResult = drainPromise.call(sync, 'did:plc:goku')
 
     await new Promise((r) => setTimeout(r, 10))
 
@@ -72,14 +83,17 @@ describe('ActorQueue drain race condition fix', () => {
     expect(q.active).toBe(false)
 
     setPrivate(sync, 'activeSyncs', 0)
-    const syncWaiters: Array<() => void> = getPrivate(sync, 'syncWaiters')
+    const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
     syncWaiters.shift()?.()
 
-    await drainPromise
+    await drainResult
   })
 
   it('prevents duplicate drain calls during semaphore wait', async () => {
-    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
+      string,
+      ActorQueue
+    >
     actorQueues.set('did:plc:vegeta', {
       pending: [],
       active: false,
@@ -87,24 +101,24 @@ describe('ActorQueue drain race condition fix', () => {
     })
 
     setPrivate(sync, 'activeSyncs', 1)
-    setPrivate(
-      sync,
-      'handleMessage',
-      vi.fn().mockResolvedValue(undefined),
-    )
+    setPrivate(sync, 'handleMessage', vi.fn().mockResolvedValue(undefined))
 
-    actorQueues.get('did:plc:vegeta').pending.push(new Uint8Array(0))
-    const drain1 = (sync as any).drainActorQueue('did:plc:vegeta')
+    const drainFn = getPrivate(sync, 'drainActorQueue') as (
+      did: string,
+    ) => Promise<void>
+
+    actorQueues.get('did:plc:vegeta')!.pending.push(new Uint8Array(0))
+    const drain1 = drainFn.call(sync, 'did:plc:vegeta')
     await new Promise((r) => setTimeout(r, 5))
 
-    actorQueues.get('did:plc:vegeta').pending.push(new Uint8Array(0))
-    const drain2 = (sync as any).drainActorQueue('did:plc:vegeta')
+    actorQueues.get('did:plc:vegeta')!.pending.push(new Uint8Array(0))
+    const drain2 = drainFn.call(sync, 'did:plc:vegeta')
     await new Promise((r) => setTimeout(r, 5))
 
-    actorQueues.get('did:plc:vegeta').pending.push(new Uint8Array(0))
-    const drain3 = (sync as any).drainActorQueue('did:plc:vegeta')
+    actorQueues.get('did:plc:vegeta')!.pending.push(new Uint8Array(0))
+    const drain3 = drainFn.call(sync, 'did:plc:vegeta')
 
-    const syncWaiters: Array<() => void> = getPrivate(sync, 'syncWaiters')
+    const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
     expect(syncWaiters.length).toBe(1)
 
     setPrivate(sync, 'activeSyncs', 0)
@@ -115,7 +129,10 @@ describe('ActorQueue drain race condition fix', () => {
 
   it('does not exceed syncWaiters count under rapid message flood', async () => {
     const did = 'did:plc:piccolo'
-    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
+      string,
+      ActorQueue
+    >
     actorQueues.set(did, {
       pending: [],
       active: false,
@@ -123,21 +140,20 @@ describe('ActorQueue drain race condition fix', () => {
     })
 
     setPrivate(sync, 'activeSyncs', 1)
-    setPrivate(
-      sync,
-      'handleMessage',
-      vi.fn().mockResolvedValue(undefined),
-    )
+    setPrivate(sync, 'handleMessage', vi.fn().mockResolvedValue(undefined))
 
+    const drainFn = getPrivate(sync, 'drainActorQueue') as (
+      did: string,
+    ) => Promise<void>
     const drainPromises: Promise<void>[] = []
     for (let i = 0; i < 100; i++) {
-      actorQueues.get(did).pending.push(new Uint8Array(0))
-      drainPromises.push((sync as any).drainActorQueue(did))
+      actorQueues.get(did)!.pending.push(new Uint8Array(0))
+      drainPromises.push(drainFn.call(sync, did))
     }
 
     await new Promise((r) => setTimeout(r, 10))
 
-    const syncWaiters: Array<() => void> = getPrivate(sync, 'syncWaiters')
+    const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
     expect(syncWaiters.length).toBeLessThanOrEqual(1)
 
     setPrivate(sync, 'activeSyncs', 0)
@@ -150,8 +166,14 @@ describe('ActorQueue drain race condition fix', () => {
 describe('closeAndReconnectActor', () => {
   it('closes WebSocket, clears queue, and schedules reconnect', () => {
     const { sync } = createTestSync()
-    const subscriptions: Map<string, any> = getPrivate(sync, 'subscriptions')
-    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    const subscriptions = getPrivate(sync, 'subscriptions') as Map<
+      string,
+      { close: ReturnType<typeof vi.fn> }
+    >
+    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
+      string,
+      ActorQueue
+    >
 
     const mockWs = { close: vi.fn() }
     subscriptions.set('did:plc:gohan', mockWs)
@@ -164,7 +186,11 @@ describe('closeAndReconnectActor', () => {
     setPrivate(sync, 'running', true)
     const scheduleReconnect = vi.fn()
     setPrivate(sync, 'scheduleReconnect', scheduleReconnect)
-    ;(sync as any).closeAndReconnectActor('did:plc:gohan')
+    const closeAndReconnectActor = getPrivate(
+      sync,
+      'closeAndReconnectActor',
+    ) as (did: string) => void
+    closeAndReconnectActor.call(sync, 'did:plc:gohan')
 
     expect(mockWs.close).toHaveBeenCalled()
     expect(subscriptions.has('did:plc:gohan')).toBe(false)
@@ -176,7 +202,10 @@ describe('closeAndReconnectActor', () => {
 describe('enqueueActorMessage overflow triggers close-and-reconnect', () => {
   it('calls closeAndReconnectActor when queue reaches max size', () => {
     const { sync } = createTestSync({ maxActorQueueSize: 3 })
-    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
+      string,
+      ActorQueue
+    >
 
     actorQueues.set('did:plc:trunks', {
       pending: [new Uint8Array(0), new Uint8Array(0), new Uint8Array(0)],
@@ -186,7 +215,11 @@ describe('enqueueActorMessage overflow triggers close-and-reconnect', () => {
 
     const closeAndReconnect = vi.fn()
     setPrivate(sync, 'closeAndReconnectActor', closeAndReconnect)
-    ;(sync as any).enqueueActorMessage('did:plc:trunks', new Uint8Array(0))
+    const enqueueActorMessage = getPrivate(sync, 'enqueueActorMessage') as (
+      did: string,
+      data: Uint8Array,
+    ) => void
+    enqueueActorMessage.call(sync, 'did:plc:trunks', new Uint8Array(0))
 
     expect(closeAndReconnect).toHaveBeenCalledWith('did:plc:trunks')
   })
@@ -201,7 +234,11 @@ describe('enqueueActorMessage overflow triggers close-and-reconnect', () => {
 
     const closeAndReconnect = vi.fn()
     setPrivate(sync, 'closeAndReconnectActor', closeAndReconnect)
-    ;(sync as any).enqueueActorMessage('did:plc:bulma', new Uint8Array(0))
+    const enqueueActorMessage = getPrivate(sync, 'enqueueActorMessage') as (
+      did: string,
+      data: Uint8Array,
+    ) => void
+    enqueueActorMessage.call(sync, 'did:plc:bulma', new Uint8Array(0))
 
     expect(closeAndReconnect).toHaveBeenCalledWith('did:plc:bulma')
   })
@@ -215,25 +252,24 @@ describe('globalPendingCount tracking', () => {
       drainDelayMs: 0,
     })
 
-    setPrivate(
-      sync,
-      'handleMessage',
-      vi.fn().mockResolvedValue(undefined),
-    )
+    setPrivate(sync, 'handleMessage', vi.fn().mockResolvedValue(undefined))
 
     // Block drains by saturating the semaphore
     setPrivate(sync, 'activeSyncs', 1)
-
-    ;(sync as any).enqueueActorMessage('did:plc:krillin', new Uint8Array(0))
-    ;(sync as any).enqueueActorMessage('did:plc:krillin', new Uint8Array(0))
-    ;(sync as any).enqueueActorMessage('did:plc:yamcha', new Uint8Array(0))
+    const enqueueActorMessage = getPrivate(sync, 'enqueueActorMessage') as (
+      did: string,
+      data: Uint8Array,
+    ) => void
+    enqueueActorMessage.call(sync, 'did:plc:krillin', new Uint8Array(0))
+    enqueueActorMessage.call(sync, 'did:plc:krillin', new Uint8Array(0))
+    enqueueActorMessage.call(sync, 'did:plc:yamcha', new Uint8Array(0))
 
     // Messages queued but not drained due to semaphore
     expect(getPrivate(sync, 'globalPendingCount')).toBe(3)
 
     // Unblock drains
     setPrivate(sync, 'activeSyncs', 0)
-    const syncWaiters: Array<() => void> = getPrivate(sync, 'syncWaiters')
+    const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
     while (syncWaiters.length > 0) syncWaiters.shift()?.()
 
     await new Promise((r) => setTimeout(r, 50))
@@ -250,23 +286,29 @@ describe('drain delay throttles processing', () => {
     })
 
     const callTimestamps: number[] = []
-    setPrivate(sync, 'handleMessage', vi.fn(async () => {
-      callTimestamps.push(Date.now())
-    }))
+    setPrivate(
+      sync,
+      'handleMessage',
+      vi.fn(async () => {
+        callTimestamps.push(Date.now())
+      }),
+    )
 
-    const actorQueues: Map<string, any> = getPrivate(sync, 'actorQueues')
+    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
+      string,
+      ActorQueue
+    >
     actorQueues.set('did:plc:tien', {
-      pending: [
-        new Uint8Array(0),
-        new Uint8Array(0),
-        new Uint8Array(0),
-      ],
+      pending: [new Uint8Array(0), new Uint8Array(0), new Uint8Array(0)],
       active: false,
       draining: false,
     })
     setPrivate(sync, 'globalPendingCount', 3)
 
-    await (sync as any).drainActorQueue('did:plc:tien')
+    const drainFn = getPrivate(sync, 'drainActorQueue') as (
+      did: string,
+    ) => Promise<void>
+    await drainFn.call(sync, 'did:plc:tien')
 
     expect(callTimestamps).toHaveLength(3)
     const gap1 = callTimestamps[1] - callTimestamps[0]
