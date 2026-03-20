@@ -18,7 +18,11 @@ import {
 
 import type { AppContext } from '../context.js'
 import type { ActorTransactor } from '../actor-store-types.js'
-import { signCommit, signAndPersistCommit, StratosBlockStoreReader } from '../features/index.js'
+import {
+  signCommit,
+  signAndPersistCommit,
+  StratosBlockStoreReader,
+} from '../features/index.js'
 import { Did } from '@atproto/api'
 
 export interface WritePhases {
@@ -136,7 +140,8 @@ const BASE_RETRY_DELAY_MS = 25
 function isConcurrentModificationError(err: unknown): boolean {
   return (
     err instanceof InvalidRequestError &&
-    (err as { customErrorName?: string }).customErrorName === 'ConcurrentModification'
+    (err as { customErrorName?: string }).customErrorName ===
+      'ConcurrentModification'
   )
 }
 
@@ -149,7 +154,10 @@ async function withConcurrencyRetry<T>(
       const result = await fn(attempt)
       return { result, retries: attempt }
     } catch (err) {
-      if (!isConcurrentModificationError(err) || attempt >= MAX_CONCURRENCY_RETRIES) {
+      if (
+        !isConcurrentModificationError(err) ||
+        attempt >= MAX_CONCURRENCY_RETRIES
+      ) {
         throw err
       }
       const jitter = Math.random() * BASE_RETRY_DELAY_MS
@@ -244,7 +252,10 @@ export async function createRecord(
 
         ts = performance.now()
         const storage = new StratosBlockStoreReader(reader.repo)
-        const unsigned = await buildCommit(storage, rootCid, { did: callerDid, writes })
+        const unsigned = await buildCommit(storage, rootCid, {
+          did: callerDid,
+          writes,
+        })
         phases.prepareCommitBuild = performance.now() - ts
 
         return { unsigned, rootCid }
@@ -259,17 +270,19 @@ export async function createRecord(
         phases.transactLockCheck = performance.now() - ti
 
         ti = performance.now()
-        const signed = await signCommit(
-          ctx.signingKey,
-          prepared.unsigned,
-          [{ cid, bytes: recordBytes }],
-        )
+        const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
+          { cid, bytes: recordBytes },
+        ])
         phases.transactSign = performance.now() - ti
 
         ti = performance.now()
         const persistOps: Promise<void>[] = [
           store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
-          store.repo.updateRoot(signed.commitCid, prepared.unsigned.rev, callerDid),
+          store.repo.updateRoot(
+            signed.commitCid,
+            prepared.unsigned.rev,
+            callerDid,
+          ),
           store.record.indexRecord(
             uri,
             cid,
@@ -412,17 +425,18 @@ export async function deleteRecord(
         }
 
         ti = performance.now()
-        const signed = await signCommit(
-          ctx.signingKey,
-          prepared.unsigned,
-        )
+        const signed = await signCommit(ctx.signingKey, prepared.unsigned)
         phases.transactSign = performance.now() - ti
 
         ti = performance.now()
         const persistOps: Promise<void>[] = [
           store.record.deleteRecord(uri),
           store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
-          store.repo.updateRoot(signed.commitCid, prepared.unsigned.rev, callerDid),
+          store.repo.updateRoot(
+            signed.commitCid,
+            prepared.unsigned.rev,
+            callerDid,
+          ),
         ]
         if (signed.removedCids.length > 0) {
           persistOps.push(store.repo.deleteBlocks(signed.removedCids))
@@ -553,17 +567,19 @@ export async function updateRecord(
         }
 
         ti = performance.now()
-        const signed = await signCommit(
-          ctx.signingKey,
-          prepared.unsigned,
-          [{ cid, bytes: recordBytes }],
-        )
+        const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
+          { cid, bytes: recordBytes },
+        ])
         phases.transactSign = performance.now() - ti
 
         ti = performance.now()
         const persistOps: Promise<void>[] = [
           store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
-          store.repo.updateRoot(signed.commitCid, prepared.unsigned.rev, callerDid),
+          store.repo.updateRoot(
+            signed.commitCid,
+            prepared.unsigned.rev,
+            callerDid,
+          ),
           store.record.indexRecord(
             uri,
             cid,
@@ -845,17 +861,17 @@ export async function applyWritesBatch(
         const rootDetails = await reader.repo.getRootDetailed()
         const rootCid = rootDetails?.cid.toString() ?? null
         const storage = new StratosBlockStoreReader(reader.repo)
-        const unsigned = await buildCommit(storage, rootCid, { did: callerDid, writes: mstOps })
+        const unsigned = await buildCommit(storage, rootCid, {
+          did: callerDid,
+          writes: mstOps,
+        })
         return { rootCid, unsigned }
       },
     )
 
     return ctx.actorStore.transact(callerDid, async (store) => {
       const currentRoot = await store.repo.getRootDetailed()
-      assertRootUnchanged(
-        currentRoot?.cid.toString() ?? null,
-        rootCid,
-      )
+      assertRootUnchanged(currentRoot?.cid.toString() ?? null, rootCid)
 
       for (const pre of precomputed) {
         if (pre.action === 'delete') {

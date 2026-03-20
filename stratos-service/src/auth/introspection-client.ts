@@ -398,7 +398,9 @@ export class PdsTokenVerifier implements TokenVerifier {
     }
   }
 
-  private async verifyUncached(token: string): Promise<TokenVerificationResult> {
+  private async verifyUncached(
+    token: string,
+  ): Promise<TokenVerificationResult> {
     try {
       // 1. Decode token to get issuer (without verification)
       const unsafeClaims = this.decodeTokenUnsafe(token)

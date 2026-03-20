@@ -51,9 +51,17 @@ function authorFromUri(uri: string): string {
 
 function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
   const reply = record.reply as
-    | { root?: { uri?: string; cid?: string }; parent?: { uri?: string; cid?: string } }
+    | {
+        root?: { uri?: string; cid?: string }
+        parent?: { uri?: string; cid?: string }
+      }
     | undefined
-  if (!reply?.root?.uri || !reply?.root?.cid || !reply?.parent?.uri || !reply?.parent?.cid) {
+  if (
+    !reply?.root?.uri ||
+    !reply?.root?.cid ||
+    !reply?.parent?.uri ||
+    !reply?.parent?.cid
+  ) {
     return null
   }
   return {
@@ -267,7 +275,10 @@ export function groupIntoThreads(posts: FeedPost[]): ThreadNode[] {
 
   function buildTree(post: FeedPost, depth: number): ThreadNode {
     const replies = (childrenOf.get(post.uri) ?? [])
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      )
       .map((r) => buildTree(r, depth + 1))
     return { post, replies, depth }
   }

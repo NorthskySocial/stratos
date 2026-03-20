@@ -1,8 +1,5 @@
 import { CID } from 'multiformats/cid'
-import type {
-  StubWriterService,
-  Logger,
-} from '@northskysocial/stratos-core'
+import type { StubWriterService, Logger } from '@northskysocial/stratos-core'
 
 interface StubWriteOp {
   type: 'write'

@@ -1,11 +1,11 @@
 {
-	"folders": [
-		{
-			"path": "../.."
-		},
-		{
-			"path": "../../../atproto-stratos"
-		}
-	],
-	"settings": {}
+  "folders": [
+    {
+      "path": "../..",
+    },
+    {
+      "path": "../../../atproto-stratos",
+    },
+  ],
+  "settings": {},
 }

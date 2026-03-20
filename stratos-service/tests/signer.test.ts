@@ -168,7 +168,10 @@ describe('signAndPersistCommit', () => {
 
     // All blocks persisted in a single batch call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()
-    const [blockMap, rev] = transactor.putBlocks.mock.calls[0] as [BlockMap, string]
+    const [blockMap, rev] = transactor.putBlocks.mock.calls[0] as [
+      BlockMap,
+      string,
+    ]
     expect(rev).toBe(unsigned.rev)
 
     // newBlocks + 1 commit block
@@ -177,9 +180,7 @@ describe('signAndPersistCommit', () => {
 
     // Each newBlock should be present in the batch
     for (const [cidStr] of unsigned.newBlocks) {
-      const found = [...blockMap.entries()].some(
-        ([key]) => key === cidStr,
-      )
+      const found = [...blockMap.entries()].some(([key]) => key === cidStr)
       expect(found).toBe(true)
     }
   })

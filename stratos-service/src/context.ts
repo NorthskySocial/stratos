@@ -288,7 +288,7 @@ export class StratosActorStore implements ActorStore {
         blob: new StratosBlobReader(db, blobStore, this.logger),
         sequence: new SqliteSequenceOps(db),
       }
-      const readResult = await readFn(reader) as Awaited<R>
+      const readResult = (await readFn(reader)) as Awaited<R>
 
       return await db.transaction(async (tx) => {
         const txDb = tx as unknown as StratosDbOrTx

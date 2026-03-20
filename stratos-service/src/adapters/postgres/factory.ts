@@ -90,9 +90,7 @@ export class PostgresStorageFactory implements StorageFactory {
     const schemaName = await this.getActorSchemaName(did)
     // CREATE SCHEMA must run outside the actor schema's search_path
     const utilDb = drizzle({ client: this.pool })
-    await utilDb.execute(
-      sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`),
-    )
+    await utilDb.execute(sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`))
     await this.withActorSchema(schemaName, async (tx) => {
       await migrateStratosPgDb(tx)
     })
@@ -108,7 +106,11 @@ export class PostgresStorageFactory implements StorageFactory {
     const schemaName = await this.getActorSchemaName(did)
 
     return {
-      record: new PgRecordStoreReader(this.actorDb, this.cborToRecord, schemaName),
+      record: new PgRecordStoreReader(
+        this.actorDb,
+        this.cborToRecord,
+        schemaName,
+      ),
       blobMetadata: new PgBlobMetadataReader(this.actorDb, schemaName),
       blobContent: this.blobContentStoreCreator(did),
       repo: new PgRepoStoreReader(this.actorDb, schemaName),

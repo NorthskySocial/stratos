@@ -1166,7 +1166,7 @@ export class PostgresActorStore implements ActorStore {
         blob: new PgActorBlobReader(connDb, blobStore, this.logger),
         sequence: new PgSequenceOps(connDb),
       }
-      const readResult = await readFn(reader) as Awaited<R>
+      const readResult = (await readFn(reader)) as Awaited<R>
 
       await connection`BEGIN`
       await connection`SELECT pg_advisory_xact_lock(hashtext(${did}))`
