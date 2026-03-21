@@ -215,14 +215,6 @@ export async function createRecord(
     )
   }
 
-  // Check if actor store exists, create if not
-  t0 = performance.now()
-  const exists = await ctx.actorStore.exists(callerDid)
-  if (!exists) {
-    await ctx.actorStore.create(callerDid)
-  }
-  phases.actorExists = performance.now() - t0
-
   // Validate the record if requested
   if (validate) {
     t0 = performance.now()
@@ -247,6 +239,14 @@ export async function createRecord(
   let result: { uri: AtUri; cid: typeof cid; cidStr: string; commit: { cid: string; rev: string } }
   let retries: number
   try {
+    // Ensure actor store exists (inside mutex to prevent creation race)
+    let ta = performance.now()
+    const exists = await ctx.actorStore.exists(callerDid)
+    if (!exists) {
+      await ctx.actorStore.create(callerDid)
+    }
+    phases.actorExists = performance.now() - ta
+
     const retry = await withConcurrencyRetry(async () => {
       const attemptT0 = performance.now()
       const prepared = await ctx.actorStore.read(
@@ -852,11 +852,6 @@ export async function applyWritesBatch(
 ): Promise<BatchWriteResult> {
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
 
-  const exists = await ctx.actorStore.exists(callerDid)
-  if (!exists) {
-    await ctx.actorStore.create(callerDid)
-  }
-
   // Pre-compute CPU-bound work outside the transaction
   const precomputed = await Promise.all(
     ops.map(async (op) => {
@@ -897,6 +892,12 @@ export async function applyWritesBatch(
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: { results: Array<{ uri?: string; cid?: string }>; commit: { cid: string; rev: string } }
   try {
+    // Ensure actor store exists (inside mutex to prevent creation race)
+    const exists = await ctx.actorStore.exists(callerDid)
+    if (!exists) {
+      await ctx.actorStore.create(callerDid)
+    }
+
     const retry = await withConcurrencyRetry(async () => {
       const { rootCid, unsigned } = await ctx.actorStore.read(
         callerDid,
