@@ -1,6 +1,6 @@
 import { XRPCError } from '@atproto/xrpc-server'
 
-const DEFAULT_MAX_WRITES = 25
+const DEFAULT_MAX_WRITES = 100
 const DEFAULT_WINDOW_MS = 60_000
 const DEFAULT_COOLDOWN_MS = 10_000
 
