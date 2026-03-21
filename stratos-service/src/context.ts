@@ -854,6 +854,7 @@ export interface AppContext {
   ): Promise<{ sig: Uint8Array; signingKey: string }>
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
   enrollmentEvents: EnrollmentEventEmitter
+  sequenceEvents: SequenceEventEmitter
   writeRateLimiter: WriteRateLimiter
   repoWriteLocks: RepoWriteLocks
   destroy: () => Promise<void>
@@ -869,6 +870,10 @@ export interface EnrollmentEvent {
 
 export type EnrollmentEventEmitter = EventEmitter<{
   enrollment: [EnrollmentEvent]
+}>
+
+export type SequenceEventEmitter = EventEmitter<{
+  [did: string]: []
 }>
 
 /**
@@ -1075,6 +1080,8 @@ export async function createAppContext(
   }
 
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
+  const sequenceEvents: SequenceEventEmitter = new EventEmitter()
+  sequenceEvents.setMaxListeners(0)
 
   const enrollmentService = new EnrollmentServiceImpl(
     enrollmentStore,
@@ -1207,6 +1214,7 @@ export async function createAppContext(
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
+    sequenceEvents,
     writeRateLimiter: new WriteRateLimiter(),
     repoWriteLocks: new RepoWriteLocks(),
     destroy: async () => {
