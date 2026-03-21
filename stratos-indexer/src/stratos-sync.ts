@@ -151,6 +151,7 @@ export interface StratosActorSyncOptions {
   drainDelayMs: number
   maxConnections: number
   connectDelayMs: number
+  idleEvictionMs: number
 }
 
 interface ActorQueue {
@@ -185,6 +186,12 @@ export class StratosActorSync {
   private readonly drainDelayMs: number
   private globalPendingCount = 0
 
+  // Idle connection eviction — rotate stale connections when actors are waiting
+  private lastMessageAt = new Map<string, number>()
+  private readonly idleEvictionMs: number
+  private idleEvictionTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly IDLE_EVICTION_CHECK_MS = 10_000
+
   // Periodic stats instead of per-record logging
   private indexedCount = 0
   private deletedCount = 0
@@ -204,6 +211,7 @@ export class StratosActorSync {
       drainDelayMs: 5,
       maxConnections: 20,
       connectDelayMs: 200,
+      idleEvictionMs: 60_000,
     },
     private onHandleNeeded?: (did: string) => void,
   ) {
@@ -213,6 +221,7 @@ export class StratosActorSync {
     this.drainDelayMs = options.drainDelayMs
     this.maxConnections = options.maxConnections
     this.connectDelayMs = options.connectDelayMs
+    this.idleEvictionMs = options.idleEvictionMs
   }
 
   start(): void {
@@ -238,6 +247,13 @@ export class StratosActorSync {
         if (ts < cutoff) this.knownDids.delete(did)
       }
     }, StratosActorSync.KNOWN_DIDS_SWEEP_MS)
+
+    if (this.idleEvictionMs > 0) {
+      this.idleEvictionTimer = setInterval(
+        () => this.evictIdleConnections(),
+        StratosActorSync.IDLE_EVICTION_CHECK_MS,
+      )
+    }
   }
 
   stop(): void {
@@ -255,7 +271,12 @@ export class StratosActorSync {
       clearTimeout(this.connectTimer)
       this.connectTimer = null
     }
+    if (this.idleEvictionTimer) {
+      clearInterval(this.idleEvictionTimer)
+      this.idleEvictionTimer = null
+    }
     this.knownDids.clear()
+    this.lastMessageAt.clear()
     this.waitingActors = []
 
     for (const timer of this.reconnectTimers.values()) {
@@ -305,6 +326,7 @@ export class StratosActorSync {
     this.reconnectAttempts.delete(did)
     this.cursorManager.removeStratosCursor(did)
     this.actorQueues.delete(did)
+    this.lastMessageAt.delete(did)
     this.promoteWaitingActor()
   }
 
@@ -357,6 +379,7 @@ export class StratosActorSync {
     })
 
     ws.onmessage = (e: MessageEvent) => {
+      this.lastMessageAt.set(did, Date.now())
       this.enqueueActorMessage(did, new Uint8Array(e.data as ArrayBuffer))
     }
 
@@ -587,6 +610,44 @@ export class StratosActorSync {
       activeSyncs: this.activeSyncs,
       activeConnections: this.subscriptions.size,
       waitingActors: this.waitingActors.length,
+    }
+  }
+
+  private evictIdleConnections(): void {
+    if (this.waitingActors.length === 0) return
+
+    const now = Date.now()
+    const idleDids: Array<{ did: string; idleMs: number }> = []
+
+    for (const did of this.subscriptions.keys()) {
+      const lastMsg = this.lastMessageAt.get(did) ?? 0
+      const idleMs = now - lastMsg
+      if (idleMs >= this.idleEvictionMs) {
+        idleDids.push({ did, idleMs })
+      }
+    }
+
+    // Evict longest-idle first, up to the number of waiting actors
+    idleDids.sort((a, b) => b.idleMs - a.idleMs)
+    const evictCount = Math.min(idleDids.length, this.waitingActors.length)
+
+    for (let i = 0; i < evictCount; i++) {
+      const { did } = idleDids[i]
+      console.log(
+        { did, idleMs: idleDids[i].idleMs, waitingActors: this.waitingActors.length },
+        'evicting idle actor connection to promote waiting actor',
+      )
+      const ws = this.subscriptions.get(did)
+      if (ws) {
+        ws.close()
+        this.subscriptions.delete(did)
+      }
+      this.lastMessageAt.delete(did)
+      // Move evicted actor to waiting queue so it can reconnect later
+      if (!this.waitingActors.includes(did)) {
+        this.waitingActors.push(did)
+      }
+      this.promoteWaitingActor()
     }
   }
 }
