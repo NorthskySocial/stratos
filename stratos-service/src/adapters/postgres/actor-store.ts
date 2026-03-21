@@ -1112,6 +1112,7 @@ export class PostgresActorStore implements ActorStore {
 
     return this.actorDb.transaction(async (tx) => {
       await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`))
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${did}))`)
       const txDb = tx as unknown as StratosPgDb
       const store: ActorTransactor = {
@@ -1142,6 +1143,7 @@ export class PostgresActorStore implements ActorStore {
 
     return this.actorDb.transaction(async (tx) => {
       await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`))
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${did}))`)
       const txDb = tx as unknown as StratosPgDb
 
