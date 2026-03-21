@@ -1,6 +1,9 @@
 import { XRPCError } from '@atproto/xrpc-server'
 
-const DEFAULT_MAX_WRITES = 100
+// Rate limit by DID as there's a perf drag when
+// Concurrent messages for the same MST get too high
+
+const DEFAULT_MAX_WRITES = 300
 const DEFAULT_WINDOW_MS = 60_000
 const DEFAULT_COOLDOWN_MS = 10_000
 
