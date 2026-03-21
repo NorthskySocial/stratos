@@ -379,9 +379,15 @@ importers:
 
   webapp:
     dependencies:
+      '@atcute/cbor':
+        specifier: ^2.3.2
+        version: 2.3.2
       '@atproto/api':
         specifier: ^0.15.8
         version: 0.15.27
+      '@atproto/crypto':
+        specifier: ^0.4.0
+        version: 0.4.5
       '@atproto/oauth-client-browser':
         specifier: ^0.3.17
         version: 0.3.41

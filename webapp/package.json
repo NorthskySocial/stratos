@@ -11,7 +11,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@atcute/cbor": "^2.3.2",
     "@atproto/api": "^0.15.8",
+    "@atproto/crypto": "^0.4.0",
     "@atproto/oauth-client-browser": "^0.3.17",
     "@atproto/syntax": "^0.3.0"
   },
