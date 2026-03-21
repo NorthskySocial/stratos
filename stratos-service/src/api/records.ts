@@ -1053,6 +1053,9 @@ function deferSequenceChange(
     .transact(callerDid, async (store) => {
       await sequenceChange(store, op)
     })
+    .then(() => {
+      ctx.sequenceEvents.emit(callerDid)
+    })
     .catch((err) => {
       ctx.logger?.error(
         { err, did: callerDid, uri: op.uri },
@@ -1071,6 +1074,9 @@ function deferSequenceChanges(
       for (const op of ops) {
         await sequenceChange(store, op)
       }
+    })
+    .then(() => {
+      ctx.sequenceEvents.emit(callerDid)
     })
     .catch((err) => {
       ctx.logger?.error(

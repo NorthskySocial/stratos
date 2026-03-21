@@ -110,8 +110,9 @@ function createActorSubscriptionHandler(ctx: AppContext) {
       lastSeq = event.seq
     }
 
+    // Event-driven: wait for sequenceEvents notification or 30s fallback
     while (!signal.aborted) {
-      await sleep(500)
+      await waitForSequenceEvent(ctx, did, signal, 30_000)
       if (signal.aborted) return
 
       const newEvents = await getEventsSince(ctx, did, lastSeq)
@@ -340,6 +341,35 @@ export function matchesDomain(event: SeqEvent, domain: string): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Wait for a sequence event for the given DID, or until the timeout/abort fires.
+ * Returns immediately if the DID emits a sequence event.
+ * Falls back after timeoutMs to catch any missed events.
+ */
+function waitForSequenceEvent(
+  ctx: AppContext,
+  did: string,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      ctx.sequenceEvents.off(did, onEvent)
+      signal.removeEventListener('abort', onAbort)
+      clearTimeout(timer)
+      resolve()
+    }
+    const onEvent = () => settle()
+    const onAbort = () => settle()
+    const timer = setTimeout(settle, timeoutMs)
+    ctx.sequenceEvents.on(did, onEvent)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**
