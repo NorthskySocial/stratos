@@ -20,6 +20,7 @@ import {
 import { schemas as atprotoSchemas, Agent } from '@atproto/api'
 import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
+import { WriteRateLimiter } from './rate-limiter.js'
 import { verifyServiceAuth } from './auth/verifier.js'
 
 import {
@@ -852,6 +853,7 @@ export interface AppContext {
   ): Promise<{ sig: Uint8Array; signingKey: string }>
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
   enrollmentEvents: EnrollmentEventEmitter
+  writeRateLimiter: WriteRateLimiter
   destroy: () => Promise<void>
 }
 
@@ -1203,6 +1205,7 @@ export async function createAppContext(
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
+    writeRateLimiter: new WriteRateLimiter(),
     destroy: async () => {
       await stubQueue.drain()
       await actorStore.close?.()

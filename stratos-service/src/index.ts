@@ -198,6 +198,15 @@ export class StratosServer {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _next: express.NextFunction,
       ) => {
+        if ('retryAfter' in err && typeof (err as Record<string, unknown>).retryAfter === 'number') {
+          const retryAfter = (err as Record<string, unknown>).retryAfter as number
+          res.set('Retry-After', String(retryAfter))
+          res.status(429).json({
+            error: 'RateLimitExceeded',
+            message: err.message,
+          })
+          return
+        }
         console.error('Express error:', err.message)
         console.error(err.stack)
         ctx.logger?.error(
