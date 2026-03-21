@@ -134,23 +134,41 @@ export class Indexer {
       },
     )
 
-    // Restore cursors from database
+    // Restore cursors from database (retry until migrations have run)
     const rawDb = (db as unknown as { db: unknown })
       .db as Kysely<DatabaseSchemaType>
-    const savedCursors = (await rawDb
-      .selectFrom('stratos_sync_cursor' as never)
-      .select(['did' as never, 'seq' as never])
-      .execute()) as Array<{ did: string; seq: number }>
-    if (savedCursors.length > 0) {
-      const cursorMap = new Map<string, number>()
-      for (const row of savedCursors) {
-        cursorMap.set(row.did, row.seq)
+    const maxRetries = 30
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const savedCursors = (await rawDb
+          .selectFrom('stratos_sync_cursor' as never)
+          .select(['did' as never, 'seq' as never])
+          .execute()) as Array<{ did: string; seq: number }>
+        if (savedCursors.length > 0) {
+          const cursorMap = new Map<string, number>()
+          for (const row of savedCursors) {
+            cursorMap.set(row.did, row.seq)
+          }
+          this.cursorManager.restore({ pdsSeq: 0, stratosCursors: cursorMap })
+          console.log(
+            { count: savedCursors.length },
+            'restored sync cursors from database',
+          )
+        }
+        break
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (attempt === maxRetries) {
+          throw new Error(
+            `stratos_sync_cursor table not available after ${maxRetries} attempts: ${msg}`,
+          )
+        }
+        console.log(
+          { attempt, maxRetries, err: msg },
+          'waiting for stratos_sync_cursor table (migrations may be pending)',
+        )
+        await new Promise((r) => setTimeout(r, 2000))
       }
-      this.cursorManager.restore({ pdsSeq: 0, stratosCursors: cursorMap })
-      console.log(
-        { count: savedCursors.length },
-        'restored sync cursors from database',
-      )
     }
 
     this.cursorManager.start()
