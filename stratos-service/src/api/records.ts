@@ -186,6 +186,8 @@ export async function createRecord(
     throw new AuthRequiredError('Cannot create record for another user')
   }
 
+  ctx.writeRateLimiter.assertWriteAllowed(callerDid)
+
   // Validate collection is stratos namespace
   if (!collection.startsWith('zone.stratos.')) {
     throw new InvalidRequestError(
@@ -374,6 +376,8 @@ export async function deleteRecord(
     throw new AuthRequiredError('Cannot delete record for another user')
   }
 
+  ctx.writeRateLimiter.assertWriteAllowed(callerDid)
+
   // Validate collection
   if (!collection.startsWith('zone.stratos.')) {
     throw new InvalidRequestError(
@@ -497,6 +501,8 @@ export async function updateRecord(
   if (repo !== callerDid) {
     throw new AuthRequiredError('Cannot update record for another user')
   }
+
+  ctx.writeRateLimiter.assertWriteAllowed(callerDid)
 
   if (!collection.startsWith('zone.stratos.')) {
     throw new InvalidRequestError(
@@ -809,6 +815,8 @@ export async function applyWritesBatch(
   callerDid: string,
   ops: BatchWriteOp[],
 ): Promise<BatchWriteResult> {
+  ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
+
   const exists = await ctx.actorStore.exists(callerDid)
   if (!exists) {
     await ctx.actorStore.create(callerDid)
