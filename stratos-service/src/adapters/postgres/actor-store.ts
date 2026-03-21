@@ -625,6 +625,17 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     super(db, logger, lru)
   }
 
+  async lockRoot(): Promise<{ cid: CID; rev: string } | null> {
+    const res = (await this.db.execute(
+      sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1 FOR UPDATE NOWAIT`,
+    )) as unknown as { cid: string; rev: string }[]
+    if (res.length === 0) return null
+    return {
+      cid: CID.parse(res[0].cid),
+      rev: res[0].rev,
+    }
+  }
+
   async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
     const cidStr = cid.toString()
     const indexedAt = new Date().toISOString()
@@ -1112,8 +1123,6 @@ export class PostgresActorStore implements ActorStore {
 
     return this.actorDb.transaction(async (tx) => {
       await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
-      await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`))
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${did}))`)
       const txDb = tx as unknown as StratosPgDb
       const store: ActorTransactor = {
         did,
@@ -1143,8 +1152,6 @@ export class PostgresActorStore implements ActorStore {
 
     return this.actorDb.transaction(async (tx) => {
       await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
-      await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`))
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${did}))`)
       const txDb = tx as unknown as StratosPgDb
 
       const reader: ActorReader = {

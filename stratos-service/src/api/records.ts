@@ -273,7 +273,7 @@ export async function createRecord(
 
       const transactT0 = performance.now()
       return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.getRootDetailed()
+        const currentRoot = await store.repo.lockRoot()
         assertRootUnchanged(
           currentRoot?.cid.toString() ?? null,
           prepared.rootCid,
@@ -435,7 +435,7 @@ export async function deleteRecord(
 
       const transactT0 = performance.now()
       return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.getRootDetailed()
+        const currentRoot = await store.repo.lockRoot()
         assertRootUnchanged(
           currentRoot?.cid.toString() ?? null,
           prepared.rootCid,
@@ -588,7 +588,7 @@ export async function updateRecord(
 
       const transactT0 = performance.now()
       return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.getRootDetailed()
+        const currentRoot = await store.repo.lockRoot()
         assertRootUnchanged(
           currentRoot?.cid.toString() ?? null,
           prepared.rootCid,
@@ -914,7 +914,7 @@ export async function applyWritesBatch(
       )
 
       return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.getRootDetailed()
+        const currentRoot = await store.repo.lockRoot()
         assertRootUnchanged(currentRoot?.cid.toString() ?? null, rootCid)
 
         for (const pre of precomputed) {
