@@ -161,6 +161,7 @@ export class Indexer {
         if (attempt === maxRetries) {
           throw new Error(
             `stratos_sync_cursor table not available after ${maxRetries} attempts: ${msg}`,
+            { cause: err },
           )
         }
         console.log(

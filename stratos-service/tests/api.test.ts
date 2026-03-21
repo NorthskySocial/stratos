@@ -22,6 +22,7 @@ import {
   StratosActorStore,
 } from '../src/context.js'
 import { createRecord } from '../src/api'
+import { WriteRateLimiter } from '../src/rate-limiter.js'
 import { Did } from '@atproto/api'
 
 // Create a deterministic CID from data
@@ -199,6 +200,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       await expect(
@@ -238,6 +240,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       const otherDid = 'did:plc:otheruser'
@@ -268,6 +271,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       await expect(
