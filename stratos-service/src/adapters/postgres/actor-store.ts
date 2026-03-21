@@ -1089,27 +1089,18 @@ export class PostgresActorStore implements ActorStore {
     const schemaName = await this.getSchemaName(did)
     const blobStore = this.blobstore(did)
 
-    const connection = await this.actorClient.reserve()
-    try {
-      await connection`SET search_path TO ${connection(schemaName)}`
-      // Share pool client's options so drizzle can initialize parsers
-      ;(connection as unknown as { options: unknown }).options =
-        this.actorClient.options
-      const connDb = drizzle({
-        client: connection,
-        schema: pgActorSchema,
-      }) as unknown as StratosPgDb
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      const txDb = tx as unknown as StratosPgDb
       const store: ActorReader = {
         did,
-        record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
-        repo: new PgActorRepoReader(connDb, this.logger, this.blockCache),
-        blob: new PgActorBlobReader(connDb, blobStore, this.logger),
-        sequence: new PgSequenceOps(connDb),
+        record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(txDb, this.logger, this.blockCache),
+        blob: new PgActorBlobReader(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
       }
-      return await fn(store)
-    } finally {
-      connection.release()
-    }
+      return fn(store)
+    })
   }
 
   async transact<T>(
@@ -1149,49 +1140,33 @@ export class PostgresActorStore implements ActorStore {
     const schemaName = await this.getSchemaName(did)
     const blobStore = this.blobstore(did)
 
-    const connection = await this.actorClient.reserve()
-    try {
-      await connection`SET search_path TO ${connection(schemaName)}`
-      ;(connection as unknown as { options: unknown }).options =
-        this.actorClient.options
-      const connDb = drizzle({
-        client: connection,
-        schema: pgActorSchema,
-      }) as unknown as StratosPgDb
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${did}))`)
+      const txDb = tx as unknown as StratosPgDb
 
       const reader: ActorReader = {
         did,
-        record: new PgActorRecordReader(connDb, this.cborToRecord, this.logger),
-        repo: new PgActorRepoReader(connDb, this.logger, this.blockCache),
-        blob: new PgActorBlobReader(connDb, blobStore, this.logger),
-        sequence: new PgSequenceOps(connDb),
+        record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(txDb, this.logger, this.blockCache),
+        blob: new PgActorBlobReader(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
       }
       const readResult = (await readFn(reader)) as Awaited<R>
 
-      await connection`BEGIN`
-      await connection`SELECT pg_advisory_xact_lock(hashtext(${did}))`
-      try {
-        const transactor: ActorTransactor = {
-          did,
-          record: new PgActorRecordTransactor(
-            connDb,
-            this.cborToRecord,
-            this.logger,
-          ),
-          repo: new PgActorRepoTransactor(connDb, this.logger, this.blockCache),
-          blob: new PgActorBlobTransactor(connDb, blobStore, this.logger),
-          sequence: new PgSequenceOps(connDb),
-        }
-        const result = await transactFn(readResult, transactor)
-        await connection`COMMIT`
-        return result
-      } catch (err) {
-        await connection`ROLLBACK`
-        throw err
+      const transactor: ActorTransactor = {
+        did,
+        record: new PgActorRecordTransactor(
+          txDb,
+          this.cborToRecord,
+          this.logger,
+        ),
+        repo: new PgActorRepoTransactor(txDb, this.logger, this.blockCache),
+        blob: new PgActorBlobTransactor(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
       }
-    } finally {
-      connection.release()
-    }
+      return transactFn(readResult, transactor)
+    })
   }
 
   getBlobStore(did: string): BlobStore {
