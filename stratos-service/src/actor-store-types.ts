@@ -118,6 +118,7 @@ export interface ActorRepoReader {
 }
 
 export interface ActorRepoTransactor extends ActorRepoReader {
+  lockRoot(): Promise<{ cid: CID; rev: string } | null>
   updateRoot(cid: CID, rev: string, did: string): Promise<void>
   putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void>
   putBlocks(blocks: BlockMap, rev: string): Promise<void>
