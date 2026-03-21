@@ -3,7 +3,15 @@
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
   import { init, signOut } from './lib/auth'
-  import { discoverStratosEnrollment, STRATOS_URL, APPVIEW_URL, type StratosEnrollment } from './lib/stratos'
+  import {
+    discoverStratosEnrollment,
+    checkStratosServiceStatus,
+    verifyAttestation,
+    STRATOS_URL,
+    APPVIEW_URL,
+    type StratosEnrollment,
+    type StratosServiceStatus,
+  } from './lib/stratos'
   import { createServiceAgent, createStratosAgent } from './lib/stratos-agent'
   import {
     fetchPublicPosts,
@@ -24,6 +32,8 @@
 
   let session: OAuthSession | null = $state(null)
   let enrollment: StratosEnrollment | null = $state(null)
+  let stratosStatus: StratosServiceStatus | null = $state(null)
+  let attestationVerified: boolean | null = $state(null)
   let appviewAgent: Agent | null = $state(null)
   let stratosAgent: Agent | null = $state(null)
   let allPosts: FeedPost[] = $state([])
@@ -78,6 +88,14 @@
     if (url) {
       serviceUrl = url
       stratosAgent = createStratosAgent(session, url)
+
+      stratosStatus = await checkStratosServiceStatus(url, session.sub)
+    }
+
+    if (enrollment) {
+      attestationVerified = await verifyAttestation(session.sub, enrollment)
+    } else {
+      attestationVerified = null
     }
 
     await refreshFeed()
@@ -120,6 +138,8 @@
     await signOut()
     session = null
     enrollment = null
+    stratosStatus = null
+    attestationVerified = null
     appviewAgent = null
     stratosAgent = null
     allPosts = []
@@ -144,6 +164,8 @@
         {handle}
         {enrollment}
         {serviceUrl}
+        {stratosStatus}
+        {attestationVerified}
         {allDomains}
         {enrolledDomains}
         postCount={stats.postCount}
