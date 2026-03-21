@@ -253,6 +253,7 @@ export class Indexer {
         drainDelayMs: this.config.worker.actorSyncDrainDelayMs,
         maxConnections: this.config.worker.actorSyncMaxConnections,
         connectDelayMs: this.config.worker.actorSyncConnectDelayMs,
+        idleEvictionMs: this.config.worker.actorSyncIdleEvictionMs,
       },
       (did) =>
         background.add(() =>
