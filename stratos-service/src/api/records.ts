@@ -139,12 +139,17 @@ const MAX_CONCURRENCY_RETRIES = 4
 const BASE_RETRY_DELAY_MS = 25
 
 function isRetriableWriteError(err: unknown): boolean {
-  return (
+  if (
     (err instanceof InvalidRequestError &&
       (err as { customErrorName?: string }).customErrorName ===
         'ConcurrentModification') ||
     err instanceof MissingBlockError
-  )
+  ) {
+    return true
+  }
+  // pg lock_timeout exceeded (SQLSTATE 55P03 — lock_not_available)
+  const code = (err as { code?: string })?.code
+  return code === '55P03'
 }
 
 async function withConcurrencyRetry<T>(
