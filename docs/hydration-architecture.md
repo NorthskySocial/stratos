@@ -131,55 +131,29 @@ Instead of modifying user DID documents (requires PLC signing), users publish an
 
 ### Lexicon: zone.stratos.actor.enrollment
 
+The current enrollment record is service-scoped rather than a single `self` record. Each Stratos service writes one record keyed by its own DID, which makes multi-service enrollment possible without replacing older records.
+
 ```json
 {
-  "lexicon": 1,
-  "id": "zone.stratos.actor.enrollment",
-  "defs": {
-    "main": {
-      "type": "record",
-      "key": "self",
-      "description": "Declaration of Stratos service enrollments",
-      "record": {
-        "type": "object",
-        "required": ["services", "createdAt"],
-        "properties": {
-          "services": {
-            "type": "array",
-            "description": "List of Stratos service enrollments",
-            "items": { "type": "ref", "ref": "#serviceEnrollment" },
-            "maxLength": 10
-          },
-          "createdAt": { "type": "string", "format": "datetime" }
-        }
-      }
-    },
-    "serviceEnrollment": {
-      "type": "object",
-      "required": ["endpoint"],
-      "properties": {
-        "endpoint": {
-          "type": "string",
-          "format": "uri",
-          "description": "Stratos service endpoint URL"
-        },
-        "boundaries": {
-          "type": "array",
-          "description": "Boundaries available on this service",
-          "items": { "type": "string" },
-          "maxLength": 50
-        },
-        "enrolledAt": { "type": "string", "format": "datetime" }
-      }
-    }
-  }
+  "$type": "zone.stratos.actor.enrollment",
+  "service": "https://stratos.example.com",
+  "boundaries": [{ "value": "engineering" }],
+  "signingKey": "did:key:zDna...",
+  "attestation": {
+    "sig": { "$bytes": "..." },
+    "signingKey": "did:key:zQ3s..."
+  },
+  "createdAt": "2026-03-22T12:00:00.000Z"
 }
 ```
 
 ### Discovery Flow
 
 ```typescript
-async function resolveStratosEndpoint(did: string): Promise<string | null> {
+async function resolveStratosEndpoint(
+  did: string,
+  serviceDid: string,
+): Promise<string | null> {
   // Resolve DID to find PDS
   const didDoc = await resolveDid(did)
   const pdsEndpoint = didDoc.service.find(
@@ -189,13 +163,13 @@ async function resolveStratosEndpoint(did: string): Promise<string | null> {
   // Fetch enrollment record from user's PDS
   const enrollment = await fetch(
     `${pdsEndpoint}/xrpc/com.atproto.repo.getRecord?` +
-      `repo=${did}&collection=zone.stratos.actor.enrollment&rkey=self`,
+      `repo=${did}&collection=zone.stratos.actor.enrollment&rkey=${encodeURIComponent(serviceDid)}`,
   )
 
   if (!enrollment.ok) return null
 
   const { value } = await enrollment.json()
-  return value.services[0]?.endpoint ?? null
+  return value.service ?? null
 }
 ```
 
@@ -397,7 +371,7 @@ function isAuthorized(
    }
 
 7. Stratos stores enrollment locally
-   - Creates per-user SQLite database
+  - Initializes actor repo storage for the configured backend
    - Records OAuth session
 
 8. User is now enrolled and discoverable
