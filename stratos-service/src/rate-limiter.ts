@@ -29,6 +29,15 @@ export interface WriteRateLimiterOpts {
   maxWrites?: number
   windowMs?: number
   cooldownMs?: number
+  cooldownJitterMs?: number
+}
+
+export interface WriteRateSnapshot {
+  inWindow: number
+  maxWrites: number
+  windowMs: number
+  cooldownUntil: number
+  now: number
 }
 
 export class WriteRateLimiter {
@@ -36,11 +45,13 @@ export class WriteRateLimiter {
   private readonly maxWrites: number
   private readonly windowMs: number
   private readonly cooldownMs: number
+  private readonly cooldownJitterMs: number
 
   constructor(opts: WriteRateLimiterOpts = {}) {
     this.maxWrites = opts.maxWrites ?? DEFAULT_MAX_WRITES
     this.windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS
     this.cooldownMs = opts.cooldownMs ?? DEFAULT_COOLDOWN_MS
+    this.cooldownJitterMs = opts.cooldownJitterMs ?? 0
   }
 
   assertWriteAllowed(did: string, count = 1): void {
@@ -61,13 +72,42 @@ export class WriteRateLimiter {
     entry.timestamps = entry.timestamps.filter((t) => t > windowStart)
 
     if (entry.timestamps.length + count > this.maxWrites) {
-      entry.cooldownUntil = now + this.cooldownMs
-      const waitSec = Math.ceil(this.cooldownMs / 1000)
+      const jitter =
+        this.cooldownJitterMs > 0
+          ? Math.floor(Math.random() * this.cooldownJitterMs)
+          : 0
+      entry.cooldownUntil = now + this.cooldownMs + jitter
+      const waitSec = Math.ceil((this.cooldownMs + jitter) / 1000)
       throw new RateLimitError(waitSec)
     }
 
     for (let i = 0; i < count; i++) {
       entry.timestamps.push(now)
+    }
+  }
+
+  getSnapshot(did: string): WriteRateSnapshot {
+    const now = Date.now()
+    const entry = this.state.get(did)
+    if (!entry) {
+      return {
+        inWindow: 0,
+        maxWrites: this.maxWrites,
+        windowMs: this.windowMs,
+        cooldownUntil: 0,
+        now,
+      }
+    }
+
+    const windowStart = now - this.windowMs
+    entry.timestamps = entry.timestamps.filter((t) => t > windowStart)
+
+    return {
+      inWindow: entry.timestamps.length,
+      maxWrites: this.maxWrites,
+      windowMs: this.windowMs,
+      cooldownUntil: entry.cooldownUntil,
+      now,
     }
   }
 }
