@@ -801,7 +801,7 @@ and boundaries offline without querying the enrollment status endpoint on every 
 
 ### Enrollment Record Fields
 
-The `app.northsky.stratos.actor.enrollment` record on the user's PDS includes:
+The `zone.stratos.actor.enrollment` record on the user's PDS includes:
 
 | Field         | Type                 | Description                       |
 | ------------- | -------------------- | --------------------------------- |
@@ -858,7 +858,7 @@ async function verifyAttestation(
   a point in time.
 - For high-stakes operations, AppViews should additionally check the live enrollment status endpoint
   to confirm the enrollment hasn't been revoked since the attestation was created.
-- The enrollment status endpoint (`app.northsky.stratos.enrollment.status`) is the canonical trust
+- The enrollment status endpoint (`zone.stratos.enrollment.status`) is the canonical trust
   anchor.
 
 ---

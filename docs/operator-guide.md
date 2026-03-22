@@ -91,7 +91,7 @@ sequenceDiagram
     U->>P: Authorize Stratos
     P->>S: /oauth/callback (with auth code)
     S->>S: Validate enrollment (DID/PDS allowlist)
-    S->>S: Create enrollment record + per-user database
+    S->>S: Create enrollment record + initialize actor storage
 ```
 
 #### 2. Record Creation
@@ -103,10 +103,10 @@ sequenceDiagram
     participant P as User's PDS
 
     C->>S: com.atproto.repo.createRecord
-    Note right of C: collection: app.northsky.stratos.feed.post<br/>record: { text: "...", boundary: { values: [{ value: "fanart" }] } } }
+    Note right of C: collection: zone.stratos.feed.post<br/>record: { text: "...", boundary: { values: [{ value: "fanart" }] } } }
 
     S->>S: Validate User Enrollment, Valid Boundary, No cross-namespace embeds
-    S->>S: Store record in per-user SQLite database
+    S->>S: Store record in actor repo storage
     S->>S: Sequence event to stratos_seq table
     Note right of S: Updates MST (Merkle Search Tree) and signs a new commit:<br/>- Inserts record into MST via NodeWrangler<br/>- Computes block diff (new/removed MST nodes)<br/>- Signs commit with service secp256k1 key<br/>- Persists commit block and updates repo root
 
@@ -501,7 +501,7 @@ enables future per-user record signing and is attested by the service's secp256k
 `{dataDir}/actors/{prefix}/{did}/signing_key`, alongside the actor's SQLite database.
 
 **Enrollment record**: The user's public key (as a `did:key` string) and a service attestation are
-published to the user's PDS in the `app.northsky.stratos.actor.enrollment` record. The attestation
+published to the user's PDS in the `zone.stratos.actor.enrollment` record. The attestation
 is a DAG-CBOR payload (`{boundaries, did, signingKey}`) signed by the service's secp256k1 key.
 
 **Attestation lifecycle**:
