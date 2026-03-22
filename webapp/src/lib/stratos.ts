@@ -151,6 +151,20 @@ export async function verifyAttestation(
   }
 }
 
+export async function fetchServerDomains(
+  serviceUrl: string,
+): Promise<string[]> {
+  try {
+    const url = new URL('/xrpc/zone.stratos.server.listDomains', serviceUrl)
+    const res = await fetch(url.href)
+    if (!res.ok) return []
+    const data = await res.json()
+    return Array.isArray(data.domains) ? data.domains : []
+  } catch {
+    return []
+  }
+}
+
 export function enrollInStratos(stratosUrl: string, handle: string): void {
   const url = new URL('/oauth/authorize', stratosUrl)
   url.searchParams.set('handle', handle)
