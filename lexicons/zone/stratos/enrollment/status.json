@@ -41,7 +41,7 @@
               "description": "Authoritative boundaries assigned. Only included when request is authenticated.",
               "items": {
                 "type": "ref",
-                "ref": "app.stratos.boundary.defs#Domain"
+                "ref": "zone.stratos.boundary.defs#Domain"
               }
             }
           }

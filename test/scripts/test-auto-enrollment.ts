@@ -176,7 +176,7 @@ async function verifyPdsRecord(
   const did = session.did
 
   const res = await fetch(
-    `${PDS_URL}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=app.stratos.actor.enrollment&rkey=self`,
+    `${PDS_URL}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=zone.stratos.actor.enrollment&rkey=self`,
     {
       headers: {
         Authorization: `Bearer ${session.accessJwt}`,
