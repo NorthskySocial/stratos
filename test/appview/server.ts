@@ -181,9 +181,13 @@ async function indexRecord(
         ${replyRef?.parent?.uri ?? null}, ${replyRef?.parent?.cid ?? null},
         ${embed}, ${facets}, ${langs}, ${labels}, ${tags}, ${createdAt}, ${timestamp})
       ON CONFLICT (uri) DO UPDATE SET
-        cid = ${cid}, text = ${text}, embed = ${embed},
-        facets = ${facets}, langs = ${langs}, labels = ${labels},
-        tags = ${tags}, "indexedAt" = ${timestamp}
+        cid = ${cid}, text = ${text},
+        "replyRoot" = ${replyRef?.root?.uri ?? null},
+        "replyRootCid" = ${replyRef?.root?.cid ?? null},
+        "replyParent" = ${replyRef?.parent?.uri ?? null},
+        "replyParentCid" = ${replyRef?.parent?.cid ?? null},
+        embed = ${embed}, facets = ${facets}, langs = ${langs},
+        labels = ${labels}, tags = ${tags}, "indexedAt" = ${timestamp}
     `
 
     await tx`DELETE FROM stratos_post_boundary WHERE uri = ${uri}`
@@ -563,7 +567,10 @@ async function handleGetTimeline(req: Request): Promise<Response> {
     ? (posts[posts.length - 1]?.sortAt as string)
     : undefined
 
-  const feed = posts.map(formatFeedViewPost)
+  const boundaryMap = await enrichWithBoundaries(posts)
+  const feed = posts.map((p) =>
+    formatFeedViewPost(p, boundaryMap.get(p.uri as string)),
+  )
   return jsonResponse({ feed, cursor: nextCursor })
 }
 
@@ -621,7 +628,10 @@ async function handleGetAuthorFeed(req: Request): Promise<Response> {
     ? (posts[posts.length - 1]?.sortAt as string)
     : undefined
 
-  const feed = posts.map(formatFeedViewPost)
+  const boundaryMap = await enrichWithBoundaries(posts)
+  const feed = posts.map((p) =>
+    formatFeedViewPost(p, boundaryMap.get(p.uri as string)),
+  )
   return jsonResponse({ feed, cursor: nextCursor })
 }
 
@@ -657,10 +667,13 @@ async function handleGetPost(req: Request): Promise<Response> {
     }
   }
 
-  return jsonResponse({ post: formatFeedViewPost(post) })
+  return jsonResponse({ post: formatFeedViewPost(post, postBoundaries) })
 }
 
-function formatFeedViewPost(row: Record<string, unknown>) {
+function formatFeedViewPost(
+  row: Record<string, unknown>,
+  boundaries?: string[],
+) {
   return {
     post: {
       uri: row.uri,
@@ -670,6 +683,22 @@ function formatFeedViewPost(row: Record<string, unknown>) {
         $type: 'zone.stratos.feed.post',
         text: row.text,
         createdAt: row.createdAt,
+        ...(row.replyRoot
+          ? {
+              reply: {
+                root: { uri: row.replyRoot, cid: row.replyRootCid },
+                parent: { uri: row.replyParent, cid: row.replyParentCid },
+              },
+            }
+          : {}),
+        ...(boundaries && boundaries.length > 0
+          ? {
+              boundary: {
+                $type: 'zone.stratos.boundary.defs#Domains',
+                values: boundaries.map((b) => ({ value: b })),
+              },
+            }
+          : {}),
         ...(row.facets ? { facets: JSON.parse(row.facets as string) } : {}),
         ...(row.embed ? { embed: JSON.parse(row.embed as string) } : {}),
         ...(row.langs ? { langs: (row.langs as string).split(',') } : {}),
@@ -678,6 +707,24 @@ function formatFeedViewPost(row: Record<string, unknown>) {
       indexedAt: row.indexedAt,
     },
   }
+}
+
+async function enrichWithBoundaries(
+  posts: Record<string, unknown>[],
+): Promise<Map<string, string[]>> {
+  if (posts.length === 0) return new Map()
+  const uris = posts.map((p) => p.uri as string)
+  const rows = await sql`
+    SELECT uri, boundary FROM stratos_post_boundary WHERE uri = ANY(${uris})
+  `
+  const map = new Map<string, string[]>()
+  for (const r of rows) {
+    const uri = r.uri as string
+    const list = map.get(uri) ?? []
+    list.push(r.boundary as string)
+    map.set(uri, list)
+  }
+  return map
 }
 
 async function handleHealth(): Promise<Response> {

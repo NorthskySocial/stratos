@@ -4,7 +4,8 @@ import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Keypair } from '@atproto/crypto'
 import type { ActorRepoTransactor } from '../../actor-store-types.js'
-import { type UnsignedCommitData } from '@northskysocial/stratos-core'
+import { type UnsignedCommitData, BlockMap } from '@northskysocial/stratos-core'
+import type { WritePhases } from '../../api/records.js'
 
 export interface SignedCommitResult {
   commitCid: CID
@@ -12,11 +13,24 @@ export interface SignedCommitResult {
   rev: string
 }
 
-export async function signAndPersistCommit(
-  repoTransactor: ActorRepoTransactor,
+export interface SignedCommitData {
+  commitCid: CID
+  commitBytes: Uint8Array
+  rev: string
+  allBlocks: BlockMap
+  removedCids: CID[]
+}
+
+export interface ExtraBlock {
+  cid: CID
+  bytes: Uint8Array
+}
+
+export async function signCommit(
   signingKey: Keypair,
   unsigned: UnsignedCommitData,
-): Promise<SignedCommitResult> {
+  extraBlocks?: ExtraBlock[],
+): Promise<SignedCommitData> {
   const unsignedCommit = {
     did: unsigned.did,
     version: unsigned.version as 3,
@@ -38,22 +52,56 @@ export async function signAndPersistCommit(
   const commitCidStr = cidToString(atcuteCid)
   const commitCid = CID.parse(commitCidStr)
 
+  const allBlocks = new BlockMap()
+  if (extraBlocks) {
+    for (const block of extraBlocks) {
+      allBlocks.set(block.cid, block.bytes)
+    }
+  }
   for (const [cidStr, bytes] of unsigned.newBlocks) {
-    await repoTransactor.putBlock(CID.parse(cidStr), bytes, unsigned.rev)
+    allBlocks.set(CID.parse(cidStr), bytes)
   }
+  allBlocks.set(commitCid, commitBytes)
 
-  if (unsigned.removedCids.length > 0) {
-    await repoTransactor.deleteBlocks(
-      unsigned.removedCids.map((s) => CID.parse(s)),
-    )
-  }
-
-  await repoTransactor.putBlock(commitCid, commitBytes, unsigned.rev)
-  await repoTransactor.updateRoot(commitCid, unsigned.rev, unsigned.did)
+  const removedCids = unsigned.removedCids.map((s) => CID.parse(s))
 
   return {
     commitCid,
     commitBytes,
     rev: unsigned.rev,
+    allBlocks,
+    removedCids,
+  }
+}
+
+export async function signAndPersistCommit(
+  repoTransactor: ActorRepoTransactor,
+  signingKey: Keypair,
+  unsigned: UnsignedCommitData,
+  phases?: WritePhases,
+  extraBlocks?: ExtraBlock[],
+): Promise<SignedCommitResult> {
+  let t0 = performance.now()
+  const signed = await signCommit(signingKey, unsigned, extraBlocks)
+  if (phases) phases.transactSign = performance.now() - t0
+
+  t0 = performance.now()
+  await repoTransactor.putBlocks(signed.allBlocks, unsigned.rev)
+  if (phases) phases.transactPutBlocks = performance.now() - t0
+
+  if (signed.removedCids.length > 0) {
+    t0 = performance.now()
+    await repoTransactor.deleteBlocks(signed.removedCids)
+    if (phases) phases.transactDeleteBlocks = performance.now() - t0
+  }
+
+  t0 = performance.now()
+  await repoTransactor.updateRoot(signed.commitCid, unsigned.rev, unsigned.did)
+  if (phases) phases.transactUpdateRoot = performance.now() - t0
+
+  return {
+    commitCid: signed.commitCid,
+    commitBytes: signed.commitBytes,
+    rev: signed.rev,
   }
 }

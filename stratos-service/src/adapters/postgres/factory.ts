@@ -30,6 +30,7 @@ export interface PostgresStorageFactoryConfig {
   serviceDb: ServicePgDb
   cborToRecord: (content: Uint8Array) => Record<string, unknown>
   blobContentStoreCreator: (did: string) => BlobContentStore
+  actorPoolSize?: number
 }
 
 function actorSchemaName(didHash: string): string {
@@ -39,18 +40,22 @@ function actorSchemaName(didHash: string): string {
 export class PostgresStorageFactory implements StorageFactory {
   readonly backend: StorageBackend = 'postgres'
 
-  private connectionString: string
   private serviceDb: ServicePgDb
   private cborToRecord: (content: Uint8Array) => Record<string, unknown>
   private blobContentStoreCreator: (did: string) => BlobContentStore
   private pool: postgres.Sql
+  private actorPool: postgres.Sql
+  private actorDb: StratosPgDb
 
   constructor(config: PostgresStorageFactoryConfig) {
-    this.connectionString = config.connectionString
     this.serviceDb = config.serviceDb
     this.cborToRecord = config.cborToRecord
     this.blobContentStoreCreator = config.blobContentStoreCreator
-    this.pool = postgres(this.connectionString, { max: 20 })
+    this.pool = postgres(config.connectionString, { max: 10 })
+    this.actorPool = postgres(config.connectionString, {
+      max: config.actorPoolSize ?? 30,
+    })
+    this.actorDb = drizzle({ client: this.actorPool, schema: pgActorSchema })
   }
 
   private async getActorSchemaName(did: string): Promise<string> {
@@ -58,12 +63,14 @@ export class PostgresStorageFactory implements StorageFactory {
     return actorSchemaName(didHash)
   }
 
-  private createActorDb(schemaName: string): StratosPgDb {
-    const client = postgres(this.connectionString, {
-      max: 5,
-      connection: { search_path: schemaName },
+  private async withActorSchema<T>(
+    schemaName: string,
+    fn: (db: StratosPgDb) => Promise<T>,
+  ): Promise<T> {
+    return await this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      return await fn(tx as unknown as StratosPgDb)
     })
-    return drizzle({ client, schema: pgActorSchema })
   }
 
   async initialize(): Promise<void> {
@@ -81,8 +88,12 @@ export class PostgresStorageFactory implements StorageFactory {
 
   async createActor(did: string): Promise<void> {
     const schemaName = await this.getActorSchemaName(did)
-    const actorDb = this.createActorDb(schemaName)
-    await migrateStratosPgDb(actorDb, schemaName)
+    // CREATE SCHEMA must run outside the actor schema's search_path
+    const utilDb = drizzle({ client: this.pool })
+    await utilDb.execute(sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`))
+    await this.withActorSchema(schemaName, async (tx) => {
+      await migrateStratosPgDb(tx)
+    })
   }
 
   async deleteActor(did: string): Promise<void> {
@@ -93,14 +104,17 @@ export class PostgresStorageFactory implements StorageFactory {
 
   async getActorReaders(did: string): Promise<ActorStoreReaders> {
     const schemaName = await this.getActorSchemaName(did)
-    const actorDb = this.createActorDb(schemaName)
 
     return {
-      record: new PgRecordStoreReader(actorDb, this.cborToRecord),
-      blobMetadata: new PgBlobMetadataReader(actorDb),
+      record: new PgRecordStoreReader(
+        this.actorDb,
+        this.cborToRecord,
+        schemaName,
+      ),
+      blobMetadata: new PgBlobMetadataReader(this.actorDb, schemaName),
       blobContent: this.blobContentStoreCreator(did),
-      repo: new PgRepoStoreReader(actorDb),
-      sequence: new PgSequenceStoreReader(actorDb),
+      repo: new PgRepoStoreReader(this.actorDb, schemaName),
+      sequence: new PgSequenceStoreReader(this.actorDb, schemaName),
     }
   }
 
@@ -109,18 +123,14 @@ export class PostgresStorageFactory implements StorageFactory {
     fn: (stores: ActorStoreWriters) => Promise<T>,
   ): Promise<T> {
     const schemaName = await this.getActorSchemaName(did)
-    const actorDb = this.createActorDb(schemaName)
 
-    return await actorDb.transaction(async (tx) => {
+    return await this.withActorSchema(schemaName, async (tx) => {
       const stores: ActorStoreWriters = {
-        record: new PgRecordStoreWriter(
-          tx as unknown as StratosPgDb,
-          this.cborToRecord,
-        ),
-        blobMetadata: new PgBlobMetadataWriter(tx as unknown as StratosPgDb),
+        record: new PgRecordStoreWriter(tx, this.cborToRecord),
+        blobMetadata: new PgBlobMetadataWriter(tx),
         blobContent: this.blobContentStoreCreator(did),
-        repo: new PgRepoStoreWriter(tx as unknown as StratosPgDb),
-        sequence: new PgSequenceStoreWriter(tx as unknown as StratosPgDb),
+        repo: new PgRepoStoreWriter(tx),
+        sequence: new PgSequenceStoreWriter(tx),
       }
       return await fn(stores)
     })
@@ -133,6 +143,7 @@ export class PostgresStorageFactory implements StorageFactory {
   }
 
   async close(): Promise<void> {
+    await this.actorPool.end()
     await this.pool.end()
   }
 }

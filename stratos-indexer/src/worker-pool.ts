@@ -37,6 +37,15 @@ export class WorkerPool<T = unknown> {
     })
   }
 
+  trySubmit(data: T): boolean {
+    if (!this.running || this.queue.length >= this.maxQueueSize) {
+      return false
+    }
+    this.queue.push({ data, resolve: () => {}, reject: () => {} })
+    this.drain()
+    return true
+  }
+
   async stop(): Promise<void> {
     this.running = false
     // Wait for all active work and queued items to finish

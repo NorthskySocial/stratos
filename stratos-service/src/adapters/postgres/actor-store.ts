@@ -4,6 +4,7 @@ import { eq, gt, lt, and, asc, desc, inArray, isNull, sql } from 'drizzle-orm'
 import { CID } from 'multiformats/cid'
 import { AtUri } from '@atproto/syntax'
 import * as crypto from '@atproto/crypto'
+import { decode as cborDecode, type CidLink } from '@atcute/cbor'
 
 import {
   type StratosPgDb,
@@ -22,6 +23,7 @@ import {
   getStratosBacklinks,
   BlockMap,
   CidSet,
+  LruBlockCache,
   type Logger,
   type BlobStore,
   type BlobStoreCreator,
@@ -320,20 +322,9 @@ export class PgActorRecordTransactor extends PgActorRecordReader {
       throw new Error('Expected indexed URI to contain a record key')
     }
 
-    await this.db
-      .insert(pgStratosRecord)
-      .values({
-        ...row,
-        takedownRef: null,
-      })
-      .onConflictDoUpdate({
-        target: pgStratosRecord.uri,
-        set: {
-          cid: row.cid,
-          repoRev: repoRev,
-          indexedAt: row.indexedAt,
-        },
-      })
+    await this.db.execute(
+      sql`INSERT INTO stratos_record (uri, cid, collection, rkey, "repoRev", "indexedAt", "takedownRef") VALUES (${row.uri}, ${row.cid}, ${row.collection}, ${row.rkey}, ${row.repoRev}, ${row.indexedAt}, ${null}) ON CONFLICT (uri) DO UPDATE SET cid = ${row.cid}, "repoRev" = ${row.repoRev}, "indexedAt" = ${row.indexedAt}`,
+    )
 
     if (record !== null) {
       const backlinks = getStratosBacklinks(uri, record)
@@ -399,6 +390,7 @@ export class PgActorRepoReader {
   constructor(
     protected db: StratosPgDbOrTx,
     protected logger?: Logger,
+    protected lru?: LruBlockCache,
   ) {}
 
   async hasRoot(): Promise<boolean> {
@@ -415,10 +407,9 @@ export class PgActorRepoReader {
   }
 
   async getRootDetailed(): Promise<{ cid: CID; rev: string } | null> {
-    const res = await this.db
-      .select({ cid: pgStratosRepoRoot.cid, rev: pgStratosRepoRoot.rev })
-      .from(pgStratosRepoRoot)
-      .limit(1)
+    const res = (await this.db.execute(
+      sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1`,
+    )) as unknown as { cid: string; rev: string }[]
     if (res.length === 0) return null
     return {
       cid: CID.parse(res[0].cid),
@@ -429,14 +420,19 @@ export class PgActorRepoReader {
   async getBytes(cid: CID): Promise<Uint8Array | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
-    const found = await this.db
-      .select({ content: pgStratosRepoBlock.content })
-      .from(pgStratosRepoBlock)
-      .where(eq(pgStratosRepoBlock.cid, cid.toString()))
-      .limit(1)
+    const cidStr = cid.toString()
+    const lruCached = this.lru?.get(cidStr)
+    if (lruCached) {
+      this.cache.set(cid, lruCached)
+      return lruCached
+    }
+    const found = (await this.db.execute(
+      sql`SELECT content FROM stratos_repo_block WHERE cid = ${cidStr} LIMIT 1`,
+    )) as unknown as { content: Buffer }[]
     if (found.length === 0) return null
     const content = new Uint8Array(found[0].content)
     this.cache.set(cid, content)
+    this.lru?.set(cidStr, content)
     return content
   }
 
@@ -448,6 +444,24 @@ export class PgActorRepoReader {
   async getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }> {
     const cached = this.cache.getMany(cids)
     if (cached.missing.length < 1) return cached
+
+    if (this.lru) {
+      const stillMissing: CID[] = []
+      for (const cid of cached.missing) {
+        const lruHit = this.lru.get(cid.toString())
+        if (lruHit) {
+          cached.blocks.set(cid, lruHit)
+          this.cache.set(cid, lruHit)
+        } else {
+          stillMissing.push(cid)
+        }
+      }
+      if (stillMissing.length === 0) {
+        return { blocks: cached.blocks, missing: [] }
+      }
+      cached.missing = stillMissing
+    }
+
     const missing = new CidSet(cached.missing)
     const missingStr = cached.missing.map((c) => c.toString())
     const blocks = new BlockMap()
@@ -463,7 +477,9 @@ export class PgActorRepoReader {
         .where(inArray(pgStratosRepoBlock.cid, batch))
       for (const row of res) {
         const cid = CID.parse(row.cid)
-        blocks.set(cid, new Uint8Array(row.content))
+        const content = new Uint8Array(row.content)
+        blocks.set(cid, content)
+        this.lru?.set(row.cid, content)
         missing.delete(cid)
       }
     }
@@ -525,11 +541,11 @@ export class PgActorRepoReader {
     }
 
     const res = await query
-    return res.map((row) => ({
-      cid: row.cid,
-      repoRev: row.repoRev,
-      content: new Uint8Array(row.content),
-    }))
+    return res.map((row) => {
+      const content = new Uint8Array(row.content)
+      this.lru?.set(row.cid, content)
+      return { cid: row.cid, repoRev: row.repoRev, content }
+    })
   }
 
   async countBlocks(): Promise<number> {
@@ -537,6 +553,50 @@ export class PgActorRepoReader {
       .select({ count: countAll })
       .from(pgStratosRepoBlock)
     return Number(res[0]?.count ?? 0)
+  }
+
+  async preloadBlocksForRev(rev: string): Promise<void> {
+    const res = (await this.db.execute(
+      sql`SELECT cid, content FROM stratos_repo_block WHERE "repoRev" = ${rev} LIMIT 15`,
+    )) as unknown as { cid: string; content: Buffer }[]
+    for (const row of res) {
+      const cid = CID.parse(row.cid)
+      if (!this.cache.has(cid)) {
+        const content = new Uint8Array(row.content)
+        this.cache.set(cid, content)
+        this.lru?.set(row.cid, content)
+      }
+    }
+  }
+
+  async preloadRootSpine(commitCid: CID): Promise<void> {
+    const commitBytes = await this.getBytes(commitCid)
+    if (!commitBytes) return
+
+    const commit = cborDecode(commitBytes) as { data: CidLink }
+    const mstRootCid = CID.parse(commit.data.$link)
+
+    const rootBytes = await this.getBytes(mstRootCid)
+    if (!rootBytes) return
+
+    const rootNode = cborDecode(rootBytes) as {
+      l: CidLink | null
+      e: Array<{ t: CidLink | null }>
+    }
+
+    const childCids: CID[] = []
+    if (rootNode.l) {
+      childCids.push(CID.parse(rootNode.l.$link))
+    }
+    for (const entry of rootNode.e) {
+      if (entry.t) {
+        childCids.push(CID.parse(entry.t.$link))
+      }
+    }
+
+    if (childCids.length > 0) {
+      await this.getBlocks(childCids)
+    }
   }
 
   async listExistingBlocks(): Promise<CidSet> {
@@ -561,41 +621,38 @@ export class PgActorRepoReader {
 // ─── Repo Transactor ────────────────────────────────────────────────────────
 
 export class PgActorRepoTransactor extends PgActorRepoReader {
-  constructor(db: StratosPgDbOrTx, logger?: Logger) {
-    super(db, logger)
+  constructor(db: StratosPgDbOrTx, logger?: Logger, lru?: LruBlockCache) {
+    super(db, logger, lru)
+  }
+
+  async lockRoot(): Promise<{ cid: CID; rev: string } | null> {
+    const res = (await this.db.execute(
+      sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1 FOR UPDATE NOWAIT`,
+    )) as unknown as { cid: string; rev: string }[]
+    if (res.length === 0) return null
+    return {
+      cid: CID.parse(res[0].cid),
+      rev: res[0].rev,
+    }
   }
 
   async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
-    await this.db
-      .insert(pgStratosRepoRoot)
-      .values({
-        did,
-        cid: cid.toString(),
-        rev,
-        indexedAt: new Date().toISOString(),
-      })
-      .onConflictDoUpdate({
-        target: pgStratosRepoRoot.did,
-        set: {
-          cid: cid.toString(),
-          rev,
-          indexedAt: new Date().toISOString(),
-        },
-      })
+    const cidStr = cid.toString()
+    const indexedAt = new Date().toISOString()
+    await this.db.execute(
+      sql`INSERT INTO stratos_repo_root (did, cid, rev, "indexedAt") VALUES (${did}, ${cidStr}, ${rev}, ${indexedAt}) ON CONFLICT (did) DO UPDATE SET cid = ${cidStr}, rev = ${rev}, "indexedAt" = ${indexedAt}`,
+    )
   }
 
   async putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void> {
-    await this.db
-      .insert(pgStratosRepoBlock)
-      .values({
-        cid: cid.toString(),
-        repoRev: rev,
-        size: bytes.length,
-        content: Buffer.from(bytes),
-      })
-      .onConflictDoNothing()
+    const cidStr = cid.toString()
+    const content = Buffer.from(bytes)
+    await this.db.execute(
+      sql`INSERT INTO stratos_repo_block (cid, "repoRev", size, content) VALUES (${cidStr}, ${rev}, ${bytes.length}, ${content}) ON CONFLICT DO NOTHING`,
+    )
 
     this.cache.set(cid, bytes)
+    this.lru?.set(cidStr, bytes)
   }
 
   async putBlocks(blocks: BlockMap, rev: string): Promise<void> {
@@ -614,6 +671,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
         content: Buffer.from(content),
       })
       this.cache.set(CID.parse(cidStr), content)
+      this.lru?.set(cidStr, content)
     }
 
     if (values.length === 0) return
@@ -632,6 +690,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
       .delete(pgStratosRepoBlock)
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
     this.cache.delete(cid)
+    this.lru?.delete(cid.toString())
   }
 
   async deleteBlocks(cids: CID[]): Promise<void> {
@@ -645,6 +704,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     }
     for (const cid of cids) {
       this.cache.delete(cid)
+      this.lru?.delete(cid.toString())
     }
   }
 
@@ -931,7 +991,9 @@ export class PgSequenceOps implements SequenceOperations {
     invalidated: number
     sequencedAt: string
   }): Promise<void> {
-    await this.db.insert(pgStratosSeq).values(event)
+    await this.db.execute(
+      sql`INSERT INTO stratos_seq (did, "eventType", event, invalidated, "sequencedAt") VALUES (${event.did}, ${event.eventType}, ${event.event}, ${event.invalidated}, ${event.sequencedAt})`,
+    )
   }
 }
 
@@ -946,10 +1008,12 @@ export interface PostgresActorStoreConfig {
   blobstore: BlobStoreCreator
   cborToRecord: (content: Uint8Array) => Record<string, unknown>
   logger?: Logger
+  actorPoolSize?: number
+  adminPoolSize?: number
+  blockCacheSize?: number
 }
 
 export class PostgresActorStore implements ActorStore {
-  private readonly connectionString: string
   private readonly blobstore: BlobStoreCreator
   private readonly cborToRecord: (
     content: Uint8Array,
@@ -959,21 +1023,23 @@ export class PostgresActorStore implements ActorStore {
   private readonly adminDb: StratosPgDb
   private readonly actorClient: ReturnType<typeof postgres>
   private readonly actorDb: StratosPgDb
+  private readonly schemaNameCache = new Map<string, string>()
+  private readonly existsCache = new Set<string>()
+  private readonly blockCache: LruBlockCache
 
   constructor(config: PostgresActorStoreConfig) {
-    this.connectionString = config.connectionString
     this.blobstore = config.blobstore
     this.cborToRecord = config.cborToRecord
     this.logger = config.logger
-    this.adminClient = postgres(this.connectionString, {
-      max: 3,
+    this.blockCache = new LruBlockCache(config.blockCacheSize ?? 50_000)
+    this.adminClient = postgres(config.connectionString, {
+      max: config.adminPoolSize ?? 3,
       idle_timeout: 20,
       connect_timeout: 10,
     })
     this.adminDb = drizzle({ client: this.adminClient })
-    // Shared pool for all per-actor operations; search_path set per transaction via SET LOCAL
-    this.actorClient = postgres(this.connectionString, {
-      max: 15,
+    this.actorClient = postgres(config.connectionString, {
+      max: config.actorPoolSize ?? 200,
       idle_timeout: 20,
       connect_timeout: 10,
     })
@@ -986,32 +1052,37 @@ export class PostgresActorStore implements ActorStore {
   }
 
   private async getSchemaName(did: string): Promise<string> {
+    const cached = this.schemaNameCache.get(did)
+    if (cached !== undefined) return cached
     const didHash = await crypto.sha256Hex(did)
-    return actorSchemaName(didHash)
+    const name = actorSchemaName(didHash)
+    this.schemaNameCache.set(did, name)
+    return name
   }
 
   async exists(did: string): Promise<boolean> {
+    if (this.existsCache.has(did)) return true
     const schemaName = await this.getSchemaName(did)
     const rows = await this.adminDb.execute(
       sql`SELECT 1 FROM information_schema.schemata WHERE schema_name = ${schemaName} LIMIT 1`,
     )
-    return rows.length > 0
+    if (rows.length > 0) {
+      this.existsCache.add(did)
+      return true
+    }
+    return false
   }
 
   async create(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
-    const client = postgres(this.connectionString, {
-      max: 2,
-      idle_timeout: 10,
-      connect_timeout: 10,
-      connection: { search_path: schemaName },
+    await this.adminDb.execute(
+      sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`),
+    )
+    await this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      await migrateStratosPgDb(tx as unknown as StratosPgDb)
     })
-    const actorDb = drizzle({ client, schema: pgActorSchema })
-    try {
-      await migrateStratosPgDb(actorDb, schemaName)
-    } finally {
-      await client.end()
-    }
+    this.existsCache.add(did)
   }
 
   async destroy(did: string): Promise<void> {
@@ -1019,6 +1090,7 @@ export class PostgresActorStore implements ActorStore {
     await this.adminDb.execute(
       sql.raw(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`),
     )
+    this.existsCache.delete(did)
   }
 
   async read<T>(
@@ -1034,7 +1106,7 @@ export class PostgresActorStore implements ActorStore {
       const store: ActorReader = {
         did,
         record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
-        repo: new PgActorRepoReader(txDb, this.logger),
+        repo: new PgActorRepoReader(txDb, this.logger, this.blockCache),
         blob: new PgActorBlobReader(txDb, blobStore, this.logger),
         sequence: new PgSequenceOps(txDb),
       }
@@ -1059,11 +1131,50 @@ export class PostgresActorStore implements ActorStore {
           this.cborToRecord,
           this.logger,
         ),
-        repo: new PgActorRepoTransactor(txDb, this.logger),
+        repo: new PgActorRepoTransactor(txDb, this.logger, this.blockCache),
         blob: new PgActorBlobTransactor(txDb, blobStore, this.logger),
         sequence: new PgSequenceOps(txDb),
       }
       return fn(store)
+    })
+  }
+
+  async readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
+  ): Promise<T> {
+    const schemaName = await this.getSchemaName(did)
+    const blobStore = this.blobstore(did)
+
+    return this.actorDb.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`))
+      const txDb = tx as unknown as StratosPgDb
+
+      const reader: ActorReader = {
+        did,
+        record: new PgActorRecordReader(txDb, this.cborToRecord, this.logger),
+        repo: new PgActorRepoReader(txDb, this.logger, this.blockCache),
+        blob: new PgActorBlobReader(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
+      }
+      const readResult = (await readFn(reader)) as Awaited<R>
+
+      const transactor: ActorTransactor = {
+        did,
+        record: new PgActorRecordTransactor(
+          txDb,
+          this.cborToRecord,
+          this.logger,
+        ),
+        repo: new PgActorRepoTransactor(txDb, this.logger, this.blockCache),
+        blob: new PgActorBlobTransactor(txDb, blobStore, this.logger),
+        sequence: new PgSequenceOps(txDb),
+      }
+      return transactFn(readResult, transactor)
     })
   }
 

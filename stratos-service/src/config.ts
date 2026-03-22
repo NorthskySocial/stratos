@@ -24,6 +24,9 @@ const envSchema = z.object({
   STRATOS_PG_SSLMODE: z
     .enum(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])
     .optional(),
+  STRATOS_PG_ACTOR_POOL_SIZE: z.coerce.number().int().positive().optional(),
+  STRATOS_PG_ADMIN_POOL_SIZE: z.coerce.number().int().positive().optional(),
+  STRATOS_BLOCK_CACHE_SIZE: z.coerce.number().int().positive().optional(),
   STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
   // S3 storage (optional)
@@ -50,6 +53,26 @@ const envSchema = z.object({
         .filter((d) => d.length > 0),
     ),
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  STRATOS_WRITE_RATE_MAX_WRITES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300),
+  STRATOS_WRITE_RATE_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60_000),
+  STRATOS_WRITE_RATE_COOLDOWN_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(10_000),
+  STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(1_000),
 
   // Enrollment
   STRATOS_ENROLLMENT_MODE: z
@@ -205,6 +228,9 @@ export interface StratosServiceConfig {
     backend: 'sqlite' | 'postgres'
     dataDir: string
     postgresUrl?: string
+    pgActorPoolSize?: number
+    pgAdminPoolSize?: number
+    blockCacheSize?: number
   }
   blobstore: BlobstoreConfig
   stratos: {
@@ -212,6 +238,12 @@ export interface StratosServiceConfig {
     retentionDays: number
     devMode?: boolean
     importMaxBytes: number
+    writeRateLimit: {
+      maxWrites: number
+      windowMs: number
+      cooldownMs: number
+      cooldownJitterMs: number
+    }
   }
   enrollment: {
     mode: ENROLLMENT_MODE
@@ -317,6 +349,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
       backend: env.STORAGE_BACKEND,
       dataDir: env.STRATOS_DATA_DIR,
       postgresUrl: env.STRATOS_POSTGRES_URL ?? buildPostgresUrl(env),
+      pgActorPoolSize: env.STRATOS_PG_ACTOR_POOL_SIZE,
+      pgAdminPoolSize: env.STRATOS_PG_ADMIN_POOL_SIZE,
+      blockCacheSize: env.STRATOS_BLOCK_CACHE_SIZE,
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {
@@ -324,6 +359,12 @@ export function envToConfig(env: Env): StratosServiceConfig {
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
+      writeRateLimit: {
+        maxWrites: env.STRATOS_WRITE_RATE_MAX_WRITES,
+        windowMs: env.STRATOS_WRITE_RATE_WINDOW_MS,
+        cooldownMs: env.STRATOS_WRITE_RATE_COOLDOWN_MS,
+        cooldownJitterMs: env.STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS,
+      },
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,

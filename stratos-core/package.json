@@ -39,7 +39,7 @@
     "@atproto/lexicon": "^0.6.1",
     "@atproto/syntax": "^0.4.3",
     "@libsql/client": "^0.17.0",
-    "drizzle-orm": "1.0.0-beta.16-ea816b6",
+    "drizzle-orm": "1.0.0-beta.18-7eb39f0",
     "multiformats": "^13.4.2",
     "postgres": "^3.4.8",
     "zod": "^4.3.6"

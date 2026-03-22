@@ -17,20 +17,57 @@ interface StratosTimelineResponse {
   cursor?: string
 }
 
+export interface StrongRef {
+  uri: string
+  cid: string
+}
+
+export interface ReplyRef {
+  root: StrongRef
+  parent: StrongRef
+}
+
 export interface FeedPost {
   uri: string
   cid: string
   text: string
   createdAt: string
   isPrivate: boolean
-  hasReply: boolean
+  reply: ReplyRef | null
   author: string
   authorHandle: string
   boundaries: string[]
 }
 
+export interface ThreadNode {
+  post: FeedPost
+  replies: ThreadNode[]
+  depth: number
+}
+
 function authorFromUri(uri: string): string {
   return uri.replace('at://', '').split('/')[0]
+}
+
+function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
+  const reply = record.reply as
+    | {
+        root?: { uri?: string; cid?: string }
+        parent?: { uri?: string; cid?: string }
+      }
+    | undefined
+  if (
+    !reply?.root?.uri ||
+    !reply?.root?.cid ||
+    !reply?.parent?.uri ||
+    !reply?.parent?.cid
+  ) {
+    return null
+  }
+  return {
+    root: { uri: reply.root.uri, cid: reply.root.cid },
+    parent: { uri: reply.parent.uri, cid: reply.parent.cid },
+  }
 }
 
 function boundariesFromRecord(record: Record<string, unknown>): string[] {
@@ -61,7 +98,7 @@ function mapFeedViewPosts(
         text: (val.text as string) ?? '',
         createdAt: (val.createdAt as string) ?? item.post.indexedAt ?? '',
         isPrivate,
-        hasReply: !!val.reply,
+        reply: parseReplyRef(val),
         author: did,
         authorHandle: handle !== did ? handle : '',
         boundaries: boundariesFromRecord(val),
@@ -88,7 +125,7 @@ export async function fetchRepoPublicPosts(
         text: (val.text as string) ?? '',
         createdAt: (val.createdAt as string) ?? '',
         isPrivate: false,
-        hasReply: !!val.reply,
+        reply: parseReplyRef(val),
         author: did,
         authorHandle: '',
         boundaries: [],
@@ -133,7 +170,7 @@ export async function fetchStratosPosts(
         text: (val.text as string) ?? '',
         createdAt: (val.createdAt as string) ?? '',
         isPrivate: true,
-        hasReply: !!val.reply,
+        reply: parseReplyRef(val),
         author: authorFromUri(r.uri),
         authorHandle: '',
         boundaries: boundariesFromRecord(val),
@@ -216,4 +253,39 @@ export function resolveHandles(
     }
     return p
   })
+}
+
+export function groupIntoThreads(posts: FeedPost[]): ThreadNode[] {
+  const byUri = new Map<string, FeedPost>()
+  for (const p of posts) byUri.set(p.uri, p)
+
+  const childrenOf = new Map<string, FeedPost[]>()
+  const rootPosts: FeedPost[] = []
+
+  for (const p of posts) {
+    if (p.reply && byUri.has(p.reply.parent.uri)) {
+      const parentUri = p.reply.parent.uri
+      const siblings = childrenOf.get(parentUri) ?? []
+      siblings.push(p)
+      childrenOf.set(parentUri, siblings)
+    } else {
+      rootPosts.push(p)
+    }
+  }
+
+  function buildTree(post: FeedPost, depth: number): ThreadNode {
+    const replies = (childrenOf.get(post.uri) ?? [])
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      )
+      .map((r) => buildTree(r, depth + 1))
+    return { post, replies, depth }
+  }
+
+  return rootPosts.map((p) => buildTree(p, 0))
+}
+
+export function findPost(posts: FeedPost[], uri: string): FeedPost | undefined {
+  return posts.find((p) => p.uri === uri)
 }
