@@ -1,6 +1,6 @@
 # Stratos
 
-Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream AppViews serve boundary-filtered content without inventing a separate identity model.
+Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream AppViews serve boundary-filtered content without inventing a separate identity model. The service is written in typescript with postgres and sqlite support.
 
 ## What the Repository Contains
 
@@ -19,7 +19,7 @@ Stratos is a private, boundary-aware data layer for AT Protocol. It keeps privat
 - Users enroll with a Stratos service via OAuth.
 - The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
 - Private records live in Stratos, not on the user's PDS.
-- Records can carry one or more boundary values such as `engineering` or `leadership`.
+- Records can carry one or more boundary values such as `posters-madness` or `tech`.
 - A viewer can access a record only if they share at least one boundary with it.
 
 ## Request Flow
@@ -30,21 +30,6 @@ User -> OAuth enrollment -> Stratos service
      -> private records stored in Stratos
      -> standalone stratos-indexer writes boundary-aware rows into AppView Postgres
      -> AppView serves `zone.stratos.feed.*` queries
-```
-
-## Package Layout
-
-```text
-stratos/
-├── stratos-core/
-├── stratos-service/
-├── stratos-client/
-├── stratos-indexer/
-├── webapp/
-├── lexicons/
-├── docs/
-├── test/
-└── test-data/
 ```
 
 ## Local Development
@@ -64,7 +49,7 @@ cp .env.example .env
 pnpm --filter @northskysocial/stratos-service dev
 ```
 
-For end-to-end coverage, run the Deno suite from the repo root:
+For end-to-end coverage, run the integration suite from the repo root, see `test/` for details:
 
 ```bash
 pnpm e2etest
@@ -147,12 +132,10 @@ That separation matters when updating docs or deployment plans: query-time Strat
 
 ## Testing
 
-| Command                                              | Scope                  |
-| ---------------------------------------------------- | ---------------------- |
-| `pnpm test`                                          | Vitest across packages |
-| `pnpm --filter @northskysocial/stratos-service test` | Service-only tests     |
-| `pnpm --filter @northskysocial/stratos-indexer lint` | Indexer lint           |
-| `pnpm e2etest`                                       | End-to-end Deno suite  |
+| Command        | Scope                  |
+| -------------- | ---------------------- |
+| `pnpm test`    | Vitest across packages |
+| `pnpm e2etest` | End-to-end suite       |
 
 ## Related Docs
 
