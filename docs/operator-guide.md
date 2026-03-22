@@ -108,7 +108,7 @@ sequenceDiagram
     S->>S: Validate User Enrollment, Valid Boundary, No cross-namespace embeds
     S->>S: Store record in actor repo storage
     S->>S: Sequence event to stratos_seq table
-    Note right of S: Updates MST (Merkle Search Tree) and signs a new commit:<br/>- Inserts record into MST via NodeWrangler<br/>- Computes block diff (new/removed MST nodes)<br/>- Signs commit with service secp256k1 key<br/>- Persists commit block and updates repo root
+    Note right of S: Updates MST (Merkle Search Tree) and signs a new commit:<br/>- Inserts record into MST via NodeWrangler<br/>- Computes block diff (new/removed MST nodes)<br/>- Signs commit with user's P-256 key (falls back to service key)<br/>- Persists commit block and updates repo root
 
     S->>P: putRecord(Stub with source field)
 ```
@@ -147,7 +147,7 @@ graph TD
         C2["version: 3"]
         C3["data: &lt;MST root CID&gt;"]
         C4["rev: '2024...' (TID)"]
-        C5["sig: &lt;secp256k1 signature&gt;"]
+        C5["sig: &lt;P-256 signature (user key)&gt;"]
     end
 
     subgraph MSTInfo ["MST Content"]
