@@ -27,6 +27,9 @@ function createMockEnrollmentStore(
     unenroll: vi.fn(async () => {}),
     updateEnrollment: vi.fn(async () => {}),
     getBoundaries: vi.fn(async () => []),
+    setBoundaries: vi.fn(async () => {}),
+    addBoundary: vi.fn(async () => {}),
+    removeBoundary: vi.fn(async () => {}),
   }
 }
 

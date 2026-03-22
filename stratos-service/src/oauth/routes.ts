@@ -38,6 +38,9 @@ export interface EnrollmentStore {
   unenroll(did: string): Promise<void>
   getEnrollment(did: string): Promise<EnrollmentRecord | null>
   getBoundaries(did: string): Promise<string[]>
+  setBoundaries(did: string, boundaries: string[]): Promise<void>
+  addBoundary(did: string, boundary: string): Promise<void>
+  removeBoundary(did: string, boundary: string): Promise<void>
   updateEnrollment(
     did: string,
     updates: Partial<Omit<EnrollmentRecord, 'did'>>,

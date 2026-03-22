@@ -5,7 +5,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { EventEmitter } from 'node:events'
 import express from 'express'
-import { eq, gt, asc, desc, sql } from 'drizzle-orm'
+import { eq, gt, asc, desc, sql, and } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
@@ -506,6 +506,36 @@ export class SqliteEnrollmentStore
       .where(eq(enrollmentBoundary.did, did))
 
     return rows.map((r) => r.boundary)
+  }
+
+  async setBoundaries(did: string, boundaries: string[]): Promise<void> {
+    await this.db
+      .delete(enrollmentBoundary)
+      .where(eq(enrollmentBoundary.did, did))
+
+    if (boundaries.length > 0) {
+      await this.db
+        .insert(enrollmentBoundary)
+        .values(boundaries.map((boundary) => ({ did, boundary })))
+    }
+  }
+
+  async addBoundary(did: string, boundary: string): Promise<void> {
+    await this.db
+      .insert(enrollmentBoundary)
+      .values({ did, boundary })
+      .onConflictDoNothing()
+  }
+
+  async removeBoundary(did: string, boundary: string): Promise<void> {
+    await this.db
+      .delete(enrollmentBoundary)
+      .where(
+        and(
+          eq(enrollmentBoundary.did, did),
+          eq(enrollmentBoundary.boundary, boundary),
+        ),
+      )
   }
 }
 
@@ -1215,7 +1245,12 @@ export async function createAppContext(
     dpopVerifier,
     enrollmentEvents,
     sequenceEvents,
-    writeRateLimiter: new WriteRateLimiter(),
+    writeRateLimiter: new WriteRateLimiter({
+      maxWrites: cfg.stratos.writeRateLimit.maxWrites,
+      windowMs: cfg.stratos.writeRateLimit.windowMs,
+      cooldownMs: cfg.stratos.writeRateLimit.cooldownMs,
+      cooldownJitterMs: cfg.stratos.writeRateLimit.cooldownJitterMs,
+    }),
     repoWriteLocks: new RepoWriteLocks(),
     destroy: async () => {
       await stubQueue.drain()
