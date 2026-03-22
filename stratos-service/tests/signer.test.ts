@@ -4,7 +4,7 @@ import * as AtcuteCid from '@atcute/cid'
 import { decode as cborDecode, isBytes, fromBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { MemoryBlockStore } from '@atcute/mst'
-import { signAndPersistCommit } from '../src/features'
+import { signAndPersistCommit, signCommit } from '../src/features'
 import {
   buildCommit,
   type UnsignedCommitData,
@@ -379,5 +379,77 @@ describe('signAndPersistCommit', () => {
     )
     expect(commitEntry).toBeDefined()
     expect(commitEntry![1]).toEqual(result.commitBytes)
+  })
+})
+
+describe('signCommit with real P256 keypair', () => {
+  it('produces a commit verifiable with the P256 public key', async () => {
+    const { P256Keypair, verifySignature } = await import('@atproto/crypto')
+    const { encode: encodeCbor } = await import('@atcute/cbor')
+
+    const keypair = await P256Keypair.create({ exportable: true })
+    const storage = new MemoryBlockStore()
+    const recordCid = await makeCidStr('p256-record')
+
+    const unsigned = await buildCommit(storage, null, {
+      did: DID,
+      writes: [
+        {
+          action: 'create',
+          collection: 'zone.stratos.feed.post',
+          rkey: 'p256test',
+          cid: recordCid,
+        },
+      ],
+    })
+
+    const result = await signCommit(keypair, unsigned)
+
+    expect(result.commitCid).toBeInstanceOf(CID)
+    expect(result.commitBytes.length).toBeGreaterThan(0)
+
+    const decoded = cborDecode(result.commitBytes) as Record<string, unknown>
+    expect(decoded.did).toBe(DID)
+    expect(decoded.version).toBe(3)
+
+    // Verify: strip sig from decoded commit, re-encode, verify signature
+    const { sig, ...rest } = decoded
+    const unsignedBytes = encodeCbor(rest)
+    const sigBytes = fromBytes(sig as any)
+    const didKey = keypair.did()
+    const verified = await verifySignature(didKey, unsignedBytes, sigBytes)
+    expect(verified).toBe(true)
+  })
+
+  it('signature fails verification against a different P256 key', async () => {
+    const { P256Keypair, verifySignature } = await import('@atproto/crypto')
+    const { encode: encodeCbor } = await import('@atcute/cbor')
+
+    const signingKeypair = await P256Keypair.create({ exportable: true })
+    const otherKeypair = await P256Keypair.create({ exportable: true })
+    const storage = new MemoryBlockStore()
+    const recordCid = await makeCidStr('p256-wrong-key')
+
+    const unsigned = await buildCommit(storage, null, {
+      did: DID,
+      writes: [
+        {
+          action: 'create',
+          collection: 'zone.stratos.feed.post',
+          rkey: 'wrongkey',
+          cid: recordCid,
+        },
+      ],
+    })
+
+    const result = await signCommit(signingKeypair, unsigned)
+
+    const decoded = cborDecode(result.commitBytes) as Record<string, unknown>
+    const { sig, ...rest } = decoded
+    const unsignedBytes = encodeCbor(rest)
+    const sigBytes = fromBytes(sig as any)
+    const otherDidKey = otherKeypair.did()
+    const verified = await verifySignature(otherDidKey, unsignedBytes, sigBytes)
+    expect(verified).toBe(false)
   })
 })
