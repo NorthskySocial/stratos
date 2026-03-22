@@ -53,10 +53,15 @@ function invokePostRoute(
       (l) => l.route?.path === path,
     )
     if (!layer?.route) return reject(new Error(`Route not registered: ${path}`))
-    const handler = layer.route.stack[0]?.handle
-    if (!handler) return reject(new Error('No handler on route'))
+    const handlers = layer.route.stack.map((s) => s.handle)
+    if (handlers.length === 0) return reject(new Error('No handler on route'))
 
-    Promise.resolve(handler(req, res, () => {})).catch(reject)
+    let idx = 0
+    const next = () => {
+      const h = handlers[++idx]
+      if (h) Promise.resolve(h(req, res, next)).catch(reject)
+    }
+    Promise.resolve(handlers[0]!(req, res, next)).catch(reject)
   })
 }
 
