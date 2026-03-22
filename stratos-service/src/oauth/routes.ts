@@ -37,6 +37,10 @@ export interface EnrollmentStore {
   enroll(record: EnrollmentRecord): Promise<void>
   unenroll(did: string): Promise<void>
   getEnrollment(did: string): Promise<EnrollmentRecord | null>
+  getBoundaries(did: string): Promise<string[]>
+  setBoundaries(did: string, boundaries: string[]): Promise<void>
+  addBoundary(did: string, boundary: string): Promise<void>
+  removeBoundary(did: string, boundary: string): Promise<void>
   updateEnrollment(
     did: string,
     updates: Partial<Omit<EnrollmentRecord, 'did'>>,
@@ -55,6 +59,7 @@ export interface OAuthRoutesConfig {
   serviceEndpoint: string
   serviceDid: string
   defaultBoundaries?: string[]
+  autoEnrollDomains?: string[]
   allowListProvider?: AllowListProvider
   logger?: Logger
   devMode?: boolean
@@ -151,6 +156,15 @@ export async function migrateEnrollmentRkey(
   }
 }
 
+export function selectEnrollBoundaries(
+  autoEnrollDomains: string[] | undefined,
+  defaultBoundaries: string[],
+): string[] {
+  return autoEnrollDomains && autoEnrollDomains.length > 0
+    ? autoEnrollDomains
+    : defaultBoundaries
+}
+
 /**
  * Create Express router for OAuth enrollment flow
  */
@@ -164,6 +178,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     serviceEndpoint,
     serviceDid,
     defaultBoundaries = [],
+    autoEnrollDomains,
     allowListProvider,
     logger,
     devMode = false,
@@ -172,6 +187,11 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     createSigningKey,
     createAttestation,
   } = config
+
+  const enrollBoundaries = selectEnrollBoundaries(
+    autoEnrollDomains,
+    defaultBoundaries,
+  )
 
   const isSecure = config.baseUrl.startsWith('https://')
 
@@ -361,7 +381,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         const userSigningKeyDid = await createSigningKey(did)
         const attestation = await createAttestation(
           did,
-          defaultBoundaries,
+          enrollBoundaries,
           userSigningKeyDid,
         )
 
@@ -378,7 +398,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             rkey: enrollmentRkey,
             record: {
               service: serviceEndpoint,
-              boundaries: defaultBoundaries.map((value) => ({ value })),
+              boundaries: enrollBoundaries.map((value) => ({ value })),
               signingKey: userSigningKeyDid,
               attestation: {
                 sig: attestation.sig,
@@ -405,7 +425,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           did,
           enrolledAt: new Date().toISOString(),
           pdsEndpoint: enrollmentResult.pdsEndpoint,
-          boundaries: defaultBoundaries,
+          boundaries: enrollBoundaries,
           signingKeyDid: userSigningKeyDid,
           active: true,
           enrollmentRkey,
@@ -440,7 +460,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
       if (!alreadyEnrolled) {
         logger?.info(
-          { did, boundaryCount: defaultBoundaries.length },
+          { did, boundaryCount: enrollBoundaries.length },
           'user enrolled via OAuth',
         )
       }
@@ -476,11 +496,12 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         })
       }
 
+      const boundaries = await enrollmentStore.getBoundaries(did)
       res.json({
         did,
         enrolled: true,
         enrolledAt: enrollment.enrolledAt,
-        boundaries: defaultBoundaries,
+        boundaries: boundaries.map((value) => ({ value })),
       })
     } catch (err) {
       logger?.error(
