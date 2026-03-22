@@ -7,6 +7,7 @@
     discoverStratosEnrollment,
     checkStratosServiceStatus,
     verifyAttestation,
+    fetchServerDomains,
     STRATOS_URL,
     APPVIEW_URL,
     type StratosEnrollment,
@@ -19,7 +20,6 @@
     fetchStratosPosts,
     fetchAppviewStratosPosts,
     buildUnifiedFeed,
-    collectDomains,
     filterByDomain,
     feedStats,
     resolveHandles,
@@ -43,6 +43,7 @@
   let handle = $state('')
   let serviceUrl = $state(STRATOS_URL ?? '')
   let activeFeed: string | null = $state(null)
+  let serverDomains: string[] = $state([])
 
   let enrolledDomains = $derived(
     enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
@@ -50,7 +51,7 @@
 
   let allDomains = $derived(
     Array.from(
-      new Set([...enrolledDomains, ...collectDomains(allPosts)]),
+      new Set([...serverDomains, ...enrolledDomains]),
     ).sort(),
   )
 
@@ -90,6 +91,7 @@
       stratosAgent = createStratosAgent(session, url)
 
       stratosStatus = await checkStratosServiceStatus(url, session.sub)
+      serverDomains = await fetchServerDomains(url)
     }
 
     if (enrollment) {

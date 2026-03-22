@@ -1,6 +1,10 @@
-import type { Router, Request, Response } from 'express'
+import express, { type Router, type Request, type Response } from 'express'
 import type { BoundaryResolver } from '@northskysocial/stratos-core'
+import { Agent } from '@atproto/api'
 import type { AppContext } from '../../context.js'
+import { serviceDIDToRkey } from '../../oauth/routes.js'
+
+const jsonBody = express.json({ limit: '100kb' })
 
 const BOUNDARY_CACHE_TTL_MS = 60_000
 
@@ -197,6 +201,270 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
         res.status(500).json({
           error: 'InternalError',
           message: 'Failed to resolve enrollments',
+        })
+      }
+    },
+  )
+
+  // ── Admin boundary management ──────────────────────────────────────────
+
+  async function updatePdsEnrollmentRecord(
+    ctx: AppContext,
+    did: string,
+    boundaries: string[],
+  ): Promise<void> {
+    const enrollment = await ctx.enrollmentStore.getEnrollment(did)
+    if (!enrollment?.signingKeyDid) return
+
+    const attestation = await ctx.createAttestation(
+      did,
+      boundaries,
+      enrollment.signingKeyDid,
+    )
+
+    const rkey = serviceDIDToRkey(ctx.serviceDid)
+    const oauthSession = await ctx.oauthClient.restore(did)
+    const agent = new Agent(oauthSession)
+
+    await agent.com.atproto.repo.putRecord({
+      repo: did,
+      collection: 'zone.stratos.actor.enrollment',
+      rkey,
+      record: {
+        service: ctx.cfg.service.publicUrl,
+        boundaries: boundaries.map((value) => ({ value })),
+        signingKey: enrollment.signingKeyDid,
+        attestation: {
+          sig: attestation.sig,
+          signingKey: attestation.signingKey,
+        },
+        createdAt: new Date().toISOString(),
+      },
+    })
+  }
+
+  // POST /xrpc/zone.stratos.admin.addBoundary
+  router.post(
+    '/xrpc/zone.stratos.admin.addBoundary',
+    jsonBody,
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res } as Parameters<
+          typeof ctx.authVerifier.admin
+        >[0])
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did, boundary } = req.body as {
+          did?: string
+          boundary?: string
+        }
+
+        if (!did || !boundary) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'did and boundary are required',
+          })
+        }
+
+        const allowedDomains = ctx.cfg.stratos.allowedDomains
+        if (!allowedDomains.includes(boundary)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: `boundary "${boundary}" is not in allowed domains`,
+          })
+        }
+
+        const enrolled = await ctx.enrollmentStore.isEnrolled(did)
+        if (!enrolled) {
+          return res.status(404).json({
+            error: 'NotFound',
+            message: `user ${did} is not enrolled`,
+          })
+        }
+
+        await ctx.enrollmentStore.addBoundary(did, boundary)
+        const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        try {
+          await updatePdsEnrollmentRecord(ctx, did, boundaries)
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to update PDS enrollment record after addBoundary',
+          )
+        }
+
+        ctx.logger?.info({ did, boundary }, 'admin added boundary')
+        res.json({ did, boundaries })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.addBoundary failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to add boundary',
+        })
+      }
+    },
+  )
+
+  // POST /xrpc/zone.stratos.admin.removeBoundary
+  router.post(
+    '/xrpc/zone.stratos.admin.removeBoundary',
+    jsonBody,
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res } as Parameters<
+          typeof ctx.authVerifier.admin
+        >[0])
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did, boundary } = req.body as {
+          did?: string
+          boundary?: string
+        }
+
+        if (!did || !boundary) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'did and boundary are required',
+          })
+        }
+
+        const enrolled = await ctx.enrollmentStore.isEnrolled(did)
+        if (!enrolled) {
+          return res.status(404).json({
+            error: 'NotFound',
+            message: `user ${did} is not enrolled`,
+          })
+        }
+
+        await ctx.enrollmentStore.removeBoundary(did, boundary)
+        const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        try {
+          await updatePdsEnrollmentRecord(ctx, did, boundaries)
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to update PDS enrollment record after removeBoundary',
+          )
+        }
+
+        ctx.logger?.info({ did, boundary }, 'admin removed boundary')
+        res.json({ did, boundaries })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.removeBoundary failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to remove boundary',
+        })
+      }
+    },
+  )
+
+  // POST /xrpc/zone.stratos.admin.setBoundaries
+  router.post(
+    '/xrpc/zone.stratos.admin.setBoundaries',
+    jsonBody,
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res } as Parameters<
+          typeof ctx.authVerifier.admin
+        >[0])
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did, boundaries } = req.body as {
+          did?: string
+          boundaries?: string[]
+        }
+
+        if (!did || !Array.isArray(boundaries)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'did and boundaries array are required',
+          })
+        }
+
+        const allowedDomains = ctx.cfg.stratos.allowedDomains
+        const invalid = boundaries.filter((b) => !allowedDomains.includes(b))
+        if (invalid.length > 0) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: `boundaries not in allowed domains: ${invalid.join(', ')}`,
+          })
+        }
+
+        const enrolled = await ctx.enrollmentStore.isEnrolled(did)
+        if (!enrolled) {
+          return res.status(404).json({
+            error: 'NotFound',
+            message: `user ${did} is not enrolled`,
+          })
+        }
+
+        await ctx.enrollmentStore.setBoundaries(did, boundaries)
+
+        try {
+          await updatePdsEnrollmentRecord(ctx, did, boundaries)
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to update PDS enrollment record after setBoundaries',
+          )
+        }
+
+        ctx.logger?.info(
+          { did, boundaryCount: boundaries.length },
+          'admin set boundaries',
+        )
+        res.json({ did, boundaries })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.setBoundaries failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to set boundaries',
+        })
+      }
+    },
+  )
+
+  // zone.stratos.server.listDomains — public service information
+  router.get(
+    '/xrpc/zone.stratos.server.listDomains',
+    async (_req: Request, res: Response) => {
+      try {
+        res.json({ domains: ctx.cfg.stratos.allowedDomains })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'server.listDomains failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list domains',
         })
       }
     },

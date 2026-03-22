@@ -163,6 +163,7 @@ export class StratosServer {
       serviceEndpoint: cfg.service.publicUrl,
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
+      autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,

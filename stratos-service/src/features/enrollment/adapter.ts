@@ -79,9 +79,11 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     const record = await this.enrollmentStore.getEnrollment(did)
     if (!record) return null
 
+    const boundaries = await this.enrollmentStore.getBoundaries(did)
+
     return {
       did: record.did,
-      boundaries: [],
+      boundaries,
       enrolledAt: new Date(record.enrolledAt),
       pdsEndpoint: record.pdsEndpoint ?? '',
       signingKeyDid: record.signingKeyDid,

@@ -18,6 +18,7 @@ const EXPECTED_STRATOS_LEXICONS = [
   'zone.stratos.repo.hydrateRecord',
   'zone.stratos.repo.hydrateRecords',
   'zone.stratos.repo.importRepo',
+  'zone.stratos.server.listDomains',
   'zone.stratos.sync.getRepo',
   'zone.stratos.sync.subscribeRecords',
 ]
