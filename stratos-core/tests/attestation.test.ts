@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { decode as cborDecode } from '@atcute/cbor'
 import { createAttestationPayload } from '../src'
-import type { Attestation } from '../src'
 
 describe('Attestation Domain', () => {
   describe('createAttestationPayload', () => {
@@ -96,15 +95,4 @@ describe('Attestation Domain', () => {
     })
   })
 
-  describe('Attestation type', () => {
-    it('should satisfy the Attestation interface', () => {
-      const attestation: Attestation = {
-        sig: new Uint8Array([1, 2, 3]),
-        signingKey: 'did:key:zDnaeTest123',
-      }
-
-      expect(attestation.sig).toBeInstanceOf(Uint8Array)
-      expect(attestation.signingKey).toBe('did:key:zDnaeTest123')
-    })
-  })
 })

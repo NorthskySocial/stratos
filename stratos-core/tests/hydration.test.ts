@@ -81,23 +81,17 @@ describe('Hydration Domain', () => {
   })
 
   describe('hasIntersection', () => {
-    it('should return true when arrays share an element', () => {
-      expect(hasIntersection(['a', 'b', 'c'], ['c', 'd', 'e'])).toBe(true)
-    })
-
-    it('should return false when arrays have no common elements', () => {
-      expect(hasIntersection(['a', 'b'], ['c', 'd'])).toBe(false)
-    })
-
     it('should return false for empty arrays', () => {
       expect(hasIntersection([], [])).toBe(false)
       expect(hasIntersection(['a', 'b'], [])).toBe(false)
       expect(hasIntersection([], ['a', 'b'])).toBe(false)
     })
 
-    it('should handle single element arrays', () => {
+    it('should detect intersection and non-intersection', () => {
       expect(hasIntersection(['a'], ['a'])).toBe(true)
       expect(hasIntersection(['a'], ['b'])).toBe(false)
+      expect(hasIntersection(['a', 'b', 'c'], ['c', 'd', 'e'])).toBe(true)
+      expect(hasIntersection(['a', 'b'], ['c', 'd'])).toBe(false)
     })
   })
 
