@@ -4,11 +4,11 @@ This document explains how Stratos handles multiple domain boundaries and select
 
 ## Concepts
 
-| Term | Description |
-|------|-------------|
-| **Allowed Domains** | The full set of domains the service accepts. Users can create posts with any of these domains as boundaries. |
-| **Auto-Enroll Domains** | The subset of domains assigned to new users during OAuth enrollment. |
-| **User Boundaries** | The specific domains stored per-user in the enrollment store. Determines which posts they can create and (on the AppView side) which posts they can view. |
+| Term                    | Description                                                                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Allowed Domains**     | The full set of domains the service accepts. Users can create posts with any of these domains as boundaries.                                              |
+| **Auto-Enroll Domains** | The subset of domains assigned to new users during OAuth enrollment.                                                                                      |
+| **User Boundaries**     | The specific domains stored per-user in the enrollment store. Determines which posts they can create and (on the AppView side) which posts they can view. |
 
 ## How It Works
 
@@ -52,10 +52,10 @@ If `STRATOS_AUTO_ENROLL_DOMAINS` is not set or empty, enrollment falls back to a
 
 ### Environment Variables
 
-| Variable | Required | Format | Description |
-|----------|----------|--------|-------------|
-| `STRATOS_ALLOWED_DOMAINS` | Yes | Comma-separated | All domains the service recognizes. Records are validated against this list. |
-| `STRATOS_AUTO_ENROLL_DOMAINS` | No | Comma-separated | Domains assigned to new users on enrollment. Defaults to all allowed domains. |
+| Variable                      | Required | Format          | Description                                                                   |
+| ----------------------------- | -------- | --------------- | ----------------------------------------------------------------------------- |
+| `STRATOS_ALLOWED_DOMAINS`     | Yes      | Comma-separated | All domains the service recognizes. Records are validated against this list.  |
+| `STRATOS_AUTO_ENROLL_DOMAINS` | No       | Comma-separated | Domains assigned to new users on enrollment. Defaults to all allowed domains. |
 
 ### Infrastructure (CDK)
 
