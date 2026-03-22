@@ -311,6 +311,17 @@ export async function createRecord(
           await Promise.all(persistOps)
           phases.transactPersist = performance.now() - ti
 
+          // Sequence inline (same connection)
+          await sequenceChange(store, {
+            action: 'create',
+            uri: uriStr,
+            cid: cid.toString(),
+            record,
+            commitCid: signed.commitCid.toString(),
+            rev: signed.rev,
+            trace: sequenceTrace,
+          })
+
           return {
             uri,
             cid,
@@ -331,16 +342,8 @@ export async function createRecord(
   phases.transact = performance.now() - t0
   phases.retries = retries
 
-  // Sequence the change (deferred, non-blocking)
-  deferSequenceChange(ctx, callerDid, {
-    action: 'create',
-    uri: uriStr,
-    cid: cid.toString(),
-    record,
-    commitCid: result.commit.cid,
-    rev: result.commit.rev,
-    trace: sequenceTrace,
-  })
+  // Notify subscribers
+  ctx.sequenceEvents.emit(callerDid)
 
   // Write stub to user's PDS (background, non-blocking)
   const recordObj = record as Record<string, unknown>
@@ -475,6 +478,15 @@ export async function deleteRecord(
           await Promise.all(persistOps)
           phases.transactPersist = performance.now() - ti
 
+          // Sequence inline (same connection)
+          await sequenceChange(store, {
+            action: 'delete',
+            uri: uriStr,
+            commitCid: signed.commitCid.toString(),
+            rev: signed.rev,
+            trace: sequenceTrace,
+          })
+
           return {
             commit: {
               cid: signed.commitCid.toString(),
@@ -492,14 +504,8 @@ export async function deleteRecord(
   phases.transact = performance.now() - t0
   phases.retries = retries
 
-  // Sequence the change (deferred, non-blocking)
-  deferSequenceChange(ctx, callerDid, {
-    action: 'delete',
-    uri: uriStr,
-    commitCid: result.commit.cid,
-    rev: result.commit.rev,
-    trace: sequenceTrace,
-  })
+  // Notify subscribers
+  ctx.sequenceEvents.emit(callerDid)
 
   // Delete stub from user's PDS (background, non-blocking)
   ctx.stubQueue.enqueueDelete(callerDid, collection, rkey)
@@ -646,6 +652,17 @@ export async function updateRecord(
           await Promise.all(persistOps)
           phases.transactPersist = performance.now() - ti
 
+          // Sequence inline (same connection)
+          await sequenceChange(store, {
+            action: 'update',
+            uri: uriStr,
+            cid: cid.toString(),
+            record,
+            commitCid: signed.commitCid.toString(),
+            rev: signed.rev,
+            trace: sequenceTrace,
+          })
+
           return {
             uri,
             cid,
@@ -666,16 +683,8 @@ export async function updateRecord(
   phases.transact = performance.now() - t0
   phases.retries = retries
 
-  // Sequence the change (deferred, non-blocking)
-  deferSequenceChange(ctx, callerDid, {
-    action: 'update',
-    uri: uriStr,
-    cid: cid.toString(),
-    record,
-    commitCid: result.commit.cid,
-    rev: result.commit.rev,
-    trace: sequenceTrace,
-  })
+  // Notify subscribers
+  ctx.sequenceEvents.emit(callerDid)
 
   // Update stub on PDS (background, non-blocking)
   const recordObj = record as Record<string, unknown>
@@ -975,6 +984,19 @@ export async function applyWritesBatch(
             }
           }
 
+          // Sequence all changes inline (same connection)
+          for (const pre of precomputed) {
+            await sequenceChange(store, {
+              action: pre.action,
+              uri: pre.uriStr,
+              cid: pre.action !== 'delete' ? pre.cid.toString() : undefined,
+              record: pre.action !== 'delete' ? (pre.op.record as unknown) : undefined,
+              commitCid: commitResult.commitCid.toString(),
+              rev: commitResult.rev,
+              trace: sequenceTrace,
+            })
+          }
+
           return {
             results,
             commit: {
@@ -990,31 +1012,8 @@ export async function applyWritesBatch(
     unlock()
   }
 
-  // Sequence all changes (deferred, non-blocking)
-  deferSequenceChanges(
-    ctx,
-    callerDid,
-    precomputed.map((pre) => {
-      if (pre.action === 'delete') {
-        return {
-          action: 'delete' as const,
-          uri: pre.uriStr,
-          commitCid: result.commit.cid,
-          rev: result.commit.rev,
-          trace: sequenceTrace,
-        }
-      }
-      return {
-        action: pre.action,
-        uri: pre.uriStr,
-        cid: pre.cid.toString(),
-        record: pre.op.record,
-        commitCid: result.commit.cid,
-        rev: result.commit.rev,
-        trace: sequenceTrace,
-      }
-    }),
-  )
+  // Notify subscribers
+  ctx.sequenceEvents.emit(callerDid)
 
   return result
 }
@@ -1074,44 +1073,4 @@ type SequenceOp = {
   trace?: SequenceTrace
 }
 
-function deferSequenceChange(
-  ctx: AppContext,
-  callerDid: string,
-  op: SequenceOp,
-): void {
-  ctx.actorStore
-    .transact(callerDid, async (store) => {
-      await sequenceChange(store, op)
-    })
-    .then(() => {
-      ctx.sequenceEvents.emit(callerDid)
-    })
-    .catch((err) => {
-      ctx.logger?.error(
-        { err, did: callerDid, uri: op.uri },
-        'failed to sequence change',
-      )
-    })
-}
 
-function deferSequenceChanges(
-  ctx: AppContext,
-  callerDid: string,
-  ops: SequenceOp[],
-): void {
-  ctx.actorStore
-    .transact(callerDid, async (store) => {
-      for (const op of ops) {
-        await sequenceChange(store, op)
-      }
-    })
-    .then(() => {
-      ctx.sequenceEvents.emit(callerDid)
-    })
-    .catch((err) => {
-      ctx.logger?.error(
-        { err, did: callerDid },
-        'failed to sequence batch changes',
-      )
-    })
-}
