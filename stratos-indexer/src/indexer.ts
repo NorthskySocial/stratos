@@ -255,6 +255,11 @@ export class Indexer {
         maxConnections: this.config.worker.actorSyncMaxConnections,
         connectDelayMs: this.config.worker.actorSyncConnectDelayMs,
         idleEvictionMs: this.config.worker.actorSyncIdleEvictionMs,
+        reconnectBaseDelayMs:
+          this.config.worker.actorSyncReconnectBaseDelayMs,
+        reconnectMaxDelayMs: this.config.worker.actorSyncReconnectMaxDelayMs,
+        reconnectJitterMs: this.config.worker.actorSyncReconnectJitterMs,
+        reconnectMaxAttempts: this.config.worker.actorSyncReconnectMaxAttempts,
       },
       (did) =>
         background.add(() =>
@@ -388,6 +393,14 @@ export class Indexer {
         actorSyncQueuePerActor: this.config.worker.actorSyncQueuePerActor,
         actorSyncMaxConnections: this.config.worker.actorSyncMaxConnections,
         actorSyncConnectDelayMs: this.config.worker.actorSyncConnectDelayMs,
+        actorSyncReconnectBaseDelayMs:
+          this.config.worker.actorSyncReconnectBaseDelayMs,
+        actorSyncReconnectMaxDelayMs:
+          this.config.worker.actorSyncReconnectMaxDelayMs,
+        actorSyncReconnectJitterMs:
+          this.config.worker.actorSyncReconnectJitterMs,
+        actorSyncReconnectMaxAttempts:
+          this.config.worker.actorSyncReconnectMaxAttempts,
       },
       'stratos indexer started',
     )

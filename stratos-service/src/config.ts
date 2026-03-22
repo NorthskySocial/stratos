@@ -53,6 +53,10 @@ const envSchema = z.object({
         .filter((d) => d.length > 0),
     ),
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  STRATOS_WRITE_RATE_MAX_WRITES: z.coerce.number().int().positive().default(300),
+  STRATOS_WRITE_RATE_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  STRATOS_WRITE_RATE_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(10_000),
+  STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS: z.coerce.number().int().nonnegative().default(1_000),
 
   // Enrollment
   STRATOS_ENROLLMENT_MODE: z
@@ -218,6 +222,12 @@ export interface StratosServiceConfig {
     retentionDays: number
     devMode?: boolean
     importMaxBytes: number
+    writeRateLimit: {
+      maxWrites: number
+      windowMs: number
+      cooldownMs: number
+      cooldownJitterMs: number
+    }
   }
   enrollment: {
     mode: ENROLLMENT_MODE
@@ -333,6 +343,12 @@ export function envToConfig(env: Env): StratosServiceConfig {
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
+      writeRateLimit: {
+        maxWrites: env.STRATOS_WRITE_RATE_MAX_WRITES,
+        windowMs: env.STRATOS_WRITE_RATE_WINDOW_MS,
+        cooldownMs: env.STRATOS_WRITE_RATE_COOLDOWN_MS,
+        cooldownJitterMs: env.STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS,
+      },
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,
