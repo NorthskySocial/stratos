@@ -957,7 +957,7 @@ For create → index investigations, additionally track:
 #### Create Path (5-min bins during peak window 09:25–09:40 UTC)
 
 | Time (UTC) | Creates | avg ms | p50 ms | p95 ms | p99 ms | max ms | avg connAcq ms | p95 connAcq ms |
-|------------|---------|--------|--------|--------|--------|--------|----------------|----------------|
+| ---------- | ------- | ------ | ------ | ------ | ------ | ------ | -------------- | -------------- |
 | 09:25      | 6,519   | 505    | 444    | 1,029  | 1,265  | 28,827 | 99             | 339            |
 | 09:30      | 4,324   | 3,375  | 2,888  | 6,666  | 7,573  | 21,007 | 1,640          | 4,364          |
 | 09:35      | 1,393   | 9,638  | 9,409  | 12,674 | 13,660 | 55,776 | 4,885          | 8,625          |
@@ -966,13 +966,14 @@ For create → index investigations, additionally track:
 
 #### Aggregate Stats (12,236 creates over full window)
 
-| Metric | avg | p50 | p95 | p99 | max |
-|--------|-----|-----|-----|-----|-----|
-| End-to-end (ms) | 2,559 | 997 | 9,805 | 12,052 | 55,776 |
-| connAcquire (ms) | 1,189 | — | 5,259 | 7,920 | — |
-| commitBuild (ms) | 25 | — | 1.6 | — | 45,694 |
+| Metric           | avg   | p50 | p95   | p99    | max    |
+| ---------------- | ----- | --- | ----- | ------ | ------ |
+| End-to-end (ms)  | 2,559 | 997 | 9,805 | 12,052 | 55,776 |
+| connAcquire (ms) | 1,189 | —   | 5,259 | 7,920  | —      |
+| commitBuild (ms) | 25    | —   | 1.6   | —      | 45,694 |
 
 **Outlier breakdown** (out of 12,236):
+
 - connAcquire > 1s: **3,940 (32.2%)**
 - connAcquire > 5s: **785 (6.4%)**
 - commitBuild > 100ms: 160 (1.3%)
@@ -981,21 +982,21 @@ For create → index investigations, additionally track:
 #### Indexer (create-to-index lag warnings)
 
 | Time (UTC) | Lag Warnings | Transport Errors |
-|------------|-------------|------------------|
-| 09:25      | 1,721       | 1,385            |
-| 09:30      | 36,554      | 1,718            |
-| 09:35      | 24,595      | 928              |
-| 09:40      | 853         | 24               |
+| ---------- | ------------ | ---------------- |
+| 09:25      | 1,721        | 1,385            |
+| 09:30      | 36,554       | 1,718            |
+| 09:35      | 24,595       | 928              |
+| 09:40      | 853          | 24               |
 
 #### RDS Infrastructure
 
-| Metric | Pre-load | Peak | Assessment |
-|--------|----------|------|------------|
-| CPU | 8–10% | 31% | Headroom exists |
-| Connections | 389 | 389 | **Pinned at ceiling** — pool is saturated |
-| WriteLatency | 22ms | 23ms | Stable — disk not the bottleneck |
-| FreeableMemory | 6.57 GB | 6.37 GB | Healthy |
-| DiskQueueDepth | 10–16 | 10–16 | **Chronically elevated** (threshold: >5) |
+| Metric         | Pre-load | Peak    | Assessment                                |
+| -------------- | -------- | ------- | ----------------------------------------- |
+| CPU            | 8–10%    | 31%     | Headroom exists                           |
+| Connections    | 389      | 389     | **Pinned at ceiling** — pool is saturated |
+| WriteLatency   | 22ms     | 23ms    | Stable — disk not the bottleneck          |
+| FreeableMemory | 6.57 GB  | 6.37 GB | Healthy                                   |
+| DiskQueueDepth | 10–16    | 10–16   | **Chronically elevated** (threshold: >5)  |
 
 #### AppView
 
@@ -1024,15 +1025,22 @@ Zero `Write rate limit exceeded` hits observed during this test window.
 During each load test phase, confirm the following before interpreting latency results:
 
 1. ECS service utilization (`AWS/ECS`):
-  - `CPUUtilization` and `MemoryUtilization` for `stratos-service-staging`, `stratos-indexer-staging`, and `appview-api-staging`
+
+- `CPUUtilization` and `MemoryUtilization` for `stratos-service-staging`, `stratos-indexer-staging`, and `appview-api-staging`
+
 2. RDS pressure (`AWS/RDS`):
-  - `CPUUtilization`, `DatabaseConnections`, `FreeableMemory`
+
+- `CPUUtilization`, `DatabaseConnections`, `FreeableMemory`
+
 3. Application Signals:
-  - `POST /xrpc/com.atproto.repo.createRecord` latency/error
-  - `GET /xrpc/zone.stratos.feed.getTimeline` latency/error
+
+- `POST /xrpc/com.atproto.repo.createRecord` latency/error
+- `GET /xrpc/zone.stratos.feed.getTimeline` latency/error
+
 4. Indexer health:
-  - actor sync error volume
-  - indexed records per interval (`stratos sync stats`)
+
+- actor sync error volume
+- indexed records per interval (`stratos sync stats`)
 
 If utilization is low and latency remains high, prioritize commit-build and sync pipeline analysis over
 infrastructure scaling.

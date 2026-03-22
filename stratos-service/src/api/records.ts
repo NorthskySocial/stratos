@@ -241,11 +241,16 @@ export async function createRecord(
 
   t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
-  let result: { uri: AtUri; cid: typeof cid; cidStr: string; commit: { cid: string; rev: string } }
+  let result: {
+    uri: AtUri
+    cid: typeof cid
+    cidStr: string
+    commit: { cid: string; rev: string }
+  }
   let retries: number
   try {
     // Ensure actor store exists (inside mutex to prevent creation race)
-    let ta = performance.now()
+    const ta = performance.now()
     const exists = await ctx.actorStore.exists(callerDid)
     if (!exists) {
       await ctx.actorStore.create(callerDid)
@@ -585,7 +590,12 @@ export async function updateRecord(
 
   t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
-  let result: { uri: AtUri; cid: typeof cid; cidStr: string; commit: { cid: string; rev: string } }
+  let result: {
+    uri: AtUri
+    cid: typeof cid
+    cidStr: string
+    commit: { cid: string; rev: string }
+  }
   let retries: number
   try {
     const retry = await withConcurrencyRetry(async () => {
@@ -604,7 +614,9 @@ export async function updateRecord(
           const storage = new StratosBlockStoreReader(reader.repo)
           const unsigned = await buildCommit(storage, rootCid, {
             did: callerDid,
-            writes: [{ action: 'update', collection, rkey, cid: cid.toString() }],
+            writes: [
+              { action: 'update', collection, rkey, cid: cid.toString() },
+            ],
           })
           phases.prepareCommitBuild = performance.now() - ts
 
@@ -925,7 +937,10 @@ export async function applyWritesBatch(
 
   // Build and commit with concurrency retry
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
-  let result: { results: Array<{ uri?: string; cid?: string }>; commit: { cid: string; rev: string } }
+  let result: {
+    results: Array<{ uri?: string; cid?: string }>
+    commit: { cid: string; rev: string }
+  }
   try {
     // Ensure actor store exists (inside mutex to prevent creation race)
     const exists = await ctx.actorStore.exists(callerDid)
@@ -954,7 +969,10 @@ export async function applyWritesBatch(
             if (pre.action === 'delete') {
               const existing = await store.record.getRecord(pre.uri, null)
               if (!existing) {
-                throw new InvalidRequestError('Record not found', 'RecordNotFound')
+                throw new InvalidRequestError(
+                  'Record not found',
+                  'RecordNotFound',
+                )
               }
             } else {
               await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
@@ -990,7 +1008,10 @@ export async function applyWritesBatch(
               action: pre.action,
               uri: pre.uriStr,
               cid: pre.action !== 'delete' ? pre.cid.toString() : undefined,
-              record: pre.action !== 'delete' ? (pre.op.record as unknown) : undefined,
+              record:
+                pre.action !== 'delete'
+                  ? (pre.op.record as unknown)
+                  : undefined,
               commitCid: commitResult.commitCid.toString(),
               rev: commitResult.rev,
               trace: sequenceTrace,
@@ -1062,15 +1083,3 @@ async function sequenceChange(
     sequencedAt: new Date().toISOString(),
   })
 }
-
-type SequenceOp = {
-  action: 'create' | 'update' | 'delete'
-  uri: string
-  cid?: string
-  record?: unknown
-  commitCid: string
-  rev: string
-  trace?: SequenceTrace
-}
-
-

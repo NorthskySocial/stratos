@@ -46,10 +46,7 @@ export class RepoWriteLocks {
   private sweep(): void {
     for (const [did, p] of this.locks) {
       // The settled() helper resolves immediately if p is already done
-      const settled = Promise.race([
-        p.then(() => true),
-        Promise.resolve(false),
-      ])
+      const settled = Promise.race([p.then(() => true), Promise.resolve(false)])
       void settled.then((done) => {
         if (done && this.locks.get(did) === p) {
           this.locks.delete(did)

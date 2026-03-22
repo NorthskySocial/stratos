@@ -255,8 +255,7 @@ export class Indexer {
         maxConnections: this.config.worker.actorSyncMaxConnections,
         connectDelayMs: this.config.worker.actorSyncConnectDelayMs,
         idleEvictionMs: this.config.worker.actorSyncIdleEvictionMs,
-        reconnectBaseDelayMs:
-          this.config.worker.actorSyncReconnectBaseDelayMs,
+        reconnectBaseDelayMs: this.config.worker.actorSyncReconnectBaseDelayMs,
         reconnectMaxDelayMs: this.config.worker.actorSyncReconnectMaxDelayMs,
         reconnectJitterMs: this.config.worker.actorSyncReconnectJitterMs,
         reconnectMaxAttempts: this.config.worker.actorSyncReconnectMaxAttempts,
