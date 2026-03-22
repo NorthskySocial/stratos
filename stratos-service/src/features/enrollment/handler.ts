@@ -445,4 +445,23 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
       }
     },
   )
+
+  // zone.stratos.server.listDomains — public service information
+  router.get(
+    '/xrpc/zone.stratos.server.listDomains',
+    async (_req: Request, res: Response) => {
+      try {
+        res.json({ domains: ctx.cfg.stratos.allowedDomains })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'server.listDomains failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list domains',
+        })
+      }
+    },
+  )
 }
