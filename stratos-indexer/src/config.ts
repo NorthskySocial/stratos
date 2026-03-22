@@ -37,6 +37,17 @@ export interface WorkerConfig {
   cursorFlushIntervalMs: number
   actorSyncConcurrency: number
   actorSyncQueuePerActor: number
+  actorSyncGlobalMaxPending: number
+  actorSyncDrainDelayMs: number
+  actorSyncMaxConnections: number
+  actorSyncConnectDelayMs: number
+  actorSyncIdleEvictionMs: number
+  actorSyncReconnectBaseDelayMs: number
+  actorSyncReconnectMaxDelayMs: number
+  actorSyncReconnectJitterMs: number
+  actorSyncReconnectMaxAttempts: number
+  backgroundQueueConcurrency: number
+  backgroundQueueMaxSize: number
 }
 
 export function loadConfig(): IndexerConfig {
@@ -44,7 +55,7 @@ export function loadConfig(): IndexerConfig {
     db: {
       postgresUrl: requireEnv('BSKY_DB_POSTGRES_URL'),
       schema: env('BSKY_DB_POSTGRES_SCHEMA', 'bsky'),
-      poolSize: envInt('BSKY_DB_POOL_SIZE', 10),
+      poolSize: envInt('BSKY_DB_POOL_SIZE', 20),
     },
     pds: {
       repoProvider: requireEnv('BSKY_REPO_PROVIDER'),
@@ -62,10 +73,33 @@ export function loadConfig(): IndexerConfig {
     },
     worker: {
       concurrency: envInt('WORKER_CONCURRENCY', 4),
-      maxQueueSize: envInt('WORKER_MAX_QUEUE_SIZE', 200),
+      maxQueueSize: envInt('WORKER_MAX_QUEUE_SIZE', 100),
       cursorFlushIntervalMs: envInt('CURSOR_FLUSH_INTERVAL_MS', 5000),
       actorSyncConcurrency: envInt('ACTOR_SYNC_CONCURRENCY', 8),
-      actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 50),
+      actorSyncQueuePerActor: envInt('ACTOR_SYNC_QUEUE_PER_ACTOR', 10),
+      actorSyncGlobalMaxPending: envInt('ACTOR_SYNC_GLOBAL_MAX_PENDING', 500),
+      actorSyncDrainDelayMs: envInt('ACTOR_SYNC_DRAIN_DELAY_MS', 5),
+      actorSyncMaxConnections: envInt('ACTOR_SYNC_MAX_CONNECTIONS', 20),
+      actorSyncConnectDelayMs: envInt('ACTOR_SYNC_CONNECT_DELAY_MS', 200),
+      actorSyncIdleEvictionMs: envInt('ACTOR_SYNC_IDLE_EVICTION_MS', 60000),
+      actorSyncReconnectBaseDelayMs: envInt(
+        'ACTOR_SYNC_RECONNECT_BASE_DELAY_MS',
+        1000,
+      ),
+      actorSyncReconnectMaxDelayMs: envInt(
+        'ACTOR_SYNC_RECONNECT_MAX_DELAY_MS',
+        60000,
+      ),
+      actorSyncReconnectJitterMs: envInt(
+        'ACTOR_SYNC_RECONNECT_JITTER_MS',
+        1000,
+      ),
+      actorSyncReconnectMaxAttempts: envInt(
+        'ACTOR_SYNC_RECONNECT_MAX_ATTEMPTS',
+        20,
+      ),
+      backgroundQueueConcurrency: envInt('BACKGROUND_QUEUE_CONCURRENCY', 10),
+      backgroundQueueMaxSize: envInt('BACKGROUND_QUEUE_MAX_SIZE', 1000),
     },
   }
 }

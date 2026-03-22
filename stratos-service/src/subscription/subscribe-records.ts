@@ -1,8 +1,11 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { decode as cborDecode } from '@atproto/lex-cbor'
+import type { WebSocket } from 'ws'
 
 import type { AppContext, EnrollmentEvent } from '../context.js'
 import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
+
+const WS_PING_INTERVAL_MS = 30_000
 
 /**
  * Sequence event from stratos_seq table
@@ -110,8 +113,9 @@ function createActorSubscriptionHandler(ctx: AppContext) {
       lastSeq = event.seq
     }
 
+    // Event-driven: wait for sequenceEvents notification or 30s fallback
     while (!signal.aborted) {
-      await sleep(500)
+      await waitForSequenceEvent(ctx, did, signal, 30_000)
       if (signal.aborted) return
 
       const newEvents = await getEventsSince(ctx, did, lastSeq)
@@ -247,7 +251,8 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
     return await ctx.actorStore.read(did, async (store) => {
       return store.sequence.getLatestSeq()
     })
-  } catch {
+  } catch (err) {
+    ctx.logger?.warn({ did, err }, 'getLatestSeq failed')
     return 0
   }
 }
@@ -257,7 +262,8 @@ async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
     return await ctx.actorStore.read(did, async (store) => {
       return store.sequence.getOldestSeq()
     })
-  } catch {
+  } catch (err) {
+    ctx.logger?.warn({ did, err }, 'getOldestSeq failed')
     return 0
   }
 }
@@ -288,7 +294,8 @@ async function getEventsSince(
         }
       })
     })
-  } catch {
+  } catch (err) {
+    ctx.logger?.warn({ did, cursor, err }, 'getEventsSince failed')
     return []
   }
 }
@@ -343,6 +350,35 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Wait for a sequence event for the given DID, or until the timeout/abort fires.
+ * Returns immediately if the DID emits a sequence event.
+ * Falls back after timeoutMs to catch any missed events.
+ */
+function waitForSequenceEvent(
+  ctx: AppContext,
+  did: string,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      ctx.sequenceEvents.off(did, onEvent)
+      signal.removeEventListener('abort', onAbort)
+      clearTimeout(timer)
+      resolve()
+    }
+    const onEvent = () => settle()
+    const onAbort = () => settle()
+    const timer = setTimeout(settle, timeoutMs)
+    ctx.sequenceEvents.on(did, onEvent)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
  * Register the subscribeRecords handler with XRPC server
  */
 export function registerSubscribeRecords(ctx: AppContext): void {
@@ -374,4 +410,33 @@ export function registerSubscribeRecords(ctx: AppContext): void {
       }
     },
   })
+
+  // Configure WebSocket ping/pong to keep connections alive through ALBs
+  const sub = (
+    ctx.xrpcServer as unknown as {
+      subscriptions: Map<
+        string,
+        { wss: { on: (event: string, cb: (ws: WebSocket) => void) => void } }
+      >
+    }
+  ).subscriptions.get('zone.stratos.sync.subscribeRecords')
+  if (sub) {
+    sub.wss.on('connection', (ws: WebSocket) => {
+      let alive = true
+      ws.on('pong', () => {
+        alive = true
+      })
+      const interval = setInterval(() => {
+        if (!alive) {
+          ws.terminate()
+          clearInterval(interval)
+          return
+        }
+        alive = false
+        ws.ping()
+      }, WS_PING_INTERVAL_MS)
+      ws.on('close', () => clearInterval(interval))
+    })
+    ctx.logger?.info('WebSocket ping/pong configured (interval: 30s)')
+  }
 }

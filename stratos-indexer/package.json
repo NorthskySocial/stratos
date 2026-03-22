@@ -18,6 +18,7 @@
     "@atproto/repo": "^0.8.1",
     "@atproto/syntax": "^0.4.0",
     "multiformats": "9.9.0",
+    "p-queue": "^9.1.0",
     "partysocket": "^1.1.4"
   },
   "devDependencies": {

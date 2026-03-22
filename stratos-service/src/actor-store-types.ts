@@ -106,6 +106,8 @@ export interface ActorRepoReader {
   getBytes(cid: CID): Promise<Uint8Array | null>
   has(cid: CID): Promise<boolean>
   getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }>
+  preloadBlocksForRev(rev: string): Promise<void>
+  preloadRootSpine(commitCid: CID): Promise<void>
   iterateCarBlocks(since?: string): AsyncIterable<CarBlock>
   getBlockRange(
     since?: string,
@@ -116,6 +118,7 @@ export interface ActorRepoReader {
 }
 
 export interface ActorRepoTransactor extends ActorRepoReader {
+  lockRoot(): Promise<{ cid: CID; rev: string } | null>
   updateRoot(cid: CID, rev: string, did: string): Promise<void>
   putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void>
   putBlocks(blocks: BlockMap, rev: string): Promise<void>
@@ -196,6 +199,14 @@ export interface ActorStore {
   transact<T>(
     did: string,
     fn: (store: ActorTransactor) => T | PromiseLike<T>,
+  ): Promise<T>
+  readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
   ): Promise<T>
   getBlobStore(did: string): BlobStore
   createSigningKey(did: string): Promise<import('@atproto/crypto').P256Keypair>

@@ -20,6 +20,8 @@ import {
 import { schemas as atprotoSchemas, Agent } from '@atproto/api'
 import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
+import { WriteRateLimiter } from './rate-limiter.js'
+import { RepoWriteLocks } from './repo-write-lock.js'
 import { verifyServiceAuth } from './auth/verifier.js'
 
 import {
@@ -44,6 +46,7 @@ import {
   type StoredEnrollment,
   type ListEnrollmentsOptions,
   createAttestationPayload,
+  buildCommit,
 } from '@northskysocial/stratos-core'
 import type {
   SequenceOperations,
@@ -57,12 +60,11 @@ import {
   PdsAgent,
   ExternalAllowListProvider,
 } from './features/index.js'
-import { StubWriterServiceImpl } from './features/index.js'
+import { StubWriterServiceImpl, BackgroundStubQueue } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
 } from './features/index.js'
-import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type StratosServiceConfig,
@@ -96,6 +98,7 @@ import {
 } from './db/pg.js'
 import { PgEnrollmentStoreWriter } from './adapters/index.js'
 import { PostgresActorStore } from './adapters/index.js'
+import { CachedEnrollmentStore } from './adapters/cached-enrollment-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 import { RedisCache } from './adapters/redis-cache.js'
@@ -168,6 +171,7 @@ export class StratosActorStore implements ActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
+  private readonly existsCache = new Set<string>()
   private readonly cborToRecord: (
     content: Uint8Array,
   ) => Record<string, unknown>
@@ -185,8 +189,11 @@ export class StratosActorStore implements ActorStore {
   }
 
   async exists(did: string): Promise<boolean> {
+    if (this.existsCache.has(did)) return true
     const { dbLocation } = await this.getLocation(did)
-    return fileExists(dbLocation)
+    const found = await fileExists(dbLocation)
+    if (found) this.existsCache.add(did)
+    return found
   }
 
   async create(did: string): Promise<void> {
@@ -200,11 +207,13 @@ export class StratosActorStore implements ActorStore {
     } finally {
       await closeStratosDb(db)
     }
+    this.existsCache.add(did)
   }
 
   async destroy(did: string): Promise<void> {
     const { directory } = await this.getLocation(did)
     await fs.rm(directory, { recursive: true, force: true })
+    this.existsCache.delete(did)
   }
 
   async read<T>(
@@ -254,6 +263,49 @@ export class StratosActorStore implements ActorStore {
           sequence: new SqliteSequenceOps(txDb),
         }
         return fn(store)
+      })
+    } finally {
+      await closeStratosDb(db)
+    }
+  }
+
+  async readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
+  ): Promise<T> {
+    const { dbLocation } = await this.getLocation(did)
+    const db = createStratosDb(dbLocation)
+    await db._initialized
+    const blobStore = this.blobstore(did)
+
+    try {
+      const reader: ActorReader = {
+        did,
+        record: new StratosRecordReader(db, this.cborToRecord, this.logger),
+        repo: new StratosSqlRepoReader(db),
+        blob: new StratosBlobReader(db, blobStore, this.logger),
+        sequence: new SqliteSequenceOps(db),
+      }
+      const readResult = (await readFn(reader)) as Awaited<R>
+
+      return await db.transaction(async (tx) => {
+        const txDb = tx as unknown as StratosDbOrTx
+        const transactor: ActorTransactor = {
+          did,
+          record: new StratosRecordTransactor(
+            txDb,
+            this.cborToRecord,
+            this.logger,
+          ),
+          repo: new StratosSqlRepoTransactor(txDb),
+          blob: new StratosBlobTransactor(txDb, blobStore, this.logger),
+          sequence: new SqliteSequenceOps(txDb),
+        }
+        return transactFn(readResult, transactor)
       })
     } finally {
       await closeStratosDb(db)
@@ -784,6 +836,7 @@ export interface AppContext {
   enrollmentService: EnrollmentService
   boundaryResolver: BoundaryResolver
   stubWriter: StubWriterService
+  stubQueue: BackgroundStubQueue
   authVerifier: AuthVerifiers
   idResolver: IdResolver
   oauthClient: NodeOAuthClient
@@ -801,6 +854,9 @@ export interface AppContext {
   ): Promise<{ sig: Uint8Array; signingKey: string }>
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
   enrollmentEvents: EnrollmentEventEmitter
+  sequenceEvents: SequenceEventEmitter
+  writeRateLimiter: WriteRateLimiter
+  repoWriteLocks: RepoWriteLocks
   destroy: () => Promise<void>
 }
 
@@ -814,6 +870,10 @@ export interface EnrollmentEvent {
 
 export type EnrollmentEventEmitter = EventEmitter<{
   enrollment: [EnrollmentEvent]
+}>
+
+export type SequenceEventEmitter = EventEmitter<{
+  [did: string]: []
 }>
 
 /**
@@ -901,7 +961,12 @@ export async function createAppContext(
       'postgres service database preflight passed',
     )
     await migrateServicePgDb(pgDb)
-    enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    const pgEnrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore, {
+      cacheTtlMs: 5 * 60 * 1000,
+    })
+    await cachedEnrollmentStore.warm()
+    enrollmentStore = cachedEnrollmentStore
     oauthStores = createPgOAuthStores(pgDb)
     destroyBackend = async () => {
       await closeServicePgDb(pgDb)
@@ -1001,6 +1066,9 @@ export async function createAppContext(
       blobstore,
       cborToRecord,
       logger,
+      actorPoolSize: cfg.storage.pgActorPoolSize,
+      adminPoolSize: cfg.storage.pgAdminPoolSize,
+      blockCacheSize: cfg.storage.blockCacheSize,
     })
   } else {
     actorStore = new StratosActorStore({
@@ -1012,6 +1080,8 @@ export async function createAppContext(
   }
 
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
+  const sequenceEvents: SequenceEventEmitter = new EventEmitter()
+  sequenceEvents.setMaxListeners(0)
 
   const enrollmentService = new EnrollmentServiceImpl(
     enrollmentStore,
@@ -1052,6 +1122,9 @@ export async function createAppContext(
   const tokenVerifier = new PdsTokenVerifier({
     idResolver,
     fetch: fetchWithUserAgent,
+    jwksCacheMaxAge: 10 * 60 * 1000,
+    verifyCacheMaxAge: 5 * 60 * 1000,
+    verifyCacheMaxSize: 10_000,
   })
   const dpopVerifier = new DpopVerifier({
     serviceDid: cfg.service.did,
@@ -1085,6 +1158,8 @@ export async function createAppContext(
       return null
     }
   }, serviceDidWithFragment)
+
+  const stubQueue = new BackgroundStubQueue(stubWriter, logger)
 
   const app = express()
   // Note: express.json() is applied in index.ts with exclusion for /xrpc/ routes
@@ -1125,6 +1200,7 @@ export async function createAppContext(
     enrollmentService,
     boundaryResolver,
     stubWriter,
+    stubQueue,
     authVerifier,
     idResolver,
     oauthClient,
@@ -1138,7 +1214,11 @@ export async function createAppContext(
     createAttestation,
     dpopVerifier,
     enrollmentEvents,
+    sequenceEvents,
+    writeRateLimiter: new WriteRateLimiter(),
+    repoWriteLocks: new RepoWriteLocks(),
     destroy: async () => {
+      await stubQueue.drain()
       await actorStore.close?.()
       await destroyBackend()
     },
@@ -1152,5 +1232,6 @@ export async function destroyAppContext(ctx: AppContext): Promise<void> {
   if (ctx.allowListProvider) {
     await ctx.allowListProvider.stop()
   }
+  ctx.repoWriteLocks.destroy()
   await ctx.destroy()
 }

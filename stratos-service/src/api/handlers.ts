@@ -82,13 +82,16 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   const xrpc = server as unknown as XrpcServerInternal
   const { authVerifier } = ctx
 
+  const makeRequestId = (method: string): string => {
+    return `${method}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  }
+
   xrpc.method('com.atproto.repo.createRecord', {
     auth: authVerifier.standard,
     handler: async ({ input, auth }: HandlerContext) => {
-      console.log('[createRecord] handler entered')
+      const requestId = makeRequestId('create')
       const start = Date.now()
       const { did } = validateUserAuth(auth)
-      console.log('[createRecord] auth validated, did:', did)
       const body = input?.body as {
         repo: Did
         collection: string
@@ -98,13 +101,11 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         swapCommit?: string
       }
 
-      console.log(
-        '[createRecord] body:',
-        JSON.stringify(body).substring(0, 200),
-      )
       ctx.logger?.debug(
         {
+          requestId,
           method: 'createRecord',
+          did,
           repo: body.repo,
           collection: body.collection,
         },
@@ -121,18 +122,30 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
             record: body.record,
             validate: body.validate,
             swapCommit: body.swapCommit,
+            requestId,
           },
           did,
         )
 
+        const { phases, ...body_result } = result
+        const totalMs = Date.now() - start
+        const buildMs = phases?.prepareCommitBuild ?? 0
         ctx.logger?.info(
-          { uri: result.uri, durationMs: Date.now() - start },
+          {
+            requestId,
+            uri: body_result.uri,
+            durationMs: totalMs,
+            buildMs,
+            buildShare:
+              totalMs > 0 ? Number((buildMs / totalMs).toFixed(4)) : 0,
+            phases,
+          },
           'record created',
         )
 
         return {
           encoding: 'application/json',
-          body: result,
+          body: body_result,
         }
       } catch (err) {
         console.error(
@@ -144,6 +157,8 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         }
         ctx.logger?.error(
           {
+            requestId,
+            did,
             err: err instanceof Error ? err.message : String(err),
             repo: body.repo,
             collection: body.collection,
@@ -158,6 +173,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   xrpc.method('com.atproto.repo.deleteRecord', {
     auth: authVerifier.standard,
     handler: async ({ input, auth }: HandlerContext) => {
+      const requestId = makeRequestId('delete')
       const start = Date.now()
       const { did } = validateUserAuth(auth)
       const body = input?.body as {
@@ -170,7 +186,9 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
 
       ctx.logger?.debug(
         {
+          requestId,
           method: 'deleteRecord',
+          did,
           repo: body.repo,
           collection: body.collection,
           rkey: body.rkey,
@@ -187,27 +205,33 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
             rkey: body.rkey,
             swapRecord: body.swapRecord,
             swapCommit: body.swapCommit,
+            requestId,
           },
           did,
         )
 
+        const { phases, ...delete_result } = result
         ctx.logger?.info(
           {
+            requestId,
             repo: body.repo,
             collection: body.collection,
             rkey: body.rkey,
             durationMs: Date.now() - start,
+            phases,
           },
           'record deleted',
         )
 
         return {
           encoding: 'application/json',
-          body: result,
+          body: delete_result,
         }
       } catch (err) {
         ctx.logger?.error(
           {
+            requestId,
+            did,
             err: err instanceof Error ? err.message : String(err),
             repo: body.repo,
             collection: body.collection,
@@ -464,6 +488,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
   xrpc.method('com.atproto.repo.applyWrites', {
     auth: authVerifier.standard,
     handler: async ({ input, auth }: HandlerContext) => {
+      const requestId = makeRequestId('apply')
       const start = Date.now()
       const { did } = validateUserAuth(auth)
       const body = input?.body as {
@@ -487,7 +512,13 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
       }
 
       ctx.logger?.debug(
-        { method: 'applyWrites', repo: body.repo, count: body.writes.length },
+        {
+          requestId,
+          method: 'applyWrites',
+          did,
+          repo: body.repo,
+          count: body.writes.length,
+        },
         'handling request',
       )
 
@@ -535,10 +566,15 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         }
       }
 
-      const batchResult = await applyWritesBatch(ctx, did, batchOps)
+      const batchResult = await applyWritesBatch(ctx, did, batchOps, requestId)
 
       ctx.logger?.info(
-        { count: body.writes.length, durationMs: Date.now() - start },
+        {
+          requestId,
+          did,
+          count: body.writes.length,
+          durationMs: Date.now() - start,
+        },
         'applyWrites completed',
       )
 

@@ -348,6 +348,12 @@ STRATOS_OAUTH_REDIRECT_URI="https://stratos.example.com/oauth/callback"
 # Allowed boundary domains (records can only have these domains)
 STRATOS_ALLOWED_DOMAINS="general,writers"
 
+# Write rate limiter
+STRATOS_WRITE_RATE_MAX_WRITES=300
+STRATOS_WRITE_RATE_WINDOW_MS=60000
+STRATOS_WRITE_RATE_COOLDOWN_MS=10000
+STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS=1000
+
 # Service Auth (AppViews that can call getRecord with viewer header)
 STRATOS_ALLOWED_APPVIEWS="did:web:appview.example.com"
 
@@ -440,6 +446,27 @@ STRATOS_ALLOWED_DOMAINS="general,fanart"
 ```
 
 Records with boundaries outside this list will be rejected.
+
+### Write Rate Limiter
+
+Stratos applies per-DID write throttling to protect MST commit performance under burst traffic.
+
+```bash
+# Per-DID writes allowed inside the rolling window
+STRATOS_WRITE_RATE_MAX_WRITES=300
+
+# Rolling window size in milliseconds
+STRATOS_WRITE_RATE_WINDOW_MS=60000
+
+# Cooldown after limit is exceeded
+STRATOS_WRITE_RATE_COOLDOWN_MS=10000
+
+# Random jitter added to cooldown to avoid synchronized retries
+STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS=1000
+```
+
+For controlled load tests, adjust these values deliberately and record the exact settings used for
+each run.
 
 ### Repository Import
 
@@ -914,6 +941,13 @@ Key metrics to monitor:
 - `stratos_subscription_connections` - Active WebSocket subscriptions
 - `stratos_request_duration_seconds` - XRPC request latency
 
+For create → index investigations, additionally track:
+
+- `record created` log `durationMs` and `phases.prepareCommitBuild`
+- `record created` log `buildShare` (commit-build contribution to total latency)
+- `high create-to-index lag observed` warnings in `stratos-indexer`
+- actor sync reconnect pressure (`max reconnect attempts`, websocket close/error events)
+
 ### Backup
 
 ```bash
@@ -967,14 +1001,6 @@ Recommended rate limits:
 | OAuth authorize | 10/minute per IP    |
 
 ### CORS Configuration
-
-Stratos ships with permissive CORS (`Access-Control-Allow-Origin: *`) by default. This is safe for
-the XRPC API because DPoP binding provides request-level proof of possession — a token stolen via a
-cross-origin request cannot be replayed without the corresponding DPoP private key.
-
-However, operators **should** restrict CORS origins via their reverse proxy to only allow their
-webapp origin. This provides defense in depth and prevents cross-origin requests from untrusted
-frontends.
 
 **Required exposed headers:** `DPoP-Nonce`, `WWW-Authenticate`
 

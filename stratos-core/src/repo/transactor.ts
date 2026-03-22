@@ -16,6 +16,10 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
     super(db, logger)
   }
 
+  async lockRoot(): Promise<{ cid: CID; rev: string } | null> {
+    return this.getRootDetailed()
+  }
+
   async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
     await this.db
       .insert(stratosRepoRoot)

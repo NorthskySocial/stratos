@@ -25,7 +25,7 @@ describe('loadConfig', () => {
       'postgresql://shinji:eva01@localhost/nerv',
     )
     expect(config.db.schema).toBe('bsky')
-    expect(config.db.poolSize).toBe(10)
+    expect(config.db.poolSize).toBe(20)
     expect(config.pds.repoProvider).toBe('wss://bsky.network')
     expect(config.pds.enrolledOnly).toBe(false)
     expect(config.stratos.serviceUrl).toBe('https://stratos.tokyo-3.jp')
@@ -33,10 +33,11 @@ describe('loadConfig', () => {
     expect(config.identity.plcUrl).toBe('https://plc.directory')
     expect(config.health.port).toBe(3002)
     expect(config.worker.concurrency).toBe(4)
-    expect(config.worker.maxQueueSize).toBe(200)
+    expect(config.worker.maxQueueSize).toBe(100)
     expect(config.worker.cursorFlushIntervalMs).toBe(5000)
     expect(config.worker.actorSyncConcurrency).toBe(8)
-    expect(config.worker.actorSyncQueuePerActor).toBe(50)
+    expect(config.worker.actorSyncQueuePerActor).toBe(10)
+    expect(config.worker.backgroundQueueConcurrency).toBe(10)
   })
 
   it('uses custom values from environment variables', () => {

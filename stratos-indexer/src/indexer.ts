@@ -8,6 +8,7 @@ import {
   createIndexingService,
 } from './db.ts'
 import { WorkerPool } from './worker-pool.ts'
+import { HandleDedup } from './handle-dedup.ts'
 import { CursorManager } from './cursor-manager.ts'
 import {
   PdsFirehose,
@@ -28,9 +29,12 @@ export class Indexer {
   private stratosActorSync: StratosActorSync | null = null
   private workerPool: WorkerPool<unknown> | null = null
   private cursorManager: CursorManager | null = null
+  private handleDedup: HandleDedup | null = null
   private healthServer: Deno.HttpServer | null = null
   private enrolledDids = new Set<string>()
-  private backfilledDids = new Set<string>()
+  private backfilledDids = new Map<string, number>()
+  private backfilledDidsSweepTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly BACKFILLED_TTL_MS = 30 * 60 * 1000
   private activeBackfills = 0
   private readonly maxConcurrentBackfills = 2
 
@@ -39,11 +43,20 @@ export class Indexer {
   async start(): Promise<void> {
     console.log('starting stratos indexer')
 
+    this.backfilledDidsSweepTimer = setInterval(() => {
+      const cutoff = Date.now() - Indexer.BACKFILLED_TTL_MS
+      for (const [did, ts] of this.backfilledDids) {
+        if (ts < cutoff) this.backfilledDids.delete(did)
+      }
+    }, 60_000)
+
     // Health server
     this.healthServer = Deno.serve(
       { port: this.config.health.port },
       (req: Request) => {
         if (new URL(req.url).pathname === '/health') {
+          const mem = Deno.memoryUsage()
+          const actorSyncStats = this.stratosActorSync?.getStats()
           return new Response(
             JSON.stringify({
               ok: true,
@@ -52,6 +65,13 @@ export class Indexer {
                 this.stratosActorSync?.getActiveActors().length ?? 0,
               workerPoolPending: this.workerPool?.pendingCount ?? 0,
               workerPoolActive: this.workerPool?.runningCount ?? 0,
+              actorSync: actorSyncStats ?? null,
+              memory: {
+                rss: mem.rss,
+                heapTotal: mem.heapTotal,
+                heapUsed: mem.heapUsed,
+                external: mem.external,
+              },
             }),
             { headers: { 'content-type': 'application/json' } },
           )
@@ -72,6 +92,7 @@ export class Indexer {
     const { indexingService, background } = createIndexingService(
       db,
       idResolver,
+      this.config,
     )
 
     // Cursor manager with periodic flush to database
@@ -80,19 +101,32 @@ export class Indexer {
       async (state) => {
         const rawDb = (db as unknown as { db: unknown })
           .db as Kysely<DatabaseSchemaType>
-        for (const [did, seq] of state.stratosCursors) {
+
+        if (state.stratosCursors.size > 0) {
+          const now = new Date().toISOString()
+          const values = Array.from(state.stratosCursors, ([did, seq]) => ({
+            did,
+            seq,
+            updatedAt: now,
+          }))
+
+          // Batch upsert all actor cursors in a single statement
           await rawDb
             .insertInto('stratos_sync_cursor' as never)
-            .values({ did, seq, updatedAt: new Date().toISOString() } as never)
+            .values(values as never)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .onConflict((oc: any) =>
               oc.column('did' as never).doUpdateSet({
-                seq,
-                updatedAt: new Date().toISOString(),
+                seq: (eb: unknown) =>
+                  (eb as { ref: (col: string) => unknown }).ref(
+                    'excluded.seq' as never,
+                  ),
+                updatedAt: now,
               } as never),
             )
             .execute()
         }
+
         console.log(
           { pdsSeq: state.pdsSeq, actorCursors: state.stratosCursors.size },
           'cursor flush',
@@ -100,26 +134,49 @@ export class Indexer {
       },
     )
 
-    // Restore cursors from database
+    // Restore cursors from database (retry until migrations have run)
     const rawDb = (db as unknown as { db: unknown })
       .db as Kysely<DatabaseSchemaType>
-    const savedCursors = (await rawDb
-      .selectFrom('stratos_sync_cursor' as never)
-      .select(['did' as never, 'seq' as never])
-      .execute()) as Array<{ did: string; seq: number }>
-    if (savedCursors.length > 0) {
-      const cursorMap = new Map<string, number>()
-      for (const row of savedCursors) {
-        cursorMap.set(row.did, row.seq)
+    const maxRetries = 30
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const savedCursors = (await rawDb
+          .selectFrom('stratos_sync_cursor' as never)
+          .select(['did' as never, 'seq' as never])
+          .execute()) as Array<{ did: string; seq: number }>
+        if (savedCursors.length > 0) {
+          const cursorMap = new Map<string, number>()
+          for (const row of savedCursors) {
+            cursorMap.set(row.did, row.seq)
+          }
+          this.cursorManager.restore({ pdsSeq: 0, stratosCursors: cursorMap })
+          console.log(
+            { count: savedCursors.length },
+            'restored sync cursors from database',
+          )
+        }
+        break
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (attempt === maxRetries) {
+          throw new Error(
+            `stratos_sync_cursor table not available after ${maxRetries} attempts: ${msg}`,
+            { cause: err },
+          )
+        }
+        console.log(
+          { attempt, maxRetries, err: msg },
+          'waiting for stratos_sync_cursor table (migrations may be pending)',
+        )
+        await new Promise((r) => setTimeout(r, 2000))
       }
-      this.cursorManager.restore({ pdsSeq: 0, stratosCursors: cursorMap })
-      console.log(
-        { count: savedCursors.length },
-        'restored sync cursors from database',
-      )
     }
 
     this.cursorManager.start()
+
+    // Handle dedup — skip redundant indexHandle calls for recently-seen DIDs
+    const handleDedup = new HandleDedup()
+    this.handleDedup = handleDedup
 
     // Enrollment callbacks (defined first, referenced by worker pool and subscriptions)
     const enrollmentCallback: EnrollmentCallback = {
@@ -156,6 +213,7 @@ export class Indexer {
           indexingService,
           background,
           enrollmentCallback,
+          handleDedup,
         )
       },
       (err) => console.error({ err: err.message }, 'worker pool error'),
@@ -192,6 +250,15 @@ export class Indexer {
       {
         maxConcurrentActorSyncs: this.config.worker.actorSyncConcurrency,
         maxActorQueueSize: this.config.worker.actorSyncQueuePerActor,
+        globalMaxPending: this.config.worker.actorSyncGlobalMaxPending,
+        drainDelayMs: this.config.worker.actorSyncDrainDelayMs,
+        maxConnections: this.config.worker.actorSyncMaxConnections,
+        connectDelayMs: this.config.worker.actorSyncConnectDelayMs,
+        idleEvictionMs: this.config.worker.actorSyncIdleEvictionMs,
+        reconnectBaseDelayMs: this.config.worker.actorSyncReconnectBaseDelayMs,
+        reconnectMaxDelayMs: this.config.worker.actorSyncReconnectMaxDelayMs,
+        reconnectJitterMs: this.config.worker.actorSyncReconnectJitterMs,
+        reconnectMaxAttempts: this.config.worker.actorSyncReconnectMaxAttempts,
       },
       (did) =>
         background.add(() =>
@@ -263,8 +330,9 @@ export class Indexer {
       )
 
       const backfilled = await backfillActors(backfillOpts, didsList)
+      const now = Date.now()
       for (const did of didsList) {
-        this.backfilledDids.add(did)
+        this.backfilledDids.set(did, now)
       }
 
       console.log(
@@ -287,11 +355,32 @@ export class Indexer {
       workerPool: workerPool as never,
       cursorManager: this.cursorManager,
       enrollmentCallback,
+      handleDedup,
       onError: (err) =>
         console.error({ err: err.message }, 'pds firehose error'),
     })
     this.pdsFirehose.start()
     console.log('PDS firehose connected')
+
+    setInterval(() => {
+      const mem = Deno.memoryUsage()
+      const syncStats = this.stratosActorSync?.getStats()
+      console.log(
+        {
+          rss: Math.round(mem.rss / 1024 / 1024),
+          heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+          heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+          external: Math.round(mem.external / 1024 / 1024),
+          enrolledDids: this.enrolledDids.size,
+          backfilledDids: this.backfilledDids.size,
+          workerPending: this.workerPool?.pendingCount ?? 0,
+          workerActive: this.workerPool?.runningCount ?? 0,
+          activeConnections: syncStats?.activeConnections ?? 0,
+          waitingActors: syncStats?.waitingActors ?? 0,
+        },
+        'memory stats (MB)',
+      )
+    }, 30_000)
 
     console.log(
       {
@@ -301,6 +390,16 @@ export class Indexer {
         maxQueueSize: this.config.worker.maxQueueSize,
         actorSyncConcurrency: this.config.worker.actorSyncConcurrency,
         actorSyncQueuePerActor: this.config.worker.actorSyncQueuePerActor,
+        actorSyncMaxConnections: this.config.worker.actorSyncMaxConnections,
+        actorSyncConnectDelayMs: this.config.worker.actorSyncConnectDelayMs,
+        actorSyncReconnectBaseDelayMs:
+          this.config.worker.actorSyncReconnectBaseDelayMs,
+        actorSyncReconnectMaxDelayMs:
+          this.config.worker.actorSyncReconnectMaxDelayMs,
+        actorSyncReconnectJitterMs:
+          this.config.worker.actorSyncReconnectJitterMs,
+        actorSyncReconnectMaxAttempts:
+          this.config.worker.actorSyncReconnectMaxAttempts,
       },
       'stratos indexer started',
     )
@@ -311,7 +410,7 @@ export class Indexer {
     opts: Parameters<typeof backfillSingleActor>[0],
   ): void {
     if (this.backfilledDids.has(did)) return
-    this.backfilledDids.add(did)
+    this.backfilledDids.set(did, Date.now())
     console.log({ did }, 'backfilling referenced actor')
     void this.runBackfill(did, opts)
   }
@@ -343,6 +442,13 @@ export class Indexer {
     this.pdsFirehose?.stop()
     this.stratosServiceSub?.stop()
     this.stratosActorSync?.stop()
+    this.handleDedup?.stop()
+
+    if (this.backfilledDidsSweepTimer) {
+      clearInterval(this.backfilledDidsSweepTimer)
+      this.backfilledDidsSweepTimer = null
+    }
+    this.backfilledDids.clear()
 
     if (this.workerPool) {
       await this.workerPool.stop()

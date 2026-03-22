@@ -8,6 +8,7 @@ import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/index
 import type { BackgroundQueue } from '@atproto/bsky'
 import type { WorkerPool } from './worker-pool.ts'
 import type { CursorManager } from './cursor-manager.ts'
+import type { HandleDedup } from './handle-dedup.ts'
 import {
   decodeCommitOps,
   parseCid,
@@ -69,6 +70,7 @@ export interface PdsFirehoseOptions {
   workerPool: WorkerPool<FirehoseWork>
   cursorManager: CursorManager
   enrollmentCallback: EnrollmentCallback
+  handleDedup: HandleDedup
   onError?: (err: Error) => void
 }
 
@@ -146,10 +148,12 @@ export class PdsFirehose {
           const work = this.classifyMessage(message)
           if (!work) continue
 
-          // Backpressure: submit blocks until worker pool has space
-          await this.opts.workerPool.submit(work)
+          // Non-blocking: drop messages when queue is full to prevent
+          // unbounded memory growth in the firehose's internal buffer.
+          // Cursor tracking allows resumption on reconnect.
+          this.opts.workerPool.trySubmit(work)
 
-          // Update cursor after successful submission
+          // Always advance cursor so reconnects resume from latest position
           if ('seq' in message && typeof message.seq === 'number') {
             this.opts.cursorManager.updatePdsCursor(message.seq)
           }
@@ -185,6 +189,7 @@ export async function processFirehoseWork(
   indexingService: IndexingService,
   background: BackgroundQueue,
   enrollmentCallback: EnrollmentCallback,
+  handleDedup: HandleDedup,
 ): Promise<void> {
   switch (work.type) {
     case 'commit':
@@ -193,6 +198,7 @@ export async function processFirehoseWork(
         indexingService,
         background,
         enrollmentCallback,
+        handleDedup,
       )
       break
     case 'identity':
@@ -216,21 +222,25 @@ async function processCommit(
   indexingService: IndexingService,
   background: BackgroundQueue,
   enrollmentCallback: EnrollmentCallback,
+  handleDedup: HandleDedup,
 ): Promise<void> {
   const did = message.repo
+  const timestamp = message.time
+  const commitCid = message.commit
+  const rev = message.rev
+  const rawBlocks = message.blocks
+  const rawOps = message.ops
 
-  background.add(() => indexingService.indexHandle(did, message.time))
+  if (handleDedup.shouldIndex(did)) {
+    background.add(() => indexingService.indexHandle(did, timestamp))
+  }
 
-  await indexingService.setCommitLastSeen(
-    did,
-    parseCid(message.commit),
-    message.rev,
-  )
+  await indexingService.setCommitLastSeen(did, parseCid(commitCid), rev)
 
-  const blocks = fromBytes(message.blocks)
+  const blocks = fromBytes(rawBlocks)
   if (!blocks?.length) return
 
-  const ops = decodeCommitOps(blocks, message.ops)
+  const ops = decodeCommitOps(blocks, rawOps)
 
   for (const op of ops) {
     const uri = AtUri.make(did, op.collection, op.rkey)
@@ -296,10 +306,11 @@ async function processSync(
   message: SyncWork['message'],
   indexingService: IndexingService,
 ): Promise<void> {
-  const blocks = fromBytes(message.blocks)
+  const { did, rev, time: timestamp, blocks: rawBlocks } = message
+  const blocks = fromBytes(rawBlocks)
   const cid = parseCid(fromUint8Array(blocks).header.data.roots[0])
   await Promise.all([
-    indexingService.setCommitLastSeen(message.did, cid, message.rev),
-    indexingService.indexHandle(message.did, message.time),
+    indexingService.setCommitLastSeen(did, cid, rev),
+    indexingService.indexHandle(did, timestamp),
   ])
 }

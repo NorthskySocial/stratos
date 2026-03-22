@@ -22,6 +22,7 @@ import {
   StratosActorStore,
 } from '../src/context.js'
 import { createRecord } from '../src/api'
+import { WriteRateLimiter } from '../src/rate-limiter.js'
 import { Did } from '@atproto/api'
 
 // Create a deterministic CID from data
@@ -103,6 +104,7 @@ function createTestConfig(dataDir: string): StratosServiceConfig {
       serviceFragment: 'atproto_pns',
       port: 3100,
       publicUrl: 'https://stratos.test',
+      repoUrl: 'https://github.com/NorthskySocial/stratos',
     },
     storage: {
       backend: 'sqlite',
@@ -115,6 +117,13 @@ function createTestConfig(dataDir: string): StratosServiceConfig {
     stratos: {
       allowedDomains: ['example.com', 'test.com'],
       retentionDays: 30,
+      importMaxBytes: 256 * 1024 * 1024,
+      writeRateLimit: {
+        maxWrites: 300,
+        windowMs: 60_000,
+        cooldownMs: 10_000,
+        cooldownJitterMs: 1_000,
+      },
     },
     enrollment: {
       mode: ENROLLMENT_MODE.OPEN,
@@ -124,11 +133,15 @@ function createTestConfig(dataDir: string): StratosServiceConfig {
     identity: {
       plcUrl: 'https://plc.directory',
     },
+    oauth: {},
     logging: {
       level: 'info',
     },
     dpop: {
       requireNonce: false,
+    },
+    userAgent: {
+      repoUrl: 'https://github.com/NorthskySocial/stratos',
     },
   }
 }
@@ -142,6 +155,8 @@ interface TestContext {
       did: string
       enrolledAt: string
       pdsEndpoint?: string
+      signingKeyDid?: string
+      active?: boolean
     }) => Promise<void>
   }
   stratosConfig: { allowedDomains: string[]; retentionDays: number }
@@ -199,6 +214,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       await expect(
@@ -238,6 +254,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       const otherDid = 'did:plc:otheruser'
@@ -268,6 +285,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       await expect(
