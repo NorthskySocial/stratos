@@ -220,6 +220,8 @@ export async function createRecord(
     )
   }
 
+  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+
   // Validate the record if requested
   if (validate) {
     t0 = performance.now()
@@ -289,7 +291,7 @@ export async function createRecord(
           phases.transactLockCheck = performance.now() - transactT0
 
           let ti = performance.now()
-          const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
+          const signed = await signCommit(actorSigningKey, prepared.unsigned, [
             { cid, bytes: recordBytes },
           ])
           phases.transactSign = performance.now() - ti
@@ -422,6 +424,8 @@ export async function deleteRecord(
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUri(uriStr)
 
+  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+
   const t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: { commit: { cid: string; rev: string } }
@@ -464,7 +468,7 @@ export async function deleteRecord(
           }
 
           let ti = performance.now()
-          const signed = await signCommit(ctx.signingKey, prepared.unsigned)
+          const signed = await signCommit(actorSigningKey, prepared.unsigned)
           phases.transactSign = performance.now() - ti
 
           ti = performance.now()
@@ -588,6 +592,8 @@ export async function updateRecord(
   const cid = await computeCid(record)
   phases.encode = performance.now() - t0
 
+  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+
   t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: {
@@ -637,7 +643,7 @@ export async function updateRecord(
           }
 
           let ti = performance.now()
-          const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
+          const signed = await signCommit(actorSigningKey, prepared.unsigned, [
             { cid, bytes: recordBytes },
           ])
           phases.transactSign = performance.now() - ti
@@ -936,6 +942,7 @@ export async function applyWritesBatch(
   }))
 
   // Build and commit with concurrency retry
+  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: {
     results: Array<{ uri?: string; cid?: string }>
@@ -981,7 +988,7 @@ export async function applyWritesBatch(
 
           const commitResult = await signAndPersistCommit(
             store.repo,
-            ctx.signingKey,
+            actorSigningKey,
             unsigned,
           )
 

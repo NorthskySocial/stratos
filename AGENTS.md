@@ -124,13 +124,13 @@ stratos-service/src/features/{feature}/
 
 **Client library** (`stratos-client/src/`):
 
-| File              | Description                                                          |
-| ----------------- | -------------------------------------------------------------------- |
-| `discovery.ts`    | Enrollment discovery from user PDS; locates Stratos service endpoint |
-| `routing.ts`      | Service routing; directs requests to correct Stratos instance        |
-| `verification.ts` | Record verification with inclusion proofs                            |
-| `scopes.ts`       | OAuth scope declarations                                             |
-| `types.ts`        | Client type definitions                                              |
+| File              | Description                                                                     |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `discovery.ts`    | Enrollment discovery from user PDS; locates Stratos service endpoint            |
+| `routing.ts`      | Service routing; directs requests to correct Stratos instance                   |
+| `verification.ts` | Record verification with inclusion proofs and user/service key signature checks |
+| `scopes.ts`       | OAuth scope declarations                                                        |
+| `types.ts`        | Client type definitions                                                         |
 
 **Indexer** (`stratos-indexer/src/`):
 

@@ -6,8 +6,8 @@ This document describes the enrollment attestation model implemented in the curr
 
 During enrollment, Stratos creates and persists two pieces of signing state:
 
-- a service signing key, used to sign repo commits and enrollment attestations
-- a per-user signing key, stored as a `did:key` and included in the enrollment record
+- a service signing key (Secp256k1), used to sign enrollment attestations and as a fallback for repo commits
+- a per-user signing key (P-256), used to sign record commits and included in the enrollment record
 
 The enrollment record published to the user's PDS contains:
 
@@ -212,7 +212,9 @@ This attestation lets a client or AppView verify that:
 - the boundary set has not been modified after signing
 - the user signing key in the record matches what the service enrolled
 
-What it does not prove by itself:
+Because record commits are signed with the user's P-256 key, a verifier can chain trust: resolve the user's enrollment record → verify the service attestation → extract the user's `signingKey` → verify the commit signature on any record. This proves both service endorsement and user authorship.
+
+What the attestation does not prove by itself:
 
 - that the user is still enrolled right now
 - that the boundaries have not changed since the record was last written

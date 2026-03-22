@@ -1,12 +1,12 @@
 name: Deploy to AWS
 
-on:
-  workflow_run:
-    workflows: ['Run Lint, Prettier, and Tests on PR and Push']
-    types:
-      - completed
-    branches:
-      - main
+# on:
+#   workflow_run:
+#     workflows: ['Run Lint, Prettier, and Tests on PR and Push']
+#     types:
+#       - completed
+#     branches:
+#       - main
 
 concurrency:
   group: deploy-${{ github.ref }}

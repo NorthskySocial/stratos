@@ -873,6 +873,7 @@ export interface AppContext {
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
+  getActorSigningKey(did: string): Promise<crypto.Keypair>
   allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
   app: express.Application
@@ -1211,6 +1212,16 @@ export async function createAppContext(
     },
   })
 
+  const getActorSigningKey = async (did: string): Promise<crypto.Keypair> => {
+    const userKey = await actorStore.loadSigningKey(did)
+    if (userKey) return userKey
+    logger?.warn(
+      { did },
+      'no per-user signing key found, falling back to service key',
+    )
+    return signingKey
+  }
+
   const createAttestation = async (
     did: string,
     boundaries: string[],
@@ -1237,6 +1248,7 @@ export async function createAppContext(
     signingKey,
     signingDidKey,
     serviceDid,
+    getActorSigningKey,
     allowListProvider,
     xrpcServer,
     app,
