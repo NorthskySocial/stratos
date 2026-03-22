@@ -53,10 +53,26 @@ const envSchema = z.object({
         .filter((d) => d.length > 0),
     ),
   STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
-  STRATOS_WRITE_RATE_MAX_WRITES: z.coerce.number().int().positive().default(300),
-  STRATOS_WRITE_RATE_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  STRATOS_WRITE_RATE_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(10_000),
-  STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS: z.coerce.number().int().nonnegative().default(1_000),
+  STRATOS_WRITE_RATE_MAX_WRITES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300),
+  STRATOS_WRITE_RATE_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60_000),
+  STRATOS_WRITE_RATE_COOLDOWN_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(10_000),
+  STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(1_000),
 
   // Enrollment
   STRATOS_ENROLLMENT_MODE: z

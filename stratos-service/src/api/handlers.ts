@@ -136,7 +136,8 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
             uri: body_result.uri,
             durationMs: totalMs,
             buildMs,
-            buildShare: totalMs > 0 ? Number((buildMs / totalMs).toFixed(4)) : 0,
+            buildShare:
+              totalMs > 0 ? Number((buildMs / totalMs).toFixed(4)) : 0,
             phases,
           },
           'record created',
@@ -565,12 +566,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
         }
       }
 
-      const batchResult = await applyWritesBatch(
-        ctx,
-        did,
-        batchOps,
-        requestId,
-      )
+      const batchResult = await applyWritesBatch(ctx, did, batchOps, requestId)
 
       ctx.logger?.info(
         {
