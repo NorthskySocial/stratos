@@ -1,8 +1,10 @@
-import type { Router, Request, Response } from 'express'
+import express, { type Router, type Request, type Response } from 'express'
 import type { BoundaryResolver } from '@northskysocial/stratos-core'
 import { Agent } from '@atproto/api'
 import type { AppContext } from '../../context.js'
 import { serviceDIDToRkey } from '../../oauth/routes.js'
+
+const jsonBody = express.json({ limit: '100kb' })
 
 const BOUNDARY_CACHE_TTL_MS = 60_000
 
@@ -244,6 +246,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
   // POST /xrpc/zone.stratos.admin.addBoundary
   router.post(
     '/xrpc/zone.stratos.admin.addBoundary',
+    jsonBody,
     async (req: Request, res: Response) => {
       try {
         await ctx.authVerifier.admin({ req, res } as Parameters<
@@ -314,6 +317,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
   // POST /xrpc/zone.stratos.admin.removeBoundary
   router.post(
     '/xrpc/zone.stratos.admin.removeBoundary',
+    jsonBody,
     async (req: Request, res: Response) => {
       try {
         await ctx.authVerifier.admin({ req, res } as Parameters<
@@ -376,6 +380,7 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
   // POST /xrpc/zone.stratos.admin.setBoundaries
   router.post(
     '/xrpc/zone.stratos.admin.setBoundaries',
+    jsonBody,
     async (req: Request, res: Response) => {
       try {
         await ctx.authVerifier.admin({ req, res } as Parameters<
