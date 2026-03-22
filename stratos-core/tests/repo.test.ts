@@ -313,8 +313,6 @@ describe('Repo Transactor', () => {
       expect(await transactor.has(cid1)).toBe(true)
       expect(await transactor.has(cid2)).toBe(true)
     })
-
-
   })
 
   describe('deleteBlock', () => {
@@ -365,8 +363,6 @@ describe('Repo Transactor', () => {
       expect(count).toHaveLength(1)
       expect(count[0].cid).toBe(cid3.toString())
     })
-
-
   })
 
   describe('deleteBlocksForRev', () => {

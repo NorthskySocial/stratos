@@ -94,5 +94,4 @@ describe('Attestation Domain', () => {
       expect(payload1).not.toEqual(payload2)
     })
   })
-
 })
