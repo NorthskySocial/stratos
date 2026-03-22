@@ -24,6 +24,7 @@ export {
 export {
   verifyCidIntegrity,
   resolveServiceSigningKey,
+  resolveUserSigningKey,
   fetchAndVerifyRecord,
 } from './verification.js'
 export {
