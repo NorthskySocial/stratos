@@ -948,103 +948,6 @@ For create → index investigations, additionally track:
 - `high create-to-index lag observed` warnings in `stratos-indexer`
 - actor sync reconnect pressure (`max reconnect attempts`, websocket close/error events)
 
-### Load Test Analysis — 2026-03-22
-
-**Test parameters**: `--posts-per-user 5000 --concurrency 500 --ramp-up 5`
-
-**Infrastructure**: Fargate 2 vCPU / 4 GB, RDS m8g.large (gp3, 50 GiB) behind RDS Proxy, Postgres 16
-
-#### Create Path (5-min bins during peak window 09:25–09:40 UTC)
-
-| Time (UTC) | Creates | avg ms | p50 ms | p95 ms | p99 ms | max ms | avg connAcq ms | p95 connAcq ms |
-| ---------- | ------- | ------ | ------ | ------ | ------ | ------ | -------------- | -------------- |
-| 09:25      | 6,519   | 505    | 444    | 1,029  | 1,265  | 28,827 | 99             | 339            |
-| 09:30      | 4,324   | 3,375  | 2,888  | 6,666  | 7,573  | 21,007 | 1,640          | 4,364          |
-| 09:35      | 1,393   | 9,638  | 9,409  | 12,674 | 13,660 | 55,776 | 4,885          | 8,625          |
-
-**Throughput collapse**: Creates dropped 4.7x (6,519 → 1,393) while latency rose 19x (505 → 9,638 ms).
-
-#### Aggregate Stats (12,236 creates over full window)
-
-| Metric           | avg   | p50 | p95   | p99    | max    |
-| ---------------- | ----- | --- | ----- | ------ | ------ |
-| End-to-end (ms)  | 2,559 | 997 | 9,805 | 12,052 | 55,776 |
-| connAcquire (ms) | 1,189 | —   | 5,259 | 7,920  | —      |
-| commitBuild (ms) | 25    | —   | 1.6   | —      | 45,694 |
-
-**Outlier breakdown** (out of 12,236):
-
-- connAcquire > 1s: **3,940 (32.2%)**
-- connAcquire > 5s: **785 (6.4%)**
-- commitBuild > 100ms: 160 (1.3%)
-- commitBuild > 1s: 42 (0.3%)
-
-#### Indexer (create-to-index lag warnings)
-
-| Time (UTC) | Lag Warnings | Transport Errors |
-| ---------- | ------------ | ---------------- |
-| 09:25      | 1,721        | 1,385            |
-| 09:30      | 36,554       | 1,718            |
-| 09:35      | 24,595       | 928              |
-| 09:40      | 853          | 24               |
-
-#### RDS Infrastructure
-
-| Metric         | Pre-load | Peak    | Assessment                                |
-| -------------- | -------- | ------- | ----------------------------------------- |
-| CPU            | 8–10%    | 31%     | Headroom exists                           |
-| Connections    | 389      | 389     | **Pinned at ceiling** — pool is saturated |
-| WriteLatency   | 22ms     | 23ms    | Stable — disk not the bottleneck          |
-| FreeableMemory | 6.57 GB  | 6.37 GB | Healthy                                   |
-| DiskQueueDepth | 10–16    | 10–16   | **Chronically elevated** (threshold: >5)  |
-
-#### AppView
-
-Timeline reads remained fast throughout: avg 3.2ms, p99 13.9ms, errors near zero.
-
-#### Root Cause Summary
-
-1. **Connection pool saturation is the primary bottleneck.** Connections are pinned at 389 (RDS Proxy + application pool). When concurrent writes exceed available connections, requests queue on `connAcquire`. This single factor accounts for the majority of the latency spike.
-2. **DiskQueueDepth is chronically high at 10–16** even at baseline. While write latency is stable (22–28ms), the persistent queue depth limits burst absorption. For gp3 the baseline is 3,000 IOPS; the queue suggests sustained IO near that limit.
-3. **Commit build time is NOT the primary culprit** at this load level. avg 25ms with p95 at 1.6ms. The rare outliers (42 events > 1s) may reflect connection contention spilling into the build measurement window.
-4. **Indexer lag is a cascading effect** of create-side stalls. Records are stamped with `queuedAtMs` on the service side; when creates stall, the indexer sees them as already stale.
-
-#### Improvement Priority (updated)
-
-1. **Increase connection capacity** — raise RDS Proxy `MaxConnectionsPercent` and/or application-side `STRATOS_PG_ACTOR_POOL_SIZE`. RDS CPU at 31% and memory at 6.4 GB confirm the instance can absorb more connections.
-2. **Address DiskQueueDepth** — increase gp3 provisioned IOPS from baseline 3,000 or increase `allocatedStorageGiB` (currently 50 GiB). Target DiskQueueDepth < 5.
-3. **Reduce transaction hold time** — keep only block writes and commit inside the transaction; defer sequence insert and other non-critical writes to post-commit.
-4. **Horizontal scale** — add Fargate task replicas. Each task brings its own event loop and pool, parallel-izing connection acquisition across processes.
-
-#### Rate Limiting
-
-Zero `Write rate limit exceeded` hits observed during this test window.
-
-### Utilization Validation Checklist
-
-During each load test phase, confirm the following before interpreting latency results:
-
-1. ECS service utilization (`AWS/ECS`):
-
-- `CPUUtilization` and `MemoryUtilization` for `stratos-service-staging`, `stratos-indexer-staging`, and `appview-api-staging`
-
-2. RDS pressure (`AWS/RDS`):
-
-- `CPUUtilization`, `DatabaseConnections`, `FreeableMemory`
-
-3. Application Signals:
-
-- `POST /xrpc/com.atproto.repo.createRecord` latency/error
-- `GET /xrpc/zone.stratos.feed.getTimeline` latency/error
-
-4. Indexer health:
-
-- actor sync error volume
-- indexed records per interval (`stratos sync stats`)
-
-If utilization is low and latency remains high, prioritize commit-build and sync pipeline analysis over
-infrastructure scaling.
-
 ### Backup
 
 ```bash
@@ -1098,14 +1001,6 @@ Recommended rate limits:
 | OAuth authorize | 10/minute per IP    |
 
 ### CORS Configuration
-
-Stratos ships with permissive CORS (`Access-Control-Allow-Origin: *`) by default. This is safe for
-the XRPC API because DPoP binding provides request-level proof of possession — a token stolen via a
-cross-origin request cannot be replayed without the corresponding DPoP private key.
-
-However, operators **should** restrict CORS origins via their reverse proxy to only allow their
-webapp origin. This provides defense in depth and prevents cross-origin requests from untrusted
-frontends.
 
 **Required exposed headers:** `DPoP-Nonce`, `WWW-Authenticate`
 
