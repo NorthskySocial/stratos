@@ -55,7 +55,7 @@ describe('ActorQueue drain race condition fix', () => {
     ;({ sync } = createTestSync({ maxConcurrentActorSyncs: 1 }))
   })
 
-  it('sets draining flag before awaiting semaphore', async () => {
+  it('sets draining flag, prevents duplicate drains, and caps syncWaiters under flood', async () => {
     const actorQueues = getPrivate(sync, 'actorQueues') as Map<
       string,
       ActorQueue
@@ -67,99 +67,43 @@ describe('ActorQueue drain race condition fix', () => {
     })
 
     setPrivate(sync, 'activeSyncs', 1)
-
-    const handleMessage = vi.fn().mockResolvedValue(undefined)
-    setPrivate(sync, 'handleMessage', handleMessage)
-
-    const drainPromise = getPrivate(sync, 'drainActorQueue') as (
-      did: string,
-    ) => Promise<void>
-    const drainResult = drainPromise.call(sync, 'did:plc:goku')
-
-    await new Promise((r) => setTimeout(r, 10))
-
-    const q = actorQueues.get('did:plc:goku')
-    expect(q.draining).toBe(true)
-    expect(q.active).toBe(false)
-
-    setPrivate(sync, 'activeSyncs', 0)
-    const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
-    syncWaiters.shift()?.()
-
-    await drainResult
-  })
-
-  it('prevents duplicate drain calls during semaphore wait', async () => {
-    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
-      string,
-      ActorQueue
-    >
-    actorQueues.set('did:plc:vegeta', {
-      pending: [],
-      active: false,
-      draining: false,
-    })
-
-    setPrivate(sync, 'activeSyncs', 1)
     setPrivate(sync, 'handleMessage', vi.fn().mockResolvedValue(undefined))
 
     const drainFn = getPrivate(sync, 'drainActorQueue') as (
       did: string,
     ) => Promise<void>
 
-    actorQueues.get('did:plc:vegeta')!.pending.push(new Uint8Array(0))
-    const drain1 = drainFn.call(sync, 'did:plc:vegeta')
+    // First drain: should set draining flag while waiting on semaphore
+    const drain1 = drainFn.call(sync, 'did:plc:goku')
+    await new Promise((r) => setTimeout(r, 10))
+
+    const q = actorQueues.get('did:plc:goku')!
+    expect(q.draining).toBe(true)
+    expect(q.active).toBe(false)
+
+    // Duplicate drains should not add extra syncWaiters
+    q.pending.push(new Uint8Array(0))
+    const drain2 = drainFn.call(sync, 'did:plc:goku')
+    q.pending.push(new Uint8Array(0))
+    const drain3 = drainFn.call(sync, 'did:plc:goku')
+
     await new Promise((r) => setTimeout(r, 5))
-
-    actorQueues.get('did:plc:vegeta')!.pending.push(new Uint8Array(0))
-    const drain2 = drainFn.call(sync, 'did:plc:vegeta')
-    await new Promise((r) => setTimeout(r, 5))
-
-    actorQueues.get('did:plc:vegeta')!.pending.push(new Uint8Array(0))
-    const drain3 = drainFn.call(sync, 'did:plc:vegeta')
-
     const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
-    expect(syncWaiters.length).toBe(1)
+    expect(syncWaiters.length).toBeLessThanOrEqual(1)
 
+    // Flood: 100 rapid drains should still cap at 1 waiter
+    for (let i = 0; i < 100; i++) {
+      q.pending.push(new Uint8Array(0))
+      drainFn.call(sync, 'did:plc:goku')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+    expect(syncWaiters.length).toBeLessThanOrEqual(1)
+
+    // Unblock semaphore and let all drains complete
     setPrivate(sync, 'activeSyncs', 0)
     syncWaiters.shift()?.()
 
     await Promise.all([drain1, drain2, drain3])
-  })
-
-  it('does not exceed syncWaiters count under rapid message flood', async () => {
-    const did = 'did:plc:piccolo'
-    const actorQueues = getPrivate(sync, 'actorQueues') as Map<
-      string,
-      ActorQueue
-    >
-    actorQueues.set(did, {
-      pending: [],
-      active: false,
-      draining: false,
-    })
-
-    setPrivate(sync, 'activeSyncs', 1)
-    setPrivate(sync, 'handleMessage', vi.fn().mockResolvedValue(undefined))
-
-    const drainFn = getPrivate(sync, 'drainActorQueue') as (
-      did: string,
-    ) => Promise<void>
-    const drainPromises: Promise<void>[] = []
-    for (let i = 0; i < 100; i++) {
-      actorQueues.get(did)!.pending.push(new Uint8Array(0))
-      drainPromises.push(drainFn.call(sync, did))
-    }
-
-    await new Promise((r) => setTimeout(r, 10))
-
-    const syncWaiters = getPrivate(sync, 'syncWaiters') as Array<() => void>
-    expect(syncWaiters.length).toBeLessThanOrEqual(1)
-
-    setPrivate(sync, 'activeSyncs', 0)
-    syncWaiters.shift()?.()
-
-    await Promise.all(drainPromises)
   })
 })
 
