@@ -54,6 +54,7 @@ export interface CreateRecordInput {
   record: unknown
   validate?: boolean
   swapCommit?: string
+  requestId?: string
 }
 
 /**
@@ -185,6 +186,10 @@ export async function createRecord(
 ): Promise<CreateRecordOutput & { phases?: WritePhases }> {
   const phases: WritePhases = {}
   const { repo, collection, record, validate = true } = input
+  const sequenceTrace: SequenceTrace = {
+    requestId: input.requestId,
+    queuedAtMs: Date.now(),
+  }
 
   // Must be creating record for self
   if (repo !== callerDid) {
@@ -249,7 +254,7 @@ export async function createRecord(
 
     const retry = await withConcurrencyRetry(async () => {
       const attemptT0 = performance.now()
-      const prepared = await ctx.actorStore.read(
+      return ctx.actorStore.readThenTransact(
         callerDid,
         async (reader) => {
           phases.connAcquire = performance.now() - attemptT0
@@ -269,55 +274,54 @@ export async function createRecord(
 
           return { unsigned, rootCid }
         },
-      )
+        async (prepared, store) => {
+          const transactT0 = performance.now()
+          const currentRoot = await store.repo.lockRoot()
+          assertRootUnchanged(
+            currentRoot?.cid.toString() ?? null,
+            prepared.rootCid,
+          )
+          phases.transactLockCheck = performance.now() - transactT0
 
-      const transactT0 = performance.now()
-      return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.lockRoot()
-        assertRootUnchanged(
-          currentRoot?.cid.toString() ?? null,
-          prepared.rootCid,
-        )
-        phases.transactLockCheck = performance.now() - transactT0
+          let ti = performance.now()
+          const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
+            { cid, bytes: recordBytes },
+          ])
+          phases.transactSign = performance.now() - ti
 
-        let ti = performance.now()
-        const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
-          { cid, bytes: recordBytes },
-        ])
-        phases.transactSign = performance.now() - ti
+          ti = performance.now()
+          const persistOps: Promise<void>[] = [
+            store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
+            store.repo.updateRoot(
+              signed.commitCid,
+              prepared.unsigned.rev,
+              callerDid,
+            ),
+            store.record.indexRecord(
+              uri,
+              cid,
+              record as Record<string, unknown>,
+              'create',
+              prepared.unsigned.rev,
+            ),
+          ]
+          if (signed.removedCids.length > 0) {
+            persistOps.push(store.repo.deleteBlocks(signed.removedCids))
+          }
+          await Promise.all(persistOps)
+          phases.transactPersist = performance.now() - ti
 
-        ti = performance.now()
-        const persistOps: Promise<void>[] = [
-          store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
-          store.repo.updateRoot(
-            signed.commitCid,
-            prepared.unsigned.rev,
-            callerDid,
-          ),
-          store.record.indexRecord(
+          return {
             uri,
             cid,
-            record as Record<string, unknown>,
-            'create',
-            prepared.unsigned.rev,
-          ),
-        ]
-        if (signed.removedCids.length > 0) {
-          persistOps.push(store.repo.deleteBlocks(signed.removedCids))
-        }
-        await Promise.all(persistOps)
-        phases.transactPersist = performance.now() - ti
-
-        return {
-          uri,
-          cid,
-          cidStr: cid.toString(),
-          commit: {
-            cid: signed.commitCid.toString(),
-            rev: signed.rev,
-          },
-        }
-      })
+            cidStr: cid.toString(),
+            commit: {
+              cid: signed.commitCid.toString(),
+              rev: signed.rev,
+            },
+          }
+        },
+      )
     }, ctx.logger)
     result = retry.result
     retries = retry.retries
@@ -335,6 +339,7 @@ export async function createRecord(
     record,
     commitCid: result.commit.cid,
     rev: result.commit.rev,
+    trace: sequenceTrace,
   })
 
   // Write stub to user's PDS (background, non-blocking)
@@ -373,6 +378,7 @@ export interface DeleteRecordInput {
   rkey: string
   swapRecord?: string
   swapCommit?: string
+  requestId?: string
 }
 
 /**
@@ -385,6 +391,10 @@ export async function deleteRecord(
 ): Promise<{ commit?: { cid: string; rev: string }; phases?: WritePhases }> {
   const phases: WritePhases = {}
   const { repo, collection, rkey } = input
+  const sequenceTrace: SequenceTrace = {
+    requestId: input.requestId,
+    queuedAtMs: Date.now(),
+  }
 
   // Must be deleting own record
   if (repo !== callerDid) {
@@ -411,7 +421,7 @@ export async function deleteRecord(
   try {
     const retry = await withConcurrencyRetry(async () => {
       const attemptT0 = performance.now()
-      const prepared = await ctx.actorStore.read(
+      return ctx.actorStore.readThenTransact(
         callerDid,
         async (reader) => {
           phases.connAcquire = performance.now() - attemptT0
@@ -431,49 +441,48 @@ export async function deleteRecord(
 
           return { unsigned, rootCid }
         },
+        async (prepared, store) => {
+          const transactT0 = performance.now()
+          const currentRoot = await store.repo.lockRoot()
+          assertRootUnchanged(
+            currentRoot?.cid.toString() ?? null,
+            prepared.rootCid,
+          )
+          phases.transactLockCheck = performance.now() - transactT0
+
+          const existing = await store.record.getRecord(uri, null)
+          if (!existing) {
+            throw new InvalidRequestError('Record not found', 'RecordNotFound')
+          }
+
+          let ti = performance.now()
+          const signed = await signCommit(ctx.signingKey, prepared.unsigned)
+          phases.transactSign = performance.now() - ti
+
+          ti = performance.now()
+          const persistOps: Promise<void>[] = [
+            store.record.deleteRecord(uri),
+            store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
+            store.repo.updateRoot(
+              signed.commitCid,
+              prepared.unsigned.rev,
+              callerDid,
+            ),
+          ]
+          if (signed.removedCids.length > 0) {
+            persistOps.push(store.repo.deleteBlocks(signed.removedCids))
+          }
+          await Promise.all(persistOps)
+          phases.transactPersist = performance.now() - ti
+
+          return {
+            commit: {
+              cid: signed.commitCid.toString(),
+              rev: signed.rev,
+            },
+          }
+        },
       )
-
-      const transactT0 = performance.now()
-      return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.lockRoot()
-        assertRootUnchanged(
-          currentRoot?.cid.toString() ?? null,
-          prepared.rootCid,
-        )
-        phases.transactLockCheck = performance.now() - transactT0
-
-        const existing = await store.record.getRecord(uri, null)
-        if (!existing) {
-          throw new InvalidRequestError('Record not found', 'RecordNotFound')
-        }
-
-        let ti = performance.now()
-        const signed = await signCommit(ctx.signingKey, prepared.unsigned)
-        phases.transactSign = performance.now() - ti
-
-        ti = performance.now()
-        const persistOps: Promise<void>[] = [
-          store.record.deleteRecord(uri),
-          store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
-          store.repo.updateRoot(
-            signed.commitCid,
-            prepared.unsigned.rev,
-            callerDid,
-          ),
-        ]
-        if (signed.removedCids.length > 0) {
-          persistOps.push(store.repo.deleteBlocks(signed.removedCids))
-        }
-        await Promise.all(persistOps)
-        phases.transactPersist = performance.now() - ti
-
-        return {
-          commit: {
-            cid: signed.commitCid.toString(),
-            rev: signed.rev,
-          },
-        }
-      })
     }, ctx.logger)
     result = retry.result
     retries = retry.retries
@@ -489,6 +498,7 @@ export async function deleteRecord(
     uri: uriStr,
     commitCid: result.commit.cid,
     rev: result.commit.rev,
+    trace: sequenceTrace,
   })
 
   // Delete stub from user's PDS (background, non-blocking)
@@ -503,6 +513,12 @@ export interface UpdateRecordInput {
   rkey: string
   record: unknown
   validate?: boolean
+  requestId?: string
+}
+
+interface SequenceTrace {
+  requestId?: string
+  queuedAtMs: number
 }
 
 export interface UpdateRecordOutput {
@@ -522,6 +538,10 @@ export async function updateRecord(
 ): Promise<UpdateRecordOutput & { phases?: WritePhases }> {
   const phases: WritePhases = {}
   const { repo, collection, rkey, record, validate = true } = input
+  const sequenceTrace: SequenceTrace = {
+    requestId: input.requestId,
+    queuedAtMs: Date.now(),
+  }
 
   if (repo !== callerDid) {
     throw new AuthRequiredError('Cannot update record for another user')
@@ -564,7 +584,7 @@ export async function updateRecord(
   try {
     const retry = await withConcurrencyRetry(async () => {
       const attemptT0 = performance.now()
-      const prepared = await ctx.actorStore.read(
+      return ctx.actorStore.readThenTransact(
         callerDid,
         async (reader) => {
           phases.connAcquire = performance.now() - attemptT0
@@ -584,60 +604,59 @@ export async function updateRecord(
 
           return { unsigned, rootCid }
         },
-      )
+        async (prepared, store) => {
+          const transactT0 = performance.now()
+          const currentRoot = await store.repo.lockRoot()
+          assertRootUnchanged(
+            currentRoot?.cid.toString() ?? null,
+            prepared.rootCid,
+          )
+          phases.transactLockCheck = performance.now() - transactT0
 
-      const transactT0 = performance.now()
-      return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.lockRoot()
-        assertRootUnchanged(
-          currentRoot?.cid.toString() ?? null,
-          prepared.rootCid,
-        )
-        phases.transactLockCheck = performance.now() - transactT0
+          const existing = await store.record.getRecord(uri, null)
+          if (!existing) {
+            throw new InvalidRequestError('Record not found', 'RecordNotFound')
+          }
 
-        const existing = await store.record.getRecord(uri, null)
-        if (!existing) {
-          throw new InvalidRequestError('Record not found', 'RecordNotFound')
-        }
+          let ti = performance.now()
+          const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
+            { cid, bytes: recordBytes },
+          ])
+          phases.transactSign = performance.now() - ti
 
-        let ti = performance.now()
-        const signed = await signCommit(ctx.signingKey, prepared.unsigned, [
-          { cid, bytes: recordBytes },
-        ])
-        phases.transactSign = performance.now() - ti
+          ti = performance.now()
+          const persistOps: Promise<void>[] = [
+            store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
+            store.repo.updateRoot(
+              signed.commitCid,
+              prepared.unsigned.rev,
+              callerDid,
+            ),
+            store.record.indexRecord(
+              uri,
+              cid,
+              record as Record<string, unknown>,
+              'update',
+              prepared.unsigned.rev,
+            ),
+          ]
+          if (signed.removedCids.length > 0) {
+            persistOps.push(store.repo.deleteBlocks(signed.removedCids))
+          }
+          await Promise.all(persistOps)
+          phases.transactPersist = performance.now() - ti
 
-        ti = performance.now()
-        const persistOps: Promise<void>[] = [
-          store.repo.putBlocks(signed.allBlocks, prepared.unsigned.rev),
-          store.repo.updateRoot(
-            signed.commitCid,
-            prepared.unsigned.rev,
-            callerDid,
-          ),
-          store.record.indexRecord(
+          return {
             uri,
             cid,
-            record as Record<string, unknown>,
-            'update',
-            prepared.unsigned.rev,
-          ),
-        ]
-        if (signed.removedCids.length > 0) {
-          persistOps.push(store.repo.deleteBlocks(signed.removedCids))
-        }
-        await Promise.all(persistOps)
-        phases.transactPersist = performance.now() - ti
-
-        return {
-          uri,
-          cid,
-          cidStr: cid.toString(),
-          commit: {
-            cid: signed.commitCid.toString(),
-            rev: signed.rev,
-          },
-        }
-      })
+            cidStr: cid.toString(),
+            commit: {
+              cid: signed.commitCid.toString(),
+              rev: signed.rev,
+            },
+          }
+        },
+      )
     }, ctx.logger)
     result = retry.result
     retries = retry.retries
@@ -655,6 +674,7 @@ export async function updateRecord(
     record,
     commitCid: result.commit.cid,
     rev: result.commit.rev,
+    trace: sequenceTrace,
   })
 
   // Update stub on PDS (background, non-blocking)
@@ -849,7 +869,13 @@ export async function applyWritesBatch(
   ctx: AppContext,
   callerDid: string,
   ops: BatchWriteOp[],
+  requestId?: string,
 ): Promise<BatchWriteResult> {
+  const sequenceTrace: SequenceTrace = {
+    requestId,
+    queuedAtMs: Date.now(),
+  }
+
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
 
   // Pre-compute CPU-bound work outside the transaction
@@ -899,7 +925,7 @@ export async function applyWritesBatch(
     }
 
     const retry = await withConcurrencyRetry(async () => {
-      const { rootCid, unsigned } = await ctx.actorStore.read(
+      return ctx.actorStore.readThenTransact(
         callerDid,
         async (reader) => {
           const rootDetails = await reader.repo.getRootDetailed()
@@ -911,54 +937,53 @@ export async function applyWritesBatch(
           })
           return { rootCid, unsigned }
         },
-      )
+        async ({ rootCid, unsigned }, store) => {
+          const currentRoot = await store.repo.lockRoot()
+          assertRootUnchanged(currentRoot?.cid.toString() ?? null, rootCid)
 
-      return ctx.actorStore.transact(callerDid, async (store) => {
-        const currentRoot = await store.repo.lockRoot()
-        assertRootUnchanged(currentRoot?.cid.toString() ?? null, rootCid)
-
-        for (const pre of precomputed) {
-          if (pre.action === 'delete') {
-            const existing = await store.record.getRecord(pre.uri, null)
-            if (!existing) {
-              throw new InvalidRequestError('Record not found', 'RecordNotFound')
+          for (const pre of precomputed) {
+            if (pre.action === 'delete') {
+              const existing = await store.record.getRecord(pre.uri, null)
+              if (!existing) {
+                throw new InvalidRequestError('Record not found', 'RecordNotFound')
+              }
+            } else {
+              await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
             }
-          } else {
-            await store.repo.putBlock(pre.cid, pre.recordBytes, pre.tempRev)
           }
-        }
 
-        const commitResult = await signAndPersistCommit(
-          store.repo,
-          ctx.signingKey,
-          unsigned,
-        )
+          const commitResult = await signAndPersistCommit(
+            store.repo,
+            ctx.signingKey,
+            unsigned,
+          )
 
-        const results: Array<{ uri?: string; cid?: string }> = []
-        for (const pre of precomputed) {
-          if (pre.action === 'delete') {
-            await store.record.deleteRecord(pre.uri)
-            results.push({})
-          } else {
-            await store.record.indexRecord(
-              pre.uri,
-              pre.cid!,
-              pre.op.record as Record<string, unknown>,
-              pre.action,
-              commitResult.rev,
-            )
-            results.push({ uri: pre.uriStr, cid: pre.cid!.toString() })
+          const results: Array<{ uri?: string; cid?: string }> = []
+          for (const pre of precomputed) {
+            if (pre.action === 'delete') {
+              await store.record.deleteRecord(pre.uri)
+              results.push({})
+            } else {
+              await store.record.indexRecord(
+                pre.uri,
+                pre.cid!,
+                pre.op.record as Record<string, unknown>,
+                pre.action,
+                commitResult.rev,
+              )
+              results.push({ uri: pre.uriStr, cid: pre.cid!.toString() })
+            }
           }
-        }
 
-        return {
-          results,
-          commit: {
-            cid: commitResult.commitCid.toString(),
-            rev: commitResult.rev,
-          },
-        }
-      })
+          return {
+            results,
+            commit: {
+              cid: commitResult.commitCid.toString(),
+              rev: commitResult.rev,
+            },
+          }
+        },
+      )
     }, ctx.logger)
     result = retry.result
   } finally {
@@ -976,6 +1001,7 @@ export async function applyWritesBatch(
           uri: pre.uriStr,
           commitCid: result.commit.cid,
           rev: result.commit.rev,
+          trace: sequenceTrace,
         }
       }
       return {
@@ -985,6 +1011,7 @@ export async function applyWritesBatch(
         record: pre.op.record,
         commitCid: result.commit.cid,
         rev: result.commit.rev,
+        trace: sequenceTrace,
       }
     }),
   )
@@ -1014,6 +1041,7 @@ async function sequenceChange(
     record?: unknown
     commitCid: string
     rev: string
+    trace?: SequenceTrace
   },
 ): Promise<void> {
   // Sequence the change for subscriptions
@@ -1024,6 +1052,7 @@ async function sequenceChange(
     record: op.record as LexValue | undefined,
     commit: op.commitCid,
     rev: op.rev,
+    trace: op.trace as LexValue | undefined,
   }
 
   await store.sequence.appendEvent({
@@ -1042,6 +1071,7 @@ type SequenceOp = {
   record?: unknown
   commitCid: string
   rev: string
+  trace?: SequenceTrace
 }
 
 function deferSequenceChange(
