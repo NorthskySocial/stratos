@@ -1,8 +1,11 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { decode as cborDecode } from '@atproto/lex-cbor'
+import type { WebSocket } from 'ws'
 
 import type { AppContext, EnrollmentEvent } from '../context.js'
 import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
+
+const WS_PING_INTERVAL_MS = 30_000
 
 /**
  * Sequence event from stratos_seq table
@@ -248,7 +251,8 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
     return await ctx.actorStore.read(did, async (store) => {
       return store.sequence.getLatestSeq()
     })
-  } catch {
+  } catch (err) {
+    ctx.logger?.warn({ did, err }, 'getLatestSeq failed')
     return 0
   }
 }
@@ -258,7 +262,8 @@ async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
     return await ctx.actorStore.read(did, async (store) => {
       return store.sequence.getOldestSeq()
     })
-  } catch {
+  } catch (err) {
+    ctx.logger?.warn({ did, err }, 'getOldestSeq failed')
     return 0
   }
 }
@@ -289,7 +294,8 @@ async function getEventsSince(
         }
       })
     })
-  } catch {
+  } catch (err) {
+    ctx.logger?.warn({ did, cursor, err }, 'getEventsSince failed')
     return []
   }
 }
@@ -404,4 +410,33 @@ export function registerSubscribeRecords(ctx: AppContext): void {
       }
     },
   })
+
+  // Configure WebSocket ping/pong to keep connections alive through ALBs
+  const sub = (
+    ctx.xrpcServer as unknown as {
+      subscriptions: Map<
+        string,
+        { wss: { on: (event: string, cb: (ws: WebSocket) => void) => void } }
+      >
+    }
+  ).subscriptions.get('zone.stratos.sync.subscribeRecords')
+  if (sub) {
+    sub.wss.on('connection', (ws: WebSocket) => {
+      let alive = true
+      ws.on('pong', () => {
+        alive = true
+      })
+      const interval = setInterval(() => {
+        if (!alive) {
+          ws.terminate()
+          clearInterval(interval)
+          return
+        }
+        alive = false
+        ws.ping()
+      }, WS_PING_INTERVAL_MS)
+      ws.on('close', () => clearInterval(interval))
+    })
+    ctx.logger?.info('WebSocket ping/pong configured (interval: 30s)')
+  }
 }

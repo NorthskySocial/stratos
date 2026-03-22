@@ -5,8 +5,11 @@ import type { CursorManager } from './cursor-manager.ts'
 import { extractBoundaries } from './record-decoder.ts'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
-const MAX_RECONNECT_DELAY_MS = 60_000
-const MAX_RECONNECT_ATTEMPTS = 20
+const DEFAULT_RECONNECT_BASE_DELAY_MS = 1_000
+const DEFAULT_RECONNECT_MAX_DELAY_MS = 60_000
+const DEFAULT_RECONNECT_JITTER_MS = 1_000
+const DEFAULT_RECONNECT_MAX_ATTEMPTS = 200
+const INDEX_TRACE_WARN_LAG_MS = 5_000
 
 export interface StratosSyncConfig {
   stratosServiceUrl: string
@@ -26,6 +29,10 @@ interface StratosRecordOp {
   path: string
   cid?: string
   record?: Record<string, unknown>
+  trace?: {
+    requestId?: string
+    queuedAtMs?: number
+  }
 }
 
 interface EnrollmentMessage {
@@ -111,7 +118,7 @@ export class StratosServiceSubscription {
     this.reconnectAttempt++
     const delay = Math.min(
       1000 * Math.pow(2, this.reconnectAttempt),
-      MAX_RECONNECT_DELAY_MS,
+      DEFAULT_RECONNECT_MAX_DELAY_MS,
     )
     setTimeout(() => this.connect(), delay)
   }
@@ -152,6 +159,10 @@ export interface StratosActorSyncOptions {
   maxConnections: number
   connectDelayMs: number
   idleEvictionMs: number
+  reconnectBaseDelayMs: number
+  reconnectMaxDelayMs: number
+  reconnectJitterMs: number
+  reconnectMaxAttempts: number
 }
 
 interface ActorQueue {
@@ -160,10 +171,21 @@ interface ActorQueue {
   draining: boolean
 }
 
+interface RecordUpsert {
+  uri: string
+  cid: string
+  record: Record<string, unknown>
+  trace?: {
+    requestId?: string
+    queuedAtMs?: number
+  }
+}
+
 export class StratosActorSync {
   private subscriptions = new Map<string, WebSocket>()
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private reconnectAttempts = new Map<string, number>()
+  private intentionallyClosed = new Set<string>()
   private running = false
   private knownDids = new Map<string, number>()
   private knownDidsSweepTimer: ReturnType<typeof setInterval> | null = null
@@ -174,6 +196,10 @@ export class StratosActorSync {
   private waitingActors: string[] = []
   private readonly maxConnections: number
   private readonly connectDelayMs: number
+  private readonly reconnectBaseDelayMs: number
+  private readonly reconnectMaxDelayMs: number
+  private readonly reconnectJitterMs: number
+  private readonly reconnectMaxAttempts: number
   private connectTimer: ReturnType<typeof setTimeout> | null = null
 
   // Per-actor bounded queues prevent unbounded concurrent DB operations during spikes
@@ -212,6 +238,10 @@ export class StratosActorSync {
       maxConnections: 20,
       connectDelayMs: 200,
       idleEvictionMs: 60_000,
+      reconnectBaseDelayMs: DEFAULT_RECONNECT_BASE_DELAY_MS,
+      reconnectMaxDelayMs: DEFAULT_RECONNECT_MAX_DELAY_MS,
+      reconnectJitterMs: DEFAULT_RECONNECT_JITTER_MS,
+      reconnectMaxAttempts: DEFAULT_RECONNECT_MAX_ATTEMPTS,
     },
     private onHandleNeeded?: (did: string) => void,
   ) {
@@ -222,6 +252,10 @@ export class StratosActorSync {
     this.maxConnections = options.maxConnections
     this.connectDelayMs = options.connectDelayMs
     this.idleEvictionMs = options.idleEvictionMs
+    this.reconnectBaseDelayMs = options.reconnectBaseDelayMs
+    this.reconnectMaxDelayMs = options.reconnectMaxDelayMs
+    this.reconnectJitterMs = options.reconnectJitterMs
+    this.reconnectMaxAttempts = options.reconnectMaxAttempts
   }
 
   start(): void {
@@ -278,6 +312,7 @@ export class StratosActorSync {
     this.knownDids.clear()
     this.lastMessageAt.clear()
     this.waitingActors = []
+    this.intentionallyClosed.clear()
 
     for (const timer of this.reconnectTimers.values()) {
       clearTimeout(timer)
@@ -315,6 +350,7 @@ export class StratosActorSync {
     }
     const ws = this.subscriptions.get(did)
     if (ws) {
+      this.intentionallyClosed.add(did)
       ws.close()
       this.subscriptions.delete(did)
     }
@@ -378,13 +414,17 @@ export class StratosActorSync {
       this.reconnectAttempts.delete(did)
     })
 
-    ws.onmessage = (e: MessageEvent) => {
+    // Respond to server pings to keep ALB connection alive
+    ws.addEventListener('message', (e: MessageEvent) => {
       this.lastMessageAt.set(did, Date.now())
       this.enqueueActorMessage(did, new Uint8Array(e.data as ArrayBuffer))
-    }
+    })
 
     ws.addEventListener('close', (e: { code: number; reason: string }) => {
       this.subscriptions.delete(did)
+      if (this.intentionallyClosed.delete(did)) {
+        return
+      }
       if (e.code !== 1000) {
         this.onError?.(
           new Error(
@@ -411,9 +451,9 @@ export class StratosActorSync {
     const attempt = (this.reconnectAttempts.get(did) ?? 0) + 1
     this.reconnectAttempts.set(did, attempt)
 
-    if (attempt > MAX_RECONNECT_ATTEMPTS) {
+    if (attempt > this.reconnectMaxAttempts) {
       console.warn(
-        `max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached for ${did}, giving up`,
+        `max reconnect attempts (${this.reconnectMaxAttempts}) reached for ${did}, giving up`,
       )
       this.reconnectAttempts.delete(did)
       return
@@ -426,7 +466,15 @@ export class StratosActorSync {
       return
     }
 
-    const delay = Math.min(1000 * Math.pow(2, attempt), MAX_RECONNECT_DELAY_MS)
+    const exponentialDelay = Math.min(
+      this.reconnectBaseDelayMs * Math.pow(2, attempt - 1),
+      this.reconnectMaxDelayMs,
+    )
+    const jitter =
+      this.reconnectJitterMs > 0
+        ? Math.floor(Math.random() * this.reconnectJitterMs)
+        : 0
+    const delay = exponentialDelay + jitter
     const timer = setTimeout(() => {
       this.reconnectTimers.delete(did)
       if (this.subscriptions.size >= this.maxConnections) {
@@ -463,6 +511,7 @@ export class StratosActorSync {
   private closeAndReconnectActor(did: string): void {
     const ws = this.subscriptions.get(did)
     if (ws) {
+      this.intentionallyClosed.add(did)
       ws.close()
       this.subscriptions.delete(did)
     }
@@ -541,11 +590,7 @@ export class StratosActorSync {
     did: string,
     commit: StratosCommitMessage,
   ): Promise<void> {
-    const upserts: Array<{
-      uri: string
-      cid: string
-      record: Record<string, unknown>
-    }> = []
+    const upserts: RecordUpsert[] = []
     const deletes: string[] = []
 
     for (const op of commit.ops) {
@@ -556,7 +601,12 @@ export class StratosActorSync {
       const uri = `at://${did}/${trimmedPath}`
 
       if ((op.action === 'create' || op.action === 'update') && op.record) {
-        upserts.push({ uri, cid: op.cid ?? '', record: op.record })
+        upserts.push({
+          uri,
+          cid: op.cid ?? '',
+          record: op.record,
+          trace: op.trace,
+        })
       } else if (op.action === 'delete') {
         deletes.push(uri)
       }
@@ -571,6 +621,34 @@ export class StratosActorSync {
     }
 
     await batchIndexStratosRecords(this.db, upserts, deletes, commit.time)
+
+    let maxIndexLagMs = 0
+    const traceSamples: string[] = []
+    const nowMs = Date.now()
+    for (const upsert of upserts) {
+      const queuedAtMs = upsert.trace?.queuedAtMs
+      if (typeof queuedAtMs !== 'number') continue
+      const lagMs = Math.max(0, nowMs - queuedAtMs)
+      if (lagMs > maxIndexLagMs) {
+        maxIndexLagMs = lagMs
+      }
+      if (upsert.trace?.requestId && traceSamples.length < 3) {
+        traceSamples.push(upsert.trace.requestId)
+      }
+    }
+
+    if (maxIndexLagMs >= INDEX_TRACE_WARN_LAG_MS) {
+      console.warn(
+        {
+          did,
+          seq: commit.seq,
+          indexed: upserts.length,
+          maxIndexLagMs,
+          traceSamples,
+        },
+        'high create-to-index lag observed',
+      )
+    }
 
     this.indexedCount += upserts.length
     this.deletedCount += deletes.length
@@ -634,11 +712,16 @@ export class StratosActorSync {
     for (let i = 0; i < evictCount; i++) {
       const { did } = idleDids[i]
       console.log(
-        { did, idleMs: idleDids[i].idleMs, waitingActors: this.waitingActors.length },
+        {
+          did,
+          idleMs: idleDids[i].idleMs,
+          waitingActors: this.waitingActors.length,
+        },
         'evicting idle actor connection to promote waiting actor',
       )
       const ws = this.subscriptions.get(did)
       if (ws) {
+        this.intentionallyClosed.add(did)
         ws.close()
         this.subscriptions.delete(did)
       }
@@ -690,12 +773,6 @@ function didFromUri(uri: string): string | null {
 }
 
 // --- Stratos record indexer ---
-
-interface RecordUpsert {
-  uri: string
-  cid: string
-  record: Record<string, unknown>
-}
 
 function preparePostRow(
   uri: string,
