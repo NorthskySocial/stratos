@@ -30,9 +30,9 @@ When a user imports a CAR from another Stratos service, the destination service 
 
 This would open the door for operators to optionally enforce strict inter-service verification as a policy (e.g., reject imports where the source service is reachable but refuses to confirm the signature). Tracked as a note in the mst-verification requirements.
 
-## importRepo re-signing with service key
+## ~~importRepo re-signing with service key~~
 
-The `importRepo` handler stores the original CAR blocks and commit verbatim, preserving the source signature. The original MST implementation plan called for rebuilding the MST from scratch and re-signing with `ctx.signingKey` so the imported repo is authoritative under the Stratos service's DID. Without re-signing, AppViews that verify commit signatures against the Stratos service DID document will fail verification on imported repos.
+**Done**: The `importRepo` handler now re-signs incoming commits with the user's per-enrollment P-256 key. The original commit block is discarded, a new `UnsignedCommitData` is built from the original MST root CID and rev, and the commit is signed with the user's key. This makes imported repos verifiable against the user's enrollment record.
 
 ## Property-based tests for MST operations
 
@@ -40,9 +40,9 @@ The `importRepo` handler stores the original CAR blocks and commit verbatim, pre
 
 ## Per-user signing key — sign collections with user key
 
-**Done**: P-256 signing key generation and storage is implemented. At enrollment time, Stratos generates a P-256 keypair per user, stores the private key at `{dataDir}/actors/{prefix}/{did}/signing_key`, and publishes the public key (`did:key` format) plus a service attestation in the enrollment record on the user's PDS. The attestation is a DAG-CBOR payload (`{boundaries, did, signingKey}`) signed by the service's secp256k1 key. Attestations are regenerated on boundary changes and deleted on unenrollment. The `signingKeyDid` is cached in the enrollment table for efficient status lookups.
+**Done**: All record commits (create, update, delete, batch writes) are signed with the actor's per-enrollment P-256 key. The service Secp256k1 key is used as a fallback when a user's key is not yet available (forward-only migration — existing commits are not re-signed). `importRepo` re-signs incoming commits with the user's P-256 key so imported repos are verifiable against the user's enrollment record.
 
-**Next**: Use the per-user P-256 key to sign repo commits instead of (or in addition to) the service-wide secp256k1 key. This enables user-level authorship verification — anyone can verify a commit was created by a specific user by checking the signature against the public key in their enrollment record. This also improves data portability: exported repos carry user signatures verifiable independently of the original Stratos service.
+The client library (`stratos-client`) supports a `'user-signature'` verification level: `resolveUserSigningKey()` extracts the user's public key from their enrollment attestation, and `fetchAndVerifyRecord()` prefers it over the service key when verifying records.
 
 ## Encryption at rest
 

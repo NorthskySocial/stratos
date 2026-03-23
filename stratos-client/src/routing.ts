@@ -1,6 +1,18 @@
 import type { FetchHandler, FetchHandlerObject } from '@atcute/client'
 
 /**
+ * converts a service DID to a valid AT Protocol record key.
+ * replaces percent-encoded colons (%3A) with literal colons,
+ * which are valid rkey characters.
+ *
+ * @param serviceDid the service's DID (e.g., 'did:web:stratos.example.com')
+ * @returns a valid AT Protocol record key
+ */
+export const serviceDIDToRkey = (serviceDid: string): string => {
+  return serviceDid.replace(/%3A/gi, ':')
+}
+
+/**
  * creates a fetch handler that routes XRPC calls to a specific service URL
  * using an existing authenticated handler for DPoP credentials.
  *
@@ -37,4 +49,21 @@ export const resolveServiceUrl = (
   fallbackUrl: string,
 ): string => {
   return enrollment?.service ?? fallbackUrl
+}
+
+/**
+ * finds the enrollment matching a given service URL from a list of enrollments.
+ *
+ * @param enrollments array of discovered enrollments
+ * @param serviceUrl the service URL to match
+ * @returns the matching enrollment, or null if not found
+ */
+export const findEnrollmentByService = (
+  enrollments: Array<{ service: string }>,
+  serviceUrl: string,
+): (typeof enrollments)[number] | null => {
+  const normalized = serviceUrl.replace(/\/$/, '')
+  return (
+    enrollments.find((e) => e.service.replace(/\/$/, '') === normalized) ?? null
+  )
 }

@@ -2,5 +2,6 @@ packages:
   - 'stratos-core'
   - 'stratos-service'
   - 'stratos-client'
+  - 'stratos-indexer'
   - 'webapp'
   - 'infra'

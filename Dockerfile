@@ -27,6 +27,9 @@ COPY stratos-core/ ./stratos-core/
 COPY stratos-service/ ./stratos-service/
 COPY lexicons/ ./lexicons/
 
+# Re-link workspace node_modules (COPY can disrupt pnpm symlinks)
+RUN pnpm install --frozen-lockfile
+
 # Generate version module, then compile both packages
 RUN pnpm run --filter stratos-service generate:version \
     && pnpm run --filter stratos-core build \

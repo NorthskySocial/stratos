@@ -4,8 +4,8 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A profile record indicating the user is enrolled in a Stratos service. Published to the user's PDS during OAuth enrollment for endpoint discovery by AppViews.",
-      "key": "literal:self",
+      "description": "A record indicating the user is enrolled in a Stratos service. Published to the user's PDS during OAuth enrollment for endpoint discovery by AppViews. Multiple enrollment records are supported — one per Stratos service.",
+      "key": "any",
       "record": {
         "type": "object",
         "required": ["service", "signingKey", "attestation", "createdAt"],

@@ -22,144 +22,167 @@ export class PgRecordStoreReader implements RecordStoreReader {
   constructor(
     protected db: StratosPgDb | StratosPgDbOrTx,
     protected cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    protected schemaName?: string,
   ) {}
 
+  protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
+    if (!this.schemaName) {
+      return fn(this.db as StratosPgDb)
+    }
+    return (this.db as StratosPgDb).transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${this.schemaName}"`))
+      return fn(tx as unknown as StratosPgDb)
+    })
+  }
+
   async recordCount(): Promise<number> {
-    const rows = await this.db
-      .select({ count: sql<number>`count(*)` })
-      .from(pgStratosRecord)
-    return Number(rows[0]?.count ?? 0)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(pgStratosRecord)
+      return Number(rows[0]?.count ?? 0)
+    })
   }
 
   async listAll(): Promise<RecordDescript[]> {
-    const records: RecordDescript[] = []
-    let cursor: string | undefined = ''
-    while (cursor !== undefined) {
-      const res = await this.db
-        .select({ uri: pgStratosRecord.uri, cid: pgStratosRecord.cid })
-        .from(pgStratosRecord)
-        .where(gt(pgStratosRecord.uri, cursor))
-        .orderBy(asc(pgStratosRecord.uri))
-        .limit(1000)
-      for (const row of res) {
-        const parsed = new AtUri(row.uri)
-        records.push({
-          uri: row.uri,
-          cid: CID.parse(row.cid),
-          collection: parsed.collection,
-          rkey: parsed.rkey,
-        })
+    return this.withDb(async (db) => {
+      const records: RecordDescript[] = []
+      let cursor: string | undefined = ''
+      while (cursor !== undefined) {
+        const res = await db
+          .select({ uri: pgStratosRecord.uri, cid: pgStratosRecord.cid })
+          .from(pgStratosRecord)
+          .where(gt(pgStratosRecord.uri, cursor))
+          .orderBy(asc(pgStratosRecord.uri))
+          .limit(1000)
+        for (const row of res) {
+          const parsed = new AtUri(row.uri)
+          records.push({
+            uri: row.uri,
+            cid: CID.parse(row.cid),
+            collection: parsed.collection,
+            rkey: parsed.rkey,
+          })
+        }
+        cursor = res.at(-1)?.uri
       }
-      cursor = res.at(-1)?.uri
-    }
-    return records
+      return records
+    })
   }
 
   async listRecords(options: ListRecordsOptions): Promise<RecordValue[]> {
-    const conditions = [eq(pgStratosRecord.collection, options.collection)]
+    return this.withDb(async (db) => {
+      const conditions = [eq(pgStratosRecord.collection, options.collection)]
 
-    if (!options.includeSoftDeleted) {
-      conditions.push(isNull(pgStratosRecord.takedownRef))
-    }
+      if (!options.includeSoftDeleted) {
+        conditions.push(isNull(pgStratosRecord.takedownRef))
+      }
 
-    if (options.cursor !== undefined) {
-      if (options.reverse) {
-        conditions.push(gt(pgStratosRecord.rkey, options.cursor))
+      if (options.cursor !== undefined) {
+        if (options.reverse) {
+          conditions.push(gt(pgStratosRecord.rkey, options.cursor))
+        } else {
+          conditions.push(lt(pgStratosRecord.rkey, options.cursor))
+        }
       } else {
-        conditions.push(lt(pgStratosRecord.rkey, options.cursor))
+        if (options.rkeyStart !== undefined) {
+          conditions.push(gt(pgStratosRecord.rkey, options.rkeyStart))
+        }
+        if (options.rkeyEnd !== undefined) {
+          conditions.push(lt(pgStratosRecord.rkey, options.rkeyEnd))
+        }
       }
-    } else {
-      if (options.rkeyStart !== undefined) {
-        conditions.push(gt(pgStratosRecord.rkey, options.rkeyStart))
-      }
-      if (options.rkeyEnd !== undefined) {
-        conditions.push(lt(pgStratosRecord.rkey, options.rkeyEnd))
-      }
-    }
 
-    const res = await this.db
-      .select({
-        uri: pgStratosRecord.uri,
-        cid: pgStratosRecord.cid,
-        content: pgStratosRepoBlock.content,
-      })
-      .from(pgStratosRecord)
-      .innerJoin(
-        pgStratosRepoBlock,
-        eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
-      )
-      .where(and(...conditions))
-      .orderBy(
-        options.reverse
-          ? asc(pgStratosRecord.rkey)
-          : desc(pgStratosRecord.rkey),
-      )
-      .limit(options.limit ?? 50)
+      const res = await db
+        .select({
+          uri: pgStratosRecord.uri,
+          cid: pgStratosRecord.cid,
+          content: pgStratosRepoBlock.content,
+        })
+        .from(pgStratosRecord)
+        .innerJoin(
+          pgStratosRepoBlock,
+          eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
+        )
+        .where(and(...conditions))
+        .orderBy(
+          options.reverse
+            ? asc(pgStratosRecord.rkey)
+            : desc(pgStratosRecord.rkey),
+        )
+        .limit(options.limit ?? 50)
 
-    return res.map((row) => ({
-      uri: row.uri,
-      cid: row.cid,
-      value: this.cborToRecord(row.content),
-      indexedAt: new Date().toISOString(),
-      takedownRef: null,
-    }))
+      return res.map((row) => ({
+        uri: row.uri,
+        cid: row.cid,
+        value: this.cborToRecord(row.content),
+        indexedAt: new Date().toISOString(),
+        takedownRef: null,
+      }))
+    })
   }
 
   async getRecord(options: GetRecordOptions): Promise<RecordValue | null> {
-    const uri = new AtUri(options.uri)
-    const conditions = [eq(pgStratosRecord.uri, uri.toString())]
+    return this.withDb(async (db) => {
+      const uri = new AtUri(options.uri)
+      const conditions = [eq(pgStratosRecord.uri, uri.toString())]
 
-    if (!options.includeSoftDeleted) {
-      conditions.push(isNull(pgStratosRecord.takedownRef))
-    }
+      if (!options.includeSoftDeleted) {
+        conditions.push(isNull(pgStratosRecord.takedownRef))
+      }
 
-    const res = await this.db
-      .select({
-        uri: pgStratosRecord.uri,
-        cid: pgStratosRecord.cid,
-        indexedAt: pgStratosRecord.indexedAt,
-        takedownRef: pgStratosRecord.takedownRef,
-        content: pgStratosRepoBlock.content,
-      })
-      .from(pgStratosRecord)
-      .innerJoin(
-        pgStratosRepoBlock,
-        eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
-      )
-      .where(and(...conditions))
-      .limit(1)
+      const res = await db
+        .select({
+          uri: pgStratosRecord.uri,
+          cid: pgStratosRecord.cid,
+          indexedAt: pgStratosRecord.indexedAt,
+          takedownRef: pgStratosRecord.takedownRef,
+          content: pgStratosRepoBlock.content,
+        })
+        .from(pgStratosRecord)
+        .innerJoin(
+          pgStratosRepoBlock,
+          eq(pgStratosRepoBlock.cid, pgStratosRecord.cid),
+        )
+        .where(and(...conditions))
+        .limit(1)
 
-    const record = res[0]
-    if (!record) return null
+      const record = res[0]
+      if (!record) return null
 
-    return {
-      uri: record.uri,
-      cid: record.cid,
-      value: this.cborToRecord(record.content),
-      indexedAt: record.indexedAt,
-      takedownRef: record.takedownRef,
-    }
+      return {
+        uri: record.uri,
+        cid: record.cid,
+        value: this.cborToRecord(record.content),
+        indexedAt: record.indexedAt,
+        takedownRef: record.takedownRef,
+      }
+    })
   }
 
   async hasRecord(uri: string): Promise<boolean> {
-    const rows = await this.db
-      .select({ uri: pgStratosRecord.uri })
-      .from(pgStratosRecord)
-      .where(eq(pgStratosRecord.uri, uri))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ uri: pgStratosRecord.uri })
+        .from(pgStratosRecord)
+        .where(eq(pgStratosRecord.uri, uri))
+        .limit(1)
 
-    return rows.length > 0
+      return rows.length > 0
+    })
   }
 
   async getRecordContent(cid: CID): Promise<Uint8Array | null> {
-    const rows = await this.db
-      .select({ content: pgStratosRepoBlock.content })
-      .from(pgStratosRepoBlock)
-      .where(eq(pgStratosRepoBlock.cid, cid.toString()))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ content: pgStratosRepoBlock.content })
+        .from(pgStratosRepoBlock)
+        .where(eq(pgStratosRepoBlock.cid, cid.toString()))
+        .limit(1)
 
-    const content = rows[0]?.content
-    return content ? content : null
+      const content = rows[0]?.content
+      return content ? content : null
+    })
   }
 }
 

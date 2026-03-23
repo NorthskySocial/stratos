@@ -3,8 +3,9 @@ import * as fs from 'node:fs/promises'
 import { readFileSync, readdirSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { EventEmitter } from 'node:events'
 import express from 'express'
-import { eq, gt, asc, desc, sql } from 'drizzle-orm'
+import { eq, gt, asc, desc, sql, and } from 'drizzle-orm'
 import * as crypto from '@atproto/crypto'
 import { IdResolver } from '@atproto/identity'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
@@ -19,6 +20,8 @@ import {
 import { schemas as atprotoSchemas, Agent } from '@atproto/api'
 import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
+import { WriteRateLimiter } from './rate-limiter.js'
+import { RepoWriteLocks } from './repo-write-lock.js'
 import { verifyServiceAuth } from './auth/verifier.js'
 
 import {
@@ -43,6 +46,7 @@ import {
   type StoredEnrollment,
   type ListEnrollmentsOptions,
   createAttestationPayload,
+  buildCommit,
 } from '@northskysocial/stratos-core'
 import type {
   SequenceOperations,
@@ -57,12 +61,11 @@ import {
   ExternalAllowListProvider,
   ProfileRecordWriterImpl,
 } from './features/index.js'
-import { StubWriterServiceImpl } from './features/index.js'
+import { StubWriterServiceImpl, BackgroundStubQueue } from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
 } from './features/index.js'
-import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   type StratosServiceConfig,
@@ -96,6 +99,7 @@ import {
 } from './db/pg.js'
 import { PgEnrollmentStoreWriter } from './adapters/index.js'
 import { PostgresActorStore } from './adapters/index.js'
+import { CachedEnrollmentStore } from './adapters/cached-enrollment-store.js'
 import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
 import { VERSION } from './version.js'
 import { RedisCache } from './adapters/redis-cache.js'
@@ -168,6 +172,7 @@ export class StratosActorStore implements ActorStore {
   private readonly dataDir: string
   private readonly blobstore: BlobStoreCreator
   private readonly logger?: Logger
+  private readonly existsCache = new Set<string>()
   private readonly cborToRecord: (
     content: Uint8Array,
   ) => Record<string, unknown>
@@ -185,8 +190,11 @@ export class StratosActorStore implements ActorStore {
   }
 
   async exists(did: string): Promise<boolean> {
+    if (this.existsCache.has(did)) return true
     const { dbLocation } = await this.getLocation(did)
-    return fileExists(dbLocation)
+    const found = await fileExists(dbLocation)
+    if (found) this.existsCache.add(did)
+    return found
   }
 
   async create(did: string): Promise<void> {
@@ -200,11 +208,13 @@ export class StratosActorStore implements ActorStore {
     } finally {
       await closeStratosDb(db)
     }
+    this.existsCache.add(did)
   }
 
   async destroy(did: string): Promise<void> {
     const { directory } = await this.getLocation(did)
     await fs.rm(directory, { recursive: true, force: true })
+    this.existsCache.delete(did)
   }
 
   async read<T>(
@@ -254,6 +264,49 @@ export class StratosActorStore implements ActorStore {
           sequence: new SqliteSequenceOps(txDb),
         }
         return fn(store)
+      })
+    } finally {
+      await closeStratosDb(db)
+    }
+  }
+
+  async readThenTransact<R, T>(
+    did: string,
+    readFn: (store: ActorReader) => R | PromiseLike<R>,
+    transactFn: (
+      readResult: Awaited<R>,
+      store: ActorTransactor,
+    ) => T | PromiseLike<T>,
+  ): Promise<T> {
+    const { dbLocation } = await this.getLocation(did)
+    const db = createStratosDb(dbLocation)
+    await db._initialized
+    const blobStore = this.blobstore(did)
+
+    try {
+      const reader: ActorReader = {
+        did,
+        record: new StratosRecordReader(db, this.cborToRecord, this.logger),
+        repo: new StratosSqlRepoReader(db),
+        blob: new StratosBlobReader(db, blobStore, this.logger),
+        sequence: new SqliteSequenceOps(db),
+      }
+      const readResult = (await readFn(reader)) as Awaited<R>
+
+      return await db.transaction(async (tx) => {
+        const txDb = tx as unknown as StratosDbOrTx
+        const transactor: ActorTransactor = {
+          did,
+          record: new StratosRecordTransactor(
+            txDb,
+            this.cborToRecord,
+            this.logger,
+          ),
+          repo: new StratosSqlRepoTransactor(txDb),
+          blob: new StratosBlobTransactor(txDb, blobStore, this.logger),
+          sequence: new SqliteSequenceOps(txDb),
+        }
+        return transactFn(readResult, transactor)
       })
     } finally {
       await closeStratosDb(db)
@@ -334,6 +387,7 @@ export class SqliteEnrollmentStore
         pdsEndpoint: record.pdsEndpoint ?? null,
         signingKeyDid: record.signingKeyDid,
         active: record.active ? 'true' : 'false',
+        enrollmentRkey: record.enrollmentRkey ?? null,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -342,6 +396,7 @@ export class SqliteEnrollmentStore
           pdsEndpoint: record.pdsEndpoint ?? null,
           signingKeyDid: record.signingKeyDid,
           active: record.active ? 'true' : 'false',
+          enrollmentRkey: record.enrollmentRkey ?? null,
         },
       })
 
@@ -385,6 +440,31 @@ export class SqliteEnrollmentStore
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
+    }
+  }
+
+  async updateEnrollment(
+    did: string,
+    updates: Partial<Omit<EnrollmentRecord, 'did'>>,
+  ): Promise<void> {
+    const setValues: Record<string, unknown> = {}
+    if (updates.enrolledAt !== undefined)
+      setValues.enrolledAt = updates.enrolledAt
+    if (updates.pdsEndpoint !== undefined)
+      setValues.pdsEndpoint = updates.pdsEndpoint
+    if (updates.signingKeyDid !== undefined)
+      setValues.signingKeyDid = updates.signingKeyDid
+    if (updates.active !== undefined)
+      setValues.active = updates.active ? 'true' : 'false'
+    if (updates.enrollmentRkey !== undefined)
+      setValues.enrollmentRkey = updates.enrollmentRkey
+
+    if (Object.keys(setValues).length > 0) {
+      await this.db
+        .update(enrollment)
+        .set(setValues)
+        .where(eq(enrollment.did, did))
     }
   }
 
@@ -408,6 +488,7 @@ export class SqliteEnrollmentStore
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
     }))
   }
 
@@ -426,6 +507,36 @@ export class SqliteEnrollmentStore
       .where(eq(enrollmentBoundary.did, did))
 
     return rows.map((r) => r.boundary)
+  }
+
+  async setBoundaries(did: string, boundaries: string[]): Promise<void> {
+    await this.db
+      .delete(enrollmentBoundary)
+      .where(eq(enrollmentBoundary.did, did))
+
+    if (boundaries.length > 0) {
+      await this.db
+        .insert(enrollmentBoundary)
+        .values(boundaries.map((boundary) => ({ did, boundary })))
+    }
+  }
+
+  async addBoundary(did: string, boundary: string): Promise<void> {
+    await this.db
+      .insert(enrollmentBoundary)
+      .values({ did, boundary })
+      .onConflictDoNothing()
+  }
+
+  async removeBoundary(did: string, boundary: string): Promise<void> {
+    await this.db
+      .delete(enrollmentBoundary)
+      .where(
+        and(
+          eq(enrollmentBoundary.did, did),
+          eq(enrollmentBoundary.boundary, boundary),
+        ),
+      )
   }
 }
 
@@ -479,6 +590,7 @@ function createAuthVerifiers(
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier,
   allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
+  syncToken: string | undefined,
 ): AuthVerifiers {
   return {
     standard: async (ctx) => {
@@ -581,6 +693,26 @@ function createAuthVerifiers(
         return { credentials: { type: 'none' } }
       }
 
+      // Try service auth (Bearer JWT from AppView/indexer)
+      if (authHeader.startsWith('Bearer ')) {
+        try {
+          const serviceCtx = await verifyServiceAuth(
+            authHeader,
+            serviceDid,
+            undefined,
+            idResolver,
+          )
+          return {
+            credentials: {
+              type: 'service',
+              did: serviceCtx.iss,
+            },
+          }
+        } catch {
+          return { credentials: { type: 'none' } }
+        }
+      }
+
       if (!authHeader.startsWith('DPoP ') || !dpopVerifier) {
         return { credentials: { type: 'none' } }
       }
@@ -649,11 +781,31 @@ function createAuthVerifiers(
     },
     subscribeAuth: async (ctx: StreamAuthContext) => {
       const params = ctx.params as Record<string, unknown>
-      const syncToken = params.syncToken
+      const tokenParam = params.syncToken
 
-      if (syncToken && typeof syncToken === 'string') {
+      console.log('[subscribeAuth] request received', {
+        hasSyncToken: !!tokenParam,
+        hasServerToken: !!syncToken,
+        url: ctx.req.url,
+      })
+
+      if (tokenParam && typeof tokenParam === 'string' && syncToken) {
+        if (safeEqual(tokenParam, syncToken)) {
+          console.log('[subscribeAuth] sync token matched')
+          return {
+            credentials: {
+              type: 'service',
+              iss: 'sync-token',
+              aud: serviceDid,
+            },
+          }
+        }
+        console.log('[subscribeAuth] sync token mismatch')
+      }
+
+      if (tokenParam && typeof tokenParam === 'string') {
         const serviceCtx = await verifyServiceAuth(
-          `Bearer ${syncToken}`,
+          `Bearer ${tokenParam}`,
           serviceDid,
           'zone.stratos.sync.subscribeRecords',
           idResolver,
@@ -716,12 +868,14 @@ export interface AppContext {
   profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   boundaryResolver: BoundaryResolver
   stubWriter: StubWriterService
+  stubQueue: BackgroundStubQueue
   authVerifier: AuthVerifiers
   idResolver: IdResolver
   oauthClient: NodeOAuthClient
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
+  getActorSigningKey(did: string): Promise<crypto.Keypair>
   allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
   app: express.Application
@@ -732,8 +886,28 @@ export interface AppContext {
     userDidKey: string,
   ): Promise<{ sig: Uint8Array; signingKey: string }>
   dpopVerifier: import('./auth/dpop-verifier.js').DpopVerifier
+  enrollmentEvents: EnrollmentEventEmitter
+  sequenceEvents: SequenceEventEmitter
+  writeRateLimiter: WriteRateLimiter
+  repoWriteLocks: RepoWriteLocks
   destroy: () => Promise<void>
 }
+
+export interface EnrollmentEvent {
+  did: string
+  action: 'enroll' | 'unenroll'
+  service?: string
+  boundaries?: string[]
+  time: string
+}
+
+export type EnrollmentEventEmitter = EventEmitter<{
+  enrollment: [EnrollmentEvent]
+}>
+
+export type SequenceEventEmitter = EventEmitter<{
+  [did: string]: []
+}>
 
 /**
  * Application context options
@@ -820,7 +994,12 @@ export async function createAppContext(
       'postgres service database preflight passed',
     )
     await migrateServicePgDb(pgDb)
-    enrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    const pgEnrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore, {
+      cacheTtlMs: 5 * 60 * 1000,
+    })
+    await cachedEnrollmentStore.warm()
+    enrollmentStore = cachedEnrollmentStore
     oauthStores = createPgOAuthStores(pgDb)
     destroyBackend = async () => {
       await closeServicePgDb(pgDb)
@@ -920,6 +1099,9 @@ export async function createAppContext(
       blobstore,
       cborToRecord,
       logger,
+      actorPoolSize: cfg.storage.pgActorPoolSize,
+      adminPoolSize: cfg.storage.pgAdminPoolSize,
+      blockCacheSize: cfg.storage.blockCacheSize,
     })
   } else {
     actorStore = new StratosActorStore({
@@ -929,6 +1111,10 @@ export async function createAppContext(
       logger,
     })
   }
+
+  const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
+  const sequenceEvents: SequenceEventEmitter = new EventEmitter()
+  sequenceEvents.setMaxListeners(0)
 
   const enrollmentService = new EnrollmentServiceImpl(
     enrollmentStore,
@@ -941,6 +1127,9 @@ export async function createAppContext(
         await signAndPersistCommit(store.repo, signingKey, unsigned)
       })
     },
+    logger,
+    enrollmentEvents,
+    cfg.service.publicUrl,
   )
 
   // Resolves per-user boundaries from storage
@@ -975,6 +1164,9 @@ export async function createAppContext(
   const tokenVerifier = new PdsTokenVerifier({
     idResolver,
     fetch: fetchWithUserAgent,
+    jwksCacheMaxAge: 10 * 60 * 1000,
+    verifyCacheMaxAge: 5 * 60 * 1000,
+    verifyCacheMaxSize: 10_000,
   })
   const dpopVerifier = new DpopVerifier({
     serviceDid: cfg.service.did,
@@ -993,6 +1185,7 @@ export async function createAppContext(
     dpopVerifier,
     allowListProvider,
     cfg.stratos.devMode === true,
+    cfg.syncToken,
   )
 
   const serviceDid = cfg.service.did
@@ -1007,6 +1200,8 @@ export async function createAppContext(
       return null
     }
   }, serviceDidWithFragment)
+
+  const stubQueue = new BackgroundStubQueue(stubWriter, logger)
 
   const app = express()
   // Note: express.json() is applied in index.ts with exclusion for /xrpc/ routes
@@ -1028,6 +1223,16 @@ export async function createAppContext(
     },
   })
 
+  const getActorSigningKey = async (did: string): Promise<crypto.Keypair> => {
+    const userKey = await actorStore.loadSigningKey(did)
+    if (userKey) return userKey
+    logger?.warn(
+      { did },
+      'no per-user signing key found, falling back to service key',
+    )
+    return signingKey
+  }
+
   const createAttestation = async (
     did: string,
     boundaries: string[],
@@ -1048,19 +1253,34 @@ export async function createAppContext(
     profileRecordWriter,
     boundaryResolver,
     stubWriter,
+    stubQueue,
     authVerifier,
     idResolver,
     oauthClient,
     signingKey,
     signingDidKey,
     serviceDid,
+    getActorSigningKey,
     allowListProvider,
     xrpcServer,
     app,
     logger,
     createAttestation,
     dpopVerifier,
-    destroy: destroyBackend,
+    enrollmentEvents,
+    sequenceEvents,
+    writeRateLimiter: new WriteRateLimiter({
+      maxWrites: cfg.stratos.writeRateLimit.maxWrites,
+      windowMs: cfg.stratos.writeRateLimit.windowMs,
+      cooldownMs: cfg.stratos.writeRateLimit.cooldownMs,
+      cooldownJitterMs: cfg.stratos.writeRateLimit.cooldownJitterMs,
+    }),
+    repoWriteLocks: new RepoWriteLocks(),
+    destroy: async () => {
+      await stubQueue.drain()
+      await actorStore.close?.()
+      await destroyBackend()
+    },
   }
 }
 
@@ -1071,5 +1291,6 @@ export async function destroyAppContext(ctx: AppContext): Promise<void> {
   if (ctx.allowListProvider) {
     await ctx.allowListProvider.stop()
   }
+  ctx.repoWriteLocks.destroy()
   await ctx.destroy()
 }

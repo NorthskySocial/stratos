@@ -1,0 +1,76 @@
+# Full E2E compose: Stratos + PostgreSQL + AppView test server
+# Usage: docker compose -f docker-compose.test.yml -f docker-compose.e2e.yml up -d --build
+#
+# Services:
+#   - stratos: Stratos service (port 3100)
+#   - postgres: Shared PostgreSQL (port 5432) — databases: stratos, appview
+#   - appview: Test AppView server (port 3200) — indexes from Stratos, serves feed endpoints
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stratos-e2e-postgres
+    restart: 'no'
+    environment:
+      POSTGRES_USER: stratos
+      POSTGRES_PASSWORD: stratos
+      POSTGRES_DB: stratos
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./appview/init-appview-db.sql:/docker-entrypoint-initdb.d/01-appview.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U stratos']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  stratos:
+    environment:
+      STORAGE_BACKEND: postgres
+      STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
+      STRATOS_DEV_MODE: 'true'
+      STRATOS_SYNC_TOKEN: test-sync-token
+      STRATOS_PUBLIC_URL: https://stratos.test
+      STRATOS_SERVICE_DID: did:web:stratos.test
+      STRATOS_OAUTH_CLIENT_ID: https://stratos.test/client-metadata.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  appview:
+    image: denoland/deno:latest
+    container_name: stratos-e2e-appview
+    restart: 'no'
+    ports:
+      - '3200:3200'
+    working_dir: /app
+    volumes:
+      - ./appview:/app:ro
+    command: ['run', '-A', '--unstable-net', 'server.ts']
+    environment:
+      APPVIEW_PORT: '3200'
+      STRATOS_URL: http://stratos:3100
+      APPVIEW_PG_URL: postgres://stratos:stratos@postgres:5432/appview
+      APPVIEW_SYNC_TOKEN: test-sync-token
+    depends_on:
+      stratos:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'sh',
+          '-c',
+          'deno eval "const r = await fetch(\"http://localhost:3200/health\"); if (!r.ok) Deno.exit(1);"',
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  pgdata:

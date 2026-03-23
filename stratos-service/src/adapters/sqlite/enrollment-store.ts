@@ -46,6 +46,7 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
     }
   }
 
@@ -69,6 +70,7 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
       pdsEndpoint: row.pdsEndpoint ?? undefined,
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
     }))
   }
 
@@ -106,6 +108,7 @@ export class SqliteEnrollmentStoreWriter
         pdsEndpoint: data.pdsEndpoint ?? null,
         signingKeyDid: data.signingKeyDid,
         active: data.active ? 'true' : 'false',
+        enrollmentRkey: data.enrollmentRkey ?? null,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -114,6 +117,7 @@ export class SqliteEnrollmentStoreWriter
           pdsEndpoint: data.pdsEndpoint ?? null,
           signingKeyDid: data.signingKeyDid,
           active: data.active ? 'true' : 'false',
+          enrollmentRkey: data.enrollmentRkey ?? null,
         },
       })
 
@@ -150,6 +154,9 @@ export class SqliteEnrollmentStoreWriter
     }
     if (updates.active !== undefined) {
       setValues.active = updates.active ? 'true' : 'false'
+    }
+    if (updates.enrollmentRkey !== undefined) {
+      setValues.enrollmentRkey = updates.enrollmentRkey
     }
 
     if (Object.keys(setValues).length > 0) {

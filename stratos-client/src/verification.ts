@@ -1,6 +1,7 @@
 import { verifyRecord as atcuteVerifyRecord } from '@atcute/repo'
 import {
   getPublicKeyFromDidController,
+  parseDidKey,
   Secp256k1PublicKey,
   P256PublicKey,
   type PublicKey,
@@ -13,6 +14,8 @@ import type {
   FetchAndVerifyOptions,
   ResolveSigningKeyOptions,
 } from './types.js'
+import { discoverEnrollments } from './discovery.js'
+import { serviceDIDToRkey } from './routing.js'
 
 type DidString = `did:plc:${string}` | `did:web:${string}`
 
@@ -22,6 +25,7 @@ const verifyRecordCar = async (
   rkey: string,
   did?: string,
   publicKey?: PublicKey,
+  level?: VerificationLevel,
 ): Promise<VerifiedRecord> => {
   const result = await atcuteVerifyRecord({
     carBytes,
@@ -30,10 +34,9 @@ const verifyRecordCar = async (
     did: did as DidString | undefined,
     publicKey,
   })
-  const level: VerificationLevel = publicKey
-    ? 'service-signature'
-    : 'cid-integrity'
-  return { cid: result.cid, record: result.record, level }
+  const resolvedLevel: VerificationLevel =
+    level ?? (publicKey ? 'service-signature' : 'cid-integrity')
+  return { cid: result.cid, record: result.record, level: resolvedLevel }
 }
 
 /**
@@ -97,9 +100,49 @@ export const resolveServiceSigningKey = async (
 }
 
 /**
+ * resolves a user's per-actor signing public key from their enrollment record
+ * on their PDS. the enrollment record contains the did:key of the user's
+ * signing key, which is decoded into the appropriate key type.
+ *
+ * callers should cache the returned key per (did, serviceDid) pair.
+ *
+ * @param pdsUrl the user's PDS service URL
+ * @param did the user's DID
+ * @param serviceDid the Stratos service's DID to find the enrollment for
+ * @returns the user's public signing key, or null if no enrollment found
+ */
+export const resolveUserSigningKey = async (
+  pdsUrl: string,
+  did: string,
+  serviceDid: string,
+): Promise<PublicKey | null> => {
+  const enrollments = await discoverEnrollments(did, pdsUrl)
+
+  const targetRkey = serviceDIDToRkey(serviceDid)
+  const enrollment = enrollments.find((e) => e.rkey === targetRkey)
+  if (!enrollment?.signingKey) return null
+
+  const didKey = enrollment.signingKey
+  if (!didKey.startsWith('did:key:')) {
+    throw new Error(`invalid signing key format: ${didKey}`)
+  }
+
+  const found = parseDidKey(didKey)
+
+  switch (found.type) {
+    case 'secp256k1':
+      return Secp256k1PublicKey.importRaw(found.publicKeyBytes)
+    case 'p256':
+      return P256PublicKey.importRaw(found.publicKeyBytes)
+  }
+}
+
+/**
  * fetches a record with its inclusion proof from a Stratos service
- * and verifies it. when serviceSigningKey is provided, performs full
- * signature verification; otherwise falls back to CID integrity only.
+ * and verifies it. verification priority:
+ * 1. userSigningKey — verifies the user's per-actor commit signature ('user-signature')
+ * 2. serviceSigningKey — verifies the service's commit signature ('service-signature')
+ * 3. neither — CID integrity and MST path validation only ('cid-integrity')
  *
  * @param serviceUrl the Stratos service base URL
  * @param did the repo DID
@@ -128,6 +171,18 @@ export const fetchAndVerifyRecord = async (
   }
 
   const carBytes = new Uint8Array(await res.arrayBuffer())
+
+  if (options?.userSigningKey) {
+    return verifyRecordCar(
+      carBytes,
+      collection,
+      rkey,
+      did,
+      options.userSigningKey,
+      'user-signature',
+    )
+  }
+
   return verifyRecordCar(
     carBytes,
     collection,

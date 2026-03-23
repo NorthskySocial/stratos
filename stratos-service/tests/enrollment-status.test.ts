@@ -1,0 +1,438 @@
+import { describe, it, expect } from 'vitest'
+import * as fc from 'fast-check'
+import express, { type Router } from 'express'
+import type { AppContext } from '../src'
+import { registerEnrollmentHandlers } from '../src/features'
+import type { Enrollment } from '@northskysocial/stratos-core'
+
+function didArb(): fc.Arbitrary<string> {
+  return fc.stringMatching(/^[a-z2-7]{24}$/).map((s) => `did:plc:${s}`)
+}
+
+function boundaryArb(): fc.Arbitrary<string> {
+  return fc.stringMatching(/^[a-z0-9]{3,20}$/).map((s) => `${s}.example.com`)
+}
+
+function boundarySetArb(): fc.Arbitrary<string[]> {
+  return fc.uniqueArray(boundaryArb(), { minLength: 0, maxLength: 10 })
+}
+
+interface MockResponse {
+  statusCode: number
+  body: unknown
+}
+
+function invokeRoute(
+  router: Router,
+  query: Record<string, string>,
+  headers: Record<string, string> = {},
+): Promise<MockResponse> {
+  return new Promise((resolve, reject) => {
+    let statusCode = 200
+    const req = {
+      query,
+      headers,
+      method: 'GET',
+      url: '/xrpc/zone.stratos.enrollment.status',
+    } as unknown as express.Request
+    const res = {
+      status(code: number) {
+        statusCode = code
+        return res
+      },
+      json(body: unknown) {
+        resolve({ statusCode, body })
+        return res
+      },
+      setHeader() {
+        return res
+      },
+    } as unknown as express.Response
+
+    // Extract the registered route handler from the router stack
+    type RouteLayer = {
+      route?: {
+        path: string
+        stack: Array<{ handle: Function }>
+      }
+    }
+    const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
+      (l) => l.route?.path === '/xrpc/zone.stratos.enrollment.status',
+    )
+    if (!layer?.route) return reject(new Error('Route not registered'))
+    const handler = layer.route.stack[0]?.handle
+    if (!handler) return reject(new Error('No handler on route'))
+
+    Promise.resolve(handler(req, res, () => {})).catch(reject)
+  })
+}
+
+function createCtx(opts: {
+  getEnrollment: (did: string) => Promise<Enrollment | null>
+  getBoundaries: (did: string) => Promise<string[]>
+  authenticatedDid?: string | null
+  createAttestation?: (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ) => Promise<{ sig: Uint8Array; signingKey: string }>
+}): AppContext {
+  const authenticatedDid = opts.authenticatedDid ?? null
+  const createAttestation =
+    opts.createAttestation ??
+    (async () => ({
+      sig: new Uint8Array([0xde, 0xad]),
+      signingKey: 'did:key:zDnaeServiceKey',
+    }))
+  return {
+    enrollmentService: { getEnrollment: opts.getEnrollment },
+    boundaryResolver: { getBoundaries: opts.getBoundaries },
+    authVerifier: {
+      optionalStandard: async () => {
+        if (authenticatedDid) {
+          return { credentials: { type: 'user', did: authenticatedDid } }
+        }
+        return { credentials: { type: 'none' } }
+      },
+    },
+    createAttestation,
+    logger: undefined,
+  } as unknown as AppContext
+}
+
+describe('Status endpoint with authentication', () => {
+  it('returns enrolled status with boundaries when authenticated', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        didArb(),
+        boundarySetArb(),
+        fc.date({
+          min: new Date('2020-01-01T00:00:00Z'),
+          max: new Date('2030-01-01T00:00:00Z'),
+          noInvalidDate: true,
+        }),
+        async (did, boundaries, enrolledAt) => {
+          const router = express.Router()
+          const ctx = createCtx({
+            getEnrollment: async (queryDid) => {
+              if (queryDid === did) {
+                return {
+                  did,
+                  boundaries,
+                  enrolledAt,
+                  pdsEndpoint: 'https://pds.example.com',
+                  signingKeyDid: 'did:key:zDnaeTestUser123',
+                  active: true,
+                  enrollmentRkey: 'did:web:stratos.example.com',
+                }
+              }
+              return null
+            },
+            getBoundaries: async (queryDid) => {
+              if (queryDid === did) return boundaries
+              return []
+            },
+            authenticatedDid: did,
+          })
+
+          registerEnrollmentHandlers(router, ctx)
+          const res = await invokeRoute(
+            router,
+            { did },
+            { authorization: 'DPoP token' },
+          )
+
+          expect(res.statusCode).toBe(200)
+
+          const body = res.body as Record<string, unknown>
+          expect(body.did).toBe(did)
+          expect(body.enrolled).toBe(true)
+          expect(body.enrolledAt).toBe(enrolledAt.toISOString())
+
+          // signingKey should be included when enrollment has one
+          expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // enrollmentRkey should be included
+          expect(body.enrollmentRkey).toBe('did:web:stratos.example.com')
+
+          // Boundaries should be included when authenticated
+          const returnedBoundaries = body.boundaries as Array<{ value: string }>
+          expect(returnedBoundaries).toBeDefined()
+          expect(returnedBoundaries).toHaveLength(boundaries.length)
+
+          const returnedValues = returnedBoundaries.map((b) => b.value).sort()
+          expect(returnedValues).toEqual([...boundaries].sort())
+
+          // Each boundary is a { value: string } Domain object
+          for (const b of returnedBoundaries) {
+            expect(Object.keys(b)).toEqual(['value'])
+            expect(typeof b.value).toBe('string')
+          }
+
+          // Attestation should be present when authenticated with boundaries and signing key
+          if (boundaries.length > 0) {
+            const attestation = body.attestation as {
+              sig: unknown
+              signingKey: string
+            }
+            expect(attestation).toBeDefined()
+            expect(attestation.signingKey).toBe('did:key:zDnaeServiceKey')
+          }
+        },
+      ),
+      { numRuns: 100 },
+    )
+  })
+
+  it('returns enrolled status without boundaries when not authenticated', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        didArb(),
+        boundarySetArb(),
+        fc.date({
+          min: new Date('2020-01-01T00:00:00Z'),
+          max: new Date('2030-01-01T00:00:00Z'),
+          noInvalidDate: true,
+        }),
+        async (did, boundaries, enrolledAt) => {
+          const router = express.Router()
+          const ctx = createCtx({
+            getEnrollment: async (queryDid) => {
+              if (queryDid === did) {
+                return {
+                  did,
+                  boundaries,
+                  enrolledAt,
+                  pdsEndpoint: 'https://pds.example.com',
+                  signingKeyDid: 'did:key:zDnaeTestUser123',
+                  active: true,
+                  enrollmentRkey: 'did:web:stratos.example.com',
+                }
+              }
+              return null
+            },
+            getBoundaries: async () => [],
+            authenticatedDid: null,
+          })
+
+          registerEnrollmentHandlers(router, ctx)
+          const res = await invokeRoute(router, { did })
+
+          expect(res.statusCode).toBe(200)
+
+          const body = res.body as Record<string, unknown>
+          expect(body.did).toBe(did)
+          expect(body.enrolled).toBe(true)
+          expect(body.enrolledAt).toBe(enrolledAt.toISOString())
+
+          // signingKey should still be present even when unauthenticated
+          expect(body.signingKey).toBe('did:key:zDnaeTestUser123')
+
+          // enrollmentRkey should be present even when unauthenticated
+          expect(body.enrollmentRkey).toBe('did:web:stratos.example.com')
+
+          // Boundaries and attestation should NOT be included when not authenticated
+          expect(body.boundaries).toBeUndefined()
+          expect(body.attestation).toBeUndefined()
+        },
+      ),
+      { numRuns: 100 },
+    )
+  })
+})
+
+describe('Status endpoint for non-enrolled DIDs', () => {
+  it('returns enrolled: false with no boundaries or enrolledAt (unauthenticated)', async () => {
+    await fc.assert(
+      fc.asyncProperty(didArb(), async (did) => {
+        const router = express.Router()
+        const ctx = createCtx({
+          getEnrollment: async () => null,
+          getBoundaries: async () => [],
+          authenticatedDid: null,
+        })
+
+        registerEnrollmentHandlers(router, ctx)
+        const res = await invokeRoute(router, { did })
+
+        expect(res.statusCode).toBe(200)
+
+        const body = res.body as Record<string, unknown>
+        expect(body.did).toBe(did)
+        expect(body.enrolled).toBe(false)
+        expect(body).not.toHaveProperty('boundaries')
+        expect(body).not.toHaveProperty('enrolledAt')
+      }),
+      { numRuns: 100 },
+    )
+  })
+})
+
+describe('Status endpoint route registration', () => {
+  it('registers the route at /xrpc/zone.stratos.enrollment.status', () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => [],
+      authenticatedDid: null,
+    })
+
+    registerEnrollmentHandlers(router, ctx)
+
+    type RouteLayer = {
+      route?: { path: string; methods: Record<string, boolean> }
+    }
+    const layers = (router as unknown as { stack: RouteLayer[] }).stack
+    const statusRoute = layers.find(
+      (l) => l.route?.path === '/xrpc/zone.stratos.enrollment.status',
+    )
+
+    expect(statusRoute).toBeDefined()
+    expect(statusRoute!.route!.methods.get).toBe(true)
+  })
+
+  it('returns 400 when did parameter is missing', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => [],
+      authenticatedDid: null,
+    })
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeRoute(router, {})
+
+    expect(res.statusCode).toBe(400)
+    const body = res.body as Record<string, unknown>
+    expect(body.error).toBe('InvalidRequest')
+  })
+})
+
+// --- resolveEnrollments endpoint tests ---
+
+function invokeResolveRoute(
+  router: Router,
+  query: Record<string, string>,
+): Promise<MockResponse> {
+  return new Promise((resolve, reject) => {
+    let statusCode = 200
+    const req = {
+      query,
+      headers: {},
+      method: 'GET',
+      url: '/xrpc/zone.stratos.identity.resolveEnrollments',
+    } as unknown as express.Request
+    const res = {
+      status(code: number) {
+        statusCode = code
+        return res
+      },
+      json(body: unknown) {
+        resolve({ statusCode, body })
+        return res
+      },
+      setHeader() {
+        return res
+      },
+    } as unknown as express.Response
+
+    type RouteLayer = {
+      route?: {
+        path: string
+        stack: Array<{ handle: Function }>
+      }
+    }
+    const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
+      (l) => l.route?.path === '/xrpc/zone.stratos.identity.resolveEnrollments',
+    )
+    if (!layer?.route) return reject(new Error('Route not registered'))
+    const handler = layer.route.stack[0]?.handle
+    if (!handler) return reject(new Error('No handler on route'))
+
+    Promise.resolve(handler(req, res, () => {})).catch(reject)
+  })
+}
+
+describe('resolveEnrollments endpoint', () => {
+  it('returns boundaries for enrolled user', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async (did) =>
+        did === 'did:plc:gokusaiyan' ? ['capsule-corp.jp'] : [],
+    })
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled = async (
+      did: string,
+    ) => did === 'did:plc:gokusaiyan'
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeResolveRoute(router, { did: 'did:plc:gokusaiyan' })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.body as {
+      did: string
+      enrolled: boolean
+      boundaries: string[]
+    }
+    expect(body.enrolled).toBe(true)
+    expect(body.boundaries).toEqual(['capsule-corp.jp'])
+  })
+
+  it('returns empty boundaries for non-enrolled user', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => [],
+    })
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
+      async () => false
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeResolveRoute(router, {
+      did: 'did:plc:vegetaprinceofallsaiyans',
+    })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.body as {
+      did: string
+      enrolled: boolean
+      boundaries: string[]
+    }
+    expect(body.enrolled).toBe(false)
+    expect(body.boundaries).toEqual([])
+  })
+
+  it('returns 400 when did is missing', async () => {
+    const router = express.Router()
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => [],
+    })
+
+    registerEnrollmentHandlers(router, ctx)
+    const res = await invokeResolveRoute(router, {})
+
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('caches boundaries across calls', async () => {
+    const router = express.Router()
+    let callCount = 0
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      getBoundaries: async () => {
+        callCount++
+        return ['west-city.jp']
+      },
+    })
+    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
+      async () => true
+
+    registerEnrollmentHandlers(router, ctx)
+
+    await invokeResolveRoute(router, { did: 'did:plc:bulmabrief' })
+    await invokeResolveRoute(router, { did: 'did:plc:bulmabrief' })
+
+    expect(callCount).toBe(1)
+  })
+})

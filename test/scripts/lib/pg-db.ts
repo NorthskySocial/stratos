@@ -27,16 +27,20 @@ export async function enrollUser(
   did: string,
   pdsEndpoint?: string,
   boundaries?: string[],
+  enrollmentRkey?: string,
 ): Promise<void> {
   const sql = getClient()
   try {
     const enrolledAt = new Date().toISOString()
+    const signingKeyDid = `did:key:test-${sha256Hex(did).slice(0, 16)}`
     await sql`
-      INSERT INTO enrollment (did, "enrolledAt", "pdsEndpoint")
-      VALUES (${did}, ${enrolledAt}, ${pdsEndpoint ?? null})
+      INSERT INTO enrollment (did, "enrolledAt", "pdsEndpoint", "enrollmentRkey", "signingKeyDid")
+      VALUES (${did}, ${enrolledAt}, ${pdsEndpoint ?? null}, ${enrollmentRkey ?? null}, ${signingKeyDid})
       ON CONFLICT (did) DO UPDATE
         SET "enrolledAt" = EXCLUDED."enrolledAt",
-            "pdsEndpoint" = EXCLUDED."pdsEndpoint"
+            "pdsEndpoint" = EXCLUDED."pdsEndpoint",
+            "enrollmentRkey" = EXCLUDED."enrollmentRkey",
+            "signingKeyDid" = EXCLUDED."signingKeyDid"
     `
 
     if (boundaries && boundaries.length > 0) {

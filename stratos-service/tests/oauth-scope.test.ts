@@ -19,15 +19,6 @@ describe('OAUTH_SCOPE', () => {
     expect(scopes).toContain('repo:zone.stratos.feed.post')
   })
 
-  it('should not contain transition:generic', () => {
-    expect(OAUTH_SCOPE).not.toContain('transition:generic')
-  })
-
-  it('should be a space-separated string of exactly 3 scopes', () => {
-    const scopes = OAUTH_SCOPE.split(' ')
-    expect(scopes).toHaveLength(3)
-  })
-
   it('should match the expected full value', () => {
     expect(OAUTH_SCOPE).toBe(
       'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post',
