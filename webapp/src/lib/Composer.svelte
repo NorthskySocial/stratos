@@ -2,20 +2,51 @@
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
   import type { StratosEnrollment } from './stratos'
+  import type { FeedPost, ReplyRef } from './feed'
 
   interface Props {
     session: OAuthSession
     enrollment: StratosEnrollment | null
     stratosAgent: Agent | null
+    replyingTo: FeedPost | null
     onpost: () => void
+    oncancelreply: () => void
   }
 
-  let { session, enrollment, stratosAgent, onpost }: Props = $props()
+  let { session, enrollment, stratosAgent, replyingTo, onpost, oncancelreply }: Props = $props()
 
   let text = $state('')
   let isPrivate = $state(false)
+  let selectedDomain = $state('')
   let posting = $state(false)
   let error = $state('')
+
+  let domains = $derived(
+    enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
+  )
+
+  $effect(() => {
+    if (domains.length > 0 && !selectedDomain) {
+      selectedDomain = domains[0]
+    }
+  })
+
+  $effect(() => {
+    if (replyingTo?.isPrivate) {
+      isPrivate = true
+    }
+  })
+
+  function buildReplyRef(parent: FeedPost): ReplyRef {
+    const parentRef = { uri: parent.uri, cid: parent.cid }
+    const rootRef = parent.reply ? parent.reply.root : parentRef
+    return { root: rootRef, parent: parentRef }
+  }
+
+  function shortDid(did: string): string {
+    if (did.length <= 24) return did
+    return did.slice(0, 16) + '…' + did.slice(-6)
+  }
 
   async function handlePost() {
     if (!text.trim()) return
@@ -24,8 +55,9 @@
 
     try {
       const now = new Date().toISOString()
+      const replyRef = replyingTo ? buildReplyRef(replyingTo) : undefined
 
-      if (isPrivate && stratosAgent) {
+      if (isPrivate && stratosAgent && selectedDomain) {
         await stratosAgent.com.atproto.repo.createRecord({
           repo: session.sub,
           collection: 'zone.stratos.feed.post',
@@ -34,8 +66,9 @@
             text: text.trim(),
             boundary: {
               $type: 'zone.stratos.boundary.defs#Domains',
-              values: enrollment?.boundaries ?? [],
+              values: [{ value: selectedDomain }],
             },
+            ...(replyRef ? { reply: replyRef } : {}),
             createdAt: now,
           },
         })
@@ -47,12 +80,14 @@
           record: {
             $type: 'app.bsky.feed.post',
             text: text.trim(),
+            ...(replyRef ? { reply: replyRef } : {}),
             createdAt: now,
           },
         })
       }
 
       text = ''
+      oncancelreply()
       onpost()
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to create post'
@@ -63,25 +98,46 @@
 </script>
 
 <div class="composer">
+  {#if replyingTo}
+    <div class="reply-indicator">
+      <span>Replying to @{replyingTo.authorHandle || shortDid(replyingTo.author)}</span>
+      <button class="cancel-reply" onclick={oncancelreply}>✕</button>
+    </div>
+  {/if}
+
   <textarea
     bind:value={text}
-    placeholder={isPrivate ? 'Write a private post…' : 'Write a post…'}
+    placeholder={isPrivate ? `Post to ${selectedDomain || 'private'}…` : 'Write a post…'}
     disabled={posting}
     rows="3"
   ></textarea>
 
   <div class="composer-actions">
-    <label class="private-toggle" class:disabled={!enrollment}>
-      <input
-        type="checkbox"
-        bind:checked={isPrivate}
-        disabled={!enrollment || posting}
-      />
-      <span>Private</span>
-      {#if !enrollment}
-        <span class="tooltip">Enroll in Stratos to post privately</span>
+    <div class="left-actions">
+      <label class="private-toggle" class:disabled={!enrollment}>
+        <input
+          type="checkbox"
+          bind:checked={isPrivate}
+          disabled={!enrollment || posting}
+        />
+        <span>Private</span>
+        {#if !enrollment}
+          <span class="tooltip">Enroll in Stratos to post privately</span>
+        {/if}
+      </label>
+
+      {#if isPrivate && domains.length > 0}
+        <select
+          class="domain-select"
+          bind:value={selectedDomain}
+          disabled={posting}
+        >
+          {#each domains as domain}
+            <option value={domain}>{domain}</option>
+          {/each}
+        </select>
       {/if}
-    </label>
+    </div>
 
     <button onclick={handlePost} disabled={posting || !text.trim()}>
       {posting ? 'Posting…' : 'Post'}
@@ -97,6 +153,33 @@
   .composer {
     padding: 1rem;
     border-bottom: 1px solid #eee;
+  }
+
+  .reply-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f0f4ff;
+    border: 1px solid #d0d9f0;
+    border-radius: 6px;
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: #3730a3;
+  }
+
+  .cancel-reply {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 0.3rem;
+    line-height: 1;
+  }
+
+  .cancel-reply:hover {
+    color: #333;
   }
 
   textarea {
@@ -121,6 +204,12 @@
     align-items: center;
     justify-content: space-between;
     margin-top: 0.5rem;
+  }
+
+  .left-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
   .private-toggle {
@@ -158,6 +247,20 @@
 
   .private-toggle.disabled:hover .tooltip {
     display: block;
+  }
+
+  .domain-select {
+    padding: 0.3rem 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    background: white;
+    color: #333;
+  }
+
+  .domain-select:focus {
+    outline: none;
+    border-color: #8b5cf6;
   }
 
   button {

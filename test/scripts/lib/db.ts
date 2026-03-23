@@ -28,14 +28,23 @@ export function enrollUser(
   did: string,
   pdsEndpoint?: string,
   boundaries?: string[],
+  enrollmentRkey?: string,
 ): void {
   const db = openDb()
   try {
     const enrolledAt = new Date().toISOString()
+    // Use a placeholder signing key DID for direct test enrollment
+    const signingKeyDid = `did:key:test-${sha256Hex(did).slice(0, 16)}`
     db.exec(
-      `INSERT INTO enrollment (did, enrolledAt, pdsEndpoint) VALUES (?, ?, ?)
-       ON CONFLICT(did) DO UPDATE SET enrolledAt = excluded.enrolledAt, pdsEndpoint = excluded.pdsEndpoint`,
-      [did, enrolledAt, pdsEndpoint ?? null],
+      `INSERT INTO enrollment (did, enrolledAt, pdsEndpoint, enrollmentRkey, signingKeyDid) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(did) DO UPDATE SET enrolledAt = excluded.enrolledAt, pdsEndpoint = excluded.pdsEndpoint, enrollmentRkey = excluded.enrollmentRkey, signingKeyDid = excluded.signingKeyDid`,
+      [
+        did,
+        enrolledAt,
+        pdsEndpoint ?? null,
+        enrollmentRkey ?? null,
+        signingKeyDid,
+      ],
     )
 
     if (boundaries && boundaries.length > 0) {

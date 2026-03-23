@@ -7,6 +7,9 @@ import type { OAuthClientMetadataInput } from '@atproto/oauth-types'
 let client: BrowserOAuthClient | null = null
 let currentSession: OAuthSession | null = null
 
+const HANDLE_RESOLVER =
+  import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER ?? 'https://bsky.social'
+
 function isLoopback(): boolean {
   const h = window.location.hostname
   return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
@@ -19,7 +22,8 @@ function buildClientMetadata(): OAuthClientMetadataInput {
     client_name: 'Stratos',
     client_uri: origin,
     redirect_uris: [`${origin}/`],
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     token_endpoint_auth_method: 'none',
@@ -31,7 +35,7 @@ function buildClientMetadata(): OAuthClientMetadataInput {
 function getClient(): BrowserOAuthClient {
   if (!client) {
     client = new BrowserOAuthClient({
-      handleResolver: 'https://bsky.social',
+      handleResolver: HANDLE_RESOLVER,
       responseMode: 'query',
       ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
     })
@@ -51,7 +55,8 @@ export async function init(): Promise<OAuthSession | null> {
 export async function signIn(handle: string): Promise<void> {
   const oauthClient = getClient()
   await oauthClient.signIn(handle, {
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
     signal: new AbortController().signal,
   })
 }

@@ -1,4 +1,4 @@
-import http from 'node:http'
+import type http from 'node:http'
 import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
@@ -33,11 +33,12 @@ export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
  */
 export class StratosServer {
   public ctx: AppContext
-  public server: http.Server
+  public server: http.Server | null = null
+  private app: express.Application
 
-  constructor(ctx: AppContext, server: http.Server) {
+  constructor(ctx: AppContext, app: express.Application) {
     this.ctx = ctx
-    this.server = server
+    this.app = app
   }
 
   /**
@@ -160,8 +161,9 @@ export class StratosServer {
       idResolver: ctx.idResolver,
       baseUrl: cfg.service.publicUrl,
       serviceEndpoint: cfg.service.publicUrl,
+      serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
-      allowListProvider: ctx.allowListProvider,
+      autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
@@ -197,6 +199,19 @@ export class StratosServer {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _next: express.NextFunction,
       ) => {
+        if (
+          'retryAfter' in err &&
+          typeof (err as Record<string, unknown>).retryAfter === 'number'
+        ) {
+          const retryAfter = (err as Record<string, unknown>)
+            .retryAfter as number
+          res.set('Retry-After', String(retryAfter))
+          res.status(429).json({
+            error: 'RateLimitExceeded',
+            message: err.message,
+          })
+          return
+        }
         console.error('Express error:', err.message)
         console.error(err.stack)
         ctx.logger?.error(
@@ -213,11 +228,7 @@ export class StratosServer {
       },
     )
 
-    const server = http.createServer(app)
-
-    // WebSocket handling is set up automatically when xrpcServer.router is mounted on app
-
-    return new StratosServer(ctx, server)
+    return new StratosServer(ctx, app)
   }
 
   /**
@@ -227,8 +238,12 @@ export class StratosServer {
     const port = this.ctx.cfg.service.port
 
     return new Promise((resolve) => {
-      this.server.listen(port, () => {
-        this.ctx.logger?.info({ port }, 'stratos server started')
+      this.server = this.app.listen(port, () => {
+        const upgradeListeners = this.server?.listenerCount('upgrade') ?? 0
+        this.ctx.logger?.info(
+          { port, upgradeListeners },
+          'stratos server started',
+        )
         resolve()
       })
     })
@@ -239,6 +254,10 @@ export class StratosServer {
    */
   async stop(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (!this.server) {
+        destroyAppContext(this.ctx).then(resolve, reject)
+        return
+      }
       this.server.close(async (err) => {
         if (err) {
           reject(err)

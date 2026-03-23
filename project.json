@@ -1,0 +1,55 @@
+{
+  "name": "stratos",
+  "root": "stratos",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm build"
+      }
+    },
+    "codegen": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm codegen"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm lint"
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm format"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm format:check"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm test"
+      }
+    },
+    "test-integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm test:integration"
+      }
+    }
+  }
+}

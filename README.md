@@ -1,129 +1,147 @@
-# Stratos - Private Shared Data for ATProtocol
+# Stratos
 
-Stratos provides isolated, private data storage within the ATProtocol ecosystem. ATprotocol is designed for data to be in the public to allow for open inter-operability. This however means that there is a lack of privacy on protocol, Stratos solves this while remaining "on protocol" by:
+Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream AppViews serve boundary-filtered content without inventing a separate identity model. The service is written in typescript with postgres and sqlite support.
 
-- Storing records and blobs in a dedicated Stratos service (separate from PDS)
-- Allowing users to enroll in the service via oauth to store their data
-- Accessible only to enrolled users
-- Scoped by configurable boundary domains
-- Excluded from public/unauthenticated sync/export
+## What the Repository Contains
 
-## Boundary Behavior
+| Package           | Purpose                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| `stratos-core`    | Domain logic, storage interfaces, schema, validation, MST commit builder                |
+| `stratos-service` | HTTP/XRPC service, OAuth enrollment flow, repo CRUD, sync export, adapters              |
+| `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers for clients                   |
+| `stratos-indexer` | Standalone indexer that consumes PDS + Stratos streams and writes to AppView PostgreSQL |
+| `webapp`          | Svelte demo client for enrollment and private posting                                   |
+| `test`            | Deno end-to-end test suite                                                              |
+| `docs`            | Operator, client, and architecture documentation                                        |
 
-Records stored in Stratos can be scoped to boundary domains. Access is determined during hydration based on whether the authenticated viewer shares boundaries with the record:
+## Core Model
 
-```mermaid
-flowchart TD
-    A[Viewer Requests Record] --> B{Is viewer the owner?}
-    B -->|Yes| C[✓ Grant Access]
-    B -->|No| D{Is viewer enrolled?}
-    D -->|No| E[✗ Deny Access]
-    D -->|Yes| F{Record has boundaries?}
-    F -->|No boundaries| G[✓ Grant Access<br/>Public to enrolled users]
-    F -->|Has boundaries| H{Viewer shares<br/>any boundary?}
-    H -->|Yes| I[✓ Grant Access]
-    H -->|No| J[✗ Deny Access]
+- Users enroll with a Stratos service via OAuth.
+- The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
+- Private records live in Stratos, not on the user's PDS.
+- Records can carry one or more boundary values such as `posters-madness` or `tech`.
+- A viewer can access a record only if they share at least one boundary with it.
 
-    style C fill:#90EE90
-    style G fill:#90EE90
-    style I fill:#90EE90
-    style E fill:#FFB6C1
-    style J fill:#FFB6C1
+## Request Flow
+
+```text
+User -> OAuth enrollment -> Stratos service
+     -> enrollment record on PDS (`zone.stratos.actor.enrollment`)
+     -> private records stored in Stratos
+     -> standalone stratos-indexer writes boundary-aware rows into AppView Postgres
+     -> AppView serves `zone.stratos.feed.*` queries
 ```
 
-## Quick Start
+## Local Development
 
-### Local Development
+### Install and verify
 
 ```bash
 pnpm install
 pnpm build
 pnpm test
-cd stratos-service
-pnpm start
 ```
 
-### Environment Variables
-
-Create a `.env` file from the example:
+### Start the service
 
 ```bash
 cp .env.example .env
+pnpm --filter @northskysocial/stratos-service dev
 ```
 
-Required variables:
-
-- `STRATOS_SERVICE_DID` - Unique identifier for your Stratos instance
-- `STRATOS_PUBLIC_URL` - Public URL where the service is accessible
-- `STRATOS_ALLOWED_DOMAINS` - Comma-separated boundary domains
-
-### S3 Storage
-
-To use S3-compatible storage instead of local disk:
+For end-to-end coverage, run the integration suite from the repo root, see `test/` for details:
 
 ```bash
-# In .env
-STRATOS_BLOB_STORAGE=s3
-STRATOS_S3_BUCKET=stratos-blobs
-STRATOS_S3_REGION=us-east-1
-STRATOS_S3_ENDPOINT=https://s3.amazonaws.com
-STRATOS_S3_ACCESS_KEY=your-access-key
-STRATOS_S3_SECRET_KEY=your-secret-key
+pnpm e2etest
 ```
 
-Or use the included MinIO example (uncomment in docker-compose.yml):
+## Configuration Highlights
 
-```bash
-# In .env
-STRATOS_BLOB_STORAGE=s3
-STRATOS_S3_BUCKET=stratos-blobs
-STRATOS_S3_ENDPOINT=http://minio:9000
-STRATOS_S3_ACCESS_KEY=minioadmin
-STRATOS_S3_SECRET_KEY=minioadmin
-```
+The service reads its configuration from environment variables in `stratos-service/src/config.ts`.
 
-## Configuration
+### Required
 
-The Stratos service is configured via environment variables:
+| Variable                  | Description                                   |
+| ------------------------- | --------------------------------------------- |
+| `STRATOS_SERVICE_DID`     | Service DID, typically `did:web:<host>`       |
+| `STRATOS_PUBLIC_URL`      | Public base URL for the service               |
+| `STRATOS_ALLOWED_DOMAINS` | Comma-separated list of valid boundary values |
 
-| Variable                        | Description                                       | Default        |
-| ------------------------------- | ------------------------------------------------- | -------------- |
-| `STRATOS_SERVICE_DID`           | Service DID (e.g., `did:web:stratos.example.com`) | Required       |
-| `STRATOS_PORT`                  | HTTP port                                         | `3100`         |
-| `STRATOS_PUBLIC_URL`            | Public URL for the service                        | Required       |
-| `STRATOS_DATA_DIR`              | Directory for SQLite databases                    | `./data`       |
-| `STRATOS_ALLOWED_DOMAINS`       | Comma-separated list of valid boundary domains    | Required       |
-| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                             | `allowlist`    |
-| `STRATOS_ALLOWED_DIDS`          | Comma-separated list of allowed DIDs              | `[]`           |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Comma-separated list of allowed PDS URLs          | `[]`           |
-| `STRATOS_IMPORT_MAX_BYTES`      | Maximum CAR file size for repo import             | `268435456`    |
-| `STRATOS_SIGNING_KEY_HEX`       | Service signing key (secp256k1, hex-encoded)      | Auto-generated |
+### Storage
 
-## Enrollment
+| Variable                     | Description                                       | Default  |
+| ---------------------------- | ------------------------------------------------- | -------- |
+| `STORAGE_BACKEND`            | `sqlite` or `postgres`                            | `sqlite` |
+| `STRATOS_DATA_DIR`           | Base data directory for sqlite-backed deployments | `./data` |
+| `STRATOS_POSTGRES_URL`       | Full Postgres DSN when using `postgres` storage   | unset    |
+| `STRATOS_PG_ACTOR_POOL_SIZE` | Actor transaction pool size for Postgres storage  | unset    |
+| `STRATOS_PG_ADMIN_POOL_SIZE` | Admin/schema pool size for Postgres storage       | unset    |
+| `STRATOS_BLOCK_CACHE_SIZE`   | Block cache size for Postgres-backed actor repos  | unset    |
 
-Users enroll via OAuth authentication. The service validates enrollment based on configuration:
+### Enrollment
 
-- **Mode: `open`** - Any user can enroll
-- **Mode: `allowlist`** - User must be in `allowedDids` OR their PDS must be in
-  `allowedPdsEndpoints`
+| Variable                        | Description                                             | Default     |
+| ------------------------------- | ------------------------------------------------------- | ----------- |
+| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                                   | `allowlist` |
+| `STRATOS_ALLOWED_DIDS`          | Allowed DIDs when running in allowlist mode             | empty       |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Allowed PDS origins when running in allowlist mode      | empty       |
+| `STRATOS_AUTO_ENROLL_DOMAINS`   | Domains automatically assigned at enrollment time       | empty       |
+| `STRATOS_ALLOW_LIST_URI`        | Optional external allow-list source                     | unset       |
+| `STRATOS_VALKEY_URL`            | Optional Valkey/Redis backing store for allow-list data | unset       |
 
-## Packages
+### Storage for blobs
 
-### @northskysocial/stratos-core
+| Variable               | Description                                | Default |
+| ---------------------- | ------------------------------------------ | ------- |
+| `STRATOS_BLOB_STORAGE` | `local` or `s3`                            | `local` |
+| `STRATOS_S3_BUCKET`    | Bucket name for S3-compatible blob storage | unset   |
+| `STRATOS_S3_REGION`    | Region for S3-compatible blob storage      | unset   |
+| `STRATOS_S3_ENDPOINT`  | Custom S3 endpoint, including MinIO        | unset   |
 
-Core package containing:
+### Operational
 
-- Validation logic for stratos records
-- Database schema and migrations
-- Storage abstractions (repo, record, blob)
-- MST commit builder for ATProto-compatible repos
+| Variable                         | Description                                         | Default     |
+| -------------------------------- | --------------------------------------------------- | ----------- |
+| `STRATOS_PORT`                   | HTTP port                                           | `3100`      |
+| `STRATOS_IMPORT_MAX_BYTES`       | CAR import size limit                               | `268435456` |
+| `STRATOS_WRITE_RATE_MAX_WRITES`  | Write-rate limit window quota                       | `300`       |
+| `STRATOS_WRITE_RATE_WINDOW_MS`   | Write-rate limit window size                        | `60000`     |
+| `STRATOS_WRITE_RATE_COOLDOWN_MS` | Cooldown after exceeding the limit                  | `10000`     |
+| `STRATOS_DPOP_REQUIRE_NONCE`     | Require DPoP nonces for protected requests          | `true`      |
+| `USE_OAUTH`                      | Enable OAuth enrollment routes in local/test setups | `false`     |
 
-### @northskysocial/stratos-service
+## Storage Model
 
-Standalone HTTP service providing:
+Stratos supports two repo storage modes:
 
-- OAuth authorization server
-- XRPC endpoints for record CRUD
-- WebSocket subscription for AppView indexing
-- Repository export/import via CAR files
-- Signed commits with MST inclusion proofs
+- `sqlite`: one sqlite database per actor plus a service-level sqlite database.
+- `postgres`: one Postgres schema per actor plus shared service tables.
+
+Blob content is stored separately through the configured blob provider (`local` or `s3`).
+
+## Indexing Model
+
+The AppView-facing indexing path is not embedded in `stratos-service` or the AppView fork. The standalone `stratos-indexer` package is responsible for:
+
+- reading PDS enrollment events,
+- connecting to `zone.stratos.sync.subscribeRecords`,
+- decoding commit payloads,
+- writing `stratos_post`, `stratos_post_boundary`, `stratos_enrollment`, and `stratos_sync_cursor` rows into the AppView database.
+
+That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in `atproto-stratos`, while ingestion lives here in `stratos-indexer`.
+
+## Testing
+
+| Command        | Scope                  |
+| -------------- | ---------------------- |
+| `pnpm test`    | Vitest across packages |
+| `pnpm e2etest` | End-to-end suite       |
+
+## Related Docs
+
+- `docs/operator-guide.md`
+- `docs/client-guide.md`
+- `docs/hydration-architecture.md`
+- `docs/enrollment-signing.md`
+- `stratos-client/README.md`
+- `stratos-indexer/CONFIGURATION.md`

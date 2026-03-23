@@ -1,0 +1,41 @@
+{
+  "name": "stratos-webapp",
+  "root": "stratos/webapp",
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/webapp",
+        "command": "pnpm dev"
+      }
+    },
+    "dev-northsky": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/webapp",
+        "command": "pnpm dev:northsky"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/webapp",
+        "command": "pnpm build"
+      }
+    },
+    "build-northsky": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/webapp",
+        "command": "pnpm build:northsky"
+      }
+    },
+    "preview": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/webapp",
+        "command": "pnpm preview"
+      }
+    }
+  }
+}

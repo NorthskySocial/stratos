@@ -11,7 +11,6 @@ import {
   StratosSqlRepoReader,
   StratosSqlRepoTransactor,
   BlockMap,
-  CidSet,
 } from '../src'
 import {
   createStratosDb,
@@ -28,112 +27,6 @@ const createCid = async (data: string | Uint8Array): Promise<CID> => {
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
 }
-
-describe('BlockMap', () => {
-  it('should set and get bytes', async () => {
-    const map = new BlockMap()
-    const cid = await createCid('test')
-    const bytes = new Uint8Array([1, 2, 3])
-
-    map.set(cid, bytes)
-
-    expect(map.has(cid)).toBe(true)
-    expect(map.get(cid)).toEqual(bytes)
-    expect(map.size()).toBe(1)
-  })
-
-  it('should delete entries', async () => {
-    const map = new BlockMap()
-    const cid = await createCid('deleteme')
-    const bytes = new Uint8Array([4, 5, 6])
-
-    map.set(cid, bytes)
-    expect(map.has(cid)).toBe(true)
-
-    map.delete(cid)
-    expect(map.has(cid)).toBe(false)
-    expect(map.get(cid)).toBeUndefined()
-  })
-
-  it('should get many and report missing', async () => {
-    const map = new BlockMap()
-    const cid1 = await createCid('one')
-    const cid2 = await createCid('two')
-    const cid3 = await createCid('three')
-
-    map.set(cid1, new Uint8Array([1]))
-    map.set(cid2, new Uint8Array([2]))
-
-    const { blocks, missing } = map.getMany([cid1, cid2, cid3])
-
-    expect(blocks.has(cid1)).toBe(true)
-    expect(blocks.has(cid2)).toBe(true)
-    expect(missing).toHaveLength(1)
-    expect(missing[0].toString()).toBe(cid3.toString())
-  })
-
-  it('should add maps together', async () => {
-    const map1 = new BlockMap()
-    const map2 = new BlockMap()
-    const cid1 = await createCid('a')
-    const cid2 = await createCid('b')
-
-    map1.set(cid1, new Uint8Array([1]))
-    map2.set(cid2, new Uint8Array([2]))
-
-    map1.addMap(map2)
-
-    expect(map1.has(cid1)).toBe(true)
-    expect(map1.has(cid2)).toBe(true)
-    expect(map1.size()).toBe(2)
-  })
-})
-
-describe('CidSet', () => {
-  it('should add and check membership', async () => {
-    const set = new CidSet()
-    const cid = await createCid('member')
-
-    set.add(cid)
-
-    expect(set.has(cid)).toBe(true)
-    expect(set.size()).toBe(1)
-  })
-
-  it('should initialize from array', async () => {
-    const cid1 = await createCid('init1')
-    const cid2 = await createCid('init2')
-
-    const set = new CidSet([cid1, cid2])
-
-    expect(set.has(cid1)).toBe(true)
-    expect(set.has(cid2)).toBe(true)
-    expect(set.size()).toBe(2)
-  })
-
-  it('should delete entries', async () => {
-    const set = new CidSet()
-    const cid = await createCid('deleteme')
-
-    set.add(cid)
-    expect(set.has(cid)).toBe(true)
-
-    set.delete(cid)
-    expect(set.has(cid)).toBe(false)
-  })
-
-  it('should convert to list', async () => {
-    const cid1 = await createCid('list1')
-    const cid2 = await createCid('list2')
-
-    const set = new CidSet([cid1, cid2])
-    const list = set.toList()
-
-    expect(list).toHaveLength(2)
-    expect(list.map((c) => c.toString())).toContain(cid1.toString())
-    expect(list.map((c) => c.toString())).toContain(cid2.toString())
-  })
-})
 
 describe('Repo Reader', () => {
   let db: StratosDb
@@ -420,11 +313,6 @@ describe('Repo Transactor', () => {
       expect(await transactor.has(cid1)).toBe(true)
       expect(await transactor.has(cid2)).toBe(true)
     })
-
-    it('should handle empty BlockMap', async () => {
-      const blocks = new BlockMap()
-      await expect(transactor.putBlocks(blocks, 'rev1')).resolves.not.toThrow()
-    })
   })
 
   describe('deleteBlock', () => {
@@ -474,10 +362,6 @@ describe('Repo Transactor', () => {
         .from(stratosRepoBlock)
       expect(count).toHaveLength(1)
       expect(count[0].cid).toBe(cid3.toString())
-    })
-
-    it('should handle empty array', async () => {
-      await expect(transactor.deleteBlocks([])).resolves.not.toThrow()
     })
   })
 

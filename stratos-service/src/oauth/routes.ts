@@ -4,8 +4,17 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
 import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
-import { type AllowListProvider } from '../features/index.js'
+import type { AllowListProvider } from '../features/enrollment/allow-list.js'
 import { OAUTH_SCOPE } from './client.js'
+
+/**
+ * Converts a service DID to a valid AT Protocol record key.
+ * Replaces percent-encoded colons (%3A) with literal colons,
+ * which are valid rkey characters.
+ */
+export function serviceDIDToRkey(serviceDid: string): string {
+  return serviceDid.replace(/%3A/gi, ':')
+}
 
 /**
  * Enrollment record stored in database
@@ -17,6 +26,7 @@ export interface EnrollmentRecord {
   boundaries?: string[]
   signingKeyDid: string
   active: boolean
+  enrollmentRkey?: string
 }
 
 /**
@@ -27,6 +37,14 @@ export interface EnrollmentStore {
   enroll(record: EnrollmentRecord): Promise<void>
   unenroll(did: string): Promise<void>
   getEnrollment(did: string): Promise<EnrollmentRecord | null>
+  getBoundaries(did: string): Promise<string[]>
+  setBoundaries(did: string, boundaries: string[]): Promise<void>
+  addBoundary(did: string, boundary: string): Promise<void>
+  removeBoundary(did: string, boundary: string): Promise<void>
+  updateEnrollment(
+    did: string,
+    updates: Partial<Omit<EnrollmentRecord, 'did'>>,
+  ): Promise<void>
 }
 
 /**
@@ -39,10 +57,10 @@ export interface OAuthRoutesConfig {
   idResolver: IdResolver
   baseUrl: string
   serviceEndpoint: string
+  serviceDid: string
   defaultBoundaries?: string[]
-  /** External allow list provider (optional) */
+  autoEnrollDomains?: string[]
   allowListProvider?: AllowListProvider
-  /** Logger for OAuth events */
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
@@ -56,6 +74,98 @@ export interface OAuthRoutesConfig {
 }
 
 /**
+ * Migrate a legacy enrollment record (self-keyed or TID-keyed) to use
+ * the service DID as the rkey. On re-auth, lists the user's PDS enrollment
+ * records, finds the one matching this service, and re-writes it with the
+ * service DID rkey if needed.
+ */
+export async function migrateEnrollmentRkey(
+  did: string,
+  enrollmentStore: EnrollmentStore,
+  oauthClient: NodeOAuthClient,
+  serviceEndpoint: string,
+  serviceDid: string,
+  logger?: Logger,
+): Promise<void> {
+  const expectedRkey = serviceDIDToRkey(serviceDid)
+  const existing = await enrollmentStore.getEnrollment(did)
+  if (!existing) return
+
+  // Already using the correct rkey
+  if (existing.enrollmentRkey === expectedRkey) return
+
+  try {
+    const oauthSession = await oauthClient.restore(did)
+    const agent = new Agent(oauthSession)
+
+    const listRes = await agent.com.atproto.repo.listRecords({
+      repo: did,
+      collection: 'zone.stratos.actor.enrollment',
+      limit: 100,
+    })
+
+    const normalizedEndpoint = serviceEndpoint.replace(/\/$/, '')
+    const matchingRecord = listRes.data.records.find((r) => {
+      const val = r.value as Record<string, unknown>
+      return (
+        typeof val.service === 'string' &&
+        val.service.replace(/\/$/, '') === normalizedEndpoint
+      )
+    })
+
+    if (!matchingRecord) return
+
+    const currentRkey = matchingRecord.uri.split('/').pop()!
+
+    if (currentRkey === expectedRkey) {
+      // PDS record already has correct rkey, just sync the DB
+      await enrollmentStore.updateEnrollment(did, {
+        enrollmentRkey: expectedRkey,
+      })
+      return
+    }
+
+    // Write record with service DID rkey
+    await agent.com.atproto.repo.putRecord({
+      repo: did,
+      collection: 'zone.stratos.actor.enrollment',
+      rkey: expectedRkey,
+      record: matchingRecord.value as Record<string, unknown>,
+    })
+
+    // Delete the old record
+    await agent.com.atproto.repo.deleteRecord({
+      repo: did,
+      collection: 'zone.stratos.actor.enrollment',
+      rkey: currentRkey,
+    })
+
+    await enrollmentStore.updateEnrollment(did, {
+      enrollmentRkey: expectedRkey,
+    })
+
+    logger?.info(
+      { did, oldRkey: currentRkey, newRkey: expectedRkey },
+      'migrated enrollment record to service DID rkey',
+    )
+  } catch (err) {
+    logger?.warn(
+      { did, err: err instanceof Error ? err.message : String(err) },
+      'failed to migrate legacy enrollment rkey',
+    )
+  }
+}
+
+export function selectEnrollBoundaries(
+  autoEnrollDomains: string[] | undefined,
+  defaultBoundaries: string[],
+): string[] {
+  return autoEnrollDomains && autoEnrollDomains.length > 0
+    ? autoEnrollDomains
+    : defaultBoundaries
+}
+
+/**
  * Create Express router for OAuth enrollment flow
  */
 export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
@@ -66,7 +176,9 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     enrollmentStore,
     idResolver,
     serviceEndpoint,
+    serviceDid,
     defaultBoundaries = [],
+    autoEnrollDomains,
     allowListProvider,
     logger,
     devMode = false,
@@ -75,6 +187,11 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     createSigningKey,
     createAttestation,
   } = config
+
+  const enrollBoundaries = selectEnrollBoundaries(
+    autoEnrollDomains,
+    defaultBoundaries,
+  )
 
   const isSecure = config.baseUrl.startsWith('https://')
 
@@ -244,6 +361,18 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       // Check if already enrolled
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
 
+      if (alreadyEnrolled) {
+        // Migrate legacy (self-keyed or TID-keyed) enrollment record to service DID rkey
+        await migrateEnrollmentRkey(
+          did,
+          enrollmentStore,
+          oauthClient,
+          serviceEndpoint,
+          serviceDid,
+          logger,
+        )
+      }
+
       if (!alreadyEnrolled) {
         // Initialize actor store and repo with an empty signed commit
         await initRepo(did)
@@ -252,28 +381,13 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         const userSigningKeyDid = await createSigningKey(did)
         const attestation = await createAttestation(
           did,
-          defaultBoundaries,
+          enrollBoundaries,
           userSigningKeyDid,
         )
 
-        // Determine boundaries for enrollment
-        const boundaries =
-          enrollmentResult.autoEnrollDomains &&
-          enrollmentResult.autoEnrollDomains.length > 0
-            ? enrollmentResult.autoEnrollDomains
-            : defaultBoundaries
-
-        // Create enrollment record
-        await enrollmentStore.enroll({
-          did,
-          enrolledAt: new Date().toISOString(),
-          pdsEndpoint: enrollmentResult.pdsEndpoint,
-          boundaries,
-          signingKeyDid: userSigningKeyDid,
-          active: true,
-        })
-
         // Write profile record to user's PDS for endpoint discovery
+        // Uses putRecord with service DID as rkey for deterministic addressing
+        const enrollmentRkey = serviceDIDToRkey(serviceDid)
         try {
           const oauthSession = await oauthClient.restore(did)
           const agent = new Agent(oauthSession)
@@ -281,10 +395,10 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           await agent.com.atproto.repo.putRecord({
             repo: did,
             collection: 'zone.stratos.actor.enrollment',
-            rkey: 'self',
+            rkey: enrollmentRkey,
             record: {
               service: serviceEndpoint,
-              boundaries: boundaries.map((value) => ({ value })),
+              boundaries: enrollBoundaries.map((value) => ({ value })),
               signingKey: userSigningKeyDid,
               attestation: {
                 sig: attestation.sig,
@@ -305,6 +419,17 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
             'failed to write profile record',
           )
         }
+
+        // Create enrollment record
+        await enrollmentStore.enroll({
+          did,
+          enrolledAt: new Date().toISOString(),
+          pdsEndpoint: enrollmentResult.pdsEndpoint,
+          boundaries: enrollBoundaries,
+          signingKeyDid: userSigningKeyDid,
+          active: true,
+          enrollmentRkey,
+        })
       }
 
       // Redirect back to the app if a redirect was stored, otherwise return JSON
@@ -335,7 +460,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
 
       if (!alreadyEnrolled) {
         logger?.info(
-          { did, boundaryCount: defaultBoundaries.length },
+          { did, boundaryCount: enrollBoundaries.length },
           'user enrolled via OAuth',
         )
       }
@@ -371,11 +496,12 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         })
       }
 
+      const boundaries = await enrollmentStore.getBoundaries(did)
       res.json({
         did,
         enrolled: true,
         enrolledAt: enrollment.enrolledAt,
-        boundaries: defaultBoundaries,
+        boundaries: boundaries.map((value) => ({ value })),
       })
     } catch (err) {
       logger?.error(
@@ -399,22 +525,24 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       if (!did) return
 
       // Check if enrolled
-      const isEnrolled = await enrollmentStore.isEnrolled(did)
-      if (!isEnrolled) {
+      const currentEnrollment = await enrollmentStore.getEnrollment(did)
+      if (!currentEnrollment) {
         return res.status(404).json({
           error: 'NotFound',
           message: 'User is not enrolled',
         })
       }
 
-      // Best-effort PDS enrollment record deletion
+      // Best-effort PDS enrollment record deletion using stored rkey or service DID
+      const rkey =
+        currentEnrollment.enrollmentRkey || serviceDIDToRkey(serviceDid)
       try {
         const oauthSession = await oauthClient.restore(did)
         const agent = new Agent(oauthSession)
         await agent.com.atproto.repo.deleteRecord({
           repo: did,
           collection: 'zone.stratos.actor.enrollment',
-          rkey: 'self',
+          rkey,
         })
       } catch (err) {
         logger?.warn(

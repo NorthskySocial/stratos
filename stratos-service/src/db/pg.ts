@@ -20,7 +20,7 @@ export type ServicePgDb = PostgresJsDatabase<typeof pgSchema> & {
 }
 
 export function createServicePgDb(connectionString: string): ServicePgDb {
-  const client = postgres(connectionString, { max: 10 })
+  const client = postgres(connectionString, { max: 5, idle_timeout: 20 })
   return drizzle({ client, schema: pgSchema }) as unknown as ServicePgDb
 }
 
@@ -198,7 +198,8 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
         "enrolledAt" TEXT NOT NULL,
         "pdsEndpoint" TEXT,
         "signingKeyDid" TEXT NOT NULL,
-        "active" TEXT NOT NULL DEFAULT 'true'
+        "active" TEXT NOT NULL DEFAULT 'true',
+        "enrollmentRkey" TEXT
       )
     `,
   )
@@ -221,6 +222,13 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     sql`
       CREATE INDEX IF NOT EXISTS "enrollment_boundary_did_idx" ON "enrollment_boundary"("did")
     `,
+  )
+
+  // Migration: add enrollmentRkey column if missing (for existing databases)
+  await executeMigrationStep(
+    db,
+    'enrollment_add_enrollmentRkey',
+    sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "enrollmentRkey" TEXT`,
   )
 }
 

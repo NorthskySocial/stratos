@@ -10,6 +10,7 @@ export interface StratosEnrollment {
   signingKey: string
   attestation: ServiceAttestation
   createdAt: string
+  rkey: string
 }
 
 /**
@@ -23,10 +24,14 @@ export interface ServiceAttestation {
 
 /**
  * verification level indicating what was cryptographically checked.
+ * - 'user-signature': full signature verification against the user's per-actor signing key + DID match
  * - 'service-signature': full signature verification against the service's signing key + DID match
  * - 'cid-integrity': CID integrity and MST path validation only (no signature check)
  */
-export type VerificationLevel = 'service-signature' | 'cid-integrity'
+export type VerificationLevel =
+  | 'user-signature'
+  | 'service-signature'
+  | 'cid-integrity'
 
 /**
  * result of record verification via inclusion proof.
@@ -42,8 +47,14 @@ export interface VerifiedRecord {
  */
 export interface FetchAndVerifyOptions {
   /**
+   * the user's per-actor public signing key from @atcute/crypto.
+   * when provided, verifies the commit was signed by the user's key.
+   * callers should cache the result of resolveUserSigningKey.
+   */
+  userSigningKey?: import('@atcute/crypto').PublicKey
+  /**
    * the service's public signing key from @atcute/crypto.
-   * when provided, full signature verification is performed.
+   * used as fallback when userSigningKey is not provided.
    * callers should cache the result of resolveServiceSigningKey.
    */
   serviceSigningKey?: import('@atcute/crypto').PublicKey

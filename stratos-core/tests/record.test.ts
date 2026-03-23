@@ -59,13 +59,9 @@ describe('Record Reader', () => {
   })
 
   describe('recordCount', () => {
-    it('should return 0 for empty database', async () => {
-      const count = await reader.recordCount()
-      expect(count).toBe(0)
-    })
+    it('should track record count', async () => {
+      expect(await reader.recordCount()).toBe(0)
 
-    it('should return correct count after inserts', async () => {
-      // Insert some records
       await db.insert(stratosRecord).values([
         {
           uri: 'at://did:plc:test/zone.stratos.feed.post/1111111111111',
@@ -87,18 +83,14 @@ describe('Record Reader', () => {
         },
       ])
 
-      const count = await reader.recordCount()
-      expect(count).toBe(2)
+      expect(await reader.recordCount()).toBe(2)
     })
   })
 
   describe('listCollections', () => {
-    it('should return empty array for no records', async () => {
-      const collections = await reader.listCollections()
-      expect(collections).toEqual([])
-    })
-
     it('should return unique collections', async () => {
+      expect(await reader.listCollections()).toEqual([])
+
       await db.insert(stratosRecord).values([
         {
           uri: 'at://did:plc:test/zone.stratos.feed.post/1',

@@ -10,6 +10,7 @@ export interface StoredEnrollment {
   boundaries?: string[]
   signingKeyDid: string
   active: boolean
+  enrollmentRkey?: string
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { Secp256k1Keypair } from '@atproto/crypto'
+import { Secp256k1Keypair, P256Keypair } from '@atproto/crypto'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import {
@@ -14,12 +14,13 @@ import {
   NodeStore,
   buildInclusionProof,
 } from '@atcute/mst'
-import { parseDidKey, Secp256k1PublicKey } from '@atcute/crypto'
+import { parseDidKey, Secp256k1PublicKey, P256PublicKey } from '@atcute/crypto'
 import { buildCommit } from '@northskysocial/stratos-core'
 
 import {
   verifyCidIntegrity,
   resolveServiceSigningKey,
+  resolveUserSigningKey,
   fetchAndVerifyRecord,
 } from '../src'
 
@@ -125,6 +126,26 @@ async function keypairToPublicKey(keypair: Secp256k1Keypair) {
   const didKey = keypair.did()
   const found = parseDidKey(didKey)
   return Secp256k1PublicKey.importRaw(found.publicKeyBytes)
+}
+
+async function p256KeypairToPublicKey(keypair: P256Keypair) {
+  const didKey = keypair.did()
+  const found = parseDidKey(didKey)
+  return P256PublicKey.importRaw(found.publicKeyBytes)
+}
+
+async function buildP256SignedRecordCar(
+  keypair: P256Keypair,
+  did: string,
+  collection: string,
+  rkey: string,
+): Promise<{ carBytes: Uint8Array; recordCid: string }> {
+  return buildSignedRecordCar(
+    keypair as unknown as Secp256k1Keypair,
+    did,
+    collection,
+    rkey,
+  )
 }
 
 describe('verifyCidIntegrity', () => {
@@ -494,5 +515,215 @@ describe('fetchAndVerifyRecord', () => {
       text: 'test record',
       createdAt: '2025-01-01T00:00:00Z',
     })
+  })
+})
+
+describe('user-signature verification', () => {
+  it('verifies a P256-signed commit as user-signature level', async () => {
+    const keypair = await P256Keypair.create({ exportable: true })
+    const publicKey = await p256KeypairToPublicKey(keypair)
+    const { carBytes } = await buildP256SignedRecordCar(
+      keypair,
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const mockFetch = vi.fn(async () => new Response(carBytes))
+
+    const result = await fetchAndVerifyRecord(
+      'https://stratos.example.com',
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      { userSigningKey: publicKey, fetchFn: mockFetch },
+    )
+
+    expect(result.level).toBe('user-signature')
+    expect(result.cid).toBeTruthy()
+    expect(result.record).toEqual({
+      text: 'test record',
+      createdAt: '2025-01-01T00:00:00Z',
+    })
+  })
+
+  it('fails with wrong P256 key', async () => {
+    const signingKeypair = await P256Keypair.create({ exportable: true })
+    const wrongKeypair = await P256Keypair.create({ exportable: true })
+    const wrongPublicKey = await p256KeypairToPublicKey(wrongKeypair)
+    const { carBytes } = await buildP256SignedRecordCar(
+      signingKeypair,
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const mockFetch = vi.fn(async () => new Response(carBytes))
+
+    await expect(
+      fetchAndVerifyRecord(
+        'https://stratos.example.com',
+        TEST_DID,
+        TEST_COLLECTION,
+        TEST_RKEY,
+        { userSigningKey: wrongPublicKey, fetchFn: mockFetch },
+      ),
+    ).rejects.toThrow(/signature/)
+  })
+
+  it('prefers userSigningKey over serviceSigningKey when both provided', async () => {
+    const userKeypair = await P256Keypair.create({ exportable: true })
+    const userPublicKey = await p256KeypairToPublicKey(userKeypair)
+    const serviceKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const servicePublicKey = await keypairToPublicKey(serviceKeypair)
+
+    const { carBytes } = await buildP256SignedRecordCar(
+      userKeypair,
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const mockFetch = vi.fn(async () => new Response(carBytes))
+
+    const result = await fetchAndVerifyRecord(
+      'https://stratos.example.com',
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      {
+        userSigningKey: userPublicKey,
+        serviceSigningKey: servicePublicKey,
+        fetchFn: mockFetch,
+      },
+    )
+
+    expect(result.level).toBe('user-signature')
+  })
+
+  it('falls back to service-signature when only serviceSigningKey provided', async () => {
+    const serviceKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const servicePublicKey = await keypairToPublicKey(serviceKeypair)
+    const { carBytes } = await buildSignedRecordCar(
+      serviceKeypair,
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const mockFetch = vi.fn(async () => new Response(carBytes))
+
+    const result = await fetchAndVerifyRecord(
+      'https://stratos.example.com',
+      TEST_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      { serviceSigningKey: servicePublicKey, fetchFn: mockFetch },
+    )
+
+    expect(result.level).toBe('service-signature')
+  })
+})
+
+describe('resolveUserSigningKey', () => {
+  it('resolves a P256 signing key from enrollment record', async () => {
+    const keypair = await P256Keypair.create({ exportable: true })
+    const didKey = keypair.did()
+
+    const sigBytes = new Uint8Array([0xde, 0xad])
+    const sigB64 = btoa(String.fromCharCode(...sigBytes))
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          records: [
+            {
+              uri: 'at://did:plc:testuser/zone.stratos.actor.enrollment/did:web:stratos.example.com',
+              cid: 'bafytest',
+              value: {
+                service: 'https://stratos.example.com',
+                boundaries: [{ value: 'engineering' }],
+                signingKey: didKey,
+                attestation: {
+                  sig: { $bytes: sigB64 },
+                  signingKey: 'did:key:zServiceKey',
+                },
+                createdAt: '2025-01-01T00:00:00Z',
+              },
+            },
+          ],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    const publicKey = await resolveUserSigningKey(
+      'https://pds.example.com',
+      'did:plc:testuser',
+      'did:web:stratos.example.com',
+    )
+
+    expect(publicKey).toBeTruthy()
+    expect(publicKey!.type).toBe('p256')
+
+    vi.restoreAllMocks()
+  })
+
+  it('returns null when no enrollment exists for the service', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ records: [] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    const publicKey = await resolveUserSigningKey(
+      'https://pds.example.com',
+      'did:plc:testuser',
+      'did:web:stratos.example.com',
+    )
+
+    expect(publicKey).toBeNull()
+
+    vi.restoreAllMocks()
+  })
+
+  it('returns null when enrollment for a different service exists', async () => {
+    const keypair = await P256Keypair.create({ exportable: true })
+    const sigBytes = new Uint8Array([0xca, 0xfe])
+    const sigB64 = btoa(String.fromCharCode(...sigBytes))
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          records: [
+            {
+              uri: 'at://did:plc:testuser/zone.stratos.actor.enrollment/did:web:other-service.example.com',
+              cid: 'bafytest',
+              value: {
+                service: 'https://other-service.example.com',
+                boundaries: [],
+                signingKey: keypair.did(),
+                attestation: {
+                  sig: { $bytes: sigB64 },
+                  signingKey: 'did:key:zServiceKey',
+                },
+                createdAt: '2025-01-01T00:00:00Z',
+              },
+            },
+          ],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    const publicKey = await resolveUserSigningKey(
+      'https://pds.example.com',
+      'did:plc:testuser',
+      'did:web:stratos.example.com',
+    )
+
+    expect(publicKey).toBeNull()
+
+    vi.restoreAllMocks()
   })
 })

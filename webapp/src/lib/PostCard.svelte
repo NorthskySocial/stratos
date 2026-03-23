@@ -3,9 +3,10 @@
 
   interface Props {
     post: FeedPost
+    onreply: (post: FeedPost) => void
   }
 
-  let { post }: Props = $props()
+  let { post, onreply }: Props = $props()
 
   function formatTime(iso: string): string {
     try {
@@ -24,21 +25,44 @@
       return ''
     }
   }
+
+  function shortDid(did: string): string {
+    if (did.length <= 24) return did
+    return did.slice(0, 16) + '…' + did.slice(-6)
+  }
+
+  function parentAuthor(uri: string): string {
+    return uri.replace('at://', '').split('/')[0]
+  }
 </script>
 
 <article class="post-card" class:private={post.isPrivate}>
-  {#if post.isPrivate}
-    <span class="private-badge">Private</span>
+  {#if post.reply}
+    <div class="reply-context">
+      ↩ replying to {shortDid(parentAuthor(post.reply.parent.uri))}
+    </div>
   {/if}
 
-  {#if post.hasReply}
-    <div class="reply-indicator">Reply</div>
-  {/if}
+  <div class="post-header">
+    <span class="author">
+      @{post.authorHandle || shortDid(post.author)}
+    </span>
+    <time>{formatTime(post.createdAt)}</time>
+  </div>
+
+  <div class="badges">
+    {#if post.isPrivate}
+      <span class="private-badge">Private</span>
+    {/if}
+    {#each post.boundaries as domain}
+      <span class="domain-badge">{domain}</span>
+    {/each}
+  </div>
 
   <p class="post-text">{post.text}</p>
 
-  <div class="post-meta">
-    <time>{formatTime(post.createdAt)}</time>
+  <div class="post-actions">
+    <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
   </div>
 </article>
 
@@ -54,6 +78,45 @@
     background: #faf5ff;
   }
 
+  .reply-context {
+    font-size: 0.78rem;
+    color: #888;
+    margin-bottom: 0.3rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .post-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.35rem;
+  }
+
+  .author {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 70%;
+  }
+
+  .post-header time {
+    font-size: 0.8rem;
+    color: #888;
+    flex-shrink: 0;
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.4rem;
+  }
+
   .private-badge {
     display: inline-block;
     background: #8b5cf6;
@@ -62,15 +125,18 @@
     font-weight: 600;
     padding: 0.1rem 0.45rem;
     border-radius: 4px;
-    margin-bottom: 0.4rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
 
-  .reply-indicator {
-    color: #888;
-    font-size: 0.8rem;
-    margin-bottom: 0.3rem;
+  .domain-badge {
+    display: inline-block;
+    background: #e0e7ff;
+    color: #3730a3;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
   }
 
   .post-text {
@@ -80,9 +146,22 @@
     line-height: 1.45;
   }
 
-  .post-meta {
-    margin-top: 0.5rem;
-    font-size: 0.8rem;
+  .post-actions {
+    margin-top: 0.4rem;
+  }
+
+  .reply-btn {
+    background: none;
+    border: none;
     color: #888;
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  .reply-btn:hover {
+    background: #f3f4f6;
+    color: #333;
   }
 </style>

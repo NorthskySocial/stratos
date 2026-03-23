@@ -14,101 +14,128 @@ import {
 } from '@northskysocial/stratos-core'
 
 export class PgRepoStoreReader implements RepoStoreReader {
-  constructor(protected db: StratosPgDb | StratosPgDbOrTx) {}
+  constructor(
+    protected db: StratosPgDb | StratosPgDbOrTx,
+    protected schemaName?: string,
+  ) {}
+
+  protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
+    if (!this.schemaName) {
+      return fn(this.db as StratosPgDb)
+    }
+    return (this.db as StratosPgDb).transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${this.schemaName}"`))
+      return fn(tx as unknown as StratosPgDb)
+    })
+  }
 
   async getRoot(): Promise<CID | null> {
-    const rows = await this.db
-      .select({ cid: pgStratosRepoRoot.cid })
-      .from(pgStratosRepoRoot)
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ cid: pgStratosRepoRoot.cid })
+        .from(pgStratosRepoRoot)
+        .limit(1)
 
-    const row = rows[0]
-    if (!row?.cid) return null
+      const row = rows[0]
+      if (!row?.cid) return null
 
-    return CID.parse(row.cid)
+      return CID.parse(row.cid)
+    })
   }
 
   async getRev(): Promise<string | null> {
-    const rows = await this.db
-      .select({ rev: pgStratosRepoRoot.rev })
-      .from(pgStratosRepoRoot)
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ rev: pgStratosRepoRoot.rev })
+        .from(pgStratosRepoRoot)
+        .limit(1)
 
-    return rows[0]?.rev ?? null
+      return rows[0]?.rev ?? null
+    })
   }
 
   async getState(): Promise<RepoState | null> {
-    const rows = await this.db
-      .select({ cid: pgStratosRepoRoot.cid, rev: pgStratosRepoRoot.rev })
-      .from(pgStratosRepoRoot)
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ cid: pgStratosRepoRoot.cid, rev: pgStratosRepoRoot.rev })
+        .from(pgStratosRepoRoot)
+        .limit(1)
 
-    const row = rows[0]
-    if (!row?.cid || !row?.rev) return null
+      const row = rows[0]
+      if (!row?.cid || !row?.rev) return null
 
-    return {
-      root: CID.parse(row.cid),
-      rev: row.rev,
-    }
+      return {
+        root: CID.parse(row.cid),
+        rev: row.rev,
+      }
+    })
   }
 
   async getBlock(cid: CID): Promise<Uint8Array | null> {
-    const rows = await this.db
-      .select({ content: pgStratosRepoBlock.content })
-      .from(pgStratosRepoBlock)
-      .where(eq(pgStratosRepoBlock.cid, cid.toString()))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ content: pgStratosRepoBlock.content })
+        .from(pgStratosRepoBlock)
+        .where(eq(pgStratosRepoBlock.cid, cid.toString()))
+        .limit(1)
 
-    const content = rows[0]?.content
-    return content ? new Uint8Array(content) : null
+      const content = rows[0]?.content
+      return content ? new Uint8Array(content) : null
+    })
   }
 
   async hasBlock(cid: CID): Promise<boolean> {
-    const rows = await this.db
-      .select({ cid: pgStratosRepoBlock.cid })
-      .from(pgStratosRepoBlock)
-      .where(eq(pgStratosRepoBlock.cid, cid.toString()))
-      .limit(1)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ cid: pgStratosRepoBlock.cid })
+        .from(pgStratosRepoBlock)
+        .where(eq(pgStratosRepoBlock.cid, cid.toString()))
+        .limit(1)
 
-    return rows.length > 0
+      return rows.length > 0
+    })
   }
 
   async getBlocks(cids: CID[]): Promise<Map<string, Uint8Array>> {
     if (cids.length === 0) return new Map()
 
-    const cidStrings = cids.map((c) => c.toString())
-    const result = new Map<string, Uint8Array>()
+    return this.withDb(async (db) => {
+      const cidStrings = cids.map((c) => c.toString())
+      const result = new Map<string, Uint8Array>()
 
-    const batchSize = 100
-    for (let i = 0; i < cidStrings.length; i += batchSize) {
-      const batch = cidStrings.slice(i, i + batchSize)
-      const rows = await this.db
-        .select({
-          cid: pgStratosRepoBlock.cid,
-          content: pgStratosRepoBlock.content,
-        })
-        .from(pgStratosRepoBlock)
-        .where(
-          sql`${pgStratosRepoBlock.cid} IN (${sql.join(
-            batch.map((c) => sql`${c}`),
-            sql`,`,
-          )})`,
-        )
+      const batchSize = 100
+      for (let i = 0; i < cidStrings.length; i += batchSize) {
+        const batch = cidStrings.slice(i, i + batchSize)
+        const rows = await db
+          .select({
+            cid: pgStratosRepoBlock.cid,
+            content: pgStratosRepoBlock.content,
+          })
+          .from(pgStratosRepoBlock)
+          .where(
+            sql`${pgStratosRepoBlock.cid} IN (${sql.join(
+              batch.map((c) => sql`${c}`),
+              sql`,`,
+            )})`,
+          )
 
-      for (const row of rows) {
-        result.set(row.cid, new Uint8Array(row.content))
+        for (const row of rows) {
+          result.set(row.cid, new Uint8Array(row.content))
+        }
       }
-    }
 
-    return result
+      return result
+    })
   }
 
   async blockCount(): Promise<number> {
-    const rows = await this.db
-      .select({ count: sql<number>`count(*)` })
-      .from(pgStratosRepoBlock)
+    return this.withDb(async (db) => {
+      const rows = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(pgStratosRepoBlock)
 
-    return Number(rows[0]?.count ?? 0)
+      return Number(rows[0]?.count ?? 0)
+    })
   }
 }
 

@@ -1,0 +1,940 @@
+import { decodeFirst } from '@atcute/cbor'
+import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
+import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
+import type { CursorManager } from './cursor-manager.ts'
+import { extractBoundaries } from './record-decoder.ts'
+
+const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
+const DEFAULT_RECONNECT_BASE_DELAY_MS = 1_000
+const DEFAULT_RECONNECT_MAX_DELAY_MS = 60_000
+const DEFAULT_RECONNECT_JITTER_MS = 1_000
+const DEFAULT_RECONNECT_MAX_ATTEMPTS = 200
+const INDEX_TRACE_WARN_LAG_MS = 5_000
+
+export interface StratosSyncConfig {
+  stratosServiceUrl: string
+  syncToken: string
+}
+
+interface StratosCommitMessage {
+  seq: number
+  did: string
+  time: string
+  rev: string
+  ops: StratosRecordOp[]
+}
+
+interface StratosRecordOp {
+  action: 'create' | 'update' | 'delete'
+  path: string
+  cid?: string
+  record?: Record<string, unknown>
+  trace?: {
+    requestId?: string
+    queuedAtMs?: number
+  }
+}
+
+interface EnrollmentMessage {
+  did: string
+  action: 'enroll' | 'unenroll'
+  service?: string
+  boundaries?: string[]
+  time: string
+}
+
+export interface StratosSyncCallbacks {
+  onEnroll: (did: string, boundaries: string[]) => void
+  onUnenroll: (did: string) => void
+}
+
+// --- Service-level enrollment stream ---
+
+export class StratosServiceSubscription {
+  private ws: WebSocket | null = null
+  private running = false
+  private reconnectAttempt = 0
+
+  constructor(
+    private config: StratosSyncConfig,
+    private callbacks: StratosSyncCallbacks,
+    private onError?: (err: Error) => void,
+  ) {}
+
+  start(): void {
+    this.running = true
+    this.connect()
+  }
+
+  stop(): void {
+    this.running = false
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+  }
+
+  private connect(): void {
+    if (!this.running) return
+
+    const wsUrl = buildWsUrl(this.config.stratosServiceUrl, {
+      syncToken: this.config.syncToken,
+    })
+
+    this.ws = new WebSocket(wsUrl)
+    this.ws.binaryType = 'arraybuffer'
+
+    this.ws.addEventListener('open', () => {
+      this.reconnectAttempt = 0
+    })
+
+    this.ws.onmessage = (e: MessageEvent) => {
+      void this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
+    }
+
+    this.ws.onerror = (e: Event & { error?: unknown }) => {
+      const cause =
+        e.error instanceof Error
+          ? e.error.message
+          : String(e.error ?? 'unknown')
+      this.onError?.(new Error(`service subscription ws error: ${cause}`))
+    }
+
+    this.ws.onclose = (e: { code: number; reason: string }) => {
+      if (e.code !== 1000) {
+        this.onError?.(
+          new Error(
+            `service subscription ws closed: code=${e.code} reason=${e.reason || 'none'}`,
+          ),
+        )
+      }
+      this.scheduleReconnect()
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.running) return
+
+    this.reconnectAttempt++
+    const delay = Math.min(
+      1000 * Math.pow(2, this.reconnectAttempt),
+      DEFAULT_RECONNECT_MAX_DELAY_MS,
+    )
+    setTimeout(() => this.connect(), delay)
+  }
+
+  private async handleMessage(data: Uint8Array): Promise<void> {
+    try {
+      const msg = decodeXrpcFrame(data)
+      if (!msg) return
+
+      if (
+        msg.$type === '#enrollment' ||
+        msg.$type === 'zone.stratos.sync.subscribeRecords#enrollment'
+      ) {
+        const enrollment = msg as unknown as EnrollmentMessage
+        if (enrollment.action === 'enroll') {
+          this.callbacks.onEnroll(enrollment.did, enrollment.boundaries ?? [])
+        } else if (enrollment.action === 'unenroll') {
+          this.callbacks.onUnenroll(enrollment.did)
+        }
+      }
+    } catch (err) {
+      this.onError?.(
+        new Error('failed to process Stratos enrollment message', {
+          cause: err,
+        }),
+      )
+    }
+  }
+}
+
+// --- Per-actor record streams ---
+
+export interface StratosActorSyncOptions {
+  maxConcurrentActorSyncs: number
+  maxActorQueueSize: number
+  globalMaxPending: number
+  drainDelayMs: number
+  maxConnections: number
+  connectDelayMs: number
+  idleEvictionMs: number
+  reconnectBaseDelayMs: number
+  reconnectMaxDelayMs: number
+  reconnectJitterMs: number
+  reconnectMaxAttempts: number
+}
+
+interface ActorQueue {
+  pending: Uint8Array[]
+  active: boolean
+  draining: boolean
+}
+
+interface RecordUpsert {
+  uri: string
+  cid: string
+  record: Record<string, unknown>
+  trace?: {
+    requestId?: string
+    queuedAtMs?: number
+  }
+}
+
+export class StratosActorSync {
+  private subscriptions = new Map<string, WebSocket>()
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private reconnectAttempts = new Map<string, number>()
+  private intentionallyClosed = new Set<string>()
+  private running = false
+  private knownDids = new Map<string, number>()
+  private knownDidsSweepTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly KNOWN_DIDS_TTL_MS = 30 * 60 * 1000
+  private static readonly KNOWN_DIDS_SWEEP_MS = 60 * 1000
+
+  // Connection management — limits total open WebSockets to prevent native memory exhaustion
+  private waitingActors: string[] = []
+  private readonly maxConnections: number
+  private readonly connectDelayMs: number
+  private readonly reconnectBaseDelayMs: number
+  private readonly reconnectMaxDelayMs: number
+  private readonly reconnectJitterMs: number
+  private readonly reconnectMaxAttempts: number
+  private connectTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Per-actor bounded queues prevent unbounded concurrent DB operations during spikes
+  private actorQueues = new Map<string, ActorQueue>()
+  private activeSyncs = 0
+  private syncWaiters: Array<() => void> = []
+  private readonly maxConcurrentActorSyncs: number
+  private readonly maxActorQueueSize: number
+  private readonly globalMaxPending: number
+  private readonly drainDelayMs: number
+  private globalPendingCount = 0
+
+  // Idle connection eviction — rotate stale connections when actors are waiting
+  private lastMessageAt = new Map<string, number>()
+  private readonly idleEvictionMs: number
+  private idleEvictionTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly IDLE_EVICTION_CHECK_MS = 10_000
+
+  // Periodic stats instead of per-record logging
+  private indexedCount = 0
+  private deletedCount = 0
+  private statsTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly STATS_INTERVAL_MS = 10_000
+
+  constructor(
+    private db: Kysely<DatabaseSchemaType>,
+    private config: StratosSyncConfig,
+    private cursorManager: CursorManager,
+    private onError?: (err: Error) => void,
+    private onReferencedActor?: (did: string) => void,
+    options: StratosActorSyncOptions = {
+      maxConcurrentActorSyncs: 8,
+      maxActorQueueSize: 10,
+      globalMaxPending: 500,
+      drainDelayMs: 5,
+      maxConnections: 20,
+      connectDelayMs: 200,
+      idleEvictionMs: 60_000,
+      reconnectBaseDelayMs: DEFAULT_RECONNECT_BASE_DELAY_MS,
+      reconnectMaxDelayMs: DEFAULT_RECONNECT_MAX_DELAY_MS,
+      reconnectJitterMs: DEFAULT_RECONNECT_JITTER_MS,
+      reconnectMaxAttempts: DEFAULT_RECONNECT_MAX_ATTEMPTS,
+    },
+    private onHandleNeeded?: (did: string) => void,
+  ) {
+    this.maxConcurrentActorSyncs = options.maxConcurrentActorSyncs
+    this.maxActorQueueSize = options.maxActorQueueSize
+    this.globalMaxPending = options.globalMaxPending
+    this.drainDelayMs = options.drainDelayMs
+    this.maxConnections = options.maxConnections
+    this.connectDelayMs = options.connectDelayMs
+    this.idleEvictionMs = options.idleEvictionMs
+    this.reconnectBaseDelayMs = options.reconnectBaseDelayMs
+    this.reconnectMaxDelayMs = options.reconnectMaxDelayMs
+    this.reconnectJitterMs = options.reconnectJitterMs
+    this.reconnectMaxAttempts = options.reconnectMaxAttempts
+  }
+
+  start(): void {
+    this.running = true
+    this.statsTimer = setInterval(() => {
+      if (this.indexedCount > 0 || this.deletedCount > 0) {
+        console.log(
+          {
+            indexed: this.indexedCount,
+            deleted: this.deletedCount,
+            activeActors: this.subscriptions.size,
+          },
+          'stratos sync stats',
+        )
+        this.indexedCount = 0
+        this.deletedCount = 0
+      }
+    }, StratosActorSync.STATS_INTERVAL_MS)
+
+    this.knownDidsSweepTimer = setInterval(() => {
+      const cutoff = Date.now() - StratosActorSync.KNOWN_DIDS_TTL_MS
+      for (const [did, ts] of this.knownDids) {
+        if (ts < cutoff) this.knownDids.delete(did)
+      }
+    }, StratosActorSync.KNOWN_DIDS_SWEEP_MS)
+
+    if (this.idleEvictionMs > 0) {
+      this.idleEvictionTimer = setInterval(
+        () => this.evictIdleConnections(),
+        StratosActorSync.IDLE_EVICTION_CHECK_MS,
+      )
+    }
+  }
+
+  stop(): void {
+    this.running = false
+
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer)
+      this.statsTimer = null
+    }
+    if (this.knownDidsSweepTimer) {
+      clearInterval(this.knownDidsSweepTimer)
+      this.knownDidsSweepTimer = null
+    }
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer)
+      this.connectTimer = null
+    }
+    if (this.idleEvictionTimer) {
+      clearInterval(this.idleEvictionTimer)
+      this.idleEvictionTimer = null
+    }
+    this.knownDids.clear()
+    this.lastMessageAt.clear()
+    this.waitingActors = []
+    this.intentionallyClosed.clear()
+
+    for (const timer of this.reconnectTimers.values()) {
+      clearTimeout(timer)
+    }
+    this.reconnectTimers.clear()
+    this.reconnectAttempts.clear()
+
+    for (const ws of this.subscriptions.values()) {
+      ws.close()
+    }
+    this.subscriptions.clear()
+
+    this.actorQueues.clear()
+    for (const waiter of this.syncWaiters) waiter()
+    this.syncWaiters = []
+  }
+
+  addActor(did: string, cursor?: number): void {
+    if (this.subscriptions.has(did)) return
+    if (this.waitingActors.includes(did)) return
+    if (cursor !== undefined) {
+      this.cursorManager.updateStratosCursor(did, cursor)
+    }
+    if (this.subscriptions.size >= this.maxConnections) {
+      this.waitingActors.push(did)
+      return
+    }
+    this.scheduleConnect(did)
+  }
+
+  removeActor(did: string): void {
+    const idx = this.waitingActors.indexOf(did)
+    if (idx !== -1) {
+      this.waitingActors.splice(idx, 1)
+    }
+    const ws = this.subscriptions.get(did)
+    if (ws) {
+      this.intentionallyClosed.add(did)
+      ws.close()
+      this.subscriptions.delete(did)
+    }
+    const timer = this.reconnectTimers.get(did)
+    if (timer) {
+      clearTimeout(timer)
+      this.reconnectTimers.delete(did)
+    }
+    this.reconnectAttempts.delete(did)
+    this.cursorManager.removeStratosCursor(did)
+    this.actorQueues.delete(did)
+    this.lastMessageAt.delete(did)
+    this.promoteWaitingActor()
+  }
+
+  getActiveActors(): string[] {
+    return Array.from(this.subscriptions.keys())
+  }
+
+  getWaitingActorCount(): number {
+    return this.waitingActors.length
+  }
+
+  private promoteWaitingActor(): void {
+    if (this.waitingActors.length === 0) return
+    if (this.subscriptions.size >= this.maxConnections) return
+    const nextDid = this.waitingActors.shift()!
+    this.scheduleConnect(nextDid)
+  }
+
+  private scheduleConnect(did: string): void {
+    if (!this.running) return
+    if (this.connectDelayMs <= 0) {
+      this.subscribe(did)
+      return
+    }
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null
+      this.subscribe(did)
+    }, this.connectDelayMs)
+  }
+
+  private subscribe(did: string): void {
+    if (!this.running) return
+
+    const cursor = this.cursorManager.getStratosCursor(did)
+    const params: Record<string, string> = {
+      did,
+      syncToken: this.config.syncToken,
+    }
+    if (cursor !== undefined) {
+      params.cursor = String(cursor)
+    }
+
+    const wsUrl = buildWsUrl(this.config.stratosServiceUrl, params)
+    const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
+    this.subscriptions.set(did, ws)
+
+    ws.addEventListener('open', () => {
+      this.reconnectAttempts.delete(did)
+    })
+
+    // Respond to server pings to keep ALB connection alive
+    ws.addEventListener('message', (e: MessageEvent) => {
+      this.lastMessageAt.set(did, Date.now())
+      this.enqueueActorMessage(did, new Uint8Array(e.data as ArrayBuffer))
+    })
+
+    ws.addEventListener('close', (e: { code: number; reason: string }) => {
+      this.subscriptions.delete(did)
+      if (this.intentionallyClosed.delete(did)) {
+        return
+      }
+      if (e.code !== 1000) {
+        this.onError?.(
+          new Error(
+            `actor sync ws closed for ${did}: code=${e.code} reason=${e.reason || 'none'}`,
+          ),
+        )
+      }
+      this.scheduleReconnect(did)
+      this.promoteWaitingActor()
+    })
+
+    ws.addEventListener('error', (e: Event & { error?: unknown }) => {
+      const cause =
+        e instanceof Error
+          ? e.message
+          : ((e as { error?: unknown }).error ?? 'unknown')
+      this.onError?.(new Error(`actor sync ws error for ${did}: ${cause}`))
+    })
+  }
+
+  private scheduleReconnect(did: string): void {
+    if (!this.running) return
+
+    const attempt = (this.reconnectAttempts.get(did) ?? 0) + 1
+    this.reconnectAttempts.set(did, attempt)
+
+    if (attempt > this.reconnectMaxAttempts) {
+      console.warn(
+        `max reconnect attempts (${this.reconnectMaxAttempts}) reached for ${did}, giving up`,
+      )
+      this.reconnectAttempts.delete(did)
+      return
+    }
+
+    if (this.subscriptions.size >= this.maxConnections) {
+      if (!this.waitingActors.includes(did)) {
+        this.waitingActors.push(did)
+      }
+      return
+    }
+
+    const exponentialDelay = Math.min(
+      this.reconnectBaseDelayMs * Math.pow(2, attempt - 1),
+      this.reconnectMaxDelayMs,
+    )
+    const jitter =
+      this.reconnectJitterMs > 0
+        ? Math.floor(Math.random() * this.reconnectJitterMs)
+        : 0
+    const delay = exponentialDelay + jitter
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(did)
+      if (this.subscriptions.size >= this.maxConnections) {
+        if (!this.waitingActors.includes(did)) {
+          this.waitingActors.push(did)
+        }
+        return
+      }
+      this.subscribe(did)
+    }, delay)
+    this.reconnectTimers.set(did, timer)
+  }
+
+  private enqueueActorMessage(did: string, data: Uint8Array): void {
+    let q = this.actorQueues.get(did)
+    if (!q) {
+      q = { pending: [], active: false, draining: false }
+      this.actorQueues.set(did, q)
+    }
+    if (
+      q.pending.length >= this.maxActorQueueSize ||
+      this.globalPendingCount >= this.globalMaxPending
+    ) {
+      this.closeAndReconnectActor(did)
+      return
+    }
+    q.pending.push(data)
+    this.globalPendingCount++
+    if (!q.active && !q.draining) {
+      void this.drainActorQueue(did)
+    }
+  }
+
+  private closeAndReconnectActor(did: string): void {
+    const ws = this.subscriptions.get(did)
+    if (ws) {
+      this.intentionallyClosed.add(did)
+      ws.close()
+      this.subscriptions.delete(did)
+    }
+    const q = this.actorQueues.get(did)
+    if (q) {
+      this.globalPendingCount -= q.pending.length
+      q.pending.length = 0
+    }
+    this.scheduleReconnect(did)
+    this.promoteWaitingActor()
+  }
+
+  private async drainActorQueue(did: string): Promise<void> {
+    const q = this.actorQueues.get(did)
+    if (!q || q.active || q.draining) return
+
+    q.draining = true
+
+    if (this.activeSyncs >= this.maxConcurrentActorSyncs) {
+      await new Promise<void>((resolve) => this.syncWaiters.push(resolve))
+    }
+
+    q.active = true
+    q.draining = false
+    this.activeSyncs++
+
+    try {
+      while (true) {
+        const current = this.actorQueues.get(did)
+        if (!current || current.pending.length === 0) break
+        const data = current.pending.shift()!
+        this.globalPendingCount--
+        await this.handleMessage(did, data)
+        if (this.drainDelayMs > 0 && current.pending.length > 0) {
+          await new Promise<void>((r) => setTimeout(r, this.drainDelayMs))
+        }
+      }
+    } finally {
+      q.active = false
+      this.activeSyncs--
+      this.syncWaiters.shift()?.()
+      const remaining = this.actorQueues.get(did)
+      if (remaining && remaining.pending.length > 0 && !remaining.draining) {
+        void this.drainActorQueue(did)
+      }
+    }
+  }
+
+  private async handleMessage(did: string, data: Uint8Array): Promise<void> {
+    try {
+      const msg = decodeXrpcFrame(data)
+      if (!msg) return
+
+      if (msg.$type === '#info') {
+        const name = (msg as { name?: string }).name
+        if (name === 'OutdatedCursor') {
+          console.warn(`outdated cursor for ${did}, need full repo import`)
+        }
+        return
+      }
+
+      if (msg.$type === '#commit') {
+        const commit = msg as unknown as StratosCommitMessage
+        await this.processCommit(did, commit)
+      }
+    } catch (err) {
+      this.onError?.(
+        new Error(`failed to process Stratos sync message for ${did}`, {
+          cause: err,
+        }),
+      )
+    }
+  }
+
+  private async processCommit(
+    did: string,
+    commit: StratosCommitMessage,
+  ): Promise<void> {
+    const upserts: RecordUpsert[] = []
+    const deletes: string[] = []
+
+    for (const op of commit.ops) {
+      const trimmedPath = op.path.replace(/^\//, '')
+      const collection = trimmedPath.split('/')[0]
+      if (collection !== STRATOS_POST_COLLECTION) continue
+
+      const uri = `at://${did}/${trimmedPath}`
+
+      if ((op.action === 'create' || op.action === 'update') && op.record) {
+        upserts.push({
+          uri,
+          cid: op.cid ?? '',
+          record: op.record,
+          trace: op.trace,
+        })
+      } else if (op.action === 'delete') {
+        deletes.push(uri)
+      }
+    }
+
+    if (upserts.length === 0 && deletes.length === 0) return
+
+    // Resolve the post creator's handle if not already known
+    if (upserts.length > 0 && !this.knownDids.has(did)) {
+      this.knownDids.set(did, Date.now())
+      this.onHandleNeeded?.(did)
+    }
+
+    await batchIndexStratosRecords(this.db, upserts, deletes, commit.time)
+
+    let maxIndexLagMs = 0
+    const traceSamples: string[] = []
+    const nowMs = Date.now()
+    for (const upsert of upserts) {
+      const queuedAtMs = upsert.trace?.queuedAtMs
+      if (typeof queuedAtMs !== 'number') continue
+      const lagMs = Math.max(0, nowMs - queuedAtMs)
+      if (lagMs > maxIndexLagMs) {
+        maxIndexLagMs = lagMs
+      }
+      if (upsert.trace?.requestId && traceSamples.length < 3) {
+        traceSamples.push(upsert.trace.requestId)
+      }
+    }
+
+    if (maxIndexLagMs >= INDEX_TRACE_WARN_LAG_MS) {
+      console.warn(
+        {
+          did,
+          seq: commit.seq,
+          indexed: upserts.length,
+          maxIndexLagMs,
+          traceSamples,
+        },
+        'high create-to-index lag observed',
+      )
+    }
+
+    this.indexedCount += upserts.length
+    this.deletedCount += deletes.length
+
+    this.cursorManager.updateStratosCursor(did, commit.seq)
+
+    if (this.onReferencedActor) {
+      for (const { record } of upserts) {
+        for (const refDid of extractReferencedDids(record)) {
+          if (refDid !== did && !this.knownDids.has(refDid)) {
+            this.knownDids.set(refDid, Date.now())
+            this.onReferencedActor(refDid)
+          }
+        }
+      }
+    }
+  }
+  markKnown(dids: Iterable<string>): void {
+    const now = Date.now()
+    for (const did of dids) {
+      this.knownDids.set(did, now)
+    }
+  }
+
+  getStats(): {
+    knownDids: number
+    actorQueues: number
+    globalPendingCount: number
+    activeSyncs: number
+    activeConnections: number
+    waitingActors: number
+  } {
+    return {
+      knownDids: this.knownDids.size,
+      actorQueues: this.actorQueues.size,
+      globalPendingCount: this.globalPendingCount,
+      activeSyncs: this.activeSyncs,
+      activeConnections: this.subscriptions.size,
+      waitingActors: this.waitingActors.length,
+    }
+  }
+
+  private evictIdleConnections(): void {
+    if (this.waitingActors.length === 0) return
+
+    const now = Date.now()
+    const idleDids: Array<{ did: string; idleMs: number }> = []
+
+    for (const did of this.subscriptions.keys()) {
+      const lastMsg = this.lastMessageAt.get(did) ?? 0
+      const idleMs = now - lastMsg
+      if (idleMs >= this.idleEvictionMs) {
+        idleDids.push({ did, idleMs })
+      }
+    }
+
+    // Evict longest-idle first, up to the number of waiting actors
+    idleDids.sort((a, b) => b.idleMs - a.idleMs)
+    const evictCount = Math.min(idleDids.length, this.waitingActors.length)
+
+    for (let i = 0; i < evictCount; i++) {
+      const { did } = idleDids[i]
+      console.log(
+        {
+          did,
+          idleMs: idleDids[i].idleMs,
+          waitingActors: this.waitingActors.length,
+        },
+        'evicting idle actor connection to promote waiting actor',
+      )
+      const ws = this.subscriptions.get(did)
+      if (ws) {
+        this.intentionallyClosed.add(did)
+        ws.close()
+        this.subscriptions.delete(did)
+      }
+      this.lastMessageAt.delete(did)
+      // Move evicted actor to waiting queue so it can reconnect later
+      if (!this.waitingActors.includes(did)) {
+        this.waitingActors.push(did)
+      }
+      this.promoteWaitingActor()
+    }
+  }
+}
+
+function extractReferencedDids(record: Record<string, unknown>): string[] {
+  const dids: string[] = []
+
+  const reply = record.reply as
+    | {
+        root?: { uri?: string }
+        parent?: { uri?: string }
+      }
+    | undefined
+
+  if (reply?.root?.uri) {
+    const did = didFromUri(reply.root.uri)
+    if (did) dids.push(did)
+  }
+  if (reply?.parent?.uri) {
+    const did = didFromUri(reply.parent.uri)
+    if (did) dids.push(did)
+  }
+
+  const embed = record.embed as
+    | { record?: { uri?: string }; $type?: string }
+    | undefined
+
+  if (embed?.record?.uri) {
+    const did = didFromUri(embed.record.uri)
+    if (did) dids.push(did)
+  }
+
+  return dids
+}
+
+function didFromUri(uri: string): string | null {
+  if (!uri.startsWith('at://')) return null
+  const authority = uri.slice(5).split('/')[0]
+  return authority.startsWith('did:') ? authority : null
+}
+
+// --- Stratos record indexer ---
+
+function preparePostRow(
+  uri: string,
+  cid: string,
+  record: Record<string, unknown>,
+  timestamp: string,
+) {
+  const parts = uri.replace('at://', '').split('/')
+  const creator = parts[0]
+  const rkey = parts[2]
+
+  const text = typeof record.text === 'string' ? record.text : ''
+  const createdAt =
+    typeof record.createdAt === 'string'
+      ? record.createdAt
+      : new Date().toISOString()
+
+  const replyRef = record.reply as
+    | {
+        root?: { uri?: string; cid?: string }
+        parent?: { uri?: string; cid?: string }
+      }
+    | undefined
+
+  return {
+    row: {
+      uri,
+      cid,
+      rkey,
+      creator,
+      text,
+      replyRoot: replyRef?.root?.uri ?? null,
+      replyRootCid: replyRef?.root?.cid ?? null,
+      replyParent: replyRef?.parent?.uri ?? null,
+      replyParentCid: replyRef?.parent?.cid ?? null,
+      embed: record.embed ? JSON.stringify(record.embed) : null,
+      facets: record.facets ? JSON.stringify(record.facets) : null,
+      langs: Array.isArray(record.langs)
+        ? (record.langs as string[]).join(',')
+        : null,
+      labels: record.labels ? JSON.stringify(record.labels) : null,
+      tags: Array.isArray(record.tags)
+        ? (record.tags as string[]).join(',')
+        : null,
+      createdAt,
+      indexedAt: timestamp,
+    },
+    boundaries: extractBoundaries(record),
+  }
+}
+
+async function batchIndexStratosRecords(
+  db: Kysely<DatabaseSchemaType>,
+  upserts: RecordUpsert[],
+  deletes: string[],
+  timestamp: string,
+): Promise<void> {
+  await db.transaction().execute(async (tx: unknown) => {
+    const trx = tx as Kysely<DatabaseSchemaType>
+
+    for (const deleteUri of deletes) {
+      await trx
+        .deleteFrom('stratos_post_boundary' as never)
+        .where('uri' as never, '=', deleteUri)
+        .execute()
+      await trx
+        .deleteFrom('stratos_post' as never)
+        .where('uri' as never, '=', deleteUri)
+        .execute()
+    }
+
+    for (const { uri, cid, record } of upserts) {
+      const { row, boundaries } = preparePostRow(uri, cid, record, timestamp)
+
+      await trx
+        .insertInto('stratos_post' as never)
+        .values(row as never)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .onConflict((oc: any) =>
+          oc.column('uri' as never).doUpdateSet({
+            cid: row.cid,
+            text: row.text,
+            replyRoot: row.replyRoot,
+            replyRootCid: row.replyRootCid,
+            replyParent: row.replyParent,
+            replyParentCid: row.replyParentCid,
+            embed: row.embed,
+            facets: row.facets,
+            langs: row.langs,
+            labels: row.labels,
+            tags: row.tags,
+            indexedAt: row.indexedAt,
+          } as never),
+        )
+        .execute()
+
+      await trx
+        .deleteFrom('stratos_post_boundary' as never)
+        .where('uri' as never, '=', uri)
+        .execute()
+
+      if (boundaries.length > 0) {
+        await trx
+          .insertInto('stratos_post_boundary' as never)
+          .values(boundaries.map((boundary) => ({ uri, boundary }) as never))
+          .execute()
+      }
+    }
+  })
+}
+
+// Keep single-record function for backfill compatibility
+export async function indexStratosRecord(
+  db: Kysely<DatabaseSchemaType>,
+  uri: string,
+  cid: string,
+  record: Record<string, unknown>,
+  timestamp: string,
+): Promise<void> {
+  await batchIndexStratosRecords(db, [{ uri, cid, record }], [], timestamp)
+}
+
+export async function deleteStratosRecord(
+  db: Kysely<DatabaseSchemaType>,
+  uri: string,
+): Promise<void> {
+  await batchIndexStratosRecords(db, [], [uri], '')
+}
+
+// --- Shared utilities ---
+
+function decodeXrpcFrame(
+  data: Uint8Array,
+): (Record<string, unknown> & { $type?: string }) | null {
+  const [header, remainder] = decodeFirst(data)
+  const [body] = decodeFirst(remainder)
+
+  const hdr = header as { op?: number; t?: string }
+  if (hdr.op === -1) {
+    const err = body as { error?: string; message?: string }
+    throw new Error(`xrpc stream error: ${err.error}: ${err.message ?? ''}`)
+  }
+
+  if (hdr.op !== 1) return null
+
+  const record = body as Record<string, unknown>
+  if (hdr.t) {
+    record.$type = hdr.t
+  }
+  return record
+}
+
+function buildWsUrl(
+  serviceUrl: string,
+  params: Record<string, string>,
+): string {
+  const url = new URL(
+    '/xrpc/zone.stratos.sync.subscribeRecords',
+    serviceUrl.replace(/^http/, 'ws'),
+  )
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value)
+  }
+  return url.toString()
+}

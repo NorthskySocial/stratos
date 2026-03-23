@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.server.listDomains",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Returns the list of boundary domains available on this Stratos service.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["domains"],
+          "properties": {
+            "domains": {
+              "type": "array",
+              "description": "The boundary domains available on this service.",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

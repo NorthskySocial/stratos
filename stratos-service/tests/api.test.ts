@@ -21,6 +21,7 @@ import {
   StratosActorStore,
 } from '../src/context.js'
 import { createRecord } from '../src/api'
+import { WriteRateLimiter } from '../src/rate-limiter.js'
 import { Did } from '@atproto/api'
 
 // Create a deterministic CID from data
@@ -94,6 +95,56 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
+// Create a minimal test config
+function createTestConfig(dataDir: string): StratosServiceConfig {
+  return {
+    service: {
+      did: 'did:web:stratos.test',
+      serviceFragment: 'atproto_pns',
+      port: 3100,
+      publicUrl: 'https://stratos.test',
+      repoUrl: 'https://github.com/NorthskySocial/stratos',
+    },
+    storage: {
+      backend: 'sqlite',
+      dataDir,
+    },
+    blobstore: {
+      provider: 'disk',
+      location: `${dataDir}/blobs`,
+    },
+    stratos: {
+      allowedDomains: ['example.com', 'test.com'],
+      retentionDays: 30,
+      importMaxBytes: 256 * 1024 * 1024,
+      writeRateLimit: {
+        maxWrites: 300,
+        windowMs: 60_000,
+        cooldownMs: 10_000,
+        cooldownJitterMs: 1_000,
+      },
+    },
+    enrollment: {
+      mode: ENROLLMENT_MODE.OPEN,
+      allowedDids: [],
+      allowedPdsEndpoints: [],
+    },
+    identity: {
+      plcUrl: 'https://plc.directory',
+    },
+    oauth: {},
+    logging: {
+      level: 'info',
+    },
+    dpop: {
+      requireNonce: false,
+    },
+    userAgent: {
+      repoUrl: 'https://github.com/NorthskySocial/stratos',
+    },
+  }
+}
+
 // Create minimal app context for testing API functions
 interface TestContext {
   actorStore: StratosActorStore
@@ -103,6 +154,8 @@ interface TestContext {
       did: string
       enrolledAt: string
       pdsEndpoint?: string
+      signingKeyDid?: string
+      active?: boolean
     }) => Promise<void>
   }
   stratosConfig: { allowedDomains: string[]; retentionDays: number }
@@ -160,6 +213,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       await expect(
@@ -199,6 +253,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       const otherDid = 'did:plc:otheruser'
@@ -229,6 +284,7 @@ describe('API Records', () => {
       const mockCtx = {
         enrollmentStore: testContext.enrollmentStore,
         actorStore: testContext.actorStore,
+        writeRateLimiter: new WriteRateLimiter(),
       } as unknown as AppContext
 
       await expect(
@@ -469,6 +525,109 @@ describe('SqliteEnrollmentStore', () => {
     it('should return empty array for non-enrolled user', async () => {
       const boundaries = await store.getBoundaries('did:plc:nonexistent')
       expect(boundaries).toEqual([])
+    })
+  })
+
+  describe('enrollmentRkey', () => {
+    it('should store and retrieve enrollmentRkey', async () => {
+      const did = 'did:plc:reiwithrkey'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should return undefined enrollmentRkey when not set', async () => {
+      const did = 'did:plc:sakuranorkey'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBeUndefined()
+    })
+
+    it('should update enrollmentRkey on re-enrollment', async () => {
+      const did = 'did:plc:kaorukorkey'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:old-stratos.example.com',
+      })
+
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+  })
+
+  describe('updateEnrollment', () => {
+    it('should update enrollmentRkey', async () => {
+      const did = 'did:plc:fuyukoupdate'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+      })
+
+      await store.updateEnrollment(did, {
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should update pdsEndpoint without affecting other fields', async () => {
+      const did = 'did:plc:harukipartial'
+      const enrolledAt = '2025-01-01T00:00:00Z'
+      await store.enroll({
+        did,
+        enrolledAt,
+        pdsEndpoint: 'https://old.pds.com',
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com',
+      })
+
+      await store.updateEnrollment(did, { pdsEndpoint: 'https://new.pds.com' })
+
+      const result = await store.getEnrollment(did)
+      expect(result?.pdsEndpoint).toBe('https://new.pds.com')
+      expect(result?.enrolledAt).toBe(enrolledAt)
+      expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
+    })
+
+    it('should not fail when no updates provided', async () => {
+      const did = 'did:plc:noupdate'
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zDnaeTestKey123',
+        active: true,
+      })
+
+      await expect(store.updateEnrollment(did, {})).resolves.not.toThrow()
     })
   })
 })

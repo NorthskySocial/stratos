@@ -458,23 +458,11 @@ describe('Blob Transactor', () => {
       expect(deleted).toHaveLength(1)
       expect(deleted[0].toString()).toBe(orphanCid.toString())
 
-      // Verify orphan is gone
+      // Verify orphan is gone from DB and blobstore
       const orphanExists = await transactor.hasBlob(orphanCid)
       const usedExists = await transactor.hasBlob(usedCid)
       expect(orphanExists).toBe(false)
       expect(usedExists).toBe(true)
-    })
-
-    it('should call blobstore.delete for orphan blobs', async () => {
-      const orphanCid = await createCid('orphan to delete')
-      await transactor.trackBlob({
-        cid: orphanCid,
-        mimeType: 'image/png',
-        size: 50,
-      })
-
-      await transactor.deleteOrphanBlobs()
-
       expect(blobStore.delete).toHaveBeenCalledWith(orphanCid)
     })
   })

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Stratos is a **standalone private permissioned data service** for ATProtocol. It provides domain-scoped private data storage with boundary-based access control. Users enroll via OAuth, their enrollment is published to their PDS, and AppViews hydrate records from Stratos at request time.
+Stratos is a **standalone private permissioned data service** for ATProtocol. It provides domain-scoped private data storage with boundary-based access control. Users enroll via OAuth, their enrollment is published to their PDS, and downstream indexers or AppViews discover that enrollment through `zone.stratos.actor.enrollment` records.
 
 ## Architecture
 
@@ -12,8 +12,9 @@ Stratos is a **standalone private permissioned data service** for ATProtocol. It
 | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | **Boundary**       | Access control scope (e.g., "engineering", "leadership"). Records have boundaries; viewers must share at least one. |
 | **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                           |
-| **Hydration**      | AppView calls Stratos to fetch records, filtering by viewer's boundaries.                                           |
-| **Profile Record** | `app.northsky.stratos.actor.enrollment` - published to user's PDS for endpoint discovery.                           |
+| **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                   |
+| **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.       |
+| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped stream consumed by the standalone `stratos-indexer`.            |
 
 ### Packages
 
@@ -22,6 +23,7 @@ stratos/
 ├── stratos-core/       # Domain logic, ports (interfaces)
 ├── stratos-service/    # HTTP service, adapters (implementations)
 ├── stratos-client/     # Client library (discovery, routing, verification, scopes)
+├── stratos-indexer/    # Standalone indexer for AppViews
 ├── lexicons/           # ATProto lexicon definitions
 └── docs/               # Technical documentation
 ```
@@ -53,7 +55,7 @@ Each feature is self-contained with its own:
 
 Features in stratos-core follow one of two patterns:
 
-**Port/Domain pattern** (enrollment, hydration, stub):
+**Port/Domain pattern** (enrollment, hydration, stub, attestation):
 
 ```
 stratos-core/src/{feature}/
@@ -85,19 +87,20 @@ stratos-service/src/features/{feature}/
 
 **Core domain modules** (`stratos-core/src/`):
 
-| Module       | Pattern           | Description                                                        |
-| ------------ | ----------------- | ------------------------------------------------------------------ |
-| `enrollment` | Port/Domain       | OAuth enrollment validation and business logic                     |
-| `hydration`  | Port/Domain       | Boundary-aware record hydration for AppViews                       |
-| `stub`       | Port/Domain       | Stub record generation with source field for PDS dual-write        |
-| `record`     | Reader/Transactor | Record metadata read/write operations                              |
-| `repo`       | Reader/Transactor | Repository block storage operations (IPLD blocks)                  |
-| `blob`       | Reader/Transactor | Blob metadata and content read/write operations                    |
-| `mst`        | Utility           | Merkle Search Tree commit builder (`builder.ts`)                   |
-| `validation` | Utility           | Stratos-specific validation rules for boundaries and records       |
-| `storage`    | Ports             | Storage interface definitions (Reader/Writer ports for all stores) |
-| `db`         | Infrastructure    | Database schema (Drizzle), SQLite + Postgres support, migrations   |
-| `shared`     | Infrastructure    | Shared error types and domain-specific exceptions                  |
+| Module        | Pattern           | Description                                                        |
+| ------------- | ----------------- | ------------------------------------------------------------------ |
+| `enrollment`  | Port/Domain       | OAuth enrollment validation and business logic                     |
+| `hydration`   | Port/Domain       | Boundary-aware record hydration for AppViews and clients           |
+| `stub`        | Port/Domain       | Stub record generation with source field for PDS dual-write        |
+| `attestation` | Port/Domain       | Enrollment attestation signing and verification                    |
+| `record`      | Reader/Transactor | Record metadata read/write operations                              |
+| `repo`        | Reader/Transactor | Repository block storage operations (IPLD blocks)                  |
+| `blob`        | Reader/Transactor | Blob metadata and content read/write operations                    |
+| `mst`         | Utility           | Merkle Search Tree commit builder (`builder.ts`)                   |
+| `validation`  | Utility           | Stratos-specific validation rules for boundaries and records       |
+| `storage`     | Ports             | Storage interface definitions (Reader/Writer ports for all stores) |
+| `db`          | Infrastructure    | Database schema (Drizzle), SQLite + Postgres support, migrations   |
+| `shared`      | Infrastructure    | Shared error types and domain-specific exceptions                  |
 
 **Service feature modules** (`stratos-service/src/features/`):
 
@@ -115,19 +118,32 @@ stratos-service/src/features/{feature}/
 | `api/`          | XRPC handlers: `records.ts` (CRUD), `handlers.ts` (getRecord, getRepo, importRepo)                                                                        |
 | `auth/`         | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifier (`verifier.ts`), enrollment auth (`enrollment.ts`) |
 | `oauth/`        | OAuth client (`client.ts`), authorization routes (`routes.ts`)                                                                                            |
-| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for AppView indexing                                                                                          |
+| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                    |
 | `blobstore/`    | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                     |
 | `adapters/`     | Storage backend implementations: `sqlite/`, `postgres/`                                                                                                   |
 
 **Client library** (`stratos-client/src/`):
 
-| File              | Description                                                          |
-| ----------------- | -------------------------------------------------------------------- |
-| `discovery.ts`    | Enrollment discovery from user PDS; locates Stratos service endpoint |
-| `routing.ts`      | Service routing; directs requests to correct Stratos instance        |
-| `verification.ts` | Record verification with inclusion proofs                            |
-| `scopes.ts`       | OAuth scope declarations                                             |
-| `types.ts`        | Client type definitions                                              |
+| File              | Description                                                                     |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `discovery.ts`    | Enrollment discovery from user PDS; locates Stratos service endpoint            |
+| `routing.ts`      | Service routing; directs requests to correct Stratos instance                   |
+| `verification.ts` | Record verification with inclusion proofs and user/service key signature checks |
+| `scopes.ts`       | OAuth scope declarations                                                        |
+| `types.ts`        | Client type definitions                                                         |
+
+**Indexer** (`stratos-indexer/src/`):
+
+| File                | Description                                                   |
+| ------------------- | ------------------------------------------------------------- |
+| `indexer.ts`        | Main Indexer class — health server, lifecycle management      |
+| `config.ts`         | IndexerConfig interface, environment variable loading         |
+| `pds-firehose.ts`   | Connects to the PDS firehose and discovers enrollment records |
+| `stratos-sync.ts`   | Service and actor-level WebSocket subscription handlers       |
+| `record-decoder.ts` | Decodes CBOR records, extracts boundaries                     |
+| `cursor-manager.ts` | Manages PDS and Stratos sync cursors with periodic flush      |
+| `worker-pool.ts`    | Thread pool for concurrent processing                         |
+| `backfill.ts`       | Backfill existing repos on startup                            |
 
 ### Storage Architecture
 
@@ -174,13 +190,13 @@ Use domain-specific error classes extending `StratosError`. See `stratos-core/sr
 
 ## Testing
 
-Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests/`. Uses vitest. Follow patterns in existing test files. Run: `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
+Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests/`, indexer tests in `stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run: `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
 
 ---
 
 ## Database
 
-Per-actor SQLite databases at `{dataDir}/actors/{did-prefix}/{did}/stratos.sqlite` (tables: `stratos_record`, `stratos_blob`, `stratos_repo_block`, `stratos_repo_root`, `stratos_seq`). Service-level data in `{dataDir}/service.sqlite` (`enrollment`, `enrollment_boundary`, `oauth_session`, `oauth_state`). Schema defined via Drizzle in `stratos-core/src/db/schema/`.
+Per-actor SQLite databases at `{dataDir}/actors/{did-prefix}/{did}/stratos.sqlite` (tables: `stratos_record`, `stratos_blob`, `stratos_repo_block`, `stratos_repo_root`, `stratos_seq`) when using the `sqlite` backend. With the `postgres` backend, actor data is stored in per-actor schemas. Service-level data lives in `{dataDir}/service.sqlite` for sqlite-backed deployments, with schema definitions in `stratos-core/src/db/schema/` and Postgres-specific tables in `stratos-core/src/db/schema/pg-tables.ts`.
 
 ---
 
@@ -194,22 +210,22 @@ Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`,
 
 ## Lexicons
 
-Lexicon files live in `lexicons/app/northsky/stratos/`. Key lexicons:
+Lexicon files live in `lexicons/zone/stratos/`. Key lexicons:
 
-| Lexicon                                      | Type         | Description                                  |
-| -------------------------------------------- | ------------ | -------------------------------------------- |
-| `app.northsky.stratos.actor.enrollment`      | record       | User's Stratos service enrollments           |
-| `app.northsky.stratos.boundary.defs`         | defs         | Domain/Domains type definitions              |
-| `app.northsky.stratos.feed.post`             | record       | Post with boundary                           |
-| `app.northsky.stratos.repo.hydrateRecord`    | query        | Single record hydration endpoint             |
-| `app.northsky.stratos.repo.hydrateRecords`   | procedure    | Batch hydration endpoint (up to 100 records) |
-| `app.northsky.stratos.sync.subscribeRecords` | subscription | WebSocket firehose                           |
-| `app.northsky.stratos.sync.getRepo`          | query        | Export full repository as CAR file           |
-| `app.northsky.stratos.repo.importRepo`       | procedure    | Import repository from CAR file              |
+| Lexicon                              | Type         | Description                                  |
+| ------------------------------------ | ------------ | -------------------------------------------- |
+| `zone.stratos.actor.enrollment`      | record       | User's Stratos service enrollments           |
+| `zone.stratos.boundary.defs`         | defs         | Domain/Domains type definitions              |
+| `zone.stratos.feed.post`             | record       | Post with boundary                           |
+| `zone.stratos.repo.hydrateRecord`    | query        | Single record hydration endpoint             |
+| `zone.stratos.repo.hydrateRecords`   | procedure    | Batch hydration endpoint (up to 100 records) |
+| `zone.stratos.sync.subscribeRecords` | subscription | WebSocket firehose                           |
+| `zone.stratos.sync.getRepo`          | query        | Export full repository as CAR file           |
+| `zone.stratos.repo.importRepo`       | procedure    | Import repository from CAR file              |
 
 ### Adding New Lexicons
 
-1. Create JSON file in `lexicons/app/northsky/stratos/{namespace}/{name}.json`
+1. Create JSON file in `lexicons/zone/stratos/{namespace}/{name}.json`
 2. Run codegen: `pnpm run codegen` (if configured)
 3. Import generated types in handlers
 
@@ -229,7 +245,7 @@ Lexicon files live in `lexicons/app/northsky/stratos/`. Key lexicons:
 
 ### Adding a New Boundary Type
 
-1. Update `app.northsky.stratos.boundary.defs` lexicon
+1. Update `zone.stratos.boundary.defs` lexicon
 2. Add validation in `stratos-core/src/validation/stratos-validation.ts`
 3. Update boundary extraction in record handlers
 4. Add tests
@@ -263,5 +279,4 @@ Use structured logging: `logger.level({ contextObj }, 'message')`. Log request c
 - `github.com/bluesky-social/atproto` — AT Protocol reference implementation, lexicons, XRPC
 - `github.com/bluesky-social/social-app` — Bluesky app patterns, API usage examples
 - `github.com/bluesky-social/proposals` — AT Protocol proposals and specifications
-- `github.com/DavidBuchanan314/atmst` — MST implementation in Python (@atcute/mst is derived from this)
 - `github.com/DavidBuchanan314/atmst` — MST implementation in Python (@atcute/mst is derived from this)

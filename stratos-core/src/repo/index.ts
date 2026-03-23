@@ -7,3 +7,5 @@ export {
 } from './reader.js'
 
 export { StratosSqlRepoTransactor } from './transactor.js'
+
+export { LruBlockCache } from './lru-block-cache.js'

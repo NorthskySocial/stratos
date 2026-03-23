@@ -3,28 +3,70 @@
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
   import { init, signOut } from './lib/auth'
-  import { discoverStratosEnrollment, STRATOS_URL, type StratosEnrollment } from './lib/stratos'
-  import { createStratosAgent } from './lib/stratos-agent'
-  import { fetchPublicPosts, fetchStratosPosts, buildUnifiedFeed, type FeedPost } from './lib/feed'
+  import {
+    discoverStratosEnrollment,
+    checkStratosServiceStatus,
+    verifyAttestation,
+    fetchServerDomains,
+    STRATOS_URL,
+    APPVIEW_URL,
+    type StratosEnrollment,
+    type StratosServiceStatus,
+  } from './lib/stratos'
+  import { createServiceAgent, createStratosAgent } from './lib/stratos-agent'
+  import {
+    fetchPublicPosts,
+    fetchRepoPublicPosts,
+    fetchStratosPosts,
+    fetchAppviewStratosPosts,
+    buildUnifiedFeed,
+    filterByDomain,
+    feedStats,
+    resolveHandles,
+    type FeedPost,
+  } from './lib/feed'
   import LoginScreen from './lib/LoginScreen.svelte'
-  import EnrollmentIndicator from './lib/EnrollmentIndicator.svelte'
+  import Sidebar from './lib/Sidebar.svelte'
   import Composer from './lib/Composer.svelte'
   import Feed from './lib/Feed.svelte'
 
   let session: OAuthSession | null = $state(null)
   let enrollment: StratosEnrollment | null = $state(null)
+  let stratosStatus: StratosServiceStatus | null = $state(null)
+  let attestationVerified: boolean | null = $state(null)
+  let appviewAgent: Agent | null = $state(null)
   let stratosAgent: Agent | null = $state(null)
-  let posts: FeedPost[] = $state([])
+  let allPosts: FeedPost[] = $state([])
+  let replyingTo: FeedPost | null = $state(null)
   let loading = $state(true)
+  let did = $state('')
   let handle = $state('')
   let serviceUrl = $state(STRATOS_URL ?? '')
+  let activeFeed: string | null = $state(null)
+  let serverDomains: string[] = $state([])
+
+  let enrolledDomains = $derived(
+    enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
+  )
+
+  let allDomains = $derived(
+    Array.from(
+      new Set([...serverDomains, ...enrolledDomains]),
+    ).sort(),
+  )
+
+  let filteredPosts = $derived(filterByDomain(allPosts, activeFeed))
+  let stats = $derived(feedStats(filteredPosts))
 
   async function startup() {
     loading = true
     try {
       session = await init()
       if (session) {
-        handle = session.sub
+        did = session.sub
+        const agent = new Agent(session)
+        const profile = await agent.com.atproto.repo.describeRepo({ repo: session.sub })
+        handle = profile.data.handle
         await discoverAndLoad()
       }
     } catch (err) {
@@ -37,12 +79,25 @@
   async function discoverAndLoad() {
     if (!session) return
 
+    if (APPVIEW_URL) {
+      appviewAgent = createServiceAgent(session, APPVIEW_URL)
+    }
+
     enrollment = await discoverStratosEnrollment(session)
 
     const url = enrollment?.service ?? serviceUrl
     if (url) {
       serviceUrl = url
       stratosAgent = createStratosAgent(session, url)
+
+      stratosStatus = await checkStratosServiceStatus(url, session.sub)
+      serverDomains = await fetchServerDomains(url)
+    }
+
+    if (enrollment) {
+      attestationVerified = await verifyAttestation(session.sub, enrollment)
+    } else {
+      attestationVerified = null
     }
 
     await refreshFeed()
@@ -51,24 +106,48 @@
   async function refreshFeed() {
     if (!session) return
 
-    const pdsAgent = new Agent(session)
-    const publicPosts = await fetchPublicPosts(pdsAgent, session.sub)
+    const publicPosts = appviewAgent
+      ? await fetchPublicPosts(appviewAgent, session.sub)
+      : await fetchRepoPublicPosts(new Agent(session), session.sub)
 
     let stratosPosts: FeedPost[] = []
-    if (stratosAgent) {
+    if (APPVIEW_URL) {
+      stratosPosts = await fetchAppviewStratosPosts(
+        session,
+        APPVIEW_URL,
+      )
+    } else if (stratosAgent) {
       stratosPosts = await fetchStratosPosts(stratosAgent, session.sub)
     }
 
-    posts = buildUnifiedFeed(publicPosts, stratosPosts)
+    const unified = buildUnifiedFeed(publicPosts, stratosPosts)
+    allPosts = resolveHandles(unified, did, handle)
+  }
+
+  function handleSelectFeed(domain: string | null) {
+    activeFeed = domain
+  }
+
+  function handleReply(post: FeedPost) {
+    replyingTo = post
+  }
+
+  function cancelReply() {
+    replyingTo = null
   }
 
   async function handleSignOut() {
     await signOut()
     session = null
     enrollment = null
+    stratosStatus = null
+    attestationVerified = null
+    appviewAgent = null
     stratosAgent = null
-    posts = []
+    allPosts = []
     handle = ''
+    did = ''
+    activeFeed = null
   }
 
   onMount(() => {
@@ -83,20 +162,52 @@
 {:else}
   <div class="app-layout">
     <aside class="sidebar">
-      <EnrollmentIndicator {handle} {enrollment} {serviceUrl} />
+      <Sidebar
+        {handle}
+        {enrollment}
+        {serviceUrl}
+        {stratosStatus}
+        {attestationVerified}
+        {allDomains}
+        {enrolledDomains}
+        postCount={stats.postCount}
+        userCount={stats.userCount}
+        {activeFeed}
+        onSelectFeed={handleSelectFeed}
+      />
     </aside>
 
     <main class="main">
       <header class="app-header">
         <div>
           <h1>Stratos</h1>
-          <p class="session-label">{handle}</p>
+          <p class="session-label">@{handle}</p>
         </div>
         <button class="sign-out" onclick={handleSignOut}>Log Out</button>
       </header>
 
-      <Composer {session} {enrollment} {stratosAgent} onpost={refreshFeed} />
-      <Feed {posts} loading={loading} />
+      <Composer {session} {enrollment} {stratosAgent} {replyingTo} onpost={refreshFeed} oncancelreply={cancelReply} />
+
+      <div class="feed-tabs">
+        <button
+          class="tab"
+          class:active={activeFeed === null}
+          onclick={() => handleSelectFeed(null)}
+        >
+          All
+        </button>
+        {#each enrolledDomains as domain}
+          <button
+            class="tab"
+            class:active={activeFeed === domain}
+            onclick={() => handleSelectFeed(domain)}
+          >
+            {domain}
+          </button>
+        {/each}
+      </div>
+
+      <Feed posts={filteredPosts} loading={loading} onreply={handleReply} />
     </main>
   </div>
 {/if}
@@ -123,7 +234,6 @@
   }
 
   .sign-out {
-    margin: auto 1rem 1rem;
     padding: 0.45rem;
     background: none;
     border: 1px solid #ccc;
@@ -164,5 +274,33 @@
     color: #666;
     font-size: 0.85rem;
     word-break: break-all;
+  }
+
+  .feed-tabs {
+    display: flex;
+    border-bottom: 1px solid #eee;
+    padding: 0 1rem;
+    gap: 0;
+  }
+
+  .tab {
+    padding: 0.6rem 1rem;
+    border: none;
+    background: none;
+    font-size: 0.88rem;
+    cursor: pointer;
+    color: #666;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab:hover {
+    color: #333;
+  }
+
+  .tab.active {
+    color: #3730a3;
+    font-weight: 600;
+    border-bottom-color: #3730a3;
   }
 </style>

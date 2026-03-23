@@ -16,6 +16,7 @@ import {
   NotEnrolledError,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore } from '../../oauth/routes.js'
+import type { EnrollmentEventEmitter } from '../../context.js'
 
 /**
  * Implementation of EnrollmentService port
@@ -25,6 +26,8 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     private enrollmentStore: EnrollmentStore,
     private actorStoreCreator: (did: string) => Promise<void>,
     private logger?: Logger,
+    private enrollmentEvents?: EnrollmentEventEmitter,
+    private serviceUrl?: string,
   ) {}
 
   async enroll(
@@ -50,6 +53,14 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       'user enrolled',
     )
 
+    this.enrollmentEvents?.emit('enrollment', {
+      did,
+      action: 'enroll',
+      service: this.serviceUrl,
+      boundaries,
+      time: now.toISOString(),
+    })
+
     return {
       did,
       boundaries,
@@ -68,19 +79,28 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     const record = await this.enrollmentStore.getEnrollment(did)
     if (!record) return null
 
+    const boundaries = await this.enrollmentStore.getBoundaries(did)
+
     return {
       did: record.did,
-      boundaries: [],
+      boundaries,
       enrolledAt: new Date(record.enrolledAt),
       pdsEndpoint: record.pdsEndpoint ?? '',
       signingKeyDid: record.signingKeyDid,
       active: record.active,
+      enrollmentRkey: record.enrollmentRkey,
     }
   }
 
   async unenroll(did: string): Promise<void> {
     await this.enrollmentStore.unenroll(did)
     this.logger?.info({ did }, 'user unenrolled')
+
+    this.enrollmentEvents?.emit('enrollment', {
+      did,
+      action: 'unenroll',
+      time: new Date().toISOString(),
+    })
   }
 }
 
@@ -124,25 +144,29 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
     did: string,
     serviceEndpoint: string,
     boundaries: string[],
-  ): Promise<void> {
+  ): Promise<string> {
     const agent = await this.getAgent(did)
     if (!agent) {
       throw new NotEnrolledError(did)
     }
 
-    await agent.api.com.atproto.repo.putRecord({
+    const res = await agent.api.com.atproto.repo.createRecord({
       repo: did,
       collection: 'zone.stratos.actor.enrollment',
-      rkey: 'self',
       record: {
         service: serviceEndpoint,
         boundaries: boundaries.map((value) => ({ value })),
         createdAt: new Date().toISOString(),
       },
     })
+
+    // Extract rkey from the returned URI: at://did/collection/rkey
+    const uri: string = res.data.uri
+    const rkey = uri.split('/').pop()!
+    return rkey
   }
 
-  async deleteEnrollmentRecord(did: string): Promise<void> {
+  async deleteEnrollmentRecord(did: string, rkey: string): Promise<void> {
     const agent = await this.getAgent(did)
     if (!agent) {
       throw new NotEnrolledError(did)
@@ -151,7 +175,7 @@ export class ProfileRecordWriterImpl implements ProfileRecordWriter {
     await agent.api.com.atproto.repo.deleteRecord({
       repo: did,
       collection: 'zone.stratos.actor.enrollment',
-      rkey: 'self',
+      rkey: rkey || 'self',
     })
   }
 }
