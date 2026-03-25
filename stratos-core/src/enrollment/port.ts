@@ -52,31 +52,6 @@ export interface EnrollmentValidator {
 }
 
 /**
- * Port interface for profile record writer.
- * Writes the enrollment profile record to the user's PDS.
- */
-export interface ProfileRecordWriter {
-  /**
-   * Write the enrollment profile record to the user's PDS
-   * @param did - User's DID
-   * @param serviceEndpoint - This Stratos service's endpoint URL
-   * @param boundaries - Boundaries the user has access to
-   */
-  writeEnrollmentRecord(
-    did: string,
-    serviceEndpoint: string,
-    boundaries: string[],
-  ): Promise<string>
-
-  /**
-   * Delete the enrollment profile record from the user's PDS
-   * @param did - User's DID
-   * @param rkey - Record key of the enrollment record to delete
-   */
-  deleteEnrollmentRecord(did: string, rkey: string): Promise<void>
-}
-
-/**
  * Port interface for resolving user boundaries.
  * Used to determine what domains a user has access to for record filtering.
  */

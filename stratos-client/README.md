@@ -22,7 +22,7 @@ The `@northskysocial/stratos-client` package provides the building blocks for en
 
 A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS collection, created during the enrollment process via OAuth. Each enrollment record represents a connection to a different Stratos service — **a user can be enrolled in multiple Stratos services simultaneously**, with each enrollment stored as a separate record using the **service's DID** as the record key. This makes enrollment records deterministically addressable: knowing the service DID is sufficient to look up a specific enrollment.
 
-The enrollment process initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. A P-256 signing key is generated for the user and stored by the Stratos service — this key is _not yet_ used for record signing, only for enrollment attestation.
+The enrollment process initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. A P-256 signing key is generated for the user and stored by the Stratos service — this key is used for signing record commits, making them verifiable against the `signingKey` published in the enrollment record. If the per-user key is unavailable, the service falls back to its own Secp256k1 key.
 
 To discover a user's enrollments, list the enrollment collection via `com.atproto.repo.listRecords` on the user's PDS and verify each record using the service's public key.
 
@@ -241,17 +241,20 @@ const url = resolveServiceUrl(enrollment, pdsUrl)
 
 ### Routing applies to
 
-| Operation                       | Routes to Stratos?                |
-| ------------------------------- | --------------------------------- |
-| `com.atproto.repo.getRecord`    | Yes (reads private records)       |
-| `com.atproto.repo.listRecords`  | Yes (lists private collections)   |
-| `com.atproto.repo.describeRepo` | Yes (describes private repo)      |
-| `com.atproto.repo.createRecord` | Yes (writes to Stratos)           |
-| `com.atproto.repo.deleteRecord` | Yes (deletes from Stratos)        |
-| `com.atproto.repo.applyWrites`  | Yes (batch writes)                |
-| `com.atproto.sync.getRecord`    | Yes (CAR export for verification) |
-| `com.atproto.sync.getBlob`      | No (coming soon)                  |
-| `com.atproto.sync.getRepo`      | No (coming soon)                  |
+| Operation                            | Routes to Stratos?                |
+| ------------------------------------ | --------------------------------- |
+| `com.atproto.repo.getRecord`         | Yes (reads private records)       |
+| `com.atproto.repo.listRecords`       | Yes (lists private collections)   |
+| `com.atproto.repo.describeRepo`      | Yes (describes private repo)      |
+| `com.atproto.repo.createRecord`      | Yes (writes to Stratos)           |
+| `com.atproto.repo.deleteRecord`      | Yes (deletes from Stratos)        |
+| `com.atproto.repo.applyWrites`       | Yes (batch writes)                |
+| `com.atproto.sync.getRecord`         | Yes (CAR export for verification) |
+| `com.atproto.sync.listBlobs`         | Yes (lists blob CIDs)             |
+| `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)     |
+| `zone.stratos.repo.importRepo`       | Yes (import repo from CAR)        |
+| `zone.stratos.sync.subscribeRecords` | Yes (WebSocket firehose)          |
+| `com.atproto.sync.getBlob`           | No (not yet implemented)          |
 
 ---
 
@@ -374,7 +377,7 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 
 ### Boundary gating: blobs
 
-Stratos does not currently support blob browsing via `com.atproto.sync.listBlobs`. Once it is, List and Get Blobs will both be gated by boundary.
+Stratos supports blob listing via `com.atproto.sync.listBlobs`. Blob content retrieval via `com.atproto.sync.getBlob` is not yet implemented — gate blob download UI behind availability checks.
 
 ---
 
@@ -405,16 +408,7 @@ Batch operations (`com.atproto.repo.applyWrites`) work identically — route thr
 
 ## 6. Record Verification
 
-Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof for a single record. Stratos maintains independent repositories per user, signed with the **service's own key** (not the user's PDS signing key). This means standard ATproto verification against the user's DID document will fail — clients must verify against the Stratos service's signing key instead.
-
-### Verification levels
-
-| Level               | What it proves                                             | When to use                                                 |
-| ------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
-| `service-signature` | CID integrity + MST path + service cryptographic signature | Default — use whenever the service signing key is available |
-| `cid-integrity`     | CID integrity + MST path only (no signature check)         | Fallback when the signing key can't be resolved             |
-
-`cid-integrity` confirms data hasn't been corrupted but does not prove provenance.
+Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof for a single record. Stratos maintains independent repositories per user. Record commits are signed with the user's per-enrollment P-256 key when available, falling back to the service's Secp256k1 key. This means standard ATproto verification against the user's PDS DID document will fail — clients must verify against either the user's enrollment `signingKey` or the Stratos service's signing key.
 
 ### Resolving the service signing key
 
@@ -554,7 +548,7 @@ When a browser client sends a DPoP-authenticated request to a Stratos service at
 
 ### If you run your own Stratos service
 
-If using `@atcute/xrpc-server`, the defaults are correct. If using another framework directly, configure:
+If using `@atproto/xrpc-server`, the defaults are correct. If using another framework directly, configure:
 
 ```typescript
 app.use((req, res, next) => {
@@ -637,7 +631,7 @@ The DPoP proof's `htu` claim must match the actual request URL. When routing thr
 
 ### Blob operations
 
-`com.atproto.sync.listBlobs` and `com.atproto.sync.getBlob` are not supported by Stratos. Gate blob-related UI behind a `!stratosActive` check.
+`com.atproto.sync.getBlob` is not yet implemented by Stratos. Blob listing via `com.atproto.sync.listBlobs` is available. Gate blob download/display UI behind availability checks until `getBlob` is supported.
 
 ---
 
