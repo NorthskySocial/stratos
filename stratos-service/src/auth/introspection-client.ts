@@ -2,7 +2,7 @@
  * PDS Token Verifier
  *
  * Validates OAuth access tokens by decoding JWT claims and verifying the
- * issuer matches the user's PDS endpoint (resolved from their DID document).
+ * issuer matches the PDS's declared authorization server (via OAuth metadata).
  *
  * Bluesky's PDS does not expose signing keys at the JWKS endpoint, so
  * cryptographic signature verification is not possible for Bluesky users.
@@ -70,6 +70,8 @@ export interface PdsTokenVerifierConfig {
   verifyCacheMaxAge?: number
   /** Maximum number of cached verification results (default: 1000) */
   verifyCacheMaxSize?: number
+  /** Optional fetch implementation for testing */
+  fetch?: typeof globalThis.fetch
 }
 
 interface VerifyCacheEntry {
@@ -89,15 +91,19 @@ export class PdsTokenVerifier implements TokenVerifier {
   private readonly audience?: string
   private readonly verifyCacheMaxAge: number
   private readonly verifyCacheMaxSize: number
+  private readonly fetch: typeof globalThis.fetch
 
   /** Cache of verification results by access token */
   private readonly verifyCache = new Map<string, VerifyCacheEntry>()
+  /** Cache of PDS OAuth issuer by PDS origin */
+  private readonly issuerCache = new Map<string, string>()
 
   constructor(config: PdsTokenVerifierConfig) {
     this.idResolver = config.idResolver
     this.audience = config.audience
     this.verifyCacheMaxAge = config.verifyCacheMaxAge ?? 60 * 1000
     this.verifyCacheMaxSize = config.verifyCacheMaxSize ?? 1_000
+    this.fetch = config.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   /**
@@ -222,12 +228,21 @@ export class PdsTokenVerifier implements TokenVerifier {
       }
     }
 
-    // 5. Verify issuer matches the user's PDS
+    // 5. Verify issuer matches the PDS's declared authorization server.
+    // Bluesky uses an entryway (bsky.social) as the OAuth issuer while
+    // actual PDS hosts differ (e.g., jellybaby.us-east.host.bsky.network).
     const pdsOrigin = new URL(pdsEndpoint).origin
-    if (issuerOrigin !== pdsOrigin) {
+    const declaredIssuer = await this.fetchAuthServerIssuer(pdsOrigin)
+    if (!declaredIssuer) {
       return {
         active: false,
-        error: `Issuer ${issuerOrigin} does not match PDS ${pdsOrigin}`,
+        error: `Could not fetch OAuth metadata from PDS ${pdsOrigin}`,
+      }
+    }
+    if (issuerOrigin !== declaredIssuer) {
+      return {
+        active: false,
+        error: `Issuer ${issuerOrigin} does not match PDS auth server ${declaredIssuer}`,
       }
     }
 
@@ -266,8 +281,40 @@ export class PdsTokenVerifier implements TokenVerifier {
   /**
    * Clear all caches (useful for testing)
    */
+  /**
+   * Fetch the declared authorization server issuer from a PDS's OAuth metadata.
+   * Handles the entryway pattern where the PDS delegates auth to a central server.
+   */
+  private async fetchAuthServerIssuer(
+    pdsOrigin: string,
+  ): Promise<string | null> {
+    const cached = this.issuerCache.get(pdsOrigin)
+    if (cached) return cached
+
+    try {
+      const metadataUrl = new URL(
+        '/.well-known/oauth-authorization-server',
+        pdsOrigin,
+      )
+      const response = await this.fetch(metadataUrl.toString(), {
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) return null
+
+      const metadata = (await response.json()) as { issuer?: string }
+      if (!metadata.issuer) return null
+
+      const issuerOrigin = new URL(metadata.issuer).origin
+      this.issuerCache.set(pdsOrigin, issuerOrigin)
+      return issuerOrigin
+    } catch {
+      return null
+    }
+  }
+
   clearCache(): void {
     this.verifyCache.clear()
+    this.issuerCache.clear()
   }
 }
 
