@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
-  import { init, signOut } from './lib/auth'
+  import { init, signOut, onSessionDeleted } from './lib/auth'
   import {
     discoverStratosEnrollment,
     checkStratosServiceStatus,
@@ -151,6 +151,18 @@
   }
 
   onMount(() => {
+    onSessionDeleted(() => {
+      session = null
+      enrollment = null
+      stratosStatus = null
+      attestationVerified = null
+      appviewAgent = null
+      stratosAgent = null
+      allPosts = []
+      handle = ''
+      did = ''
+      activeFeed = null
+    })
     startup()
   })
 </script>
