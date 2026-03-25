@@ -276,15 +276,16 @@ export class PdsTokenVerifier implements TokenVerifier {
    * Clear all caches (useful for testing)
    */
   /**
-   * Fetch the declared authorization server issuer from a PDS's OAuth metadata.
-   * Handles the entryway pattern where the PDS delegates auth to a central server.
+   * Fetch the declared authorization server from a PDS's protected resource metadata.
+   * Per the AT Protocol OAuth spec, PDS instances are Resource Servers that expose
+   * /.well-known/oauth-protected-resource with an authorization_servers array.
    */
   private async fetchAuthServerIssuer(pdsOrigin: string): Promise<string> {
     const cached = this.issuerCache.get(pdsOrigin)
     if (cached) return cached
 
     const metadataUrl = new URL(
-      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-protected-resource',
       pdsOrigin,
     )
     const response = await this.fetch(metadataUrl.toString(), {
@@ -292,18 +293,21 @@ export class PdsTokenVerifier implements TokenVerifier {
     })
     if (!response.ok) {
       throw new Error(
-        `PDS OAuth metadata request failed: ${response.status} from ${pdsOrigin}`,
+        `PDS protected resource metadata request failed: ${response.status} from ${pdsOrigin}`,
       )
     }
 
-    const metadata = (await response.json()) as { issuer?: string }
-    if (!metadata.issuer) {
+    const metadata = (await response.json()) as {
+      authorization_servers?: string[]
+    }
+    const authServer = metadata.authorization_servers?.[0]
+    if (!authServer) {
       throw new Error(
-        `PDS OAuth metadata missing issuer field: ${pdsOrigin}`,
+        `PDS protected resource metadata missing authorization_servers: ${pdsOrigin}`,
       )
     }
 
-    const issuerOrigin = new URL(metadata.issuer).origin
+    const issuerOrigin = new URL(authServer).origin
     this.issuerCache.set(pdsOrigin, issuerOrigin)
     return issuerOrigin
   }
