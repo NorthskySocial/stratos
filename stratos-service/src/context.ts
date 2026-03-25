@@ -85,11 +85,7 @@ import {
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import {
-  PdsTokenVerifier,
-  DpopVerifier,
-  DpopVerificationError,
-} from './auth/index.js'
+import { DpopVerifier, DpopVerificationError } from './auth/index.js'
 import {
   createServicePgDb,
   checkServicePgDbStartup,
@@ -1148,19 +1144,9 @@ export async function createAppContext(
     await allowListProvider.start()
   }
 
-  // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
-  // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
-  const tokenVerifier = new PdsTokenVerifier({
-    idResolver,
-    fetch: fetchWithUserAgent,
-    jwksCacheMaxAge: 10 * 60 * 1000,
-    verifyCacheMaxAge: 5 * 60 * 1000,
-    verifyCacheMaxSize: 10_000,
-  })
   const dpopVerifier = new DpopVerifier({
     serviceDid: cfg.service.did,
     serviceEndpoint: cfg.service.publicUrl,
-    tokenVerifier,
     enrollmentStore,
     allowListProvider,
   })

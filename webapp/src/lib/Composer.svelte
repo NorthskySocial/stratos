@@ -16,7 +16,7 @@
   let { session, enrollment, stratosAgent, replyingTo, onpost, oncancelreply }: Props = $props()
 
   let text = $state('')
-  let isPrivate = $state(false)
+  let isPrivate = $state(true)
   let selectedDomain = $state('')
   let posting = $state(false)
   let error = $state('')
@@ -90,7 +90,12 @@
       oncancelreply()
       onpost()
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to create post'
+      const message = err instanceof Error ? err.message : 'Failed to create post'
+      if (!isPrivate && message.includes('Missing required scope')) {
+        error = 'Public posting is not available — this demo is for private data only.'
+      } else {
+        error = message
+      }
     } finally {
       posting = false
     }
