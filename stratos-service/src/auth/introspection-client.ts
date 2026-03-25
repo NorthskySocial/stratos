@@ -233,12 +233,6 @@ export class PdsTokenVerifier implements TokenVerifier {
     // actual PDS hosts differ (e.g., jellybaby.us-east.host.bsky.network).
     const pdsOrigin = new URL(pdsEndpoint).origin
     const declaredIssuer = await this.fetchAuthServerIssuer(pdsOrigin)
-    if (!declaredIssuer) {
-      return {
-        active: false,
-        error: `Could not fetch OAuth metadata from PDS ${pdsOrigin}`,
-      }
-    }
     if (issuerOrigin !== declaredIssuer) {
       return {
         active: false,
@@ -285,31 +279,33 @@ export class PdsTokenVerifier implements TokenVerifier {
    * Fetch the declared authorization server issuer from a PDS's OAuth metadata.
    * Handles the entryway pattern where the PDS delegates auth to a central server.
    */
-  private async fetchAuthServerIssuer(
-    pdsOrigin: string,
-  ): Promise<string | null> {
+  private async fetchAuthServerIssuer(pdsOrigin: string): Promise<string> {
     const cached = this.issuerCache.get(pdsOrigin)
     if (cached) return cached
 
-    try {
-      const metadataUrl = new URL(
-        '/.well-known/oauth-authorization-server',
-        pdsOrigin,
+    const metadataUrl = new URL(
+      '/.well-known/oauth-authorization-server',
+      pdsOrigin,
+    )
+    const response = await this.fetch(metadataUrl.toString(), {
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) {
+      throw new Error(
+        `PDS OAuth metadata request failed: ${response.status} from ${pdsOrigin}`,
       )
-      const response = await this.fetch(metadataUrl.toString(), {
-        headers: { Accept: 'application/json' },
-      })
-      if (!response.ok) return null
-
-      const metadata = (await response.json()) as { issuer?: string }
-      if (!metadata.issuer) return null
-
-      const issuerOrigin = new URL(metadata.issuer).origin
-      this.issuerCache.set(pdsOrigin, issuerOrigin)
-      return issuerOrigin
-    } catch {
-      return null
     }
+
+    const metadata = (await response.json()) as { issuer?: string }
+    if (!metadata.issuer) {
+      throw new Error(
+        `PDS OAuth metadata missing issuer field: ${pdsOrigin}`,
+      )
+    }
+
+    const issuerOrigin = new URL(metadata.issuer).origin
+    this.issuerCache.set(pdsOrigin, issuerOrigin)
+    return issuerOrigin
   }
 
   clearCache(): void {
