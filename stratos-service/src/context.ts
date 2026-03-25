@@ -1149,11 +1149,10 @@ export async function createAppContext(
   }
 
   // No audience check: PDS tokens have aud=PDS DID, not Stratos's URL.
-  // Security is ensured by DPoP binding, JWKS signature, and enrollment checks.
+  // Security is ensured by DPoP binding and enrollment checks.
   const tokenVerifier = new PdsTokenVerifier({
     idResolver,
     fetch: fetchWithUserAgent,
-    jwksCacheMaxAge: 10 * 60 * 1000,
     verifyCacheMaxAge: 5 * 60 * 1000,
     verifyCacheMaxSize: 10_000,
   })
