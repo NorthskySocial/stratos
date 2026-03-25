@@ -2,7 +2,6 @@ import type { IdResolver, DidDocument } from '@atproto/identity'
 import type {
   EnrollmentService,
   EnrollmentValidator,
-  ProfileRecordWriter,
   BoundaryResolver,
   Enrollment,
   EnrollmentConfig,
@@ -13,7 +12,6 @@ import type {
 import {
   extractPdsEndpoint,
   validateEnrollmentEligibility,
-  NotEnrolledError,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore } from '../../oauth/routes.js'
 import type { EnrollmentEventEmitter } from '../../context.js'
@@ -127,56 +125,6 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
 
     const pdsEndpoint = extractPdsEndpoint(didDoc)
     return validateEnrollmentEligibility(this.config, did, pdsEndpoint)
-  }
-}
-
-/**
- * Implementation of ProfileRecordWriter port
- * Writes enrollment record to user's PDS via their OAuth session
- */
-export class ProfileRecordWriterImpl implements ProfileRecordWriter {
-  constructor(
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private getAgent: (did: string) => Promise<{ api: any } | null>,
-  ) {}
-
-  async writeEnrollmentRecord(
-    did: string,
-    serviceEndpoint: string,
-    boundaries: string[],
-  ): Promise<string> {
-    const agent = await this.getAgent(did)
-    if (!agent) {
-      throw new NotEnrolledError(did)
-    }
-
-    const res = await agent.api.com.atproto.repo.createRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      record: {
-        service: serviceEndpoint,
-        boundaries: boundaries.map((value) => ({ value })),
-        createdAt: new Date().toISOString(),
-      },
-    })
-
-    // Extract rkey from the returned URI: at://did/collection/rkey
-    const uri: string = res.data.uri
-    const rkey = uri.split('/').pop()!
-    return rkey
-  }
-
-  async deleteEnrollmentRecord(did: string, rkey: string): Promise<void> {
-    const agent = await this.getAgent(did)
-    if (!agent) {
-      throw new NotEnrolledError(did)
-    }
-
-    await agent.api.com.atproto.repo.deleteRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      rkey: rkey || 'self',
-    })
   }
 }
 
