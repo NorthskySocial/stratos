@@ -1,7 +1,7 @@
 /**
  * DPoP Token Verifier
  *
- * Verifies DPoP-bound access tokens using the PDS's JWKS.
+ * Verifies DPoP-bound access tokens.
  * Follows RFC 9449 for DPoP proof validation.
  */
 import { DpopManager, type DpopProof } from '@atproto/oauth-provider'
@@ -138,10 +138,14 @@ export class DpopVerifier {
       'DPoP auth attempt',
     )
 
+    // Need to have made sure the authorization type is Dpop first
+    // Move after line 175
+    // Set nonce further down
     // Set DPoP-Nonce header for client
     const nonce = this.nextNonce()
     if (nonce && res) {
       res.setHeader('DPoP-Nonce', nonce)
+      // TODO Add missing header
     }
 
     // Parse Authorization header
@@ -226,7 +230,7 @@ export class DpopVerifier {
       )
     }
 
-    // Verify token using PDS JWKS
+    // Verify token claims via PDS DID resolution
     let verificationResult: TokenVerificationResult
     try {
       verificationResult = await this.config.tokenVerifier.verify(accessToken)
@@ -255,13 +259,6 @@ export class DpopVerifier {
 
     // Token is verified - cast to claims type
     const claims = verificationResult as VerifiedTokenClaims
-
-    if (!claims.signatureVerified) {
-      this.config.logger?.warn(
-        { did: claims.sub },
-        'token signature not verified (PDS uses symmetric signing); relying on DPoP proof binding',
-      )
-    }
 
     // Get subject (user DID)
     const did = claims.sub
