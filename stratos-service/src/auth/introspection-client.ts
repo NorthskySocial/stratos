@@ -433,10 +433,12 @@ export class PdsTokenVerifier implements TokenVerifier {
         return { active: false, error: 'OAuth metadata missing jwks_uri' }
       }
 
+      const jwksUri = metadata.jwks_uri
+
       // 3. Fetch JWKS
       let jwks: jose.JSONWebKeySet
       try {
-        jwks = await this.fetchJwks(metadata.jwks_uri)
+        jwks = await this.fetchJwks(jwksUri)
       } catch (err) {
         return {
           active: false,
@@ -474,24 +476,55 @@ export class PdsTokenVerifier implements TokenVerifier {
           cnf: payload['cnf'] as { jkt?: string } | undefined,
         }
       } catch (verifyErr) {
-        // AT Protocol PDSes currently sign OAuth tokens with HS256 (symmetric).
-        // JWKS only publishes asymmetric keys, so jose rejects HS256 tokens.
-        // Fall back to accepting unverified claims when we detect this case.
-        // DPoP proof binding still provides authentication assurance.
         const header = this.decodeTokenHeader(token)
         const isSymmetricAlg =
           header.alg === 'HS256' ||
           header.alg === 'HS384' ||
           header.alg === 'HS512'
 
-        if (!isSymmetricAlg) {
-          throw verifyErr
+        if (isSymmetricAlg) {
+          return this.buildUnverifiedResult(token, issuerUrl.origin)
         }
 
-        return this.buildUnverifiedResult(token, issuerUrl.origin)
+        // Cached JWKS may be stale
+        // Evict and retry once with a fresh fetch before failing.
+        if (verifyErr instanceof jose.errors.JWKSNoMatchingKey) {
+          this.jwksCache.delete(jwksUri)
+          const freshJwks = await this.doFetchJwks(jwksUri)
+          const freshKeySet = jose.createLocalJWKSet(freshJwks)
+          const { payload } = await jose.jwtVerify(token, freshKeySet, {
+            issuer: issuerUrl.origin,
+            audience: this.audience,
+            clockTolerance: 30,
+          })
+
+          if (!payload.sub || !payload.sub.startsWith('did:')) {
+            return { active: false, error: 'Invalid subject claim' }
+          }
+
+          return {
+            active: true,
+            signatureVerified: true,
+            sub: payload.sub,
+            iss: payload.iss!,
+            aud: payload.aud,
+            exp: payload.exp,
+            iat: payload.iat,
+            jti: payload.jti,
+            scope: payload['scope'] as string | undefined,
+            client_id: payload['client_id'] as string | undefined,
+            cnf: payload['cnf'] as { jkt?: string } | undefined,
+          }
+        }
+
+        throw verifyErr
       }
     } catch (err) {
-      // jose throws specific errors for various failure cases
+      // JWKS key miss after retry is an infrastructure failure, not a token
+      // problem. Let it propagate so the DPoP verifier logs at error level.
+      if (err instanceof jose.errors.JWKSNoMatchingKey) {
+        throw err
+      }
       if (err instanceof jose.errors.JWTExpired) {
         return { active: false, error: 'Token expired' }
       }
