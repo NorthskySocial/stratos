@@ -6,6 +6,7 @@ import type { OAuthClientMetadataInput } from '@atproto/oauth-types'
 
 let client: BrowserOAuthClient | null = null
 let currentSession: OAuthSession | null = null
+let sessionDeletedCallback: (() => void) | null = null
 
 const HANDLE_RESOLVER =
   import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER ?? 'https://bsky.social'
@@ -38,16 +39,29 @@ function getClient(): BrowserOAuthClient {
       handleResolver: HANDLE_RESOLVER,
       responseMode: 'query',
       ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
+      onDelete: (_sub, _cause) => {
+        currentSession = null
+        sessionDeletedCallback?.()
+      },
     })
   }
   return client
 }
 
+export function onSessionDeleted(callback: () => void): void {
+  sessionDeletedCallback = callback
+}
+
 export async function init(): Promise<OAuthSession | null> {
   const oauthClient = getClient()
-  const result = await oauthClient.init()
-  if (result?.session) {
-    currentSession = result.session
+  try {
+    const result = await oauthClient.init()
+    if (result?.session) {
+      currentSession = result.session
+    }
+  } catch (err) {
+    console.warn('Session restore failed, clearing stale session:', err)
+    currentSession = null
   }
   return currentSession
 }
