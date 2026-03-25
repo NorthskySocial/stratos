@@ -85,10 +85,7 @@ import {
   enrollment,
   enrollmentBoundary,
 } from './db/index.js'
-import {
-  DpopVerifier,
-  DpopVerificationError,
-} from './auth/index.js'
+import { DpopVerifier, DpopVerificationError } from './auth/index.js'
 import {
   createServicePgDb,
   checkServicePgDbStartup,
