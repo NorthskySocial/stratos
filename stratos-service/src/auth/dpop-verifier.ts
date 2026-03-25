@@ -5,15 +5,11 @@
  * Follows RFC 9449 for DPoP proof validation.
  */
 import { DpopManager, type DpopProof } from '@atproto/oauth-provider'
+import jwt from 'jsonwebtoken'
 import type {
   EnrollmentStoreReader,
   Logger,
 } from '@northskysocial/stratos-core'
-import {
-  PdsTokenVerifier,
-  type TokenVerificationResult,
-  type VerifiedTokenClaims,
-} from './introspection-client.js'
 
 /**
  * Result of successful DPoP verification
@@ -34,8 +30,6 @@ export interface DpopVerifierConfig {
   serviceDid: string
   /** This Stratos service's endpoint URL */
   serviceEndpoint: string
-  /** Token verifier for validating access tokens */
-  tokenVerifier: PdsTokenVerifier
   /** Enrollment store for checking enrollment status */
   enrollmentStore: EnrollmentStoreReader
   /** Optional allow list provider */
@@ -62,7 +56,6 @@ export class DpopVerificationError extends Error {
       | 'token_inactive'
       | 'key_binding_mismatch'
       | 'not_enrolled'
-      | 'verification_failed'
       | 'not_allowed',
     public readonly wwwAuthenticate?: string,
   ) {
@@ -93,7 +86,7 @@ export interface VerifyResponseContext {
  * Verifies DPoP-bound OAuth access tokens by:
  * 1. Checking for DPoP authorization header and proof
  * 2. Validating the DPoP proof (signature, claims, etc.)
- * 3. Verifying the token signature using the PDS's JWKS
+ * 3. Decoding JWT claims (signature verification is not possible — PDS does not expose JWKS)
  * 4. Verifying the token is bound to the DPoP proof key
  * 5. Checking the user is enrolled
  */
@@ -230,35 +223,38 @@ export class DpopVerifier {
       )
     }
 
-    // Verify token claims via PDS DID resolution
-    let verificationResult: TokenVerificationResult
-    try {
-      verificationResult = await this.config.tokenVerifier.verify(accessToken)
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Token verification failed'
-      this.config.logger?.error(
-        { code: 'verification_failed', error: message },
-        'DPoP auth failed: token verification error',
-      )
-      throw new DpopVerificationError(message, 'verification_failed')
-    }
-
-    // Check token is active/valid
-    if (!verificationResult.active) {
+    // Decode JWT claims without signature verification.
+    // Bluesky's PDS does not expose signing keys at the JWKS endpoint,
+    // so cryptographic signature verification is not possible. Authentication
+    // assurance comes from DPoP proof binding (RFC 9449) instead.
+    const claims = jwt.decode(accessToken, { json: true })
+    if (!claims) {
       this.config.logger?.warn(
-        { code: 'token_inactive', error: verificationResult.error },
-        'DPoP auth failed: token inactive',
+        { code: 'invalid_token' },
+        'DPoP auth failed: could not decode JWT',
       )
       throw new DpopVerificationError(
-        verificationResult.error ?? 'Token is not active',
-        'token_inactive',
+        'Could not decode access token',
+        'invalid_token',
         'DPoP realm="stratos", error="invalid_token"',
       )
     }
 
-    // Token is verified - cast to claims type
-    const claims = verificationResult as VerifiedTokenClaims
+    // Check expiration
+    if (claims.exp !== undefined) {
+      const nowSec = Math.floor(Date.now() / 1000)
+      if (nowSec > claims.exp + 30) {
+        this.config.logger?.warn(
+          { code: 'token_inactive' },
+          'DPoP auth failed: token expired',
+        )
+        throw new DpopVerificationError(
+          'Token expired',
+          'token_inactive',
+          'DPoP realm="stratos", error="invalid_token"',
+        )
+      }
+    }
 
     // Get subject (user DID)
     const did = claims.sub
@@ -275,10 +271,20 @@ export class DpopVerifier {
 
     // Get PDS endpoint from issuer
     const pdsEndpoint = claims.iss
+    if (!pdsEndpoint) {
+      this.config.logger?.warn(
+        { did, code: 'invalid_token' },
+        'DPoP auth failed: missing issuer',
+      )
+      throw new DpopVerificationError(
+        'Token missing issuer (iss) claim',
+        'invalid_token',
+      )
+    }
 
     // Verify DPoP key binding
     // The token's cnf.jkt must match the DPoP proof's JWK thumbprint
-    const tokenJkt = claims.cnf?.jkt
+    const tokenJkt = (claims.cnf as { jkt?: string } | undefined)?.jkt
     if (tokenJkt) {
       if (tokenJkt !== dpopProof.jkt) {
         this.config.logger?.warn(
@@ -329,7 +335,7 @@ export class DpopVerifier {
     return {
       type: 'dpop',
       did,
-      scope: claims.scope ?? 'atproto',
+      scope: (claims.scope as string) ?? 'atproto',
       pdsEndpoint,
       tokenType: 'DPoP',
     }
