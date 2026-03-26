@@ -141,13 +141,7 @@ async function resolveParentBoundaries(
     return undefined
   }
 
-  const parentDid = parentUri.hostname
-  const exists = await ctx.actorStore.exists(parentDid)
-  if (!exists) {
-    return undefined
-  }
-
-  return ctx.actorStore.read(parentDid, async (store) => {
+  return ctx.actorStore.read(parentUri.hostname, async (store) => {
     const parentRecord = await store.record.getRecord(parentUri, null)
     if (!parentRecord) {
       return undefined
