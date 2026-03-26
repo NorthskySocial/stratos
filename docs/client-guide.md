@@ -29,7 +29,7 @@ only to members of specific groups or communities.
 | ------------------- | ----------------------------------------------------------------- |
 | **Stratos Service** | A server that stores private records (separate from PDS)          |
 | **Enrollment**      | User must enroll with a Stratos service to create private content |
-| **Domain Boundary** | Specifies which community boundaries can view a record            |
+| **Domain Boundary** | Specifies which community boundaries can view a record. Values are fully qualified as `{serviceDid}/{name}` (e.g. `did:web:stratos.example.com/general`). |
 | **Private Post**    | An `zone.stratos.feed.post` record with boundary restrictions     |
 
 ## Quick Start
@@ -101,7 +101,7 @@ await stratosAgent.com.atproto.repo.createRecord({
       values: [
         {
           $type: 'zone.stratos.boundary.defs#Domain',
-          value: 'general',
+          value: 'did:web:stratos.example.com/general',
         },
       ],
     },
@@ -517,19 +517,20 @@ async function hydrateFromSource(
 
 ### Understanding Boundaries
 
-Every Stratos record must include a `boundary` specifying which boundaries can access it:
+Every Stratos record must include a `boundary` specifying which boundaries can access it.
+Boundary values are **service-qualified identifiers** in `{serviceDid}/{name}` format.
+The service DID is the `did:web` identity of the Stratos instance — you can retrieve it
+from the service's `/.well-known/did.json` or via the `listDomains` endpoint.
 
 ```typescript
 {
   boundary: {
     $type: 'zone.stratos.boundary.defs#Domains',
-      values
-  :
-    [
-      {$type: 'zone.stratos.boundary.defs#Domain', value: 'general'},
-      {$type: 'zone.stratos.boundary.defs#Domain', value: 'writers'}
-    ]
-  }
+    values: [
+      { $type: 'zone.stratos.boundary.defs#Domain', value: 'did:web:stratos.example.com/general' },
+      { $type: 'zone.stratos.boundary.defs#Domain', value: 'did:web:stratos.example.com/writers' },
+    ],
+  },
 }
 ```
 
@@ -551,7 +552,10 @@ const crossDomainPost = {
   $type: 'zone.stratos.feed.post',
   text: 'Announcement for both groups',
   boundary: {
-    values: [{ value: 'fanart' }, { value: 'cosplay' }],
+    values: [
+      { value: 'did:web:stratos.example.com/fanart' },
+      { value: 'did:web:stratos.example.com/cosplay' },
+    ],
   },
   createdAt: new Date().toISOString(),
 }
@@ -967,7 +971,7 @@ interface Boundary {
 
 interface Domain {
   $type: 'zone.stratos.boundary.defs#Domain'
-  value: string // Domain name, max 253 chars
+  value: string // Qualified boundary: '{serviceDid}/{name}', max 253 chars
 }
 ```
 
