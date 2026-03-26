@@ -108,12 +108,13 @@ async function validateWritableRecord(
   collection: string,
   record: unknown,
 ): Promise<void> {
+  const rec = record as Record<string, unknown>
+
+  // Resolve parent boundaries when the record is a reply
+  const parentBoundaries = await resolveParentBoundaries(ctx, rec)
+
   try {
-    assertStratosValidation(
-      record as Record<string, unknown>,
-      collection,
-      ctx.cfg.stratos,
-    )
+    assertStratosValidation(rec, collection, ctx.cfg.stratos, parentBoundaries)
   } catch (err) {
     if (err instanceof StratosValidationError) {
       throw new InvalidRequestError(err.message, 'InvalidRecord')
@@ -122,6 +123,52 @@ async function validateWritableRecord(
   }
 
   await assertCallerCanWriteDomains(ctx, callerDid, collection, record)
+}
+
+//Cache the boundaries in case a post gets _really_ popular
+const parentBoundaryCache = new Map<
+  string,
+  { boundaries: string[] | undefined; cachedAt: number }
+>()
+const PARENT_BOUNDARY_TTL_MS = 60_000
+
+async function resolveParentBoundaries(
+  ctx: AppContext,
+  record: Record<string, unknown>,
+): Promise<string[] | undefined> {
+  const reply = record.reply as { parent?: { uri?: string } } | undefined
+  if (!reply?.parent?.uri) {
+    return undefined
+  }
+
+  let parentUri: AtUri
+  try {
+    parentUri = new AtUri(reply.parent.uri)
+  } catch {
+    return undefined
+  }
+
+  const cacheKey = reply.parent.uri
+  const cached = parentBoundaryCache.get(cacheKey)
+  if (cached && Date.now() - cached.cachedAt < PARENT_BOUNDARY_TTL_MS) {
+    return cached.boundaries
+  }
+
+  const boundaries = await ctx.actorStore.read(
+    parentUri.hostname,
+    async (store) => {
+      const parentRecord = await store.record.getRecord(parentUri, null)
+      if (!parentRecord) {
+        return undefined
+      }
+      return extractBoundaryDomains(
+        parentRecord.value as Record<string, unknown>,
+      )
+    },
+  )
+
+  parentBoundaryCache.set(cacheKey, { boundaries, cachedAt: Date.now() })
+  return boundaries
 }
 
 function assertRootUnchanged(
