@@ -42,10 +42,7 @@ describe('MigratingBoundaryResolver', () => {
   })
 
   it('migrates legacy bare-name boundaries to qualified format', async () => {
-    mockStore.getBoundaries.mockResolvedValue([
-      'bounty-hunters',
-      'red-dragon',
-    ])
+    mockStore.getBoundaries.mockResolvedValue(['bounty-hunters', 'red-dragon'])
     mockStore.setBoundaries.mockResolvedValue(undefined)
 
     const result = await resolver.getBoundaries('did:plc:spike')
@@ -90,9 +87,7 @@ describe('MigratingBoundaryResolver', () => {
     mockStore.setBoundaries.mockRejectedValue(new Error('DB locked'))
 
     const result = await resolver.getBoundaries('did:plc:jet')
-    expect(result).toEqual([
-      'did:web:bebop.cowboy.space/bounty-hunters',
-    ])
+    expect(result).toEqual(['did:web:bebop.cowboy.space/bounty-hunters'])
   })
 
   it('does not fire onMigrated if DB update fails', async () => {

@@ -119,7 +119,9 @@ describe('boundary qualification', () => {
         const mismatch = err as BoundaryServiceMismatchError
         expect(mismatch.expectedServiceDid).toBe(NERV_SERVICE)
         expect(mismatch.actualServiceDid).toBe(SEELE_SERVICE)
-        expect(mismatch.boundary).toBe('did:web:seele.berlin.de/instrumentality')
+        expect(mismatch.boundary).toBe(
+          'did:web:seele.berlin.de/instrumentality',
+        )
       }
     })
 

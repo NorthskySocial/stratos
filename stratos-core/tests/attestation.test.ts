@@ -7,12 +7,20 @@ describe('Attestation Domain', () => {
     it('should produce deterministic CBOR with sorted boundaries', () => {
       const payload1 = createAttestationPayload(
         'did:plc:abc123',
-        ['did:web:nerv.tokyo.jp/leadership', 'did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/alpha'],
+        [
+          'did:web:nerv.tokyo.jp/leadership',
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/alpha',
+        ],
         'did:key:zDnaeTest123',
       )
       const payload2 = createAttestationPayload(
         'did:plc:abc123',
-        ['did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/leadership'],
+        [
+          'did:web:nerv.tokyo.jp/alpha',
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/leadership',
+        ],
         'did:key:zDnaeTest123',
       )
 
@@ -69,14 +77,22 @@ describe('Attestation Domain', () => {
     })
 
     it('should not mutate the input boundaries array', () => {
-      const boundaries = ['did:web:nerv.tokyo.jp/zebra', 'did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/middle']
+      const boundaries = [
+        'did:web:nerv.tokyo.jp/zebra',
+        'did:web:nerv.tokyo.jp/alpha',
+        'did:web:nerv.tokyo.jp/middle',
+      ]
       createAttestationPayload(
         'did:plc:abc123',
         boundaries,
         'did:key:zDnaeTest123',
       )
 
-      expect(boundaries).toEqual(['did:web:nerv.tokyo.jp/zebra', 'did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/middle'])
+      expect(boundaries).toEqual([
+        'did:web:nerv.tokyo.jp/zebra',
+        'did:web:nerv.tokyo.jp/alpha',
+        'did:web:nerv.tokyo.jp/middle',
+      ])
     })
 
     it('should produce different payloads for different inputs', () => {

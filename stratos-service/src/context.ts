@@ -1260,9 +1260,15 @@ export async function createAppContext(
           },
         })
 
-        logger?.info({ did }, 'updated PDS enrollment record with qualified boundaries')
+        logger?.info(
+          { did },
+          'updated PDS enrollment record with qualified boundaries',
+        )
       } catch (err) {
-        logger?.warn({ did, err }, 'failed to update PDS enrollment record during boundary migration')
+        logger?.warn(
+          { did, err },
+          'failed to update PDS enrollment record during boundary migration',
+        )
       }
     })()
   }

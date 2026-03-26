@@ -168,7 +168,10 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
     const hasLegacy = boundaries.some((b) => !isQualifiedBoundary(b))
     if (!hasLegacy) return boundaries
 
-    const qualified = ensureQualifiedBoundaries(this.deps.serviceDid, boundaries)
+    const qualified = ensureQualifiedBoundaries(
+      this.deps.serviceDid,
+      boundaries,
+    )
 
     try {
       await this.deps.enrollmentStore.setBoundaries(did, qualified)

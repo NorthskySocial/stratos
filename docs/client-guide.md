@@ -25,12 +25,12 @@ only to members of specific groups or communities.
 
 ### Key Concepts
 
-| Concept             | Description                                                       |
-| ------------------- | ----------------------------------------------------------------- |
-| **Stratos Service** | A server that stores private records (separate from PDS)          |
-| **Enrollment**      | User must enroll with a Stratos service to create private content |
+| Concept             | Description                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Stratos Service** | A server that stores private records (separate from PDS)                                                                                                  |
+| **Enrollment**      | User must enroll with a Stratos service to create private content                                                                                         |
 | **Domain Boundary** | Specifies which community boundaries can view a record. Values are fully qualified as `{serviceDid}/{name}` (e.g. `did:web:stratos.example.com/general`). |
-| **Private Post**    | An `zone.stratos.feed.post` record with boundary restrictions     |
+| **Private Post**    | An `zone.stratos.feed.post` record with boundary restrictions                                                                                             |
 
 ## Quick Start
 
