@@ -170,6 +170,7 @@ async function run() {
     throw err
   }
 
+  state.serviceDid = envVars['STRATOS_SERVICE_DID']
   state.stratosRunning = true
   await saveState(state)
   pass('Setup complete')
