@@ -24,7 +24,9 @@ export function qualifyBoundaries(
  * Check whether a boundary value is already in qualified form (contains a DID prefix).
  */
 export function isQualifiedBoundary(value: string): boolean {
-  return value.startsWith('did:') && value.includes(QUALIFIED_BOUNDARY_SEPARATOR)
+  return (
+    value.startsWith('did:') && value.includes(QUALIFIED_BOUNDARY_SEPARATOR)
+  )
 }
 
 /**
@@ -38,7 +40,10 @@ export function parseQualifiedBoundary(
     return null
   }
 
-  const separatorIndex = qualified.indexOf(QUALIFIED_BOUNDARY_SEPARATOR, qualified.indexOf(':', 4))
+  const separatorIndex = qualified.indexOf(
+    QUALIFIED_BOUNDARY_SEPARATOR,
+    qualified.indexOf(':', 4),
+  )
   if (separatorIndex === -1) {
     return null
   }

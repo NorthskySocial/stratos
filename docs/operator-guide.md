@@ -25,12 +25,12 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ### Key Concepts
 
-| Concept              | Description                                                                        |
-| -------------------- | ---------------------------------------------------------------------------------- |
+| Concept              | Description                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Domain Boundary**  | A service-qualified boundary identifier in `{serviceDid}/{name}` format. Records with a boundary are visible only to enrolled users who share that boundary. |
-| **Enrollment**       | The process of a user registering with a Stratos service via OAuth                 |
-| **Service DID**      | The decentralized identifier for the Stratos service itself                        |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content                  |
+| **Enrollment**       | The process of a user registering with a Stratos service via OAuth                                                                                           |
+| **Service DID**      | The decentralized identifier for the Stratos service itself                                                                                                  |
+| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content                                                                                            |
 
 ### Use Cases
 

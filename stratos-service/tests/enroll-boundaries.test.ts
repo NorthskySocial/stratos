@@ -2,10 +2,17 @@ import { describe, it, expect } from 'vitest'
 import { selectEnrollBoundaries } from '../src/oauth/routes.js'
 
 describe('selectEnrollBoundaries', () => {
-  const allDomains = ['did:web:nerv.tokyo.jp/posters-madness', 'did:web:nerv.tokyo.jp/bees', 'did:web:nerv.tokyo.jp/plants']
+  const allDomains = [
+    'did:web:nerv.tokyo.jp/posters-madness',
+    'did:web:nerv.tokyo.jp/bees',
+    'did:web:nerv.tokyo.jp/plants',
+  ]
 
   it('should use autoEnrollDomains when provided and non-empty', () => {
-    const result = selectEnrollBoundaries(['did:web:nerv.tokyo.jp/posters-madness'], allDomains)
+    const result = selectEnrollBoundaries(
+      ['did:web:nerv.tokyo.jp/posters-madness'],
+      allDomains,
+    )
     expect(result).toEqual(['did:web:nerv.tokyo.jp/posters-madness'])
   })
 
@@ -24,7 +31,10 @@ describe('selectEnrollBoundaries', () => {
       ['did:web:nerv.tokyo.jp/posters-madness', 'did:web:nerv.tokyo.jp/bees'],
       allDomains,
     )
-    expect(result).toEqual(['did:web:nerv.tokyo.jp/posters-madness', 'did:web:nerv.tokyo.jp/bees'])
+    expect(result).toEqual([
+      'did:web:nerv.tokyo.jp/posters-madness',
+      'did:web:nerv.tokyo.jp/bees',
+    ])
   })
 
   it('should return empty array when both are empty', () => {

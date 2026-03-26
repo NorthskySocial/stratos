@@ -36,7 +36,10 @@ describe('Attestation Integration', () => {
     it('round-trips: create attestation → verify with service public key', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeUserKey123'
-      const boundaries = ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/leadership']
+      const boundaries = [
+        'did:web:nerv.tokyo.jp/engineering',
+        'did:web:nerv.tokyo.jp/leadership',
+      ]
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -66,14 +69,22 @@ describe('Attestation Integration', () => {
       const attestation = await createAttestation(
         serviceKeypair,
         TEST_DID,
-        ['did:web:nerv.tokyo.jp/zebra', 'did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/middle'],
+        [
+          'did:web:nerv.tokyo.jp/zebra',
+          'did:web:nerv.tokyo.jp/alpha',
+          'did:web:nerv.tokyo.jp/middle',
+        ],
         userSigningKey,
       )
 
       // Verifier reconstructs payload with different input order
       const payload = createAttestationPayload(
         TEST_DID,
-        ['did:web:nerv.tokyo.jp/middle', 'did:web:nerv.tokyo.jp/zebra', 'did:web:nerv.tokyo.jp/alpha'],
+        [
+          'did:web:nerv.tokyo.jp/middle',
+          'did:web:nerv.tokyo.jp/zebra',
+          'did:web:nerv.tokyo.jp/alpha',
+        ],
         userSigningKey,
       )
       const valid = await verifySignature(
@@ -156,7 +167,10 @@ describe('Attestation Integration', () => {
 
       const tamperedPayload = createAttestationPayload(
         TEST_DID,
-        ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/leadership'],
+        [
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/leadership',
+        ],
         userSigningKey,
       )
 
@@ -200,7 +214,10 @@ describe('Attestation Integration', () => {
   describe('attestation payload determinism', () => {
     it('same inputs from create and verify sides produce identical bytes', async () => {
       const did = 'did:plc:canonical'
-      const boundaries = ['did:web:nerv.tokyo.jp/beta', 'did:web:nerv.tokyo.jp/alpha']
+      const boundaries = [
+        'did:web:nerv.tokyo.jp/beta',
+        'did:web:nerv.tokyo.jp/alpha',
+      ]
       const userKey = 'did:key:zDnaeCanonical'
 
       const fromCreator = createAttestationPayload(did, boundaries, userKey)
@@ -211,7 +228,11 @@ describe('Attestation Integration', () => {
 
     it('payload CBOR contains the expected fields', async () => {
       const did = 'did:plc:inspect'
-      const boundaries = ['did:web:nerv.tokyo.jp/gamma', 'did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/beta']
+      const boundaries = [
+        'did:web:nerv.tokyo.jp/gamma',
+        'did:web:nerv.tokyo.jp/alpha',
+        'did:web:nerv.tokyo.jp/beta',
+      ]
       const userKey = 'did:key:zDnaeInspect'
 
       const payload = createAttestationPayload(did, boundaries, userKey)
@@ -223,7 +244,11 @@ describe('Attestation Integration', () => {
 
       expect(decoded.did).toBe(did)
       expect(decoded.signingKey).toBe(userKey)
-      expect(decoded.boundaries).toEqual(['did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/beta', 'did:web:nerv.tokyo.jp/gamma'])
+      expect(decoded.boundaries).toEqual([
+        'did:web:nerv.tokyo.jp/alpha',
+        'did:web:nerv.tokyo.jp/beta',
+        'did:web:nerv.tokyo.jp/gamma',
+      ])
     })
   })
 
@@ -231,7 +256,10 @@ describe('Attestation Integration', () => {
     it('verifies attestation the way an AppView would from an enrollment record', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeAppViewTest'
-      const boundaries = ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/product']
+      const boundaries = [
+        'did:web:nerv.tokyo.jp/engineering',
+        'did:web:nerv.tokyo.jp/product',
+      ]
 
       // --- Service side: create enrollment attestation ---
       const attestation = await createAttestation(
@@ -287,7 +315,10 @@ describe('Attestation Integration', () => {
 
       // Simulate a tampered enrollment record where someone added a boundary
       const tamperedRecord = {
-        boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }, { value: 'did:web:nerv.tokyo.jp/admin' }],
+        boundaries: [
+          { value: 'did:web:nerv.tokyo.jp/engineering' },
+          { value: 'did:web:nerv.tokyo.jp/admin' },
+        ],
         signingKey: userSigningKey,
         attestation: {
           sig: attestation.sig,

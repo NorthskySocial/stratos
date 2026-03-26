@@ -116,7 +116,10 @@ function createTestConfig(dataDir: string): StratosServiceConfig {
     },
     stratos: {
       serviceDid: 'did:web:nerv.tokyo.jp',
-      allowedDomains: ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/design'],
+      allowedDomains: [
+        'did:web:nerv.tokyo.jp/engineering',
+        'did:web:nerv.tokyo.jp/design',
+      ],
       retentionDays: 30,
       importMaxBytes: 256 * 1024 * 1024,
       writeRateLimit: {
@@ -160,7 +163,11 @@ interface TestContext {
       active?: boolean
     }) => Promise<void>
   }
-  stratosConfig: { serviceDid: string; allowedDomains: string[]; retentionDays: number }
+  stratosConfig: {
+    serviceDid: string
+    allowedDomains: string[]
+    retentionDays: number
+  }
 }
 
 describe('API Records', () => {
@@ -201,7 +208,10 @@ describe('API Records', () => {
       enrollmentStore,
       stratosConfig: {
         serviceDid: 'did:web:nerv.tokyo.jp',
-        allowedDomains: ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/design'],
+        allowedDomains: [
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/design',
+        ],
         retentionDays: 30,
       },
     }
@@ -227,7 +237,9 @@ describe('API Records', () => {
             collection: 'zone.stratos.feed.post',
             record: {
               text: 'Hello',
-              boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/engineering' }] },
+              boundary: {
+                values: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
+              },
               createdAt: new Date().toISOString(),
             },
           },
@@ -471,7 +483,10 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did: 'did:plc:withbounds',
         enrolledAt: new Date().toISOString(),
-        boundaries: ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/design'],
+        boundaries: [
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/design',
+        ],
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
@@ -496,7 +511,10 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
-        boundaries: ['did:web:nerv.tokyo.jp/new1', 'did:web:nerv.tokyo.jp/new2'],
+        boundaries: [
+          'did:web:nerv.tokyo.jp/new1',
+          'did:web:nerv.tokyo.jp/new2',
+        ],
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })

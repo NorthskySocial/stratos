@@ -23,8 +23,7 @@ function deriveServiceDid(ngrokUrl?: string): string {
   return 'did:web:127.0.0.1%3A3100'
 }
 
-export const SERVICE_DID =
-  state.serviceDid ?? deriveServiceDid(state.ngrokUrl)
+export const SERVICE_DID = state.serviceDid ?? deriveServiceDid(state.ngrokUrl)
 
 function requireEnv(key: string): string {
   const value = Deno.env.get(key)
