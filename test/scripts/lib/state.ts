@@ -20,6 +20,7 @@ export interface TestState {
   users: Record<string, UserState>
   stratosRunning: boolean
   ngrokUrl?: string
+  serviceDid?: string
 }
 
 export function emptyState(): TestState {

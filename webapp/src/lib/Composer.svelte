@@ -19,6 +19,8 @@
   let isPrivate = $state(true)
   let selectedDomain = $state('')
   let posting = $state(false)
+  import { displayBoundary } from './boundary-display'
+
   let error = $state('')
 
   let domains = $derived(
@@ -112,7 +114,7 @@
 
   <textarea
     bind:value={text}
-    placeholder={isPrivate ? `Post to ${selectedDomain || 'private'}…` : 'Write a post…'}
+    placeholder={isPrivate ? `Post to ${selectedDomain ? displayBoundary(selectedDomain) : 'private'}…` : 'Write a post…'}
     disabled={posting}
     rows="3"
   ></textarea>
@@ -138,7 +140,7 @@
           disabled={posting}
         >
           {#each domains as domain}
-            <option value={domain}>{domain}</option>
+            <option value={domain}>{displayBoundary(domain)}</option>
           {/each}
         </select>
       {/if}

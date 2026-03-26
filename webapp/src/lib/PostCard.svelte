@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FeedPost } from './feed'
+  import { displayBoundary } from './boundary-display'
 
   interface Props {
     post: FeedPost
@@ -55,7 +56,7 @@
       <span class="private-badge">Private</span>
     {/if}
     {#each post.boundaries as domain}
-      <span class="domain-badge">{domain}</span>
+      <span class="domain-badge">{displayBoundary(domain)}</span>
     {/each}
   </div>
 

@@ -115,7 +115,11 @@ function createTestConfig(dataDir: string): StratosServiceConfig {
       location: `${dataDir}/blobs`,
     },
     stratos: {
-      allowedDomains: ['example.com', 'test.com'],
+      serviceDid: 'did:web:nerv.tokyo.jp',
+      allowedDomains: [
+        'did:web:nerv.tokyo.jp/engineering',
+        'did:web:nerv.tokyo.jp/design',
+      ],
       retentionDays: 30,
       importMaxBytes: 256 * 1024 * 1024,
       writeRateLimit: {
@@ -159,7 +163,11 @@ interface TestContext {
       active?: boolean
     }) => Promise<void>
   }
-  stratosConfig: { allowedDomains: string[]; retentionDays: number }
+  stratosConfig: {
+    serviceDid: string
+    allowedDomains: string[]
+    retentionDays: number
+  }
 }
 
 describe('API Records', () => {
@@ -199,7 +207,11 @@ describe('API Records', () => {
       actorStore,
       enrollmentStore,
       stratosConfig: {
-        allowedDomains: ['example.com', 'test.com'],
+        serviceDid: 'did:web:nerv.tokyo.jp',
+        allowedDomains: [
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/design',
+        ],
         retentionDays: 30,
       },
     }
@@ -225,7 +237,9 @@ describe('API Records', () => {
             collection: 'zone.stratos.feed.post',
             record: {
               text: 'Hello',
-              boundary: { values: [{ value: 'example.com' }] },
+              boundary: {
+                values: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
+              },
               createdAt: new Date().toISOString(),
             },
           },
@@ -469,15 +483,18 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did: 'did:plc:withbounds',
         enrolledAt: new Date().toISOString(),
-        boundaries: ['engineering', 'design'],
+        boundaries: [
+          'did:web:nerv.tokyo.jp/engineering',
+          'did:web:nerv.tokyo.jp/design',
+        ],
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
 
       const boundaries = await store.getBoundaries('did:plc:withbounds')
       expect(boundaries).toHaveLength(2)
-      expect(boundaries).toContain('engineering')
-      expect(boundaries).toContain('design')
+      expect(boundaries).toContain('did:web:nerv.tokyo.jp/engineering')
+      expect(boundaries).toContain('did:web:nerv.tokyo.jp/design')
     })
 
     it('should replace boundaries on re-enrollment', async () => {
@@ -486,7 +503,7 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
-        boundaries: ['old'],
+        boundaries: ['did:web:nerv.tokyo.jp/old'],
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
@@ -494,16 +511,19 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
-        boundaries: ['new1', 'new2'],
+        boundaries: [
+          'did:web:nerv.tokyo.jp/new1',
+          'did:web:nerv.tokyo.jp/new2',
+        ],
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
 
       const boundaries = await store.getBoundaries(did)
       expect(boundaries).toHaveLength(2)
-      expect(boundaries).toContain('new1')
-      expect(boundaries).toContain('new2')
-      expect(boundaries).not.toContain('old')
+      expect(boundaries).toContain('did:web:nerv.tokyo.jp/new1')
+      expect(boundaries).toContain('did:web:nerv.tokyo.jp/new2')
+      expect(boundaries).not.toContain('did:web:nerv.tokyo.jp/old')
     })
 
     it('should delete boundaries on unenroll', async () => {
@@ -512,7 +532,7 @@ describe('SqliteEnrollmentStore', () => {
       await store.enroll({
         did,
         enrolledAt: new Date().toISOString(),
-        boundaries: ['a', 'b'],
+        boundaries: ['did:web:nerv.tokyo.jp/a', 'did:web:nerv.tokyo.jp/b'],
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })

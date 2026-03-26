@@ -6,6 +6,7 @@
 import { createRecord } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
 import type { UserState } from './lib/state.ts'
+import { DOMAINS } from './lib/config.ts'
 import { section, pass, fail, info, summary } from './lib/log.ts'
 
 // Standalone posts per domain
@@ -52,7 +53,7 @@ interface ThreadDef {
 const SWORDSMITH_THREADS: ThreadDef[] = [
   {
     label: 'The duel on the cliff',
-    boundary: 'swordsmith',
+    boundary: DOMAINS.swordsmith,
     lines: [
       {
         user: 'fuyuko',
@@ -88,7 +89,7 @@ const SWORDSMITH_THREADS: ThreadDef[] = [
   },
   {
     label: 'Prepare to die',
-    boundary: 'swordsmith',
+    boundary: DOMAINS.swordsmith,
     lines: [
       {
         user: 'rei',
@@ -119,7 +120,7 @@ const SWORDSMITH_THREADS: ThreadDef[] = [
 const AEKEA_THREADS: ThreadDef[] = [
   {
     label: 'Inconceivable',
-    boundary: 'aekea',
+    boundary: DOMAINS.aekea,
     lines: [
       { user: 'kaoruko', text: "He didn't fall? Inconceivable!" },
       {
@@ -130,7 +131,7 @@ const AEKEA_THREADS: ThreadDef[] = [
   },
   {
     label: 'No one of consequence',
-    boundary: 'aekea',
+    boundary: DOMAINS.aekea,
     lines: [
       { user: 'haruki', text: 'Who are you?' },
       { user: 'kaoruko', text: 'No one of consequence.' },
@@ -258,7 +259,7 @@ async function run() {
   const reiResults = await generatePosts(
     rei.did,
     'Rei',
-    'swordsmith',
+    DOMAINS.swordsmith,
     SWORDSMITH_POSTS,
   )
   info(`Rei: ${reiResults.length} posts created`)
@@ -267,7 +268,7 @@ async function run() {
   const kaorukoResults = await generatePosts(
     kaoruko.did,
     'kaoruko',
-    'aekea',
+    DOMAINS.aekea,
     AEKEA_POSTS,
   )
   info(`kaoruko: ${kaorukoResults.length} posts created`)

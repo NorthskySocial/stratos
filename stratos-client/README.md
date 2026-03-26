@@ -20,7 +20,7 @@ The `@northskysocial/stratos-client` package provides the building blocks for en
 
 ## 1. Enrollment Discovery
 
-A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS collection, created during the enrollment process via OAuth. Each enrollment record represents a connection to a different Stratos service — **a user can be enrolled in multiple Stratos services simultaneously**, with each enrollment stored as a separate record using the **service's DID** as the record key. This makes enrollment records deterministically addressable: knowing the service DID is sufficient to look up a specific enrollment.
+A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS collection, created during the enrollment process via OAuth. Each enrollment record represents a connection to a different Stratos service — **a user can be enrolled in multiple Stratos services simultaneously**, with each enrollment stored as a separate record using the **service's DID** as the record key. This makes enrollment records deterministically addressable: knowing the service DID is sufficient to look up a specific enrollment. So as to prevent a confused deputy scenario, domains are also fully addressable using the service DID and stored this way.
 
 The enrollment process initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. A P-256 signing key is generated for the user and stored by the Stratos service — this key is used for signing record commits, making them verifiable against the `signingKey` published in the enrollment record. If the per-user key is unavailable, the service falls back to its own Secp256k1 key.
 
@@ -33,7 +33,10 @@ Each enrollment record is stored at `at://<did>/zone.stratos.actor.enrollment/<s
 ```json
 {
   "service": "https://stratos.example.com",
-  "boundaries": [{ "value": "WestCoastBestCoast" }, { "value": "TeaDrinkers" }],
+  "boundaries": [
+    { "value": "did:web:stratos.example.com/WestCoastBestCoast" },
+    { "value": "did:web:stratos.example.com/TeaDrinkers" }
+  ],
   "signingKey": "did:key:zDnae...",
   "attestation": {
     "sig": { "$bytes": "base64..." },
@@ -53,7 +56,7 @@ at://did:plc:abc123/zone.stratos.actor.enrollment/did:web:service-b.example.com 
 | Field                    | Type                       | Description                                                                                          |
 | ------------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `service`                | `string` (URI)             | Stratos service endpoint where user's private data lives                                             |
-| `boundaries`             | `Array<{ value: string }>` | Domains the user can access on this service                                                          |
+| `boundaries`             | `Array<{ value: string }>` | Service-DID-qualified boundaries the user can access, each in `{serviceDid}/{domainName}` format     |
 | `signingKey`             | `string` (did:key)         | User's P-256 public key, generated at enrollment and used to sign record commits                     |
 | `attestation`            | `ServiceAttestation`       | Service attestation vouching for enrollment, boundaries, and signing key                             |
 | `attestation.sig`        | `bytes`                    | Signature over DAG-CBOR encoded `{boundaries, did, signingKey}` (sorted keys), signed by service key |
@@ -141,31 +144,24 @@ if (target) {
 }
 ```
 
-### Boundary uniqueness across enrollments
+### Boundary addressability
 
-Boundary domain names should be unique across a user's enrollments. Before initiating a new enrollment, clients should check existing enrollments to warn about conflicts:
+Boundaries are service-DID-qualified: each boundary `value` is stored in `{serviceDid}/{domainName}` format (e.g., `did:web:stratos.example.com/animal-lovers`). This makes every boundary globally addressable — the same domain name on two different Stratos services produces two distinct boundary values, so cross-enrollment conflicts are impossible by design.
 
 ```typescript
-const existing = await discoverEnrollments(did, pdsUrl)
-const existingDomains = existing.flatMap((e) =>
-  e.boundaries.map((b) => b.value),
-)
-const newDomains = ['engineering', 'leadership']
-const conflicts = newDomains.filter((d) => existingDomains.includes(d))
-if (conflicts.length > 0) {
-  console.warn(
-    `Domain conflict: ${conflicts.join(', ')} already enrolled elsewhere`,
-  )
-}
+const enrollments = await discoverEnrollments(did, pdsUrl)
+
+// Boundaries from different services are distinct by construction
+enrollments.forEach((e) => {
+  e.boundaries.forEach((b) => {
+    // e.g. 'did:web:service-a.example.com/animal-lovers'
+    //      'did:web:service-b.example.com/animal-lovers'
+    console.log(b.value)
+  })
+})
 ```
 
-> **Note:** This is a client-side convention. Each Stratos service independently manages its own enrollments and does not enforce cross-service domain uniqueness.
-
 Discovery should happen at session establishment (login/resume) and the result cached for the session lifetime. Reset enrollment state on account switch or logout.
-
-### Migration from legacy rkeys
-
-Prior versions used either a single enrollment record with `rkey: self` or TID-generated rkeys. The Stratos service automatically migrates legacy records to service-DID-keyed records on next login. The `discoverEnrollments` function discovers records regardless of rkey format via `listRecords`, so no client-side migration is needed. New enrollments always use the service's DID as the record key.
 
 ### Verifying the attestation
 
@@ -396,7 +392,9 @@ await rpc.post('com.atproto.repo.createRecord', {
     record: {
       text: 'hello',
       createdAt: new Date().toISOString(),
-      boundary: { values: [{ value: 'WestCoastBestCoast' }] },
+      boundary: {
+        values: [{ value: 'did:web:stratos.example.com/WestCoastBestCoast' }],
+      },
     },
   },
 })

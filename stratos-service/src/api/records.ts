@@ -11,6 +11,8 @@ import { AtUri } from '@atproto/syntax'
 import {
   assertStratosValidation,
   extractBoundaryDomains,
+  assertBoundaryMatchesService,
+  BoundaryServiceMismatchError,
   StratosValidationError,
   buildCommit,
   type MstWriteOp,
@@ -85,6 +87,18 @@ async function assertCallerCanWriteDomains(
   )
   if (requestedDomains.length === 0) {
     return
+  }
+
+  // Reject records whose boundaries target a different Stratos service
+  for (const domain of requestedDomains) {
+    try {
+      assertBoundaryMatchesService(domain, ctx.serviceDid)
+    } catch (err) {
+      if (err instanceof BoundaryServiceMismatchError) {
+        throw new InvalidRequestError(err.message, 'ServiceMismatch')
+      }
+      throw err
+    }
   }
 
   const callerDomains = await ctx.boundaryResolver.getBoundaries(callerDid)

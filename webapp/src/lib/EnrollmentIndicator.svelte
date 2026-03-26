@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { StratosEnrollment, StratosServiceStatus } from './stratos'
   import { enrollInStratos } from './stratos'
+  import { displayBoundary } from './boundary-display'
 
   interface Props {
     handle: string
@@ -31,7 +32,7 @@
       {#if enrollment.boundaries.length > 0}
         <div class="boundaries">
           {#each enrollment.boundaries as b}
-            <span class="boundary-tag">{b.value}</span>
+            <span class="boundary-tag">{displayBoundary(b.value)}</span>
           {/each}
         </div>
       {/if}

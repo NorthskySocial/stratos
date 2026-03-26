@@ -1,5 +1,8 @@
 import { z } from 'zod'
-import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
+import {
+  ENROLLMENT_MODE,
+  qualifyBoundaries,
+} from '@northskysocial/stratos-core'
 
 /**
  * Environment variable schema for stratos service
@@ -234,6 +237,7 @@ export interface StratosServiceConfig {
   }
   blobstore: BlobstoreConfig
   stratos: {
+    serviceDid: string
     allowedDomains: string[]
     retentionDays: number
     devMode?: boolean
@@ -355,7 +359,11 @@ export function envToConfig(env: Env): StratosServiceConfig {
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {
-      allowedDomains: env.STRATOS_ALLOWED_DOMAINS,
+      serviceDid: env.STRATOS_SERVICE_DID,
+      allowedDomains: qualifyBoundaries(
+        env.STRATOS_SERVICE_DID,
+        env.STRATOS_ALLOWED_DOMAINS,
+      ),
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
@@ -370,7 +378,13 @@ export function envToConfig(env: Env): StratosServiceConfig {
       mode: env.STRATOS_ENROLLMENT_MODE,
       allowedDids: env.STRATOS_ALLOWED_DIDS,
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
-      autoEnrollDomains: env.STRATOS_AUTO_ENROLL_DOMAINS,
+      autoEnrollDomains:
+        env.STRATOS_AUTO_ENROLL_DOMAINS.length > 0
+          ? qualifyBoundaries(
+              env.STRATOS_SERVICE_DID,
+              env.STRATOS_AUTO_ENROLL_DOMAINS,
+            )
+          : undefined,
       allowListUrl: env.STRATOS_ALLOW_LIST_URI,
       allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
       valkeyUrl: env.STRATOS_VALKEY_URL,
