@@ -99,9 +99,11 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
             enrollmentRkey: enrollment.enrollmentRkey,
           }
 
-          // Only include boundaries if authenticated
+          // Always resolve boundaries to trigger lazy migration for legacy bare-name boundaries.
+          // Only include them in the response when authenticated to prevent enumeration abuse.
+          const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
+
           if (auth) {
-            const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
             response.boundaries = boundaryValues.map((value: string) => ({
               value,
             }))
