@@ -11,7 +11,7 @@ import { StratosConfig, StratosValidationError } from '../src'
 
 describe('stratos-validation', () => {
   const validConfig: StratosConfig = {
-    allowedDomains: ['example.com', 'corp.example.com'],
+    allowedDomains: ['example.com', 'bunnies.example.com'],
     retentionDays: 90,
   }
 
@@ -66,7 +66,7 @@ describe('stratos-validation', () => {
       const record = {
         text: 'test',
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
+          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
         },
         createdAt: new Date().toISOString(),
       }
@@ -137,6 +137,144 @@ describe('stratos-validation', () => {
       const record = {
         text: 'test',
         boundary: { values: [{ value: 'example.com' }] },
+        reply: {
+          parent: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/456',
+            cid: 'bafydef',
+          },
+        },
+        createdAt: new Date().toISOString(),
+      }
+
+      expect(() => {
+        assertStratosValidation(record, 'zone.stratos.feed.post', validConfig)
+      }).not.toThrow()
+    })
+
+    it('should pass when reply boundaries are a subset of parent boundaries', () => {
+      const record = {
+        text: 'test',
+        boundary: { values: [{ value: 'example.com' }] },
+        reply: {
+          parent: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/456',
+            cid: 'bafydef',
+          },
+        },
+        createdAt: new Date().toISOString(),
+      }
+      const parentBoundaries = ['example.com', 'bunnies.example.com']
+
+      expect(() => {
+        assertStratosValidation(
+          record,
+          'zone.stratos.feed.post',
+          validConfig,
+          parentBoundaries,
+        )
+      }).not.toThrow()
+    })
+
+    it('should pass when reply boundaries exactly match parent boundaries', () => {
+      const record = {
+        text: 'test',
+        boundary: {
+          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
+        },
+        reply: {
+          parent: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/456',
+            cid: 'bafydef',
+          },
+        },
+        createdAt: new Date().toISOString(),
+      }
+      const parentBoundaries = ['example.com', 'bunnies.example.com']
+
+      expect(() => {
+        assertStratosValidation(
+          record,
+          'zone.stratos.feed.post',
+          validConfig,
+          parentBoundaries,
+        )
+      }).not.toThrow()
+    })
+
+    it('should throw when reply has boundaries not in parent', () => {
+      const record = {
+        text: 'test',
+        boundary: {
+          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
+        },
+        reply: {
+          parent: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/456',
+            cid: 'bafydef',
+          },
+        },
+        createdAt: new Date().toISOString(),
+      }
+      const parentBoundaries = ['example.com']
+
+      expect(() => {
+        assertStratosValidation(
+          record,
+          'zone.stratos.feed.post',
+          validConfig,
+          parentBoundaries,
+        )
+      }).toThrow('Domains not in parent: bunnies.example.com')
+    })
+
+    it('should throw when reply has entirely different boundaries than parent', () => {
+      const record = {
+        text: 'test',
+        boundary: { values: [{ value: 'bunnies.example.com' }] },
+        reply: {
+          parent: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
+            cid: 'bafyabc',
+          },
+          root: {
+            uri: 'at://did:plc:abc/zone.stratos.feed.post/456',
+            cid: 'bafydef',
+          },
+        },
+        createdAt: new Date().toISOString(),
+      }
+      const parentBoundaries = ['example.com']
+
+      expect(() => {
+        assertStratosValidation(
+          record,
+          'zone.stratos.feed.post',
+          validConfig,
+          parentBoundaries,
+        )
+      }).toThrow('Domains not in parent: bunnies.example.com')
+    })
+
+    it('should not check boundary subset when no parentBoundaries provided', () => {
+      const record = {
+        text: 'test',
+        boundary: { values: [{ value: 'bunnies.example.com' }] },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
@@ -315,13 +453,13 @@ describe('stratos-validation', () => {
     it('should extract domains from valid boundary', () => {
       const record = {
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
+          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
         },
       }
 
       expect(extractBoundaryDomains(record)).toEqual([
         'example.com',
-        'corp.example.com',
+        'bunnies.example.com',
       ])
     })
 
