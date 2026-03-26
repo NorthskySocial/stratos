@@ -280,7 +280,7 @@ describe('Integration: Full Stratos Flow', () => {
       const record = {
         text: 'Hello Stratos!',
         boundary: {
-          values: [{ value: 'example.com' }],
+          values: [{ value: 'did:web:nerv.tokyo.jp/evangelion' }],
         },
         createdAt: new Date().toISOString(),
       }
@@ -411,7 +411,11 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('Validation Integration', () => {
     const stratosConfig = {
-      allowedDomains: ['example.com', 'corp.example.com'],
+      serviceDid: 'did:web:nerv.tokyo.jp',
+      allowedDomains: [
+        'did:web:nerv.tokyo.jp/evangelion',
+        'did:web:nerv.tokyo.jp/magi',
+      ],
       retentionDays: 30,
     }
 
@@ -420,7 +424,10 @@ describe('Integration: Full Stratos Flow', () => {
         $type: 'zone.stratos.feed.post',
         text: 'This is a valid stratos post',
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'corp.example.com' }],
+          values: [
+            { value: 'did:web:nerv.tokyo.jp/evangelion' },
+            { value: 'did:web:nerv.tokyo.jp/magi' },
+          ],
         },
         createdAt: new Date().toISOString(),
       }
@@ -433,7 +440,7 @@ describe('Integration: Full Stratos Flow', () => {
     it('should validate stratos post with stratos reply', () => {
       const record = {
         text: 'Replying to stratos',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/evangelion' }] },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
@@ -455,7 +462,7 @@ describe('Integration: Full Stratos Flow', () => {
     it('should reject stratos post replying to bsky', () => {
       const record = {
         text: 'Cross-namespace reply',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/evangelion' }] },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/app.bsky.feed.post/123',
@@ -477,7 +484,7 @@ describe('Integration: Full Stratos Flow', () => {
     it('should reject stratos post embedding bsky', () => {
       const record = {
         text: 'Quote post',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/evangelion' }] },
         embed: {
           $type: 'app.bsky.embed.record',
           record: {
@@ -511,12 +518,18 @@ describe('Integration: Full Stratos Flow', () => {
     it('should extract boundary domains from record', () => {
       const record = {
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'test.com' }],
+          values: [
+            { value: 'did:web:nerv.tokyo.jp/evangelion' },
+            { value: 'did:web:nerv.tokyo.jp/magi' },
+          ],
         },
       }
 
       const domains = extractBoundaryDomains(record)
-      expect(domains).toEqual(['example.com', 'test.com'])
+      expect(domains).toEqual([
+        'did:web:nerv.tokyo.jp/evangelion',
+        'did:web:nerv.tokyo.jp/magi',
+      ])
     })
   })
 

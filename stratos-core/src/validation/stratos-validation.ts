@@ -1,5 +1,6 @@
 import { AtUri } from '@atproto/syntax'
 import { StratosConfig, StratosValidationError } from '../types.js'
+import { assertBoundaryMatchesService } from './boundary-qualification.js'
 
 /**
  * Error codes for stratos validation failures
@@ -10,6 +11,7 @@ export type StratosValidationErrorCode =
   | 'CrossNamespaceEmbed'
   | 'MissingBoundary'
   | 'ReplyBoundaryEscalation'
+  | 'ServiceMismatch'
 
 /**
  * Record type for validation (loosely typed to avoid lexicon dependencies)
@@ -73,6 +75,15 @@ function assertStratosPostValidation(
       throw new StratosValidationError(
         `Domain "${domain.value}" is not allowed on this service. Allowed domains: ${stratosConfig.allowedDomains.join(', ')}`,
         'ForbiddenDomain',
+      )
+    }
+
+    try {
+      assertBoundaryMatchesService(domain.value, stratosConfig.serviceDid)
+    } catch {
+      throw new StratosValidationError(
+        `Boundary "${domain.value}" does not belong to this service (${stratosConfig.serviceDid})`,
+        'ServiceMismatch',
       )
     }
   }

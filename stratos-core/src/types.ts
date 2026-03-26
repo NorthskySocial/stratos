@@ -9,7 +9,9 @@ export enum ENROLLMENT_MODE {
  * Configuration for stratos domain validation
  */
 export interface StratosConfig {
-  /** List of allowed boundary domain values */
+  /** DID of the stratos service, used to qualify boundary values */
+  serviceDid: string
+  /** List of allowed boundary domain values (qualified with service DID) */
   allowedDomains: string[]
   /** Days to retain stratos data after account deactivation */
   retentionDays: number

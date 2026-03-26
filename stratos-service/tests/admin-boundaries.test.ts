@@ -81,7 +81,7 @@ function createMockStore(
     enroll: vi.fn(async () => {}),
     unenroll: vi.fn(async () => {}),
     updateEnrollment: vi.fn(async () => {}),
-    getBoundaries: vi.fn(async () => ['posters-madness']),
+    getBoundaries: vi.fn(async () => ['did:web:nerv.tokyo.jp/posters-madness']),
     setBoundaries: vi.fn(async () => {}),
     addBoundary: vi.fn(async () => {}),
     removeBoundary: vi.fn(async () => {}),
@@ -121,7 +121,10 @@ function createCtx(opts: {
     })),
     cfg: {
       service: { publicUrl: 'https://stratos.example.com' },
-      stratos: { allowedDomains: ['posters-madness', 'bees', 'plants'] },
+      stratos: {
+          serviceDid: 'did:web:nerv.tokyo.jp',
+          allowedDomains: ['did:web:nerv.tokyo.jp/posters-madness', 'did:web:nerv.tokyo.jp/bees', 'did:web:nerv.tokyo.jp/plants'],
+        },
     },
     logger: {
       info: vi.fn(),
@@ -142,7 +145,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.addBoundary',
-        { did: 'did:plc:usagi', boundary: 'bees' },
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
       expect(res.statusCode).toBe(200)
       const body = res.body as { did: string; boundaries: string[] }
@@ -150,7 +153,7 @@ describe('admin boundary endpoints', () => {
       expect(body.boundaries).toBeDefined()
       expect(enrollmentStore.addBoundary).toHaveBeenCalledWith(
         'did:plc:usagi',
-        'bees',
+        'did:web:nerv.tokyo.jp/bees',
       )
     })
 
@@ -159,7 +162,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.addBoundary',
-        { did: 'did:plc:usagi', boundary: 'bees' },
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
       expect(res.statusCode).toBe(401)
     })
@@ -180,7 +183,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.addBoundary',
-        { did: 'did:plc:usagi', boundary: 'forbidden-domain' },
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/forbidden-domain' },
       )
       expect(res.statusCode).toBe(400)
       expect((res.body as { message: string }).message).toContain(
@@ -195,7 +198,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.addBoundary',
-        { did: 'did:plc:nobody', boundary: 'bees' },
+        { did: 'did:plc:nobody', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
       expect(res.statusCode).toBe(404)
     })
@@ -207,14 +210,14 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.removeBoundary',
-        { did: 'did:plc:usagi', boundary: 'posters-madness' },
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/posters-madness' },
       )
       expect(res.statusCode).toBe(200)
       const body = res.body as { did: string; boundaries: string[] }
       expect(body.did).toBe('did:plc:usagi')
       expect(enrollmentStore.removeBoundary).toHaveBeenCalledWith(
         'did:plc:usagi',
-        'posters-madness',
+        'did:web:nerv.tokyo.jp/posters-madness',
       )
     })
 
@@ -223,7 +226,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.removeBoundary',
-        { did: 'did:plc:usagi', boundary: 'posters-madness' },
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/posters-madness' },
       )
       expect(res.statusCode).toBe(401)
     })
@@ -235,7 +238,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.removeBoundary',
-        { did: 'did:plc:nobody', boundary: 'posters-madness' },
+        { did: 'did:plc:nobody', boundary: 'did:web:nerv.tokyo.jp/posters-madness' },
       )
       expect(res.statusCode).toBe(404)
     })
@@ -247,14 +250,14 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.setBoundaries',
-        { did: 'did:plc:usagi', boundaries: ['bees', 'plants'] },
+        { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees', 'did:web:nerv.tokyo.jp/plants'] },
       )
       expect(res.statusCode).toBe(200)
       const body = res.body as { did: string; boundaries: string[] }
       expect(body.did).toBe('did:plc:usagi')
       expect(enrollmentStore.setBoundaries).toHaveBeenCalledWith(
         'did:plc:usagi',
-        ['bees', 'plants'],
+        ['did:web:nerv.tokyo.jp/bees', 'did:web:nerv.tokyo.jp/plants'],
       )
     })
 
@@ -276,10 +279,10 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.setBoundaries',
-        { did: 'did:plc:usagi', boundaries: ['bees', 'not-allowed'] },
+        { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees', 'did:web:nerv.tokyo.jp/not-allowed'] },
       )
       expect(res.statusCode).toBe(400)
-      expect((res.body as { message: string }).message).toContain('not-allowed')
+      expect((res.body as { message: string }).message).toContain('did:web:nerv.tokyo.jp/not-allowed')
     })
 
     it('rejects missing boundaries array', async () => {
@@ -297,7 +300,7 @@ describe('admin boundary endpoints', () => {
       const res = await invokePostRoute(
         router,
         '/xrpc/zone.stratos.admin.setBoundaries',
-        { did: 'did:plc:usagi', boundaries: ['bees'] },
+        { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
       )
       expect(res.statusCode).toBe(401)
     })
