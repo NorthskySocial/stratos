@@ -24,7 +24,7 @@ describe('Enrollment - auto enroll boundaries', () => {
   it('persists boundaries correctly via SqliteEnrollmentStore', async () => {
     const store = new SqliteEnrollmentStore(db)
     const did = 'did:plc:testauto'
-    const boundaries = ['alpha', 'beta', 'user-boundary']
+    const boundaries = ['did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/beta', 'did:web:nerv.tokyo.jp/user-boundary']
 
     await store.enroll({
       did,

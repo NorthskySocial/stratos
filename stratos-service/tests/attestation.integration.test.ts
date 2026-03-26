@@ -36,7 +36,7 @@ describe('Attestation Integration', () => {
     it('round-trips: create attestation → verify with service public key', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeUserKey123'
-      const boundaries = ['engineering', 'leadership']
+      const boundaries = ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/leadership']
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -66,14 +66,14 @@ describe('Attestation Integration', () => {
       const attestation = await createAttestation(
         serviceKeypair,
         TEST_DID,
-        ['zebra', 'alpha', 'middle'],
+        ['did:web:nerv.tokyo.jp/zebra', 'did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/middle'],
         userSigningKey,
       )
 
       // Verifier reconstructs payload with different input order
       const payload = createAttestationPayload(
         TEST_DID,
-        ['middle', 'zebra', 'alpha'],
+        ['did:web:nerv.tokyo.jp/middle', 'did:web:nerv.tokyo.jp/zebra', 'did:web:nerv.tokyo.jp/alpha'],
         userSigningKey,
       )
       const valid = await verifySignature(
@@ -89,7 +89,7 @@ describe('Attestation Integration', () => {
       const serviceKeypair = await createServiceKeypair()
       const wrongKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeUserKey789'
-      const boundaries = ['engineering']
+      const boundaries = ['did:web:nerv.tokyo.jp/engineering']
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -117,7 +117,7 @@ describe('Attestation Integration', () => {
     it('verification fails when payload DID is tampered', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeUserKey000'
-      const boundaries = ['engineering']
+      const boundaries = ['did:web:nerv.tokyo.jp/engineering']
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -145,7 +145,7 @@ describe('Attestation Integration', () => {
     it('verification fails when boundaries are tampered', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeUserKeyABC'
-      const boundaries = ['engineering']
+      const boundaries = ['did:web:nerv.tokyo.jp/engineering']
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -156,7 +156,7 @@ describe('Attestation Integration', () => {
 
       const tamperedPayload = createAttestationPayload(
         TEST_DID,
-        ['engineering', 'leadership'],
+        ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/leadership'],
         userSigningKey,
       )
 
@@ -172,7 +172,7 @@ describe('Attestation Integration', () => {
     it('verification fails when user signing key is tampered', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeRealKey'
-      const boundaries = ['alpha']
+      const boundaries = ['did:web:nerv.tokyo.jp/alpha']
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -200,7 +200,7 @@ describe('Attestation Integration', () => {
   describe('attestation payload determinism', () => {
     it('same inputs from create and verify sides produce identical bytes', async () => {
       const did = 'did:plc:canonical'
-      const boundaries = ['beta', 'alpha']
+      const boundaries = ['did:web:nerv.tokyo.jp/beta', 'did:web:nerv.tokyo.jp/alpha']
       const userKey = 'did:key:zDnaeCanonical'
 
       const fromCreator = createAttestationPayload(did, boundaries, userKey)
@@ -211,7 +211,7 @@ describe('Attestation Integration', () => {
 
     it('payload CBOR contains the expected fields', async () => {
       const did = 'did:plc:inspect'
-      const boundaries = ['gamma', 'alpha', 'beta']
+      const boundaries = ['did:web:nerv.tokyo.jp/gamma', 'did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/beta']
       const userKey = 'did:key:zDnaeInspect'
 
       const payload = createAttestationPayload(did, boundaries, userKey)
@@ -223,7 +223,7 @@ describe('Attestation Integration', () => {
 
       expect(decoded.did).toBe(did)
       expect(decoded.signingKey).toBe(userKey)
-      expect(decoded.boundaries).toEqual(['alpha', 'beta', 'gamma'])
+      expect(decoded.boundaries).toEqual(['did:web:nerv.tokyo.jp/alpha', 'did:web:nerv.tokyo.jp/beta', 'did:web:nerv.tokyo.jp/gamma'])
     })
   })
 
@@ -231,7 +231,7 @@ describe('Attestation Integration', () => {
     it('verifies attestation the way an AppView would from an enrollment record', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeAppViewTest'
-      const boundaries = ['engineering', 'product']
+      const boundaries = ['did:web:nerv.tokyo.jp/engineering', 'did:web:nerv.tokyo.jp/product']
 
       // --- Service side: create enrollment attestation ---
       const attestation = await createAttestation(
@@ -276,7 +276,7 @@ describe('Attestation Integration', () => {
     it('rejects attestation when enrollment record boundaries are modified after creation', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userSigningKey = 'did:key:zDnaeTamperTest'
-      const originalBoundaries = ['engineering']
+      const originalBoundaries = ['did:web:nerv.tokyo.jp/engineering']
 
       const attestation = await createAttestation(
         serviceKeypair,
@@ -287,7 +287,7 @@ describe('Attestation Integration', () => {
 
       // Simulate a tampered enrollment record where someone added a boundary
       const tamperedRecord = {
-        boundaries: [{ value: 'engineering' }, { value: 'admin' }],
+        boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }, { value: 'did:web:nerv.tokyo.jp/admin' }],
         signingKey: userSigningKey,
         attestation: {
           sig: attestation.sig,
@@ -319,7 +319,7 @@ describe('Attestation Integration', () => {
     it('produces distinct signatures for different users', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userKey = 'did:key:zDnaeShared'
-      const boundaries = ['engineering']
+      const boundaries = ['did:web:nerv.tokyo.jp/engineering']
 
       const att1 = await createAttestation(
         serviceKeypair,
@@ -359,7 +359,7 @@ describe('Attestation Integration', () => {
     it('user1 attestation does not verify with user2 payload', async () => {
       const serviceKeypair = await createServiceKeypair()
       const userKey = 'did:key:zDnaeCross'
-      const boundaries = ['alpha']
+      const boundaries = ['did:web:nerv.tokyo.jp/alpha']
 
       const att1 = await createAttestation(
         serviceKeypair,

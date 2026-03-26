@@ -57,6 +57,7 @@ import type {
 import {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
+  MigratingBoundaryResolver,
   PdsAgent,
   ExternalAllowListProvider,
 } from './features/index.js'
@@ -76,7 +77,11 @@ import {
   createSqliteOAuthStores,
   createPgOAuthStores,
 } from './oauth/client.js'
-import { type EnrollmentStore, type EnrollmentRecord } from './oauth/routes.js'
+import {
+  type EnrollmentStore,
+  type EnrollmentRecord,
+  serviceDIDToRkey,
+} from './oauth/routes.js'
 import {
   createServiceDb,
   migrateServiceDb,
@@ -1126,8 +1131,12 @@ export async function createAppContext(
     cfg.service.publicUrl,
   )
 
-  // Resolves per-user boundaries from storage
-  const boundaryResolver = new EnrollmentBoundaryResolver(enrollmentStore)
+  // Resolves per-user boundaries from storage with lazy migration of legacy bare-name boundaries
+  const boundaryResolver = new MigratingBoundaryResolver({
+    enrollmentStore,
+    serviceDid: cfg.service.did,
+    logger,
+  })
 
   // Initialize external allow list provider if configured
   let allowListProvider: ExternalAllowListProvider | undefined
@@ -1216,6 +1225,46 @@ export async function createAppContext(
     const payload = createAttestationPayload(did, boundaries, userDidKey)
     const sig = await signingKey.sign(payload)
     return { sig, signingKey: signingDidKey }
+  }
+
+  // Wire up lazy migration: when legacy boundaries are detected and updated,
+  // fire-and-forget a PDS enrollment record update with the new qualified boundaries.
+  boundaryResolver.onMigrated = (did: string, boundaries: string[]) => {
+    void (async () => {
+      try {
+        const enrollment = await enrollmentStore.getEnrollment(did)
+        if (!enrollment?.signingKeyDid) return
+
+        const attestation = await createAttestation(
+          did,
+          boundaries,
+          enrollment.signingKeyDid,
+        )
+        const rkey = serviceDIDToRkey(serviceDid)
+        const oauthSession = await oauthClient.restore(did)
+        const agent = new Agent(oauthSession)
+
+        await agent.com.atproto.repo.putRecord({
+          repo: did,
+          collection: 'zone.stratos.actor.enrollment',
+          rkey,
+          record: {
+            service: cfg.service.publicUrl,
+            boundaries: boundaries.map((value) => ({ value })),
+            signingKey: enrollment.signingKeyDid,
+            attestation: {
+              sig: attestation.sig,
+              signingKey: attestation.signingKey,
+            },
+            createdAt: new Date().toISOString(),
+          },
+        })
+
+        logger?.info({ did }, 'updated PDS enrollment record with qualified boundaries')
+      } catch (err) {
+        logger?.warn({ did, err }, 'failed to update PDS enrollment record during boundary migration')
+      }
+    })()
   }
 
   return {

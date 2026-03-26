@@ -17,7 +17,7 @@
           },
           "boundaries": {
             "type": "array",
-            "description": "List of boundaries the user has access to on this Stratos service.",
+            "description": "Service-qualified boundaries the user has access to on this Stratos service, each in '{serviceDid}/{domainName}' format.",
             "items": {
               "type": "ref",
               "ref": "zone.stratos.boundary.defs#Domain"
