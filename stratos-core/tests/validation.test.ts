@@ -11,7 +11,11 @@ import { StratosConfig, StratosValidationError } from '../src'
 
 describe('stratos-validation', () => {
   const validConfig: StratosConfig = {
-    allowedDomains: ['example.com', 'bunnies.example.com'],
+    serviceDid: 'did:web:nerv.tokyo.jp',
+    allowedDomains: [
+      'did:web:nerv.tokyo.jp/example-com',
+      'did:web:nerv.tokyo.jp/bunnies-example-com',
+    ],
     retentionDays: 90,
   }
 
@@ -27,7 +31,7 @@ describe('stratos-validation', () => {
     it('should throw when stratos is not enabled', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
       }
 
       expect(() => {
@@ -38,9 +42,10 @@ describe('stratos-validation', () => {
     it('should throw when no allowed domains are configured', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
       }
       const emptyConfig: StratosConfig = {
+        serviceDid: 'did:web:nerv.tokyo.jp',
         allowedDomains: [],
         retentionDays: 90,
       }
@@ -53,7 +58,7 @@ describe('stratos-validation', () => {
     it('should pass for valid stratos post with allowed domain', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
         createdAt: new Date().toISOString(),
       }
 
@@ -66,7 +71,10 @@ describe('stratos-validation', () => {
       const record = {
         text: 'test',
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
+          values: [
+            { value: 'did:web:nerv.tokyo.jp/example-com' },
+            { value: 'did:web:nerv.tokyo.jp/bunnies-example-com' },
+          ],
         },
         createdAt: new Date().toISOString(),
       }
@@ -102,7 +110,7 @@ describe('stratos-validation', () => {
     it('should throw for stratos post with disallowed domain', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'other.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/other-com' }] },
         createdAt: new Date().toISOString(),
       }
 
@@ -114,7 +122,7 @@ describe('stratos-validation', () => {
     it('should throw for stratos post replying to bsky post', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/app.bsky.feed.post/123',
@@ -136,7 +144,7 @@ describe('stratos-validation', () => {
     it('should pass for stratos post replying to stratos post', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
@@ -158,7 +166,7 @@ describe('stratos-validation', () => {
     it('should pass when reply boundaries are a subset of parent boundaries', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
@@ -171,7 +179,10 @@ describe('stratos-validation', () => {
         },
         createdAt: new Date().toISOString(),
       }
-      const parentBoundaries = ['example.com', 'bunnies.example.com']
+      const parentBoundaries = [
+        'did:web:nerv.tokyo.jp/example-com',
+        'did:web:nerv.tokyo.jp/bunnies-example-com',
+      ]
 
       expect(() => {
         assertStratosValidation(
@@ -187,7 +198,10 @@ describe('stratos-validation', () => {
       const record = {
         text: 'test',
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
+          values: [
+            { value: 'did:web:nerv.tokyo.jp/example-com' },
+            { value: 'did:web:nerv.tokyo.jp/bunnies-example-com' },
+          ],
         },
         reply: {
           parent: {
@@ -201,7 +215,10 @@ describe('stratos-validation', () => {
         },
         createdAt: new Date().toISOString(),
       }
-      const parentBoundaries = ['example.com', 'bunnies.example.com']
+      const parentBoundaries = [
+        'did:web:nerv.tokyo.jp/example-com',
+        'did:web:nerv.tokyo.jp/bunnies-example-com',
+      ]
 
       expect(() => {
         assertStratosValidation(
@@ -217,7 +234,10 @@ describe('stratos-validation', () => {
       const record = {
         text: 'test',
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
+          values: [
+            { value: 'did:web:nerv.tokyo.jp/example-com' },
+            { value: 'did:web:nerv.tokyo.jp/bunnies-example-com' },
+          ],
         },
         reply: {
           parent: {
@@ -231,7 +251,7 @@ describe('stratos-validation', () => {
         },
         createdAt: new Date().toISOString(),
       }
-      const parentBoundaries = ['example.com']
+      const parentBoundaries = ['did:web:nerv.tokyo.jp/example-com']
 
       expect(() => {
         assertStratosValidation(
@@ -240,13 +260,17 @@ describe('stratos-validation', () => {
           validConfig,
           parentBoundaries,
         )
-      }).toThrow('Domains not in parent: bunnies.example.com')
+      }).toThrow(
+        'Domains not in parent: did:web:nerv.tokyo.jp/bunnies-example-com',
+      )
     })
 
     it('should throw when reply has entirely different boundaries than parent', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'bunnies.example.com' }] },
+        boundary: {
+          values: [{ value: 'did:web:nerv.tokyo.jp/bunnies-example-com' }],
+        },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
@@ -259,7 +283,7 @@ describe('stratos-validation', () => {
         },
         createdAt: new Date().toISOString(),
       }
-      const parentBoundaries = ['example.com']
+      const parentBoundaries = ['did:web:nerv.tokyo.jp/example-com']
 
       expect(() => {
         assertStratosValidation(
@@ -268,13 +292,17 @@ describe('stratos-validation', () => {
           validConfig,
           parentBoundaries,
         )
-      }).toThrow('Domains not in parent: bunnies.example.com')
+      }).toThrow(
+        'Domains not in parent: did:web:nerv.tokyo.jp/bunnies-example-com',
+      )
     })
 
     it('should not check boundary subset when no parentBoundaries provided', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'bunnies.example.com' }] },
+        boundary: {
+          values: [{ value: 'did:web:nerv.tokyo.jp/bunnies-example-com' }],
+        },
         reply: {
           parent: {
             uri: 'at://did:plc:abc/zone.stratos.feed.post/123',
@@ -296,7 +324,7 @@ describe('stratos-validation', () => {
     it('should throw for stratos post embedding bsky record', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
         embed: {
           $type: 'app.bsky.embed.record',
           record: {
@@ -315,7 +343,7 @@ describe('stratos-validation', () => {
     it('should pass for stratos post embedding stratos record', () => {
       const record = {
         text: 'test',
-        boundary: { values: [{ value: 'example.com' }] },
+        boundary: { values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }] },
         embed: {
           $type: 'app.bsky.embed.record',
           record: {
@@ -453,13 +481,16 @@ describe('stratos-validation', () => {
     it('should extract domains from valid boundary', () => {
       const record = {
         boundary: {
-          values: [{ value: 'example.com' }, { value: 'bunnies.example.com' }],
+          values: [
+            { value: 'did:web:nerv.tokyo.jp/example-com' },
+            { value: 'did:web:nerv.tokyo.jp/bunnies-example-com' },
+          ],
         },
       }
 
       expect(extractBoundaryDomains(record)).toEqual([
-        'example.com',
-        'bunnies.example.com',
+        'did:web:nerv.tokyo.jp/example-com',
+        'did:web:nerv.tokyo.jp/bunnies-example-com',
       ])
     })
 

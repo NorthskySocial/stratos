@@ -12,11 +12,17 @@ describe('extractBoundaries', () => {
       $type: 'zone.stratos.feed.post',
       text: 'hello from nerv',
       boundary: {
-        values: [{ value: 'engineering' }, { value: 'leadership' }],
+        values: [
+          { value: 'did:web:nerv.tokyo.jp/engineering' },
+          { value: 'did:web:nerv.tokyo.jp/leadership' },
+        ],
       },
     }
 
-    expect(extractBoundaries(record)).toEqual(['engineering', 'leadership'])
+    expect(extractBoundaries(record)).toEqual([
+      'did:web:nerv.tokyo.jp/engineering',
+      'did:web:nerv.tokyo.jp/leadership',
+    ])
   })
 
   it('returns empty array when no boundary field', () => {
@@ -30,10 +36,17 @@ describe('extractBoundaries', () => {
   it('filters out non-string values', () => {
     const record = {
       boundary: {
-        values: [{ value: 'valid' }, { value: 42 }, {}, { value: null }],
+        values: [
+          { value: 'did:web:nerv.tokyo.jp/valid' },
+          { value: 42 },
+          {},
+          { value: null },
+        ],
       },
     }
-    expect(extractBoundaries(record as never)).toEqual(['valid'])
+    expect(extractBoundaries(record as never)).toEqual([
+      'did:web:nerv.tokyo.jp/valid',
+    ])
   })
 })
 

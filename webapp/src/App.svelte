@@ -30,6 +30,7 @@
   import Sidebar from './lib/Sidebar.svelte'
   import Composer from './lib/Composer.svelte'
   import Feed from './lib/Feed.svelte'
+  import { displayBoundary } from './lib/boundary-display'
 
   let session: OAuthSession | null = $state(null)
   let enrollment: StratosEnrollment | null = $state(null)
@@ -215,7 +216,7 @@
             class:active={activeFeed === domain}
             onclick={() => handleSelectFeed(domain)}
           >
-            {domain}
+            {displayBoundary(domain)}
           </button>
         {/each}
       </div>

@@ -18,6 +18,13 @@ const state = await loadState()
 export const STRATOS_URL =
   state.ngrokUrl || Deno.env.get('STRATOS_URL') || 'http://localhost:3100'
 
+function deriveServiceDid(ngrokUrl?: string): string {
+  if (ngrokUrl) return `did:web:${ngrokUrl.replace(/^https?:\/\//, '')}`
+  return 'did:web:127.0.0.1%3A3100'
+}
+
+export const SERVICE_DID = state.serviceDid ?? deriveServiceDid(state.ngrokUrl)
+
 function requireEnv(key: string): string {
   const value = Deno.env.get(key)
   if (!value) {
@@ -31,8 +38,8 @@ export const PDS_URL = `https://${PDS_HOST}`
 export const PDS_ADMIN_PASSWORD = requireEnv('PDS_ADMIN_PASSWORD')
 
 export const DOMAINS = {
-  swordsmith: 'swordsmith',
-  aekea: 'aekea',
+  swordsmith: `${SERVICE_DID}/swordsmith`,
+  aekea: `${SERVICE_DID}/aekea`,
 } as const
 
 // Random suffix to avoid handle conflicts with previously created accounts

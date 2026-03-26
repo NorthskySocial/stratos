@@ -9,7 +9,7 @@
       "properties": {
         "value": {
           "type": "string",
-          "description": "Domain identifier for boundary. Must be a valid domain name.",
+          "description": "Service-qualified boundary identifier in the format '{serviceDid}/{domainName}', e.g. 'did:web:stratos.example.com/engineering'.",
           "maxLength": 253
         }
       }
