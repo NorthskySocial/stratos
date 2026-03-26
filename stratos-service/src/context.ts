@@ -56,7 +56,6 @@ import type {
 } from './actor-store-types.js'
 import {
   EnrollmentServiceImpl,
-  EnrollmentBoundaryResolver,
   MigratingBoundaryResolver,
   PdsAgent,
   ExternalAllowListProvider,
