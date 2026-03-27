@@ -28,6 +28,7 @@ export default defineConfig({
       { text: 'Client Integration', link: '/client/getting-started', activeMatch: '/client/' },
       { text: 'Operator Guide', link: '/operator/overview', activeMatch: '/operator/' },
       { text: 'Architecture', link: '/architecture/hydration', activeMatch: '/architecture/' },
+      { text: 'Lexicons', link: '/lexicons/', activeMatch: '/lexicons/' },
     ],
 
     sidebar: {
@@ -82,6 +83,14 @@ export default defineConfig({
             { text: 'Enrollment Signing', link: '/architecture/enrollment-signing' },
             { text: 'Multi-Domain Enrollment', link: '/architecture/multi-domain-enrollment' },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
+          ],
+        },
+      ],
+      '/lexicons/': [
+        {
+          text: 'Lexicon Reference',
+          items: [
+            { text: 'All Lexicons', link: '/lexicons/' },
           ],
         },
       ],
