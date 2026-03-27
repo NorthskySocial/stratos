@@ -80,11 +80,16 @@ Authenticated callers receive boundaries, signing key, enrollment rkey, and a fr
 
 Because record commits are signed with the user's P-256 key, a verifier can chain trust:
 
-```
-PDS enrollment record
-  → verify service attestation (secp256k1)
-    → extract user signingKey
-      → verify commit signature on any record (P-256)
+```mermaid
+flowchart TD
+    E([PDS enrollment record]) -->|verify| A([service attestation\nsecp256k1])
+    A -->|extract| UK([user signingKey\nP-256])
+    UK -->|verify commit signature| R([any record])
+
+    style E fill:#1F0B35,color:#fff,stroke:#7780DC
+    style A fill:#9145EC,color:#fff,stroke:none
+    style UK fill:#40DAC4,color:#1F0B35,stroke:none
+    style R fill:#2AFFBA,color:#1F0B35,stroke:none
 ```
 
 This proves both service endorsement of the enrollment and user authorship of each record.
