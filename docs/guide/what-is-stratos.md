@@ -93,7 +93,7 @@ This means the network can still index and route your posts using the same infra
 - Attestations are for _discovery_, not enforcement - The service attestation in your enrollment record is a public signal: it lets any app confirm that you are enrolled with a specific Stratos service and what boundaries you were assigned at signing time. This enables offline verification without hitting the live service on every request.
 
 ::: info Operators choose the rules
-A community can run its own Stratos service with its own membership criteria — fully independent of any central authority
+A community can run its own Stratos service with its own membership criteria — fully independent of any central authority.
 :::
 
 <style scoped>
