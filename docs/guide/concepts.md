@@ -74,20 +74,10 @@ Boundary access is **enforced by Stratos internally** — when a request arrives
 
 The attestation serves a separate, complementary purpose: it is a public declaration written to the user's PDS that lets any app **verify offline** that the user is enrolled with a specific Stratos service. It binds the user's DID, assigned boundaries, and signing key into a signature from the service's secp256k1 key.
 
-```mermaid
-flowchart TD
-    K([Service secp256k1 key]) -->|signs attestation| E([Attestation Payload\nboundaries + did + signingKey])
-    E -->|written to| R([enrollment record on PDS])
-    R -->|read by| A([AppView / any verifier])
-    A -->|confirms enrollment + extracts| UK([User P-256 signingKey])
-    UK -->|verifies commit signatures on| RC([individual records])
+<script setup>
+import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
+</script>
 
-    style K fill:#9145EC,color:#fff,stroke:none
-    style E fill:#7780DC,color:#fff,stroke:none
-    style R fill:#1F0B35,color:#fff,stroke:#7780DC
-    style A fill:#59B2CF,color:#fff,stroke:none
-    style UK fill:#40DAC4,color:#1F0B35,stroke:none
-    style RC fill:#2AFFBA,color:#1F0B35,stroke:none
-```
+<TrustChainAnimation />
 
 The attestation proves service endorsement of the enrollment and enables user authorship verification on individual records. Actual access to record content is always gated by Stratos's live boundary check.
