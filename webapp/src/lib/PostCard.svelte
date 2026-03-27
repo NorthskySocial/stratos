@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { FeedPost } from './feed'
   import { displayBoundary } from './boundary-display'
+  import RecordInspector from './RecordInspector.svelte'
 
   interface Props {
     post: FeedPost
@@ -8,6 +9,8 @@
   }
 
   let { post, onreply }: Props = $props()
+
+  let inspectorOpen = $state(false)
 
   function formatTime(iso: string): string {
     try {
@@ -64,7 +67,19 @@
 
   <div class="post-actions">
     <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
+    {#if post.isPrivate}
+      <button
+        class="inspect-btn"
+        class:active={inspectorOpen}
+        onclick={() => inspectorOpen = !inspectorOpen}
+        title="Inspect PDS stub vs Stratos record"
+      >🔍</button>
+    {/if}
   </div>
+
+  {#if inspectorOpen}
+    <RecordInspector uri={post.uri} />
+  {/if}
 </article>
 
 <style>
@@ -164,5 +179,22 @@
   .reply-btn:hover {
     background: #f3f4f6;
     color: #333;
+  }
+
+  .inspect-btn {
+    background: none;
+    border: none;
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+  }
+
+  .inspect-btn:hover,
+  .inspect-btn.active {
+    opacity: 1;
+    background: #ede9fe;
   }
 </style>
