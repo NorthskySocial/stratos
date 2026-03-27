@@ -1,5 +1,12 @@
 # Enrollment Signing
 
+<script setup>
+import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
+import VerificationFlowAnimation from '../.vitepress/theme/components/VerificationFlowAnimation.vue'
+import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
+import BoundaryChangeAnimation from '../.vitepress/theme/components/BoundaryChangeAnimation.vue'
+</script>
+
 During enrollment, Stratos establishes a cryptographic trust chain for **public verification of enrollment**. This lets AppViews and other verifiers confirm that a user is enrolled with a specific Stratos service — and verify the user's authorship of individual records — without querying the live service on every request.
 
 Access control itself is always enforced internally by Stratos. When a client requests content, Stratos validates the caller's current boundary membership before returning anything.
@@ -42,55 +49,11 @@ One record is written per Stratos service, keyed at the service DID as the rkey.
 
 ## Enrollment Flow
 
-```mermaid
-sequenceDiagram
-    participant U as User Browser
-    participant PDS as User's PDS
-    participant S as Stratos Service
-    participant DB as Service DB
-
-    U->>S: GET /oauth/authorize?handle=user.bsky.social
-    S->>U: Redirect → PDS authorization page
-    U->>PDS: Approve OAuth request
-    PDS->>S: GET /oauth/callback?code=...
-
-    note over S: Validate enrollment eligibility
-
-    S->>S: Initialize user repo (empty signed commit)
-    S->>S: Generate P-256 keypair (userKeypair)
-    S->>S: Build attestation payload (DAG-CBOR)
-    note over S: encode({<br/>  boundaries: [...sorted],<br/>  did: userDid,<br/>  signingKey: "did:key:zDna..."<br/>})
-    S->>S: Sign payload with service Secp256k1 key
-    S->>DB: INSERT enrollment
-    S->>PDS: putRecord zone.stratos.actor.enrollment#serviceDid
-    S->>U: 200 { success: true, did }
-```
+<EnrollmentFlow />
 
 ## Verification Flow
 
-```mermaid
-sequenceDiagram
-    participant AV as AppView / Verifier
-    participant PDS as User's PDS
-    participant DR as DID Resolver
-    participant C as Cache
-
-    AV->>C: Lookup enrollment for userDid
-    alt Cache hit (not stale)
-        C->>AV: Return cached enrollment + boundaries
-    else Cache miss or stale
-        AV->>PDS: getRecord zone.stratos.actor.enrollment#serviceDid
-        PDS->>AV: { signingKey, attestation, boundaries, service }
-        AV->>AV: Build attestation payload (DAG-CBOR)
-        AV->>DR: Resolve attestation.signingKey
-        DR->>AV: Public key
-        AV->>AV: Verify attestation.sig over payload
-        AV->>C: Cache verified enrollment
-        C->>AV: Return enrollment + boundaries
-    end
-
-    AV->>AV: Filter records by viewer ∩ record boundaries
-```
+<VerificationFlowAnimation />
 
 **Verification steps:**
 
@@ -118,23 +81,7 @@ function buildAttestationPayload(options: {
 
 ## Trust Model
 
-```mermaid
-flowchart TD
-    SK["Service Secp256k1 Key\n(persisted at dataDir/signing_key)"]
-    SD["Service DID Document\n(verificationMethod)"]
-    ATT["Attestation\n(DAG-CBOR payload signed by service)"]
-    UK["User P-256 Keypair\n(generated at enrollment)"]
-    ER["Enrollment Record on PDS\n(zone.stratos.actor.enrollment)"]
-    RC["Record Commits\n(signed with user private key)"]
-
-    SK -->|signs| ATT
-    SD -->|resolves to| SK
-    UK -->|public key embedded in| ATT
-    ATT -->|written to| ER
-    UK -->|signingKey in| ER
-    UK -->|private key signs| RC
-    ATT -->|signingKey verifies| RC
-```
+<TrustChainAnimation />
 
 A verifier can chain trust: enrollment record → verify service attestation → extract user `signingKey` → verify commit signature. This proves both service endorsement and user authorship.
 
@@ -155,20 +102,4 @@ Authenticated callers receive current boundaries, signing key, and a fresh attes
 
 When a user's boundaries change, the service re-signs a new attestation and rewrites the PDS record. AppViews learn of the change via the sync stream and must invalidate their cache.
 
-```mermaid
-sequenceDiagram
-    participant OP as Operator
-    participant S as Stratos Service
-    participant DB as Service DB
-    participant PDS as User's PDS
-    participant AV as AppView
-
-    OP->>S: PATCH /boundaries { did, boundaries }
-    S->>DB: UPDATE enrollment SET boundaries
-    S->>S: Re-sign attestation with new boundaries
-    S->>DB: UPDATE enrollment attestation
-    S->>PDS: putRecord zone.stratos.actor.enrollment#serviceDid
-    PDS-->>AV: Sync stream: record update
-    AV->>AV: Invalidate cached enrollment for did
-    note over AV: Next hydration triggers fresh fetch + verify
-```
+<BoundaryChangeAnimation />

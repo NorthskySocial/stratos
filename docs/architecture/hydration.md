@@ -54,27 +54,11 @@ interface RecordSource {
 
 ## Hydration Flow
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant P as User's PDS
-    participant AV as AppView
-    participant S as Stratos Service
+<script setup>
+import AppviewHydration from '../.vitepress/theme/components/AppviewHydration.vue'
+</script>
 
-    Note over C, S: Record Creation
-    C->>S: postRecord(full_content, boundary)
-    S->>S: Store full record in ActorStore
-    S->>P: putRecord(stub_with_source_field)
-    S->>S: Emit subscribeRecords event
-
-    Note over C, S: Hydration Flow
-    AV->>P: subscribeRepos / getRecord (Stub)
-    AV->>AV: Detect 'source' field in stub
-    AV->>S: com.atproto.repo.getRecord(at://did/coll/rkey)
-    Note right of S: Validates requester DID<br/>Checks boundary permissions
-    S-->>AV: Full record content
-    AV-->>C: Hydrated view (Feed/Thread)
-```
+<AppviewHydration />
 
 ## Endpoint Discovery
 
