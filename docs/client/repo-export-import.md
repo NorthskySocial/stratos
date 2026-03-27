@@ -7,6 +7,29 @@ Stratos repos are Merkle Search Trees which provides "feature parity" with the P
 
 ## Verifying a Record (Inclusion Proof)
 
+### Using `stratos-client` (recommended)
+
+The `fetchAndVerifyRecord()` helper handles fetching, CAR parsing, and signature verification in a single call:
+
+```typescript
+import {
+  fetchAndVerifyRecord,
+  verifyCidIntegrity,
+  resolveServiceSigningKey,
+} from '@northskysocial/stratos-client'
+
+// Full verified fetch (fetches the CAR and verifies it)
+const serviceKey = await resolveServiceSigningKey('did:web:stratos.example.com')
+const verified = await fetchAndVerifyRecord(serviceUrl, did, collection, rkey, {
+  serviceSigningKey: serviceKey,
+})
+
+// Or verify a CAR you already have (CID integrity only)
+const result = await verifyCidIntegrity(carBytes, collection, rkey, did)
+```
+
+### Using raw XRPC
+
 Request a verifiable CAR containing the signed commit, MST inclusion proof, and record block:
 
 ```typescript
