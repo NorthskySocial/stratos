@@ -13,7 +13,7 @@ The attestation payload is:
 
 ```typescript
 {
-  boundaries: ['engineering', 'leadership'],  // sorted
+  boundaries: ['fanart', 'writers'],  // sorted
   did: 'did:plc:alice',
   signingKey: 'did:key:zDna...'              // user's P-256 public key
 }
@@ -26,7 +26,7 @@ Payload is serialised as DAG-CBOR (not JSON) and signed with the service's Secp2
 ```json
 {
   "service": "https://stratos.example.com",
-  "boundaries": [{ "value": "engineering" }, { "value": "leadership" }],
+  "boundaries": [{ "value": "fanart" }, { "value": "writers" }],
   "signingKey": "did:key:zDna...",
   "attestation": {
     "sig": { "$bytes": "..." },

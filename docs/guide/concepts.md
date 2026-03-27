@@ -70,13 +70,20 @@ Every enrolled user gets a per-user **Merkle Search Tree (MST)** repository comp
 
 ## Trust Model
 
-```
-Service secp256k1 key
-  → signs attestation payload (boundaries + did + signingKey)
-    → attestation written into enrollment record on PDS
-      → AppView reads enrollment, verifies attestation offline
-        → extracts user P-256 signingKey
-          → verifies commit signatures on individual records
+```mermaid
+flowchart TD
+    K([Service secp256k1 key]) -->|signs attestation| E([Attestation Payload\nboundaries + did + signingKey])
+    E -->|written to| R([enrollment record on PDS])
+    R -->|read by| A([AppView])
+    A -->|verifies attestation offline| UK([User P-256 signingKey])
+    UK -->|verifies commit signatures| RC([individual records])
+
+    style K fill:#9145EC,color:#fff,stroke:none
+    style E fill:#7780DC,color:#fff,stroke:none
+    style R fill:#1F0B35,color:#fff,stroke:#7780DC
+    style A fill:#59B2CF,color:#fff,stroke:none
+    style UK fill:#40DAC4,color:#1F0B35,stroke:none
+    style RC fill:#2AFFBA,color:#1F0B35,stroke:none
 ```
 
 The chain lets any verifier confirm both service endorsement of the enrollment and user authorship of each record.

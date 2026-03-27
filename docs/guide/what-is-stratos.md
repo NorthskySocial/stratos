@@ -24,20 +24,22 @@ Social networks built on ATProtocol (like Bluesky) are **fully public by default
 
 Stratos introduces **boundaries** — named access scopes that act like club memberships.
 
-When you write a post, you label it with a boundary, like `engineering` or `fanart`. Only people who are enrolled in that same boundary can read it. Everyone else sees nothing — not even a hint that the post exists.
+When you write a post, you label it with a boundary, like `fanart` or `writers`. Only people who are enrolled in that same boundary can read it. Everyone else sees nothing — not even a hint that the post exists.
 
 <div class="animation-card">
   <div class="animation-label">
     <span class="step-number">1</span>
     <span>Who can see what — boundary access control</span>
   </div>
-  <iframe
-    :src="animations.boundary"
-    class="anim-frame"
-    frameborder="0"
-    scrolling="no"
-    title="Boundary access control animation"
-  />
+  <div class="anim-wrapper">
+    <iframe
+      :src="animations.boundary"
+      class="anim-frame"
+      frameborder="0"
+      scrolling="no"
+      title="Boundary access control animation"
+    />
+  </div>
 </div>
 
 ---
@@ -57,13 +59,15 @@ When you enroll:
     <span class="step-number">2</span>
     <span>Joining a Stratos service — the enrollment flow</span>
   </div>
-  <iframe
-    :src="animations.enrollment"
-    class="anim-frame"
-    frameborder="0"
-    scrolling="no"
-    title="Enrollment flow animation"
-  />
+  <div class="anim-wrapper">
+    <iframe
+      :src="animations.enrollment"
+      class="anim-frame"
+      frameborder="0"
+      scrolling="no"
+      title="Enrollment flow animation"
+    />
+  </div>
 </div>
 
 ---
@@ -82,13 +86,15 @@ This means the network can still index and route your posts using the same infra
     <span class="step-number">3</span>
     <span>How apps read private posts — AppView hydration</span>
   </div>
-  <iframe
-    :src="animations.hydration"
-    class="anim-frame"
-    frameborder="0"
-    scrolling="no"
-    title="AppView hydration animation"
-  />
+  <div class="anim-wrapper">
+    <iframe
+      :src="animations.hydration"
+      class="anim-frame"
+      frameborder="0"
+      scrolling="no"
+      title="AppView hydration animation"
+    />
+  </div>
 </div>
 
 ---
@@ -146,11 +152,23 @@ This means the network can still index and route your posts using the same infra
   flex-shrink: 0;
 }
 
-.anim-frame {
-  display: block;
+/* Scaling wrapper: maintains 900:520 aspect ratio */
+.anim-wrapper {
+  position: relative;
   width: 100%;
-  aspect-ratio: 900 / 520;
-  border: none;
+  padding-bottom: 57.78%; /* 520/900 */
+  height: 0;
+  overflow: hidden;
   background: #1F0B35;
+}
+
+/* Iframe fills full native size; animation HTML scales its own content */
+.anim-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 </style>

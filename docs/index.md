@@ -26,16 +26,10 @@ features:
   - icon: 🪪
     title: OAuth Enrollment
     details: Users enroll via standard ATProtocol OAuth. An enrollment record is published to their PDS for endpoint discovery.
-  - icon: 🌊
-    title: Sync Streams
-    details: Actor-scoped WebSocket subscriptions let AppViews index Stratos records in real time, just like the PDS firehose.
   - icon: 🔗
     title: Source Field Hydration
     details: Minimal stub records on the PDS carry a source field. AppViews resolve full content from Stratos with boundary checks.
   - icon: 🔑
     title: Cryptographic Attestations
     details: Every enrollment is attested by the service signing key over a DAG-CBOR payload, enabling offline verification.
-  - icon: 🗄️
-    title: MST Repos
-    details: Each user gets an ATProto-compatible Merkle Search Tree repo with per-record inclusion proofs and signed commits.
 ---
