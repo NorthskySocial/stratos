@@ -89,7 +89,8 @@ This means the network can still index and route your posts using the same infra
 
 - **It's still decentralised.** Your posts live in your namespace (`at://your-did/zone.stratos.feed.post/...`), not in a closed silo.
 - **You keep your identity.** Same handle, same keys, same social graph — Stratos is an add-on layer, not a separate account.
-- **Access control is cryptographic.** Boundaries are enforced by the Stratos service with signed attestations, not by hoping an app follows rules.
+- **Access control is enforced by Stratos internally.** When your app fetches a post, Stratos validates the requester's actual boundary membership before returning any content — no trust is delegated to the client.
+- **Attestations are for discovery, not enforcement.** The service attestation in your enrollment record is a public signal: it lets any app confirm that you are enrolled with a specific Stratos service and what boundaries you were assigned at signing time. This enables offline verification without hitting the live service on every request.
 - **Operators choose the rules.** A community can run its own Stratos service with its own membership criteria — fully independent of any central authority.
 
 <style scoped>

@@ -1,6 +1,8 @@
 # Enrollment Signing
 
-During enrollment, Stratos establishes a cryptographic trust chain that lets AppViews verify user identity and boundary membership without querying the live service.
+During enrollment, Stratos establishes a cryptographic trust chain for **public verification of enrollment**. This lets AppViews and other verifiers confirm that a user is enrolled with a specific Stratos service — and verify the user's authorship of individual records — without querying the live service on every request.
+
+Access control itself is always enforced internally by Stratos. When a client requests content, Stratos validates the caller's current boundary membership before returning anything.
 
 ## What Gets Signed
 
