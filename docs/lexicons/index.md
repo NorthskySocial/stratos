@@ -4,22 +4,10 @@ title: Lexicon Reference
 
 <script setup>
 import { data } from './lexicons.data.js'
-import LexiconEntry from '../.vitepress/theme/components/LexiconEntry.vue'
+import LexiconGroup from '../.vitepress/theme/components/LexiconGroup.vue'
 
-const NS_LABELS = {
-  core:       'Core Definitions',
-  actor:      'Actor',
-  boundary:   'Boundary',
-  enrollment: 'Enrollment',
-  feed:       'Feed',
-  identity:   'Identity',
-  repo:       'Repository',
-  server:     'Server',
-  sync:       'Sync',
-}
-
-function nsLabel(name) {
-  return NS_LABELS[name] ?? name.charAt(0).toUpperCase() + name.slice(1)
+function ns(name) {
+  return data.namespaces.find(n => n.name === name)?.lexicons ?? []
 }
 </script>
 
@@ -35,19 +23,41 @@ All AT Protocol lexicons defined by the Stratos service. Lexicons describe every
   <span class="badge-item"><span class="lb badge-defs">DEFS</span> Shared type definitions</span>
 </div>
 
-<template v-for="ns in data.namespaces" :key="ns.name">
+## Core Definitions
 
-## {{ nsLabel(ns.name) }}
+<LexiconGroup :lexicons="ns('core')" />
 
-<LexiconEntry
-  v-for="lex in ns.lexicons"
-  :key="lex.id"
-  :id="lex.id"
-  :main-def="lex.mainDef"
-  :all-defs="lex.allDefs"
-/>
+## Actor
 
-</template>
+<LexiconGroup :lexicons="ns('actor')" />
+
+## Boundary
+
+<LexiconGroup :lexicons="ns('boundary')" />
+
+## Enrollment
+
+<LexiconGroup :lexicons="ns('enrollment')" />
+
+## Feed
+
+<LexiconGroup :lexicons="ns('feed')" />
+
+## Identity
+
+<LexiconGroup :lexicons="ns('identity')" />
+
+## Repository
+
+<LexiconGroup :lexicons="ns('repo')" />
+
+## Server
+
+<LexiconGroup :lexicons="ns('server')" />
+
+## Sync
+
+<LexiconGroup :lexicons="ns('sync')" />
 
 <style scoped>
 .lex-badge-legend {
