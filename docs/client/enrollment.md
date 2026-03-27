@@ -1,6 +1,6 @@
 # User Enrollment
 
-Before users can create Stratos records they must **enroll** with the Stratos service via OAuth.
+Before users can create Stratos records they must enroll with the Stratos service via OAuth.
 
 ## Checking Enrollment Status
 

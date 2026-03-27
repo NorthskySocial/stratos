@@ -1,16 +1,16 @@
 :root {
   /* Brand palette */
-  --sp-mint:   #2AFFBA;
-  --sp-teal:   #40DAC4;
-  --sp-sky:    #59B2CF;
-  --sp-indigo: #7780DC;
-  --sp-violet: #9145EC;
-  --sp-deep:   #1F0B35;
+  --sp-mint: #2affba;
+  --sp-teal: #40dac4;
+  --sp-sky: #59b2cf;
+  --sp-indigo: #7780dc;
+  --sp-violet: #9145ec;
+  --sp-deep: #1f0b35;
 
   /* VitePress colour overrides — light mode */
-  --vp-c-brand-1: #7780DC;
-  --vp-c-brand-2: #9145EC;
-  --vp-c-brand-3: #59B2CF;
+  --vp-c-brand-1: #7780dc;
+  --vp-c-brand-2: #9145ec;
+  --vp-c-brand-3: #59b2cf;
   --vp-c-brand-soft: rgba(119, 128, 220, 0.14);
 
   --vp-button-brand-bg: var(--sp-indigo);
@@ -36,16 +36,23 @@
   --vp-button-brand-hover-text: #ffffff;
 
   --vp-c-bg: #150826;
-  --vp-c-bg-alt: #1F0B35;
+  --vp-c-bg-alt: #1f0b35;
   --vp-c-bg-elv: #2a1245;
 
   --vp-c-divider: rgba(119, 128, 220, 0.2);
-  --vp-c-gutter: #1F0B35;
+  --vp-c-gutter: #1f0b35;
 }
 
 /* ── Hero gradient ── */
 .VPHero .name {
-  background: linear-gradient(135deg, var(--sp-mint) 0%, var(--sp-teal) 30%, var(--sp-sky) 55%, var(--sp-indigo) 75%, var(--sp-violet) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--sp-mint) 0%,
+    var(--sp-teal) 30%,
+    var(--sp-sky) 55%,
+    var(--sp-indigo) 75%,
+    var(--sp-violet) 100%
+  );
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

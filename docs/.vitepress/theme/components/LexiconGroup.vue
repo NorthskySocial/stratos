@@ -1,6 +1,10 @@
 <template>
   <template v-for="lex in lexicons" :key="lex.id">
-    <LexiconEntry :id="lex.id" :main-def="lex.mainDef" :all-defs="lex.allDefs" />
+    <LexiconEntry
+      :id="lex.id"
+      :main-def="lex.mainDef"
+      :all-defs="lex.allDefs"
+    />
   </template>
 </template>
 

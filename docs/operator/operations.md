@@ -4,12 +4,12 @@
 
 Key metrics to track:
 
-| Metric | Description |
-|--------|-------------|
-| `stratos_enrolled_users` | Total enrolled users |
-| `stratos_records_total` | Total records stored |
+| Metric                             | Description                    |
+| ---------------------------------- | ------------------------------ |
+| `stratos_enrolled_users`           | Total enrolled users           |
+| `stratos_records_total`            | Total records stored           |
 | `stratos_subscription_connections` | Active WebSocket subscriptions |
-| `stratos_request_duration_seconds` | XRPC request latency |
+| `stratos_request_duration_seconds` | XRPC request latency           |
 
 For create → index latency investigations also track:
 

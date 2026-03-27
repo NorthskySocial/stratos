@@ -75,7 +75,14 @@ async function createPrivatePost(
 ```typescript
 import { RichText } from '@atproto/api'
 
-async function createRichPost(agent: Agent, stratosEndpoint: string, accessToken: string, userDid: string, text: string, domains: string[]) {
+async function createRichPost(
+  agent: Agent,
+  stratosEndpoint: string,
+  accessToken: string,
+  userDid: string,
+  text: string,
+  domains: string[],
+) {
   const rt = new RichText({ text })
   await rt.detectFacets(agent)
 
@@ -95,8 +102,15 @@ async function createRichPost(agent: Agent, stratosEndpoint: string, accessToken
 
   return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo: userDid, collection: 'zone.stratos.feed.post', record }),
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      repo: userDid,
+      collection: 'zone.stratos.feed.post',
+      record,
+    }),
   }).then((r) => r.json())
 }
 ```
@@ -149,8 +163,15 @@ async function createPostWithImages(
 
   return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo: userDid, collection: 'zone.stratos.feed.post', record }),
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      repo: userDid,
+      collection: 'zone.stratos.feed.post',
+      record,
+    }),
   }).then((r) => r.json())
 }
 ```
@@ -186,8 +207,15 @@ async function createReply(
 
   return fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo: userDid, collection: 'zone.stratos.feed.post', record }),
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      repo: userDid,
+      collection: 'zone.stratos.feed.post',
+      record,
+    }),
   }).then((r) => r.json())
 }
 ```

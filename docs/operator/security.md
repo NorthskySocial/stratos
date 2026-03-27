@@ -2,16 +2,16 @@
 
 ## Authentication Reference
 
-| Endpoint | Auth Required | Auth Type |
-|----------|--------------|-----------|
-| `/oauth/*` | No | Public enrollment flow |
-| `createRecord`, `deleteRecord` | Yes | OAuth access token (DPoP) |
-| `getRecord`, `listRecords` | Optional | Used for boundary filtering |
-| `sync.getRecord` | Yes | User or service auth |
-| `sync.getRepo` | Yes | User auth (owner only) |
-| `importRepo` | Yes | User auth (owner only) |
-| `subscribeRecords` | Yes | Service auth JWT |
-| `/_health` | No | Public health check |
+| Endpoint                       | Auth Required | Auth Type                   |
+| ------------------------------ | ------------- | --------------------------- |
+| `/oauth/*`                     | No            | Public enrollment flow      |
+| `createRecord`, `deleteRecord` | Yes           | OAuth access token (DPoP)   |
+| `getRecord`, `listRecords`     | Optional      | Used for boundary filtering |
+| `sync.getRecord`               | Yes           | User or service auth        |
+| `sync.getRepo`                 | Yes           | User auth (owner only)      |
+| `importRepo`                   | Yes           | User auth (owner only)      |
+| `subscribeRecords`             | Yes           | Service auth JWT            |
+| `/_health`                     | No            | Public health check         |
 
 ## Boundary Enforcement
 
@@ -26,11 +26,11 @@ On read, `getRecord` checks whether the requesting DID shares at least one bound
 
 Recommended per-endpoint limits:
 
-| Endpoint | Limit |
-|----------|-------|
-| `createRecord` | 100/minute per user |
-| `getRecord` | 1000/minute per IP |
-| OAuth authorize | 10/minute per IP |
+| Endpoint        | Limit               |
+| --------------- | ------------------- |
+| `createRecord`  | 100/minute per user |
+| `getRecord`     | 1000/minute per IP  |
+| OAuth authorize | 10/minute per IP    |
 
 The built-in write rate limiter applies per-DID throttling. See [Configuration](/operator/configuration#write-rate-limiter) for tuning.
 

@@ -1,22 +1,22 @@
 # Hydration Architecture
 
-Stratos uses the **source field pattern** to separate data storage from presentation. Full records with boundary content are stored in Stratos; lightweight stub records on the user's PDS point back to the full record.
+Stratos uses the _source field pattern_ to separate data storage from presentation. Full records with boundary content are stored in Stratos; lightweight stub records on the user's PDS point back to the full record.
 
 ## Source Field Pattern
 
 When a user creates a record in Stratos, two writes happen:
 
-1. **Full record** stored in Stratos (with text content, boundary, etc.)
-2. **Stub record** written to the user's PDS with a `source` field
+1. Full record - stored in Stratos (with text content, boundary, etc.)
+2. Stub record - written to the user's PDS with a `source` field
 
 ```typescript
 interface RecordSource {
   vary: 'authenticated' | 'unauthenticated'
   subject: {
-    uri: string  // at:// URI of the full record in Stratos
-    cid: string  // CID of the full record for integrity verification
+    uri: string // at:// URI of the full record in Stratos
+    cid: string // CID of the full record for integrity verification
   }
-  service: string  // DID + fragment: "did:web:stratos.example.com#atproto_pns"
+  service: string // DID + fragment: "did:web:stratos.example.com#atproto_pns"
 }
 ```
 
@@ -64,12 +64,10 @@ import AppviewHydration from '../.vitepress/theme/components/AppviewHydration.vu
 
 AppViews and clients discover the Stratos service URL through the user's `zone.stratos.actor.enrollment` record on their PDS:
 
-```
-1. Query user's PDS: com.atproto.repo.listRecords?collection=zone.stratos.actor.enrollment
-2. Each record has: { service: "https://stratos.example.com", ... }
-3. Resolve service DID from: https://stratos.example.com/.well-known/did.json
-4. Use service DID to hydrate records (validates source.service field matches)
-```
+> 1. Fetch enrollment record from users PDS repo
+> 2. Each record has: { service: "https://stratos.example.com", ... }
+> 3. Resolve service DID from: https://stratos.example.com/.well-known/did.json
+> 4. Use service DID to hydrate records (validates source.service field matches)
 
 The `source.service` field in stubs is a DID+fragment string, not a URL — the AppView resolves the full URL by looking up the DID document.
 
@@ -77,12 +75,12 @@ The `source.service` field in stubs is a DID+fragment string, not a URL — the 
 
 Stratos `com.atproto.repo.getRecord` applies boundary access control:
 
-| Scenario | Result |
-|----------|--------|
-| Caller enrolled + shares boundary | Full record returned |
-| Caller enrolled but different boundary | 404 (not visible) |
-| Caller not enrolled | 404 |
-| Unauthenticated (stub only) | 404 |
+| Scenario                               | Result               |
+| -------------------------------------- | -------------------- |
+| Caller enrolled + shares boundary      | Full record returned |
+| Caller enrolled but different boundary | 404 (not visible)    |
+| Caller not enrolled                    | 404                  |
+| Unauthenticated (stub only)            | 404                  |
 
 The 404 response for denied access is deliberate — it avoids leaking the existence of records to unauthorized viewers.
 
