@@ -70,13 +70,17 @@ Every enrolled user gets a per-user **Merkle Search Tree (MST)** repository comp
 
 ## Trust Model
 
+Boundary access is **enforced by Stratos internally** — when a request arrives, Stratos validates the caller's actual current membership before returning any content. No enforcement is delegated to a client or AppView.
+
+The attestation serves a separate, complementary purpose: it is a public declaration written to the user's PDS that lets any app **verify offline** that the user is enrolled with a specific Stratos service. It binds the user's DID, assigned boundaries, and signing key into a signature from the service's secp256k1 key.
+
 ```mermaid
 flowchart TD
     K([Service secp256k1 key]) -->|signs attestation| E([Attestation Payload\nboundaries + did + signingKey])
     E -->|written to| R([enrollment record on PDS])
-    R -->|read by| A([AppView])
-    A -->|verifies attestation offline| UK([User P-256 signingKey])
-    UK -->|verifies commit signatures| RC([individual records])
+    R -->|read by| A([AppView / any verifier])
+    A -->|confirms enrollment + extracts| UK([User P-256 signingKey])
+    UK -->|verifies commit signatures on| RC([individual records])
 
     style K fill:#9145EC,color:#fff,stroke:none
     style E fill:#7780DC,color:#fff,stroke:none
@@ -86,4 +90,4 @@ flowchart TD
     style RC fill:#2AFFBA,color:#1F0B35,stroke:none
 ```
 
-The chain lets any verifier confirm both service endorsement of the enrollment and user authorship of each record.
+The attestation proves service endorsement of the enrollment and enables user authorship verification on individual records. Actual access to record content is always gated by Stratos's live boundary check.
