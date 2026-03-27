@@ -70,13 +70,16 @@ export async function fetchHydratedRecord(
   stratosUrl: string,
   uri: string,
 ): Promise<Record<string, unknown>> {
-  const url = new URL('/xrpc/zone.stratos.repo.hydrateRecord', stratosUrl)
-  url.searchParams.set('uri', uri)
+  const { did, collection, rkey } = parseAtUri(uri)
+  const url = new URL('/xrpc/com.atproto.repo.getRecord', stratosUrl)
+  url.searchParams.set('repo', did)
+  url.searchParams.set('collection', collection)
+  url.searchParams.set('rkey', rkey)
 
   const res = await session.fetchHandler(url.href, { method: 'GET' })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`Stratos hydrateRecord failed: ${res.status} ${text}`)
+    throw new Error(`Stratos getRecord failed: ${res.status} ${text}`)
   }
   return res.json()
 }
@@ -103,20 +106,8 @@ export async function inspectRecord(
     result.stubError = err instanceof Error ? err.message : String(err)
   }
 
-  // Use source.subject.uri from the stub if available, otherwise fall back to the feed URI
-  const hydrateUri =
-    (result.stub?.value as Record<string, unknown> | undefined)?.source != null
-      ? ((result.stub!.value as Record<string, unknown>).source as Record<string, unknown>)
-          ?.subject != null
-        ? (
-            ((result.stub!.value as Record<string, unknown>).source as Record<string, unknown>)
-              .subject as Record<string, unknown>
-          ).uri as string
-        : uri
-      : uri
-
   try {
-    const hydrateResponse = await fetchHydratedRecord(session, stratosUrl, hydrateUri)
+    const hydrateResponse = await fetchHydratedRecord(session, stratosUrl, uri)
     result.record = hydrateResponse as Record<string, unknown>
   } catch (err) {
     result.recordError = err instanceof Error ? err.message : String(err)
