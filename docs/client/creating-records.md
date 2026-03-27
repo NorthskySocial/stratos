@@ -219,3 +219,37 @@ async function createReply(
   }).then((r) => r.json())
 }
 ```
+
+## Write Path Integration
+
+Record creates, updates, and deletes should route through the service client when Stratos is active:
+
+```typescript
+import { createServiceFetchHandler } from '@northskysocial/stratos-client'
+
+const sessionAgent = new OAuthUserAgent(await getSession(repoDid))
+const rpc = enrollment
+  ? new Client({
+      handler: createServiceFetchHandler(
+        sessionAgent.handle,
+        enrollment.service,
+      ),
+    })
+  : new Client({ handler: sessionAgent })
+
+await rpc.post('com.atproto.repo.createRecord', {
+  input: {
+    repo: did,
+    collection: 'zone.stratos.feed.post',
+    record: {
+      text: 'hello',
+      createdAt: new Date().toISOString(),
+      boundary: {
+        values: [{ value: 'did:web:stratos.example.com/WestCoastBestCoast' }],
+      },
+    },
+  },
+})
+```
+
+Batch operations (`com.atproto.repo.applyWrites`) work identically — route through the service client.
