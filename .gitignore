@@ -47,3 +47,5 @@ docs/*-prompt.md
 
 # CDK
 infra/
+
+docs/.vitepress/cache
