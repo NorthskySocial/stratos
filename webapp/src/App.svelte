@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, setContext } from 'svelte'
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
   import { init, signOut, onSessionDeleted } from './lib/auth'
@@ -46,6 +46,14 @@
   let serviceUrl = $state(STRATOS_URL ?? '')
   let activeFeed: string | null = $state(null)
   let serverDomains: string[] = $state([])
+
+  const inspectorCtx = { session: null as OAuthSession | null, serviceUrl: '' }
+  setContext('stratos-inspector', inspectorCtx)
+
+  $effect(() => {
+    inspectorCtx.session = session
+    inspectorCtx.serviceUrl = serviceUrl
+  })
 
   let enrolledDomains = $derived(
     enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
