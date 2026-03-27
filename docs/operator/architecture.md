@@ -1,118 +1,38 @@
 # Architecture
 
+<script setup>
+import SystemOverviewAnimation from '../.vitepress/theme/components/SystemOverviewAnimation.vue'
+import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
+import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreationAnimation.vue'
+import IndexerSyncAnimation from '../.vitepress/theme/components/IndexerSyncAnimation.vue'
+</script>
+
 ## System Components
 
-```mermaid
-graph TD
-    subgraph ATProtocol ["ATProtocol Network"]
-        direction TB
-        subgraph Services [" "]
-            direction LR
-            PDS["User's PDS"]
-            Stratos["Stratos Service"]
-            AppView["AppView"]
-            PDS <--> Stratos
-            Stratos <--> AppView
-        end
-
-        subgraph Infrastructure [" "]
-            direction LR
-            DID["DID PLC"]
-            Blob["Blob Storage<br/>(Disk or S3)"]
-            Postgres["PostgreSQL"]
-        end
-
-        PDS -- "OAuth<br/>Authentication" --> DID
-        Stratos -- "Per-user<br/>SQLite / PG" --> Blob
-        AppView -- "Indexed<br/>Content" --> Postgres
-    end
-
-    style Services fill:none,stroke:none
-    style Infrastructure fill:none,stroke:none
-```
+<SystemOverviewAnimation />
 
 ## Data Flow
 
 ### User Enrollment
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant S as Stratos
-    participant P as User's PDS
-
-    U->>S: /oauth/authorize?handle=user.bsky.social
-    S->>P: Request OAuth endpoint
-    P->>U: Prompt for authorization
-    U->>P: Authorize Stratos
-    P->>S: /oauth/callback (with auth code)
-    S->>S: Validate enrollment (DID/PDS allowlist)
-    S->>S: Create enrollment record + initialize actor storage
-```
+<EnrollmentFlow />
 
 ### Record Creation
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Stratos
-    participant P as User's PDS
-
-    C->>S: com.atproto.repo.createRecord
-    Note right of C: collection: zone.stratos.feed.post
-
-    S->>S: Validate enrollment, boundary, no cross-namespace embeds
-    S->>S: Store record in actor repo storage
-    S->>S: Sequence event to stratos_seq table
-    Note right of S: Updates MST and signs new commit with user P-256 key
-
-    S->>P: putRecord (stub with source field)
-```
+<RecordCreationAnimation />
 
 ### AppView Indexing
 
-```mermaid
-sequenceDiagram
-    participant A as AppView
-    participant S as Stratos
-
-    A->>S: zone.stratos.sync.subscribeRecords (WebSocket)
-    Note right of A: { did: "<user-did>", cursor: 0 }
-
-    loop Commit events
-        S->>A: zone.stratos.sync.subscribeRecords#commit
-        Note right of S: { seq: 1, did: "did:plc:abc", ops: [...] }
-    end
-
-    A->>A: Index records with boundary metadata
-```
+<IndexerSyncAnimation />
 
 ## Repository & MST Architecture
 
 Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit chain** compatible with the ATProto repo format. Every record write produces a signed commit that updates the MST root, enabling cryptographic verification of repository contents.
 
-```mermaid
-graph TD
-    Commit["Signed Commit (v3)"] --> MST["MST (Merkle Search Tree)"]
-
-    subgraph CommitInfo ["Commit Content"]
-        direction TB
-        C1["did: 'did:plc:user'"]
-        C2["version: 3"]
-        C3["data: MST root CID"]
-        C4["rev: TID"]
-        C5["sig: P-256 signature (user key)"]
-    end
-
-    subgraph MSTInfo ["MST Content"]
-        direction TB
-        M1["collection/rkey → record CID"]
-        M2["Sorted key-value tree of all records"]
-    end
-
-    Commit -.-> CommitInfo
-    MST -.-> MSTInfo
-```
+| Layer | Contents |
+|-------|----------|
+| **Signed Commit (v3)** | `did`, `version: 3`, `data` (MST root CID), `rev` (TID), `sig` (P-256 signature) |
+| **MST** | Sorted key-value tree mapping `collection/rkey → record CID` |
 
 | Endpoint | Description |
 |----------|-------------|

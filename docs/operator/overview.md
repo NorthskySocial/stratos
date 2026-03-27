@@ -27,24 +27,11 @@ Stratos is a **private namespace service** for ATProtocol that enables users to 
 
 ## Request Flow
 
-```mermaid
-flowchart TD
-    U([User]) -->|OAuth Enrollment| S([Stratos Service])
-    S -->|enrollment record| P([User PDS])
-    P -->|firehose| I([stratos-indexer])
-    S -->|subscribeRecords| I
-    I -->|indexes| DB[(PostgreSQL)]
-    DB -->|feeds| A([AppView\nzone.stratos.feed.*])
-    A -->|boundary-filtered content| C([Client Application])
+<script setup>
+import DataFlowAnimation from '../.vitepress/theme/components/DataFlowAnimation.vue'
+</script>
 
-    style S fill:#9145EC,color:#fff,stroke:none
-    style I fill:#7780DC,color:#fff,stroke:none
-    style A fill:#59B2CF,color:#fff,stroke:none
-    style DB fill:#40DAC4,color:#1F0B35,stroke:none
-    style P fill:#1F0B35,color:#fff,stroke:#7780DC
-    style U fill:#1F0B35,color:#fff,stroke:#7780DC
-    style C fill:#1F0B35,color:#fff,stroke:#2AFFBA
-```
+<DataFlowAnimation />
 
 ## Next Steps
 

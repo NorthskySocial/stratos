@@ -1,0 +1,158 @@
+<template>
+  <div class="anim-outer" ref="containerRef">
+    <div class="stage" ref="stageRef">
+
+      <svg class="arsvg" viewBox="0 0 900 520">
+        <defs>
+          <marker id="is-ml" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+            <polygon points="0 0,7 2.5,0 5" fill="#9145EC"/>
+          </marker>
+          <marker id="is-mg" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e"/>
+          </marker>
+        </defs>
+        <!-- PDS Firehose → Indexer (diagonal down-right) -->
+        <path id="is-a1" class="ar" stroke="#9145EC" marker-end="url(#is-ml)" d="M 190 168 L 355 235"/>
+        <!-- Stratos Stream → Indexer (diagonal up-right) -->
+        <path id="is-a2" class="ar" stroke="#9145EC" marker-end="url(#is-ml)" d="M 190 332 L 355 262"/>
+        <!-- Indexer → PostgreSQL (diagonal up-right) -->
+        <path id="is-a3" class="ar" stroke="#9145EC" marker-end="url(#is-ml)" d="M 520 225 L 645 172"/>
+        <!-- PostgreSQL → AppView (vertical) -->
+        <path id="is-a4" class="ar" stroke="#24cf6e" marker-end="url(#is-mg)" d="M 732 203 L 727 295"/>
+      </svg>
+
+      <!-- Left column -->
+      <div class="node" id="is-npds" style="left:15px;top:100px;width:175px">
+        <div class="ni">🔥</div>
+        <div class="nn">PDS Firehose</div>
+        <div class="ns">subscribeRepos</div>
+      </div>
+
+      <div class="node" id="is-nst" style="left:15px;top:295px;width:175px">
+        <div class="ni">⚙️</div>
+        <div class="nn">Stratos Stream</div>
+        <div class="ns">subscribeRecords</div>
+      </div>
+
+      <!-- Center: Indexer -->
+      <div class="node" id="is-nix" style="left:355px;top:195px;width:165px">
+        <div class="ni">🔄</div>
+        <div class="nn">Indexer</div>
+        <div class="ns">stratos-indexer</div>
+      </div>
+
+      <!-- Right column -->
+      <div class="node" id="is-ndb" style="left:645px;top:100px;width:195px">
+        <div class="ni">🛢️</div>
+        <div class="nn">PostgreSQL</div>
+        <div class="ns">stratos_post · boundaries</div>
+      </div>
+
+      <div class="node" id="is-nav" style="left:645px;top:295px;width:195px">
+        <div class="ni">📡</div>
+        <div class="nn">AppView</div>
+        <div class="ns">zone.stratos.feed.*</div>
+      </div>
+
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+
+const containerRef = ref(null)
+const stageRef = ref(null)
+
+const $ = (id) => stageRef.value?.querySelector('#' + id)
+const add = (el, ...c) => el?.classList.add(...c)
+const rm  = (el, ...c) => el?.classList.remove(...c)
+
+function fit() {
+  if (!containerRef.value || !stageRef.value) return
+  const scale = containerRef.value.clientWidth / 900
+  stageRef.value.style.transform = `scale(${scale})`
+}
+
+const timeouts = []
+const later = (fn, ms) => { const t = setTimeout(fn, ms); timeouts.push(t); return t }
+
+function reset() {
+  ;['is-npds','is-nst','is-nix','is-ndb','is-nav'].forEach(id => rm($(id), 'hl', 'ok'))
+  ;['is-a1','is-a2','is-a3','is-a4'].forEach(id => rm($(id), 'show'))
+}
+
+const steps = [
+  { dur: 1600, fn() { add($('is-npds'), 'hl'); add($('is-nst'), 'hl') } },
+  { dur: 2000, fn() { rm($('is-npds'), 'hl'); rm($('is-nst'), 'hl'); add($('is-nix'), 'hl'); add($('is-a1'), 'show'); add($('is-a2'), 'show') } },
+  { dur: 1800, fn() { rm($('is-nix'), 'hl'); add($('is-ndb'), 'hl'); add($('is-a3'), 'show') } },
+  { dur: 2000, fn() { rm($('is-ndb'), 'hl'); add($('is-nav'), 'ok'); add($('is-a4'), 'show') } },
+]
+
+function run(i) {
+  steps[i].fn()
+  later(() => {
+    const next = (i + 1) % steps.length
+    if (next === 0) { reset(); later(() => run(0), 800) }
+    else run(next)
+  }, steps[i].dur)
+}
+
+let ro
+onMounted(() => {
+  ro = new ResizeObserver(fit)
+  ro.observe(containerRef.value)
+  fit()
+  reset()
+  later(() => run(0), 600)
+})
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  timeouts.forEach(clearTimeout)
+})
+</script>
+
+<style scoped>
+.anim-outer {
+  width: 100%;
+  aspect-ratio: 900 / 520;
+  position: relative;
+  overflow: hidden;
+  background: #1F0B35;
+  border-radius: 12px;
+  margin: 1.5rem 0;
+}
+.stage {
+  position: absolute; top: 0; left: 0;
+  width: 900px; height: 520px;
+  transform-origin: top left;
+  --card: #240D45; --bdr: #7780DC; --txt: #cdc6ff; --dim: #8878b0;
+  --blu: #9145EC; --grn: #24cf6e;
+}
+.stage::before {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  width: 750px; height: 440px;
+  background: radial-gradient(ellipse, rgba(80,20,130,.22) 0%, transparent 70%);
+  pointer-events: none;
+}
+.node {
+  position: absolute; background: var(--card); border: 1.5px solid var(--bdr);
+  border-radius: 12px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 5px; padding: 12px 14px;
+  transition: border-color .4s, box-shadow .4s;
+}
+.ni { font-size: 32px; line-height: 1; }
+.nn { font-size: 15px; font-weight: 700; color: var(--txt); text-align: center; white-space: nowrap; }
+.ns { font-size: 13px; color: var(--dim); text-align: center; white-space: nowrap; }
+@keyframes is-breathe {
+  0%,100% { box-shadow: 0 0 22px rgba(145,69,236,.35); }
+  50%      { box-shadow: 0 0 42px rgba(145,69,236,.7); }
+}
+@keyframes is-march { to { stroke-dashoffset: -12; } }
+.hl { border-color: var(--blu) !important; animation: is-breathe 2s ease-in-out infinite; }
+.ok { border-color: var(--grn) !important; box-shadow: 0 0 24px rgba(36,207,110,.4) !important; }
+.arsvg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.ar { fill: none; stroke-width: 2; stroke-linecap: butt; stroke-dasharray: 8 4; opacity: 0; transition: opacity .4s; }
+.ar.show { opacity: 1; animation: is-march .5s linear infinite; }
+</style>
