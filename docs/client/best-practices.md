@@ -78,12 +78,12 @@ async function createWithRetry(fn: () => Promise<unknown>, maxRetries = 3) {
 Never override `agent.serviceUrl` after constructing an `OAuthSession` agent. Always use the `fetchHandler` wrapper:
 
 ```typescript
-// ✅ Correct
+// Correct
 const stratosAgent = new Agent((url, init) => {
   return session.fetchHandler(new URL(url, STRATOS_ENDPOINT).href, init)
 })
 
-// ❌ Wrong — silently sends to PDS
+// Wrong — silently sends to PDS
 const stratosAgent = new Agent(session)
 stratosAgent.serviceUrl = new URL(STRATOS_ENDPOINT)
 ```

@@ -1,6 +1,9 @@
 # Repo Export & Import
 
-Stratos repos are ATProto-compatible Merkle Search Trees. You can export a full repo as a CAR file and import it into another service.
+Stratos repos are Merkle Search Trees which provides "feature parity" with the PDS. You can export a full repo as a CAR file and import it into another service.
+
+::: warning Note: Not yet implemented
+:::
 
 ## Verifying a Record (Inclusion Proof)
 
@@ -84,11 +87,11 @@ async function importRepo(
 
 ## Import Constraints
 
-| Constraint | Value |
-|------------|-------|
-| Max CAR size | 256 MiB (configurable by operator) |
-| CID integrity | Verified for every block |
-| Target repo | Must not already have an existing commit |
-| PDS stubs | Not created on import |
+| Constraint    | Value                                    |
+| ------------- | ---------------------------------------- |
+| Max CAR size  | 256 MiB (configurable by operator)       |
+| CID integrity | Verified for every block                 |
+| Target repo   | Must not already have an existing commit |
+| PDS stubs     | Not created on import                    |
 
 The import validates that the commit DID matches the authenticated user, then indexes all records from the MST.

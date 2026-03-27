@@ -8,19 +8,19 @@ Each enrolled user's enrollment record includes a **service attestation** — a 
 
 The `zone.stratos.actor.enrollment` record on the user's PDS includes:
 
-| Field         | Type             | Description |
-|---------------|------------------|-------------|
-| `service`     | string           | Stratos service endpoint URL |
-| `boundaries`  | `Domain[]`       | User's boundary assignments |
-| `signingKey`  | string (did:key) | User's P-256 public key |
+| Field         | Type             | Description                       |
+| ------------- | ---------------- | --------------------------------- |
+| `service`     | string           | Stratos service endpoint URL      |
+| `boundaries`  | `Domain[]`       | User's boundary assignments       |
+| `signingKey`  | string (did:key) | User's P-256 public key           |
 | `attestation` | object           | Service attestation of enrollment |
-| `createdAt`   | string           | ISO 8601 enrollment timestamp |
+| `createdAt`   | string           | ISO 8601 enrollment timestamp     |
 
 The `attestation` object:
 
-| Field        | Type             | Description |
-|--------------|------------------|-------------|
-| `sig`        | bytes            | secp256k1 signature over the CBOR payload |
+| Field        | Type             | Description                                   |
+| ------------ | ---------------- | --------------------------------------------- |
+| `sig`        | bytes            | secp256k1 signature over the CBOR payload     |
 | `signingKey` | string (did:key) | Service public key that created the signature |
 
 ## Verifying an Attestation
@@ -63,7 +63,7 @@ The attestation payload encodes boundaries as a **sorted** array. Reconstruct wi
 
 ## Trust Model
 
-The attestation proves the Stratos service vouched for the user's enrollment and boundaries **at signing time**. It does not prove:
+The attestation proves the Stratos service vouched for the user's enrollment and boundaries _at signing time_. It does not prove:
 
 - The user is still enrolled right now.
 - The boundaries haven't changed since signing.

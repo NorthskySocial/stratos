@@ -68,7 +68,9 @@ function StratosComposer({ agent, stratosDomains }) {
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={isPrivate ? 'Write a private post...' : "What's happening?"}
+        placeholder={
+          isPrivate ? 'Write a private post...' : "What's happening?"
+        }
       />
 
       <div className="privacy-toggle">

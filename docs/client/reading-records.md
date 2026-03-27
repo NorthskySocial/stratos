@@ -4,8 +4,8 @@
 
 When a record is created in Stratos, two records are written:
 
-1. **Full record** in Stratos — actual content, boundaries, all fields.
-2. **Stub record** on the user's PDS — `source` field pointing to Stratos.
+1. Full record in Stratos — actual content, boundaries, all fields.
+2. Stub record on the user's PDS — `source` field pointing to Stratos.
 
 ```json
 {

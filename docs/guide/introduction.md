@@ -1,6 +1,6 @@
 # Introduction
 
-Stratos is a **private, boundary-aware data layer for ATProtocol**. It keeps private records off the user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream AppViews serve boundary-filtered content without inventing a separate identity model.
+Stratos is a private permissioned data layer for ATProtocol. It keeps private records out of public purview, publishes enrollment metadata back to the PDS for discovery, and lets downstream apps serve boundary-filtered content without inventing a separate identity model.
 
 ## What Problem Does It Solve?
 
@@ -21,13 +21,13 @@ import DataFlowAnimation from '../.vitepress/theme/components/DataFlowAnimation.
 
 ## Repository Packages
 
-| Package             | Description |
-|---------------------|-------------|
-| `stratos-core`      | Domain logic, storage interfaces, schema, validation, MST commit builder |
-| `stratos-service`   | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters |
-| `stratos-client`    | Discovery, routing, verification, and OAuth scope helpers |
-| `stratos-indexer`   | Standalone indexer consuming PDS + Stratos streams into AppView PostgreSQL |
-| `webapp`            | Svelte demo client for enrollment and private posting |
+| Package           | Description                                                                |
+| ----------------- | -------------------------------------------------------------------------- |
+| `stratos-core`    | Domain logic, storage interfaces, schema, validation, MST commit builder   |
+| `stratos-service` | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters      |
+| `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers                  |
+| `stratos-indexer` | Standalone indexer consuming PDS + Stratos streams into AppView PostgreSQL |
+| `webapp`          | Svelte demo client for enrollment and private posting                      |
 
 ## Next Steps
 

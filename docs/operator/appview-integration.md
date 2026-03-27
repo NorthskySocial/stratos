@@ -36,9 +36,15 @@ async function subscribeToUser(
   did: string,
   cursor?: number,
 ) {
-  const syncToken = await mintSyncToken(appviewDid, stratosServiceDid, signingKey)
+  const syncToken = await mintSyncToken(
+    appviewDid,
+    stratosServiceDid,
+    signingKey,
+  )
 
-  const url = new URL('wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords')
+  const url = new URL(
+    'wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords',
+  )
   url.searchParams.set('did', did)
   url.searchParams.set('syncToken', syncToken)
   if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
@@ -75,7 +81,10 @@ async function indexRecord(did: string, path: string, record: unknown) {
   await db
     .insertInto('stratos_posts')
     .values({
-      uri, did, collection, rkey,
+      uri,
+      did,
+      collection,
+      rkey,
       text: record.text,
       boundary_domains: JSON.stringify(boundary),
       created_at: record.createdAt,
@@ -170,7 +179,9 @@ class StratosIndexer {
       keypair: this.signingKey,
     })
 
-    const url = new URL(`${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`)
+    const url = new URL(
+      `${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`,
+    )
     url.searchParams.set('did', did)
     url.searchParams.set('syncToken', syncToken)
     if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())

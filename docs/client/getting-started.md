@@ -4,14 +4,14 @@ This guide explains how to integrate Stratos private namespace functionality int
 
 ## What is Stratos?
 
-Stratos enables **private, domain-scoped content** within ATProtocol. Users can create posts visible only to members of specific groups or communities.
+Stratos enables private, domain-scoped content within ATProtocol. Users can create posts visible only to members of specific groups or communities.
 
-| Concept             | Description |
-|---------------------|-------------|
-| **Stratos Service** | A server that stores private records (separate from PDS) |
-| **Enrollment**      | User must enroll with a Stratos service to create private content |
+| Concept             | Description                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Stratos Service** | A server that stores private records (separate from PDS)                                                                                      |
+| **Enrollment**      | User must enroll with a Stratos service to create private content                                                                             |
 | **Domain Boundary** | Specifies which community can view a record. Values are fully qualified as `{serviceDid}/{name}` (e.g. `did:web:stratos.example.com/general`) |
-| **Private Post**    | A `zone.stratos.feed.post` record with boundary restrictions |
+| **Private Post**    | A `zone.stratos.feed.post` record with boundary restrictions                                                                                  |
 
 ## Quick Start
 

@@ -2,7 +2,7 @@
 
 ## Understanding Boundaries
 
-Every Stratos record must include a `boundary` specifying which domains can access it. Boundary values are **service-qualified identifiers** in `{serviceDid}/{name}` format. The service DID is the `did:web` identity of the Stratos instance — retrieve it from the service's `/.well-known/did.json`.
+Every Stratos record must include a `boundary` specifying which domains can access it. Boundary values are addressable as `{serviceDid}/{name}`. The service DID is the `did:web` identity of the Stratos instance — retrieve it from the service's `/.well-known/did.json`.
 
 ```typescript
 {
@@ -18,12 +18,12 @@ Every Stratos record must include a `boundary` specifying which domains can acce
 
 ## Visibility Rules
 
-| Viewer | Can See Record? |
-|--------|----------------|
-| Record owner | ✅ Always |
-| User with matching domain | ✅ Yes |
-| User without matching domain | ❌ No |
-| Unauthenticated | ❌ No |
+| Viewer                       | Can See Record? |
+| ---------------------------- | --------------- |
+| Record owner                 | Always          |
+| User with matching domain    | Yes             |
+| User without matching domain | No              |
+| Unauthenticated              | No              |
 
 ## Multi-Domain Posts
 
@@ -36,8 +36,14 @@ const crossDomainPost = {
   boundary: {
     $type: 'zone.stratos.boundary.defs#Domains',
     values: [
-      { $type: 'zone.stratos.boundary.defs#Domain', value: 'did:web:stratos.example.com/fanart' },
-      { $type: 'zone.stratos.boundary.defs#Domain', value: 'did:web:stratos.example.com/cosplay' },
+      {
+        $type: 'zone.stratos.boundary.defs#Domain',
+        value: 'did:web:stratos.example.com/fanart',
+      },
+      {
+        $type: 'zone.stratos.boundary.defs#Domain',
+        value: 'did:web:stratos.example.com/cosplay',
+      },
     ],
   },
   createdAt: new Date().toISOString(),
@@ -57,10 +63,10 @@ async function getUserDomains(agent: Agent): Promise<string[]> {
 
 ## Boundary Limits
 
-| Field | Constraint |
-|-------|-----------|
-| `values` | Max 10 domains per record |
-| `value` string | Max 253 characters |
-| Domain names | Must be in the service's `STRATOS_ALLOWED_DOMAINS` list |
+| Field          | Constraint                                              |
+| -------------- | ------------------------------------------------------- |
+| `values`       | Max 10 domains per record                               |
+| `value` string | Max 253 characters                                      |
+| Domain names   | Must be in the service's `STRATOS_ALLOWED_DOMAINS` list |
 
 Records with boundaries outside the service's allowed list are rejected on write.

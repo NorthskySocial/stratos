@@ -56,7 +56,17 @@ export default {
       byNamespace[ns].sort((a, b) => a.id.localeCompare(b.id))
     }
 
-    const namespaceOrder = ['core', 'actor', 'boundary', 'enrollment', 'feed', 'identity', 'repo', 'server', 'sync']
+    const namespaceOrder = [
+      'core',
+      'actor',
+      'boundary',
+      'enrollment',
+      'feed',
+      'identity',
+      'repo',
+      'server',
+      'sync',
+    ]
     const namespaces = namespaceOrder
       .filter((ns) => byNamespace[ns])
       .map((ns) => ({ name: ns, lexicons: byNamespace[ns] }))

@@ -5,9 +5,6 @@ hero:
   name: Stratos
   text: Private permissioned data for ATProtocol
   tagline: Store boundary-scoped records off the PDS, serve them through AppViews with cryptographic access control.
-  image:
-    src: /icon.svg
-    alt: Stratos
   actions:
     - theme: brand
       text: Get Started

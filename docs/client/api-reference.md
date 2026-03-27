@@ -87,36 +87,36 @@ Authenticated: also returns boundaries, signing key, enrollment rkey, and a fres
 ```typescript
 interface AppStratosFeedPost {
   $type: 'zone.stratos.feed.post'
-  text: string          // Required, max 3000 chars
-  boundary: Boundary    // Required
-  createdAt: string     // Required, ISO datetime
-  facets?: Facet[]      // Rich text annotations
-  reply?: ReplyRef      // If this is a reply
-  embed?: Embed         // Images, video, external links
-  langs?: string[]      // Language tags, max 3
-  labels?: SelfLabels   // Content warnings
-  tags?: string[]       // Additional hashtags, max 8
+  text: string // Required, max 300 chars
+  boundary: Boundary // Required
+  createdAt: string // Required, ISO datetime
+  facets?: Facet[] // Rich text annotations
+  reply?: ReplyRef // If this is a reply
+  embed?: Embed // Images, video, external links
+  langs?: string[] // Language tags, max 3
+  labels?: SelfLabels // Content warnings
+  tags?: string[] // Additional hashtags, max 8
 }
 
 interface Boundary {
   $type: 'zone.stratos.boundary.defs#Domains'
-  values: Domain[]      // Max 10 domains
+  values: Domain[] // Max 10 domains
 }
 
 interface Domain {
   $type: 'zone.stratos.boundary.defs#Domain'
-  value: string         // Qualified boundary: '{serviceDid}/{name}', max 253 chars
+  value: string // Qualified boundary: '{serviceDid}/{name}', max 253 chars
 }
 ```
 
 ## Error Codes
 
-| Error               | Description |
-|---------------------|-------------|
-| `NotEnrolled`       | User hasn't enrolled with this Stratos service |
-| `InvalidCollection` | Collection is not a valid stratos namespace |
+| Error               | Description                                       |
+| ------------------- | ------------------------------------------------- |
+| `NotEnrolled`       | User hasn't enrolled with this Stratos service    |
+| `InvalidCollection` | Collection is not a valid stratos namespace       |
 | `InvalidRecord`     | Record failed validation (e.g., missing boundary) |
-| `RecordNotFound`    | Record doesn't exist or user doesn't have access |
-| `AuthRequired`      | Endpoint requires authentication |
-| `InvalidCar`        | CAR file is malformed or fails CID integrity |
+| `RecordNotFound`    | Record doesn't exist or user doesn't have access  |
+| `AuthRequired`      | Endpoint requires authentication                  |
+| `InvalidCar`        | CAR file is malformed or fails CID integrity      |
 | `RepoAlreadyExists` | Target repo already has a commit (import blocked) |

@@ -1,9 +1,11 @@
 import { defineConfig } from 'vitepress'
 
+const base = '/'
+
 export default defineConfig({
   title: 'Stratos',
   description: 'Private permissioned data layer for ATProtocol',
-  base: '/stratos/',
+  base,
 
   srcExclude: [
     'hydration-architecture.md',
@@ -15,9 +17,7 @@ export default defineConfig({
     'animations/**',
   ],
 
-  head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/stratos/icon.svg' }],
-  ],
+  head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' }]],
 
   themeConfig: {
     logo: { src: '/icon.svg', alt: 'Stratos' },
@@ -25,9 +25,21 @@ export default defineConfig({
 
     nav: [
       { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
-      { text: 'Client Integration', link: '/client/getting-started', activeMatch: '/client/' },
-      { text: 'Operator Guide', link: '/operator/overview', activeMatch: '/operator/' },
-      { text: 'Architecture', link: '/architecture/hydration', activeMatch: '/architecture/' },
+      {
+        text: 'Client Integration',
+        link: '/client/getting-started',
+        activeMatch: '/client/',
+      },
+      {
+        text: 'Operator Guide',
+        link: '/operator/overview',
+        activeMatch: '/operator/',
+      },
+      {
+        text: 'Architecture',
+        link: '/architecture/hydration',
+        activeMatch: '/architecture/',
+      },
       { text: 'Lexicons', link: '/lexicons/', activeMatch: '/lexicons/' },
     ],
 
@@ -37,7 +49,10 @@ export default defineConfig({
           text: 'Getting Started',
           items: [
             { text: 'Introduction', link: '/guide/introduction' },
-            { text: 'What Is Shared Private Data?', link: '/guide/what-is-stratos' },
+            {
+              text: 'What Is Shared Private Data?',
+              link: '/guide/what-is-stratos',
+            },
             { text: 'Core Concepts', link: '/guide/concepts' },
           ],
         },
@@ -51,7 +66,10 @@ export default defineConfig({
             { text: 'Creating Records', link: '/client/creating-records' },
             { text: 'Reading Records', link: '/client/reading-records' },
             { text: 'Domain Boundaries', link: '/client/boundaries' },
-            { text: 'Repo Export & Import', link: '/client/repo-export-import' },
+            {
+              text: 'Repo Export & Import',
+              link: '/client/repo-export-import',
+            },
             { text: 'UI Patterns', link: '/client/ui-patterns' },
             { text: 'Attestation Verification', link: '/client/attestation' },
             { text: 'API Reference', link: '/client/api-reference' },
@@ -68,7 +86,10 @@ export default defineConfig({
             { text: 'Architecture', link: '/operator/architecture' },
             { text: 'Deployment', link: '/operator/deployment' },
             { text: 'Configuration', link: '/operator/configuration' },
-            { text: 'AppView Integration', link: '/operator/appview-integration' },
+            {
+              text: 'AppView Integration',
+              link: '/operator/appview-integration',
+            },
             { text: 'Operations', link: '/operator/operations' },
             { text: 'Security', link: '/operator/security' },
             { text: 'Troubleshooting', link: '/operator/troubleshooting' },
@@ -80,8 +101,14 @@ export default defineConfig({
           text: 'Architecture',
           items: [
             { text: 'Hydration Architecture', link: '/architecture/hydration' },
-            { text: 'Enrollment Signing', link: '/architecture/enrollment-signing' },
-            { text: 'Multi-Domain Enrollment', link: '/architecture/multi-domain-enrollment' },
+            {
+              text: 'Enrollment Signing',
+              link: '/architecture/enrollment-signing',
+            },
+            {
+              text: 'Multi-Domain Enrollment',
+              link: '/architecture/multi-domain-enrollment',
+            },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },
@@ -89,9 +116,7 @@ export default defineConfig({
       '/lexicons/': [
         {
           text: 'Lexicon Reference',
-          items: [
-            { text: 'All Lexicons', link: '/lexicons/' },
-          ],
+          items: [{ text: 'All Lexicons', link: '/lexicons/' }],
         },
       ],
     },
@@ -101,8 +126,9 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Built on ATProtocol',
-      copyright: 'Northsky Social',
+      message:
+        'Built on ATProtocol, designed by <a href="https://northskysocial.com" target="_blank">Northsky Social</a>',
+      copyright: `<center><img src="${base}northsky.png" alt="Northsky Social" width="48" height="48" /></center>`,
     },
 
     search: {

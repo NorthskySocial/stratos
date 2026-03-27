@@ -7,7 +7,7 @@ import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimat
 import BoundaryChangeAnimation from '../.vitepress/theme/components/BoundaryChangeAnimation.vue'
 </script>
 
-During enrollment, Stratos establishes a cryptographic trust chain for **public verification of enrollment**. This lets AppViews and other verifiers confirm that a user is enrolled with a specific Stratos service — and verify the user's authorship of individual records — without querying the live service on every request.
+During enrollment, Stratos establishes a trust chain for public verification of enrollment. This lets apps confirm that a user is enrolled with a specific Stratos service — and verify the user's authorship of individual records — without querying the live service on every request.
 
 Access control itself is always enforced internally by Stratos. When a client requests content, Stratos validates the caller's current boundary membership before returning anything.
 
@@ -15,20 +15,20 @@ Access control itself is always enforced internally by Stratos. When a client re
 
 At enrollment time Stratos generates:
 
-- A **per-user P-256 keypair** — private key stored on the service, public key embedded in the enrollment record.
+- A **per-user P-256 keypair** — private key stored on the service, public key is embedded in the enrollment record.
 - A **service attestation** — a DAG-CBOR signature binding the user's DID, boundaries, and signing key together.
 
 The attestation payload is:
 
 ```typescript
 {
-  boundaries: ['fanart', 'writers'],  // sorted
-  did: 'did:plc:alice',
-  signingKey: 'did:key:zDna...'              // user's P-256 public key
+  boundaries: ['fanart', 'writers'],
+  did: 'did:plc:alice',               // users DID
+  signingKey: 'did:key:zDna...'       // user's P-256 public key
 }
 ```
 
-Payload is serialised as DAG-CBOR (not JSON) and signed with the service's Secp256k1 key.
+Payload is serialised as DAG-CBOR and signed with the service's Secp256k1 key.
 
 ## Enrollment Record Shape
 
@@ -96,7 +96,7 @@ For freshness guarantees, query the live status endpoint:
 GET /xrpc/zone.stratos.enrollment.status?did=<did>
 ```
 
-Authenticated callers receive current boundaries, signing key, and a fresh attestation.
+Authenticated callers receive current boundaries, signing key, and a fresh attestation. Unauthenticated will receive details confirming if they are enrolled, their time of enrollment, and the DIDs signing key.
 
 ## Boundary Changes
 

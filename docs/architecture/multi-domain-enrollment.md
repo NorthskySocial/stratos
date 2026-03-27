@@ -2,16 +2,16 @@
 
 Stratos separates two concerns when handling domain boundaries:
 
-1. **What domains can posts reference?** — controlled by `STRATOS_ALLOWED_DOMAINS`
-2. **What domains do new users get?** — controlled by `STRATOS_AUTO_ENROLL_DOMAINS`
+1. What domains can posts reference? — controlled by `STRATOS_ALLOWED_DOMAINS`
+2. What domains do new users get? — controlled by `STRATOS_AUTO_ENROLL_DOMAINS`
 
 ## Concepts
 
-| Term | Description |
-|------|-------------|
-| **Allowed Domains** | Full set of domains the service accepts. Posts can reference any of these. |
+| Term                    | Description                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| **Allowed Domains**     | Full set of domains the service accepts. Posts can reference any of these.         |
 | **Auto-Enroll Domains** | Subset assigned to new users at OAuth enrollment. Defaults to all allowed domains. |
-| **User Boundaries** | Per-user stored domains. Determines what posts a user can create and view. |
+| **User Boundaries**     | Per-user stored domains. Determines what posts a user can create and view.         |
 
 ## Enrollment Assignment Logic
 
@@ -27,34 +27,23 @@ This is implemented in `selectEnrollBoundaries()` in `stratos-service/src/oauth/
 ## Example
 
 ```bash
-STRATOS_ALLOWED_DOMAINS=atverkackt.de,posters-madness,bees,plants
+STRATOS_ALLOWED_DOMAINS=posters-madness,bees,plants
 STRATOS_AUTO_ENROLL_DOMAINS=posters-madness
 ```
 
 - A new user enrolling via OAuth receives only the `posters-madness` boundary.
-- `atverkackt.de`, `bees`, and `plants` remain valid — existing users keep their access, existing posts stay accessible.
-- Posts can reference any of the four domains as boundaries, provided the author is enrolled in that domain.
+- `bees`, and `plants` remain valid — existing users keep their access, existing posts stay accessible.
+- Posts can reference any of the three domains as boundaries, provided the author is enrolled in that domain.
 - `assertCallerCanWriteDomains` enforces that the record's boundaries are a subset of the author's enrolled boundaries.
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `STRATOS_ALLOWED_DOMAINS` | Yes | Comma-separated. All domains the service recognizes. |
-| `STRATOS_AUTO_ENROLL_DOMAINS` | No | Comma-separated. Domains for new enrollees. Defaults to all allowed. |
-
-### CDK Infrastructure
-
-```typescript
-// ops/infra/conf/config.ts
-stratos: {
-  allowedDomains: 'atverkackt.de,posters-madness,bees,plants',
-  autoEnrollDomains: 'posters-madness',
-  enrollmentMode: 'open',
-}
-```
+| Variable                      | Required | Description                                                          |
+| ----------------------------- | -------- | -------------------------------------------------------------------- |
+| `STRATOS_ALLOWED_DOMAINS`     | Yes      | Comma-separated. All domains the service recognizes.                 |
+| `STRATOS_AUTO_ENROLL_DOMAINS` | No       | Comma-separated. Domains for new enrollees. Defaults to all allowed. |
 
 ## Data Flow
 
