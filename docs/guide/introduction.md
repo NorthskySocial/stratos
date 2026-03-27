@@ -8,24 +8,11 @@ ATProtocol is designed for open, public social data. Every record on a PDS is vi
 
 ## How It Works
 
-```mermaid
-flowchart TD
-    U([User]) -->|OAuth Enrollment| S([Stratos Service])
-    S -->|enrollment record| P([User PDS])
-    P -->|firehose| I([stratos-indexer])
-    S -->|subscribeRecords| I
-    I -->|indexes| DB[(PostgreSQL)]
-    DB -->|feeds| A([AppView\nzone.stratos.feed.*])
-    A -->|boundary-filtered content| C([Client Application])
+<script setup>
+import DataFlowAnimation from '../.vitepress/theme/components/DataFlowAnimation.vue'
+</script>
 
-    style S fill:#9145EC,color:#fff,stroke:none
-    style I fill:#7780DC,color:#fff,stroke:none
-    style A fill:#59B2CF,color:#fff,stroke:none
-    style DB fill:#40DAC4,color:#1F0B35,stroke:none
-    style P fill:#1F0B35,color:#fff,stroke:#7780DC
-    style U fill:#1F0B35,color:#fff,stroke:#7780DC
-    style C fill:#1F0B35,color:#fff,stroke:#2AFFBA
-```
+<DataFlowAnimation />
 
 1. **A user enrolls** with a Stratos service via OAuth. The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
 2. **The user creates private records** by calling the Stratos XRPC API. Records are stored in the user's per-actor repo on Stratos, not on the PDS. A lightweight stub record is written to the PDS with a `source` field pointing back to Stratos.
