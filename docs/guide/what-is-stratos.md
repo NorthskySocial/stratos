@@ -14,15 +14,15 @@ Stratos flips the house party on its head where now we have multiple parties goi
 
 ## The Problem: Everything Is Public
 
-Social networks built on ATProtocol (like Bluesky) are fully public by default. Every post you write is visible to anyone, anywhere. That's great for public conversations, but it means there's no way to share something with just your team, your community, or your close friends — without leaving the network entirely.
+Social networks built on ATprotocol (like Bluesky) are fully public by default. Every post you write is visible to anyone, anywhere. That's great for public conversations, but it means there's no way to share something with just your group, your community, or your close friends — without leaving the network entirely.
 
 ---
 
-## The Stratos Answer: Boundaries
+## The Stratos Answer
 
 Stratos introduces boundaries — named access scopes that act like club memberships.
 
-When you write a post, you label it with a boundary, like `fanart` or `writers`. Only people who are enrolled in that same boundary can read it. Everyone else sees nothing — not even a hint that the post exists.
+When you write a post, you label it with a boundary, like `cooking` or `hiking`. Only people who are enrolled in that same boundary can read it. Everyone else sees nothing — not even a hint that the post exists.
 
 <div class="animation-card">
   <div class="animation-label">
@@ -36,13 +36,13 @@ When you write a post, you label it with a boundary, like `fanart` or `writers`.
 
 ## Enrollment
 
-Before you can post or read inside a boundary, you **enroll** with a Stratos service using your existing ATProtocol account. This is a one-time OAuth flow.
+Before you can post or read inside a boundary, you _enroll_ with a Stratos service using your existing ATprotocol account. This is a one-time OAuth flow.
 
 When you enroll:
 
 1. Stratos checks whether you're on the allowlist (if the operator uses one).
 2. Your assigned boundaries are recorded.
-3. A small **enrollment record** is written to your own PDS (your personal data store on the network), so anyone can discover which Stratos service you're a member of.
+3. A small _enrollment record_ is written to your own PDS (your personal data store on the network), so anyone can discover which Stratos service you're a member of.
 
 <div class="animation-card">
   <div class="animation-label">

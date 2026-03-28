@@ -423,7 +423,7 @@ After enrollment, clients authenticate using DPoP (Demonstration of Proof-of-Pos
 9. Request proceeds with authenticated user DID
 ```
 
-Note: ATProtocol PDSes do not expose a token introspection endpoint (RFC 7662).
+Note: ATprotocol PDSes do not expose a token introspection endpoint (RFC 7662).
 Resource servers verify tokens by fetching the PDS's JWKS and validating signatures locally.
 
 ---
@@ -618,6 +618,6 @@ openssl ec -in stratos-key.pem -pubout -out stratos-key.pub.pem
 
 ## References
 
-- [ATProtocol Record Hydration (blog post)](https://blog.smokesignal.events/posts/3lvehxge7oo2a-atprotocol-record-hydration-building-privacy-aware-views)
+- [ATprotocol Record Hydration (blog post)](https://blog.smokesignal.events/posts/3lvehxge7oo2a-ATprotocol-record-hydration-building-privacy-aware-views)
 - [Stratos Service Design (previous)](../atproto/packages/pds/docs/stratos-service-design.md)
 - [ATProto OAuth Specification](https://atproto.com/specs/oauth)

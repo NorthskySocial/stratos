@@ -18,7 +18,7 @@ curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=<your-
 
 1. Verify your app's callback URL is listed in the Stratos `redirect_uris` configuration.
 2. Check for CORS errors in the browser console.
-3. Ensure the user's PDS supports ATProtocol OAuth.
+3. Ensure the user's PDS supports ATprotocol OAuth.
 
 ## Requests Go to PDS Instead of Stratos
 

@@ -15,8 +15,8 @@ Access control itself is always enforced internally by Stratos. When a client re
 
 At enrollment time Stratos generates:
 
-- A **per-user P-256 keypair** — private key stored on the service, public key is embedded in the enrollment record.
-- A **service attestation** — a DAG-CBOR signature binding the user's DID, boundaries, and signing key together.
+- A per-user P-256 keypair — private key stored on the service, public key is embedded in the enrollment record.
+- A service attestation — a DAG-CBOR signature binding the user's DID, boundaries, and signing key together.
 
 The attestation payload is:
 
@@ -55,7 +55,7 @@ One record is written per Stratos service, keyed at the service DID as the rkey.
 
 <VerificationFlowAnimation />
 
-**Verification steps:**
+Verification steps:
 
 1. Read `zone.stratos.actor.enrollment` record from user's PDS.
 2. Build the attestation payload from `{ did, sorted(boundaries), signingKey }`.
@@ -87,8 +87,8 @@ A verifier can chain trust: enrollment record → verify service attestation →
 
 ## What the Attestation Does Not Prove
 
-- That the user is **currently enrolled** (boundaries may have changed since the record was written).
-- That the **boundaries haven't changed** after the record was written.
+- That the user is currently enrolled (boundaries may have changed since the record was written).
+- That the boundaries haven't changed after the record was written.
 
 For freshness guarantees, query the live status endpoint:
 
