@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { Agent } from '@atproto/api'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
-  import { init, signOut } from './lib/auth'
+  import { init, signOut, onSessionDeleted } from './lib/auth'
   import {
     discoverStratosEnrollment,
     checkStratosServiceStatus,
@@ -25,10 +25,12 @@
     resolveHandles,
     type FeedPost,
   } from './lib/feed'
+  import underConstruction from './assets/under-construction.gif'
   import LoginScreen from './lib/LoginScreen.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import Composer from './lib/Composer.svelte'
   import Feed from './lib/Feed.svelte'
+  import { displayBoundary } from './lib/boundary-display'
 
   let session: OAuthSession | null = $state(null)
   let enrollment: StratosEnrollment | null = $state(null)
@@ -151,6 +153,18 @@
   }
 
   onMount(() => {
+    onSessionDeleted(() => {
+      session = null
+      enrollment = null
+      stratosStatus = null
+      attestationVerified = null
+      appviewAgent = null
+      stratosAgent = null
+      allPosts = []
+      handle = ''
+      did = ''
+      activeFeed = null
+    })
     startup()
   })
 </script>
@@ -180,7 +194,7 @@
     <main class="main">
       <header class="app-header">
         <div>
-          <h1>Stratos</h1>
+          <h1><img src={underConstruction} alt="" class="header-gif" />Stratos Demo App<img src={underConstruction} alt="" class="header-gif" /></h1>
           <p class="session-label">@{handle}</p>
         </div>
         <button class="sign-out" onclick={handleSignOut}>Log Out</button>
@@ -202,7 +216,7 @@
             class:active={activeFeed === domain}
             onclick={() => handleSelectFeed(domain)}
           >
-            {domain}
+            {displayBoundary(domain)}
           </button>
         {/each}
       </div>
@@ -267,6 +281,14 @@
   .app-header h1 {
     margin: 0;
     font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .header-gif {
+    height: 1.5rem;
+    width: auto;
   }
 
   .session-label {

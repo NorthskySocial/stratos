@@ -128,12 +128,14 @@ export function registerEnrollmentHandlers(
             enrollmentRkey: enrollment.enrollmentRkey,
           }
 
-        // Only include boundaries and attestation if authenticated
-        if (authenticatedDid) {
+          // Always resolve boundaries to trigger lazy migration for legacy bare-name boundaries.
+          // Only include them in the response when authenticated to prevent enumeration abuse.
           const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
-          body.boundaries = boundaryValues.map((value: string) => ({
-            value,
-          }))
+
+          if (auth) {
+            body.boundaries = boundaryValues.map((value: string) => ({
+              value,
+            }))
 
           if (boundaryValues.length > 0) {
             try {

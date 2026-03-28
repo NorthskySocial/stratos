@@ -2,7 +2,6 @@ import type { IdResolver, DidDocument } from '@atproto/identity'
 import type {
   EnrollmentService,
   EnrollmentValidator,
-  ProfileRecordWriter,
   BoundaryResolver,
   Enrollment,
   EnrollmentConfig,
@@ -13,7 +12,8 @@ import type {
 import {
   extractPdsEndpoint,
   validateEnrollmentEligibility,
-  NotEnrolledError,
+  isQualifiedBoundary,
+  ensureQualifiedBoundaries,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore } from '../../oauth/routes.js'
 import type { EnrollmentEventEmitter } from '../../context.js'
@@ -131,56 +131,6 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
 }
 
 /**
- * Implementation of ProfileRecordWriter port
- * Writes enrollment record to user's PDS via their OAuth session
- */
-export class ProfileRecordWriterImpl implements ProfileRecordWriter {
-  constructor(
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private getAgent: (did: string) => Promise<{ api: any } | null>,
-  ) {}
-
-  async writeEnrollmentRecord(
-    did: string,
-    serviceEndpoint: string,
-    boundaries: string[],
-  ): Promise<string> {
-    const agent = await this.getAgent(did)
-    if (!agent) {
-      throw new NotEnrolledError(did)
-    }
-
-    const res = await agent.api.com.atproto.repo.createRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      record: {
-        service: serviceEndpoint,
-        boundaries: boundaries.map((value) => ({ value })),
-        createdAt: new Date().toISOString(),
-      },
-    })
-
-    // Extract rkey from the returned URI: at://did/collection/rkey
-    const uri: string = res.data.uri
-    const rkey = uri.split('/').pop()!
-    return rkey
-  }
-
-  async deleteEnrollmentRecord(did: string, rkey: string): Promise<void> {
-    const agent = await this.getAgent(did)
-    if (!agent) {
-      throw new NotEnrolledError(did)
-    }
-
-    await agent.api.com.atproto.repo.deleteRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      rkey: rkey || 'self',
-    })
-  }
-}
-
-/**
  * Implementation of BoundaryResolver port
  * Resolves boundaries from storage (per-user boundaries)
  */
@@ -189,5 +139,56 @@ export class EnrollmentBoundaryResolver implements BoundaryResolver {
 
   async getBoundaries(did: string): Promise<string[]> {
     return this.enrollmentStore.getBoundaries(did)
+  }
+}
+
+export interface MigrationDeps {
+  enrollmentStore: {
+    getBoundaries(did: string): Promise<string[]>
+    setBoundaries(did: string, boundaries: string[]): Promise<void>
+  }
+  serviceDid: string
+  logger?: Logger
+}
+
+/**
+ * Wraps a BoundaryResolver with lazy migration (read-repair).
+ * When legacy bare-name boundaries are returned, qualifies them in-place,
+ * updates the DB, and fires a callback for PDS re-enrollment.
+ */
+export class MigratingBoundaryResolver implements BoundaryResolver {
+  onMigrated?: (did: string, boundaries: string[]) => void
+
+  constructor(private deps: MigrationDeps) {}
+
+  async getBoundaries(did: string): Promise<string[]> {
+    const boundaries = await this.deps.enrollmentStore.getBoundaries(did)
+    if (boundaries.length === 0) return boundaries
+
+    const hasLegacy = boundaries.some((b) => !isQualifiedBoundary(b))
+    if (!hasLegacy) return boundaries
+
+    const qualified = ensureQualifiedBoundaries(
+      this.deps.serviceDid,
+      boundaries,
+    )
+
+    try {
+      await this.deps.enrollmentStore.setBoundaries(did, qualified)
+      this.deps.logger?.info(
+        { did, count: boundaries.length },
+        'migrated legacy boundaries to qualified format',
+      )
+    } catch (err) {
+      this.deps.logger?.warn(
+        { did, err },
+        'failed to persist migrated boundaries',
+      )
+      return qualified
+    }
+
+    this.onMigrated?.(did, qualified)
+
+    return qualified
   }
 }

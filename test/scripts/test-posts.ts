@@ -2,7 +2,7 @@
 // Post CRUD + boundary access control tests.
 //
 // Test matrix:
-//   Rei writes a post with "swordsmith" boundary.
+//   Rei writes a post with the swordsmith boundary.
 //   Rei can read own post (owner access).
 //   Sakura (swordsmith boundary) can read Rei's post (shared boundary).
 //   kaoruko (aekea boundary) CANNOT read Rei's post (no intersection).
@@ -17,6 +17,7 @@ import {
   deleteRecord,
 } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
+import { DOMAINS } from './lib/config.ts'
 import { section, pass, fail, summary } from './lib/log.ts'
 
 let passed = 0
@@ -58,7 +59,7 @@ async function run() {
     const result = await createRecord(rei.did, 'zone.stratos.feed.post', {
       $type: 'zone.stratos.feed.post',
       text: 'Forging a new katana in the swordsmith workshop',
-      boundary: { values: [{ value: 'swordsmith' }] },
+      boundary: { values: [{ value: DOMAINS.swordsmith }] },
       createdAt: new Date().toISOString(),
     })
 
@@ -102,7 +103,7 @@ async function run() {
       | { values: Array<{ value: string }> }
       | undefined
     assert(
-      boundary?.values?.[0]?.value === 'swordsmith',
+      boundary?.values?.[0]?.value === DOMAINS.swordsmith,
       'Rei reads own post — boundary is swordsmith',
     )
   } catch (err) {
@@ -252,7 +253,7 @@ async function run() {
     const result = await createRecord(kaoruko.did, 'zone.stratos.feed.post', {
       $type: 'zone.stratos.feed.post',
       text: 'Shopping at the Aekea marketplace',
-      boundary: { values: [{ value: 'aekea' }] },
+      boundary: { values: [{ value: DOMAINS.aekea }] },
       createdAt: new Date().toISOString(),
     })
 
