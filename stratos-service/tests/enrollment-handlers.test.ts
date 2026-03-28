@@ -28,19 +28,19 @@ interface HandlerResponse {
 }
 
 interface XrpcMethod {
-  handler: (ctx: HandlerContext) => Promise<HandlerResponse>
+  handler: (ctx: any) => Promise<HandlerResponse>
 }
 
 interface MockXrpcServer {
   methods: Record<string, XrpcMethod>
-  method: (nsid: string, config: XrpcMethod) => void
+  method: (nsid: string, config: any) => void
 }
 
 function createMockXrpcServer(): MockXrpcServer {
   const methods: Record<string, XrpcMethod> = {}
   return {
     methods,
-    method: (nsid: string, config: XrpcMethod) => {
+    method: (nsid: string, config: any) => {
       methods[nsid] = config
     },
   }
@@ -51,10 +51,11 @@ async function invokeMethod(
   nsid: string,
   params: Record<string, unknown> = {},
   auth?: unknown,
+  input?: { body: unknown },
 ): Promise<HandlerResponse> {
   const method = server.methods[nsid]
   if (!method) throw new Error(`Method ${nsid} not registered`)
-  return method.handler({ params, auth })
+  return method.handler({ params, auth, input })
 }
 
 function createCtx(opts: {
@@ -95,6 +96,11 @@ function createCtx(opts: {
       }),
     },
     createAttestation,
+    app: {
+      get: vi.fn(),
+      post: vi.fn(),
+      use: vi.fn(),
+    } as any,
     logger: {
       debug: vi.fn(),
       info: vi.fn(),
@@ -306,8 +312,15 @@ describe('Unenroll endpoint', () => {
     const unenrollSpy = vi.fn().mockResolvedValue(undefined)
     const deleteRecordSpy = vi.fn().mockResolvedValue(undefined)
     const revokeSpy = vi.fn().mockResolvedValue(undefined)
+    const getEnrollmentSpy = vi.fn().mockResolvedValue({
+      did,
+      enrollmentRkey: 'rkey-123',
+    })
 
     const ctx = {
+      enrollmentStore: {
+        getEnrollment: getEnrollmentSpy,
+      },
       enrollmentService: {
         unenroll: unenrollSpy,
       },
@@ -326,6 +339,11 @@ describe('Unenroll endpoint', () => {
         error: vi.fn(),
         debug: vi.fn(),
       },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
     } as unknown as AppContext
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
@@ -338,7 +356,8 @@ describe('Unenroll endpoint', () => {
     )
 
     expect(res.body.success).toBe(true)
-    expect(deleteRecordSpy).toHaveBeenCalledWith(did)
+    expect(getEnrollmentSpy).toHaveBeenCalledWith(did)
+    expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
     expect(revokeSpy).toHaveBeenCalledWith(did)
   })
@@ -350,8 +369,15 @@ describe('Unenroll endpoint', () => {
     const unenrollSpy = vi.fn().mockResolvedValue(undefined)
     const deleteRecordSpy = vi.fn().mockRejectedValue(new Error('PDS Error'))
     const revokeSpy = vi.fn().mockResolvedValue(undefined)
+    const getEnrollmentSpy = vi.fn().mockResolvedValue({
+      did,
+      enrollmentRkey: 'rkey-123',
+    })
 
     const ctx = {
+      enrollmentStore: {
+        getEnrollment: getEnrollmentSpy,
+      },
       enrollmentService: {
         unenroll: unenrollSpy,
       },
@@ -370,6 +396,11 @@ describe('Unenroll endpoint', () => {
         error: vi.fn(),
         debug: vi.fn(),
       },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
     } as unknown as AppContext
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
@@ -382,7 +413,8 @@ describe('Unenroll endpoint', () => {
     )
 
     expect(res.body.success).toBe(true)
-    expect(deleteRecordSpy).toHaveBeenCalledWith(did)
+    expect(getEnrollmentSpy).toHaveBeenCalledWith(did)
+    expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
     expect(revokeSpy).toHaveBeenCalledWith(did)
   })
@@ -394,8 +426,15 @@ describe('Unenroll endpoint', () => {
     const unenrollSpy = vi.fn().mockResolvedValue(undefined)
     const deleteRecordSpy = vi.fn().mockResolvedValue(undefined)
     const revokeSpy = vi.fn().mockRejectedValue(new Error('OAuth Error'))
+    const getEnrollmentSpy = vi.fn().mockResolvedValue({
+      did,
+      enrollmentRkey: 'rkey-123',
+    })
 
     const ctx = {
+      enrollmentStore: {
+        getEnrollment: getEnrollmentSpy,
+      },
       enrollmentService: {
         unenroll: unenrollSpy,
       },
@@ -414,6 +453,11 @@ describe('Unenroll endpoint', () => {
         error: vi.fn(),
         debug: vi.fn(),
       },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
     } as unknown as AppContext
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
@@ -426,7 +470,8 @@ describe('Unenroll endpoint', () => {
     )
 
     expect(res.body.success).toBe(true)
-    expect(deleteRecordSpy).toHaveBeenCalledWith(did)
+    expect(getEnrollmentSpy).toHaveBeenCalledWith(did)
+    expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
     expect(revokeSpy).toHaveBeenCalledWith(did)
   })
@@ -440,6 +485,11 @@ describe('Unenroll endpoint', () => {
       logger: {
         error: vi.fn(),
       },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
     } as unknown as AppContext
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)

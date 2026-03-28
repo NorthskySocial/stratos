@@ -19,7 +19,10 @@ import { registerHandlers } from './api/handlers.js'
 import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
 import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
-import { registerEnrollmentHandlers } from './features/index.js'
+import {
+  registerEnrollmentHandlers,
+  registerHydrationHandlers,
+} from './features/index.js'
 import {
   StratosBlockStoreReader,
   signAndPersistCommit,
@@ -167,6 +170,7 @@ export class StratosServer {
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
+      profileRecordWriter: ctx.profileRecordWriter,
       initRepo: async (did: string) => {
         await ctx.actorStore.create(did)
         await ctx.actorStore.transact(did, async (store) => {
@@ -188,6 +192,7 @@ export class StratosServer {
 
     registerHandlers(ctx.xrpcServer, ctx)
     registerEnrollmentHandlers(ctx.xrpcServer, ctx)
+    registerHydrationHandlers(ctx.xrpcServer, ctx)
     registerSubscribeRecords(ctx)
     app.use(ctx.xrpcServer.router)
 

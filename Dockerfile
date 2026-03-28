@@ -6,7 +6,7 @@
 # --- Build stage ---
 FROM node:24-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
@@ -14,9 +14,6 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
-COPY stratos-client/package.json ./stratos-client/
-COPY webapp/package.json ./webapp/
-COPY infra/package.json ./infra/
 
 # Install all dependencies (including devDependencies for tsc)
 RUN pnpm install --frozen-lockfile
@@ -52,7 +49,7 @@ RUN node -e " \
 # --- Production stage ---
 FROM node:24-alpine
 
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
