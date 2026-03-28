@@ -78,7 +78,7 @@
   </div>
 
   {#if inspectorOpen}
-    <RecordInspector uri={post.uri} />
+    <RecordInspector uri={post.uri} onclose={() => inspectorOpen = false} />
   {/if}
 </article>
 

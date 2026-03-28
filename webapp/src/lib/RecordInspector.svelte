@@ -1,18 +1,28 @@
 <script lang="ts">
   import { getContext } from 'svelte'
   import type { OAuthSession } from '@atproto/oauth-client-browser'
-  import { inspectRecord, syntaxHighlightJson, type InspectorResult } from './inspector'
+  import {
+    inspectRecord,
+    parseAtUri,
+    syntaxHighlightJson,
+    type InspectorResult,
+  } from './inspector'
 
   interface Props {
     uri: string
+    onclose: () => void
   }
 
-  let { uri }: Props = $props()
+  let { uri, onclose }: Props = $props()
 
   const ctx = getContext<{ session: OAuthSession; serviceUrl: string }>('stratos-inspector')
 
   let loading = $state(true)
   let result: InspectorResult | null = $state(null)
+
+  const parts = parseAtUri(uri)
+  const pdsRecordAddress = `at://${parts.did}/${parts.collection}/${parts.rkey}`
+  const stratosRecordAddress = `${ctx.serviceUrl}/xrpc/com.atproto.repo.getRecord?repo=${parts.did}&collection=${parts.collection}&rkey=${parts.rkey}`
 
   async function load() {
     loading = true
@@ -31,6 +41,14 @@
     }
   }
 
+  function handleBackdropClick(e: MouseEvent) {
+    if (e.target === e.currentTarget) onclose()
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') onclose()
+  }
+
   $effect(() => {
     void load()
   })
@@ -41,95 +59,142 @@
   }
 </script>
 
-<div class="inspector">
-  <div class="inspector-header">
-    <span class="inspector-title">Record Inspector</span>
-    <span class="inspector-subtitle">PDS stub → Stratos hydration reference chain</span>
+<svelte:window onkeydown={handleKeydown} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<div class="overlay" onclick={handleBackdropClick}>
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h2 class="modal-title">Record Inspector</h2>
+        <p class="modal-subtitle">PDS stub → Stratos hydration reference chain</p>
+      </div>
+      <button class="close-btn" onclick={onclose}>&times;</button>
+    </div>
+
+    {#if loading}
+      <div class="modal-loading">
+        <span class="spinner"></span> Fetching records…
+      </div>
+    {:else if result}
+      <div class="panels">
+        <div class="panel stub-panel">
+          <div class="panel-label">Public Record</div>
+          <div class="panel-address" title={pdsRecordAddress}>{pdsRecordAddress}</div>
+          <div class="panel-body">
+            {#if result.stubError}
+              <div class="panel-error">{result.stubError}</div>
+            {:else if result.stub}
+              <pre class="json-block">{@html syntaxHighlightJson(stubValueOnly(result.stub))}</pre>
+            {:else}
+              <div class="panel-empty">No stub found</div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="panel-divider">
+          <div class="divider-line"></div>
+          <div class="divider-label">source.subject.uri</div>
+          <div class="divider-arrow">→</div>
+          <div class="divider-line"></div>
+        </div>
+
+        <div class="panel hydrated-panel">
+          <div class="panel-label">Private Hydrated Record</div>
+          <div class="panel-address" title={stratosRecordAddress}>{stratosRecordAddress}</div>
+          <div class="panel-body">
+            {#if result.recordError}
+              <div class="panel-error">{result.recordError}</div>
+            {:else if result.record}
+              <pre class="json-block">{@html syntaxHighlightJson(result.record.value ?? result.record)}</pre>
+            {:else}
+              <div class="panel-empty">No record found</div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
   </div>
-
-  {#if loading}
-    <div class="inspector-loading">
-      <span class="spinner"></span> Fetching records…
-    </div>
-  {:else if result}
-    <div class="inspector-panels">
-      <div class="panel stub-panel">
-        <div class="panel-label">
-          <span class="panel-icon">📄</span> PDS Stub Record
-        </div>
-        {#if result.stubError}
-          <div class="panel-error">{result.stubError}</div>
-        {:else if result.stub}
-          <pre class="json-block">{@html syntaxHighlightJson(stubValueOnly(result.stub))}</pre>
-        {:else}
-          <div class="panel-empty">No stub found</div>
-        {/if}
-      </div>
-
-      <div class="panel-arrow">
-        <div class="arrow-line"></div>
-        <div class="arrow-label">source.subject.uri</div>
-        <div class="arrow-head">→</div>
-      </div>
-
-      <div class="panel hydrated-panel">
-        <div class="panel-label">
-          <span class="panel-icon">🔓</span> Hydrated Stratos Record
-        </div>
-        {#if result.recordError}
-          <div class="panel-error">{result.recordError}</div>
-        {:else if result.record}
-          <pre class="json-block">{@html syntaxHighlightJson(result.record.value ?? result.record)}</pre>
-        {:else}
-          <div class="panel-empty">No record found</div>
-        {/if}
-      </div>
-    </div>
-  {/if}
 </div>
 
 <style>
-  .inspector {
-    border-top: 1px dashed #c4b5fd;
-    background: #f5f3ff;
-    padding: 0.75rem;
-    margin-top: 0.25rem;
-  }
-
-  .inspector-header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    margin-bottom: 0.6rem;
-  }
-
-  .inspector-title {
-    font-weight: 600;
-    font-size: 0.8rem;
-    color: #5b21b6;
-  }
-
-  .inspector-subtitle {
-    font-size: 0.7rem;
-    color: #7c3aed;
-    opacity: 0.7;
-  }
-
-  .inspector-loading {
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    color: #7c3aed;
-    font-size: 0.82rem;
-    padding: 0.5rem 0;
+    justify-content: center;
+    z-index: 1000;
+    padding: 2rem;
+  }
+
+  .modal {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    max-width: 1200px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  .modal-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .modal-subtitle {
+    margin: 0.2rem 0 0;
+    font-size: 0.78rem;
+    color: #6b7280;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    border-radius: 4px;
+  }
+
+  .close-btn:hover {
+    color: #374151;
+    background: #f3f4f6;
+  }
+
+  .modal-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    color: #6b7280;
+    font-size: 0.9rem;
+    padding: 3rem;
   }
 
   .spinner {
     display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid #c4b5fd;
-    border-top-color: #7c3aed;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #d1d5db;
+    border-top-color: #6366f1;
     border-radius: 50%;
     animation: spin 0.6s linear infinite;
   }
@@ -138,74 +203,85 @@
     to { transform: rotate(360deg); }
   }
 
-  .inspector-panels {
+  .panels {
     display: flex;
-    gap: 0.5rem;
-    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .panel {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     min-width: 0;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
     overflow: hidden;
   }
 
-  .stub-panel {
-    border-color: #c4b5fd;
-  }
-
-  .hydrated-panel {
-    border-color: #86efac;
-  }
-
   .panel-label {
-    font-size: 0.72rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid #f3f4f6;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
+    letter-spacing: 0.05em;
+    padding: 0.6rem 1rem 0.25rem;
+    flex-shrink: 0;
   }
 
   .stub-panel .panel-label {
-    background: #ede9fe;
     color: #5b21b6;
+    background: #f5f3ff;
   }
 
   .hydrated-panel .panel-label {
-    background: #ecfdf5;
     color: #166534;
+    background: #f0fdf4;
   }
 
-  .panel-icon {
-    font-size: 0.85rem;
+  .panel-address {
+    font-size: 0.68rem;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    color: #6b7280;
+    padding: 0 1rem 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .stub-panel .panel-address {
+    background: #f5f3ff;
+    border-bottom: 1px solid #ede9fe;
+  }
+
+  .hydrated-panel .panel-address {
+    background: #f0fdf4;
+    border-bottom: 1px solid #dcfce7;
+  }
+
+  .panel-body {
+    flex: 1;
+    overflow: auto;
   }
 
   .panel-error {
-    padding: 0.5rem 0.6rem;
+    padding: 1rem;
     color: #b91c1c;
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     background: #fef2f2;
   }
 
   .panel-empty {
-    padding: 0.5rem 0.6rem;
+    padding: 1rem;
     color: #9ca3af;
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     font-style: italic;
   }
 
   .json-block {
     margin: 0;
-    padding: 0.5rem 0.6rem;
-    font-size: 0.72rem;
-    line-height: 1.5;
+    padding: 1rem;
+    font-size: 0.76rem;
+    line-height: 1.55;
     overflow-x: auto;
     font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     white-space: pre;
@@ -234,26 +310,28 @@
     font-style: italic;
   }
 
-  .panel-arrow {
+  .panel-divider {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.2rem;
+    gap: 0.3rem;
     flex-shrink: 0;
-    padding: 0 0.15rem;
-    min-width: 2rem;
+    width: 2.5rem;
+    background: #f9fafb;
+    border-left: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
   }
 
-  .arrow-line {
+  .divider-line {
     flex: 1;
     width: 2px;
     background: #c4b5fd;
-    min-height: 1rem;
+    min-height: 0.5rem;
   }
 
-  .arrow-label {
-    font-size: 0.6rem;
+  .divider-label {
+    font-size: 0.55rem;
     color: #7c3aed;
     writing-mode: vertical-lr;
     text-orientation: mixed;
@@ -262,9 +340,9 @@
     font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   }
 
-  .arrow-head {
+  .divider-arrow {
     color: #7c3aed;
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: bold;
     transform: rotate(90deg);
   }
