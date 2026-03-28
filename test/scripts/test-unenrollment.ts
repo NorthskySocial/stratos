@@ -37,12 +37,17 @@ async function run() {
     // 1. Verify user IS enrolled in Stratos and HAS a record on PDS
     const statusBefore = await enrollmentStatus(userState.did)
     if (!statusBefore.enrolled || statusBefore.active === false) {
-      throw new Error(`User is not active in Stratos before unenrollment (enrolled: ${statusBefore.enrolled}, active: ${statusBefore.active})`)
+      throw new Error(
+        `User is not active in Stratos before unenrollment (enrolled: ${statusBefore.enrolled}, active: ${statusBefore.active})`,
+      )
     }
     pass(`User ${testUserKey} is active in Stratos`)
 
     const session = await createSession(userState.handle, userState.password)
-    const recordBefore = await getEnrollmentRecord(userState.did, session.accessJwt)
+    const recordBefore = await getEnrollmentRecord(
+      userState.did,
+      session.accessJwt,
+    )
     if (!recordBefore.exists) {
       throw new Error('Enrollment record not found on PDS before unenrollment')
     }
@@ -60,32 +65,40 @@ async function run() {
     pass('User is inactive in Stratos')
 
     // 4. Verify PDS record deletion
-    const recordAfter = await getEnrollmentRecord(userState.did, session.accessJwt)
+    const recordAfter = await getEnrollmentRecord(
+      userState.did,
+      session.accessJwt,
+    )
     if (recordAfter.exists) {
-      throw new Error('Enrollment record still exists on PDS after unenrollment')
+      throw new Error(
+        'Enrollment record still exists on PDS after unenrollment',
+      )
     }
     pass('Enrollment record deleted from PDS')
 
     // 5. Verify subsequent authenticated requests fail
     // (using Bearer bypass which checks isEnrolled)
-    const res = await fetch(`${STRATOS_URL}/xrpc/com.atproto.repo.createRecord`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userState.did}`,
+    const res = await fetch(
+      `${STRATOS_URL}/xrpc/com.atproto.repo.createRecord`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userState.did}`,
+        },
+        body: JSON.stringify({
+          repo: userState.did,
+          collection: 'app.northsky.stratos.feed.post',
+          record: { text: 'should fail', createdAt: new Date().toISOString() },
+        }),
       },
-      body: JSON.stringify({
-        repo: userState.did,
-        collection: 'app.northsky.stratos.feed.post',
-        record: { text: 'should fail', createdAt: new Date().toISOString() }
-      })
-    })
-    
+    )
+
     if (res.ok) {
-        throw new Error('Authenticated request succeeded after unenrollment')
+      throw new Error('Authenticated request succeeded after unenrollment')
     }
     pass('Authenticated request failed as expected after unenrollment')
-    
+
     userState.enrolled = false
     passed++
   } catch (err) {

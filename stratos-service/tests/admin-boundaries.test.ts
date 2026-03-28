@@ -10,7 +10,7 @@ interface MockResponse {
 }
 
 function invokePostRoute(
-  router: Router,
+  app: express.Application,
   path: string,
   body: unknown,
 ): Promise<MockResponse> {
@@ -37,31 +37,24 @@ function invokePostRoute(
       },
     } as unknown as express.Response
 
-    type RouteLayer = {
-      route?: {
-        path: string
-        stack: Array<{
-          handle: (
-            req: express.Request,
-            res: express.Response,
-            next: () => void,
-          ) => unknown
-        }>
-      }
-    }
-    const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
-      (l) => l.route?.path === path,
-    )
-    if (!layer?.route) return reject(new Error(`Route not registered: ${path}`))
-    const handlers = layer.route.stack.map((s) => s.handle)
-    if (handlers.length === 0) return reject(new Error('No handler on route'))
+    // Trigger lazy router creation if needed
+    ;(app as any).handle(req, res, () => {
+      // Find the route in the stack
+      const layer = (app as any)._router.stack.find(
+        (l: any) => l.route?.path === path,
+      )
+      if (!layer?.route)
+        return reject(new Error(`Route not registered: ${path}`))
+      const handlers = layer.route.stack.map((s: any) => s.handle)
+      if (handlers.length === 0) return reject(new Error('No handler on route'))
 
-    let idx = 0
-    const next = () => {
-      const h = handlers[++idx]
-      if (h) Promise.resolve(h(req, res, next)).catch(reject)
-    }
-    Promise.resolve(handlers[0]!(req, res, next)).catch(reject)
+      let idx = 0
+      const next = () => {
+        const h = handlers[++idx]
+        if (h) Promise.resolve(h(req, res, next)).catch(reject)
+      }
+      Promise.resolve(handlers[idx](req, res, next)).catch(reject)
+    })
   })
 }
 
@@ -92,11 +85,17 @@ function createMockStore(
 function createCtx(opts: {
   enrollmentStore?: Partial<EnrollmentStore>
   adminAuthFails?: boolean
-}): { ctx: AppContext; enrollmentStore: EnrollmentStore; router: Router } {
+}): {
+  ctx: AppContext
+  enrollmentStore: EnrollmentStore
+  app: express.Application
+} {
   const enrollmentStore = createMockStore(opts.enrollmentStore)
-  const router = express.Router()
+
+  const app = express()
 
   const ctx = {
+    app,
     enrollmentStore,
     enrollmentService: {
       isEnrolled: enrollmentStore.isEnrolled,
@@ -138,16 +137,22 @@ function createCtx(opts: {
     },
   } as unknown as AppContext
 
-  registerEnrollmentHandlers(router, ctx)
-  return { ctx, enrollmentStore, router }
+  const xrpcServer = {
+    method: vi.fn(),
+  }
+
+  registerEnrollmentHandlers(xrpcServer as any, ctx)
+  // Ensure the router is initialized for tests that look into _router
+  ;(app as any)._router = (app as any)._router || express.Router()
+  return { ctx, enrollmentStore, app }
 }
 
 describe('admin boundary endpoints', () => {
   describe('POST /xrpc/zone.stratos.admin.addBoundary', () => {
     it('adds a boundary to an enrolled user', async () => {
-      const { router, enrollmentStore } = createCtx({})
+      const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
@@ -162,9 +167,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects unauthenticated requests', async () => {
-      const { router } = createCtx({ adminAuthFails: true })
+      const { app } = createCtx({ adminAuthFails: true })
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
@@ -172,9 +177,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects missing boundary field', async () => {
-      const { router } = createCtx({})
+      const { app } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:usagi' },
       )
@@ -183,9 +188,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects boundaries not in allowed domains', async () => {
-      const { router } = createCtx({})
+      const { app } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.addBoundary',
         {
           did: 'did:plc:usagi',
@@ -199,11 +204,11 @@ describe('admin boundary endpoints', () => {
     })
 
     it('returns 404 for unenrolled users', async () => {
-      const { router } = createCtx({
+      const { app } = createCtx({
         enrollmentStore: { isEnrolled: vi.fn(async () => false) },
       })
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:nobody', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
@@ -213,9 +218,9 @@ describe('admin boundary endpoints', () => {
 
   describe('POST /xrpc/zone.stratos.admin.removeBoundary', () => {
     it('removes a boundary from an enrolled user', async () => {
-      const { router, enrollmentStore } = createCtx({})
+      const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.removeBoundary',
         {
           did: 'did:plc:usagi',
@@ -232,9 +237,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects unauthenticated requests', async () => {
-      const { router } = createCtx({ adminAuthFails: true })
+      const { app } = createCtx({ adminAuthFails: true })
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.removeBoundary',
         {
           did: 'did:plc:usagi',
@@ -245,11 +250,11 @@ describe('admin boundary endpoints', () => {
     })
 
     it('returns 404 for unenrolled users', async () => {
-      const { router } = createCtx({
+      const { app } = createCtx({
         enrollmentStore: { isEnrolled: vi.fn(async () => false) },
       })
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.removeBoundary',
         {
           did: 'did:plc:nobody',
@@ -262,9 +267,9 @@ describe('admin boundary endpoints', () => {
 
   describe('POST /xrpc/zone.stratos.admin.setBoundaries', () => {
     it('sets boundaries for an enrolled user', async () => {
-      const { router, enrollmentStore } = createCtx({})
+      const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.setBoundaries',
         {
           did: 'did:plc:usagi',
@@ -284,11 +289,11 @@ describe('admin boundary endpoints', () => {
     })
 
     it('allows setting empty boundaries', async () => {
-      const { router } = createCtx({
+      const { app } = createCtx({
         enrollmentStore: { getBoundaries: vi.fn(async () => []) },
       })
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi', boundaries: [] },
       )
@@ -297,9 +302,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects invalid boundaries', async () => {
-      const { router } = createCtx({})
+      const { app } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.setBoundaries',
         {
           did: 'did:plc:usagi',
@@ -316,9 +321,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects missing boundaries array', async () => {
-      const { router } = createCtx({})
+      const { app } = createCtx({})
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi' },
       )
@@ -326,9 +331,9 @@ describe('admin boundary endpoints', () => {
     })
 
     it('rejects unauthenticated requests', async () => {
-      const { router } = createCtx({ adminAuthFails: true })
+      const { app } = createCtx({ adminAuthFails: true })
       const res = await invokePostRoute(
-        router,
+        app as any,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
       )

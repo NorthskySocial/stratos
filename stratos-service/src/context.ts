@@ -1139,7 +1139,7 @@ export async function createAppContext(
     logger,
   })
 
-  const profileRecordWriter = new ProfileRecordWriterImpl(async (did) => {
+  const profileRecordWriter = new ProfileRecordWriterImpl(async (did: string) => {
     try {
       const session = await oauthClient.restore(did)
       return { api: new Agent(session) }
@@ -1148,7 +1148,7 @@ export async function createAppContext(
     }
   })
 
-  // Initialize external allow list provider if configured
+  // Initialize external allowlist provider if configured
   let allowListProvider: ExternalAllowListProvider | undefined
   if (cfg.enrollment.allowListUrl) {
     const cache = cfg.enrollment.valkeyUrl

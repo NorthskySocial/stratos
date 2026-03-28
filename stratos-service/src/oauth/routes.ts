@@ -64,6 +64,7 @@ export interface OAuthRoutesConfig {
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
+  profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   initRepo: (did: string) => Promise<void>
   createSigningKey: (did: string) => Promise<string>
   createAttestation: (
@@ -85,6 +86,7 @@ export async function migrateEnrollmentRkey(
   oauthClient: NodeOAuthClient,
   serviceEndpoint: string,
   serviceDid: string,
+  profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter,
   logger?: Logger,
 ): Promise<void> {
   const expectedRkey = serviceDIDToRkey(serviceDid)
@@ -126,19 +128,14 @@ export async function migrateEnrollmentRkey(
     }
 
     // Write record with service DID rkey
-    await agent.com.atproto.repo.putRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      rkey: expectedRkey,
-      record: matchingRecord.value as Record<string, unknown>,
-    })
+    await profileRecordWriter.putEnrollmentRecord(
+      did,
+      expectedRkey,
+      matchingRecord.value as Record<string, unknown>,
+    )
 
     // Delete the old record
-    await agent.com.atproto.repo.deleteRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      rkey: currentRkey,
-    })
+    await profileRecordWriter.deleteEnrollmentRecord(did, currentRkey)
 
     await enrollmentStore.updateEnrollment(did, {
       enrollmentRkey: expectedRkey,
@@ -183,6 +180,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     logger,
     devMode = false,
     dpopVerifier,
+    profileRecordWriter,
     initRepo,
     createSigningKey,
     createAttestation,
@@ -369,8 +367,48 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
           oauthClient,
           serviceEndpoint,
           serviceDid,
+          profileRecordWriter,
           logger,
         )
+
+        // Ensure PDS record exists (in case user deleted it but stayed enrolled in Stratos)
+        const enrollment = await enrollmentStore.getEnrollment(did)
+        if (enrollment && enrollment.active) {
+          const boundaries = await enrollmentStore.getBoundaries(did)
+          const attestation = await createAttestation(
+            did,
+            boundaries,
+            enrollment.signingKeyDid,
+          )
+
+          try {
+            await profileRecordWriter.putEnrollmentRecord(
+              did,
+              enrollment.enrollmentRkey!,
+              {
+                service: serviceEndpoint,
+                boundaries: boundaries.map((value) => ({ value })),
+                signingKey: enrollment.signingKeyDid,
+                attestation: {
+                  sig: attestation.sig,
+                  signingKey: attestation.signingKey,
+                },
+                createdAt: new Date().toISOString(),
+              },
+            )
+          } catch (profileErr) {
+            logger?.warn(
+              {
+                err:
+                  profileErr instanceof Error
+                    ? profileErr.message
+                    : String(profileErr),
+                did,
+              },
+              'failed to restore profile record',
+            )
+          }
+        }
       }
 
       if (!alreadyEnrolled) {
@@ -389,23 +427,15 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
         // Uses putRecord with service DID as rkey for deterministic addressing
         const enrollmentRkey = serviceDIDToRkey(serviceDid)
         try {
-          const oauthSession = await oauthClient.restore(did)
-          const agent = new Agent(oauthSession)
-
-          await agent.com.atproto.repo.putRecord({
-            repo: did,
-            collection: 'zone.stratos.actor.enrollment',
-            rkey: enrollmentRkey,
-            record: {
-              service: serviceEndpoint,
-              boundaries: enrollBoundaries.map((value) => ({ value })),
-              signingKey: userSigningKeyDid,
-              attestation: {
-                sig: attestation.sig,
-                signingKey: attestation.signingKey,
-              },
-              createdAt: new Date().toISOString(),
+          await profileRecordWriter.putEnrollmentRecord(did, enrollmentRkey, {
+            service: serviceEndpoint,
+            boundaries: enrollBoundaries.map((value) => ({ value })),
+            signingKey: userSigningKeyDid,
+            attestation: {
+              sig: attestation.sig,
+              signingKey: attestation.signingKey,
             },
+            createdAt: new Date().toISOString(),
           })
         } catch (profileErr) {
           logger?.warn(

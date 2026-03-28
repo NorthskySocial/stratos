@@ -1,4 +1,4 @@
-import express, { type Router, type Request, type Response } from 'express'
+import express, { type Request, type Response } from 'express'
 import type { BoundaryResolver } from '@northskysocial/stratos-core'
 import { Agent } from '@atproto/api'
 import {
@@ -108,53 +108,53 @@ export function registerEnrollmentHandlers(
 
       const enrollment = await ctx.enrollmentService.getEnrollment(did)
 
-        // This isn't a super great way to do it but hiding boundaries unless authenticated prevents abuse
-        if (enrollment) {
-          const body: {
-            did: string
-            enrolled: true
-            enrolledAt: string
-            active: boolean
-            signingKey: string
-            enrollmentRkey?: string
-            boundaries?: Array<{ value: string }>
-            attestation?: { sig: Uint8Array; signingKey: string }
-          } = {
-            did,
-            enrolled: true,
-            enrolledAt: enrollment.enrolledAt.toISOString(),
-            active: enrollment.active,
-            signingKey: enrollment.signingKeyDid,
-            enrollmentRkey: enrollment.enrollmentRkey,
-          }
+      // This isn't a super great way to do it but hiding boundaries unless authenticated prevents abuse
+      if (enrollment) {
+        const body: {
+          did: string
+          enrolled: true
+          enrolledAt: string
+          active: boolean
+          signingKey: string
+          enrollmentRkey?: string
+          boundaries?: Array<{ value: string }>
+          attestation?: { sig: Uint8Array; signingKey: string }
+        } = {
+          did,
+          enrolled: true,
+          enrolledAt: enrollment.enrolledAt.toISOString(),
+          active: enrollment.active,
+          signingKey: enrollment.signingKeyDid,
+          enrollmentRkey: enrollment.enrollmentRkey,
+        }
 
           // Always resolve boundaries to trigger lazy migration for legacy bare-name boundaries.
           // Only include them in the response when authenticated to prevent enumeration abuse.
           const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
 
-          if (auth) {
+          if (authenticatedDid) {
             body.boundaries = boundaryValues.map((value: string) => ({
               value,
             }))
 
-          if (boundaryValues.length > 0) {
-            try {
-              body.attestation = await ctx.createAttestation(
-                did,
-                boundaryValues,
-                enrollment.signingKeyDid,
-              )
-            } catch (err) {
-              ctx.logger?.warn(
-                {
-                  err: err instanceof Error ? err.message : String(err),
+            if (boundaryValues.length > 0) {
+              try {
+                body.attestation = await ctx.createAttestation(
                   did,
-                },
-                'failed to generate attestation for status',
-              )
+                  boundaryValues,
+                  enrollment.signingKeyDid,
+                )
+              } catch (err) {
+                ctx.logger?.warn(
+                  {
+                    err: err instanceof Error ? err.message : String(err),
+                    did,
+                  },
+                  'failed to generate attestation for status',
+                )
+              }
             }
           }
-        }
 
         ctx.logger?.debug(
           {
@@ -211,7 +211,13 @@ export function registerEnrollmentHandlers(
 
       // 1. Delete enrollment record from user's PDS (best-effort)
       try {
-        await ctx.profileRecordWriter.deleteEnrollmentRecord(did)
+        const enrollment = await ctx.enrollmentStore.getEnrollment(did)
+        if (enrollment?.enrollmentRkey) {
+          await ctx.profileRecordWriter.deleteEnrollmentRecord(
+            did,
+            enrollment.enrollmentRkey,
+          )
+        }
       } catch (err) {
         ctx.logger?.warn(
           { err: err instanceof Error ? err.message : String(err), did },
@@ -247,7 +253,7 @@ export function registerEnrollmentHandlers(
   // zone.stratos.identity.resolveEnrollments — unauthenticated boundary lookup
   const cachedResolver = new CachedBoundaryResolver(ctx.boundaryResolver)
 
-  router.get(
+  ctx.app.get(
     '/xrpc/zone.stratos.identity.resolveEnrollments',
     async (req: Request, res: Response) => {
       try {
@@ -320,7 +326,7 @@ export function registerEnrollmentHandlers(
   }
 
   // POST /xrpc/zone.stratos.admin.addBoundary
-  router.post(
+  ctx.app.post(
     '/xrpc/zone.stratos.admin.addBoundary',
     jsonBody,
     async (req: Request, res: Response) => {
@@ -391,7 +397,7 @@ export function registerEnrollmentHandlers(
   )
 
   // POST /xrpc/zone.stratos.admin.removeBoundary
-  router.post(
+  ctx.app.post(
     '/xrpc/zone.stratos.admin.removeBoundary',
     jsonBody,
     async (req: Request, res: Response) => {
@@ -454,7 +460,7 @@ export function registerEnrollmentHandlers(
   )
 
   // POST /xrpc/zone.stratos.admin.setBoundaries
-  router.post(
+  ctx.app.post(
     '/xrpc/zone.stratos.admin.setBoundaries',
     jsonBody,
     async (req: Request, res: Response) => {
@@ -528,7 +534,7 @@ export function registerEnrollmentHandlers(
   )
 
   // zone.stratos.server.listDomains — public service information
-  router.get(
+  ctx.app.get(
     '/xrpc/zone.stratos.server.listDomains',
     async (_req: Request, res: Response) => {
       try {

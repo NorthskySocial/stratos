@@ -63,3 +63,27 @@ export interface BoundaryResolver {
    */
   getBoundaries(did: string): Promise<string[]>
 }
+
+/**
+ * Port interface for writing enrollment records to a user's PDS.
+ */
+export interface ProfileRecordWriter {
+  /**
+   * Write an enrollment record to the user's PDS
+   * @param did - User's DID
+   * @param rkey - Record key (usually service DID)
+   * @param record - Enrollment record content
+   */
+  putEnrollmentRecord(
+    did: string,
+    rkey: string,
+    record: Record<string, unknown>,
+  ): Promise<void>
+
+  /**
+   * Delete an enrollment record from the user's PDS
+   * @param did - User's DID
+   * @param rkey - Record key to delete
+   */
+  deleteEnrollmentRecord(did: string, rkey: string): Promise<void>
+}
