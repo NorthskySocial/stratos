@@ -4,7 +4,7 @@ const base = '/'
 
 export default defineConfig({
   title: 'Stratos',
-  description: 'Private permissioned data layer for ATProtocol',
+  description: 'Private permissioned data layer for ATprotocol',
   base,
 
   srcExclude: [
@@ -127,7 +127,7 @@ export default defineConfig({
 
     footer: {
       message:
-        'Built on ATProtocol, designed by <a href="https://northskysocial.com" target="_blank">Northsky Social</a>',
+        'Built on ATprotocol, designed by <a href="https://northskysocial.com" target="_blank">Northsky Social</a>',
       copyright: `<center><img src="${base}northsky.png" alt="Northsky Social" width="48" height="48" /></center>`,
     },
 

@@ -7,11 +7,11 @@ Stratos separates two concerns when handling domain boundaries:
 
 ## Concepts
 
-| Term                    | Description                                                                        |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| **Allowed Domains**     | Full set of domains the service accepts. Posts can reference any of these.         |
-| **Auto-Enroll Domains** | Subset assigned to new users at OAuth enrollment. Defaults to all allowed domains. |
-| **User Boundaries**     | Per-user stored domains. Determines what posts a user can create and view.         |
+| Term                | Description                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| Allowed Domains     | Full set of domains the service accepts. Posts can reference any of these.         |
+| Auto-Enroll Domains | Subset assigned to new users at OAuth enrollment. Defaults to all allowed domains. |
+| User Boundaries     | Per-user stored domains. Determines what posts a user can create and view.         |
 
 ## Enrollment Assignment Logic
 

@@ -19,7 +19,7 @@ with an AppView for domain-scoped private content.
 
 ### What is Stratos?
 
-Stratos is a **private namespace service** for ATProtocol that enables users to store content
+Stratos is a **private namespace service** for ATprotocol that enables users to store content
 visible only within specific community domains. Unlike public `app.bsky` records that are
 globally visible, Stratos records have **domain boundaries** that restrict visibility.
 
@@ -46,7 +46,7 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ```mermaid
 graph TD
-    subgraph ATProtocol ["ATProtocol Network"]
+    subgraph ATprotocol ["ATprotocol Network"]
         direction TB
         subgraph Services [" "]
             direction LR
@@ -581,7 +581,7 @@ When DPoP is enabled:
 6. Stratos verifies the DPoP proof is bound to the token (cnf.jkt claim)
 
 > **Note:** DPoP authentication requires OAuth to be configured. Token verification uses JWKS-based
-> signature validation (not token introspection, which ATProtocol PDSes do not support).
+> signature validation (not token introspection, which ATprotocol PDSes do not support).
 
 #### Local/Disk Storage
 
