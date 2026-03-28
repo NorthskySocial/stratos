@@ -10,6 +10,7 @@ export interface InspectorResult {
   stub: Record<string, unknown> | null
   record: Record<string, unknown> | null
   stubError: string | null
+  stubNotFound: boolean
   recordError: string | null
 }
 
@@ -93,6 +94,7 @@ export async function inspectRecord(
     stub: null,
     record: null,
     stubError: null,
+    stubNotFound: false,
     recordError: null,
   }
 
@@ -103,7 +105,12 @@ export async function inspectRecord(
     const stubResponse = await fetchPdsStub(pdsUrl, did, collection, rkey)
     result.stub = stubResponse as Record<string, unknown>
   } catch (err) {
-    result.stubError = err instanceof Error ? err.message : String(err)
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('RecordNotFound')) {
+      result.stubNotFound = true
+    } else {
+      result.stubError = msg
+    }
   }
 
   try {

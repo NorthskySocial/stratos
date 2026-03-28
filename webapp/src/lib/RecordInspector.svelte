@@ -82,7 +82,12 @@
           <div class="panel-label">Public Record</div>
           <div class="panel-address" title={pdsRecordAddress}>{pdsRecordAddress}</div>
           <div class="panel-body">
-            {#if result.stubError}
+            {#if result.stubNotFound}
+              <div class="panel-not-found">
+                <p>Stub record not found on PDS.</p>
+                <p>Stubs are written asynchronously after a record is created — it may take a moment to appear. Try reopening the inspector shortly.</p>
+              </div>
+            {:else if result.stubError}
               <div class="panel-error">{result.stubError}</div>
             {:else if result.stub}
               <pre class="json-block">{@html syntaxHighlightJson(stubValueOnly(result.stub))}</pre>
@@ -268,6 +273,23 @@
     color: #b91c1c;
     font-size: 0.82rem;
     background: #fef2f2;
+  }
+
+  .panel-not-found {
+    padding: 1rem;
+    color: #92400e;
+    font-size: 0.82rem;
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+  }
+
+  .panel-not-found p {
+    margin: 0 0 0.4rem;
+  }
+
+  .panel-not-found p:last-child {
+    margin: 0;
+    opacity: 0.8;
   }
 
   .panel-empty {
