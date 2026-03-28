@@ -31,6 +31,7 @@
         bind:value={handle}
         placeholder="Enter your handle (e.g. alice.bsky.social)"
         disabled={loading}
+        autocomplete="username"
       />
       <button type="submit" disabled={loading || !handle.trim()}>
         {loading ? 'Signing in…' : 'Sign In'}

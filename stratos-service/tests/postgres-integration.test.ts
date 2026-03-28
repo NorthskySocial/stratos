@@ -397,20 +397,29 @@ describe('PostgreSQL Backend Integration', () => {
         active: true,
       })
 
-      await enrollmentStore.setBoundaries(testDid, ['engineering', 'design'])
+      await enrollmentStore.setBoundaries(testDid, [
+        'did:web:nerv.tokyo.jp/engineering',
+        'did:web:nerv.tokyo.jp/design',
+      ])
       let boundaries = await enrollmentStore.getBoundaries(testDid)
       expect(boundaries).toHaveLength(2)
-      expect(boundaries).toContain('engineering')
-      expect(boundaries).toContain('design')
+      expect(boundaries).toContain('did:web:nerv.tokyo.jp/engineering')
+      expect(boundaries).toContain('did:web:nerv.tokyo.jp/design')
 
-      await enrollmentStore.addBoundary(testDid, 'leadership')
+      await enrollmentStore.addBoundary(
+        testDid,
+        'did:web:nerv.tokyo.jp/leadership',
+      )
       boundaries = await enrollmentStore.getBoundaries(testDid)
       expect(boundaries).toHaveLength(3)
 
-      await enrollmentStore.removeBoundary(testDid, 'design')
+      await enrollmentStore.removeBoundary(
+        testDid,
+        'did:web:nerv.tokyo.jp/design',
+      )
       boundaries = await enrollmentStore.getBoundaries(testDid)
       expect(boundaries).toHaveLength(2)
-      expect(boundaries).not.toContain('design')
+      expect(boundaries).not.toContain('did:web:nerv.tokyo.jp/design')
     })
 
     it('should unenroll', async () => {

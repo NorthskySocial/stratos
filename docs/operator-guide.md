@@ -19,18 +19,18 @@ with an AppView for domain-scoped private content.
 
 ### What is Stratos?
 
-Stratos is a **private namespace service** for ATProtocol that enables users to store content
+Stratos is a **private namespace service** for ATprotocol that enables users to store content
 visible only within specific community domains. Unlike public `app.bsky` records that are
 globally visible, Stratos records have **domain boundaries** that restrict visibility.
 
 ### Key Concepts
 
-| Concept              | Description                                                                        |
-| -------------------- | ---------------------------------------------------------------------------------- |
-| **Domain Boundary**  | A list of Domain boundary names (e.g., `fanart`) that defines who can see a record |
-| **Enrollment**       | The process of a user registering with a Stratos service via OAuth                 |
-| **Service DID**      | The decentralized identifier for the Stratos service itself                        |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content                  |
+| Concept              | Description                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Domain Boundary**  | A service-qualified boundary identifier in `{serviceDid}/{name}` format. Records with a boundary are visible only to enrolled users who share that boundary. |
+| **Enrollment**       | The process of a user registering with a Stratos service via OAuth                                                                                           |
+| **Service DID**      | The decentralized identifier for the Stratos service itself                                                                                                  |
+| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content                                                                                            |
 
 ### Use Cases
 
@@ -46,7 +46,7 @@ globally visible, Stratos records have **domain boundaries** that restrict visib
 
 ```mermaid
 graph TD
-    subgraph ATProtocol ["ATProtocol Network"]
+    subgraph ATprotocol ["ATprotocol Network"]
         direction TB
         subgraph Services [" "]
             direction LR
@@ -103,7 +103,7 @@ sequenceDiagram
     participant P as User's PDS
 
     C->>S: com.atproto.repo.createRecord
-    Note right of C: collection: zone.stratos.feed.post<br/>record: { text: "...", boundary: { values: [{ value: "fanart" }] } } }
+    Note right of C: collection: zone.stratos.feed.post<br/>record: { text: "...", boundary: { values: [{ value: "did:web:stratos.example.com/fanart" }] } } }
 
     S->>S: Validate User Enrollment, Valid Boundary, No cross-namespace embeds
     S->>S: Store record in actor repo storage
@@ -439,11 +439,15 @@ Both can be combined - a user is allowed if they match **either** list.
 
 ### Domain Boundaries
 
-Restrict which domains can appear in record boundaries:
+Restrict which domain names can appear in record boundaries:
 
 ```bash
 STRATOS_ALLOWED_DOMAINS="general,fanart"
 ```
+
+These are the **bare domain names**. At startup the service qualifies them with its own
+DID, so `"fanart"` becomes `"did:web:stratos.example.com/fanart"`. Clients must send the
+fully-qualified form when creating records (see the [Client Guide](client-guide.md)).
 
 Records with boundaries outside this list will be rejected.
 
@@ -577,7 +581,7 @@ When DPoP is enabled:
 6. Stratos verifies the DPoP proof is bound to the token (cnf.jkt claim)
 
 > **Note:** DPoP authentication requires OAuth to be configured. Token verification uses JWKS-based
-> signature validation (not token introspection, which ATProtocol PDSes do not support).
+> signature validation (not token introspection, which ATprotocol PDSes do not support).
 
 #### Local/Disk Storage
 

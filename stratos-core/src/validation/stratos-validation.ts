@@ -1,5 +1,6 @@
 import { AtUri } from '@atproto/syntax'
 import { StratosConfig, StratosValidationError } from '../types.js'
+import { assertBoundaryMatchesService } from './boundary-qualification.js'
 
 /**
  * Error codes for stratos validation failures
@@ -9,6 +10,8 @@ export type StratosValidationErrorCode =
   | 'CrossNamespaceReply'
   | 'CrossNamespaceEmbed'
   | 'MissingBoundary'
+  | 'ReplyBoundaryEscalation'
+  | 'ServiceMismatch'
 
 /**
  * Record type for validation (loosely typed to avoid lexicon dependencies)
@@ -18,11 +21,15 @@ export type RepoRecord = Record<string, unknown>
 /**
  * Validates stratos records for domain boundaries and cross-namespace isolation.
  * This function should be called for any record in the zone.stratos.* namespace.
+ *
+ * When the record is a reply, parentBoundaries must be provided so the function
+ * can enforce that reply boundaries are a subset of the parent's boundaries.
  */
 export function assertStratosValidation(
   record: RepoRecord,
   collection: string,
   stratosConfig: StratosConfig | undefined,
+  parentBoundaries?: string[],
 ): void {
   // Only validate zone.stratos.* collections
   if (!collection.startsWith('zone.stratos.')) {
@@ -39,7 +46,7 @@ export function assertStratosValidation(
 
   // Validate boundary for stratos posts
   if (collection === 'zone.stratos.feed.post') {
-    assertStratosPostValidation(record, stratosConfig)
+    assertStratosPostValidation(record, stratosConfig, parentBoundaries)
   }
 }
 
@@ -49,6 +56,7 @@ export function assertStratosValidation(
 function assertStratosPostValidation(
   record: RepoRecord,
   stratosConfig: StratosConfig,
+  parentBoundaries?: string[],
 ): void {
   // Check boundary property exists
   const boundary = record.boundary as
@@ -67,6 +75,15 @@ function assertStratosPostValidation(
       throw new StratosValidationError(
         `Domain "${domain.value}" is not allowed on this service. Allowed domains: ${stratosConfig.allowedDomains.join(', ')}`,
         'ForbiddenDomain',
+      )
+    }
+
+    try {
+      assertBoundaryMatchesService(domain.value, stratosConfig.serviceDid)
+    } catch {
+      throw new StratosValidationError(
+        `Boundary "${domain.value}" does not belong to this service (${stratosConfig.serviceDid})`,
+        'ServiceMismatch',
       )
     }
   }
@@ -90,6 +107,20 @@ function assertStratosPostValidation(
         'Stratos post cannot have a non-stratos root',
         'CrossNamespaceReply',
       )
+    }
+
+    // Reply boundaries must be a subset of the parent's boundaries
+    if (parentBoundaries) {
+      const replyDomains = boundary.values.map((d) => d.value)
+      const escalatedDomains = replyDomains.filter(
+        (domain) => !parentBoundaries.includes(domain),
+      )
+      if (escalatedDomains.length > 0) {
+        throw new StratosValidationError(
+          `Reply boundaries must be a subset of the parent's boundaries. Domains not in parent: ${escalatedDomains.join(', ')}`,
+          'ReplyBoundaryEscalation',
+        )
+      }
     }
   }
 

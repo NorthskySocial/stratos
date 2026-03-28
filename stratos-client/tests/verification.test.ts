@@ -642,7 +642,7 @@ describe('resolveUserSigningKey', () => {
               cid: 'bafytest',
               value: {
                 service: 'https://stratos.example.com',
-                boundaries: [{ value: 'engineering' }],
+                boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
                 signingKey: didKey,
                 attestation: {
                   sig: { $bytes: sigB64 },

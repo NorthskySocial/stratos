@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { StratosEnrollment, StratosServiceStatus } from './stratos'
   import { enrollInStratos } from './stratos'
+  import { displayBoundary } from './boundary-display'
 
   interface Props {
     handle: string
@@ -106,7 +107,7 @@
         class:active={activeFeed === domain}
         onclick={() => onSelectFeed(domain)}
       >
-        {domain}
+        {displayBoundary(domain)}
       </button>
     {/each}
   </div>
@@ -134,7 +135,7 @@
             class="domain-tag"
             class:enrolled-tag={enrolledDomains.includes(domain)}
           >
-            {domain}
+            {displayBoundary(domain)}
             {#if enrolledDomains.includes(domain)}
               <span class="check">✓</span>
             {/if}
@@ -149,7 +150,7 @@
       <h3 class="section-title">Your Domains</h3>
       <div class="domain-list">
         {#each enrolledDomains as domain}
-          <span class="domain-tag enrolled-tag">{domain}</span>
+          <span class="domain-tag enrolled-tag">{displayBoundary(domain)}</span>
         {/each}
       </div>
     </div>

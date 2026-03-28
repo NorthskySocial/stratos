@@ -16,9 +16,11 @@
   let { session, enrollment, stratosAgent, replyingTo, onpost, oncancelreply }: Props = $props()
 
   let text = $state('')
-  let isPrivate = $state(false)
+  let isPrivate = $state(true)
   let selectedDomain = $state('')
   let posting = $state(false)
+  import { displayBoundary } from './boundary-display'
+
   let error = $state('')
 
   let domains = $derived(
@@ -90,7 +92,12 @@
       oncancelreply()
       onpost()
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to create post'
+      const message = err instanceof Error ? err.message : 'Failed to create post'
+      if (!isPrivate && message.includes('Missing required scope')) {
+        error = 'Public posting is not available — this demo is for private data only.'
+      } else {
+        error = message
+      }
     } finally {
       posting = false
     }
@@ -107,7 +114,7 @@
 
   <textarea
     bind:value={text}
-    placeholder={isPrivate ? `Post to ${selectedDomain || 'private'}…` : 'Write a post…'}
+    placeholder={isPrivate ? `Post to ${selectedDomain ? displayBoundary(selectedDomain) : 'private'}…` : 'Write a post…'}
     disabled={posting}
     rows="3"
   ></textarea>
@@ -133,7 +140,7 @@
           disabled={posting}
         >
           {#each domains as domain}
-            <option value={domain}>{domain}</option>
+            <option value={domain}>{displayBoundary(domain)}</option>
           {/each}
         </select>
       {/if}
