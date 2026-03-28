@@ -1,28 +1,28 @@
 # Getting Started
 
-This guide explains how to integrate Stratos private namespace functionality into ATProtocol client applications. It is based on how Stratos was integrated with [pdsls](https://github.com/pdsls/pdsls) and maps patterns to the Bluesky [social-app](https://github.com/bluesky-social/social-app) codebase as a reference architecture.
+This guide explains how to integrate Stratos private namespace functionality into ATprotocol client applications. It is based on how Stratos was integrated with [pdsls](https://github.com/pdsls/pdsls) and maps patterns to the Bluesky [social-app](https://github.com/bluesky-social/social-app) codebase as a reference architecture.
 
 ## What is Stratos?
 
-Stratos enables private, domain-scoped content within ATProtocol. Users can create posts visible only to members of specific groups or communities.
+Stratos enables private, domain-scoped content within ATprotocol. Users can create posts visible only to members of specific groups or communities.
 
-| Concept             | Description                                                                                                                                   |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Stratos Service** | A server that stores private records (separate from PDS)                                                                                      |
-| **Enrollment**      | User must enroll with a Stratos service to create private content                                                                             |
-| **Domain Boundary** | Specifies which community can view a record. Values are fully qualified as `{serviceDid}/{name}` (e.g. `did:web:stratos.example.com/general`) |
-| **Private Post**    | A `zone.stratos.feed.post` record with boundary restrictions                                                                                  |
+| Concept         | Description                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stratos Service | A server that stores private records (separate from PDS)                                                                                      |
+| Enrollment      | User must enroll with a Stratos service to create private content                                                                             |
+| Domain Boundary | Specifies which community can view a record. Values are fully qualified as `{serviceDid}/{name}` (e.g. `did:web:stratos.example.com/general`) |
+| Private Post    | A `zone.stratos.feed.post` record with boundary restrictions                                                                                  |
 
 ## The `stratos-client` Helper Library
 
 The `@northskysocial/stratos-client` package provides the building blocks for enrollment discovery, service routing, record verification, and OAuth scope management:
 
-| Module           | What it provides                                                                                                                           |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **discovery**    | `discoverEnrollments()`, `discoverEnrollment()`, `getEnrollmentByServiceDid()` — find enrollment records on a user's PDS                   |
-| **routing**      | `createServiceFetchHandler()`, `resolveServiceUrl()`, `findEnrollmentByService()` — route XRPC calls to the correct Stratos service        |
-| **verification** | `fetchAndVerifyRecord()`, `verifyCidIntegrity()`, `resolveServiceSigningKey()`, `resolveUserSigningKey()` — three-tier record verification |
-| **scopes**       | `buildStratosScopes()`, `STRATOS_SCOPES` — build OAuth scope strings for Stratos collections                                               |
+| Module       | What it provides                                                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| discovery    | `discoverEnrollments()`, `discoverEnrollment()`, `getEnrollmentByServiceDid()` — find enrollment records on a user's PDS                   |
+| routing      | `createServiceFetchHandler()`, `resolveServiceUrl()`, `findEnrollmentByService()` — route XRPC calls to the correct Stratos service        |
+| verification | `fetchAndVerifyRecord()`, `verifyCidIntegrity()`, `resolveServiceSigningKey()`, `resolveUserSigningKey()` — three-tier record verification |
+| scopes       | `buildStratosScopes()`, `STRATOS_SCOPES` — build OAuth scope strings for Stratos collections                                               |
 
 Install it alongside your AT Protocol client library:
 
@@ -83,7 +83,7 @@ When using `@atproto/api` with an OAuth session, you **must** wrap the session's
 `new Agent(session)` followed by `agent.serviceUrl = new URL(stratosUrl)` will silently send requests to the PDS instead of Stratos. The `OAuthSession` always resolves URLs against the OAuth token's audience. Always use the wrapper pattern below.
 :::
 
-**Using `stratos-client`** (with `@atcute/client`):
+Using `stratos-client` (with `@atcute/client`):
 
 ```typescript
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
@@ -92,7 +92,7 @@ const handler = createServiceFetchHandler(authenticatedHandler, serviceUrl)
 const rpc = new Client({ handler })
 ```
 
-**Using `@atproto/api`** directly:
+Using `@atproto/api` directly:
 
 ```typescript
 import { Agent } from '@atproto/api'

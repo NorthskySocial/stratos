@@ -1,6 +1,6 @@
 # Stratos Client Integration Guide
 
-This guide explains how to integrate Stratos private namespace functionality into ATProtocol client
+This guide explains how to integrate Stratos private namespace functionality into ATprotocol client
 applications.
 
 ## Table of Contents
@@ -20,7 +20,7 @@ applications.
 
 ### What is Stratos?
 
-Stratos enables **private, domain-scoped content** within ATProtocol. Users can create posts visible
+Stratos enables **private, domain-scoped content** within ATprotocol. Users can create posts visible
 only to members of specific groups or communities.
 
 ### Key Concepts

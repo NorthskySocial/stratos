@@ -15,7 +15,7 @@ The bare name (e.g. `general`) is what operators configure in `STRATOS_ALLOWED_D
 
 ## Enrollment
 
-Enrollment is the process of a user registering with a Stratos service. It happens via ATProtocol OAuth. On successful enrollment the service:
+Enrollment is the process of a user registering with a Stratos service. It happens via ATprotocol OAuth. On successful enrollment the service:
 
 1. Initialises a per-user repo (empty signed commit + MST).
 2. Generates a P-256 signing keypair for the user.
