@@ -22,7 +22,7 @@
 
   const parts = parseAtUri(uri)
   const pdsRecordAddress = `at://${parts.did}/${parts.collection}/${parts.rkey}`
-  const stratosRecordAddress = `${ctx.serviceUrl}/xrpc/com.atproto.repo.getRecord?repo=${parts.did}&collection=${parts.collection}&rkey=${parts.rkey}`
+  const stratosRecordAddress = `at://${parts.did}/${parts.collection}/${parts.rkey}`
 
   async function load() {
     loading = true

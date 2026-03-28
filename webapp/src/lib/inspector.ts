@@ -28,7 +28,8 @@ export async function resolvePdsEndpoint(did: string): Promise<string> {
     const pds = doc.service?.find(
       (s: { id?: string }) => s.id === '#atproto_pds',
     )
-    if (!pds?.serviceEndpoint) throw new Error('No PDS endpoint in DID document')
+    if (!pds?.serviceEndpoint)
+      throw new Error('No PDS endpoint in DID document')
     return pds.serviceEndpoint
   }
 
@@ -40,7 +41,8 @@ export async function resolvePdsEndpoint(did: string): Promise<string> {
     const pds = doc.service?.find(
       (s: { id?: string }) => s.id === '#atproto_pds',
     )
-    if (!pds?.serviceEndpoint) throw new Error('No PDS endpoint in DID document')
+    if (!pds?.serviceEndpoint)
+      throw new Error('No PDS endpoint in DID document')
     return pds.serviceEndpoint
   }
 
@@ -137,10 +139,8 @@ export function syntaxHighlightJson(obj: unknown, indent = 0): string {
 
   if (obj === null) return '<span class="json-null">null</span>'
   if (obj === undefined) return '<span class="json-null">undefined</span>'
-  if (typeof obj === 'boolean')
-    return `<span class="json-bool">${obj}</span>`
-  if (typeof obj === 'number')
-    return `<span class="json-num">${obj}</span>`
+  if (typeof obj === 'boolean') return `<span class="json-bool">${obj}</span>`
+  if (typeof obj === 'number') return `<span class="json-num">${obj}</span>`
   if (typeof obj === 'string')
     return `<span class="json-str">"${escapeHtml(obj)}"</span>`
 
