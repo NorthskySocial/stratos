@@ -1,10 +1,10 @@
 # Introduction
 
-Stratos is a private permissioned data layer for ATProtocol. It keeps private records out of public purview, publishes enrollment metadata back to the PDS for discovery, and lets downstream apps serve boundary-filtered content without inventing a separate identity model.
+Stratos is a private permissioned data layer for ATprotocol. It keeps private records out of public purview, publishes enrollment metadata back to the PDS for discovery, and lets downstream apps serve boundary-filtered content without inventing a separate identity model.
 
 ## What Problem Does It Solve?
 
-ATProtocol is designed for open, public social data. Every record on a PDS is visible to anyone who knows the AT-URI. Stratos adds a permissioned layer on top: users can create posts that are only visible to members of specific communities, without leaving the AT Protocol identity and tooling ecosystem.
+ATprotocol is designed for open, public social data. Every record on a PDS is visible to anyone who knows the AT-URI. Stratos adds a permissioned layer on top: users can create posts that are only visible to members of specific communities, without leaving the AT Protocol identity and tooling ecosystem.
 
 ## How It Works
 
@@ -14,10 +14,10 @@ import DataFlowAnimation from '../.vitepress/theme/components/DataFlowAnimation.
 
 <DataFlowAnimation />
 
-1. **A user enrolls** with a Stratos service via OAuth. The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
-2. **The user creates private records** by calling the Stratos XRPC API. Records are stored in the user's per-actor repo on Stratos, not on the PDS. A lightweight stub record is written to the PDS with a `source` field pointing back to Stratos.
-3. **A standalone indexer** subscribes to the PDS firehose (to discover enrollments) and to each user's `subscribeRecords` stream (to index records with their boundary metadata).
-4. **An AppView** queries the indexed PostgreSQL tables. When a viewer requests a feed, the AppView filters posts to only those whose boundaries overlap with the viewer's enrolled boundaries.
+1. _A user enrolls_ with a Stratos service via OAuth. The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
+2. _The user creates private records_ by calling the Stratos XRPC API. Records are stored in the user's per-actor repo on Stratos, not on the PDS. A lightweight stub record is written to the PDS with a `source` field pointing back to Stratos.
+3. _A standalone indexer_ subscribes to the PDS firehose (to discover enrollments) and to each user's `subscribeRecords` stream (to index records with their boundary metadata).
+4. _An AppView_ queries the indexed PostgreSQL tables. When a viewer requests a feed, the AppView filters posts to only those whose boundaries overlap with the viewer's enrolled boundaries.
 
 ## Repository Packages
 
