@@ -2,7 +2,7 @@
 
 ## Overview
 
-Each enrolled user's enrollment record includes a **service attestation** — a DAG-CBOR payload signed by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment and boundaries offline without querying the enrollment status endpoint on every request.
+Each enrolled user's enrollment record includes a _service attestation_ — a DAG-CBOR payload signed by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment and boundaries offline without querying the enrollment status endpoint on every request.
 
 ## Enrollment Record Fields
 
@@ -91,7 +91,7 @@ async function verifyAttestation(
 ```
 
 ::: warning Boundary sort order matters
-The attestation payload encodes boundaries as a **sorted** array. Reconstruct with `.sort()` or verification will fail.
+The attestation payload encodes boundaries as a _sorted_ array. Reconstruct with `.sort()` or verification will fail.
 :::
 
 ## Record-Level Verification

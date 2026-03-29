@@ -4,7 +4,7 @@ Before users can create Stratos records they must enroll with the Stratos servic
 
 ## Enrollment Record Schema
 
-A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS, created during the enrollment process. Each enrollment record represents a connection to a different Stratos service — **a user can be enrolled in multiple Stratos services simultaneously**, with each enrollment stored as a separate record using the **service's DID** as the record key.
+A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS, created during the enrollment process. Each enrollment record represents a connection to a different Stratos service — _a user can be enrolled in multiple Stratos services simultaneously_, with each enrollment stored as a separate record using the service's DID as the record key.
 
 Each enrollment record is stored at `at://<did>/zone.stratos.actor.enrollment/<service-did>`:
 
@@ -303,6 +303,6 @@ Add scopes to your `oauth-client-metadata.json`:
 
 ## Troubleshooting
 
-**"NotEnrolled" after completing OAuth** — The service may have an allowlist. Contact the operator to request access.
+_"NotEnrolled" after completing OAuth_ — The service may have an allowlist. Contact the operator to request access.
 
-**OAuth redirect fails** — Verify your app's callback URL matches the Stratos configuration and check for CORS issues in the browser console.
+_OAuth redirect fails_ — Verify your app's callback URL matches the Stratos configuration and check for CORS issues in the browser console.
