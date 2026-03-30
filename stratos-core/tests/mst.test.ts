@@ -7,7 +7,7 @@ import {
   decode as cborDecode,
   type CidLink,
 } from '@atcute/cbor'
-import { buildCommit, type MstWriteOp } from '../src'
+import { buildCommit, type MstWriteOp } from '../src/index.js'
 
 const DID = 'did:plc:testuser123'
 

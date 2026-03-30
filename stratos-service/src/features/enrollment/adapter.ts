@@ -25,6 +25,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   constructor(
     private enrollmentStore: EnrollmentStore,
     private actorStoreCreator: (did: string) => Promise<void>,
+    private actorStoreDestroyer: (did: string) => Promise<void>,
     private logger?: Logger,
     private enrollmentEvents?: EnrollmentEventEmitter,
     private serviceUrl?: string,
@@ -94,7 +95,8 @@ export class EnrollmentServiceImpl implements EnrollmentService {
 
   async unenroll(did: string): Promise<void> {
     await this.enrollmentStore.unenroll(did)
-    this.logger?.info({ did }, 'user unenrolled')
+    await this.actorStoreDestroyer(did)
+    this.logger?.info({ did }, 'user unenrolled (hard delete)')
 
     this.enrollmentEvents?.emit('enrollment', {
       did,

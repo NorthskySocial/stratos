@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
@@ -11,7 +11,7 @@ import {
   StratosSqlRepoReader,
   StratosSqlRepoTransactor,
   BlockMap,
-} from '../src'
+} from '../src/index.js'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -19,7 +19,7 @@ import {
   StratosDb,
   stratosRepoRoot,
   stratosRepoBlock,
-} from '../src'
+} from '../src/index.js'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {

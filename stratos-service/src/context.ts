@@ -1,5 +1,5 @@
 import path from 'node:path'
-import fs from 'node:fs/promises'
+import * as fs from 'node:fs/promises'
 import { readFileSync, readdirSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
@@ -59,6 +59,7 @@ import {
   MigratingBoundaryResolver,
   PdsAgent,
   ExternalAllowListProvider,
+  ProfileRecordWriterImpl,
 } from './features/index.js'
 import { StubWriterServiceImpl, BackgroundStubQueue } from './features/index.js'
 import {
@@ -417,10 +418,7 @@ export class SqliteEnrollmentStore
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    await this.db
-      .update(enrollment)
-      .set({ active: 'false' })
-      .where(eq(enrollment.did, did))
+    await this.db.delete(enrollment).where(eq(enrollment.did, did))
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -864,6 +862,7 @@ export interface AppContext {
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore
   enrollmentService: EnrollmentService
+  profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   boundaryResolver: BoundaryResolver
   stubWriter: StubWriterService
   stubQueue: BackgroundStubQueue
@@ -1125,6 +1124,9 @@ export async function createAppContext(
         await signAndPersistCommit(store.repo, signingKey, unsigned)
       })
     },
+    async (did) => {
+      await actorStore.destroy(did)
+    },
     logger,
     enrollmentEvents,
     cfg.service.publicUrl,
@@ -1137,7 +1139,16 @@ export async function createAppContext(
     logger,
   })
 
-  // Initialize external allow list provider if configured
+  const profileRecordWriter = new ProfileRecordWriterImpl(async (did: string) => {
+    try {
+      const session = await oauthClient.restore(did)
+      return { api: new Agent(session) }
+    } catch {
+      return null
+    }
+  })
+
+  // Initialize external allowlist provider if configured
   let allowListProvider: ExternalAllowListProvider | undefined
   if (cfg.enrollment.allowListUrl) {
     const cache = cfg.enrollment.valkeyUrl
@@ -1279,6 +1290,7 @@ export async function createAppContext(
     actorStore,
     enrollmentStore,
     enrollmentService,
+    profileRecordWriter,
     boundaryResolver,
     stubWriter,
     stubQueue,

@@ -7,7 +7,7 @@ import {
   assertBoundaryMatchesService,
   ensureQualifiedBoundaries,
   BoundaryServiceMismatchError,
-} from '../src/validation/boundary-qualification.js'
+} from '../src/index.js'
 
 const NERV_SERVICE = 'did:web:nerv.tokyo.jp'
 const SEELE_SERVICE = 'did:web:seele.berlin.de'

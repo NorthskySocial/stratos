@@ -4,12 +4,14 @@ import * as AtcuteCid from '@atcute/cid'
 import { decode as cborDecode, isBytes, fromBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { MemoryBlockStore } from '@atcute/mst'
-import { signAndPersistCommit, signCommit } from '../src/features'
+import { signAndPersistCommit, signCommit } from '../src/features/index.js'
 import {
   buildCommit,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
 import { BlockMap } from '@northskysocial/stratos-core'
+
+import type { ActorRepoTransactor } from '../src/actor-store-types.js'
 
 const DID = 'did:plc:testsigner'
 
@@ -35,16 +37,19 @@ function createMockKeypair() {
   }
 }
 
-function createMockRepoTransactor() {
+function createMockRepoTransactor(): ActorRepoTransactor {
   const blocks = new Map<string, Uint8Array>()
   let rootCid: CID | null = null
   let rootRev: string | null = null
 
   return {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     putBlock: vi.fn(async (cid: CID, bytes: Uint8Array, _rev: string) => {
       blocks.set(cid.toString(), bytes)
     }),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     deleteBlocks: vi.fn(async (_cids: CID[]) => {}),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     updateRoot: vi.fn(async (cid: CID, rev: string, _did: string) => {
       rootCid = cid
       rootRev = rev
@@ -67,15 +72,18 @@ function createMockRepoTransactor() {
     ),
     hasRoot: vi.fn(async () => rootCid !== null),
     putBlocks: vi.fn(),
+    deleteBlock: vi.fn(),
     deleteBlocksForRev: vi.fn(),
+    clearCache: vi.fn(),
     cache: new BlockMap(),
     iterateCarBlocks: vi.fn(async function* () {}),
     countBlocks: vi.fn(async () => blocks.size),
     listExistingBlocks: vi.fn(),
     getBlockRange: vi.fn(),
-    _blocks: blocks,
+    // Internal access for tests
+    _blocks: blocks as unknown,
     _getRootCid: () => rootCid,
-  }
+  } as unknown as ActorRepoTransactor
 }
 
 describe('signAndPersistCommit', () => {
@@ -98,11 +106,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(result.commitCid).toBeInstanceOf(CID)
     expect(result.commitBytes).toBeInstanceOf(Uint8Array)
@@ -129,7 +133,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsigned)
+    await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(keypair.sign).toHaveBeenCalledOnce()
     const signedBytes = keypair.sign.mock.calls[0][0]
@@ -164,7 +168,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsigned)
+    await signAndPersistCommit(transactor, keypair, unsigned)
 
     // All blocks persisted in a single batch call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()
@@ -204,11 +208,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(transactor.updateRoot).toHaveBeenCalledOnce()
     expect(transactor.updateRoot).toHaveBeenCalledWith(
@@ -237,11 +237,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     // dag-cbor codec = 0x71
     expect(result.commitCid.code).toBe(0x71)
@@ -268,11 +264,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     const decoded = cborDecode(result.commitBytes) as Record<string, unknown>
     expect(decoded.did).toBe(DID)
@@ -280,7 +272,7 @@ describe('signAndPersistCommit', () => {
     expect((decoded.data as CidLink).$link).toBe(unsigned.data)
     expect(decoded.rev).toBe(unsigned.rev)
     expect(isBytes(decoded.sig)).toBe(true)
-    expect(fromBytes(decoded.sig as any).length).toBe(64)
+    expect(fromBytes(decoded.sig as Uint8Array).length).toBe(64)
   })
 
   it('should delete removed CIDs when present', async () => {
@@ -316,7 +308,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsignedWithRemovals)
+    await signAndPersistCommit(transactor, keypair, unsignedWithRemovals)
 
     expect(transactor.deleteBlocks).toHaveBeenCalledOnce()
     expect(transactor.deleteBlocks.mock.calls[0][0]).toHaveLength(1)
@@ -341,7 +333,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsigned)
+    await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(transactor.deleteBlocks).not.toHaveBeenCalled()
   })
@@ -365,11 +357,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     // The commit block should be included in the batch putBlocks call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()

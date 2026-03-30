@@ -1,27 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 
-import { BlobStore, ENROLLMENT_MODE } from '@northskysocial/stratos-core'
+import { BlobStore } from '@northskysocial/stratos-core'
 import {
   closeServiceDb,
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
+} from '../src/db/index.js'
 
-import { StratosServiceConfig } from '../src'
 import {
   AppContext,
   SqliteEnrollmentStore,
   StratosActorStore,
 } from '../src/context.js'
-import { createRecord } from '../src/api'
+import { createRecord } from '../src/api/index.js'
 import { WriteRateLimiter } from '../src/rate-limiter.js'
 import { Did } from '@atproto/api'
 

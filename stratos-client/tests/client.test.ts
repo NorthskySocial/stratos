@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-import { discoverEnrollment, discoverEnrollments } from '../src/discovery.js'
+import { discoverEnrollment, discoverEnrollments } from '../src/index.js'
 import {
   createServiceFetchHandler,
   resolveServiceUrl,
@@ -93,7 +93,7 @@ describe('discovery', () => {
           {
             uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
             cid: 'bafytest',
-            value: { invalid: true },
+            value: { invalid: true } as any,
           },
         ]),
       ),
@@ -189,7 +189,7 @@ describe('routing', () => {
         'https://stratos.example.com',
       )
 
-      await handler.handle('/xrpc/zone.stratos.feed.post')
+      await handler.handle('/xrpc/zone.stratos.feed.post', {})
 
       expect(mockHandler).toHaveBeenCalledWith(
         'https://stratos.example.com/xrpc/zone.stratos.feed.post',
@@ -222,6 +222,7 @@ describe('routing', () => {
 
       await handler.handle(
         '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
+        {},
       )
 
       expect(mockHandler).toHaveBeenCalledWith(
@@ -265,7 +266,7 @@ describe('routing', () => {
         enrollments,
         'https://stratos-b.example.com',
       )
-      expect(result?.rkey).toBe('rkey2')
+      expect((result as any)?.rkey).toBe('rkey2')
     })
 
     it('matches with trailing slash normalization', () => {
@@ -276,7 +277,7 @@ describe('routing', () => {
         enrollments,
         'https://stratos.example.com',
       )
-      expect(result?.rkey).toBe('rkey1')
+      expect((result as any)?.rkey).toBe('rkey1')
     })
 
     it('returns null when no match', () => {

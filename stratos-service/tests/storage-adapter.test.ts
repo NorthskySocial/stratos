@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { CID } from 'multiformats/cid'
 import * as AtcuteCid from '@atcute/cid'
-import { StratosBlockStoreReader } from '../src/features'
+import { StratosBlockStoreReader } from '../src/features/index.js'
 import { BlockMap } from '@northskysocial/stratos-core'
+import type { ActorRepoReader } from '../src/actor-store-types.js'
 
 const DAG_CBOR_CODEC = 0x71
 
@@ -12,7 +13,9 @@ async function makeCid(data: string): Promise<CID> {
   return CID.parse(AtcuteCid.toString(atcuteCid))
 }
 
-function createMockRepoReader(blocks: Map<string, Uint8Array>) {
+function createMockRepoReader(
+  blocks: Map<string, Uint8Array>,
+): ActorRepoReader {
   return {
     getBytes: vi.fn(async (cid: CID) => blocks.get(cid.toString()) ?? null),
     has: vi.fn(async (cid: CID) => blocks.has(cid.toString())),
@@ -37,7 +40,7 @@ function createMockRepoReader(blocks: Map<string, Uint8Array>) {
     countBlocks: vi.fn(async () => 0),
     listExistingBlocks: vi.fn(async () => ({ toList: () => [] })),
     getBlockRange: vi.fn(async () => []),
-  }
+  } as unknown as ActorRepoReader
 }
 
 describe('StratosBlockStoreReader', () => {

@@ -957,25 +957,6 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext): void {
     },
   })
 
-  xrpc.method('zone.stratos.enrollment.status', {
-    handler: async ({ params }: HandlerContext) => {
-      const did = params.did as string
-      if (!did) {
-        throw new InvalidRequestError('DID required', 'MissingDid')
-      }
-
-      const isEnrolled = await ctx.enrollmentStore.isEnrolled(did)
-
-      return {
-        encoding: 'application/json',
-        body: {
-          did,
-          enrolled: isEnrolled,
-        },
-      }
-    },
-  })
-
   registerHydrationHandlers(server, ctx)
 }
 

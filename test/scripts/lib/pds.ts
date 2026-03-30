@@ -116,3 +116,31 @@ export async function deleteAccount(did: string): Promise<void> {
     throw new Error(`Failed to delete account ${did}: ${res.status} ${body}`)
   }
 }
+
+/** Check for enrollment record on PDS */
+export async function getEnrollmentRecord(
+  did: string,
+  accessJwt: string,
+): Promise<{ exists: boolean; value?: Record<string, unknown> }> {
+  const collection = 'zone.stratos.actor.enrollment'
+  const res = await fetch(
+    `${PDS_URL}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=${collection}&rkey=self`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessJwt}`,
+      },
+    },
+  )
+
+  if (res.status === 404) {
+    return { exists: false }
+  }
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to get enrollment record: ${res.status} ${body}`)
+  }
+
+  const data = await res.json()
+  return { exists: true, value: data.value }
+}

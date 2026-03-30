@@ -54,6 +54,7 @@ export async function waitForHealthy(
 export async function enrollmentStatus(did: string): Promise<{
   did: string
   enrolled: boolean
+  active?: boolean
   enrolledAt?: string
   enrollmentRkey?: string
 }> {
@@ -68,6 +69,7 @@ export async function enrollmentStatus(did: string): Promise<{
   return (await res.json()) as {
     did: string
     enrolled: boolean
+    active?: boolean
     enrolledAt?: string
     enrollmentRkey?: string
   }
@@ -256,4 +258,20 @@ export async function listPdsRecords(
   }
 
   return (await res.json()) as PdsListRecordsResponse
+}
+
+/** Unenroll from Stratos (requires auth) */
+export async function unenroll(callerDid: string): Promise<void> {
+  const baseUrl = await getBaseUrl()
+  const res = await fetch(`${baseUrl}/xrpc/zone.stratos.enrollment.unenroll`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${callerDid}`,
+    },
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    throw new Error(`unenroll failed: ${res.status} ${errBody}`)
+  }
 }

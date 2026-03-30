@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { sql, eq } from 'drizzle-orm'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import os from 'node:os'
+import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
+import * as os from 'node:os'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -14,7 +14,7 @@ import {
   stratosBlob,
   stratosBacklink,
   stratosSeq,
-} from '../src'
+} from '../src/index.js'
 
 describe('stratos-db', () => {
   let db: StratosDb

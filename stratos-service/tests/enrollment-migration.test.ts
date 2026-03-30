@@ -9,6 +9,7 @@ vi.mock('@atproto/api', () => {
 })
 
 import { Agent } from '@atproto/api'
+import type { ProfileRecordWriter } from '@northskysocial/stratos-core'
 
 function createMockEnrollmentStore(
   enrollment: Record<string, unknown> | null = null,
@@ -68,11 +69,17 @@ function createMockOAuthClient(
     return mockAgent as unknown as InstanceType<typeof Agent>
   } as unknown as (...args: unknown[]) => InstanceType<typeof Agent>)
 
+  const mockProfileRecordWriter: ProfileRecordWriter = {
+    putEnrollmentRecord: vi.fn(async () => {}),
+    deleteEnrollmentRecord: vi.fn(async () => {}),
+  }
+
   return {
     client: {
       restore: vi.fn(async () => ({})),
     } as unknown as NodeOAuthClient,
     agent: mockAgent,
+    profileRecordWriter: mockProfileRecordWriter,
   }
 }
 
@@ -143,7 +150,7 @@ describe('migrateEnrollmentRkey', () => {
         active: true,
         enrollmentRkey: SERVICE_DID_RKEY,
       })
-      const { client } = createMockOAuthClient()
+      const { client, profileRecordWriter } = createMockOAuthClient()
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -151,6 +158,7 @@ describe('migrateEnrollmentRkey', () => {
         client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
       )
 
       expect(client.restore).not.toHaveBeenCalled()
@@ -160,7 +168,7 @@ describe('migrateEnrollmentRkey', () => {
 
   describe('when enrollment has a self-keyed record', () => {
     let store: EnrollmentStore
-    let agent: ReturnType<typeof createMockOAuthClient>['agent']
+    let profileRecordWriter: ProfileRecordWriter
     const mockLogger = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -177,7 +185,7 @@ describe('migrateEnrollmentRkey', () => {
         active: true,
       })
       const mock = createMockOAuthClient([SELF_RECORD])
-      agent = mock.agent
+      profileRecordWriter = mock.profileRecordWriter
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -185,25 +193,24 @@ describe('migrateEnrollmentRkey', () => {
         mock.client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
         mockLogger,
       )
     })
 
-    it('should write a new record with service DID rkey via putRecord', () => {
-      expect(agent.com.atproto.repo.putRecord).toHaveBeenCalledWith({
-        repo: TEST_DID,
-        collection: 'zone.stratos.actor.enrollment',
-        rkey: SERVICE_DID_RKEY,
-        record: SELF_RECORD.value,
-      })
+    it('should write a new record with service DID rkey via putEnrollmentRecord', () => {
+      expect(profileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        TEST_DID,
+        SERVICE_DID_RKEY,
+        SELF_RECORD.value,
+      )
     })
 
     it('should delete the old self-keyed record', () => {
-      expect(agent.com.atproto.repo.deleteRecord).toHaveBeenCalledWith({
-        repo: TEST_DID,
-        collection: 'zone.stratos.actor.enrollment',
-        rkey: 'self',
-      })
+      expect(profileRecordWriter.deleteEnrollmentRecord).toHaveBeenCalledWith(
+        TEST_DID,
+        'self',
+      )
     })
 
     it('should update the DB with the service DID rkey', () => {
@@ -215,7 +222,7 @@ describe('migrateEnrollmentRkey', () => {
 
   describe('when enrollment has a TID-keyed record', () => {
     let store: EnrollmentStore
-    let agent: ReturnType<typeof createMockOAuthClient>['agent']
+    let profileRecordWriter: ProfileRecordWriter
 
     beforeEach(async () => {
       vi.mocked(Agent).mockReset()
@@ -224,10 +231,9 @@ describe('migrateEnrollmentRkey', () => {
         enrolledAt: '2025-01-01T00:00:00Z',
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
-        enrollmentRkey: '3jzfcijpj2z2a',
       })
       const mock = createMockOAuthClient([TID_RECORD])
-      agent = mock.agent
+      profileRecordWriter = mock.profileRecordWriter
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -235,24 +241,23 @@ describe('migrateEnrollmentRkey', () => {
         mock.client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
       )
     })
 
     it('should write a new record with service DID rkey', () => {
-      expect(agent.com.atproto.repo.putRecord).toHaveBeenCalledWith({
-        repo: TEST_DID,
-        collection: 'zone.stratos.actor.enrollment',
-        rkey: SERVICE_DID_RKEY,
-        record: TID_RECORD.value,
-      })
+      expect(profileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        TEST_DID,
+        SERVICE_DID_RKEY,
+        TID_RECORD.value,
+      )
     })
 
     it('should delete the old TID-keyed record', () => {
-      expect(agent.com.atproto.repo.deleteRecord).toHaveBeenCalledWith({
-        repo: TEST_DID,
-        collection: 'zone.stratos.actor.enrollment',
-        rkey: '3jzfcijpj2z2a',
-      })
+      expect(profileRecordWriter.deleteEnrollmentRecord).toHaveBeenCalledWith(
+        TEST_DID,
+        '3jzfcijpj2z2a',
+      )
     })
 
     it('should update the DB with the service DID rkey', () => {
@@ -271,7 +276,9 @@ describe('migrateEnrollmentRkey', () => {
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
-      const { client, agent } = createMockOAuthClient([CORRECT_RKEY_RECORD])
+      const { client, profileRecordWriter } = createMockOAuthClient([
+        CORRECT_RKEY_RECORD,
+      ])
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -279,10 +286,11 @@ describe('migrateEnrollmentRkey', () => {
         client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
       )
 
-      expect(agent.com.atproto.repo.putRecord).not.toHaveBeenCalled()
-      expect(agent.com.atproto.repo.deleteRecord).not.toHaveBeenCalled()
+      expect(profileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
+      expect(profileRecordWriter.deleteEnrollmentRecord).not.toHaveBeenCalled()
       expect(store.updateEnrollment).toHaveBeenCalledWith(TEST_DID, {
         enrollmentRkey: SERVICE_DID_RKEY,
       })
@@ -305,7 +313,9 @@ describe('migrateEnrollmentRkey', () => {
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
-      const { client, agent } = createMockOAuthClient([otherServiceRecord])
+      const { client, profileRecordWriter } = createMockOAuthClient([
+        otherServiceRecord,
+      ])
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -313,10 +323,11 @@ describe('migrateEnrollmentRkey', () => {
         client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
       )
 
-      expect(agent.com.atproto.repo.putRecord).not.toHaveBeenCalled()
-      expect(agent.com.atproto.repo.deleteRecord).not.toHaveBeenCalled()
+      expect(profileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
+      expect(profileRecordWriter.deleteEnrollmentRecord).not.toHaveBeenCalled()
       expect(store.updateEnrollment).not.toHaveBeenCalled()
     })
   })
@@ -324,7 +335,7 @@ describe('migrateEnrollmentRkey', () => {
   describe('when enrollment is not found', () => {
     it('should skip migration', async () => {
       const store = createMockEnrollmentStore(null)
-      const { client } = createMockOAuthClient()
+      const { client, profileRecordWriter } = createMockOAuthClient()
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -332,6 +343,7 @@ describe('migrateEnrollmentRkey', () => {
         client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
       )
 
       expect(client.restore).not.toHaveBeenCalled()
@@ -347,6 +359,7 @@ describe('migrateEnrollmentRkey', () => {
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
+      const { profileRecordWriter } = createMockOAuthClient()
       const client = {
         restore: vi.fn(async () => {
           throw new Error('OAuth session expired')
@@ -360,6 +373,7 @@ describe('migrateEnrollmentRkey', () => {
           client,
           SERVICE_ENDPOINT,
           SERVICE_DID,
+          profileRecordWriter,
         ),
       ).resolves.not.toThrow()
 
@@ -383,7 +397,9 @@ describe('migrateEnrollmentRkey', () => {
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
       })
-      const { client, agent } = createMockOAuthClient([recordWithSlash])
+      const { client, profileRecordWriter } = createMockOAuthClient([
+        recordWithSlash,
+      ])
 
       await migrateEnrollmentRkey(
         TEST_DID,
@@ -391,9 +407,10 @@ describe('migrateEnrollmentRkey', () => {
         client,
         SERVICE_ENDPOINT,
         SERVICE_DID,
+        profileRecordWriter,
       )
 
-      expect(agent.com.atproto.repo.putRecord).toHaveBeenCalled()
+      expect(profileRecordWriter.putEnrollmentRecord).toHaveBeenCalled()
       expect(store.updateEnrollment).toHaveBeenCalledWith(TEST_DID, {
         enrollmentRkey: SERVICE_DID_RKEY,
       })

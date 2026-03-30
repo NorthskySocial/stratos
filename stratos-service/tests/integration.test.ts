@@ -3,7 +3,7 @@
  * Tests the complete flow from enrollment to record operations
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
@@ -23,14 +23,19 @@ import {
   isStratosUri,
 } from '@northskysocial/stratos-core'
 
+import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
-import { EnrollmentConfig, validateEnrollment } from '../src/auth'
+import { EnrollmentServiceImpl } from '../src/features/index.js'
+import {
+  EnrollmentConfig,
+  validateEnrollment,
+} from '../src/auth/index.js'
 import {
   closeServiceDb,
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
+} from '../src/db/index.js'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {
@@ -129,12 +134,14 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
 }
 
 // Mock IdResolver
-function createMockIdResolver(didDoc: { id: string; service?: any[] } | null) {
+function createMockIdResolver(
+  didDoc: { id: string; service?: unknown[] } | null,
+) {
   return {
     did: {
       resolve: vi.fn().mockResolvedValue(didDoc),
     },
-  } as any
+  } as unknown as IdResolver
 }
 
 describe('Integration: Full Stratos Flow', () => {
@@ -565,24 +572,30 @@ describe('Integration: Full Stratos Flow', () => {
   })
 
   describe('Actor Lifecycle', () => {
-    it('should handle complete actor lifecycle', async () => {
+    it('should handle complete actor lifecycle (hard delete)', async () => {
       const actorDid = 'did:plc:lifecycle'
+      const actorStoreDestroyer = vi.fn().mockImplementation(async (did) => {
+        await actorStore.destroy(did)
+      })
+
+      const enrollmentService = new EnrollmentServiceImpl(
+        enrollmentStore,
+        async (did) => {
+          await actorStore.create(did)
+        },
+        actorStoreDestroyer,
+      )
 
       // 1. Enroll
-      await enrollmentStore.enroll({
-        did: actorDid,
-        enrolledAt: new Date().toISOString(),
-        pdsEndpoint: 'https://pds.test.com',
-        signingKeyDid: 'did:key:zDnaeTestKey123',
-        active: true,
-      })
+      await enrollmentService.enroll(
+        actorDid,
+        ['did:web:test.com/domain'],
+        'did:key:zDnaeTestKey123',
+      )
       expect(await enrollmentStore.isEnrolled(actorDid)).toBe(true)
-
-      // 2. Create actor store
-      await actorStore.create(actorDid)
       expect(await actorStore.exists(actorDid)).toBe(true)
 
-      // 3. Create some records
+      // 2. Create some records
       const cid = await createCid('lifecycle test')
       await actorStore.transact(actorDid, async (store) => {
         await store.record.indexRecord(
@@ -594,19 +607,21 @@ describe('Integration: Full Stratos Flow', () => {
         )
       })
 
-      // 4. Verify records exist
+      // 3. Verify records exist
       const count = await actorStore.read(actorDid, (s) =>
         s.record.recordCount(),
       )
       expect(count).toBe(1)
 
-      // 5. Unenroll
-      await enrollmentStore.unenroll(actorDid)
-      expect(await enrollmentStore.isEnrolled(actorDid)).toBe(false)
+      // 4. Unenroll (Full hard delete)
+      await enrollmentService.unenroll(actorDid)
 
-      // 6. Destroy actor store
-      await actorStore.destroy(actorDid)
+      // 5. Verify hard delete
+      expect(await enrollmentStore.isEnrolled(actorDid)).toBe(false)
+      const storedEnrollment = await enrollmentStore.getEnrollment(actorDid)
+      expect(storedEnrollment).toBeNull()
       expect(await actorStore.exists(actorDid)).toBe(false)
+      expect(actorStoreDestroyer).toHaveBeenCalledWith(actorDid)
     })
   })
 })
