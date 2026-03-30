@@ -65,7 +65,7 @@ The `zone.stratos.actor.enrollment` record on the user's PDS is the **profile re
 
 ## MST Repo
 
-Every enrolled user gets a per-user MST repository compatible with the ATProto repo format. Every record write produces a new signed commit, enabling:
+Every enrolled user gets a per-user MST repository compatible with the ATProto PDS repo format. Every record write produces a new signed commit, enabling:
 
 - Inclusion proofs: `com.atproto.sync.getRecord` returns a CAR with the signed commit, MST path, and record block.
 - Full export: `zone.stratos.sync.getRepo` exports the complete repo as a CAR file.
@@ -73,9 +73,9 @@ Every enrolled user gets a per-user MST repository compatible with the ATProto r
 
 ## Trust Model
 
-Boundary access is enforced internally — when a request arrives, Stratos validates the caller's actual current membership before returning any content. No enforcement is delegated to a client or AppView.
+Boundary access is enforced internally — when a request arrives, Stratos validates the caller's actual current membership before returning any content. No enforcement is delegated to a client or AppView (though it is encouraged).
 
-The attestation serves a separate, complementary purpose: it is a public declaration written to the user's PDS that lets any app verify independently that the user is enrolled with a specific Stratos service. It binds the user's DID, assigned boundaries, and signing key into a signature from the service's secp256k1 key.
+The attestation serves a separate, complementary purpose: it is a public declaration written to the user's PDS repo that lets any app verify independently that the user is enrolled with a specific Stratos service. It binds the user's DID, assigned boundaries, and signing key into a signature from the service's secp256k1 key.
 
 <script setup>
 import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
@@ -83,4 +83,4 @@ import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimat
 
 <TrustChainAnimation />
 
-The attestation proves service endorsement of the enrollment and enables user authorship verification on individual records. Actual access to record content is always gated by Stratos's live boundary check.
+The attestation proves service endorsement of the enrollment and enables user authorship verification on individual records. Actual access to create/access content is always gated by Stratos's live boundary check.
