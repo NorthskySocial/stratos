@@ -118,10 +118,7 @@ export class PgEnrollmentStoreWriter
     await this.db
       .delete(pgEnrollmentBoundary)
       .where(eq(pgEnrollmentBoundary.did, did))
-    await this.db
-      .update(pgEnrollment)
-      .set({ active: 'false' })
-      .where(eq(pgEnrollment.did, did))
+    await this.db.delete(pgEnrollment).where(eq(pgEnrollment.did, did))
   }
 
   async updateEnrollment(

@@ -8,7 +8,7 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { eq } from 'drizzle-orm'
 
-import { StratosRecordReader, StratosRecordTransactor } from '../src'
+import { StratosRecordReader, StratosRecordTransactor } from '../src/index.js'
 import {
   createStratosDb,
   migrateStratosDb,
@@ -16,7 +16,7 @@ import {
   StratosDb,
   stratosRecord,
   stratosBacklink,
-} from '../src'
+} from '../src/index.js'
 
 // Simple encoding for tests (just use JSON for simplicity)
 const encodeRecord = (data: unknown): Uint8Array => {

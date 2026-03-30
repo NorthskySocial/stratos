@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { CursorManager } from '../src/cursor-manager.ts'
-import { StratosActorSync } from '../src/stratos-sync.ts'
+import type { CursorManager } from '../src/index.ts'
+import { StratosActorSync, StratosActorSyncOptions } from '../src/index.ts'
 
 interface ActorQueue {
   pending: Uint8Array[]
@@ -8,14 +8,7 @@ interface ActorQueue {
   draining: boolean
 }
 
-function createTestSync(
-  opts: {
-    maxConcurrentActorSyncs?: number
-    maxActorQueueSize?: number
-    globalMaxPending?: number
-    drainDelayMs?: number
-  } = {},
-) {
+function createTestSync(opts: Partial<StratosActorSyncOptions> = {}) {
   const errors: Error[] = []
   const cursorManager = {
     getStratosCursor: vi.fn(() => undefined),
@@ -29,12 +22,7 @@ function createTestSync(
     cursorManager as unknown as CursorManager,
     (err) => errors.push(err),
     undefined,
-    {
-      maxConcurrentActorSyncs: opts.maxConcurrentActorSyncs ?? 1,
-      maxActorQueueSize: opts.maxActorQueueSize ?? 10,
-      globalMaxPending: opts.globalMaxPending ?? 500,
-      drainDelayMs: opts.drainDelayMs ?? 0,
-    },
+    opts,
   )
 
   return { sync, errors, cursorManager }
@@ -138,7 +126,7 @@ describe('closeAndReconnectActor', () => {
 
     expect(mockWs.close).toHaveBeenCalled()
     expect(subscriptions.has('did:plc:gohan')).toBe(false)
-    expect(actorQueues.get('did:plc:gohan').pending).toHaveLength(0)
+    expect(actorQueues.get('did:plc:gohan')?.pending).toHaveLength(0)
     expect(scheduleReconnect).toHaveBeenCalledWith('did:plc:gohan')
   })
 })

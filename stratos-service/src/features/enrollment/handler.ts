@@ -225,10 +225,20 @@ export function registerEnrollmentHandlers(
         )
       }
 
-      // 2. Mark enrollment as inactive in local storage
+      // 2. Perform hard delete: local enrollment record and actor data
       await ctx.enrollmentService.unenroll(did)
 
-      // 3. Revoke OAuth sessions
+      // 3. Delete signing key (if it exists)
+      try {
+        await ctx.actorStore.deleteSigningKey(did)
+      } catch (err) {
+        ctx.logger?.warn(
+          { err: err instanceof Error ? err.message : String(err), did },
+          'failed to delete signing key during unenrollment',
+        )
+      }
+
+      // 4. Revoke OAuth sessions
       try {
         await ctx.oauthClient.revoke(did)
       } catch (err) {

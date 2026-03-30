@@ -131,10 +131,7 @@ export class SqliteEnrollmentStoreWriter
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    await this.db
-      .update(enrollment)
-      .set({ active: 'false' })
-      .where(eq(enrollment.did, did))
+    await this.db.delete(enrollment).where(eq(enrollment.did, did))
   }
 
   async updateEnrollment(

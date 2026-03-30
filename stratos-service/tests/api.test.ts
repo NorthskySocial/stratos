@@ -13,14 +13,14 @@ import {
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
+} from '../src/db/index.js'
 
 import {
   AppContext,
   SqliteEnrollmentStore,
   StratosActorStore,
 } from '../src/context.js'
-import { createRecord } from '../src/api'
+import { createRecord } from '../src/api/index.js'
 import { WriteRateLimiter } from '../src/rate-limiter.js'
 import { Did } from '@atproto/api'
 

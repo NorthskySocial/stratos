@@ -6,7 +6,7 @@ import {
   isDidAllowed,
   isPdsAllowed,
   validateEnrollmentEligibility,
-} from '../src'
+} from '../src/index.js'
 
 describe('Enrollment Domain Logic', () => {
   describe('extractPdsEndpoint', () => {
