@@ -11,6 +11,7 @@ export {
   indexStratosRecord,
   deleteStratosRecord,
 } from './stratos-sync.ts'
+export type { StratosActorSyncOptions } from './stratos-sync.ts'
 export {
   backfillRepos,
   backfillActors,

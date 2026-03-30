@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { MigratingBoundaryResolver } from '../src/features/enrollment/adapter.js'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { MigratingBoundaryResolver } from '../src/features/index.js'
 
 const BEBOP_SERVICE = 'did:web:bebop.cowboy.space'
 
 describe('MigratingBoundaryResolver', () => {
   let mockStore: {
-    getBoundaries: ReturnType<typeof vi.fn>
-    setBoundaries: ReturnType<typeof vi.fn>
+    getBoundaries: Mock<(did: string) => Promise<string[]>>
+    setBoundaries: Mock<(did: string, boundaries: string[]) => Promise<void>>
   }
   let resolver: MigratingBoundaryResolver
 

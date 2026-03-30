@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { createServiceJwt } from '@atproto/xrpc-server'
 import type { IdResolver } from '@atproto/identity'
-import { verifyServiceAuth } from '../src/auth'
+import { verifyServiceAuth } from '../src/auth/index.js'
 
 const OUR_DID = 'did:web:stratos.test'
 const LXM = 'zone.stratos.sync.subscribeRecords'

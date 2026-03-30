@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { CID } from 'multiformats/cid'
 import * as AtcuteCid from '@atcute/cid'
-import { StratosBlockStoreReader } from '../src/features'
+import { StratosBlockStoreReader } from '../src/features/index.js'
 import { BlockMap } from '@northskysocial/stratos-core'
 import type { ActorRepoReader } from '../src/actor-store-types.js'
 

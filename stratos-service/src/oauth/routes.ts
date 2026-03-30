@@ -4,7 +4,7 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
 import type { Logger } from '@northskysocial/stratos-core'
 import { EnrollmentConfig, validateEnrollment } from '../auth/enrollment.js'
-import type { AllowListProvider } from '../features/enrollment/allow-list.js'
+import type { AllowListProvider } from '../features/index.js'
 import { OAUTH_SCOPE } from './client.js'
 
 /**

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { OAUTH_SCOPE } from '../src/oauth'
-import { PdsTokenVerifier } from '../src/auth'
+import { OAUTH_SCOPE } from '../src/oauth/index.js'
+import { PdsTokenVerifier } from '../src/auth/index.js'
 import { IdResolver } from '@atproto/identity'
 
 describe('OAUTH_SCOPE', () => {

@@ -5,7 +5,7 @@ import {
   EnrollmentDeniedError,
   extractPdsEndpoint,
   validateEnrollment,
-} from '../src/auth'
+} from '../src/auth/index.js'
 import type { DidDocument, IdResolver } from '@atproto/identity'
 import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 

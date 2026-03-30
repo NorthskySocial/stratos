@@ -22,7 +22,7 @@ import {
   resolveServiceSigningKey,
   resolveUserSigningKey,
   fetchAndVerifyRecord,
-} from '../src'
+} from '../src/index.js'
 
 const TEST_DID = 'did:plc:testverify' as const
 const TEST_COLLECTION = 'zone.stratos.feed.post'
@@ -428,7 +428,7 @@ describe('fetchAndVerifyRecord', () => {
       TEST_RKEY,
     )
 
-    const mockFetch = vi.fn(async () => new Response(carBytes))
+    const mockFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     await fetchAndVerifyRecord(
       'https://stratos.example.com',
@@ -446,7 +446,7 @@ describe('fetchAndVerifyRecord', () => {
   })
 
   it('throws on non-OK response', async () => {
-    const mockFetch = vi.fn(
+    const mockFetch = vi.fn<typeof fetch>(
       async () => new Response(null, { status: 404, statusText: 'Not Found' }),
     )
 
@@ -472,7 +472,7 @@ describe('fetchAndVerifyRecord', () => {
       TEST_RKEY,
     )
 
-    const didDocFetch = vi.fn(
+    const didDocFetch = vi.fn<typeof fetch>(
       async () =>
         new Response(
           JSON.stringify({
@@ -499,7 +499,7 @@ describe('fetchAndVerifyRecord', () => {
       { fetchFn: didDocFetch },
     )
 
-    const recordFetch = vi.fn(async () => new Response(carBytes))
+    const recordFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     const result = await fetchAndVerifyRecord(
       'https://stratos.example.com',
@@ -529,7 +529,7 @@ describe('user-signature verification', () => {
       TEST_RKEY,
     )
 
-    const mockFetch = vi.fn(async () => new Response(carBytes))
+    const mockFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     const result = await fetchAndVerifyRecord(
       'https://stratos.example.com',

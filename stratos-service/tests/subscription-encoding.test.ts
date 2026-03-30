@@ -11,7 +11,7 @@ import {
   formatEvent,
   matchesDomain,
   type SeqEvent,
-} from '../src/subscription/subscribe-records.js'
+} from '../src/subscription/index.js'
 
 function createCborEvent(event: Record<string, unknown>): Uint8Array {
   return new Uint8Array(cborEncode(event))

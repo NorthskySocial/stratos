@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { WorkerPool } from '../src/worker-pool.ts'
+import { WorkerPool } from '../src/index.ts'
 
 describe('WorkerPool', () => {
   let errors: Error[]

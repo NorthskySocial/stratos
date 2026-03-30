@@ -418,10 +418,7 @@ export class SqliteEnrollmentStore
       .delete(enrollmentBoundary)
       .where(eq(enrollmentBoundary.did, did))
 
-    await this.db
-      .update(enrollment)
-      .set({ active: 'false' })
-      .where(eq(enrollment.did, did))
+    await this.db.delete(enrollment).where(eq(enrollment.did, did))
   }
 
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
@@ -1126,6 +1123,9 @@ export async function createAppContext(
         const unsigned = await buildCommit(adapter, null, { did, writes: [] })
         await signAndPersistCommit(store.repo, signingKey, unsigned)
       })
+    },
+    async (did) => {
+      await actorStore.destroy(did)
     },
     logger,
     enrollmentEvents,

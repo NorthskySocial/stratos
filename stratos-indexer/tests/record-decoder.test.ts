@@ -3,7 +3,7 @@ import {
   extractBoundaries,
   parseCid,
   jsonToLex,
-} from '../src/record-decoder.ts'
+} from '../src/index.ts'
 import { CID } from 'multiformats/cid'
 
 describe('extractBoundaries', () => {

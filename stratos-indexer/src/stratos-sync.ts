@@ -11,6 +11,20 @@ const DEFAULT_RECONNECT_JITTER_MS = 1_000
 const DEFAULT_RECONNECT_MAX_ATTEMPTS = 200
 const INDEX_TRACE_WARN_LAG_MS = 5_000
 
+export const DEFAULT_ACTOR_SYNC_OPTIONS: StratosActorSyncOptions = {
+  maxConcurrentActorSyncs: 8,
+  maxActorQueueSize: 10,
+  globalMaxPending: 500,
+  drainDelayMs: 5,
+  maxConnections: 20,
+  connectDelayMs: 200,
+  idleEvictionMs: 60_000,
+  reconnectBaseDelayMs: DEFAULT_RECONNECT_BASE_DELAY_MS,
+  reconnectMaxDelayMs: DEFAULT_RECONNECT_MAX_DELAY_MS,
+  reconnectJitterMs: DEFAULT_RECONNECT_JITTER_MS,
+  reconnectMaxAttempts: DEFAULT_RECONNECT_MAX_ATTEMPTS,
+}
+
 export interface StratosSyncConfig {
   stratosServiceUrl: string
   syncToken: string
@@ -230,32 +244,21 @@ export class StratosActorSync {
     private cursorManager: CursorManager,
     private onError?: (err: Error) => void,
     private onReferencedActor?: (did: string) => void,
-    options: StratosActorSyncOptions = {
-      maxConcurrentActorSyncs: 8,
-      maxActorQueueSize: 10,
-      globalMaxPending: 500,
-      drainDelayMs: 5,
-      maxConnections: 20,
-      connectDelayMs: 200,
-      idleEvictionMs: 60_000,
-      reconnectBaseDelayMs: DEFAULT_RECONNECT_BASE_DELAY_MS,
-      reconnectMaxDelayMs: DEFAULT_RECONNECT_MAX_DELAY_MS,
-      reconnectJitterMs: DEFAULT_RECONNECT_JITTER_MS,
-      reconnectMaxAttempts: DEFAULT_RECONNECT_MAX_ATTEMPTS,
-    },
+    options: Partial<StratosActorSyncOptions> = {},
     private onHandleNeeded?: (did: string) => void,
   ) {
-    this.maxConcurrentActorSyncs = options.maxConcurrentActorSyncs
-    this.maxActorQueueSize = options.maxActorQueueSize
-    this.globalMaxPending = options.globalMaxPending
-    this.drainDelayMs = options.drainDelayMs
-    this.maxConnections = options.maxConnections
-    this.connectDelayMs = options.connectDelayMs
-    this.idleEvictionMs = options.idleEvictionMs
-    this.reconnectBaseDelayMs = options.reconnectBaseDelayMs
-    this.reconnectMaxDelayMs = options.reconnectMaxDelayMs
-    this.reconnectJitterMs = options.reconnectJitterMs
-    this.reconnectMaxAttempts = options.reconnectMaxAttempts
+    const opts = { ...DEFAULT_ACTOR_SYNC_OPTIONS, ...options }
+    this.maxConcurrentActorSyncs = opts.maxConcurrentActorSyncs
+    this.maxActorQueueSize = opts.maxActorQueueSize
+    this.globalMaxPending = opts.globalMaxPending
+    this.drainDelayMs = opts.drainDelayMs
+    this.maxConnections = opts.maxConnections
+    this.connectDelayMs = opts.connectDelayMs
+    this.idleEvictionMs = opts.idleEvictionMs
+    this.reconnectBaseDelayMs = opts.reconnectBaseDelayMs
+    this.reconnectMaxDelayMs = opts.reconnectMaxDelayMs
+    this.reconnectJitterMs = opts.reconnectJitterMs
+    this.reconnectMaxAttempts = opts.reconnectMaxAttempts
   }
 
   start(): void {
