@@ -1,7 +1,7 @@
 import fsSync from 'node:fs'
 import * as fs from 'node:fs/promises'
 import path from 'node:path'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import {
   fileExists,
   rmIfExists,
@@ -35,6 +35,11 @@ export class DiskBlobStore implements BlobStore {
 
   /**
    * Factory function for creating per-DID blob stores
+   *
+   * @param location - Base location for blob storage
+   * @param tmpLocation - Temporary blob storage location
+   * @param quarantineLocation - Quarantine blob storage location
+   * @returns Blob store creator function
    */
   static creator(
     location: string,
@@ -48,37 +53,80 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
+  /**
+   * Get the temporary path for a given key
+   *
+   * @param key - Key for temporary storage
+   * @returns Temporary path for the key
+   */
   getTmpPath(key: string): string {
     return path.join(this.tmpLocation, this.did, key)
   }
 
+  /**
+   * Get stored path for a given CID
+   *
+   * @param cid - Content identifier
+   * @returns Stored path for the CID
+   */
   getStoredPath(cid: CID): string {
     return path.join(this.location, this.did, cid.toString())
   }
 
+  /**
+   * Get quarantine path for a given CID
+   *
+   * @param cid - Content identifier
+   * @returns Quarantine path for the CID
+   */
   getQuarantinePath(cid: CID): string {
     return path.join(this.quarantineLocation, this.did, cid.toString())
   }
 
+  /**
+   * Check if temporary storage has a file for a given key
+   *
+   * @param key - Key for temporary storage
+   * @returns True if temporary storage has the file, false otherwise
+   */
   async hasTemp(key: string): Promise<boolean> {
     return fileExists(this.getTmpPath(key))
   }
 
+  /**
+   * Check if stored storage has a file for a given CID
+   *
+   * @param cid - Content identifier
+   * @returns True if stored storage has the file, false otherwise
+   */
   async hasStored(cid: CID): Promise<boolean> {
     return fileExists(this.getStoredPath(cid))
   }
 
+  /**
+   * Store temporary data in disk storage
+   *
+   * @param bytes - Data to store
+   * @returns Key for the stored data
+   */
   async putTemp(
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<string> {
     await this.ensureTemp()
     const key = this.genKey()
-    const data =
-      bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
+    const data = !(Symbol.asyncIterator in bytes)
+      ? bytes
+      : await collectAsyncIterable(bytes)
     await fs.writeFile(this.getTmpPath(key), data)
     return key
   }
 
+  /**
+   * Move temporary data to permanent storage
+   *
+   * @param key - Key for temporary storage
+   * @param cid - Content identifier
+   */
   async makePermanent(key: string, cid: CID): Promise<void> {
     await this.ensureDir()
     const tmpPath = this.getTmpPath(key)
@@ -96,16 +144,28 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
+  /**
+   * Store permanent data in disk storage
+   *
+   * @param cid - Content identifier
+   * @param bytes - Data to store
+   */
   async putPermanent(
     cid: CID,
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<void> {
     await this.ensureDir()
-    const data =
-      bytes instanceof Uint8Array ? bytes : await collectAsyncIterable(bytes)
+    const data = !(Symbol.asyncIterator in bytes)
+      ? bytes
+      : await collectAsyncIterable(bytes)
     await fs.writeFile(this.getStoredPath(cid), data)
   }
 
+  /**
+   * Quarantine a blob by moving it to the quarantine directory
+   *
+   * @param cid - Content identifier
+   */
   async quarantine(cid: CID): Promise<void> {
     await this.ensureQuarantine()
     const storedPath = this.getStoredPath(cid)
@@ -120,6 +180,11 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
+  /**
+   * Restore a blob from quarantine to permanent storage
+   *
+   * @param cid - Content identifier
+   */
   async unquarantine(cid: CID): Promise<void> {
     await this.ensureDir()
     const quarantinePath = this.getQuarantinePath(cid)
@@ -134,6 +199,12 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
+  /**
+   * Retrieve bytes for a blob from permanent storage
+   *
+   * @param cid - Content identifier
+   * @returns Bytes of the blob
+   */
   async getBytes(cid: CID): Promise<Uint8Array> {
     try {
       const buffer = await fs.readFile(this.getStoredPath(cid))
@@ -146,6 +217,11 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
+  /**
+   * Retrieve a stream for a blob from permanent storage
+   *
+   * @param cid - Content identifier
+   */
   async getStream(cid: CID): Promise<AsyncIterable<Uint8Array>> {
     const filePath = this.getStoredPath(cid)
     const exists = await fileExists(filePath)
@@ -155,10 +231,20 @@ export class DiskBlobStore implements BlobStore {
     return readableToAsyncIterable(fsSync.createReadStream(filePath))
   }
 
+  /**
+   * Delete a blob from permanent storage
+   *
+   * @param cid - Content identifier
+   */
   async delete(cid: CID): Promise<void> {
     await rmIfExists(this.getStoredPath(cid))
   }
 
+  /**
+   * Delete multiple blobs from permanent storage
+   *
+   * @param cids - Content identifiers
+   */
   async deleteMany(cids: CID[]): Promise<void> {
     const errors: unknown[] = []
     for (const chunk of chunkArray(cids, 500)) {

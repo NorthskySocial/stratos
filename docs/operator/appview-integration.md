@@ -1,10 +1,13 @@
 # AppView Integration
 
-AppViews index Stratos content by subscribing to the `zone.stratos.sync.subscribeRecords` WebSocket endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
+AppViews index Stratos content by subscribing to the `zone.stratos.sync.subscribeRecords` WebSocket
+endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
 
 ## Step 1: Service Authentication
 
-AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query parameter. The token must be a query param because `Authorization` headers are stripped by many WebSocket proxies and aren't supported in browser WebSocket APIs.
+AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query
+parameter. The token must be a query param because `Authorization` headers are stripped by many
+WebSocket proxies and aren't supported in browser WebSocket APIs.
 
 ```typescript
 import { createServiceJwt } from '@atproto/xrpc-server'

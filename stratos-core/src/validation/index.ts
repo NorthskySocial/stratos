@@ -1,10 +1,5 @@
 export {
-  assertStratosValidation,
-  assertBskyNoCrossNamespaceEmbed,
-  isStratosUri,
-  isBskyUri,
-  isStratosCollection,
-  extractBoundaryDomains,
+  StratosValidator,
   type StratosValidationErrorCode,
   type RepoRecord,
 } from './stratos-validation.js'

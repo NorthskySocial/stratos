@@ -6,47 +6,27 @@
  * - MST inclusion proof CAR building
  * - Full repo CAR building from iterateCarBlocks
  */
-import { describe, it, expect } from 'vitest'
-import { CID } from 'multiformats/cid'
-import * as AtcuteCid from '@atcute/cid'
+import { describe, expect, it } from 'vitest'
+import { CID } from '@atproto/lex-data'
 import type { CidLink } from '@atcute/cid'
+import * as AtcuteCid from '@atcute/cid'
 import * as AtcuteCbor from '@atcute/cbor'
 import { toBytes as cborToBytes } from '@atcute/cbor'
 import * as CAR from '@atcute/car'
 import { fromUint8Array as repoFromCar } from '@atcute/repo'
 import {
+  buildInclusionProof,
+  MemoryBlockStore,
   NodeStore,
   NodeWrangler,
   OverlayBlockStore,
-  MemoryBlockStore,
-  buildInclusionProof,
 } from '@atcute/mst'
+import {
+  collectCarStream,
+  makeCidStr,
+} from '@northskysocial/stratos-core/tests'
 
 const DID = 'did:plc:testhandlers'
-
-async function makeCidStr(data: string): Promise<string> {
-  const bytes = new TextEncoder().encode(data)
-  const cid = await AtcuteCid.create(0x71, bytes)
-  return AtcuteCid.toString(cid)
-}
-
-async function collectCarStream(
-  roots: CidLink[],
-  blocks: Array<{ cid: Uint8Array; data: Uint8Array }>,
-): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of CAR.writeCarStream(roots, blocks)) {
-    chunks.push(chunk)
-  }
-  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.length
-  }
-  return result
-}
 
 describe('CAR round-trip', () => {
   it('should write and read back a single-block CAR', async () => {
@@ -134,10 +114,7 @@ describe('CID integrity verification', () => {
     const cidStr = AtcuteCid.toString(cid)
 
     // Re-hash the data and compare
-    const recomputed = await AtcuteCid.create(
-      0x71,
-      new Uint8Array(data) as Uint8Array<ArrayBuffer>,
-    )
+    const recomputed = await AtcuteCid.create(0x71, new Uint8Array(data))
     expect(AtcuteCid.toString(recomputed)).toBe(cidStr)
   })
 
@@ -150,10 +127,7 @@ describe('CID integrity verification', () => {
     const tampered = new Uint8Array(data)
     tampered[0] ^= 0xff
 
-    const recomputed = await AtcuteCid.create(
-      0x71,
-      tampered as Uint8Array<ArrayBuffer>,
-    )
+    const recomputed = await AtcuteCid.create(0x71, tampered)
     expect(AtcuteCid.toString(recomputed)).not.toBe(cidStr)
   })
 
@@ -175,7 +149,7 @@ describe('CID integrity verification', () => {
     const reader = CAR.fromUint8Array(carBytes)
     for (const entry of reader) {
       const cidStr = AtcuteCid.toString(entry.cid)
-      const blockBytes = new Uint8Array(entry.bytes) as Uint8Array<ArrayBuffer>
+      const blockBytes = new Uint8Array(entry.bytes)
       const expected = await AtcuteCid.create(
         entry.cid.codec as 0x55 | 0x71,
         blockBytes,
@@ -256,7 +230,7 @@ describe('MST inclusion proof CAR', () => {
     // Build inclusion proof
     const proofCids = await buildInclusionProof(
       nodeStore,
-      root!,
+      root,
       'zone.stratos.feed.post/abc123',
     )
 
@@ -338,17 +312,17 @@ describe('MST inclusion proof CAR', () => {
     // Proof for each record should be available
     const proof1 = await buildInclusionProof(
       nodeStore,
-      root!,
+      root,
       'zone.stratos.feed.post/a1',
     )
     const proof2 = await buildInclusionProof(
       nodeStore,
-      root!,
+      root,
       'zone.stratos.feed.post/a2',
     )
     const proof3 = await buildInclusionProof(
       nodeStore,
-      root!,
+      root,
       'zone.stratos.feed.post/a3',
     )
 
@@ -536,7 +510,7 @@ describe('Import repo CAR verification', () => {
     const reader = CAR.fromUint8Array(carBytes)
     for (const entry of reader) {
       const cidStr = AtcuteCid.toString(entry.cid)
-      const blockBytes = new Uint8Array(entry.bytes) as Uint8Array<ArrayBuffer>
+      const blockBytes = new Uint8Array(entry.bytes)
       const expected = await AtcuteCid.create(
         entry.cid.codec as 0x55 | 0x71,
         blockBytes,
@@ -582,10 +556,7 @@ describe('CID string interop', () => {
 
   it('should handle raw codec (0x55) CIDs', async () => {
     const data = new Uint8Array([1, 2, 3, 4, 5])
-    const atcuteCid = await AtcuteCid.create(
-      0x55,
-      data as Uint8Array<ArrayBuffer>,
-    )
+    const atcuteCid = await AtcuteCid.create(0x55, data)
     const str = AtcuteCid.toString(atcuteCid)
 
     const mfCid = CID.parse(str)

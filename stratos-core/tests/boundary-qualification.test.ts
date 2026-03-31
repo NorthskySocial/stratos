@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  qualifyBoundary,
-  qualifyBoundaries,
+  assertBoundaryMatchesService,
+  BoundaryServiceMismatchError,
+  ensureQualifiedBoundaries,
   isQualifiedBoundary,
   parseQualifiedBoundary,
-  assertBoundaryMatchesService,
-  ensureQualifiedBoundaries,
-  BoundaryServiceMismatchError,
+  qualifyBoundaries,
+  qualifyBoundary,
 } from '../src/index.js'
 
 const NERV_SERVICE = 'did:web:nerv.tokyo.jp'

@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { discoverEnrollment, discoverEnrollments } from '../src/index.js'
 import {
   createServiceFetchHandler,
-  resolveServiceUrl,
   findEnrollmentByService,
+  resolveServiceUrl,
 } from '../src/routing.js'
 import {
   buildCollectionScope,
@@ -93,6 +93,7 @@ describe('discovery', () => {
           {
             uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
             cid: 'bafytest',
+            /* eslint-disable @typescript-eslint/no-explicit-any */
             value: { invalid: true } as any,
           },
         ]),
@@ -266,7 +267,7 @@ describe('routing', () => {
         enrollments,
         'https://stratos-b.example.com',
       )
-      expect((result as any)?.rkey).toBe('rkey2')
+      expect(result?.rkey).toBe('rkey2')
     })
 
     it('matches with trailing slash normalization', () => {
@@ -277,7 +278,7 @@ describe('routing', () => {
         enrollments,
         'https://stratos.example.com',
       )
-      expect((result as any)?.rkey).toBe('rkey1')
+      expect(result?.rkey).toBe('rkey1')
     })
 
     it('returns null when no match', () => {

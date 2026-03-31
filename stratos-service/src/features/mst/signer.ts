@@ -1,11 +1,11 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Keypair } from '@atproto/crypto'
 import type { ActorRepoTransactor } from '../../actor-store-types.js'
 import { type UnsignedCommitData, BlockMap } from '@northskysocial/stratos-core'
-import type { WritePhases } from '../../api/records.js'
+import type { WritePhases } from '../../api/records/index.js'
 
 export interface SignedCommitResult {
   commitCid: CID
@@ -26,6 +26,13 @@ export interface ExtraBlock {
   bytes: Uint8Array
 }
 
+/**
+ * Sign a commit with the given signing key and unsigned commit data.
+ * @param signingKey - The signing key to use.
+ * @param unsigned - The unsigned commit data to sign.
+ * @param extraBlocks - Optional extra blocks to include in the commit.
+ * @returns A promise that resolves to the signed commit data.
+ */
 export async function signCommit(
   signingKey: Keypair,
   unsigned: UnsignedCommitData,
@@ -74,6 +81,15 @@ export async function signCommit(
   }
 }
 
+/**
+ * Sign and persist a commit to the repository.
+ * @param repoTransactor - The repository transactor to use.
+ * @param signingKey - The signing key to use.
+ * @param unsigned - The unsigned commit data to sign and persist.
+ * @param phases - Optional phases to track performance metrics.
+ * @param extraBlocks - Optional extra blocks to include in the commit.
+ * @returns A promise that resolves to the signed commit result.
+ */
 export async function signAndPersistCommit(
   repoTransactor: ActorRepoTransactor,
   signingKey: Keypair,

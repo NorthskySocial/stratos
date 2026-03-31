@@ -514,9 +514,12 @@ is a DAG-CBOR payload (`{boundaries, did, signingKey}`) signed by the service's 
 - Regenerated when boundaries change (always during an authenticated user action)
 - Deleted on unenrollment along with the signing key
 
-**Revocation**: When a user unenrolls, their signing key and all associated actor data (records, blobs, and repository blocks) are deleted from disk, and the enrollment
-record is permanently removed from the service database (hard delete). A best-effort attempt is made to delete the PDS
-enrollment record and revoke any active OAuth sessions. AppViews should check the enrollment status endpoint as the canonical trust anchor
+**Revocation**: When a user unenrolls, their signing key and all associated actor data (records,
+blobs, and repository blocks) are deleted from disk, and the enrollment
+record is permanently removed from the service database (hard delete). A best-effort attempt is made
+to delete the PDS
+enrollment record and revoke any active OAuth sessions. AppViews should check the enrollment status
+endpoint as the canonical trust anchor
 for high-stakes operations.
 
 **Verification**: AppViews can verify a user's attestation offline by checking the DAG-CBOR payload

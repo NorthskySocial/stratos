@@ -19,11 +19,21 @@ export type ServicePgDb = PostgresJsDatabase<typeof pgSchema> & {
   $client: ServicePgClient
 }
 
+/**
+ * Create a PostgreSQL database connection for the service
+ * @param connectionString - PostgreSQL connection string
+ * @returns ServicePgDb instance
+ */
 export function createServicePgDb(connectionString: string): ServicePgDb {
   const client = postgres(connectionString, { max: 5, idle_timeout: 20 })
   return drizzle({ client, schema: pgSchema }) as unknown as ServicePgDb
 }
 
+/**
+ * Format PostgreSQL startup diagnostics into a string
+ * @param diagnostics - Startup diagnostics
+ * @returns Formatted diagnostics string
+ */
 function formatStartupDiagnostics(
   diagnostics: ServicePgStartupDiagnostics,
 ): string {
@@ -38,6 +48,11 @@ function formatStartupDiagnostics(
   ].join(', ')
 }
 
+/**
+ * Extract PostgreSQL error details from an error object
+ * @param error - Error object
+ * @returns Set of error details
+ */
 function extractPgErrorDetails(error: unknown): string {
   const details = new Set<string>()
 
@@ -66,6 +81,11 @@ function extractPgErrorDetails(error: unknown): string {
   return [...details].join(', ')
 }
 
+/**
+ * Check PostgreSQL database startup and return diagnostics
+ * @param db - ServicePgDb instance
+ * @returns ServicePgStartupDiagnostics
+ */
 export async function checkServicePgDbStartup(
   db: ServicePgDb,
 ): Promise<ServicePgStartupDiagnostics> {
@@ -138,6 +158,12 @@ export async function checkServicePgDbStartup(
   return diagnostics
 }
 
+/**
+ * Execute a migration step against the PostgreSQL database
+ * @param db - ServicePgDb instance
+ * @param name - Migration step name
+ * @param statement - SQL statement to execute
+ */
 async function executeMigrationStep(
   db: ServicePgDb,
   name: string,
@@ -156,13 +182,22 @@ async function executeMigrationStep(
     })()
 
     const errorDetails = extractPgErrorDetails(error)
+    const errorPrefix = `Failed to migrate PostgreSQL service table ${name}: `
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const details = errorDetails ? `; postgres details: ${errorDetails}` : ''
     throw new Error(
-      `Failed to migrate PostgreSQL service table ${name}: ${error instanceof Error ? error.message : String(error)}${errorDetails ? `; postgres details: ${errorDetails}` : ''}${diagnosticSuffix}`,
-      { cause: error },
+      `${errorPrefix}${errorMessage}${details}${diagnosticSuffix}`,
+      {
+        cause: error,
+      },
     )
   }
 }
 
+/**
+ * Migrate the PostgreSQL database schema for the service
+ * @param db - ServicePgDb instance
+ */
 export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
   await executeMigrationStep(
     db,
@@ -232,6 +267,10 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
   )
 }
 
+/**
+ * Close the PostgreSQL database connection
+ * @param db - ServicePgDb instance
+ */
 export async function closeServicePgDb(db: ServicePgDb): Promise<void> {
   await db.$client.end()
 }

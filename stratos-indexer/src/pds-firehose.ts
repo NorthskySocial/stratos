@@ -1,5 +1,4 @@
 import { FirehoseSubscription } from '@atcute/firehose'
-import { fromUint8Array } from '@atcute/car'
 import { fromBytes } from '@atcute/cbor'
 import { ComAtprotoSyncSubscribeRepos } from '@atcute/atproto'
 import type { WriteOpAction } from '@atproto/repo'
@@ -11,10 +10,11 @@ import type { CursorManager } from './cursor-manager.ts'
 import type { HandleDedup } from './handle-dedup.ts'
 import {
   decodeCommitOps,
-  parseCid,
-  jsonToLex,
   extractBoundaries,
-} from './record-decoder.ts'
+  jsonToLex,
+  parseCid,
+} from '@northskysocial/stratos-core'
+import { fromUint8Array } from '@atcute/car'
 
 const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 
@@ -31,6 +31,7 @@ export interface EnrollmentCallback {
 
 interface CommitWork {
   type: 'commit'
+  traceId: string
   message: Extract<
     SubscribeReposMessage,
     { $type: 'com.atproto.sync.subscribeRepos#commit' }
@@ -39,6 +40,7 @@ interface CommitWork {
 
 interface IdentityWork {
   type: 'identity'
+  traceId: string
   message: Extract<
     SubscribeReposMessage,
     { $type: 'com.atproto.sync.subscribeRepos#identity' }
@@ -47,6 +49,7 @@ interface IdentityWork {
 
 interface AccountWork {
   type: 'account'
+  traceId: string
   message: Extract<
     SubscribeReposMessage,
     { $type: 'com.atproto.sync.subscribeRepos#account' }
@@ -55,6 +58,7 @@ interface AccountWork {
 
 interface SyncWork {
   type: 'sync'
+  traceId: string
   message: Extract<
     SubscribeReposMessage,
     { $type: 'com.atproto.sync.subscribeRepos#sync' }
@@ -78,16 +82,32 @@ export class PdsFirehose {
   private subscription: FirehoseSubscription<
     typeof ComAtprotoSyncSubscribeRepos.mainSchema
   > | null = null
+  private ws: WebSocket | null = null
   private running = false
   private abortController: AbortController | null = null
 
   constructor(private opts: PdsFirehoseOptions) {}
 
+  /**
+   * Check if the PDS firehose is currently connected.
+   *
+   * @returns {boolean} - True if the PDS firehose is connected, false otherwise.
+   */
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  /**
+   * Start consuming messages from the PDS firehose.
+   */
   start(): void {
     this.running = true
     this.connect()
   }
 
+  /**
+   * Stop consuming messages from the PDS firehose.
+   */
   stop(): void {
     this.running = false
     this.abortController?.abort()
@@ -95,6 +115,10 @@ export class PdsFirehose {
     this.subscription = null
   }
 
+  /**
+   * Connect to the PDS firehose and start consuming messages.
+   * @private
+   */
   private connect(): void {
     if (!this.running) return
 
@@ -135,6 +159,10 @@ export class PdsFirehose {
     this.consumeMessages()
   }
 
+  /**
+   * Consume messages from the PDS firehose.
+   * @private
+   */
   private consumeMessages(): void {
     if (!this.subscription || !this.running) return
 
@@ -142,6 +170,7 @@ export class PdsFirehose {
 
     void (async () => {
       try {
+        this.ws = (this.subscription as { socket?: WebSocket }).socket ?? null
         for await (const message of this.subscription!) {
           if (!this.running) break
 
@@ -168,22 +197,39 @@ export class PdsFirehose {
     })()
   }
 
+  /**
+   * Classify a message from the PDS firehose into a FirehoseWork object.
+   * @private
+   * @param {SubscribeReposMessage} message - The message to classify.
+   * @returns {FirehoseWork | null} - The classified work or null if the message type is unknown.
+   */
   private classifyMessage(message: SubscribeReposMessage): FirehoseWork | null {
+    const traceId = Math.random().toString(36).substring(2, 15)
     switch (message.$type) {
       case 'com.atproto.sync.subscribeRepos#commit':
-        return { type: 'commit', message }
+        return { type: 'commit', message, traceId }
       case 'com.atproto.sync.subscribeRepos#identity':
-        return { type: 'identity', message }
+        return { type: 'identity', message, traceId }
       case 'com.atproto.sync.subscribeRepos#account':
-        return { type: 'account', message }
+        return { type: 'account', message, traceId }
       case 'com.atproto.sync.subscribeRepos#sync':
-        return { type: 'sync', message }
+        return { type: 'sync', message, traceId }
       default:
         return null
     }
   }
 }
 
+/**
+ * Process a FirehoseWork object by handling different types of messages.
+ * @async
+ * @param {FirehoseWork} work - The work to process.
+ * @param {IndexingService} indexingService - The indexing service to use.
+ * @param {BackgroundQueue} background - The background queue for processing.
+ * @param {EnrollmentCallback} enrollmentCallback - The callback for enrollment.
+ * @param {HandleDedup} handleDedup - The deduplication handler.
+ * @returns {Promise<void>} - A promise that resolves when the work is processed.
+ */
 export async function processFirehoseWork(
   work: FirehoseWork,
   indexingService: IndexingService,
@@ -191,6 +237,7 @@ export async function processFirehoseWork(
   enrollmentCallback: EnrollmentCallback,
   handleDedup: HandleDedup,
 ): Promise<void> {
+  const { traceId } = work
   switch (work.type) {
     case 'commit':
       await processCommit(
@@ -199,6 +246,7 @@ export async function processFirehoseWork(
         background,
         enrollmentCallback,
         handleDedup,
+        traceId,
       )
       break
     case 'identity':
@@ -217,12 +265,22 @@ export async function processFirehoseWork(
   }
 }
 
+/**
+ * Process a commit message from the PDS firehose.
+ * @param message - The commit message.
+ * @param indexingService - The indexing service.
+ * @param background - The background queue for processing.
+ * @param enrollmentCallback - The callback for enrollment.
+ * @param handleDedup - The deduplication handler.
+ * @param traceId - The trace identifier for logging.
+ */
 async function processCommit(
   message: CommitWork['message'],
   indexingService: IndexingService,
   background: BackgroundQueue,
   enrollmentCallback: EnrollmentCallback,
   handleDedup: HandleDedup,
+  traceId: string,
 ): Promise<void> {
   const did = message.repo
   const timestamp = message.time
@@ -235,6 +293,7 @@ async function processCommit(
     background.add(() => indexingService.indexHandle(did, timestamp))
   }
 
+  console.log({ did, traceId }, 'processing firehose commit')
   await indexingService.setCommitLastSeen(did, parseCid(commitCid), rev)
 
   const blocks = fromBytes(rawBlocks)
@@ -267,6 +326,12 @@ async function processCommit(
   }
 }
 
+/**
+ * Check if an operation is related to enrollment and trigger enrollment callback.
+ * @param did - The DID of the actor.
+ * @param op - The operation details.
+ * @param enrollmentCallback - The callback for enrollment.
+ */
 function checkEnrollmentOp(
   did: string,
   op: { action: string; collection: string; record?: Record<string, unknown> },
@@ -287,11 +352,18 @@ function checkEnrollmentOp(
   }
 }
 
+/**
+ * Process an account message from the PDS firehose.
+ * @async
+ * @param message - The account message.
+ * @param indexingService - The indexing service.
+ * @returns {Promise<void>} - A promise that resolves when the account message is processed.
+ */
 async function processAccount(
   message: AccountWork['message'],
   indexingService: IndexingService,
 ): Promise<void> {
-  if (message.active === false && message.status === 'deleted') {
+  if (!message.active && message.status === 'deleted') {
     await indexingService.deleteActor(message.did)
   } else {
     await indexingService.updateActorStatus(
@@ -302,6 +374,12 @@ async function processAccount(
   }
 }
 
+/**
+ * Process a sync message from the PDS firehose.
+ *
+ * @param message - The sync message.
+ * @param indexingService - The indexing service.
+ */
 async function processSync(
   message: SyncWork['message'],
   indexingService: IndexingService,

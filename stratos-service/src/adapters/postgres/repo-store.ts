@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { eq, sql } from 'drizzle-orm'
 import type {
   RepoStoreReader,

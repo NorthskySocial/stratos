@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
-import { CID } from 'multiformats/cid'
-import { StratosDbOrTx, stratosBlob, stratosRecordBlob } from '../db/index.js'
-import { BlobStore, PreparedBlobRef, Logger } from '../types.js'
+import { CID } from '@atproto/lex-data'
+import { stratosBlob, StratosDbOrTx, stratosRecordBlob } from '../db/index.js'
+import { BlobStore, Logger, PreparedBlobRef } from '../types.js'
 import { StratosBlobReader } from './reader.js'
 
 /**
@@ -12,6 +12,11 @@ export class StratosBlobTransactor extends StratosBlobReader {
     super(db, blobstore, logger)
   }
 
+  /**
+   * Tracks a blob by inserting its metadata into the database.
+   * @param blob - The blob object to track.
+   * @returns A promise that resolves when the blob is successfully tracked.
+   */
   async trackBlob(blob: {
     cid: CID
     mimeType: string
@@ -35,6 +40,12 @@ export class StratosBlobTransactor extends StratosBlobReader {
       .onConflictDoNothing()
   }
 
+  /**
+   * Associates a blob with a record by inserting a record-blob association into the database.
+   * @param blobCid - CID of the blob to associate.
+   * @param recordUri - URI of the record to associate with the blob.
+   * @returns A promise that resolves when the association is successfully created.
+   */
   async associateBlobWithRecord(
     blobCid: CID,
     recordUri: string,
@@ -48,6 +59,12 @@ export class StratosBlobTransactor extends StratosBlobReader {
       .onConflictDoNothing()
   }
 
+  /**
+   * Processes a list of blobs associated with a record, tracking them and associating them with the record.
+   * @param recordUri - URI of the record to process blobs for.
+   * @param blobs - Array of prepared blob references to process.
+   * @returns A promise that resolves when all blobs are successfully processed.
+   */
   async processBlobs(
     recordUri: string,
     blobs: PreparedBlobRef[],
@@ -68,12 +85,23 @@ export class StratosBlobTransactor extends StratosBlobReader {
     }
   }
 
+  /**
+   * Removes all blob associations for a given record from the database.
+   * @param recordUri - URI of the record to remove associations for.
+   * @returns A promise that resolves when all associations are successfully removed.
+   */
   async removeRecordBlobAssociations(recordUri: string): Promise<void> {
     await this.db
       .delete(stratosRecordBlob)
       .where(eq(stratosRecordBlob.recordUri, recordUri))
   }
 
+  /**
+   * Updates the takedown status of a blob in the database.
+   * @param cid - CID of the blob to update.
+   * @param takedown - Takedown information to set for the blob.
+   * @returns A promise that resolves when the takedown status is successfully updated.
+   */
   async updateBlobTakedown(
     cid: CID,
     takedown: { applied: boolean; ref?: string },
@@ -84,6 +112,10 @@ export class StratosBlobTransactor extends StratosBlobReader {
       .where(eq(stratosBlob.cid, cid.toString()))
   }
 
+  /**
+   * Deletes blobs that are not associated with any record from the database and blobstore.
+   * @returns A promise that resolves with an array of CID objects of deleted blobs.
+   */
   async deleteOrphanBlobs(): Promise<CID[]> {
     // Using a subquery approach since Drizzle handles left joins differently
     const allBlobs = await this.db

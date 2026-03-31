@@ -14,7 +14,7 @@ export interface InspectorResult {
   recordError: string | null
 }
 
-export function parseAtUri(uri: string): AtUriParts {
+export function parseAtUri(uri: string): stringParts {
   const stripped = uri.replace('at://', '')
   const [did, collection, rkey] = stripped.split('/')
   return { did, collection, rkey }
@@ -105,7 +105,7 @@ export async function inspectRecord(
   try {
     const pdsUrl = await resolvePdsEndpoint(did)
     const stubResponse = await fetchPdsStub(pdsUrl, did, collection, rkey)
-    result.stub = stubResponse as Record<string, unknown>
+    result.stub = stubResponse
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('RecordNotFound')) {
@@ -117,7 +117,7 @@ export async function inspectRecord(
 
   try {
     const hydrateResponse = await fetchHydratedRecord(session, stratosUrl, uri)
-    result.record = hydrateResponse as Record<string, unknown>
+    result.record = hydrateResponse
   } catch (err) {
     result.recordError = err instanceof Error ? err.message : String(err)
   }

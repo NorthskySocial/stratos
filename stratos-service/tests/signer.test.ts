@@ -1,15 +1,20 @@
-import { describe, it, expect, vi } from 'vitest'
-import { CID } from 'multiformats/cid'
-import * as AtcuteCid from '@atcute/cid'
-import { decode as cborDecode, isBytes, fromBytes } from '@atcute/cbor'
+import { describe, expect, it, vi } from 'vitest'
+import { CID } from '@atproto/lex-data'
 import type { CidLink } from '@atcute/cid'
+import * as AtcuteCid from '@atcute/cid'
+import {
+  type Bytes,
+  decode as cborDecode,
+  fromBytes,
+  isBytes,
+} from '@atcute/cbor'
 import { MemoryBlockStore } from '@atcute/mst'
 import { signAndPersistCommit, signCommit } from '../src/features/index.js'
 import {
+  BlockMap,
   buildCommit,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
-import { BlockMap } from '@northskysocial/stratos-core'
 
 import type { ActorRepoTransactor } from '../src/actor-store-types.js'
 
@@ -172,7 +177,7 @@ describe('signAndPersistCommit', () => {
 
     // All blocks persisted in a single batch call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()
-    const [blockMap, rev] = transactor.putBlocks.mock.calls[0] as [
+    const [blockMap, rev] = vi.mocked(transactor.putBlocks).mock.calls[0] as [
       BlockMap,
       string,
     ]
@@ -272,7 +277,7 @@ describe('signAndPersistCommit', () => {
     expect((decoded.data as CidLink).$link).toBe(unsigned.data)
     expect(decoded.rev).toBe(unsigned.rev)
     expect(isBytes(decoded.sig)).toBe(true)
-    expect(fromBytes(decoded.sig as Uint8Array).length).toBe(64)
+    expect(fromBytes(decoded.sig as unknown as Bytes).length).toBe(64)
   })
 
   it('should delete removed CIDs when present', async () => {
@@ -311,7 +316,7 @@ describe('signAndPersistCommit', () => {
     await signAndPersistCommit(transactor, keypair, unsignedWithRemovals)
 
     expect(transactor.deleteBlocks).toHaveBeenCalledOnce()
-    expect(transactor.deleteBlocks.mock.calls[0][0]).toHaveLength(1)
+    expect(vi.mocked(transactor.deleteBlocks).mock.calls[0][0]).toHaveLength(1)
   })
 
   it('should not call deleteBlocks when removedCids is empty', async () => {
@@ -361,7 +366,10 @@ describe('signAndPersistCommit', () => {
 
     // The commit block should be included in the batch putBlocks call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()
-    const [blockMap] = transactor.putBlocks.mock.calls[0] as [BlockMap]
+    const [blockMap] = vi.mocked(transactor.putBlocks).mock.calls[0] as [
+      BlockMap,
+      string,
+    ]
     const commitEntry = [...blockMap.entries()].find(
       ([key]) => key === result.commitCid.toString(),
     )

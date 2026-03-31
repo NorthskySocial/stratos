@@ -5,6 +5,9 @@ export interface AllowListProvider {
   refresh(): Promise<void>
 }
 
+/**
+ * ExternalAllowListProvider implements AllowListProvider by fetching an allow list from an external source.
+ */
 export class ExternalAllowListProvider implements AllowListProvider {
   private allowList: Set<string> = new Set()
   private refreshInterval: NodeJS.Timeout | null = null
@@ -17,11 +20,20 @@ export class ExternalAllowListProvider implements AllowListProvider {
     private refreshMs: number = 600000, // 10 minutes default
   ) {}
 
+  /**
+   * Starts the allow list provider by refreshing the allow list and setting up periodic refresh.
+   */
   async start() {
     await this.refresh()
-    this.refreshInterval = setInterval(() => this.refresh(), this.refreshMs)
+    this.refreshInterval = setInterval(
+      () => void this.refresh(),
+      this.refreshMs,
+    )
   }
 
+  /**
+   * Stops the allow list provider by clearing the refresh interval and closing the cache if present.
+   */
   async stop() {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval)
@@ -31,6 +43,11 @@ export class ExternalAllowListProvider implements AllowListProvider {
     }
   }
 
+  /**
+   * Checks if a DID is allowed based on the allow list.
+   * @param did - The DID to check.
+   * @returns True if the DID is allowed, false otherwise.
+   */
   async isAllowed(did: string): Promise<boolean> {
     if (this.allowList.has(did)) {
       return true

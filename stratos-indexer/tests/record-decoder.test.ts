@@ -3,8 +3,8 @@ import {
   extractBoundaries,
   parseCid,
   jsonToLex,
-} from '../src/index.ts'
-import { CID } from 'multiformats/cid'
+} from '@northskysocial/stratos-core'
+import { CID } from '@atproto/lex-data'
 
 describe('extractBoundaries', () => {
   it('extracts boundary values from a record', () => {

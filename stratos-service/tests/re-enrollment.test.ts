@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import express from 'express'
-import { Agent } from '@atproto/api'
 import { createOAuthRoutes } from '../src/oauth/routes.js'
+import { createMockEnrollment } from './utils/index.js'
 
 vi.mock('@atproto/api', () => {
-  const mockPutRecord = vi.fn().mockResolvedValue({ uri: 'at://did:plc:user/zone.stratos.actor.enrollment/rkey' })
+  const mockPutRecord = vi.fn().mockResolvedValue({
+    uri: 'at://did:plc:user/zone.stratos.actor.enrollment/rkey',
+  })
   const mockListRecords = vi.fn().mockResolvedValue({ data: { records: [] } })
 
   return {
@@ -60,7 +62,13 @@ describe('Re-enrollment', () => {
     mockIdResolver = {
       resolve: vi.fn().mockResolvedValue({
         didDocument: {
-          service: [{ id: '#atproto_pds', type: 'AtprotoPersonalDataServer', serviceEndpoint: 'https://pds.example.com' }],
+          service: [
+            {
+              id: '#atproto_pds',
+              type: 'AtprotoPersonalDataServer',
+              serviceEndpoint: 'https://pds.example.com',
+            },
+          ],
         },
       }),
     }
@@ -69,12 +77,13 @@ describe('Re-enrollment', () => {
   it('restores PDS record for an active user who deleted it', async () => {
     // 1. Setup: user is already active in Stratos
     mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
-    mockEnrollmentStore.getEnrollment.mockResolvedValue({
-      did: userDid,
-      signingKeyDid: 'did:key:user-key',
-      active: true,
-      enrollmentRkey: 'did:web:stratos.example.com', // serviceDIDToRkey('did:web:stratos.example.com')
-    })
+    mockEnrollmentStore.getEnrollment.mockResolvedValue(
+      createMockEnrollment(userDid, {
+        signingKeyDid: 'did:key:user-key',
+        active: true,
+        enrollmentRkey: 'did:web:stratos.example.com', // serviceDIDToRkey('did:web:stratos.example.com')
+      }),
+    )
     mockEnrollmentStore.getBoundaries.mockResolvedValue(['engineering'])
 
     const config: any = {
@@ -93,7 +102,10 @@ describe('Re-enrollment', () => {
       },
       initRepo: vi.fn().mockResolvedValue(undefined),
       createSigningKey: vi.fn().mockResolvedValue('did:key:user-key'),
-      createAttestation: vi.fn().mockResolvedValue({ sig: new Uint8Array([1, 2, 3]), signingKey: 'did:key:service-key' }),
+      createAttestation: vi.fn().mockResolvedValue({
+        sig: new Uint8Array([1, 2, 3]),
+        signingKey: 'did:key:service-key',
+      }),
     }
 
     const router = createOAuthRoutes(config)
@@ -101,13 +113,14 @@ describe('Re-enrollment', () => {
     app.use(router)
 
     // Finding the handler in the router
-    const handler = (router.stack.find(s => s.route?.path === '/callback')?.route.stack[0].handle) as any
+    const handler = router.stack.find((s) => s.route?.path === '/callback')
+      ?.route?.stack[0].handle as any
 
     const req: any = {
       url: '/callback?code=123&state=abc',
       method: 'GET',
       query: { code: '123', state: 'abc' },
-      cookies: {}
+      cookies: {},
     }
     const res: any = {
       json: vi.fn(),
@@ -125,20 +138,22 @@ describe('Re-enrollment', () => {
       expect.objectContaining({
         service: serviceEndpoint,
         signingKey: 'did:key:user-key',
-      })
+      }),
     )
 
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      enrolled: false,
-      message: 'Already enrolled in Stratos'
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        enrolled: false,
+        message: 'Already enrolled in Stratos',
+      }),
+    )
   })
 
   it('reactivates an inactive user', async () => {
     // 1. Setup: user is inactive
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false) // Inactive users return false for isEnrolled
-    
+
     const config: any = {
       oauthClient: mockOauthClient,
       enrollmentConfig: { mode: 'open' },
@@ -155,17 +170,21 @@ describe('Re-enrollment', () => {
       },
       initRepo: vi.fn().mockResolvedValue(undefined),
       createSigningKey: vi.fn().mockResolvedValue('did:key:user-key'),
-      createAttestation: vi.fn().mockResolvedValue({ sig: new Uint8Array([1, 2, 3]), signingKey: 'did:key:service-key' }),
+      createAttestation: vi.fn().mockResolvedValue({
+        sig: new Uint8Array([1, 2, 3]),
+        signingKey: 'did:key:service-key',
+      }),
     }
 
     const router = createOAuthRoutes(config)
-    const handler = (router.stack.find(s => s.route?.path === '/callback')?.route.stack[0].handle) as any
+    const handler = router.stack.find((s) => s.route?.path === '/callback')
+      ?.route?.stack[0].handle as any
 
     const req: any = {
       url: '/callback?code=123&state=abc',
       method: 'GET',
       query: { code: '123', state: 'abc' },
-      cookies: {}
+      cookies: {},
     }
     const res: any = {
       json: vi.fn(),
@@ -177,10 +196,12 @@ describe('Re-enrollment', () => {
     await handler(req, res)
 
     // 2. Verify: enrollmentStore.enroll was called (which reactivates)
-    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(expect.objectContaining({
-      did: userDid,
-      active: true,
-    }))
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        did: userDid,
+        active: true,
+      }),
+    )
 
     // 3. Verify: putEnrollmentRecord was called
     expect(mockPutRecord).toHaveBeenCalledWith(
@@ -189,12 +210,14 @@ describe('Re-enrollment', () => {
       expect.objectContaining({
         service: serviceEndpoint,
         signingKey: 'did:key:user-key',
-      })
+      }),
     )
 
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      enrolled: true,
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        enrolled: true,
+      }),
+    )
   })
 })

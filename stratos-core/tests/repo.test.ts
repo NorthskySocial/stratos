@@ -1,24 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { eq } from 'drizzle-orm'
 
 import {
-  StratosSqlRepoReader,
-  StratosSqlRepoTransactor,
   BlockMap,
-} from '../src/index.js'
-import {
+  closeStratosDb,
   createStratosDb,
   migrateStratosDb,
-  closeStratosDb,
-  StratosDb,
-  stratosRepoRoot,
+  type StratosDb,
   stratosRepoBlock,
+  stratosRepoRoot,
+  StratosSqlRepoReader,
+  StratosSqlRepoTransactor,
 } from '../src/index.js'
 
 // Create a deterministic CID from data
@@ -392,7 +390,7 @@ describe('Repo Transactor', () => {
 
       expect(transactor.cache.size()).toBe(1)
 
-      await transactor.clearCache()
+      transactor.clearCache()
 
       expect(transactor.cache.size()).toBe(0)
     })

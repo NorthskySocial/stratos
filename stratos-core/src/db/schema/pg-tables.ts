@@ -1,11 +1,11 @@
 import {
-  pgTable,
-  text,
-  integer,
   bytea,
-  primaryKey,
   index,
+  integer,
+  pgTable,
+  primaryKey,
   serial,
+  text,
 } from 'drizzle-orm/pg-core'
 
 export const pgStratosRepoRoot = pgTable('stratos_repo_root', {

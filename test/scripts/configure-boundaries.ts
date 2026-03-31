@@ -3,10 +3,13 @@
 // Rei → [swordsmith], Sakura → [swordsmith], kaoruko → [aekea]
 
 import { TEST_USERS } from './lib/config.ts'
-import { setBoundaries, getBoundaries } from './lib/backend.ts'
+import { getBoundaries, setBoundaries } from './lib/backend.ts'
 import { loadState } from './lib/state.ts'
-import { section, info, pass, fail } from './lib/log.ts'
+import { fail, info, pass, section } from './lib/log.ts'
 
+/**
+ * Runs the boundary configuration script.
+ */
 async function run() {
   section('Phase 3: Configure Boundaries')
 

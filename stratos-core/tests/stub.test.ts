@@ -1,13 +1,13 @@
 /**
  * Unit tests for stub module domain logic
  */
-import { describe, it, expect } from 'vitest'
-import { CID } from 'multiformats/cid'
+import { describe, expect, it } from 'vitest'
+import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import {
+  extractSource,
   generateStub,
   isStubRecord,
-  extractSource,
   parseServiceDid,
 } from '../src/index.js'
 

@@ -3,7 +3,7 @@
  *
  * Implements BlobMetadataReader/Writer for SQLite backend.
  */
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { eq } from 'drizzle-orm'
 import type {
   BlobMetadataReader,

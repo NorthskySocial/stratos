@@ -10,6 +10,8 @@ export class WorkerPool<T = unknown> {
   private running = true
   private handler: (data: T) => Promise<void>
   private onError: (err: Error) => void
+  // Backpressure signaling
+  private drainWaiters: Array<() => void> = []
 
   constructor(
     private concurrency: number,
@@ -21,6 +23,19 @@ export class WorkerPool<T = unknown> {
     this.onError = onError
   }
 
+  get pendingCount(): number {
+    return this.queue.length
+  }
+
+  get runningCount(): number {
+    return this.activeCount
+  }
+
+  /**
+   * Submit work to the worker pool.
+   * @param data - Data to process.
+   * @returns A promise that resolves when the work is completed.
+   */
   async submit(data: T): Promise<void> {
     if (!this.running) {
       throw new Error('worker pool is stopped')
@@ -37,6 +52,12 @@ export class WorkerPool<T = unknown> {
     })
   }
 
+  /**
+   * Try to submit work to the worker pool.
+   * Returns true if the work was submitted, false otherwise.
+   * @param data - Data to process.
+   * @returns True if the work was submitted, false otherwise.
+   */
   trySubmit(data: T): boolean {
     if (!this.running || this.queue.length >= this.maxQueueSize) {
       return false
@@ -52,14 +73,6 @@ export class WorkerPool<T = unknown> {
     while (this.activeCount > 0 || this.queue.length > 0) {
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-  }
-
-  get pendingCount(): number {
-    return this.queue.length
-  }
-
-  get runningCount(): number {
-    return this.activeCount
   }
 
   private drain(): void {
@@ -86,9 +99,6 @@ export class WorkerPool<T = unknown> {
         this.notifyDrain()
       })
   }
-
-  // Backpressure signaling
-  private drainWaiters: Array<() => void> = []
 
   private waitForDrain(): Promise<void> {
     return new Promise((resolve) => {

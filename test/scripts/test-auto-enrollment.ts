@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run -A
-import { chromium, type Browser } from 'npm:playwright@1.58.2'
-import { STRATOS_URL, PDS_URL } from './lib/config.ts'
+import { type Browser, chromium } from 'npm:playwright@1.58.2'
+import { PDS_URL, STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { section, info, pass, fail, error } from './lib/log.ts'
+import { error, fail, info, pass, section } from './lib/log.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { createSession } from './lib/pds.ts'
 
@@ -194,7 +194,6 @@ async function verifyPdsRecord(
   info(`PDS record: ${JSON.stringify(data.value)}`)
 
   const recordBoundaries = data.value.boundaries.map(
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
     (b: { value: any }) => b.value,
   )
   const match =

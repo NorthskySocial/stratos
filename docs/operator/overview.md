@@ -1,6 +1,8 @@
 # Overview
 
-Stratos is a **private namespace service** for ATprotocol that enables users to store content visible only within specific community domains. Unlike public `app.bsky` records that are globally visible, Stratos records have **domain boundaries** that restrict visibility.
+Stratos is a **private namespace service** for ATprotocol that enables users to store content
+visible only within specific community domains. Unlike public `app.bsky` records that are globally
+visible, Stratos records have **domain boundaries** that restrict visibility.
 
 ## Key Concepts
 
@@ -28,7 +30,6 @@ Stratos is a **private namespace service** for ATprotocol that enables users to 
 ## Request Flow
 
 <script setup>
-import DataFlowAnimation from '../.vitepress/theme/components/DataFlowAnimation.vue'
 </script>
 
 <DataFlowAnimation />

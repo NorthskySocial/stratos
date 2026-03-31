@@ -2,22 +2,113 @@
 
 ## Overview
 
-This document describes the Stratos architecture using the **source field pattern** for hydration. This approach:
+This document describes the Stratos architecture using the **source field pattern** for hydration.
+This approach:
 
 - Writes **stub records** to user's PDS with a `source` field pointing to the Stratos service
 - Full records are stored in Stratos with boundary restrictions
-- AppViews hydrate via standard `com.atproto.repo.getRecord` calls to the service in `source.service`
+- AppViews hydrate via standard `com.atproto.repo.getRecord` calls to the service in
+  `source.service`
 - Uses `zone.stratos.actor.enrollment` records for endpoint discovery
 - Follows feature-sliced architecture with ports/adapters pattern
 
 ---
 
-## Source Field Pattern
+## Core Repository Management
 
-The source field enables self-describing hydration. When a user creates a record in Stratos:
+Stratos uses a specialized repository manager to handle record operations and MST maintenance.
 
-1. **Full record** is stored in Stratos (with boundary, content, etc.)
-2. **Stub record** is written to user's PDS with `source` field
+### ActorRepoManager
+
+The `ActorRepoManager` in `stratos-core` encapsulates the complex orchestration of repository
+writes:
+
+1. **Concurrency Control**: Uses mutex locking per DID to prevent write races.
+2. **IPLD Block Management**: Handles block storage and CID computation for records and the MST.
+3. **MST Manipulation**: Uses the `@atcute/mst` library for Merkle Search Tree operations.
+4. **Commit Signing**: Integrates with `SigningService` to sign repository commits.
+5. **Event Sequencing**: Publishes sequence events via `SequencingService` for downstream indexers.
+6. **MST Operations**: Leverages `buildCommit` to calculate new Merkle Search Tree states.
+7. **Atomic Transactions**: Wraps all database updates (blocks, records, root, sequence) in a single
+   DB transaction.
+8. **Decoupled Services**: Uses `SigningService` and `SequencingService` ports to remain independent
+   of specific infrastructure (like @atproto/identity or firehose implementations).
+
+### Service Infrastructure
+
+The Stratos service is built on a modular architecture that separates context management, storage
+implementations, and API handling.
+
+#### Application Context
+
+The `AppContext` (defined in `stratos-service/src/context-types.ts`) serves as the central
+dependency injection container for the service. It is initialized in
+`stratos-service/src/context.ts`, which orchestrates:
+
+- Storage setup (SQLite/Postgres)
+- Identity resolution and OAuth client initialization
+- Auth verifier creation
+- XRPC server configuration
+
+Storage implementations for SQLite are modularized in `stratos-service/src/storage/sqlite/`,
+including:
+
+- `SqliteSequenceOps`: Handles event sequencing.
+- `SqliteEnrollmentStore`: Manages user enrollments.
+- `StratosActorStore`: Manages per-actor SQLite databases and signing keys.
+
+#### API Handlers
+
+XRPC handlers are decomposed into specialized modules in `stratos-service/src/api/`:
+
+- `repo-read-handlers.ts`: Handles `getRecord` and `listRecords`.
+- `repo-write-handlers.ts`: Handles `createRecord`, `deleteRecord`, and `uploadBlob`.
+- `repo-sync-handlers.ts`: Handles repository synchronization and imports.
+- `describe-repo-handlers.ts`: Handles `describeRepo`.
+- `blob-handlers.ts`: Handles blob listing.
+
+All handlers utilize the `createXrpcHandler` utility to ensure consistent authentication, logging,
+and error mapping.
+
+### Indexer Sync Logic
+
+The `stratos-indexer` consumes the sync stream from Stratos services. The synchronization logic is
+modularized:
+
+- `StratosActorSync`: Manages the overall subscription lifecycle for multiple actors.
+- `ActorSyncer`: (in `stratos-indexer/src/actor-syncer.ts`) Handles the WebSocket connection and
+  message processing for a single actor, including queue management, reconnection logic, and record
+  indexing.
+
+### Write Workflow
+
+The service orchestrates full record storage and PDS stub creation:
+
+1. **Full record** is stored in Stratos using `ActorRepoManager.applyWrites`
+2. **Stub record** is written to user's PDS via the `StubService`
+
+### API Infrastructure
+
+Stratos uses a standardized XRPC handler abstraction to ensure consistency across endpoints:
+
+- **`createXrpcHandler`**: A higher-level wrapper that automates authentication validation, request
+  ID generation, performance logging, and domain error mapping.
+- **`StratosError` Mapping**: Domain-specific exceptions from `stratos-core` are automatically
+  caught and translated into appropriate XRPC `InvalidRequestError` or `AuthRequiredError` codes.
+- **`HandlerContext`**: A unified type for all XRPC inputs, parameters, and authentication data,
+  reducing manual type casting and boilerplate.
+
+### Context and Dependency Injection
+
+The service follows a strict dependency injection pattern managed by the `ServiceFactory` and
+`AppContext`:
+
+- **`ServiceFactory`**: Centralizes the instantiation of domain services (e.g., `EnrollmentService`,
+  `BoundaryResolver`), ensuring they are consistently configured with the correct stores and events.
+- **`AppContext`**: A global context object that provides access to all initialized services,
+  storage adapters, and infrastructure components (e.g., `ActorStore`, `OAuthClient`).
+- **Standardization**: By using the factory pattern, the core domain logic remains decoupled from
+  specific infrastructure implementations, facilitating easier testing and maintenance.
 
 ### Source Field Structure
 
@@ -127,11 +218,14 @@ graph LR
 
 ## Endpoint Discovery via Profile Record
 
-Instead of modifying user DID documents (requires PLC signing), users publish an enrollment record to their PDS during OAuth enrollment:
+Instead of modifying user DID documents (requires PLC signing), users publish an enrollment record
+to their PDS during OAuth enrollment:
 
 ### Lexicon: zone.stratos.actor.enrollment
 
-The current enrollment record is service-scoped rather than a single `self` record. Each Stratos service writes one record keyed by its own DID, which makes multi-service enrollment possible without replacing older records.
+The current enrollment record is service-scoped rather than a single `self` record. Each Stratos
+service writes one record keyed by its own DID, which makes multi-service enrollment possible
+without replacing older records.
 
 ```json
 {
@@ -580,7 +674,8 @@ stratos/
 
 ### Service DID Configuration
 
-The service fragment (`STRATOS_SERVICE_FRAGMENT`) is appended to the service DID for the `source.service` field:
+The service fragment (`STRATOS_SERVICE_FRAGMENT`) is appended to the service DID for the
+`source.service` field:
 
 ```
 DID: did:web:stratos.example.com

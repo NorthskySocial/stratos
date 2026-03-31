@@ -21,8 +21,9 @@ export class RepoWriteLocks {
   }
 
   /**
-   * Acquire the write lock for a DID.
-   * Returns an unlock function that **must** be called in a finally block.
+   * Acquire a write lock for the given DID.
+   * @param did - The DID to lock.
+   * @returns A function that releases the lock.
    */
   async acquire(did: string): Promise<() => void> {
     // Chain behind whatever is currently pending for this DID
@@ -42,7 +43,21 @@ export class RepoWriteLocks {
     return unlock
   }
 
-  /** Remove entries whose promise has already settled (no waiters). */
+  /**
+   * Release all locks.
+   */
+  destroy(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer)
+      this.sweepTimer = undefined
+    }
+    this.locks.clear()
+  }
+
+  /**
+   * Remove entries whose promise has already settled (no waiters).
+   * @private
+   */
   private sweep(): void {
     for (const [did, p] of this.locks) {
       // The settled() helper resolves immediately if p is already done
@@ -53,13 +68,5 @@ export class RepoWriteLocks {
         }
       })
     }
-  }
-
-  destroy(): void {
-    if (this.sweepTimer) {
-      clearInterval(this.sweepTimer)
-      this.sweepTimer = undefined
-    }
-    this.locks.clear()
   }
 }

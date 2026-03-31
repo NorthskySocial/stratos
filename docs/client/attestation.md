@@ -2,7 +2,9 @@
 
 ## Overview
 
-Each enrolled user's enrollment record includes a _service attestation_ — a DAG-CBOR payload signed by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment and boundaries offline without querying the enrollment status endpoint on every request.
+Each enrolled user's enrollment record includes a _service attestation_ — a DAG-CBOR payload signed
+by the Stratos service's secp256k1 key. This enables AppViews to verify a user's enrollment and
+boundaries offline without querying the enrollment status endpoint on every request.
 
 ## Enrollment Record Fields
 
@@ -25,11 +27,13 @@ The `attestation` object:
 
 ## Using `stratos-client` for Key Resolution
 
-The `stratos-client` package provides helpers to resolve the signing keys needed for verification. Results should be cached — keys don't change unless the service rotates them.
+The `stratos-client` package provides helpers to resolve the signing keys needed for verification.
+Results should be cached — keys don't change unless the service rotates them.
 
 ### Resolving the service signing key
 
-Stratos services publish their signing public key in the `did:web` DID document as a Multikey `verificationMethod` with the standard `#atproto` fragment. Resolve it once and cache:
+Stratos services publish their signing public key in the `did:web` DID document as a Multikey
+`verificationMethod` with the standard `#atproto` fragment. Resolve it once and cache:
 
 ```typescript
 import { resolveServiceSigningKey } from '@northskysocial/stratos-client'
@@ -91,12 +95,18 @@ async function verifyAttestation(
 ```
 
 ::: warning Boundary sort order matters
-The attestation payload encodes boundaries as a _sorted_ array. Reconstruct with `.sort()` or verification will fail.
+The attestation payload encodes boundaries as a _sorted_ array. Reconstruct with `.sort()` or
+verification will fail.
 :::
 
 ## Record-Level Verification
 
-Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof for a single record. Stratos maintains independent repositories per user. Record commits are signed with the user's per-enrollment P-256 key when available, falling back to the service's Secp256k1 key. This means standard ATproto verification against the user's PDS DID document will fail — clients must verify against either the user's enrollment `signingKey` or the Stratos service's signing key.
+Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof
+for a single record. Stratos maintains independent repositories per user. Record commits are signed
+with the user's per-enrollment P-256 key when available, falling back to the service's Secp256k1
+key. This means standard ATproto verification against the user's PDS DID document will fail —
+clients must verify against either the user's enrollment `signingKey` or the Stratos service's
+signing key.
 
 ### Fetch and verify in one step
 
@@ -131,7 +141,11 @@ const verified3 = await fetchAndVerifyRecord(serviceUrl, did, collection, rkey)
 
 ### Verification levels
 
-Record commits are signed with the user's per-enrollment P-256 key. Clients can verify a record was authored by a specific user by checking the commit signature against the `signingKey` published in the user's enrollment record. The enrollment attestation (signed by the service's Secp256k1 key) binds the user's DID, boundaries, and signing key — establishing the service as the root of trust for that binding.
+Record commits are signed with the user's per-enrollment P-256 key. Clients can verify a record was
+authored by a specific user by checking the commit signature against the `signingKey` published in
+the user's enrollment record. The enrollment attestation (signed by the service's Secp256k1 key)
+binds the user's DID, boundaries, and signing key — establishing the service as the root of trust
+for that binding.
 
 | Level               | What it proves                                                            |
 | ------------------- | ------------------------------------------------------------------------- |
@@ -143,7 +157,8 @@ Record commits are signed with the user's per-enrollment P-256 key. Clients can 
 
 ## Trust Model
 
-The attestation proves the Stratos service vouched for the user's enrollment and boundaries _at signing time_. It does not prove:
+The attestation proves the Stratos service vouched for the user's enrollment and boundaries _at
+signing time_. It does not prove:
 
 - The user is still enrolled right now.
 - The boundaries haven't changed since signing.
@@ -161,7 +176,6 @@ Authenticated callers receive boundaries, signing key, enrollment rkey, and a fr
 Because record commits are signed with the user's P-256 key, a verifier can chain trust:
 
 <script setup>
-import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
 </script>
 
 <TrustChainAnimation />

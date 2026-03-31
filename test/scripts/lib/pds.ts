@@ -1,8 +1,8 @@
 // PDS admin API helpers — account creation via pds.atverkackt.de
 
-import { PDS_URL, PDS_ADMIN_PASSWORD } from './config.ts'
+import { PDS_ADMIN_PASSWORD, PDS_URL } from './config.ts'
 
-const adminAuth = `Basic ${btoa(`admin:${PDS_ADMIN_PASSWORD}`)}`
+const adminAuth = 'Basic ' + btoa('admin:' + PDS_ADMIN_PASSWORD)
 
 interface CreateAccountResponse {
   handle: string

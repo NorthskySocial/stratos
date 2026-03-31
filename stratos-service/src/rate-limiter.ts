@@ -40,6 +40,12 @@ export interface WriteRateSnapshot {
   now: number
 }
 
+/**
+ * Write rate limiter for DIDs.
+ * This class manages a rate limiter for writes to a DID.
+ * It allows a maximum number of writes within a specified time window.
+ * If the limit is exceeded, the write is delayed until the cooldown period elapses.
+ */
 export class WriteRateLimiter {
   private state = new Map<string, DidState>()
   private readonly maxWrites: number
@@ -54,6 +60,13 @@ export class WriteRateLimiter {
     this.cooldownJitterMs = opts.cooldownJitterMs ?? 0
   }
 
+  /**
+   * Assert that a write is allowed, throwing if not.
+   * @param did - The DID for which the write is being checked.
+   * @param count - The number of writes to check.
+   *
+   * @throws RateLimitError if the write is not allowed.
+   */
   assertWriteAllowed(did: string, count = 1): void {
     const now = Date.now()
     let entry = this.state.get(did)
@@ -86,6 +99,12 @@ export class WriteRateLimiter {
     }
   }
 
+  /**
+   * Get a snapshot of the current write rate for a DID
+   *
+   * @param did - Decentralized Identifier (DID) for which to get the snapshot
+   * @returns Write rate snapshot
+   */
   getSnapshot(did: string): WriteRateSnapshot {
     const now = Date.now()
     const entry = this.state.get(did)

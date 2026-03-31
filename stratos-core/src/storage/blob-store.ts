@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 
 /**
  * Blob metadata stored in the database

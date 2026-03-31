@@ -32,9 +32,12 @@ STRATOS_AUTO_ENROLL_DOMAINS=posters-madness
 ```
 
 - A new user enrolling via OAuth receives only the `posters-madness` boundary.
-- `bees`, and `plants` remain valid — existing users keep their access, existing posts stay accessible.
-- Posts can reference any of the three domains as boundaries, provided the author is enrolled in that domain.
-- `assertCallerCanWriteDomains` enforces that the record's boundaries are a subset of the author's enrolled boundaries.
+- `bees`, and `plants` remain valid — existing users keep their access, existing posts stay
+  accessible.
+- Posts can reference any of the three domains as boundaries, provided the author is enrolled in
+  that domain.
+- `assertCallerCanWriteDomains` enforces that the record's boundaries are a subset of the author's
+  enrolled boundaries.
 
 ## Configuration
 
@@ -69,11 +72,13 @@ Record Creation (zone.stratos.feed.post)
 
 ## Backward Compatibility
 
-If `STRATOS_AUTO_ENROLL_DOMAINS` is not set, enrollment assigns all allowed domains — identical to the original behavior. Existing deployments continue working without change.
+If `STRATOS_AUTO_ENROLL_DOMAINS` is not set, enrollment assigns all allowed domains — identical to
+the original behavior. Existing deployments continue working without change.
 
 ## Assigning Additional Domains After Enrollment
 
-Auto-enrollment only runs at initial OAuth enrollment. To grant additional domains later, use the enrollment store directly:
+Auto-enrollment only runs at initial OAuth enrollment. To grant additional domains later, use the
+enrollment store directly:
 
 ```typescript
 await enrollmentStore.addBoundary(did, 'bees')

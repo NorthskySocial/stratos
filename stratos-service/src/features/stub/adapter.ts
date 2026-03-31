@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import type {
   StubWriterService,
   WriteStubResult,
@@ -40,6 +40,16 @@ export class StubWriterServiceImpl implements StubWriterService {
     private serviceDid: string,
   ) {}
 
+  /**
+   * Write a stub record to the user's PDS'
+   * @param did - The user's DID.
+   * @param collection - The collection name for the stub record.
+   * @param rkey - The record key for the stub record.
+   * @param recordType - The type of the stub record.
+   * @param fullRecordCid - The CID of the full record.
+   * @param createdAt - The creation timestamp of the stub record.
+   * @returns A WriteStubResult indicating success or failure.
+   */
   async writeStub(
     did: string,
     collection: string,
@@ -75,6 +85,12 @@ export class StubWriterServiceImpl implements StubWriterService {
     }
   }
 
+  /**
+   * Delete a stub record from the user's PDS.
+   * @param did - The user's DID.
+   * @param collection - The collection name for the stub record.
+   * @param rkey - The record key for the stub record.
+   */
   async deleteStub(
     did: string,
     collection: string,

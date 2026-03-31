@@ -100,6 +100,9 @@ importers:
 
   stratos-core:
     dependencies:
+      '@atcute/car':
+        specifier: ^5.1.1
+        version: 5.1.1
       '@atcute/cbor':
         specifier: ^2.3.2
         version: 2.3.2
@@ -115,6 +118,12 @@ importers:
       '@atproto/common-web':
         specifier: ^0.4.16
         version: 0.4.16
+      '@atproto/lex-cbor':
+        specifier: ^0.0.9
+        version: 0.0.9
+      '@atproto/lex-data':
+        specifier: ^0.0.9
+        version: 0.0.9
       '@atproto/lexicon':
         specifier: ^0.6.1
         version: 0.6.1
@@ -188,6 +197,9 @@ importers:
       '@atproto/identity':
         specifier: ^0.4.8
         version: 0.4.11
+      '@atproto/lex-data':
+        specifier: ^0.0.9
+        version: 0.0.9
       '@atproto/lexicon':
         specifier: ^0.6.1
         version: 0.6.1
@@ -197,6 +209,12 @@ importers:
       '@atproto/syntax':
         specifier: ^0.4.0
         version: 0.4.3
+      '@northskysocial/stratos-core':
+        specifier: workspace:*
+        version: link:../stratos-core
+      kysely:
+        specifier: ^0.28.14
+        version: 0.28.14
       multiformats:
         specifier: ^13.4.2
         version: 13.4.2
@@ -206,6 +224,9 @@ importers:
       partysocket:
         specifier: ^1.1.4
         version: 1.1.16
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       vitest:
         specifier: ^4.0.18
@@ -361,6 +382,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      axios:
+        specifier: ^1.14.0
+        version: 1.14.0
       eslint:
         specifier: ^10.0.0
         version: 10.0.0
@@ -2336,6 +2360,9 @@ packages:
   axios@1.13.6:
     resolution: {integrity: sha512-ChTCHMouEe2kn713WHbQGcuYrr6fXTBiu460OTwWrWob16g1bXn4vtz07Ope7ewMozJAnEquLk5lWQWtBig9DQ==}
 
+  axios@1.14.0:
+    resolution: {integrity: sha512-3Y8yrqLSwjuzpXuZ0oIYZ/XGgLwUIBU3uLvbcpb0pidD9ctpShJd43KSlEEkVQg6DS0G9NKyzOvBfUtDKEyHvQ==}
+
   axobject-query@4.1.0:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
     engines: {node: '>= 0.4'}
@@ -3325,6 +3352,10 @@ packages:
     resolution: {integrity: sha512-ZE3qWtnqLOalodzfK5QUEcm7AEulhxsPNuKaGFsC3XiqO92vMLm+mAHk/NnbSIOtC4RmGm0nsv700i8KDp1gfQ==}
     engines: {node: '>=14.0.0'}
 
+  kysely@0.28.14:
+    resolution: {integrity: sha512-SU3lgh0rPvq7upc6vvdVrCsSMUG1h3ChvHVOY7wJ2fw4C9QEB7X3d5eyYEyULUX7UQtxZJtZXGuT6U2US72UYA==}
+    engines: {node: '>=20.0.0'}
+
   lazystream@1.0.1:
     resolution: {integrity: sha512-b94GiNHQNy6JNTrt5w6zNyffMrNkXZb3KTkCZJb2V1xaEGCk093vkZ2jk3tpaeP33/OiXC+WvK9AxUebnf5nbw==}
     engines: {node: '>= 0.6.3'}
@@ -3339,6 +3370,7 @@ packages:
 
   libsql@0.5.22:
     resolution: {integrity: sha512-NscWthMQt7fpU8lqd7LXMvT9pi+KhhmTHAJWUB/Lj6MWa0MKFv0F2V4C6WKKpjCVZl0VwcDz4nOI3CyaT1DDiA==}
+    cpu: [x64, arm64, wasm32, arm]
     os: [darwin, linux, win32]
 
   locate-character@3.0.0:
@@ -3780,6 +3812,10 @@ packages:
 
   proxy-from-env@1.1.0:
     resolution: {integrity: sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg==}
+
+  proxy-from-env@2.1.0:
+    resolution: {integrity: sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==}
+    engines: {node: '>=10'}
 
   pump@3.0.4:
     resolution: {integrity: sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==}
@@ -7218,6 +7254,14 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
+  axios@1.14.0:
+    dependencies:
+      follow-redirects: 1.15.11
+      form-data: 4.0.5
+      proxy-from-env: 2.1.0
+    transitivePeerDependencies:
+      - debug
+
   axobject-query@4.1.0: {}
 
   b4a@1.8.0: {}
@@ -8209,6 +8253,8 @@ snapshots:
 
   kysely@0.22.0: {}
 
+  kysely@0.28.14: {}
+
   lazystream@1.0.1:
     dependencies:
       readable-stream: 2.3.8
@@ -8634,6 +8680,8 @@ snapshots:
       ipaddr.js: 1.9.1
 
   proxy-from-env@1.1.0: {}
+
+  proxy-from-env@2.1.0: {}
 
   pump@3.0.4:
     dependencies:

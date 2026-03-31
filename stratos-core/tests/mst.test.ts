@@ -1,21 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { MemoryBlockStore } from '@atcute/mst'
 import * as AtcuteCid from '@atcute/cid'
 import {
+  type CidLink,
+  decode as cborDecode,
   encode as cborEncode,
   toBytes as cborToBytes,
-  decode as cborDecode,
-  type CidLink,
 } from '@atcute/cbor'
 import { buildCommit, type MstWriteOp } from '../src/index.js'
-
-const DID = 'did:plc:testuser123'
-
-async function makeCid(data: string): Promise<string> {
-  const bytes = new TextEncoder().encode(data)
-  const cid = await AtcuteCid.create(0x71, bytes)
-  return AtcuteCid.toString(cid)
-}
+import { makeCidStr } from './utils/index.js'
 
 async function persistAndMakeCommitCid(
   storage: MemoryBlockStore,
@@ -39,10 +32,12 @@ async function persistAndMakeCommitCid(
   return commitCid
 }
 
+const DID = 'did:plc:abc123'
+
 describe('buildCommit', () => {
   it('should create an initial commit with a single record', async () => {
     const storage = new MemoryBlockStore()
-    const recordCid = await makeCid('record-1')
+    const recordCid = await makeCidStr('record-1')
 
     const unsigned = await buildCommit(storage, null, {
       did: DID,
@@ -67,9 +62,9 @@ describe('buildCommit', () => {
 
   it('should create a commit with multiple records', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('record-1')
-    const cid2 = await makeCid('record-2')
-    const cid3 = await makeCid('record-3')
+    const cid1 = await makeCidStr('record-1')
+    const cid2 = await makeCidStr('record-2')
+    const cid3 = await makeCidStr('record-3')
 
     const unsigned = await buildCommit(storage, null, {
       did: DID,
@@ -102,7 +97,7 @@ describe('buildCommit', () => {
 
   it('should build a second commit on top of a first', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('record-1')
+    const cid1 = await makeCidStr('record-1')
 
     // First commit
     const first = await buildCommit(storage, null, {
@@ -137,7 +132,7 @@ describe('buildCommit', () => {
     await storage.put(commitCid, fakeCommitBlock)
 
     // Second commit: add another record on top of first
-    const cid2 = await makeCid('record-2')
+    const cid2 = await makeCidStr('record-2')
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
@@ -163,7 +158,7 @@ describe('buildCommit', () => {
 
   it('should handle update operations', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('record-v1')
+    const cid1 = await makeCidStr('record-v1')
 
     // Initial commit
     const first = await buildCommit(storage, null, {
@@ -184,7 +179,7 @@ describe('buildCommit', () => {
     }
 
     // For the next buildCommit, we pass null since we're rebuilding from scratch
-    const cid2 = await makeCid('record-v2')
+    const cid2 = await makeCidStr('record-v2')
     const updated = await buildCommit(storage, null, {
       did: DID,
       writes: [
@@ -203,8 +198,8 @@ describe('buildCommit', () => {
 
   it('should handle delete operations after create', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('record-1')
-    const cid2 = await makeCid('record-2')
+    const cid1 = await makeCidStr('record-1')
+    const cid2 = await makeCidStr('record-2')
 
     // Create two records
     const first = await buildCommit(storage, null, {
@@ -250,8 +245,8 @@ describe('buildCommit', () => {
 
   it('should generate monotonically increasing revs', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('record-1')
-    const cid2 = await makeCid('record-2')
+    const cid1 = await makeCidStr('record-1')
+    const cid2 = await makeCidStr('record-2')
 
     const first = await buildCommit(storage, null, {
       did: DID,
@@ -321,7 +316,7 @@ describe('buildCommit', () => {
 
   it('should produce newBlocks as Map<string, Uint8Array>', async () => {
     const storage = new MemoryBlockStore()
-    const cid = await makeCid('map-type-check')
+    const cid = await makeCidStr('map-type-check')
 
     const unsigned = await buildCommit(storage, null, {
       did: DID,
@@ -346,8 +341,8 @@ describe('buildCommit', () => {
 
   it('should produce string CIDs in removedCids', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('remove-test-1')
-    const cid2 = await makeCid('remove-test-2')
+    const cid1 = await makeCidStr('remove-test-1')
+    const cid2 = await makeCidStr('remove-test-2')
 
     const first = await buildCommit(storage, null, {
       did: DID,
@@ -395,7 +390,7 @@ describe('buildCommit', () => {
     // Create enough records that the MST tree has structure
     const writes: MstWriteOp[] = []
     for (let i = 0; i < 10; i++) {
-      const cid = await makeCid(`bulk-record-${i}`)
+      const cid = await makeCidStr(`bulk-record-${i}`)
       writes.push({
         action: 'create',
         collection: 'zone.stratos.feed.post',
@@ -433,7 +428,7 @@ describe('buildCommit', () => {
 
   it('should read from underlying storage via OverlayBlockStore', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('overlay-test-1')
+    const cid1 = await makeCidStr('overlay-test-1')
 
     const first = await buildCommit(storage, null, {
       did: DID,
@@ -451,7 +446,7 @@ describe('buildCommit', () => {
     const commitCid = await persistAndMakeCommitCid(storage, first)
 
     // Second commit should be able to read the first commit's data from storage
-    const cid2 = await makeCid('overlay-test-2')
+    const cid2 = await makeCidStr('overlay-test-2')
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
@@ -473,7 +468,7 @@ describe('buildCommit', () => {
 
   it('should produce a data field that is a valid MST node CID', async () => {
     const storage = new MemoryBlockStore()
-    const cid = await makeCid('data-cid-check')
+    const cid = await makeCidStr('data-cid-check')
 
     const unsigned = await buildCommit(storage, null, {
       did: DID,
@@ -516,7 +511,7 @@ describe('buildCommit', () => {
 
   it('should reject empty writes on an existing commit', async () => {
     const storage = new MemoryBlockStore()
-    const cid = await makeCid('record-1')
+    const cid = await makeCidStr('record-1')
 
     const first = await buildCommit(storage, null, {
       did: DID,
@@ -541,7 +536,7 @@ describe('buildCommit', () => {
 
   it('should throw when commit block is not found in storage', async () => {
     const storage = new MemoryBlockStore()
-    const fakeCid = await makeCid('nonexistent-commit')
+    const fakeCid = await makeCidStr('nonexistent-commit')
 
     await expect(
       buildCommit(storage, fakeCid, {
@@ -551,7 +546,7 @@ describe('buildCommit', () => {
             action: 'create',
             collection: 'zone.stratos.feed.post',
             rkey: 'x1',
-            cid: await makeCid('x'),
+            cid: await makeCidStr('x'),
           },
         ],
       }),
@@ -560,7 +555,7 @@ describe('buildCommit', () => {
 
   it('should decode the existing commit via CBOR when continuing from a previous commit', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('continuity-1')
+    const cid1 = await makeCidStr('continuity-1')
 
     const first = await buildCommit(storage, null, {
       did: DID,
@@ -584,7 +579,7 @@ describe('buildCommit', () => {
     expect(decoded.data.$link).toBe(first.data)
 
     // Building on top of it should work
-    const cid2 = await makeCid('continuity-2')
+    const cid2 = await makeCidStr('continuity-2')
     const second = await buildCommit(storage, commitCid, {
       did: DID,
       writes: [
@@ -603,7 +598,7 @@ describe('buildCommit', () => {
 
   it('should use the same MST root when no changes are effective', async () => {
     const storage = new MemoryBlockStore()
-    const cid1 = await makeCid('idempotent-1')
+    const cid1 = await makeCidStr('idempotent-1')
 
     const first = await buildCommit(storage, null, {
       did: DID,

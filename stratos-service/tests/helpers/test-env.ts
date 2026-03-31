@@ -3,7 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import type { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../../src/context.js'
@@ -66,7 +66,7 @@ export function createMockBlobStore(): BlobStore {
       .fn()
       .mockImplementation(
         async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-          if (bytes instanceof Uint8Array) {
+          if (!(Symbol.asyncIterator in bytes)) {
             storage.set(cid.toString(), bytes)
           } else {
             const chunks: Uint8Array[] = []

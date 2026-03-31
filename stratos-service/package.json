@@ -71,6 +71,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.2.1",
     "@types/ws": "^8.18.1",
+    "axios": "^1.14.0",
     "eslint": "^10.0.0",
     "fast-check": "^4.5.0",
     "globals": "^17.3.0",

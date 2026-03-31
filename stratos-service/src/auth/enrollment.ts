@@ -42,7 +42,7 @@ export async function validateEnrollment(
   idResolver: IdResolver,
   allowListProvider?: AllowListProvider,
 ): Promise<EnrollmentResult> {
-  // First check if DID is explicitly allowed (open mode or DID allowlist)
+  // First, check if DID is explicitly allowed (open mode or DID allowlist)
   // This doesn't require DID resolution - return immediately
   if (isDidAllowed(config, did)) {
     // DID is allowed without needing PDS resolution

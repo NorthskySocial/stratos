@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 
 /**
  * Descriptor for a stratos record

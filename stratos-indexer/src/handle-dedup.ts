@@ -13,7 +13,11 @@ export class HandleDedup {
     this.sweepTimer = setInterval(() => this.sweep(), DEFAULT_SWEEP_INTERVAL_MS)
   }
 
-  /** Returns true if this DID should be indexed (not recently seen). */
+  /**
+   * Returns true if this DID should be indexed (not recently seen).
+   * @param did - The DID to check.
+   * @returns True if the DID should be indexed, false otherwise.
+   */
   shouldIndex(did: string): boolean {
     const now = Date.now()
     const last = this.seen.get(did)
@@ -24,6 +28,9 @@ export class HandleDedup {
     return true
   }
 
+  /**
+   * Clears all seen DIDs.
+   */
   stop(): void {
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer)
@@ -32,6 +39,10 @@ export class HandleDedup {
     this.seen.clear()
   }
 
+  /**
+   * Removes DIDs that have exceeded the TTL from the seen map.
+   * @private
+   */
   private sweep(): void {
     const cutoff = Date.now() - this.ttlMs
     for (const [did, ts] of this.seen) {

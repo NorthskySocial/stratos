@@ -1,59 +1,59 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="vf-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="vf-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- AppView → PDS (diagonal up-right) -->
         <path
           id="vf-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#vf-ml)"
           d="M 190 222 L 600 160"
+          marker-end="url(#vf-ml)"
+          stroke="#9145EC"
         />
         <!-- AppView → DID Resolver (diagonal down-right) -->
         <path
           id="vf-a2"
           class="ar"
-          stroke="#7780DC"
-          marker-end="url(#vf-ml)"
           d="M 190 240 L 600 342"
+          marker-end="url(#vf-ml)"
+          stroke="#7780DC"
         />
         <!-- AppView → Records (vertical down) -->
         <path
           id="vf-a3"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#vf-mg)"
           d="M 107 278 L 107 375"
+          marker-end="url(#vf-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Left: AppView (verifier) -->
       <div
-        class="node"
         id="vf-nav"
+        class="node"
         style="left: 25px; top: 175px; width: 165px"
       >
         <div class="ni">📡</div>
@@ -63,8 +63,8 @@
 
       <!-- Top-right: PDS -->
       <div
-        class="node"
         id="vf-npds"
+        class="node"
         style="left: 600px; top: 100px; width: 155px"
       >
         <div class="ni">🗄️</div>
@@ -74,8 +74,8 @@
 
       <!-- Bottom-right: DID Resolver -->
       <div
-        class="node"
         id="vf-ndid"
+        class="node"
         style="left: 600px; top: 295px; width: 175px"
       >
         <div class="ni">🔍</div>
@@ -85,8 +85,8 @@
 
       <!-- Bottom-left: Verified Records -->
       <div
-        class="node"
         id="vf-nrc"
+        class="node"
         style="left: 25px; top: 375px; width: 165px"
       >
         <div class="ni">📄</div>
@@ -98,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

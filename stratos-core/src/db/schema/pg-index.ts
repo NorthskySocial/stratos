@@ -1,14 +1,14 @@
 export * from './pg-tables.js'
 
 import {
-  pgStratosRepoRoot,
-  pgStratosRepoBlock,
-  pgStratosRecord,
-  pgStratosBlob,
-  pgStratosRecordBlob,
   pgStratosBacklink,
-  pgStratosSigningKey,
+  pgStratosBlob,
+  pgStratosRecord,
+  pgStratosRecordBlob,
+  pgStratosRepoBlock,
+  pgStratosRepoRoot,
   pgStratosSeq,
+  pgStratosSigningKey,
 } from './pg-tables.js'
 
 export const pgSchema = {

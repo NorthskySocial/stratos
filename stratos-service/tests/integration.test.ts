@@ -7,29 +7,20 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
-import { AtUri } from '@atproto/syntax'
 
 import {
-  assertBskyNoCrossNamespaceEmbed,
-  assertStratosValidation,
   BlobStore,
   BlobStoreCreator,
   ENROLLMENT_MODE,
-  extractBoundaryDomains,
-  isBskyUri,
-  isStratosCollection,
-  isStratosUri,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 
 import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import { EnrollmentServiceImpl } from '../src/features/index.js'
-import {
-  EnrollmentConfig,
-  validateEnrollment,
-} from '../src/auth/index.js'
+import { EnrollmentConfig, validateEnrollment } from '../src/auth/index.js'
 import {
   closeServiceDb,
   createServiceDb,
@@ -65,7 +56,7 @@ function createMockBlobStore(): BlobStore {
       .fn()
       .mockImplementation(
         async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-          if (bytes instanceof Uint8Array) {
+          if (!(Symbol.asyncIterator in bytes)) {
             storage.set(cid.toString(), bytes)
           } else {
             const chunks: Uint8Array[] = []
@@ -190,7 +181,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       const mockResolver = createMockIdResolver(null)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(true)
     })
@@ -203,7 +198,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       const mockResolver = createMockIdResolver(null)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(true)
     })
@@ -227,7 +226,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       const mockResolver = createMockIdResolver(didDoc)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(true)
       expect(result.pdsEndpoint).toBe(testPds)
@@ -241,7 +244,11 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       const mockResolver = createMockIdResolver(null)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(false)
       expect(result.reason).toBe('DidNotResolved')
@@ -255,7 +262,7 @@ describe('Integration: Full Stratos Flow', () => {
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
         enrollmentRkey: 'did:web:stratos.test',
-      })
+      } as any)
 
       const isEnrolled = await enrollmentStore.isEnrolled(testDid)
       expect(isEnrolled).toBe(true)
@@ -294,13 +301,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       // Create record
       await actorStore.transact(testDid, async (store) => {
-        await store.record.indexRecord(
-          new AtUri(uri),
-          cid,
-          record,
-          'create',
-          'rev1',
-        )
+        await store.record.indexRecord(uri, cid, record, 'create', 'rev1')
       })
 
       // Read record
@@ -316,21 +317,21 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/1`),
+          `at://${testDid}/zone.stratos.feed.post/1`,
           cid,
           { text: 'Post 1' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/2`),
+          `at://${testDid}/zone.stratos.feed.post/2`,
           cid,
           { text: 'Post 2' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.graph.follow/1`),
+          `at://${testDid}/zone.stratos.graph.follow/1`,
           cid,
           { subject: 'did:plc:other' },
           'create',
@@ -353,7 +354,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(uri),
+          uri,
           cid,
           { text: 'Delete me' },
           'create',
@@ -366,7 +367,7 @@ describe('Integration: Full Stratos Flow', () => {
       ).toBe(1)
 
       await actorStore.transact(testDid, async (store) => {
-        await store.record.deleteRecord(new AtUri(uri))
+        await store.record.deleteRecord(uri)
       })
 
       expect(
@@ -380,7 +381,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(postUri),
+          postUri,
           cid,
           {
             text: 'Replying to someone',
@@ -440,7 +441,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).not.toThrow()
     })
 
@@ -462,7 +466,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).not.toThrow()
     })
 
@@ -484,7 +491,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).toThrow('cannot reply to a non-stratos record')
     })
 
@@ -503,7 +513,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).toThrow('cannot embed bsky content')
     })
 
@@ -518,7 +531,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertBskyNoCrossNamespaceEmbed(record, 'app.bsky.feed.post')
+        StratosValidator.assertBskyNoCrossNamespaceEmbed(
+          record,
+          'app.bsky.feed.post',
+        )
       }).toThrow('cannot embed stratos content')
     })
 
@@ -532,7 +548,7 @@ describe('Integration: Full Stratos Flow', () => {
         },
       }
 
-      const domains = extractBoundaryDomains(record)
+      const domains = StratosValidator.extractBoundaryDomains(record)
       expect(domains).toEqual([
         'did:web:nerv.tokyo.jp/evangelion',
         'did:web:nerv.tokyo.jp/magi',
@@ -542,32 +558,52 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('URI Classification', () => {
     it('should correctly identify stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/zone.stratos.feed.post/123')).toBe(
-        true,
-      )
       expect(
-        isStratosUri('at://did:plc:abc/zone.stratos.graph.follow/456'),
+        StratosValidator.isStratosUri(
+          'at://did:plc:abc/zone.stratos.feed.post/123',
+        ),
       ).toBe(true)
-      expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(
-        false,
-      )
+      expect(
+        StratosValidator.isStratosUri(
+          'at://did:plc:abc/zone.stratos.graph.follow/456',
+        ),
+      ).toBe(true)
+      expect(
+        StratosValidator.isStratosUri(
+          'at://did:plc:abc/app.bsky.feed.post/123',
+        ),
+      ).toBe(false)
     })
 
     it('should correctly identify bsky URIs', () => {
-      expect(isBskyUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(true)
-      expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
-        true,
-      )
-      expect(isBskyUri('at://did:plc:abc/zone.stratos.feed.post/123')).toBe(
-        false,
-      )
+      expect(
+        StratosValidator.isBskyUri('at://did:plc:abc/app.bsky.feed.post/123'),
+      ).toBe(true)
+      expect(
+        StratosValidator.isBskyUri(
+          'at://did:plc:abc/app.bsky.actor.profile/self',
+        ),
+      ).toBe(true)
+      expect(
+        StratosValidator.isBskyUri(
+          'at://did:plc:abc/zone.stratos.feed.post/123',
+        ),
+      ).toBe(false)
     })
 
     it('should correctly identify stratos collections', () => {
-      expect(isStratosCollection('zone.stratos.feed.post')).toBe(true)
-      expect(isStratosCollection('zone.stratos.graph.follow')).toBe(true)
-      expect(isStratosCollection('app.bsky.feed.post')).toBe(false)
-      expect(isStratosCollection('com.atproto.repo.record')).toBe(false)
+      expect(
+        StratosValidator.isStratosCollection('zone.stratos.feed.post'),
+      ).toBe(true)
+      expect(
+        StratosValidator.isStratosCollection('zone.stratos.graph.follow'),
+      ).toBe(true)
+      expect(StratosValidator.isStratosCollection('app.bsky.feed.post')).toBe(
+        false,
+      )
+      expect(
+        StratosValidator.isStratosCollection('com.atproto.repo.record'),
+      ).toBe(false)
     })
   })
 
@@ -590,7 +626,7 @@ describe('Integration: Full Stratos Flow', () => {
       await enrollmentService.enroll(
         actorDid,
         ['did:web:test.com/domain'],
-        'did:key:zDnaeTestKey123',
+        'did:key:zDnaeTestKey123' as any,
       )
       expect(await enrollmentStore.isEnrolled(actorDid)).toBe(true)
       expect(await actorStore.exists(actorDid)).toBe(true)
@@ -599,7 +635,7 @@ describe('Integration: Full Stratos Flow', () => {
       const cid = await createCid('lifecycle test')
       await actorStore.transact(actorDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${actorDid}/zone.stratos.feed.post/1`),
+          `at://${actorDid}/zone.stratos.feed.post/1`,
           cid,
           { text: 'Post 1' },
           'create',

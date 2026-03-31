@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import {
   S3BlobStore as AtprotoS3BlobStore,
   S3Config as AtprotoS3Config,
@@ -77,27 +77,52 @@ export class S3BlobStoreAdapter implements BlobStore {
     return (did: string) => new S3BlobStoreAdapter(did, cfg)
   }
 
+  /**
+   * Put temporary bytes to blob store
+   *
+   * @param bytes - Temporary bytes to store
+   * @returns Key for the stored data
+   */
   async putTemp(
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<string> {
-    const input =
-      bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
+    const input = !(Symbol.asyncIterator in bytes)
+      ? bytes
+      : asyncIterableToReadable(bytes)
     return this.inner.putTemp(input)
   }
 
+  /**
+   * Make temporary bytes permanent
+   *
+   * @param key - Key for the temporary data
+   * @param cid - Content identifier for the permanent data
+   */
   async makePermanent(key: string, cid: CID): Promise<void> {
     return this.inner.makePermanent(key, cid)
   }
 
+  /**
+   * Put permanent bytes to blob store
+   *
+   * @param cid - Content identifier for the permanent data
+   * @param bytes - Permanent bytes to store
+   */
   async putPermanent(
     cid: CID,
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<void> {
-    const input =
-      bytes instanceof Uint8Array ? bytes : asyncIterableToReadable(bytes)
+    const input = !(Symbol.asyncIterator in bytes)
+      ? bytes
+      : asyncIterableToReadable(bytes)
     return this.inner.putPermanent(cid, input)
   }
 
+  /**
+   * Quarantine a blob
+   *
+   * @param cid - Content identifier for the blob to quarantine
+   */
   async quarantine(cid: CID): Promise<void> {
     try {
       return await this.inner.quarantine(cid)
@@ -110,6 +135,11 @@ export class S3BlobStoreAdapter implements BlobStore {
     }
   }
 
+  /**
+   * Unquarantine a blob
+   *
+   * @param cid - Content identifier for the blob to unquarantine
+   */
   async unquarantine(cid: CID): Promise<void> {
     try {
       return await this.inner.unquarantine(cid)
@@ -121,6 +151,12 @@ export class S3BlobStoreAdapter implements BlobStore {
     }
   }
 
+  /**
+   * Get bytes from blob store
+   *
+   * @param cid - Content identifier for the blob to retrieve
+   * @returns Bytes of the blob
+   */
   async getBytes(cid: CID): Promise<Uint8Array> {
     try {
       return await this.inner.getBytes(cid)
@@ -132,10 +168,16 @@ export class S3BlobStoreAdapter implements BlobStore {
     }
   }
 
+  /**
+   * Get a stream of bytes from blob store
+   *
+   * @param cid - Content identifier for the blob to retrieve
+   * @returns Async iterable of bytes
+   */
   async getStream(cid: CID): Promise<AsyncIterable<Uint8Array>> {
     try {
       const readable = await this.inner.getStream(cid)
-      return readableToAsyncIterable(readable as Readable)
+      return readableToAsyncIterable(readable)
     } catch (err) {
       if (isBlobNotFoundError(err)) {
         throw new BlobNotFoundError()
@@ -144,18 +186,40 @@ export class S3BlobStoreAdapter implements BlobStore {
     }
   }
 
+  /**
+   * Check if a blob exists in the blob store
+   *
+   * @param key - Key for the blob to check
+   * @returns True if the blob exists, false otherwise
+   */
   async hasTemp(key: string): Promise<boolean> {
     return this.inner.hasTemp(key)
   }
 
+  /**
+   * Check if a blob exists in the blob store
+   *
+   * @param cid - Content identifier for the blob to check
+   * @returns True if the blob exists, false otherwise
+   */
   async hasStored(cid: CID): Promise<boolean> {
     return this.inner.hasStored(cid)
   }
 
+  /**
+   * Delete a blob from the blob store
+   *
+   * @param cid - Content identifier for the blob to delete
+   */
   async delete(cid: CID): Promise<void> {
     return this.inner.delete(cid)
   }
 
+  /**
+   * Delete multiple blobs from the blob store
+   *
+   * @param cids - Content identifiers for the blobs to delete
+   */
   async deleteMany(cids: CID[]): Promise<void> {
     return this.inner.deleteMany(cids)
   }
@@ -163,6 +227,9 @@ export class S3BlobStoreAdapter implements BlobStore {
 
 /**
  * Check if an error is a BlobNotFoundError from @atproto/repo
+ *
+ * @param err - Error to check
+ * @returns True if the error is a BlobNotFoundError, false otherwise
  */
 function isBlobNotFoundError(err: unknown): boolean {
   return err instanceof Error && err.name === 'BlobNotFoundError'

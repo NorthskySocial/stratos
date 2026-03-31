@@ -1,14 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  backfillRepos,
   backfillActors,
-  backfillSingleActor,
   type BackfillOptions,
+  backfillRepos,
+  backfillSingleActor,
 } from '../src/backfill.ts'
 
 function makeOpts(overrides?: Partial<BackfillOptions>): BackfillOptions {
   return {
-    repoProvider: 'http://pds.tokyo-3.nerv.jp',
+    repoProvider: 'https://pds.tokyo-3.nerv.jp',
     indexingService: {
       indexRecord: vi.fn().mockResolvedValue(undefined),
     } as never,
@@ -35,12 +35,14 @@ describe('backfillActors', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input: string | URL | Request) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url
+        let url: string
+        if (typeof input === 'string') {
+          url = input
+        } else if (input instanceof URL) {
+          url = input.toString()
+        } else {
+          url = input.url
+        }
         if (url.includes('listRecords')) {
           return new Response(JSON.stringify({ records: [] }), { status: 200 })
         }
@@ -169,12 +171,14 @@ describe('backfillRepos', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input: string | URL | Request) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url
+        let url: string
+        if (typeof input === 'string') {
+          url = input
+        } else if (input instanceof URL) {
+          url = input.toString()
+        } else {
+          url = input.url
+        }
         if (url.includes('listRepos')) {
           return new Response(
             JSON.stringify({

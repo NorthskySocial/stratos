@@ -22,11 +22,23 @@ export async function migrateStratosPgDb(
   db: StratosPgDb,
   schemaName?: string,
 ): Promise<void> {
+  await ensureSchema(db, schemaName)
+  await createRepoTables(db)
+  await createRecordTables(db)
+  await createBlobTables(db)
+  await createBacklinkTables(db)
+  await createSequenceTables(db)
+  await createSigningKeyTables(db)
+}
+
+async function ensureSchema(db: StratosPgDb, schemaName?: string) {
   if (schemaName) {
     await db.execute(sql.raw(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`))
     await db.execute(sql.raw(`SET search_path TO "${schemaName}"`))
   }
+}
 
+async function createRepoTables(db: StratosPgDb) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS stratos_repo_root (
       did TEXT PRIMARY KEY,
@@ -49,7 +61,9 @@ export async function migrateStratosPgDb(
     CREATE INDEX IF NOT EXISTS stratos_repo_block_repo_rev_idx 
     ON stratos_repo_block("repoRev", cid)
   `)
+}
 
+async function createRecordTables(db: StratosPgDb) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS stratos_record (
       uri TEXT PRIMARY KEY,
@@ -71,7 +85,9 @@ export async function migrateStratosPgDb(
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS stratos_record_repo_rev_idx ON stratos_record("repoRev")`,
   )
+}
 
+async function createBlobTables(db: StratosPgDb) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS stratos_blob (
       cid TEXT PRIMARY KEY,
@@ -96,7 +112,9 @@ export async function migrateStratosPgDb(
       PRIMARY KEY ("blobCid", "recordUri")
     )
   `)
+}
 
+async function createBacklinkTables(db: StratosPgDb) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS stratos_backlink (
       uri TEXT NOT NULL,
@@ -110,7 +128,9 @@ export async function migrateStratosPgDb(
     CREATE INDEX IF NOT EXISTS stratos_backlink_link_to_idx 
     ON stratos_backlink(path, "linkTo")
   `)
+}
 
+async function createSequenceTables(db: StratosPgDb) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS stratos_seq (
       seq SERIAL PRIMARY KEY,
@@ -128,7 +148,9 @@ export async function migrateStratosPgDb(
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS stratos_seq_sequenced_at_idx ON stratos_seq("sequencedAt")`,
   )
+}
 
+async function createSigningKeyTables(db: StratosPgDb) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS stratos_signing_key (
       did TEXT PRIMARY KEY,

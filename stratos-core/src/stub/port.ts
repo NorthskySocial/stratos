@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 
 /**
  * Result of writing a stub to the PDS
