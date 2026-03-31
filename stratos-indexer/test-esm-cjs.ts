@@ -2,7 +2,7 @@ import {
   ipldToLex as esmIpldToLex,
   BlobRef as EsmBlobRef,
 } from '@atproto/lexicon'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { CidLinkWrapper } from '@atcute/cid'
 import { createRequire } from 'node:module'
 

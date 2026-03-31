@@ -47,7 +47,7 @@ function rowToEvent(row: {
   }
 
   const { collection, rkey } = decoded?.path
-    ? parsePath(decoded!.path)
+    ? parsePath(decoded.path)
     : { collection: '', rkey: '' }
 
   return {

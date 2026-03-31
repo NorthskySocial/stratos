@@ -1,52 +1,56 @@
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq, gt, lt, and, asc, desc, inArray, isNull, sql } from 'drizzle-orm'
-import { CID } from 'multiformats/cid'
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { CID } from '@atproto/lex-data'
 import { AtUri } from '@atproto/syntax'
 import * as crypto from '@atproto/crypto'
-import { decode as cborDecode, type CidLink } from '@atcute/cbor'
+import { type CidLink, decode as cborDecode } from '@atcute/cbor'
 
 import {
-  type StratosPgDb,
-  type StratosPgDbOrTx,
-  migrateStratosPgDb,
-  pgSchema as pgActorSchema,
-  pgStratosSigningKey,
-  pgStratosRecord,
-  pgStratosRepoBlock,
-  pgStratosRepoRoot,
-  pgStratosBacklink,
-  pgStratosBlob,
-  pgStratosRecordBlob,
-  pgStratosSeq,
-  countAll,
-  getStratosBacklinks,
-  BlockMap,
-  CidSet,
-  LruBlockCache,
-  type Logger,
   type BlobStore,
   type BlobStoreCreator,
-  type StatusAttr,
+  BlockMap,
+  type CarBlock,
+  CidSet,
+  countAll,
+  type GetBacklinksOpts,
+  getStratosBacklinks,
   type ListRecordsOpts,
+  type Logger,
+  LruBlockCache,
+  migrateStratosPgDb,
+  pgSchema as pgActorSchema,
+  pgStratosBacklink,
+  pgStratosBlob,
+  pgStratosRecord,
+  pgStratosRecordBlob,
+  pgStratosRepoBlock,
+  pgStratosRepoRoot,
+  pgStratosSeq,
+  pgStratosSigningKey,
   type RecordWithContent,
   type RecordWithMeta,
-  type GetBacklinksOpts,
+  type StatusAttr,
+  type StratosPgDb,
+  type StratosPgDbOrTx,
   type StratosRecordDescript,
-  type CarBlock,
 } from '@northskysocial/stratos-core'
 
 import type {
-  SequenceOperations,
   ActorReader,
-  ActorTransactor,
+  ActorRecordTransactor,
   ActorStore,
+  ActorTransactor,
+  SequenceOperations,
 } from '../../actor-store-types.js'
 
 type PgBacklink = { uri: string; path: string; linkTo: string }
 
 // ─── Record Reader ──────────────────────────────────────────────────────────
 
+/**
+ * Reader for actor records from the PostgreSQL database.
+ */
 export class PgActorRecordReader {
   constructor(
     public readonly db: StratosPgDbOrTx,
@@ -54,6 +58,11 @@ export class PgActorRecordReader {
     protected logger?: Logger,
   ) {}
 
+  /**
+   * Count the number of actor records in the database.
+   *
+   * @returns The number of actor records in the database.
+   */
   async recordCount(): Promise<number> {
     const res = await this.db
       .select({ count: countAll })
@@ -150,7 +159,7 @@ export class PgActorRecordReader {
   }
 
   async getRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted = false,
   ): Promise<RecordWithMeta | null> {
@@ -191,7 +200,7 @@ export class PgActorRecordReader {
   }
 
   async hasRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted = false,
   ): Promise<boolean> {
@@ -213,7 +222,9 @@ export class PgActorRecordReader {
     return res.length > 0
   }
 
-  async getRecordTakedownStatus(uri: AtUri): Promise<StatusAttr | null> {
+  async getRecordTakedownStatus(
+    uri: string | AtUri,
+  ): Promise<StatusAttr | null> {
     const res = await this.db
       .select({ takedownRef: pgStratosRecord.takedownRef })
       .from(pgStratosRecord)
@@ -226,7 +237,7 @@ export class PgActorRecordReader {
       : { applied: false }
   }
 
-  async getCurrentRecordCid(uri: AtUri): Promise<CID | null> {
+  async getCurrentRecordCid(uri: string | AtUri): Promise<CID | null> {
     const res = await this.db
       .select({ cid: pgStratosRecord.cid })
       .from(pgStratosRecord)
@@ -263,20 +274,21 @@ export class PgActorRecordReader {
   }
 
   async getBacklinkConflicts(
-    uri: AtUri,
+    uri: string | AtUri,
     record: Record<string, unknown>,
   ): Promise<AtUri[]> {
+    const uriObj = typeof uri === 'string' ? new AtUri(uri) : uri
     const conflicts: AtUri[] = []
 
-    for (const backlink of getStratosBacklinks(uri, record)) {
+    for (const backlink of getStratosBacklinks(uriObj, record)) {
       const backlinks = await this.getRecordBacklinks({
-        collection: uri.collection,
+        collection: uriObj.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,
       })
 
       for (const { rkey } of backlinks) {
-        conflicts.push(AtUri.make(uri.hostname, uri.collection, rkey))
+        conflicts.push(AtUri.make(uriObj.hostname, uriObj.collection, rkey))
       }
     }
 
@@ -286,7 +298,10 @@ export class PgActorRecordReader {
 
 // ─── Record Transactor ──────────────────────────────────────────────────────
 
-export class PgActorRecordTransactor extends PgActorRecordReader {
+export class PgActorRecordTransactor
+  extends PgActorRecordReader
+  implements ActorRecordTransactor
+{
   constructor(
     db: StratosPgDbOrTx,
     cborToRecord: (content: Uint8Array) => Record<string, unknown>,
@@ -295,26 +310,54 @@ export class PgActorRecordTransactor extends PgActorRecordReader {
     super(db, cborToRecord, logger)
   }
 
+  async putRecord(record: {
+    uri: string
+    cid: CID
+    value: Record<string, unknown>
+    content: Uint8Array
+    indexedAt?: string
+  }): Promise<void> {
+    await this.db
+      .insert(pgStratosRepoBlock)
+      .values({
+        cid: record.cid.toString(),
+        repoRev: '',
+        size: record.content.length,
+        content: Buffer.from(record.content),
+      })
+      .onConflictDoNothing()
+
+    await this.indexRecord(
+      record.uri,
+      record.cid,
+      record.value,
+      'create',
+      '',
+      record.indexedAt,
+    )
+  }
+
   async indexRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: CID,
     record: Record<string, unknown> | null,
     action: 'create' | 'update' = 'create',
     repoRev: string,
     timestamp?: string,
   ): Promise<void> {
-    this.logger?.debug({ uri: uri.toString() }, 'indexing stratos record')
+    const uriObj = typeof uri === 'string' ? new AtUri(uri) : uri
+    this.logger?.debug({ uri: uriObj.toString() }, 'indexing stratos record')
 
     const row = {
-      uri: uri.toString(),
+      uri: uriObj.toString(),
       cid: cid.toString(),
-      collection: uri.collection,
-      rkey: uri.rkey,
+      collection: uriObj.collection,
+      rkey: uriObj.rkey,
       repoRev: repoRev,
       indexedAt: timestamp || new Date().toISOString(),
     }
 
-    if (!uri.hostname.startsWith('did:')) {
+    if (!uriObj.hostname.startsWith('did:')) {
       throw new Error('Expected indexed URI to contain DID')
     } else if (row.collection.length < 1) {
       throw new Error('Expected indexed URI to contain a collection')
@@ -327,50 +370,49 @@ export class PgActorRecordTransactor extends PgActorRecordReader {
     )
 
     if (record !== null) {
-      const backlinks = getStratosBacklinks(uri, record)
+      const backlinks = getStratosBacklinks(uriObj, record)
       if (action === 'update') {
-        await this.removeBacklinksByUri(uri)
+        await this.removeBacklinksByUri(uriObj)
       }
       await this.addBacklinks(backlinks)
     }
 
-    this.logger?.info({ uri: uri.toString() }, 'indexed stratos record')
+    this.logger?.info({ uri: uriObj.toString() }, 'indexed stratos record')
   }
 
-  async deleteRecord(uri: AtUri): Promise<void> {
-    this.logger?.debug(
-      { uri: uri.toString() },
-      'deleting indexed stratos record',
-    )
+  async deleteRecord(uri: string | AtUri): Promise<void> {
+    const uriStr = uri.toString()
+    this.logger?.debug({ uri: uriStr }, 'deleting indexed stratos record')
 
     await Promise.all([
-      this.db
-        .delete(pgStratosRecord)
-        .where(eq(pgStratosRecord.uri, uri.toString())),
+      this.db.delete(pgStratosRecord).where(eq(pgStratosRecord.uri, uriStr)),
       this.db
         .delete(pgStratosBacklink)
-        .where(eq(pgStratosBacklink.uri, uri.toString())),
+        .where(eq(pgStratosBacklink.uri, uriStr)),
     ])
 
-    this.logger?.info({ uri: uri.toString() }, 'deleted indexed stratos record')
+    this.logger?.info({ uri: uriStr }, 'deleted indexed stratos record')
   }
 
-  async removeBacklinksByUri(uri: AtUri): Promise<void> {
+  async removeBacklinksByUri(uri: string | AtUri): Promise<void> {
     await this.db
       .delete(pgStratosBacklink)
       .where(eq(pgStratosBacklink.uri, uri.toString()))
   }
 
-  async addBacklinks(backlinks: PgBacklink[]): Promise<void> {
+  async addBacklinks(
+    backlinks: Array<{ uri: string | AtUri; path: string; linkTo: string }>,
+  ): Promise<void> {
     if (backlinks.length === 0) return
-    await this.db
-      .insert(pgStratosBacklink)
-      .values(backlinks)
-      .onConflictDoNothing()
+    const mapped = backlinks.map((b) => ({
+      ...b,
+      uri: b.uri.toString(),
+    }))
+    await this.db.insert(pgStratosBacklink).values(mapped).onConflictDoNothing()
   }
 
   async updateRecordTakedown(
-    uri: AtUri,
+    uri: string | AtUri,
     takedown: { applied: boolean; ref?: string },
   ): Promise<void> {
     await this.db
@@ -388,7 +430,7 @@ export class PgActorRepoReader {
   cache: BlockMap = new BlockMap()
 
   constructor(
-    protected db: StratosPgDbOrTx,
+    public readonly db: StratosPgDbOrTx,
     protected logger?: Logger,
     protected lru?: LruBlockCache,
   ) {}
@@ -1051,15 +1093,6 @@ export class PostgresActorStore implements ActorStore {
     await this.actorClient.end()
   }
 
-  private async getSchemaName(did: string): Promise<string> {
-    const cached = this.schemaNameCache.get(did)
-    if (cached !== undefined) return cached
-    const didHash = await crypto.sha256Hex(did)
-    const name = actorSchemaName(didHash)
-    this.schemaNameCache.set(did, name)
-    return name
-  }
-
   async exists(did: string): Promise<boolean> {
     if (this.existsCache.has(did)) return true
     const schemaName = await this.getSchemaName(did)
@@ -1161,7 +1194,7 @@ export class PostgresActorStore implements ActorStore {
         blob: new PgActorBlobReader(txDb, blobStore, this.logger),
         sequence: new PgSequenceOps(txDb),
       }
-      const readResult = (await readFn(reader)) as Awaited<R>
+      const readResult = await readFn(reader)
 
       const transactor: ActorTransactor = {
         did,
@@ -1226,5 +1259,14 @@ export class PostgresActorStore implements ActorStore {
         .delete(pgStratosSigningKey)
         .where(eq(pgStratosSigningKey.did, did))
     })
+  }
+
+  private async getSchemaName(did: string): Promise<string> {
+    const cached = this.schemaNameCache.get(did)
+    if (cached !== undefined) return cached
+    const didHash = await crypto.sha256Hex(did)
+    const name = actorSchemaName(didHash)
+    this.schemaNameCache.set(did, name)
+    return name
   }
 }

@@ -22,11 +22,13 @@ When a record is created in Stratos, two records are written:
 }
 ```
 
-AppViews and clients detect the `source` field and hydrate by calling `getRecord` at the service endpoint.
+AppViews and clients detect the `source` field and hydrate by calling `getRecord` at the service
+endpoint.
 
 ## Using `stratos-client` for Verified Reads
 
-The `fetchAndVerifyRecord()` helper fetches a record with its inclusion proof (CAR) from the Stratos service and verifies it in a single call. Verification is tiered:
+The `fetchAndVerifyRecord()` helper fetches a record with its inclusion proof (CAR) from the Stratos
+service and verifies it in a single call. Verification is tiered:
 
 | Level               | What it proves                          | Requires              |
 | ------------------- | --------------------------------------- | --------------------- |
@@ -149,16 +151,19 @@ async function hydrateFromSource(
 ```
 
 ::: tip Access denied looks like 404
-When a viewer lacks boundary access, Stratos returns 404 — not 403. Handle `null` returns gracefully without assuming the record is deleted.
+When a viewer lacks boundary access, Stratos returns 404 — not 403. Handle `null` returns gracefully
+without assuming the record is deleted.
 :::
 
 ## Read Path Integration Patterns
 
-Views that display records, collections, or repo descriptions need to switch between PDS and Stratos sources based on the active mode.
+Views that display records, collections, or repo descriptions need to switch between PDS and Stratos
+sources based on the active mode.
 
 ### Reactive refetch on mode change
 
-When the Stratos active state changes, refetch data. In React, this translates to including the active state in a query key:
+When the Stratos active state changes, refetch data. In React, this translates to including the
+active state in a query key:
 
 ```typescript
 const { data } = useQuery({
@@ -169,7 +174,9 @@ const { data } = useQuery({
 
 ### Client reset on mode switch
 
-When Stratos mode toggles, any cached RPC client should be discarded since it may point to the wrong service. Rather than recreating the client on every fetch, cache the PDS and Stratos clients separately and select the right one based on mode:
+When Stratos mode toggles, any cached RPC client should be discarded since it may point to the wrong
+service. Rather than recreating the client on every fetch, cache the PDS and Stratos clients
+separately and select the right one based on mode:
 
 ```typescript
 import { Client } from '@atcute/client'
@@ -204,11 +211,13 @@ const fetchRecords = async () => {
 }
 ```
 
-Mode toggles now just pick the other cached client — no teardown or reconstruction needed. Call `resetClients()` on logout or account switch to avoid stale sessions.
+Mode toggles now just pick the other cached client — no teardown or reconstruction needed. Call
+`resetClients()` on logout or account switch to avoid stale sessions.
 
 ### Auth requirement in Stratos mode
 
-Stratos endpoints require authentication. If the user is not signed in, display a clear message rather than attempting an anonymous fetch:
+Stratos endpoints require authentication. If the user is not signed in, display a clear message
+rather than attempting an anonymous fetch:
 
 ```typescript
 if (stratosActive && !agent) {
@@ -218,9 +227,14 @@ if (stratosActive && !agent) {
 
 ### Empty repo handling
 
-Stratos initializes every enrolled user's repository with an empty signed commit at enrollment time. This means `describeRepo` and `getRepo` will always return a valid (possibly empty) repo for any enrolled user. A `describeRepo` call against an enrolled user will return an empty `collections` list until the first record is created — this is normal and should be rendered as an empty state, not an error.
+Stratos initializes every enrolled user's repository with an empty signed commit at enrollment time.
+This means `describeRepo` and `getRepo` will always return a valid (possibly empty) repo for any
+enrolled user. A `describeRepo` call against an enrolled user will return an empty `collections`
+list until the first record is created — this is normal and should be rendered as an empty state,
+not an error.
 
-If Stratos returns `RepoNotFound` for an enrolled user, treat it as a genuine error (service misconfiguration, auth failure, etc.) rather than an empty repo:
+If Stratos returns `RepoNotFound` for an enrolled user, treat it as a genuine error (service
+misconfiguration, auth failure, etc.) rather than an empty repo:
 
 ```typescript
 if (error.name === 'RepoNotFound' && stratosActive) {
@@ -230,4 +244,6 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 
 ### Blob gating
 
-Stratos supports blob listing via `com.atproto.sync.listBlobs`. Blob content retrieval via `com.atproto.sync.getBlob` is not yet implemented — gate blob download UI behind availability checks.
+Stratos supports blob listing via `com.atproto.sync.listBlobs`. Blob content retrieval via
+`com.atproto.sync.getBlob` is not yet implemented — gate blob download UI behind availability
+checks.

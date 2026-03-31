@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 
 export enum ENROLLMENT_MODE {
   OPEN = 'open',

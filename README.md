@@ -1,6 +1,9 @@
 # Stratos
 
-Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream AppViews serve boundary-filtered content without inventing a separate identity model. The service is written in typescript with postgres and sqlite support.
+Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the
+user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream
+AppViews serve boundary-filtered content without inventing a separate identity model. The service is
+written in typescript with postgres and sqlite support.
 
 ## What the Repository Contains
 
@@ -121,14 +124,17 @@ Blob content is stored separately through the configured blob provider (`local` 
 
 ## Indexing Model
 
-The AppView-facing indexing path is not embedded in `stratos-service` or the AppView fork. The standalone `stratos-indexer` package is responsible for:
+The AppView-facing indexing path is not embedded in `stratos-service` or the AppView fork. The
+standalone `stratos-indexer` package is responsible for:
 
 - reading PDS enrollment events,
 - connecting to `zone.stratos.sync.subscribeRecords`,
 - decoding commit payloads,
-- writing `stratos_post`, `stratos_post_boundary`, `stratos_enrollment`, and `stratos_sync_cursor` rows into the AppView database.
+- writing `stratos_post`, `stratos_post_boundary`, `stratos_enrollment`, and `stratos_sync_cursor`
+  rows into the AppView database.
 
-That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in `atproto-stratos`, while ingestion lives here in `stratos-indexer`.
+That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in
+`atproto-stratos`, while ingestion lives here in `stratos-indexer`.
 
 ## Testing
 

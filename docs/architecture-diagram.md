@@ -1,10 +1,12 @@
 # Stratos Architecture Diagram
 
-This document contains Mermaid diagrams representing the Stratos system architecture, including enrollment flows, record management, and hydration.
+This document contains Mermaid diagrams representing the Stratos system architecture, including
+enrollment flows, record management, and hydration.
 
 ## High-Level System Architecture
 
-This diagram shows the relationship between the Client, AppView, User's PDS, and the Stratos Service.
+This diagram shows the relationship between the Client, AppView, User's PDS, and the Stratos
+Service.
 
 ```mermaid
 graph TD
@@ -43,7 +45,8 @@ graph TD
 
 ## Record Hydration Flow (Sequence)
 
-This sequence diagram details the "Source Field Pattern" used for content hydration while maintaining data boundaries.
+This sequence diagram details the "Source Field Pattern" used for content hydration while
+maintaining data boundaries.
 
 ```mermaid
 sequenceDiagram

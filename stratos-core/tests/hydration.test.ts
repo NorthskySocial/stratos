@@ -1,16 +1,16 @@
 /**
  * Unit tests for hydration module domain logic
  */
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import type { AccessCheckInput, HydrationContext } from '../src/index.js'
 import {
   canAccessRecord,
-  hasIntersection,
-  filterAccessibleRecords,
-  parseServiceEndpoint,
-  isLocalService,
   createHydrationContext,
+  filterAccessibleRecords,
+  hasIntersection,
+  isLocalService,
+  parseServiceEndpoint,
 } from '../src/index.js'
-import type { HydrationContext, AccessCheckInput } from '../src/index.js'
 
 describe('Hydration Domain', () => {
   describe('canAccessRecord', () => {

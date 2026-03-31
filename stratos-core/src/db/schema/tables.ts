@@ -1,10 +1,10 @@
 import {
+  blob,
+  index,
+  integer,
+  primaryKey,
   sqliteTable,
   text,
-  integer,
-  blob,
-  primaryKey,
-  index,
 } from 'drizzle-orm/sqlite-core'
 
 /**

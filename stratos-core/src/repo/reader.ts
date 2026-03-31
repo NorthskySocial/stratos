@@ -1,11 +1,11 @@
-import { eq, gt, inArray, desc, asc, sql, and } from 'drizzle-orm'
-import { CID } from 'multiformats/cid'
-import { decode as cborDecode, type CidLink } from '@atcute/cbor'
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm'
+import { CID } from '@atproto/lex-data'
+import { type CidLink, decode as cborDecode } from '@atcute/cbor'
 import {
-  StratosDbOrTx,
-  stratosRepoRoot,
-  stratosRepoBlock,
   countAll,
+  StratosDbOrTx,
+  stratosRepoBlock,
+  stratosRepoRoot,
 } from '../db/index.js'
 import { Logger } from '../types.js'
 
@@ -115,10 +115,14 @@ export class StratosSqlRepoReader {
   cache: BlockMap = new BlockMap()
 
   constructor(
-    protected db: StratosDbOrTx,
+    public readonly db: StratosDbOrTx,
     protected logger?: Logger,
   ) {}
 
+  /**
+   * Check if the repository has a root block.
+   * @returns True if the root block exists, false otherwise.
+   */
   async hasRoot(): Promise<boolean> {
     const res = await this.db
       .select({ cid: stratosRepoRoot.cid })
@@ -127,11 +131,19 @@ export class StratosSqlRepoReader {
     return res.length > 0
   }
 
+  /**
+   * Get the root block CID.
+   * @returns The root block CID, or null if not found.
+   */
   async getRoot(): Promise<CID | null> {
     const root = await this.getRootDetailed()
     return root?.cid ?? null
   }
 
+  /**
+   * Get detailed information about the root block.
+   * @returns Root block CID and revision, or null if not found.
+   */
   async getRootDetailed(): Promise<{ cid: CID; rev: string } | null> {
     const res = await this.db
       .select({ cid: stratosRepoRoot.cid, rev: stratosRepoRoot.rev })
@@ -144,6 +156,11 @@ export class StratosSqlRepoReader {
     }
   }
 
+  /**
+   * Get the content of a block by CID.
+   * @param cid - The CID of the block to retrieve.
+   * @returns The block content as Uint8Array, or null if not found.
+   */
   async getBytes(cid: CID): Promise<Uint8Array | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
@@ -158,11 +175,21 @@ export class StratosSqlRepoReader {
     return content
   }
 
+  /**
+   * Check if a block exists by CID.
+   * @param cid - The CID of the block to check.
+   * @returns True if the block exists, false otherwise.
+   */
   async has(cid: CID): Promise<boolean> {
     const got = await this.getBytes(cid)
     return !!got
   }
 
+  /**
+   * Get multiple blocks by their CIDs.
+   * @param cids - Array of CIDs to retrieve.
+   * @returns Object containing blocks and missing CIDs.
+   */
   async getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }> {
     const cached = this.cache.getMany(cids)
     if (cached.missing.length < 1) return cached
@@ -192,6 +219,11 @@ export class StratosSqlRepoReader {
     return { blocks, missing: missing.toList() }
   }
 
+  /**
+   * Iterate over CAR blocks in the repository, optionally starting from a specific revision.
+   * @param since - Optional revision to start iteration from.
+   * @returns Async iterable of CarBlock objects.
+   */
   async *iterateCarBlocks(since?: string): AsyncIterable<CarBlock> {
     let cursor: RevCursor | undefined = undefined
     do {
@@ -199,7 +231,7 @@ export class StratosSqlRepoReader {
       for (const row of res) {
         yield {
           cid: CID.parse(row.cid),
-          bytes: row.content as Uint8Array,
+          bytes: row.content,
         }
       }
       const lastRow = res.at(-1)
@@ -215,6 +247,12 @@ export class StratosSqlRepoReader {
     } while (cursor)
   }
 
+  /**
+   * Get a range of blocks from the repository, optionally starting from a specific revision.
+   * @param since - Optional revision to start iteration from.
+   * @param cursor - Optional cursor to continue iteration from.
+   * @returns Array of block details including CID, revision, and content.
+   */
   async getBlockRange(
     since?: string,
     cursor?: RevCursor,
@@ -247,18 +285,29 @@ export class StratosSqlRepoReader {
     }
 
     const res = await query
-    return res.map((row) => ({
-      cid: row.cid,
-      repoRev: row.repoRev,
-      content: row.content as Uint8Array,
-    }))
+    return res.map(
+      (row: { cid: string; repoRev: string; content: Buffer }) => ({
+        cid: row.cid,
+        repoRev: row.repoRev,
+        content: new Uint8Array(row.content),
+      }),
+    )
   }
 
+  /**
+   * Get the total number of blocks in the repository.
+   * @returns Total number of blocks.
+   */
   async countBlocks(): Promise<number> {
     const res = await this.db.select({ count: countAll }).from(stratosRepoBlock)
     return res[0]?.count ?? 0
   }
 
+  /**
+   * Preload blocks for a specific revision into the cache.
+   * @param rev - Revision to preload blocks for.
+   * @returns Promise that resolves when preloading is complete.
+   */
   async preloadBlocksForRev(rev: string): Promise<void> {
     const res = await this.db
       .select({
@@ -276,6 +325,11 @@ export class StratosSqlRepoReader {
     }
   }
 
+  /**
+   * Preload the root spine of a commit into the cache.
+   * @param commitCid - CID of the commit to preload the root spine for.
+   * @returns Promise that resolves when preloading is complete.
+   */
   async preloadRootSpine(commitCid: CID): Promise<void> {
     const commitBytes = await this.getBytes(commitCid)
     if (!commitBytes) return
@@ -306,6 +360,10 @@ export class StratosSqlRepoReader {
     }
   }
 
+  /**
+   * List all existing blocks in the repository.
+   * @returns Set of CIDs representing existing blocks.
+   */
   async listExistingBlocks(): Promise<CidSet> {
     const cids = new CidSet()
     let lastCid: string | undefined = ''

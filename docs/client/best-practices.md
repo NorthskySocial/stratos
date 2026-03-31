@@ -2,7 +2,8 @@
 
 ## 1. Use `stratos-client` Helpers
 
-The `@northskysocial/stratos-client` package provides tested, composable helpers for discovery, routing, verification, and OAuth scopes. Prefer these over hand-rolling the same logic:
+The `@northskysocial/stratos-client` package provides tested, composable helpers for discovery,
+routing, verification, and OAuth scopes. Prefer these over hand-rolling the same logic:
 
 ```typescript
 import {
@@ -14,7 +15,8 @@ import {
 } from '@northskysocial/stratos-client'
 ```
 
-See the [Getting Started](/client/getting-started) guide for how each helper maps to an integration step.
+See the [Getting Started](/client/getting-started) guide for how each helper maps to an integration
+step.
 
 ## 2. Always Check Enrollment First
 
@@ -31,7 +33,8 @@ if (!enrollment) {
 
 ## 3. Handle Access Errors Gracefully
 
-Stratos returns 404 for both genuinely missing records and records the viewer can't access. Don't expose the distinction to users:
+Stratos returns 404 for both genuinely missing records and records the viewer can't access. Don't
+expose the distinction to users:
 
 ```typescript
 try {
@@ -93,7 +96,8 @@ async function createWithRetry(fn: () => Promise<unknown>, maxRetries = 3) {
 
 ## 8. Use the Stratos Agent Wrapper
 
-Never override `agent.serviceUrl` after constructing an `OAuthSession` agent. Always use the `fetchHandler` wrapper:
+Never override `agent.serviceUrl` after constructing an `OAuthSession` agent. Always use the
+`fetchHandler` wrapper:
 
 ```typescript
 // Correct — using stratos-client
@@ -115,7 +119,8 @@ stratosAgent.serviceUrl = new URL(STRATOS_ENDPOINT)
 
 ## 9. Cache Signing Keys
 
-Both `resolveServiceSigningKey()` and `resolveUserSigningKey()` make network calls to resolve DID documents and enrollment records. Cache the results:
+Both `resolveServiceSigningKey()` and `resolveUserSigningKey()` make network calls to resolve DID
+documents and enrollment records. Cache the results:
 
 ```typescript
 import {

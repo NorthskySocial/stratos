@@ -1,124 +1,124 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="ba-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="ba-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="ba-mr"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#f54b4b" />
+            <polygon fill="#f54b4b" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <path
           id="ba-avc"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ba-ml)"
           d="M 218 200 L 312 338"
+          marker-end="url(#ba-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ba-arc"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ba-ml)"
           d="M 682 200 L 588 338"
+          marker-end="url(#ba-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ba-acr"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ba-ml)"
           d="M 450 385 L 450 412"
+          marker-end="url(#ba-ml)"
+          stroke="#9145EC"
         />
       </svg>
 
-      <div class="node" id="ba-nv" style="left: 38px; top: 148px; width: 180px">
+      <div id="ba-nv" class="node" style="left: 38px; top: 148px; width: 180px">
         <svg
-          width="44"
+          id="ba-smiley"
+          fill="none"
           height="44"
           viewBox="0 0 38 38"
-          fill="none"
-          id="ba-smiley"
+          width="44"
         >
           <circle cx="19" cy="19" r="16" stroke="#7780DC" stroke-width="2" />
-          <circle cx="13.5" cy="15" r="2" fill="#7780DC" />
-          <circle cx="24.5" cy="15" r="2" fill="#7780DC" />
+          <circle cx="13.5" cy="15" fill="#7780DC" r="2" />
+          <circle cx="24.5" cy="15" fill="#7780DC" r="2" />
           <path
             d="M 12.5 23 Q 19 29.5 25.5 23"
-            stroke="#7780DC"
-            stroke-width="2"
-            stroke-linecap="round"
             fill="none"
+            stroke="#7780DC"
+            stroke-linecap="round"
+            stroke-width="2"
           />
         </svg>
         <div class="nn">Viewer</div>
         <div class="ns">bob.bsky.social</div>
         <div class="tags">
-          <span class="tag tb" id="ba-vt1">cooking</span>
+          <span id="ba-vt1" class="tag tb">cooking</span>
         </div>
       </div>
 
       <div
-        class="node"
         id="ba-nr"
+        class="node"
         style="left: 682px; top: 148px; width: 190px"
       >
         <div class="ni">📄</div>
         <div class="nn">Record</div>
         <div class="ns">zone.stratos.feed.post</div>
         <div class="tags">
-          <span class="tag tb" id="ba-rt1">cooking</span>
-          <span class="tag tb" id="ba-rt2">hiking</span>
+          <span id="ba-rt1" class="tag tb">cooking</span>
+          <span id="ba-rt2" class="tag tb">hiking</span>
         </div>
       </div>
 
       <div
-        class="node gone"
         id="ba-nchk"
+        class="node gone"
         style="left: 312px; top: 295px; width: 276px; min-height: 90px"
       >
         <div style="display: flex; align-items: center; gap: 8px">
           <span style="font-size: 20px; color: #8878b0">⊓</span>
-          <span class="nn" id="ba-chk-label">Boundary Intersection</span>
+          <span id="ba-chk-label" class="nn">Boundary Intersection</span>
         </div>
-        <div class="tags" id="ba-chk-tags"></div>
+        <div id="ba-chk-tags" class="tags"></div>
       </div>
 
-      <div class="result-box gone" id="ba-res-box">
-        <div class="res-icon" id="ba-res-icon">✓</div>
-        <div class="res-txt" id="ba-res-txt">ACCESS GRANTED</div>
+      <div id="ba-res-box" class="result-box gone">
+        <div id="ba-res-icon" class="res-icon">✓</div>
+        <div id="ba-res-txt" class="res-txt">ACCESS GRANTED</div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

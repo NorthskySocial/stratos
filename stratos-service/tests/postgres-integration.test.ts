@@ -100,7 +100,7 @@ describe('PostgreSQL Backend Integration', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/1`),
+          `at://${testDid}/zone.stratos.feed.post/1`,
           cid,
           { text: 'Actor 1 post' },
           'create',
@@ -131,7 +131,7 @@ describe('PostgreSQL Backend Integration', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(uri),
+          uri,
           cid,
           { text: 'Hello PG!' },
           'create',
@@ -150,21 +150,21 @@ describe('PostgreSQL Backend Integration', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/1`),
+          `at://${testDid}/zone.stratos.feed.post/1`,
           cid,
           { text: 'Post 1' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/2`),
+          `at://${testDid}/zone.stratos.feed.post/2`,
           cid,
           { text: 'Post 2' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.graph.follow/1`),
+          `at://${testDid}/zone.stratos.graph.follow/1`,
           cid,
           { subject: 'did:plc:other' },
           'create',
@@ -186,7 +186,7 @@ describe('PostgreSQL Backend Integration', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(uri),
+          uri,
           cid,
           { text: 'Delete me' },
           'create',
@@ -199,7 +199,7 @@ describe('PostgreSQL Backend Integration', () => {
       ).toBe(1)
 
       await actorStore.transact(testDid, async (store) => {
-        await store.record.deleteRecord(new AtUri(uri))
+        await store.record.deleteRecord(uri)
       })
 
       expect(
@@ -213,7 +213,7 @@ describe('PostgreSQL Backend Integration', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(postUri),
+          postUri,
           cid,
           {
             text: 'Reply',

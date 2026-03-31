@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run -A
 import { loadState, saveState } from './lib/state.ts'
-import { section, info, pass, fail, error } from './lib/log.ts'
+import { error, fail, info, pass, section } from './lib/log.ts'
 import { enrollmentStatus, unenroll } from './lib/stratos.ts'
 import { createSession, getEnrollmentRecord } from './lib/pds.ts'
 import { STRATOS_URL } from './lib/config.ts'

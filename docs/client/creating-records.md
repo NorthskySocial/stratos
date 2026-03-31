@@ -252,4 +252,5 @@ await rpc.post('com.atproto.repo.createRecord', {
 })
 ```
 
-Batch operations (`com.atproto.repo.applyWrites`) work identically — route through the service client.
+Batch operations (`com.atproto.repo.applyWrites`) work identically — route through the service
+client.

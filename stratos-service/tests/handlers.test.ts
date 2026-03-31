@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { Readable } from 'node:stream'
-import { CID } from 'multiformats/cid'
+import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
@@ -19,6 +19,7 @@ import * as dagCbor from '@ipld/dag-cbor'
 
 import { BlobStore } from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../src/context.js'
+import { encodeVarint, decodeVarint } from '../src/api/varint.js'
 
 const RAW_CODEC = 0x55
 const DAG_CBOR_CODEC = 0x71
@@ -30,7 +31,7 @@ function createMockBlobStore(): BlobStore {
   return {
     putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
       const key = `temp-${randomBytes(8).toString('hex')}`
-      if (bytes instanceof Uint8Array) {
+      if (Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) {
         tempStorage.set(key, bytes)
       }
       return key
@@ -45,7 +46,7 @@ function createMockBlobStore(): BlobStore {
     putPermanent: vi
       .fn()
       .mockImplementation(async (cid: CID, bytes: Uint8Array) => {
-        if (bytes instanceof Uint8Array) {
+        if (Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) {
           storage.set(cid.toString(), bytes)
         }
       }),
@@ -663,32 +664,3 @@ describe('describeRepo handleIsCorrect', () => {
     expect(mockIdResolver.handle.resolve).not.toHaveBeenCalled()
   })
 })
-
-// Helper: encode unsigned varint (unsigned LEB128)
-function encodeVarint(value: number): Uint8Array {
-  const bytes: number[] = []
-  while (value > 0x7f) {
-    bytes.push((value & 0x7f) | 0x80)
-    value >>>= 7
-  }
-  bytes.push(value & 0x7f)
-  return new Uint8Array(bytes)
-}
-
-// Helper: decode unsigned varint
-function decodeVarint(
-  buf: Uint8Array,
-  offset: number,
-): { value: number; bytesRead: number } {
-  let value = 0
-  let shift = 0
-  let bytesRead = 0
-  while (true) {
-    const byte = buf[offset + bytesRead]
-    value |= (byte & 0x7f) << shift
-    bytesRead++
-    if ((byte & 0x80) === 0) break
-    shift += 7
-  }
-  return { value, bytesRead }
-}

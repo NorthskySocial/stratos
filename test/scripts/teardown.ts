@@ -2,7 +2,7 @@
 // Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
 import { TEST_ROOT } from './lib/config.ts'
-import { section, info, pass, fail, warn } from './lib/log.ts'
+import { fail, info, pass, section, warn } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
 import { stopNgrok } from './lib/ngrok.ts'

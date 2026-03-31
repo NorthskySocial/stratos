@@ -1,13 +1,21 @@
 import '@atcute/atproto'
-import { Client, simpleFetchHandler } from '@atcute/client'
 import type { FetchHandler } from '@atcute/client'
+import { Client, simpleFetchHandler } from '@atcute/client'
 import type { ServiceAttestation, StratosEnrollment } from './types.js'
 import { serviceDIDToRkey } from './routing.js'
 
 const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 
+/**
+ * Decodes bytes from various formats into Uint8Array.
+ * @param val - The value to decode.
+ * @returns Uint8Array if decoding is successful, null otherwise.
+ */
 const decodeBytes = (val: unknown): Uint8Array | null => {
   if (val instanceof Uint8Array) return val
+  if (val && typeof val === 'object' && '_isBuffer' in val && val._isBuffer) {
+    return val as unknown as Uint8Array
+  }
   if (typeof val === 'object' && val !== null && '$bytes' in val) {
     const b64: string = (val as { $bytes: string }).$bytes
     const binary = atob(b64)
@@ -20,6 +28,11 @@ const decodeBytes = (val: unknown): Uint8Array | null => {
   return null
 }
 
+/**
+ * Parses attestation data from a given object.
+ * @param val - The object containing attestation data.
+ * @returns ServiceAttestation if parsing is successful, null otherwise.
+ */
 const parseAttestation = (val: unknown): ServiceAttestation | null => {
   if (typeof val !== 'object' || val === null) return null
   const obj = val as Record<string, unknown>

@@ -1,7 +1,10 @@
 import { Readable } from 'node:stream'
 
 /**
- * Convert a Node.js Readable stream to an AsyncIterable
+ * Converts a Node.js Readable stream into an AsyncIterable that yields Uint8Array chunks.
+ *
+ * @param readable - The Node.js Readable stream to convert.
+ * @returns An AsyncIterable that yields Uint8Array chunks.
  */
 export async function* readableToAsyncIterable(
   readable: Readable,
@@ -13,6 +16,9 @@ export async function* readableToAsyncIterable(
 
 /**
  * Convert an AsyncIterable to a Node.js Readable stream
+ *
+ * @param iterable - The AsyncIterable to convert.
+ * @returns A Node.js Readable stream.
  */
 export function asyncIterableToReadable(
   iterable: AsyncIterable<Uint8Array>,
@@ -37,6 +43,9 @@ export function asyncIterableToReadable(
 
 /**
  * Collect an AsyncIterable into a Uint8Array
+ *
+ * @param iterable - The AsyncIterable to collect.
+ * @returns A Uint8Array containing all chunks from the iterable.
  */
 export async function collectAsyncIterable(
   iterable: AsyncIterable<Uint8Array>,

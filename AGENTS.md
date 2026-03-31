@@ -2,7 +2,10 @@
 
 ## Project Overview
 
-Stratos is a **standalone private permissioned data service** for ATProtocol. It provides domain-scoped private data storage with boundary-based access control. Users enroll via OAuth, their enrollment is published to their PDS, and downstream indexers or AppViews discover that enrollment through `zone.stratos.actor.enrollment` records.
+Stratos is a **standalone private permissioned data service** for ATProtocol. It provides
+domain-scoped private data storage with boundary-based access control. Users enroll via OAuth, their
+enrollment is published to their PDS, and downstream indexers or AppViews discover that enrollment
+through `zone.stratos.actor.enrollment` records.
 
 ## Architecture
 
@@ -39,7 +42,8 @@ Follow Clean code design patterns and prioritize the following parts fo it:
 - Use explanatory variables
 - Encapsulate boundary conditions
 - Choose descriptive and unambiguous names
-- Don't use flag arguments. Split method into several independent methods that can be called from the client without the flag.
+- Don't use flag arguments. Split method into several independent methods that can be called from
+  the client without the flag.
 
 ## Feature-Sliced Architecture
 
@@ -147,14 +151,18 @@ stratos-service/src/features/{feature}/
 
 ### Storage Architecture
 
-Storage interfaces are defined in `stratos-core/src/storage/*.ts` with adapters in `stratos-service/src/adapters/` (sqlite and postgres). Each store has a Reader (read-only) and Writer (extends Reader) variant. Read the interface files directly for method signatures.
+Storage interfaces are defined in `stratos-core/src/storage/*.ts` with adapters in
+`stratos-service/src/adapters/` (sqlite and postgres). Each store has a Reader (read-only) and
+Writer (extends Reader) variant. Read the interface files directly for method signatures.
 
 Composite interfaces group stores per scope:
 
-- `ActorStoreReaders` / `ActorStoreWriters` — per-actor stores: `record`, `blobMetadata`, `blobContent`, `repo`, `sequence`
+- `ActorStoreReaders` / `ActorStoreWriters` — per-actor stores: `record`, `blobMetadata`,
+  `blobContent`, `repo`, `sequence`
 - `ServiceStores` — service-level stores: `enrollment`
 
-**Enrollment** uses a dual-type pattern: `Enrollment` (domain, with `Date`) vs `StoredEnrollment` (storage, with string dates).
+**Enrollment** uses a dual-type pattern: `Enrollment` (domain, with `Date`) vs `StoredEnrollment` (
+storage, with string dates).
 
 ---
 
@@ -180,7 +188,8 @@ Composite interfaces group stores per scope:
 
 ### Ports & Adapters
 
-Follow the pattern in `stratos-core/src/enrollment/port.ts` (port) and `stratos-service/src/features/enrollment/adapter.ts` (adapter).
+Follow the pattern in `stratos-core/src/enrollment/port.ts` (port) and
+`stratos-service/src/features/enrollment/adapter.ts` (adapter).
 
 ### Error Handling
 
@@ -190,13 +199,20 @@ Use domain-specific error classes extending `StratosError`. See `stratos-core/sr
 
 ## Testing
 
-Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests/`, indexer tests in `stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run: `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
+Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests/`, indexer tests in
+`stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run:
+`pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
 
 ---
 
 ## Database
 
-Per-actor SQLite databases at `{dataDir}/actors/{did-prefix}/{did}/stratos.sqlite` (tables: `stratos_record`, `stratos_blob`, `stratos_repo_block`, `stratos_repo_root`, `stratos_seq`) when using the `sqlite` backend. With the `postgres` backend, actor data is stored in per-actor schemas. Service-level data lives in `{dataDir}/service.sqlite` for sqlite-backed deployments, with schema definitions in `stratos-core/src/db/schema/` and Postgres-specific tables in `stratos-core/src/db/schema/pg-tables.ts`.
+Per-actor SQLite databases at `{dataDir}/actors/{did-prefix}/{did}/stratos.sqlite` (tables:
+`stratos_record`, `stratos_blob`, `stratos_repo_block`, `stratos_repo_root`, `stratos_seq`) when
+using the `sqlite` backend. With the `postgres` backend, actor data is stored in per-actor schemas.
+Service-level data lives in `{dataDir}/service.sqlite` for sqlite-backed deployments, with schema
+definitions in `stratos-core/src/db/schema/` and Postgres-specific tables in
+`stratos-core/src/db/schema/pg-tables.ts`.
 
 ---
 
@@ -204,7 +220,8 @@ Per-actor SQLite databases at `{dataDir}/actors/{did-prefix}/{did}/stratos.sqlit
 
 Follow the pattern in `stratos-service/src/api/records.ts` for handler structure.
 
-Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`, `.service` (inter-service JWT), `.admin` (basic/bearer).
+Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`, `.service` (
+inter-service JWT), `.admin` (basic/bearer).
 
 ---
 
@@ -256,13 +273,16 @@ When modifying `stratos-client/` exports or XRPC endpoints, update `stratos-clie
 
 ## Comment Guidelines
 
-Minimal comments. Only explain _why_, not _what_. Never generate: commented-out code, restated JSDoc, section divider comments (`// ====`), or TODOs without issue refs.
+Minimal comments. Only explain _why_, not _what_. Never generate: commented-out code, restated
+JSDoc, section divider comments (`// ====`), or TODOs without issue refs.
 
 ---
 
 ## Logging Guidelines
 
-Use structured logging: `logger.level({ contextObj }, 'message')`. Log request completion with duration, business events, and failures with IDs. Never log tokens, passwords, PII, or record contents. Don't log per-iteration in loops.
+Use structured logging: `logger.level({ contextObj }, 'message')`. Log request completion with
+duration, business events, and failures with IDs. Never log tokens, passwords, PII, or record
+contents. Don't log per-iteration in loops.
 
 ---
 
@@ -279,4 +299,5 @@ Use structured logging: `logger.level({ contextObj }, 'message')`. Log request c
 - `github.com/bluesky-social/atproto` — AT Protocol reference implementation, lexicons, XRPC
 - `github.com/bluesky-social/social-app` — Bluesky app patterns, API usage examples
 - `github.com/bluesky-social/proposals` — AT Protocol proposals and specifications
-- `github.com/DavidBuchanan314/atmst` — MST implementation in Python (@atcute/mst is derived from this)
+- `github.com/DavidBuchanan314/atmst` — MST implementation in Python (@atcute/mst is derived from
+  this)

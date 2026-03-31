@@ -32,10 +32,10 @@ export interface StratosServiceStatus {
 }
 
 function decodeBytes(val: unknown): Uint8Array | null {
-  if (val instanceof Uint8Array) return val
+  if (val instanceof Uint8Array || (val && (val as any)._isBuffer))
+    return val as Uint8Array
   if (typeof val === 'object' && val !== null && '$bytes' in val) {
     const b64 = (val as { $bytes: string }).$bytes
-    if (typeof b64 !== 'string') return null
     const binary = atob(b64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {

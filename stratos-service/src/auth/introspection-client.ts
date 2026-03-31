@@ -108,6 +108,8 @@ export class PdsTokenVerifier implements TokenVerifier {
 
   /**
    * Get the PDS endpoint for a DID by resolving its DID document
+   * @param did - The DID to resolve.
+   * @returns The PDS endpoint URL or null if not found.
    */
   async getPdsEndpointFromDid(did: string): Promise<string | null> {
     try {
@@ -134,6 +136,8 @@ export class PdsTokenVerifier implements TokenVerifier {
 
   /**
    * Verify an access token
+   * @param token - The access token to verify.
+   * @returns The verification result.
    */
   async verify(token: string): Promise<TokenVerificationResult> {
     const cached = this.verifyCache.get(token)
@@ -165,6 +169,17 @@ export class PdsTokenVerifier implements TokenVerifier {
     return result
   }
 
+  /**
+   * Clear all caches (useful for testing)
+   */
+  clearCache(): void {
+    this.verifyCache.clear()
+    this.issuerCache.clear()
+  }
+
+  /**
+   * Evict expired entries from the verify cache.
+   */
   private evictVerifyCache(): void {
     if (this.verifyCache.size <= this.verifyCacheMaxSize) return
     const now = Date.now()
@@ -184,25 +199,24 @@ export class PdsTokenVerifier implements TokenVerifier {
     }
   }
 
+  /**
+   * Verify an access token without using the cache.
+   * @param token - The access token to verify.
+   * @returns The verification result.
+   */
   private async verifyUncached(
     token: string,
   ): Promise<TokenVerificationResult> {
     // 1. Decode token claims (no signature verification)
-    let payload: Record<string, unknown>
-    try {
-      const parts = token.split('.')
-      if (parts.length !== 3) {
-        return { active: false, error: 'Invalid JWT format' }
-      }
-      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
-    } catch {
+    const payload = this.decodeJwtPayload(token)
+    if (!payload) {
       return { active: false, error: 'Failed to decode JWT payload' }
     }
 
+    // 2. Validate subject and issuer
     const sub = payload['sub'] as string | undefined
     const iss = payload['iss'] as string | undefined
 
-    // 2. Validate subject is a DID
     if (!sub || !sub.startsWith('did:')) {
       return { active: false, error: 'Invalid subject claim' }
     }
@@ -219,43 +233,16 @@ export class PdsTokenVerifier implements TokenVerifier {
       return { active: false, error: `Invalid issuer URL: ${iss}` }
     }
 
-    // 4. Resolve the user's DID to find their PDS endpoint
-    const pdsEndpoint = await this.getPdsEndpointFromDid(sub)
-    if (!pdsEndpoint) {
-      return {
-        active: false,
-        error: `Could not resolve PDS endpoint for ${sub}`,
-      }
+    // 4. Verify issuer matches the PDS's declared authorization server
+    const pdsError = await this.verifyPdsAuthServer(sub, issuerOrigin)
+    if (pdsError) {
+      return { active: false, error: pdsError }
     }
 
-    // 5. Verify issuer matches the PDS's declared authorization server.
-    // Bluesky uses an entryway (bsky.social) as the OAuth issuer while
-    // actual PDS hosts differ (e.g., jellybaby.us-east.host.bsky.network).
-    const pdsOrigin = new URL(pdsEndpoint).origin
-    const declaredIssuer = await this.fetchAuthServerIssuer(pdsOrigin)
-    if (issuerOrigin !== declaredIssuer) {
-      return {
-        active: false,
-        error: `Issuer ${issuerOrigin} does not match PDS auth server ${declaredIssuer}`,
-      }
-    }
-
-    // 6. Check expiration
-    const exp = payload['exp'] as number | undefined
-    if (exp !== undefined) {
-      const nowSec = Math.floor(Date.now() / 1000)
-      if (nowSec > exp + 30) {
-        return { active: false, error: 'Token expired' }
-      }
-    }
-
-    // 7. Check audience if configured
-    if (this.audience) {
-      const aud = payload['aud'] as string | string[] | undefined
-      const audArray = Array.isArray(aud) ? aud : aud ? [aud] : []
-      if (!audArray.includes(this.audience)) {
-        return { active: false, error: 'Audience mismatch' }
-      }
+    // 5. Check expiration and audience
+    const expError = this.checkExpirationAndAudience(payload)
+    if (expError) {
+      return { active: false, error: expError }
     }
 
     return {
@@ -263,7 +250,7 @@ export class PdsTokenVerifier implements TokenVerifier {
       sub,
       iss,
       aud: payload['aud'] as string | string[] | undefined,
-      exp,
+      exp: payload['exp'] as number | undefined,
       iat: payload['iat'] as number | undefined,
       jti: payload['jti'] as string | undefined,
       scope: payload['scope'] as string | undefined,
@@ -273,12 +260,98 @@ export class PdsTokenVerifier implements TokenVerifier {
   }
 
   /**
-   * Clear all caches (useful for testing)
+   * Decode token claims from JWT payload (no signature verification)
    */
+  private decodeJwtPayload(token: string): Record<string, unknown> | null {
+    try {
+      const parts = token.split('.')
+      if (parts.length !== 3) {
+        return null
+      }
+      return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Verify issuer matches the PDS's declared authorization server.
+   * Bluesky uses an entryway (bsky.social) as the OAuth issuer while
+   * actual PDS hosts differ (e.g., jellybaby.us-east.host.bsky.network).
+   *
+   * @param sub - The user's DID
+   * @param issuerOrigin - The issuer origin (e.g., https://bsky.social)
+   * @returns Error message if verification fails, null if successful
+   '
+   */
+  private async verifyPdsAuthServer(
+    sub: string,
+    issuerOrigin: string,
+  ): Promise<string | null> {
+    // Resolve the user's DID to find their PDS endpoint
+    const pdsEndpoint = await this.getPdsEndpointFromDid(sub)
+    if (!pdsEndpoint) {
+      return `Could not resolve PDS endpoint for ${sub}`
+    }
+
+    const pdsOrigin = new URL(pdsEndpoint).origin
+    try {
+      const declaredIssuer = await this.fetchAuthServerIssuer(pdsOrigin)
+      if (issuerOrigin !== declaredIssuer) {
+        return `Issuer ${issuerOrigin} does not match PDS auth server ${declaredIssuer}`
+      }
+    } catch (err) {
+      return err instanceof Error
+        ? err.message
+        : 'Failed to fetch PDS auth server'
+    }
+
+    return null
+  }
+
+  /**
+   * Check expiration and audience claims
+   *
+   * @param payload - The JWT payload
+   * @returns Error message if verification fails, null if successful
+   */
+  private checkExpirationAndAudience(
+    payload: Record<string, unknown>,
+  ): string | null {
+    // Check expiration
+    const exp = payload['exp'] as number | undefined
+    if (exp !== undefined) {
+      const nowSec = Math.floor(Date.now() / 1000)
+      if (nowSec > exp + 30) {
+        return 'Token expired'
+      }
+    }
+
+    // Check audience if configured
+    if (this.audience) {
+      const aud = payload['aud'] as string | string[] | undefined
+      let audArray: string[]
+      if (Array.isArray(aud)) {
+        audArray = aud
+      } else {
+        audArray = aud ? [aud] : []
+      }
+      if (!audArray.includes(this.audience)) {
+        return 'Audience mismatch'
+      }
+    }
+
+    return null
+  }
+
   /**
    * Fetch the declared authorization server from a PDS's protected resource metadata.
    * Per the AT Protocol OAuth spec, PDS instances are Resource Servers that expose
    * /.well-known/oauth-protected-resource with an authorization_servers array.
+   *
+   * @param pdsOrigin - The origin of the PDS to fetch the authorization server from.
+   * @returns The declared authorization server URL.
+   * @throws {Error} If the request fails or the metadata does not contain an authorization server.
    */
   private async fetchAuthServerIssuer(pdsOrigin: string): Promise<string> {
     const cached = this.issuerCache.get(pdsOrigin)
@@ -311,15 +384,4 @@ export class PdsTokenVerifier implements TokenVerifier {
     this.issuerCache.set(pdsOrigin, issuerOrigin)
     return issuerOrigin
   }
-
-  clearCache(): void {
-    this.verifyCache.clear()
-    this.issuerCache.clear()
-  }
 }
-
-/**
- * @deprecated Use PdsTokenVerifier instead
- */
-export const PdsIntrospectionClient = PdsTokenVerifier
-export type IntrospectionResponse = VerifiedTokenClaims

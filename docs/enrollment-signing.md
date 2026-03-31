@@ -1,12 +1,14 @@
 # Enrollment Signing and Verification
 
-This document describes the enrollment attestation model implemented in the current Stratos codebase.
+This document describes the enrollment attestation model implemented in the current Stratos
+codebase.
 
 ## Summary
 
 During enrollment, Stratos creates and persists two pieces of signing state:
 
-- a service signing key (Secp256k1), used to sign enrollment attestations and as a fallback for repo commits
+- a service signing key (Secp256k1), used to sign enrollment attestations and as a fallback for repo
+  commits
 - a per-user signing key (P-256), used to sign record commits and included in the enrollment record
 
 The enrollment record published to the user's PDS contains:
@@ -212,7 +214,9 @@ This attestation lets a client or AppView verify that:
 - the boundary set has not been modified after signing
 - the user signing key in the record matches what the service enrolled
 
-Because record commits are signed with the user's P-256 key, a verifier can chain trust: resolve the user's enrollment record → verify the service attestation → extract the user's `signingKey` → verify the commit signature on any record. This proves both service endorsement and user authorship.
+Because record commits are signed with the user's P-256 key, a verifier can chain trust: resolve the
+user's enrollment record → verify the service attestation → extract the user's `signingKey` → verify
+the commit signature on any record. This proves both service endorsement and user authorship.
 
 What the attestation does not prove by itself:
 
@@ -228,13 +232,15 @@ For that, query the live status endpoint.
 Behavior today:
 
 - unauthenticated callers receive `enrolled: true` or `false`
-- authenticated callers also receive boundaries, signing key, enrollment rkey, and a fresh attestation
+- authenticated callers also receive boundaries, signing key, enrollment rkey, and a fresh
+  attestation
 
 Use this when you need stronger freshness guarantees than the cached PDS record provides.
 
 ## Boundary Changes
 
-When a user's boundaries change, the Stratos service re-signs a new attestation and rewrites the PDS record. AppViews learn of the change via the sync stream and invalidate their cache.
+When a user's boundaries change, the Stratos service re-signs a new attestation and rewrites the PDS
+record. AppViews learn of the change via the sync stream and invalidate their cache.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -270,7 +276,8 @@ sequenceDiagram
 
 ## Legacy Notes
 
-Older docs described a JWT-shaped service certificate and `app.northsky.stratos.actor.enrollment` records keyed at `self`. That is not the current model in this repository.
+Older docs described a JWT-shaped service certificate and `app.northsky.stratos.actor.enrollment`
+records keyed at `self`. That is not the current model in this repository.
 
 The current model uses:
 

@@ -81,6 +81,7 @@
 .custom-block.tip {
   border-color: var(--sp-teal);
 }
+
 .custom-block.tip .custom-block-title {
   color: var(--sp-teal);
 }

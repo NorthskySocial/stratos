@@ -22,4 +22,4 @@ export {
   parseCid,
   jsonToLex,
   extractBoundaries,
-} from './record-decoder.ts'
+} from '@northskysocial/stratos-core'

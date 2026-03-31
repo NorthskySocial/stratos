@@ -6,3 +6,4 @@ export {
   type SignedCommitResult,
   type ExtraBlock,
 } from './signer.js'
+export * from './adapters.js'

@@ -2,12 +2,12 @@
 export * from './tables.js'
 
 import {
-  stratosRepoRoot,
-  stratosRepoBlock,
-  stratosRecord,
-  stratosBlob,
-  stratosRecordBlob,
   stratosBacklink,
+  stratosBlob,
+  stratosRecord,
+  stratosRecordBlob,
+  stratosRepoBlock,
+  stratosRepoRoot,
   stratosSeq,
 } from './tables.js'
 

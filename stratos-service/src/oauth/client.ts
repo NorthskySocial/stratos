@@ -2,7 +2,6 @@ import {
   NodeOAuthClient,
   NodeSavedSession,
   ResolvedHandle,
-  ResolveHandleOptions,
 } from '@atproto/oauth-client-node'
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
@@ -66,6 +65,11 @@ export interface OAuthStateStoreBackend {
 export class SqliteSessionStore implements OAuthSessionStoreBackend {
   constructor(private db: ServiceDb) {}
 
+  /**
+   * Get OAuth session by key
+   * @param key - Session key
+   * @returns OAuth session or undefined if not found
+   */
   async get(key: string): Promise<NodeSavedSession | undefined> {
     const rows = await this.db
       .select()
@@ -78,6 +82,11 @@ export class SqliteSessionStore implements OAuthSessionStoreBackend {
     return JSON.parse(row.session) as NodeSavedSession
   }
 
+  /**
+   * Set OAuth session by key
+   * @param key - Session key
+   * @param session - OAuth session to store
+   */
   async set(key: string, session: NodeSavedSession): Promise<void> {
     const now = new Date().toISOString()
     const sessionStr = JSON.stringify(session)
@@ -99,6 +108,10 @@ export class SqliteSessionStore implements OAuthSessionStoreBackend {
       })
   }
 
+  /**
+   * Delete OAuth session by key
+   * @param key - Session key
+   */
   async del(key: string): Promise<void> {
     await this.db.delete(oauthSession).where(eq(oauthSession.key, key))
   }
@@ -110,6 +123,11 @@ export class SqliteSessionStore implements OAuthSessionStoreBackend {
 export class SqliteStateStore implements OAuthStateStoreBackend {
   constructor(private db: ServiceDb) {}
 
+  /**
+   * Get OAuth state by key
+   * @param key - State key
+   * @returns OAuth state or undefined if not found
+   */
   async get(key: string): Promise<string | undefined> {
     const rows = await this.db
       .select()
@@ -120,6 +138,11 @@ export class SqliteStateStore implements OAuthStateStoreBackend {
     return rows[0]?.state
   }
 
+  /**
+   * Set OAuth state by key
+   * @param key - State key
+   * @param state - OAuth state to store
+   */
   async set(key: string, state: string): Promise<void> {
     const now = new Date().toISOString()
 
@@ -136,6 +159,10 @@ export class SqliteStateStore implements OAuthStateStoreBackend {
       })
   }
 
+  /**
+   * Delete OAuth state by key
+   * @param key - State key
+   */
   async del(key: string): Promise<void> {
     await this.db.delete(oauthState).where(eq(oauthState.key, key))
   }
@@ -162,6 +189,11 @@ export interface OAuthClientConfig {
 export class PgSessionStore implements OAuthSessionStoreBackend {
   constructor(private db: ServicePgDb) {}
 
+  /**
+   * Get OAuth session by key
+   * @param key - Session key
+   * @returns OAuth session or undefined if not found
+   */
   async get(key: string): Promise<NodeSavedSession | undefined> {
     const rows = await this.db
       .select()
@@ -174,6 +206,11 @@ export class PgSessionStore implements OAuthSessionStoreBackend {
     return JSON.parse(row.session) as NodeSavedSession
   }
 
+  /**
+   * Set OAuth session by key
+   * @param key - Session key
+   * @param session - OAuth session to store
+   */
   async set(key: string, session: NodeSavedSession): Promise<void> {
     const now = new Date().toISOString()
     const sessionStr = JSON.stringify(session)
@@ -195,6 +232,10 @@ export class PgSessionStore implements OAuthSessionStoreBackend {
       })
   }
 
+  /**
+   * Delete OAuth session by key
+   * @param key - Session key
+   */
   async del(key: string): Promise<void> {
     await this.db.delete(pgOauthSession).where(eq(pgOauthSession.key, key))
   }
@@ -326,11 +367,7 @@ export async function createOAuthClient(
 
     // Use our identity resolver for handle resolution
     handleResolver: {
-      resolve: async (
-        handle: string,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        options: ResolveHandleOptions | undefined,
-      ) => {
+      resolve: async (handle: string) => {
         // HandleResolver expects a ResolvedHandle; fall back to empty string if unresolved
         const did = await idResolver.handle.resolve(handle)
         return (did ?? null) as unknown as ResolvedHandle

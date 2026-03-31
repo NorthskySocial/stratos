@@ -38,15 +38,20 @@ STRATOS_ALLOWED_DOMAINS=atverkackt.de,posters-madness,bees,plants
 STRATOS_AUTO_ENROLL_DOMAINS=posters-madness
 ```
 
-- `atverkackt.de` remains a valid domain — existing users keep their enrollment and existing posts stay accessible.
+- `atverkackt.de` remains a valid domain — existing users keep their enrollment and existing posts
+  stay accessible.
 - A **new** user enrolling via OAuth gets **only** the `posters-madness` boundary.
-- Posts can be created with **any** of the four domains as boundaries (provided the author is enrolled in that domain).
-- The user can only create posts within their enrolled boundaries (enforced by `assertCallerCanWriteDomains` in the record handler).
-- Additional boundaries (`bees`, `plants`, `atverkackt.de`) can be assigned to users later via admin tools or direct store operations.
+- Posts can be created with **any** of the four domains as boundaries (provided the author is
+  enrolled in that domain).
+- The user can only create posts within their enrolled boundaries (enforced by
+  `assertCallerCanWriteDomains` in the record handler).
+- Additional boundaries (`bees`, `plants`, `atverkackt.de`) can be assigned to users later via admin
+  tools or direct store operations.
 
 ### Backward Compatibility
 
-If `STRATOS_AUTO_ENROLL_DOMAINS` is not set or empty, enrollment falls back to assigning **all** allowed domains — matching the previous behavior where every user got every domain.
+If `STRATOS_AUTO_ENROLL_DOMAINS` is not set or empty, enrollment falls back to assigning **all**
+allowed domains — matching the previous behavior where every user got every domain.
 
 ## Configuration
 
@@ -74,7 +79,8 @@ stratos: {
 `atverkackt.de` is the original domain and stays in `allowedDomains` so existing
 data and enrollments continue to work. New users only get `posters-madness`.
 
-Both values are passed as environment variables to the ECS task definition in `ops/infra/src/stratos-service-stack.ts`.
+Both values are passed as environment variables to the ECS task definition in
+`ops/infra/src/stratos-service-stack.ts`.
 
 ## Data Flow
 
@@ -102,7 +108,8 @@ Record Creation (zone.stratos.feed.post)
 
 ## Assigning Additional Domains
 
-Auto-enrollment only applies at initial OAuth enrollment. To grant a user access to additional domains after enrollment, use the enrollment store directly:
+Auto-enrollment only applies at initial OAuth enrollment. To grant a user access to additional
+domains after enrollment, use the enrollment store directly:
 
 ```typescript
 // Via the enrollment store (e.g., in an admin handler)

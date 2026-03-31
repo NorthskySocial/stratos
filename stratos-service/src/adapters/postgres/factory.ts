@@ -40,12 +40,14 @@ function actorSchemaName(didHash: string): string {
 export class PostgresStorageFactory implements StorageFactory {
   readonly backend: StorageBackend = 'postgres'
 
-  private serviceDb: ServicePgDb
-  private cborToRecord: (content: Uint8Array) => Record<string, unknown>
-  private blobContentStoreCreator: (did: string) => BlobContentStore
-  private pool: postgres.Sql
-  private actorPool: postgres.Sql
-  private actorDb: StratosPgDb
+  private readonly serviceDb: ServicePgDb
+  private readonly cborToRecord: (
+    content: Uint8Array,
+  ) => Record<string, unknown>
+  private readonly blobContentStoreCreator: (did: string) => BlobContentStore
+  private readonly pool: postgres.Sql
+  private readonly actorPool: postgres.Sql
+  private readonly actorDb: StratosPgDb
 
   constructor(config: PostgresStorageFactoryConfig) {
     this.serviceDb = config.serviceDb

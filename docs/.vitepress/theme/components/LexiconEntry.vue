@@ -1,7 +1,7 @@
 <template>
-  <div class="lex-entry" :class="'lex-type-' + mainType">
+  <div :class="'lex-type-' + mainType" class="lex-entry">
     <div class="lex-header">
-      <span class="lex-badge" :class="'badge-' + mainType">{{
+      <span :class="'badge-' + mainType" class="lex-badge">{{
         badgeLabel
       }}</span>
       <span class="lex-id">{{ id }}</span>

@@ -1,67 +1,67 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="is-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="is-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- PDS Firehose → Indexer (diagonal down-right) -->
         <path
           id="is-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#is-ml)"
           d="M 190 168 L 355 235"
+          marker-end="url(#is-ml)"
+          stroke="#9145EC"
         />
         <!-- Stratos Stream → Indexer (diagonal up-right) -->
         <path
           id="is-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#is-ml)"
           d="M 190 332 L 355 262"
+          marker-end="url(#is-ml)"
+          stroke="#9145EC"
         />
         <!-- Indexer → PostgreSQL (diagonal up-right) -->
         <path
           id="is-a3"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#is-ml)"
           d="M 520 225 L 645 172"
+          marker-end="url(#is-ml)"
+          stroke="#9145EC"
         />
         <!-- PostgreSQL → AppView (vertical) -->
         <path
           id="is-a4"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#is-mg)"
           d="M 732 203 L 727 295"
+          marker-end="url(#is-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Left column -->
       <div
-        class="node"
         id="is-npds"
+        class="node"
         style="left: 15px; top: 100px; width: 175px"
       >
         <div class="ni">🔥</div>
@@ -70,8 +70,8 @@
       </div>
 
       <div
-        class="node"
         id="is-nst"
+        class="node"
         style="left: 15px; top: 295px; width: 175px"
       >
         <div class="ni">⚙️</div>
@@ -81,8 +81,8 @@
 
       <!-- Center: Indexer -->
       <div
-        class="node"
         id="is-nix"
+        class="node"
         style="left: 355px; top: 195px; width: 165px"
       >
         <div class="ni">🔄</div>
@@ -92,8 +92,8 @@
 
       <!-- Right column -->
       <div
-        class="node"
         id="is-ndb"
+        class="node"
         style="left: 645px; top: 100px; width: 195px"
       >
         <div class="ni">🛢️</div>
@@ -102,8 +102,8 @@
       </div>
 
       <div
-        class="node"
         id="is-nav"
+        class="node"
         style="left: 645px; top: 295px; width: 195px"
       >
         <div class="ni">📡</div>
@@ -115,7 +115,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

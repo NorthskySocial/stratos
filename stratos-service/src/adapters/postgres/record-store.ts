@@ -1,22 +1,26 @@
-import { CID } from 'multiformats/cid'
-import { AtUri } from '@atproto/syntax'
-import * as syntax from '@atproto/syntax'
-import { eq, and, gt, lt, asc, desc, isNull, sql } from 'drizzle-orm'
+import { CID } from '@atproto/lex-data'
+import { and, asc, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm'
 import type {
+  AtUri,
+  GetRecordOptions,
+  ListRecordsOptions,
+  RecordDescript,
   RecordStoreReader,
   RecordStoreWriter,
-  RecordDescript,
   RecordValue,
-  ListRecordsOptions,
-  GetRecordOptions,
 } from '@northskysocial/stratos-core'
 import {
-  type StratosPgDb,
-  type StratosPgDbOrTx,
+  pgStratosBacklink,
   pgStratosRecord,
   pgStratosRepoBlock,
-  pgStratosBacklink,
+  type StratosPgDb,
+  type StratosPgDbOrTx,
 } from '@northskysocial/stratos-core'
+import {
+  AtUri as AtUriSyntax,
+  ensureValidAtUri,
+  ensureValidDid,
+} from '@atproto/syntax'
 
 export class PgRecordStoreReader implements RecordStoreReader {
   constructor(
@@ -25,16 +29,10 @@ export class PgRecordStoreReader implements RecordStoreReader {
     protected schemaName?: string,
   ) {}
 
-  protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
-    if (!this.schemaName) {
-      return fn(this.db as StratosPgDb)
-    }
-    return (this.db as StratosPgDb).transaction(async (tx) => {
-      await tx.execute(sql.raw(`SET LOCAL search_path TO "${this.schemaName}"`))
-      return fn(tx as unknown as StratosPgDb)
-    })
-  }
-
+  /**
+   * Get the record count
+   * @returns The number of records in the database
+   */
   async recordCount(): Promise<number> {
     return this.withDb(async (db) => {
       const rows = await db
@@ -44,6 +42,10 @@ export class PgRecordStoreReader implements RecordStoreReader {
     })
   }
 
+  /**
+   * List all records
+   * @returns List of all records
+   */
   async listAll(): Promise<RecordDescript[]> {
     return this.withDb(async (db) => {
       const records: RecordDescript[] = []
@@ -56,7 +58,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
           .orderBy(asc(pgStratosRecord.uri))
           .limit(1000)
         for (const row of res) {
-          const parsed = new AtUri(row.uri)
+          const parsed = new AtUriSyntax(row.uri)
           records.push({
             uri: row.uri,
             cid: CID.parse(row.cid),
@@ -70,6 +72,11 @@ export class PgRecordStoreReader implements RecordStoreReader {
     })
   }
 
+  /**
+   * List records with specified options
+   * @param options - List records options
+   * @returns List of records matching the options
+   */
   async listRecords(options: ListRecordsOptions): Promise<RecordValue[]> {
     return this.withDb(async (db) => {
       const conditions = [eq(pgStratosRecord.collection, options.collection)]
@@ -122,9 +129,14 @@ export class PgRecordStoreReader implements RecordStoreReader {
     })
   }
 
+  /**
+   * Get a record by URI
+   * @param options - Get record options
+   * @returns Record value or null if not found
+   */
   async getRecord(options: GetRecordOptions): Promise<RecordValue | null> {
     return this.withDb(async (db) => {
-      const uri = new AtUri(options.uri)
+      const uri = new AtUriSyntax(options.uri)
       const conditions = [eq(pgStratosRecord.uri, uri.toString())]
 
       if (!options.includeSoftDeleted) {
@@ -160,18 +172,28 @@ export class PgRecordStoreReader implements RecordStoreReader {
     })
   }
 
+  /**
+   * Check if a record exists
+   * @param uri - URI of the record
+   * @returns True if record exists, false otherwise
+   */
   async hasRecord(uri: string): Promise<boolean> {
     return this.withDb(async (db) => {
       const rows = await db
         .select({ uri: pgStratosRecord.uri })
         .from(pgStratosRecord)
-        .where(eq(pgStratosRecord.uri, uri))
+        .where(eq(pgStratosRecord.uri, uri.toString()))
         .limit(1)
 
       return rows.length > 0
     })
   }
 
+  /**
+   * Get record content by CID
+   * @param cid - CID of the record content
+   * @returns Record content as Uint8Array or null if not found
+   */
   async getRecordContent(cid: CID): Promise<Uint8Array | null> {
     return this.withDb(async (db) => {
       const rows = await db
@@ -181,27 +203,50 @@ export class PgRecordStoreReader implements RecordStoreReader {
         .limit(1)
 
       const content = rows[0]?.content
-      return content ? content : null
+      return content || null
+    })
+  }
+
+  /**
+   * With database transaction
+   * @param fn - Function to execute in transaction
+   * @returns Result of function execution
+   * @protected
+   */
+  protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
+    if (!this.schemaName) {
+      return fn(this.db as StratosPgDb)
+    }
+    return (this.db as StratosPgDb).transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${this.schemaName}"`))
+      return fn(tx as unknown as StratosPgDb)
     })
   }
 }
 
+/**
+ * Get backlinks for a record
+ * @param uri - URI of the record
+ * @param record - Record object
+ * @returns Array of backlinks
+ */
 function getBacklinks(
-  uri: AtUri,
+  uri: string | AtUri,
   record: Record<string, unknown>,
 ): { uri: string; path: string; linkTo: string }[] {
   const backlinks: { uri: string; path: string; linkTo: string }[] = []
+  const uriStr = uri.toString()
 
   const subject = record?.['subject']
   if (typeof subject === 'string') {
     try {
-      syntax.ensureValidDid(subject)
-      backlinks.push({ uri: uri.toString(), path: 'subject', linkTo: subject })
+      ensureValidDid(subject)
+      backlinks.push({ uri: uriStr, path: 'subject', linkTo: subject })
     } catch {
       try {
-        syntax.ensureValidAtUri(subject)
+        ensureValidAtUri(subject)
         backlinks.push({
-          uri: uri.toString(),
+          uri: uriStr,
           path: 'subject',
           linkTo: subject,
         })
@@ -215,9 +260,9 @@ function getBacklinks(
   ) {
     try {
       const subjectUri = (subject as Record<string, unknown>)['uri'] as string
-      syntax.ensureValidAtUri(subjectUri)
+      ensureValidAtUri(subjectUri)
       backlinks.push({
-        uri: uri.toString(),
+        uri: uriStr,
         path: 'subject.uri',
         linkTo: subjectUri,
       })
@@ -233,6 +278,10 @@ export class PgRecordStoreWriter
   extends PgRecordStoreReader
   implements RecordStoreWriter
 {
+  /**
+   * Put the record into the store
+   * @param record - Record to put into the store
+   */
   async putRecord(record: {
     uri: string
     cid: CID
@@ -240,7 +289,7 @@ export class PgRecordStoreWriter
     content: Uint8Array
     indexedAt?: string
   }): Promise<void> {
-    const uri = new AtUri(record.uri)
+    const uri = new AtUriSyntax(record.uri)
 
     await this.db
       .insert(pgStratosRepoBlock)
@@ -285,24 +334,41 @@ export class PgRecordStoreWriter
     }
   }
 
+  /**
+   * Delete a record and its backlinks
+   * @param uri - URI of the record to delete
+   */
   async deleteRecord(uri: string): Promise<void> {
     await Promise.all([
-      this.db.delete(pgStratosRecord).where(eq(pgStratosRecord.uri, uri)),
-      this.db.delete(pgStratosBacklink).where(eq(pgStratosBacklink.uri, uri)),
+      this.db
+        .delete(pgStratosRecord)
+        .where(eq(pgStratosRecord.uri, uri.toString())),
+      this.db
+        .delete(pgStratosBacklink)
+        .where(eq(pgStratosBacklink.uri, uri.toString())),
     ])
   }
 
+  /**
+   * Take down a record
+   * @param uri - URI of the record to takedown
+   * @param takedownRef - Reference to the takedown
+   */
   async takedownRecord(uri: string, takedownRef: string): Promise<void> {
     await this.db
       .update(pgStratosRecord)
       .set({ takedownRef })
-      .where(eq(pgStratosRecord.uri, uri))
+      .where(eq(pgStratosRecord.uri, uri.toString()))
   }
 
+  /**
+   * Restore a record
+   * @param uri - URI of the record to restore
+   */
   async restoreRecord(uri: string): Promise<void> {
     await this.db
       .update(pgStratosRecord)
       .set({ takedownRef: null })
-      .where(eq(pgStratosRecord.uri, uri))
+      .where(eq(pgStratosRecord.uri, uri.toString()))
   }
 }

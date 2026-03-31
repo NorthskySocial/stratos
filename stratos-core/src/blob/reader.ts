@@ -1,12 +1,12 @@
-import { eq, gt, and, isNull, asc } from 'drizzle-orm'
-import { CID } from 'multiformats/cid'
+import { and, asc, eq, gt, isNull } from 'drizzle-orm'
+import { CID } from '@atproto/lex-data'
 import {
-  StratosDbOrTx,
   stratosBlob,
-  stratosRecordBlob,
+  StratosDbOrTx,
   stratosRecord,
+  stratosRecordBlob,
 } from '../db/index.js'
-import { StatusAttr, BlobStore, Logger } from '../types.js'
+import { BlobStore, Logger, StatusAttr } from '../types.js'
 
 /**
  * Blob metadata from the database
@@ -26,6 +26,11 @@ export class StratosBlobReader {
     protected logger?: Logger,
   ) {}
 
+  /**
+   * Retrieves metadata for a blob from the database.
+   * @param cid - CID of the blob to retrieve metadata for.
+   * @returns A promise that resolves with the blob metadata if found, or null if not found.
+   */
   async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
     const found = await this.db
       .select()
@@ -46,6 +51,11 @@ export class StratosBlobReader {
     }
   }
 
+  /**
+   * Retrieves a blob from the database and blobstore.
+   * @param cid - CID of the blob to retrieve.
+   * @returns A promise that resolves with the blob metadata and stream if found, or null if not found.
+   */
   async getBlob(cid: CID): Promise<{
     size: number
     mimeType?: string
@@ -61,12 +71,17 @@ export class StratosBlobReader {
         ...metadata,
         stream,
       }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
+      this.logger?.error(`Failed to retrieve blob ${cid.toString()}: ${err}`)
       return null
     }
   }
 
+  /**
+   * Lists blobs in the database that are associated with records.
+   * @param opts - Options for listing blobs.
+   * @returns A promise that resolves with an array of CID objects of blobs associated with records.
+   */
   async listBlobs(opts: {
     since?: string
     cursor?: string
@@ -95,7 +110,7 @@ export class StratosBlobReader {
         )
         .orderBy(asc(stratosRecordBlob.blobCid))
         .limit(limit)
-      return res.map((row) => row.blobCid)
+      return res.map((row: { blobCid: string }) => row.blobCid)
     }
 
     const res = await this.db
@@ -104,9 +119,14 @@ export class StratosBlobReader {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(asc(stratosRecordBlob.blobCid))
       .limit(limit)
-    return res.map((row) => row.blobCid)
+    return res.map((row: { blobCid: string }) => row.blobCid)
   }
 
+  /**
+   * Retrieves the takedown status of a blob from the database.
+   * @param cid - CID of the blob to retrieve takedown status for.
+   * @returns A promise that resolves with the takedown status if found, or null if not found.
+   */
   async getBlobTakedownStatus(cid: CID): Promise<StatusAttr | null> {
     const res = await this.db
       .select({ takedownRef: stratosBlob.takedownRef })
@@ -119,14 +139,24 @@ export class StratosBlobReader {
       : { applied: false }
   }
 
+  /**
+   * Retrieves the records associated with a blob from the database.
+   * @param cid - CID of the blob to retrieve records for.
+   * @returns A promise that resolves with an array of record URIs associated with the blob.
+   */
   async getRecordsForBlob(cid: CID): Promise<string[]> {
     const res = await this.db
       .select()
       .from(stratosRecordBlob)
       .where(eq(stratosRecordBlob.blobCid, cid.toString()))
-    return res.map((row) => row.recordUri)
+    return res.map((row: { recordUri: string }) => row.recordUri)
   }
 
+  /**
+   * Checks if a blob exists in the database.
+   * @param cid - CID of the blob to check for existence.
+   * @returns A promise that resolves with true if the blob exists, false otherwise.
+   */
   async hasBlob(cid: CID): Promise<boolean> {
     const res = await this.db
       .select({ cid: stratosBlob.cid })

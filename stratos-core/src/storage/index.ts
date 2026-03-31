@@ -14,9 +14,9 @@ export * from './cache.js'
 
 import type { RecordStoreReader, RecordStoreWriter } from './record-store.js'
 import type {
+  BlobContentStore,
   BlobMetadataReader,
   BlobMetadataWriter,
-  BlobContentStore,
 } from './blob-store.js'
 import type { RepoStoreReader, RepoStoreWriter } from './repo-store.js'
 import type { EnrollmentStoreWriter } from './enrollment-store.js'

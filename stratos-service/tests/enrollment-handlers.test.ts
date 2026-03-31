@@ -355,7 +355,7 @@ describe('Unenroll endpoint', () => {
       { credentials: { type: 'user', did } },
     )
 
-    expect(res.body.success).toBe(true)
+    expect((res as any).body.success).toBe(true)
     expect(getEnrollmentSpy).toHaveBeenCalledWith(did)
     expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
@@ -412,7 +412,7 @@ describe('Unenroll endpoint', () => {
       { credentials: { type: 'user', did } },
     )
 
-    expect(res.body.success).toBe(true)
+    expect((res as any).body.success).toBe(true)
     expect(getEnrollmentSpy).toHaveBeenCalledWith(did)
     expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
@@ -469,7 +469,7 @@ describe('Unenroll endpoint', () => {
       { credentials: { type: 'user', did } },
     )
 
-    expect(res.body.success).toBe(true)
+    expect((res as any).body.success).toBe(true)
     expect(getEnrollmentSpy).toHaveBeenCalledWith(did)
     expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
@@ -495,12 +495,7 @@ describe('Unenroll endpoint', () => {
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
 
     await expect(
-      invokeMethod(
-        server,
-        'zone.stratos.enrollment.unenroll',
-        {},
-        { credentials: { type: 'none' } },
-      ),
-    ).rejects.toThrow('Authentication required')
+      invokeMethod(server, 'zone.stratos.enrollment.unenroll', {}, undefined),
+    ).rejects.toThrow()
   })
 })

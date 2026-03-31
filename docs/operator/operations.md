@@ -35,8 +35,10 @@ tar -czf /backup/actors-$(date +%Y%m%d).tar.gz \
 For high-traffic deployments:
 
 1. **Horizontal scaling** — Run multiple Stratos instances behind a load balancer.
-2. **Shared storage** — Use network-attached storage for actor databases, or switch to the `postgres` backend.
-3. **Connection pooling** — WebSocket subscriptions should be load-balanced by user DID so one instance handles all subscriptions for a given user.
+2. **Shared storage** — Use network-attached storage for actor databases, or switch to the
+   `postgres` backend.
+3. **Connection pooling** — WebSocket subscriptions should be load-balanced by user DID so one
+   instance handles all subscriptions for a given user.
 4. **S3 blobs** — Use the `s3` blob storage backend to decouple blob storage from the instance.
 
 ## Health Check

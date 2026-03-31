@@ -1,36 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { migrateEnrollmentRkey, serviceDIDToRkey } from '../src/oauth/routes.js'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EnrollmentStore } from '../src/oauth/routes.js'
+import { migrateEnrollmentRkey, serviceDIDToRkey } from '../src/oauth/routes.js'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
+import { Agent } from '@atproto/api'
+import type { ProfileRecordWriter } from '@northskysocial/stratos-core'
 
 vi.mock('@atproto/api', () => {
   const MockAgent = vi.fn()
   return { Agent: MockAgent }
 })
 
-import { Agent } from '@atproto/api'
-import type { ProfileRecordWriter } from '@northskysocial/stratos-core'
-
 function createMockEnrollmentStore(
   enrollment: Record<string, unknown> | null = null,
 ): EnrollmentStore {
   return {
-    isEnrolled: vi.fn(async () => !!enrollment),
-    getEnrollment: vi.fn(
-      async () =>
+    isEnrolled: vi.fn(() => Promise.resolve(!!enrollment)),
+    getEnrollment: vi.fn(() =>
+      Promise.resolve(
         enrollment as ReturnType<
           EnrollmentStore['getEnrollment']
         > extends Promise<infer T>
           ? T
           : never,
+      ),
     ),
-    enroll: vi.fn(async () => {}),
-    unenroll: vi.fn(async () => {}),
-    updateEnrollment: vi.fn(async () => {}),
-    getBoundaries: vi.fn(async () => []),
-    setBoundaries: vi.fn(async () => {}),
-    addBoundary: vi.fn(async () => {}),
-    removeBoundary: vi.fn(async () => {}),
+    enroll: vi.fn(() => Promise.resolve()),
+    unenroll: vi.fn(() => Promise.resolve()),
+    updateEnrollment: vi.fn(() => Promise.resolve()),
+    getBoundaries: vi.fn(() => Promise.resolve([])),
+    setBoundaries: vi.fn(() => Promise.resolve()),
+    addBoundary: vi.fn(() => Promise.resolve()),
+    removeBoundary: vi.fn(() => Promise.resolve()),
   }
 }
 
@@ -44,16 +44,20 @@ function createMockAgent(records: Array<{ uri: string; value: unknown }> = []) {
     com: {
       atproto: {
         repo: {
-          listRecords: vi.fn(async () => ({
-            data: { records },
-          })),
-          putRecord: vi.fn(async () => ({
-            data: {
-              uri: `at://did:plc:test/zone.stratos.actor.enrollment/${SERVICE_DID_RKEY}`,
-              cid: 'bafynew',
-            },
-          })),
-          deleteRecord: vi.fn(async () => {}),
+          listRecords: vi.fn(() =>
+            Promise.resolve({
+              data: { records },
+            }),
+          ),
+          putRecord: vi.fn(() =>
+            Promise.resolve({
+              data: {
+                uri: `at://did:plc:test/zone.stratos.actor.enrollment/${SERVICE_DID_RKEY}`,
+                cid: 'bafynew',
+              },
+            }),
+          ),
+          deleteRecord: vi.fn(() => Promise.resolve()),
         },
       },
     },
@@ -70,13 +74,13 @@ function createMockOAuthClient(
   } as unknown as (...args: unknown[]) => InstanceType<typeof Agent>)
 
   const mockProfileRecordWriter: ProfileRecordWriter = {
-    putEnrollmentRecord: vi.fn(async () => {}),
-    deleteEnrollmentRecord: vi.fn(async () => {}),
+    putEnrollmentRecord: vi.fn(() => Promise.resolve()),
+    deleteEnrollmentRecord: vi.fn(() => Promise.resolve()),
   }
 
   return {
     client: {
-      restore: vi.fn(async () => ({})),
+      restore: vi.fn(() => Promise.resolve({})),
     } as unknown as NodeOAuthClient,
     agent: mockAgent,
     profileRecordWriter: mockProfileRecordWriter,
@@ -361,8 +365,8 @@ describe('migrateEnrollmentRkey', () => {
       })
       const { profileRecordWriter } = createMockOAuthClient()
       const client = {
-        restore: vi.fn(async () => {
-          throw new Error('OAuth session expired')
+        restore: vi.fn(() => {
+          return Promise.reject(new Error('OAuth session expired'))
         }),
       } as unknown as NodeOAuthClient
 

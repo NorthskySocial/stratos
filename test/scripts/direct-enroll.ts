@@ -3,10 +3,10 @@
 // Use this when OAuth flow is not working (e.g., PDS handle resolution issues).
 
 import { TEST_USERS } from './lib/config.ts'
-import { enrollUser, createActorStore } from './lib/backend.ts'
+import { createActorStore, enrollUser } from './lib/backend.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
-import { section, info, pass, fail, warn, dim } from './lib/log.ts'
+import { dim, fail, info, pass, section, warn } from './lib/log.ts'
 
 async function resolvePdsEndpoint(did: string): Promise<string | undefined> {
   try {

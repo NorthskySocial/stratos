@@ -2,19 +2,22 @@ import type { CID } from 'multiformats/cid'
 import type { AtUri } from '@atproto/syntax'
 import type {
   BlobStore,
-  StatusAttr,
+  BlockMap,
+  CarBlock,
+  CidSet,
+  GetBacklinksOpts,
   ListRecordsOpts,
   RecordWithContent,
   RecordWithMeta,
-  GetBacklinksOpts,
+  StatusAttr,
   StratosRecordDescript,
-  CarBlock,
-  BlockMap,
-  CidSet,
 } from '@northskysocial/stratos-core'
 
 // ─── Sequence Operations ────────────────────────────────────────────────────
 
+/**
+ * Interface for sequence operations in the actor store.
+ */
 export interface SequenceOperations {
   getLatestSeq(): Promise<number>
   getOldestSeq(): Promise<number>
@@ -48,17 +51,17 @@ export interface ActorRecordReader {
   listCollections(): Promise<string[]>
   listRecordsForCollection(opts: ListRecordsOpts): Promise<RecordWithContent[]>
   getRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted?: boolean,
   ): Promise<RecordWithMeta | null>
   hasRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted?: boolean,
   ): Promise<boolean>
-  getRecordTakedownStatus(uri: AtUri): Promise<StatusAttr | null>
-  getCurrentRecordCid(uri: AtUri): Promise<CID | null>
+  getRecordTakedownStatus(uri: string | AtUri): Promise<StatusAttr | null>
+  getCurrentRecordCid(uri: string | AtUri): Promise<CID | null>
   getRecordBacklinks(opts: GetBacklinksOpts): Promise<
     Array<{
       uri: string
@@ -71,27 +74,34 @@ export interface ActorRecordReader {
     }>
   >
   getBacklinkConflicts(
-    uri: AtUri,
+    uri: string,
     record: Record<string, unknown>,
   ): Promise<AtUri[]>
 }
 
 export interface ActorRecordTransactor extends ActorRecordReader {
+  putRecord(record: {
+    uri: string
+    cid: CID
+    value: Record<string, unknown>
+    content: Uint8Array
+    indexedAt?: string
+  }): Promise<void>
   indexRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: CID,
     record: Record<string, unknown> | null,
     action?: 'create' | 'update',
     repoRev?: string,
     timestamp?: string,
   ): Promise<void>
-  deleteRecord(uri: AtUri): Promise<void>
-  removeBacklinksByUri(uri: AtUri): Promise<void>
+  deleteRecord(uri: string | AtUri): Promise<void>
+  removeBacklinksByUri(uri: string | AtUri): Promise<void>
   addBacklinks(
-    backlinks: Array<{ uri: string; path: string; linkTo: string }>,
+    backlinks: Array<{ uri: string | AtUri; path: string; linkTo: string }>,
   ): Promise<void>
   updateRecordTakedown(
-    uri: AtUri,
+    uri: string | AtUri,
     takedown: { applied: boolean; ref?: string },
   ): Promise<void>
 }
@@ -99,6 +109,7 @@ export interface ActorRecordTransactor extends ActorRecordReader {
 // ─── Repo Store Interface ───────────────────────────────────────────────────
 
 export interface ActorRepoReader {
+  db: any
   cache: BlockMap
   hasRoot(): Promise<boolean>
   getRoot(): Promise<CID | null>

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import * as fc from 'fast-check'
-import express, { type Router } from 'express'
+import express from 'express'
 import type { AppContext } from '../src/index.js'
 import { registerEnrollmentHandlers } from '../src/features/index.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
@@ -84,7 +84,9 @@ function invokeRoute(
         stack: Array<{ handle: Function }>
       }
     }
-    const layer = (app as unknown as { _router: { stack: RouteLayer[] } })._router.stack.find(
+    const layer = (
+      app as unknown as { _router: { stack: RouteLayer[] } }
+    )._router.stack.find(
       (l) => l.route?.path === '/xrpc/zone.stratos.enrollment.status',
     )
     if (!layer?.route) return reject(new Error('Route not registered'))
@@ -118,7 +120,8 @@ function createCtx(opts: {
   return {
     enrollmentService: {
       getEnrollment: opts.getEnrollment,
-      isEnrolled: async (did: string) => (await opts.getEnrollment(did)) !== null,
+      isEnrolled: async (did: string) =>
+        (await opts.getEnrollment(did)) !== null,
     },
     boundaryResolver: { getBoundaries: opts.getBoundaries },
     authVerifier: {
@@ -263,7 +266,11 @@ describe('Status endpoint with authentication', () => {
           })
 
           registerEnrollmentHandlers(xrpc as any, ctx)
-          const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', { did })
+          const res = await invokeMethod(
+            xrpc,
+            'zone.stratos.enrollment.status',
+            { did },
+          )
 
           expect(res.statusCode).toBe(200)
 
@@ -300,7 +307,9 @@ describe('Status endpoint for non-enrolled DIDs', () => {
         })
 
         registerEnrollmentHandlers(xrpc as any, ctx)
-        const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', { did })
+        const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
+          did,
+        })
 
         expect(res.statusCode).toBe(200)
 
@@ -386,9 +395,8 @@ describe('resolveEnrollments endpoint', () => {
       getBoundaries: async (did) =>
         did === 'did:plc:gokusaiyan' ? ['capsule-corp.jp'] : [],
     })
-    ;(ctx.enrollmentService as any).isEnrolled = async (
-      did: string,
-    ) => did === 'did:plc:gokusaiyan'
+    ;(ctx.enrollmentService as any).isEnrolled = async (did: string) =>
+      did === 'did:plc:gokusaiyan'
 
     registerEnrollmentHandlers(xrpc as any, ctx)
     const res = await invokeResolveRoute(ctx, { did: 'did:plc:gokusaiyan' })
@@ -409,8 +417,7 @@ describe('resolveEnrollments endpoint', () => {
       getEnrollment: async () => null,
       getBoundaries: async () => [],
     })
-    ;(ctx.enrollmentService as any).isEnrolled =
-      async () => false
+    ;(ctx.enrollmentService as any).isEnrolled = async () => false
 
     registerEnrollmentHandlers(xrpc as any, ctx)
     const res = await invokeResolveRoute(ctx, {
@@ -450,8 +457,7 @@ describe('resolveEnrollments endpoint', () => {
         return ['west-city.jp']
       },
     })
-    ;(ctx.enrollmentService as any).isEnrolled =
-      async () => true
+    ;(ctx.enrollmentService as any).isEnrolled = async () => true
 
     registerEnrollmentHandlers(xrpc as any, ctx)
 

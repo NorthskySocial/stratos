@@ -1,22 +1,22 @@
-import type { IdResolver, DidDocument } from '@atproto/identity'
+import type { DidDocument, IdResolver } from '@atproto/identity'
 import type {
-  EnrollmentService,
-  EnrollmentValidator,
   BoundaryResolver,
   Enrollment,
   EnrollmentConfig,
-  EnrollmentValidationResult,
+  EnrollmentService,
   EnrollmentStoreReader,
+  EnrollmentValidationResult,
+  EnrollmentValidator,
   Logger,
 } from '@northskysocial/stratos-core'
 import {
-  extractPdsEndpoint,
-  validateEnrollmentEligibility,
-  isQualifiedBoundary,
   ensureQualifiedBoundaries,
+  extractPdsEndpoint,
+  isQualifiedBoundary,
+  validateEnrollmentEligibility,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore } from '../../oauth/routes.js'
-import type { EnrollmentEventEmitter } from '../../context.js'
+import type { EnrollmentEventEmitter } from '../../context-types.js'
 
 /**
  * Implementation of EnrollmentService port
@@ -31,51 +31,44 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     private serviceUrl?: string,
   ) {}
 
+  /**
+   * Enroll a user with the given DID, boundaries, and signing key DID.
+   *
+   * @param did - The user's DID.
+   * @param boundaries - The boundaries to enroll the user with.
+   * @param signingKeyDid - The DID of the signing key.
+   * @returns A promise that resolves to the enrollment object.
+   */
   async enroll(
     did: string,
     boundaries: string[],
     signingKeyDid: string,
   ): Promise<Enrollment> {
-    const start = Date.now()
     const now = new Date()
 
     await this.actorStoreCreator(did)
+    await this.saveEnrollment(did, signingKeyDid, now)
 
-    await this.enrollmentStore.enroll({
-      did,
-      enrolledAt: now.toISOString(),
-      pdsEndpoint: undefined,
-      signingKeyDid,
-      active: true,
-    })
-
-    this.logger?.info(
-      { did, boundaryCount: boundaries.length, durationMs: Date.now() - start },
-      'user enrolled',
-    )
-
-    this.enrollmentEvents?.emit('enrollment', {
-      did,
-      action: 'enroll',
-      service: this.serviceUrl,
-      boundaries,
-      time: now.toISOString(),
-    })
-
-    return {
-      did,
-      boundaries,
-      enrolledAt: now,
-      pdsEndpoint: '',
-      signingKeyDid,
-      active: true,
-    }
+    this.emitEnrollmentEvent(did, boundaries, now)
+    return this.createEnrollmentObject(did, boundaries, signingKeyDid, now)
   }
 
+  /**
+   * Check if a user is enrolled with the given DID.
+   *
+   * @param did - The user's DID.
+   * @returns A promise that resolves to a boolean indicating if the user is enrolled.
+   */
   async isEnrolled(did: string): Promise<boolean> {
     return this.enrollmentStore.isEnrolled(did)
   }
 
+  /**
+   * Get the enrollment record for a user with the given DID.
+   *
+   * @param did - The user's DID.
+   * @returns A promise that resolves to the enrollment record or null if not found.
+   */
   async getEnrollment(did: string): Promise<Enrollment | null> {
     const record = await this.enrollmentStore.getEnrollment(did)
     if (!record) return null
@@ -93,6 +86,11 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     }
   }
 
+  /**
+   * Unenroll a user with the given DID.
+   *
+   * @param did - The user's DID.
+   */
   async unenroll(did: string): Promise<void> {
     await this.enrollmentStore.unenroll(did)
     await this.actorStoreDestroyer(did)
@@ -103,6 +101,47 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       action: 'unenroll',
       time: new Date().toISOString(),
     })
+  }
+
+  private async saveEnrollment(did: string, signingKeyDid: string, now: Date) {
+    await this.enrollmentStore.enroll({
+      did,
+      enrolledAt: now.toISOString(),
+      pdsEndpoint: undefined,
+      signingKeyDid,
+      active: true,
+    })
+  }
+
+  private emitEnrollmentEvent(did: string, boundaries: string[], now: Date) {
+    this.logger?.info(
+      { did, boundaryCount: boundaries.length },
+      'user enrolled',
+    )
+
+    this.enrollmentEvents?.emit('enrollment', {
+      did,
+      action: 'enroll',
+      service: this.serviceUrl,
+      boundaries,
+      time: now.toISOString(),
+    })
+  }
+
+  private createEnrollmentObject(
+    did: string,
+    boundaries: string[],
+    signingKeyDid: string,
+    now: Date,
+  ): Enrollment {
+    return {
+      did,
+      boundaries,
+      enrolledAt: now,
+      pdsEndpoint: '',
+      signingKeyDid,
+      active: true,
+    }
   }
 }
 
@@ -115,6 +154,12 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
     private idResolver: IdResolver,
   ) {}
 
+  /**
+   * Validate a DID against the enrollment allowlist.
+   *
+   * @param did - The user's DID.
+   * @returns The enrollment validation result.
+   */
   async validate(did: string): Promise<EnrollmentValidationResult> {
     let didDoc: DidDocument | null
     try {
@@ -139,6 +184,12 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
 export class EnrollmentBoundaryResolver implements BoundaryResolver {
   constructor(private enrollmentStore: EnrollmentStoreReader) {}
 
+  /**
+   * Get the boundaries for a user with the given DID.
+   * @param did - The user's DID.
+   * @returns A promise that resolves to an array of boundaries.
+   '
+   */
   async getBoundaries(did: string): Promise<string[]> {
     return this.enrollmentStore.getBoundaries(did)
   }
@@ -167,6 +218,13 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
     const boundaries = await this.deps.enrollmentStore.getBoundaries(did)
     if (boundaries.length === 0) return boundaries
 
+    return await this.migrateIfNeeded(did, boundaries)
+  }
+
+  private async migrateIfNeeded(
+    did: string,
+    boundaries: string[],
+  ): Promise<string[]> {
     const hasLegacy = boundaries.some((b) => !isQualifiedBoundary(b))
     if (!hasLegacy) return boundaries
 
@@ -175,22 +233,36 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
       boundaries,
     )
 
+    const success = await this.persistMigrated(
+      did,
+      qualified,
+      boundaries.length,
+    )
+    if (success) {
+      this.onMigrated?.(did, qualified)
+    }
+
+    return qualified
+  }
+
+  private async persistMigrated(
+    did: string,
+    qualified: string[],
+    oldCount: number,
+  ): Promise<boolean> {
     try {
       await this.deps.enrollmentStore.setBoundaries(did, qualified)
       this.deps.logger?.info(
-        { did, count: boundaries.length },
+        { did, count: oldCount },
         'migrated legacy boundaries to qualified format',
       )
+      return true
     } catch (err) {
       this.deps.logger?.warn(
         { did, err },
         'failed to persist migrated boundaries',
       )
-      return qualified
+      return false
     }
-
-    this.onMigrated?.(did, qualified)
-
-    return qualified
   }
 }

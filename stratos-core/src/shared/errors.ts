@@ -64,14 +64,21 @@ export class RecordNotFoundError extends StratosError {
 }
 
 /**
- * Error thrown when access to a record is blocked due to boundary restrictions
+ * Error thrown when a CID or URI is invalid
  */
-export class BoundaryBlockedError extends StratosError {
-  constructor(uri: string) {
-    super(
-      `Access to record blocked by boundary restrictions: ${uri}`,
-      'BoundaryBlocked',
-    )
-    this.name = 'BoundaryBlockedError'
+export class InvalidIdentifierError extends StratosError {
+  constructor(message: string) {
+    super(message, 'InvalidIdentifier')
+    this.name = 'InvalidIdentifierError'
+  }
+}
+
+/**
+ * Error thrown when MST operations fail
+ */
+export class MstError extends StratosError {
+  constructor(message: string) {
+    super(message, 'MstError')
+    this.name = 'MstError'
   }
 }

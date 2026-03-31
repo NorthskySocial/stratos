@@ -1,7 +1,7 @@
 import type {
   EnrollmentStoreWriter,
-  StoredEnrollment,
   ListEnrollmentsOptions,
+  StoredEnrollment,
 } from '@northskysocial/stratos-core'
 
 /**
@@ -9,7 +9,7 @@ import type {
  * False positives are OK (we fall through to cache/DB), false negatives are not.
  */
 class BloomFilter {
-  private bits: Uint32Array
+  private readonly bits: Uint32Array
   private readonly numBits: number
   private readonly numHashes: number
 
@@ -25,15 +25,6 @@ class BloomFilter {
       Math.round((this.numBits / expectedItems) * Math.LN2),
     )
     this.bits = new Uint32Array(Math.ceil(this.numBits / 32))
-  }
-
-  private hash(str: string, seed: number): number {
-    let h = seed ^ str.length
-    for (let i = 0; i < str.length; i++) {
-      h = Math.imul(h ^ str.charCodeAt(i), 0x5bd1e995)
-      h ^= h >>> 15
-    }
-    return (h >>> 0) % this.numBits
   }
 
   add(item: string): void {
@@ -56,6 +47,21 @@ class BloomFilter {
   clear(): void {
     this.bits.fill(0)
   }
+
+  /**
+   * Hash function for bloom filter using djb2 algorithm.
+   * @param str - The string to hash.
+   * @param seed - The seed value for hashing.
+   * @returns The hashed value modulo numBits.
+   */
+  private hash(str: string, seed: number): number {
+    let h = seed ^ str.length
+    for (let i = 0; i < str.length; i++) {
+      h = Math.imul(h ^ str.charCodeAt(i), 0x5bd1e995)
+      h ^= h >>> 15
+    }
+    return (h >>> 0) % this.numBits
+  }
 }
 
 interface CacheEntry<T> {
@@ -76,6 +82,11 @@ class LruCache<T> {
     this.ttlMs = ttlMs
   }
 
+  /**
+   * Get an entry from the cache, evicting it if expired.
+   * @param key - The key of the entry to get.
+   * @returns The entry if found and not expired, undefined otherwise.
+   */
   get(key: string): T | undefined {
     const entry = this.cache.get(key)
     if (!entry) return undefined
@@ -89,6 +100,11 @@ class LruCache<T> {
     return entry.value
   }
 
+  /**
+   * Set an entry in the cache, evicting the oldest entry if cache is full.
+   * @param key - The key of the entry to set.
+   * @param value - The value to set.
+   */
   set(key: string, value: T): void {
     this.cache.delete(key)
     if (this.cache.size >= this.maxSize) {
@@ -99,6 +115,10 @@ class LruCache<T> {
     this.cache.set(key, { value, expiresAt: Date.now() + this.ttlMs })
   }
 
+  /**
+   * Delete an entry from the cache.
+   * @param key - The key of the entry to delete.
+   */
   delete(key: string): void {
     this.cache.delete(key)
   }
@@ -163,6 +183,11 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
 
   // ─── Read Operations (cached) ──────────────────────────────────────────
 
+  /**
+   * Check if a DID is enrolled in the system.
+   * @param did - The DID to check.
+   * @returns A Promise resolving to true if enrolled, false otherwise.
+   */
   async isEnrolled(did: string): Promise<boolean> {
     // Bloom filter: fast negative path
     if (!this.bloom.mightContain(did)) {
@@ -179,6 +204,11 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     return result
   }
 
+  /**
+   * Retrieve boundaries for a given DID from the cache or database.
+   * @param did - The DID for which to retrieve boundaries.
+   * @returns A Promise resolving to an array of boundary strings.
+   */
   async getBoundaries(did: string): Promise<string[]> {
     const cached = this.boundariesCache.get(did)
     if (cached !== undefined) return cached
@@ -188,22 +218,40 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     return result
   }
 
+  /**
+   * Retrieve enrollment for a given DID from the cache or database.
+   * @param did - The DID for which to retrieve enrollment.
+   * @returns A Promise resolving to the enrollment or null if not found.
+   */
   async getEnrollment(did: string): Promise<StoredEnrollment | null> {
     return this.inner.getEnrollment(did)
   }
 
+  /**
+   * List enrollments with optional filtering and pagination.
+   * @param options - Optional filtering and pagination options.
+   * @returns A Promise resolving to an array of StoredEnrollment objects.
+   */
   async listEnrollments(
     options?: ListEnrollmentsOptions,
   ): Promise<StoredEnrollment[]> {
     return this.inner.listEnrollments(options)
   }
 
+  /**
+   * Get the total number of enrollments in the store.
+   * @returns A Promise resolving to the total enrollment count.
+   */
   async enrollmentCount(): Promise<number> {
     return this.inner.enrollmentCount()
   }
 
   // ─── Write Operations (invalidate cache) ───────────────────────────────
 
+  /**
+   * Enroll a new DID in the system.
+   * @param enrollment - The enrollment details to add.
+   */
   async enroll(enrollment: StoredEnrollment): Promise<void> {
     await this.inner.enroll(enrollment)
     if (enrollment.active) {
@@ -213,6 +261,10 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     this.boundariesCache.delete(enrollment.did)
   }
 
+  /**
+   * Unenroll a DID from the system.
+   * @param did - The DID to unenroll.
+   */
   async unenroll(did: string): Promise<void> {
     await this.inner.unenroll(did)
     // Can't remove from bloom filter, but cache invalidation handles correctness
@@ -220,6 +272,11 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     this.boundariesCache.delete(did)
   }
 
+  /**
+   * Update enrollment details for a DID.
+   * @param did - The DID to update.
+   * @param updates - Partial updates to apply to the enrollment.
+   */
   async updateEnrollment(
     did: string,
     updates: Partial<Omit<StoredEnrollment, 'did'>>,
@@ -228,16 +285,31 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     this.enrolledCache.delete(did)
   }
 
+  /**
+   * Set boundaries for a DID.
+   * @param did - The DID to set boundaries for.
+   * @param boundaries - The boundaries to set.
+   */
   async setBoundaries(did: string, boundaries: string[]): Promise<void> {
     await this.inner.setBoundaries(did, boundaries)
     this.boundariesCache.delete(did)
   }
 
+  /**
+   * Add a boundary to a DID's set of boundaries.
+   * @param did - The DID to add a boundary to.
+   * @param boundary - The boundary to add.
+   */
   async addBoundary(did: string, boundary: string): Promise<void> {
     await this.inner.addBoundary(did, boundary)
     this.boundariesCache.delete(did)
   }
 
+  /**
+   * Remove a boundary from a DID's set of boundaries.
+   * @param did - The DID to remove a boundary from.
+   * @param boundary - The boundary to remove.
+   */
   async removeBoundary(did: string, boundary: string): Promise<void> {
     await this.inner.removeBoundary(did, boundary)
     this.boundariesCache.delete(did)

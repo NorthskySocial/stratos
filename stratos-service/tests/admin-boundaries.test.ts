@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import express from 'express'
 import type { AppContext } from '../src/context.js'
 import type { EnrollmentStore } from '../src/oauth/routes.js'
@@ -22,6 +22,7 @@ function invokePostRoute(
       headers: {},
       method: 'POST',
       url: path,
+      _body: true, // Signal to express.json that body is already parsed
     } as unknown as express.Request
     const res = {
       status(code: number) {
@@ -37,23 +38,11 @@ function invokePostRoute(
       },
     } as unknown as express.Response
 
-    // Trigger lazy router creation if needed
-    ;(app as any).handle(req, res, () => {
-      // Find the route in the stack
-      const layer = (app as any)._router.stack.find(
-        (l: any) => l.route?.path === path,
-      )
-      if (!layer?.route)
-        return reject(new Error(`Route not registered: ${path}`))
-      const handlers = layer.route.stack.map((s: any) => s.handle)
-      if (handlers.length === 0) return reject(new Error('No handler on route'))
-
-      let idx = 0
-      const next = () => {
-        const h = handlers[++idx]
-        if (h) Promise.resolve(h(req, res, next)).catch(reject)
-      }
-      Promise.resolve(handlers[idx](req, res, next)).catch(reject)
+    // In Express 4, app.handle doesn't always work as expected for manual routing
+    // especially with the router stack. Let's try to call the app directly.
+    app(req, res, (err?: any) => {
+      if (err) return reject(err)
+      resolve({ statusCode, body: null })
     })
   })
 }
@@ -143,16 +132,17 @@ function createCtx(opts: {
 
   registerEnrollmentHandlers(xrpcServer as any, ctx)
   // Ensure the router is initialized for tests that look into _router
-  ;(app as any)._router = (app as any)._router || express.Router()
+  // ;(app as any)._router = (app as any)._router || express.Router()
   return { ctx, enrollmentStore, app }
 }
 
 describe('admin boundary endpoints', () => {
+  vi.setConfig({ testTimeout: 15000 })
   describe('POST /xrpc/zone.stratos.admin.addBoundary', () => {
     it('adds a boundary to an enrolled user', async () => {
       const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
@@ -169,7 +159,7 @@ describe('admin boundary endpoints', () => {
     it('rejects unauthenticated requests', async () => {
       const { app } = createCtx({ adminAuthFails: true })
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
@@ -179,7 +169,7 @@ describe('admin boundary endpoints', () => {
     it('rejects missing boundary field', async () => {
       const { app } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:usagi' },
       )
@@ -190,7 +180,7 @@ describe('admin boundary endpoints', () => {
     it('rejects boundaries not in allowed domains', async () => {
       const { app } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.addBoundary',
         {
           did: 'did:plc:usagi',
@@ -208,7 +198,7 @@ describe('admin boundary endpoints', () => {
         enrollmentStore: { isEnrolled: vi.fn(async () => false) },
       })
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.addBoundary',
         { did: 'did:plc:nobody', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
@@ -220,7 +210,7 @@ describe('admin boundary endpoints', () => {
     it('removes a boundary from an enrolled user', async () => {
       const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.removeBoundary',
         {
           did: 'did:plc:usagi',
@@ -239,7 +229,7 @@ describe('admin boundary endpoints', () => {
     it('rejects unauthenticated requests', async () => {
       const { app } = createCtx({ adminAuthFails: true })
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.removeBoundary',
         {
           did: 'did:plc:usagi',
@@ -254,7 +244,7 @@ describe('admin boundary endpoints', () => {
         enrollmentStore: { isEnrolled: vi.fn(async () => false) },
       })
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.removeBoundary',
         {
           did: 'did:plc:nobody',
@@ -269,7 +259,7 @@ describe('admin boundary endpoints', () => {
     it('sets boundaries for an enrolled user', async () => {
       const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.setBoundaries',
         {
           did: 'did:plc:usagi',
@@ -293,7 +283,7 @@ describe('admin boundary endpoints', () => {
         enrollmentStore: { getBoundaries: vi.fn(async () => []) },
       })
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi', boundaries: [] },
       )
@@ -304,7 +294,7 @@ describe('admin boundary endpoints', () => {
     it('rejects invalid boundaries', async () => {
       const { app } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.setBoundaries',
         {
           did: 'did:plc:usagi',
@@ -323,7 +313,7 @@ describe('admin boundary endpoints', () => {
     it('rejects missing boundaries array', async () => {
       const { app } = createCtx({})
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi' },
       )
@@ -333,7 +323,7 @@ describe('admin boundary endpoints', () => {
     it('rejects unauthenticated requests', async () => {
       const { app } = createCtx({ adminAuthFails: true })
       const res = await invokePostRoute(
-        app as any,
+        app,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
       )

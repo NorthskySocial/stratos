@@ -1,17 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { CID } from 'multiformats/cid'
-import * as AtcuteCid from '@atcute/cid'
+import { CID } from '@atproto/lex-data'
 import { StratosBlockStoreReader } from '../src/features/index.js'
 import { BlockMap } from '@northskysocial/stratos-core'
 import type { ActorRepoReader } from '../src/actor-store-types.js'
-
-const DAG_CBOR_CODEC = 0x71
-
-async function makeCid(data: string): Promise<CID> {
-  const bytes = new TextEncoder().encode(data)
-  const atcuteCid = await AtcuteCid.create(DAG_CBOR_CODEC, bytes)
-  return CID.parse(AtcuteCid.toString(atcuteCid))
-}
+import { createCid as makeCid } from './utils/test-context.js'
 
 function createMockRepoReader(
   blocks: Map<string, Uint8Array>,
@@ -56,7 +48,7 @@ describe('StratosBlockStoreReader', () => {
     expect(mockReader.getBytes).toHaveBeenCalledWith(
       expect.objectContaining({ toString: expect.any(Function) }),
     )
-    const calledCid = mockReader.getBytes.mock.calls[0][0] as CID
+    const calledCid = vi.mocked(mockReader.getBytes).mock.calls[0][0] as CID
     expect(calledCid.toString()).toBe(cid.toString())
   })
 })

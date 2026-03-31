@@ -1,6 +1,6 @@
 // Stratos XRPC API helpers
 
-import { STRATOS_URL, loadState } from './config.ts'
+import { loadState, STRATOS_URL } from './config.ts'
 
 async function getBaseUrl(forceLocal = false) {
   if (forceLocal) return 'http://localhost:3100'
@@ -75,7 +75,7 @@ export async function enrollmentStatus(did: string): Promise<{
   }
 }
 
-interface CreateRecordResponse {
+export interface CreateRecordResponse {
   uri: string
   cid: string
   commit?: { cid: string; rev: string }
@@ -113,7 +113,7 @@ export async function createRecord(
   return (await res.json()) as CreateRecordResponse
 }
 
-interface GetRecordResponse {
+export interface GetRecordResponse {
   uri: string
   cid?: string
   value: Record<string, unknown>

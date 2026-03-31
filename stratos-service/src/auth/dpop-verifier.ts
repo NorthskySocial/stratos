@@ -34,6 +34,8 @@ export interface DpopVerifierConfig {
   enrollmentStore: EnrollmentStoreReader
   /** Optional allow list provider */
   allowListProvider?: import('../features/enrollment/allow-list.js').ExternalAllowListProvider
+  /** Optional DPoP manager for testing */
+  dpopManager?: DpopManager
   /** DPoP secret for nonce generation (false to disable, undefined for random) */
   dpopSecret?: Uint8Array | string | false
   /** DPoP nonce rotation interval in ms */
@@ -65,12 +67,22 @@ export class DpopVerificationError extends Error {
 }
 
 /**
+ * Header values can be a single string, an array of strings, or undefined
+ */
+export type HeaderValue = string | string[] | undefined
+
+/**
+ * Request headers type alias
+ */
+export type RequestHeaders = Record<string, HeaderValue>
+
+/**
  * Request context for verification
  */
 export interface VerifyRequestContext {
   method: string
   url: string
-  headers: Record<string, string | string[] | undefined>
+  headers: RequestHeaders
 }
 
 /**
@@ -96,18 +108,22 @@ export class DpopVerifier {
 
   constructor(config: DpopVerifierConfig) {
     this.config = config
-    this.dpopManager = new DpopManager({
-      dpopSecret: config.dpopSecret as
-        | Uint8Array<ArrayBuffer>
-        | string
-        | false
-        | undefined,
-      dpopRotationInterval: config.dpopRotationInterval,
-    })
+    this.dpopManager =
+      config.dpopManager ??
+      new DpopManager({
+        dpopSecret: config.dpopSecret as
+          | Uint8Array<ArrayBuffer>
+          | string
+          | false
+          | undefined,
+        dpopRotationInterval: config.dpopRotationInterval,
+      })
   }
 
   /**
    * Get a DPoP nonce for response header
+   *
+   * @returns DPoP nonce or undefined if nonce rotation is disabled
    */
   nextNonce(): string | undefined {
     return this.dpopManager.nextNonce()
@@ -131,17 +147,39 @@ export class DpopVerifier {
       'DPoP auth attempt',
     )
 
-    // Need to have made sure the authorization type is Dpop first
-    // Move after line 175
-    // Set nonce further down
-    // Set DPoP-Nonce header for client
+    const accessToken = this.parseAccessToken(req)
+    const dpopProof = await this.validateDpopProof(req, accessToken)
+    const claims = this.decodeAndValidateClaims(accessToken)
+    const did = claims.sub as string
+    const pdsEndpoint = claims.iss as string
+
+    this.verifyKeyBinding(claims, dpopProof)
+    await this.checkEnrollmentAndAllowList(did)
+
+    // Set DPoP-Nonce header for client after successful verification
     const nonce = this.nextNonce()
     if (nonce && res) {
       res.setHeader('DPoP-Nonce', nonce)
-      // TODO Add missing header
     }
 
-    // Parse Authorization header
+    this.config.logger?.debug(
+      { did, durationMs: Date.now() - start },
+      'DPoP auth succeeded',
+    )
+
+    return {
+      type: 'dpop',
+      did,
+      scope: (claims.scope as string) ?? 'atproto',
+      pdsEndpoint,
+      tokenType: 'DPoP',
+    }
+  }
+
+  /**
+   * Parse and validate the Authorization header
+   */
+  private parseAccessToken(req: VerifyRequestContext): string {
     const authHeader = this.getHeader(req.headers, 'authorization')
     if (!authHeader) {
       this.config.logger?.warn(
@@ -155,7 +193,6 @@ export class DpopVerifier {
       )
     }
 
-    // Must be DPoP scheme
     if (!authHeader.startsWith('DPoP ')) {
       this.config.logger?.warn(
         { code: 'missing_auth' },
@@ -177,16 +214,28 @@ export class DpopVerifier {
       )
     }
 
-    // Build request URL
-    const url = new URL(req.url, this.config.serviceEndpoint)
+    return accessToken
+  }
 
-    // Validate DPoP proof
+  /**
+   * Validate the DPoP proof
+   *
+   * @param req - The request context
+   * @param accessToken - The access token
+   * @returns The validated DPoP proof
+   * @private
+   */
+  private async validateDpopProof(
+    req: VerifyRequestContext,
+    accessToken: string,
+  ): Promise<DpopProof> {
+    const url = new URL(req.url, this.config.serviceEndpoint)
     let dpopProof: DpopProof | null
     try {
       dpopProof = await this.dpopManager.checkProof(
         req.method,
         url,
-        req.headers as Record<string, string | string[] | undefined>,
+        req.headers,
         accessToken,
       )
     } catch (err) {
@@ -210,7 +259,6 @@ export class DpopVerifier {
       )
     }
 
-    // DPoP proof is required for DPoP token type
     if (!dpopProof) {
       this.config.logger?.warn(
         { code: 'invalid_dpop_proof' },
@@ -223,10 +271,13 @@ export class DpopVerifier {
       )
     }
 
-    // Decode JWT claims without signature verification.
-    // Bluesky's PDS does not expose signing keys at the JWKS endpoint,
-    // so cryptographic signature verification is not possible. Authentication
-    // assurance comes from DPoP proof binding (RFC 9449) instead.
+    return dpopProof
+  }
+
+  /**
+   * Decode and validate JWT claims
+   */
+  private decodeAndValidateClaims(accessToken: string): jwt.JwtPayload {
     const claims = jwt.decode(accessToken, { json: true })
     if (!claims) {
       this.config.logger?.warn(
@@ -240,7 +291,6 @@ export class DpopVerifier {
       )
     }
 
-    // Check expiration
     if (claims.exp !== undefined) {
       const nowSec = Math.floor(Date.now() / 1000)
       if (nowSec > claims.exp + 30) {
@@ -256,7 +306,6 @@ export class DpopVerifier {
       }
     }
 
-    // Get subject (user DID)
     const did = claims.sub
     if (!did || !did.startsWith('did:')) {
       this.config.logger?.warn(
@@ -269,9 +318,7 @@ export class DpopVerifier {
       )
     }
 
-    // Get PDS endpoint from issuer
-    const pdsEndpoint = claims.iss
-    if (!pdsEndpoint) {
+    if (!claims.iss) {
       this.config.logger?.warn(
         { did, code: 'invalid_token' },
         'DPoP auth failed: missing issuer',
@@ -282,24 +329,38 @@ export class DpopVerifier {
       )
     }
 
-    // Verify DPoP key binding
-    // The token's cnf.jkt must match the DPoP proof's JWK thumbprint
-    const tokenJkt = (claims.cnf as { jkt?: string } | undefined)?.jkt
-    if (tokenJkt) {
-      if (tokenJkt !== dpopProof.jkt) {
-        this.config.logger?.warn(
-          { did, code: 'key_binding_mismatch' },
-          'DPoP auth failed: key binding mismatch',
-        )
-        throw new DpopVerificationError(
-          'DPoP key binding mismatch',
-          'key_binding_mismatch',
-          'DPoP realm="stratos", error="invalid_dpop_proof"',
-        )
-      }
-    }
+    return claims
+  }
 
-    // Check user is enrolled
+  /**
+   * Verify DPoP key binding
+   *
+   * @param claims - JWT claims
+   * @param dpopProof - DPoP proof
+   * @throws {DpopVerificationError} if key binding fails
+   */
+  private verifyKeyBinding(claims: jwt.JwtPayload, dpopProof: DpopProof): void {
+    const tokenJkt = (claims.cnf as { jkt?: string } | undefined)?.jkt
+    if (tokenJkt && tokenJkt !== dpopProof.jkt) {
+      this.config.logger?.warn(
+        { did: claims.sub, code: 'key_binding_mismatch' },
+        'DPoP auth failed: key binding mismatch',
+      )
+      throw new DpopVerificationError(
+        'DPoP key binding mismatch',
+        'key_binding_mismatch',
+        'DPoP realm="stratos", error="invalid_dpop_proof"',
+      )
+    }
+  }
+
+  /**
+   * Check user enrollment and allow list
+   *
+   * @param did - User DID
+   * @throws {DpopVerificationError} if user is not enrolled or not on allow list
+   */
+  private async checkEnrollmentAndAllowList(did: string): Promise<void> {
     const isEnrolled = await this.config.enrollmentStore.isEnrolled(did)
     if (!isEnrolled) {
       this.config.logger?.warn(
@@ -312,7 +373,6 @@ export class DpopVerifier {
       )
     }
 
-    // Check user is on allow list if provider is configured
     if (this.config.allowListProvider) {
       const isAllowed = await this.config.allowListProvider.isAllowed(did)
       if (!isAllowed) {
@@ -326,28 +386,16 @@ export class DpopVerifier {
         )
       }
     }
-
-    this.config.logger?.debug(
-      { did, durationMs: Date.now() - start },
-      'DPoP auth succeeded',
-    )
-
-    return {
-      type: 'dpop',
-      did,
-      scope: (claims.scope as string) ?? 'atproto',
-      pdsEndpoint,
-      tokenType: 'DPoP',
-    }
   }
 
   /**
    * Get a header value (handles arrays)
+   *
+   * @param headers - Request headers
+   * @param name - Header name
+   * @returns Header value or undefined if not found
    */
-  private getHeader(
-    headers: Record<string, string | string[] | undefined>,
-    name: string,
-  ): string | undefined {
+  private getHeader(headers: RequestHeaders, name: string): string | undefined {
     const value = headers[name] ?? headers[name.toLowerCase()]
     if (Array.isArray(value)) {
       return value[0]
@@ -356,8 +404,14 @@ export class DpopVerifier {
   }
 }
 
-// OAuthError.error === 'use_dpop_nonce' identifies the nonce-required error
-// from @atproto/oauth-provider without needing to import the unexported class
+/**
+ * Check if error is a use_dpop_nonce error.
+ * AuthError.error === 'use_dpop_nonce' identifies the nonce-required error
+ * from @atproto/oauth-provider without needing to import the unexported class
+ *
+ * @param err - Error object
+ * @returns true if error is a use_dpop_nonce error, false otherwise
+ */
 function isUseDpopNonceError(err: unknown): boolean {
   return (
     err != null &&

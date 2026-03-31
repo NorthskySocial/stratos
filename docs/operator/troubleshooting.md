@@ -3,7 +3,8 @@
 ## "NotEnrolled" Error When Creating Records
 
 - User hasn't completed OAuth enrollment.
-- Enrollment was rejected — check your allowlist configuration (`STRATOS_ALLOWED_DIDS`, `STRATOS_ALLOWED_PDS_ENDPOINTS`).
+- Enrollment was rejected — check your allowlist configuration (`STRATOS_ALLOWED_DIDS`,
+  `STRATOS_ALLOWED_PDS_ENDPOINTS`).
 
 Verify directly:
 
@@ -25,7 +26,9 @@ curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=<did>"
 
 ## DPoP Nonce Errors
 
-Extract the nonce from the `DPoP-Nonce` response header and include it in the next request's DPoP proof. Ensure your reverse proxy exposes `DPoP-Nonce` in `Access-Control-Expose-Headers` — see [Security](/operator/security#cors-configuration).
+Extract the nonce from the `DPoP-Nonce` response header and include it in the next request's DPoP
+proof. Ensure your reverse proxy exposes `DPoP-Nonce` in `Access-Control-Expose-Headers` —
+see [Security](/operator/security#cors-configuration).
 
 ## High Latency Under Load
 
@@ -37,7 +40,8 @@ See the Performance Investigation Playbook. Key checkpoints:
 
 ## Indexer Reconnection Pressure
 
-Common during RDS restarts or resizes: `ECONNREFUSED` and `database system is shutting down`. The indexer retries with exponential backoff. These errors self-resolve once the database is back.
+Common during RDS restarts or resizes: `ECONNREFUSED` and `database system is shutting down`. The
+indexer retries with exponential backoff. These errors self-resolve once the database is back.
 
 Check indexer logs:
 
