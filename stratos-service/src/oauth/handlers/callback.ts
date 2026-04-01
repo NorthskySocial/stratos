@@ -297,6 +297,7 @@ function sendOAuthResponse(deps: {
   if (redirectTo) {
     res.clearCookie('stratos_redirect')
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const url = new URL(redirectTo)
       if (allowedSchemes.includes(url.protocol)) {
         url.searchParams.set('stratos_enrolled', 'true')

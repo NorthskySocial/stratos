@@ -23,12 +23,15 @@ function createTestSync(opts: Partial<StratosActorSyncOptions> = {}) {
   return { sync, errors, cursorManager }
 }
 
-function getPrivate(obj: object, field: string) {
-  return (obj as Record<string, unknown>)[field]
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getPrivate(obj: object, field: string): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
+  return (obj as any)[field]
 }
 
-function setPrivate(obj: object, field: string, value: unknown) {
-  ;(obj as Record<string, unknown>)[field] = value
+function setPrivate(obj: object, field: string, value: unknown): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
+  ;(obj as any)[field] = value
 }
 
 describe('ActorQueue drain race condition fix', () => {
@@ -49,7 +52,9 @@ describe('ActorQueue drain race condition fix', () => {
 
     // Mock canStartSync to control draining
     const options = getPrivate(syncer, 'options')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     options.canStartSync = vi.fn(() => false)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     options.drainDelayMs = 10
 
     const enqueueFn = getPrivate(syncer, 'enqueueMessage') as (
@@ -61,27 +66,35 @@ describe('ActorQueue drain race condition fix', () => {
     await new Promise((r) => setTimeout(r, 5))
 
     const queue = getPrivate(syncer, 'queue')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(queue.draining).toBe(true)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(queue.pending.length).toBe(1)
 
     // Enqueue more messages
     enqueueFn.call(syncer, new Uint8Array(0))
     enqueueFn.call(syncer, new Uint8Array(0))
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(queue.pending.length).toBe(3)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(queue.draining).toBe(true)
 
     // Unblock draining
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     options.canStartSync.mockReturnValue(true)
 
     // Wait for queue to drain
     let attempts = 0
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     while (queue.pending.length > 0 && attempts < 20) {
       await new Promise((r) => setTimeout(r, 20))
       attempts++
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(queue.pending.length).toBe(0)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(queue.draining).toBe(false)
   })
 })
@@ -131,7 +144,9 @@ describe('enqueueMessage overflow', () => {
     ) => void
 
     // Set draining to true so it doesn't actually drain
-    getPrivate(syncer, 'queue').draining = true
+    const queue = getPrivate(syncer, 'queue')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    queue.draining = true
 
     enqueueFn.call(syncer, new Uint8Array(1))
     enqueueFn.call(syncer, new Uint8Array(2))

@@ -6,16 +6,15 @@ import { Server as XrpcServer } from '@atproto/xrpc-server'
 import * as crypto from '@atproto/crypto'
 import {
   type BlobStoreCreator,
-  type Logger,
-  type EnrollmentService,
   type BoundaryResolver,
+  type EnrollmentService,
+  type Logger,
   type StubWriterService,
-  DID,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
 import {
-  ExternalAllowListProvider,
   BackgroundStubQueue,
+  ExternalAllowListProvider,
 } from './features/index.js'
 import { type StratosServiceConfig } from './config.js'
 import { type EnrollmentStore } from './oauth/routes.js'
@@ -73,6 +72,8 @@ export interface AppContext extends IdentityContext, StorageContext {
   dpopVerifier: DpopVerifier
   enrollmentEvents: EnrollmentEventEmitter
   sequenceEvents: SequenceEventEmitter
+  destroy: () => Promise<void>
+
   checkHealth(): Promise<{
     status: 'ok' | 'error'
     components: {
@@ -80,7 +81,6 @@ export interface AppContext extends IdentityContext, StorageContext {
       blobstore: 'ok' | 'error'
     }
   }>
-  destroy: () => Promise<void>
 }
 
 export interface EnrollmentEvent {

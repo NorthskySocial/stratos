@@ -472,12 +472,14 @@ export async function main(): Promise<void> {
   )
   await server.start()
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   process.on('SIGTERM', async () => {
     server.ctx.logger?.info('SIGTERM received, shutting down...')
     await server.stop()
     process.exit(0)
   })
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   process.on('SIGINT', async () => {
     server.ctx.logger?.info('SIGINT received, shutting down...')
     await server.stop()

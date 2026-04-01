@@ -1,15 +1,14 @@
-import type { Readable } from 'node:stream'
 import { CID } from '@atproto/lex-data'
 import {
   S3BlobStore as AtprotoS3BlobStore,
   S3Config as AtprotoS3Config,
 } from '@atproto/aws'
 import {
+  BlobNotFoundError,
   type BlobStore,
   type BlobStoreCreator,
-  BlobNotFoundError,
 } from '@northskysocial/stratos-core'
-import { readableToAsyncIterable, asyncIterableToReadable } from './util.js'
+import { asyncIterableToReadable, readableToAsyncIterable } from './util.js'
 
 /**
  * S3 configuration for stratos blob storage

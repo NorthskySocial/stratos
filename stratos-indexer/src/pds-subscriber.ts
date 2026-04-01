@@ -67,7 +67,10 @@ export class PdsSubscriber {
 
     this.firehose = new PdsFirehose({
       repoProvider: opts.repoProvider,
-      onWork: (work) => this.workerPool.add(work),
+      onWork: (work) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+        void (this.workerPool as any).add(work)
+      },
       onError: (err) => {
         if (opts.onError) {
           opts.onError(err)
@@ -103,7 +106,7 @@ export class PdsSubscriber {
    */
   stop() {
     this.firehose.stop()
-    this.workerPool.stop()
+    void this.workerPool.stop()
   }
 
   /**

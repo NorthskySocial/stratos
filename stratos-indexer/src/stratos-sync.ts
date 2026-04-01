@@ -1,9 +1,9 @@
 import { decodeFirst } from '@atcute/cbor'
-import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
-import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
+import { Kysely } from 'kysely'
 import { StratosError } from '@northskysocial/stratos-core'
 import type { CursorManager } from './cursor-manager.ts'
 import { ActorSyncer } from './actor-syncer.ts'
+import type { StratosIndexerSchema } from './schema.ts'
 
 export interface StratosActorSyncOptions {
   maxConcurrentActorSyncs: number
@@ -99,7 +99,7 @@ export class StratosServiceSubscription {
     })
 
     this.ws.onmessage = (e: MessageEvent) => {
-      this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
+      void this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
     }
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
@@ -144,6 +144,9 @@ export class StratosServiceSubscription {
 
 // --- Main Sync Manager ---
 
+/**
+ * Main actor sync manager for Stratos indexer.
+ */
 export class StratosActorSync {
   private static readonly KNOWN_DIDS_TTL_MS = 30 * 60 * 1000
   private static readonly KNOWN_DIDS_SWEEP_MS = 60 * 1000
@@ -164,7 +167,7 @@ export class StratosActorSync {
   private statsTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(
-    private db: Kysely<DatabaseSchemaType>,
+    private db: Kysely<StratosIndexerSchema>,
     private config: StratosSyncConfig,
     private cursorManager: CursorManager,
     private onError?: (err: Error) => void,
@@ -291,6 +294,14 @@ export class StratosActorSync {
       globalPending: this.globalPendingCount,
       activeSyncs: this.activeSyncs,
     }
+  }
+
+  /**
+   * Get active actors in the Stratos sync manager.
+   * @returns An array of DIDs of active actors.
+   */
+  getActiveActors(): string[] {
+    return Array.from(this.syncers.keys())
   }
 
   /**

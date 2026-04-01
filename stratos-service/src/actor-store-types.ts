@@ -10,8 +10,12 @@ import type {
   RecordWithContent,
   RecordWithMeta,
   StatusAttr,
+  StratosDbOrTx,
+  StratosPgDbOrTx,
   StratosRecordDescript,
 } from '@northskysocial/stratos-core'
+
+export type ActorStoreDb = StratosDbOrTx | StratosPgDbOrTx
 
 // ─── Sequence Operations ────────────────────────────────────────────────────
 
@@ -109,8 +113,9 @@ export interface ActorRecordTransactor extends ActorRecordReader {
 // ─── Repo Store Interface ───────────────────────────────────────────────────
 
 export interface ActorRepoReader {
-  db: any
+  db: ActorStoreDb
   cache: BlockMap
+  readonly did?: string
   hasRoot(): Promise<boolean>
   getRoot(): Promise<CID | null>
   getRootDetailed(): Promise<{ cid: CID; rev: string } | null>
@@ -129,8 +134,8 @@ export interface ActorRepoReader {
 }
 
 export interface ActorRepoTransactor extends ActorRepoReader {
-  lockRoot(): Promise<{ cid: CID; rev: string } | null>
   updateRoot(cid: CID, rev: string, did: string): Promise<void>
+  lockRoot(): Promise<{ cid: CID; rev: string } | null>
   putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void>
   putBlocks(blocks: BlockMap, rev: string): Promise<void>
   deleteBlock(cid: CID): Promise<void>
@@ -198,6 +203,14 @@ export interface ActorTransactor {
   sequence: SequenceOperations
 }
 
+/**
+ * Interface for an actor store.
+ *
+ * Actor stores are responsible for managing the lifecycle of actors, including
+ * their creation, destruction, and persistence. They provide a consistent
+ * interface for accessing and manipulating actor-related data, including records,
+ * repositories, and blobs.
+ */
 export interface ActorStore {
   close?(): Promise<void>
   exists(did: string): Promise<boolean>

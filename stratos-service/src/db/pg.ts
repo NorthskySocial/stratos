@@ -89,7 +89,7 @@ function extractPgErrorDetails(error: unknown): string {
 export async function checkServicePgDbStartup(
   db: ServicePgDb,
 ): Promise<ServicePgStartupDiagnostics> {
-  const client = db.$client as ServicePgClient
+  const client = db.$client
 
   const [context] = await client<
     Array<{

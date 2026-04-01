@@ -1,8 +1,6 @@
 import type { IndexerConfig } from './config.ts'
 import type { Database } from '@atproto/bsky'
-import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
-import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
-import { sql } from 'kysely'
+import { Kysely, sql } from 'kysely'
 import {
   createDatabase,
   createIdResolver,
@@ -18,6 +16,8 @@ import {
   backfillRepos,
   backfillSingleActor,
 } from './backfill.js'
+import { EnrollmentCallback } from './pds-firehose.ts'
+import type { NewStratosSyncCursor, StratosIndexerSchema } from './schema.ts'
 
 export class Indexer {
   private static readonly BACKFILLED_TTL_MS = 30 * 60 * 1000
@@ -98,7 +98,8 @@ export class Indexer {
     // Stratos Sync Manager (Service Subscription + Per-actor Sync)
     this.syncManager = new StratosSyncManager({
       config: this.config,
-      db: (db as unknown as { db: Kysely<DatabaseSchemaType> }).db as never,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+      db: (db as any).db as Kysely<StratosIndexerSchema>,
       cursorManager: this.cursorManager!,
       indexingService,
       background,
@@ -112,7 +113,7 @@ export class Indexer {
     await this.runAllBackfills(indexingService, background, backfillOpts)
 
     this.pdsSubscriber.start()
-    this.syncManager.start()
+    void this.syncManager.start()
 
     this.startStatsLogging()
 
@@ -162,15 +163,29 @@ export class Indexer {
     // 3. Final cursor flush
     if (this.cursorManager) {
       console.log('flushing cursors')
-      await this.cursorManager.stop()
+      try {
+        await this.cursorManager.stop()
+      } catch (err) {
+        console.error({ err }, 'failed to stop cursor manager')
+      }
     }
 
     // 4. Shutdown health server
-    this.healthServer?.shutdown()
+    if (this.healthServer) {
+      try {
+        void this.healthServer.shutdown()
+      } catch (err) {
+        console.error({ err }, 'failed to shutdown health server')
+      }
+    }
 
     // 5. Close database
     if (this.db) {
-      await this.db.close()
+      try {
+        await this.db.close()
+      } catch (err) {
+        console.error({ err }, 'failed to close database')
+      }
       this.db = null
     }
 
@@ -192,7 +207,9 @@ export class Indexer {
   private async checkDbHealth(): Promise<boolean> {
     try {
       if (this.db) {
-        const rawDb = (this.db as unknown as { db: Kysely<unknown> }).db
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+        const rawDb = (this.db as any).db as Kysely<StratosIndexerSchema>
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
         await rawDb.execute(sql`SELECT 1`)
         return true
       }
@@ -276,9 +293,14 @@ export class Indexer {
    * Start the health server
    */
   private startHealthServer(): void {
-    this.healthServer = Deno.serve({ port: this.config.health.port }, (req) =>
-      this.handleHealthCheck(req),
-    )
+    this.healthServer = Deno.serve({ port: this.config.health.port }, (req) => {
+      try {
+        return this.handleHealthCheck(req)
+      } catch (err) {
+        console.error({ err }, 'failed to handle health check')
+        return new Response('internal server error', { status: 500 })
+      }
+    })
     console.log(
       { healthPort: this.config.health.port },
       'health server started',
@@ -294,31 +316,30 @@ export class Indexer {
     this.cursorManager = new CursorManager(
       this.config.worker.cursorFlushIntervalMs,
       async (state) => {
-        const rawDb = (db as unknown as { db: Kysely<DatabaseSchemaType> }).db
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+        const rawDb = (db as any).db as Kysely<StratosIndexerSchema>
 
         if (state.stratosCursors.size > 0) {
           const now = new Date().toISOString()
-          const values = Array.from(state.stratosCursors, ([did, seq]) => ({
-            did,
-            seq,
-            updatedAt: now,
-          }))
+          const values: NewStratosSyncCursor[] = Array.from(
+            state.stratosCursors,
+            ([did, seq]) => ({
+              did,
+              seq,
+              updatedAt: now,
+            }),
+          )
 
           // Batch upsert all actor cursors in a single statement
           await rawDb
-            .insertInto('stratos_sync_cursor' as never)
-            .values(values as never)
-            .onConflict(
-              (oc: {
-                column: (col: string) => {
-                  doUpdateSet: (set: unknown) => unknown
-                }
-              }) =>
-                oc.column('did' as never).doUpdateSet({
-                  seq: (eb: { ref: (col: string) => unknown }) =>
-                    eb.ref('excluded.seq' as never),
-                  updatedAt: now,
-                } as never),
+            .insertInto('stratos_sync_cursor')
+            .values(values)
+            .onConflict((oc) =>
+              oc.column('did').doUpdateSet({
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+                seq: (eb: any) => eb.ref('excluded.seq'),
+                updatedAt: now,
+              }),
             )
             .execute()
         }
@@ -331,14 +352,15 @@ export class Indexer {
     )
 
     // Restore cursors from database (retry until migrations have run)
-    const rawDb = (db as unknown as { db: Kysely<DatabaseSchemaType> }).db
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+    const rawDb = (db as any).db as Kysely<StratosIndexerSchema>
     const maxRetries = 30
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const savedCursors = (await rawDb
-          .selectFrom('stratos_sync_cursor' as never)
-          .select(['did' as never, 'seq' as never])
-          .execute()) as Array<{ did: string; seq: number }>
+        const savedCursors = await rawDb
+          .selectFrom('stratos_sync_cursor')
+          .select(['did', 'seq'])
+          .execute()
         if (savedCursors.length > 0) {
           const cursorMap = new Map<string, number>()
           for (const row of savedCursors) {
@@ -382,7 +404,7 @@ export class Indexer {
       typeof createIndexingService
     >['indexingService'],
     background: ReturnType<typeof createIndexingService>['background'],
-  ) {
+  ): EnrollmentCallback {
     return {
       onEnrollmentDiscovered: (
         did: string,
@@ -395,9 +417,9 @@ export class Indexer {
           { did, boundaries },
           'enrollment discovered, starting actor sync',
         )
-        background.add(() =>
-          indexingService.indexHandle(did, new Date().toISOString()),
-        )
+        background.add(() => {
+          void indexingService.indexHandle(did, new Date().toISOString())
+        })
         this.syncManager?.addActor(did)
       },
       onEnrollmentRemoved: (did: string) => {
@@ -422,7 +444,8 @@ export class Indexer {
     background: ReturnType<typeof createIndexingService>['background'],
     backfillOpts: BackfillOptions,
   ): Promise<void> {
-    const rawDb = (this.db as unknown as { db: Kysely<DatabaseSchemaType> }).db
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+    const rawDb = (this.db as any).db as Kysely<StratosIndexerSchema>
 
     // Backfill existing repos
     console.log(
@@ -433,10 +456,10 @@ export class Indexer {
     )
 
     if (this.config.pds.enrolledOnly) {
-      const enrolledFromDb = (await rawDb
-        .selectFrom('stratos_enrollment' as never)
-        .select(['did' as never])
-        .execute()) as Array<{ did: string }>
+      const enrolledFromDb = await rawDb
+        .selectFrom('stratos_enrollment')
+        .select(['did'])
+        .execute()
 
       const didsToBackfill = new Set<string>(this.enrolledDids)
       for (const row of enrolledFromDb) {
@@ -451,9 +474,9 @@ export class Indexer {
       for (const did of didsList) {
         this.enrolledDids.add(did)
         this.syncManager?.addActor(did)
-        background.add(() =>
-          indexingService.indexHandle(did, new Date().toISOString()),
-        )
+        background.add(() => {
+          void indexingService.indexHandle(did, new Date().toISOString())
+        })
       }
 
       console.log(
@@ -523,7 +546,7 @@ export class Indexer {
     if (this.backfilledDids.has(did)) return
     this.backfilledDids.set(did, Date.now())
     console.log({ did }, 'backfilling referenced actor')
-    this.runBackfill(did, opts)
+    void this.runBackfill(did, opts)
   }
 
   /**

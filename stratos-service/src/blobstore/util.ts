@@ -26,6 +26,7 @@ export function asyncIterableToReadable(
   const iterator = iterable[Symbol.asyncIterator]()
 
   return new Readable({
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     async read() {
       try {
         const { value, done } = await iterator.next()

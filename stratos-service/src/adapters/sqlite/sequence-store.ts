@@ -5,15 +5,15 @@
  * Note: The stratosSeq table stores minimal data. Collection/rkey/cid/rev
  * are decoded from the CBOR event blob when reading.
  */
-import { eq, gt, and, lte, sql, asc, desc } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, lte, sql } from 'drizzle-orm'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import type {
-  SequenceStoreReader,
-  SequenceStoreWriter,
+  AppendEventInput,
+  GetEventsSinceOptions,
   SequenceEvent,
   SequenceEventType,
-  GetEventsSinceOptions,
-  AppendEventInput,
+  SequenceStoreReader,
+  SequenceStoreWriter,
 } from '@northskysocial/stratos-core'
 import { type StratosDb, stratosSeq } from '@northskysocial/stratos-core'
 
@@ -61,7 +61,7 @@ function rowToEvent(row: {
   }
 
   const { collection, rkey } = decoded?.path
-    ? parsePath(decoded!.path)
+    ? parsePath(decoded.path)
     : { collection: '', rkey: '' }
 
   return {
@@ -126,7 +126,6 @@ export class SqliteSequenceStoreReader implements SequenceStoreReader {
   async getEventsRange(
     startSeq: number,
     endSeq: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _options?: GetEventsSinceOptions,
   ): Promise<SequenceEvent[]> {
     const rows = await this.db

@@ -6,6 +6,7 @@ import { AppContext } from '../../context-types.js'
  * Handler for describing a repository.
  * @param ctx - Application Context
  * @returns XRPC handler for describing a repository
+ * @throws InvalidRequestError if the repository does not exist
  */
 export const describeRepoHandler = (ctx: AppContext) =>
   createXrpcHandler(ctx, 'com.atproto.repo.describeRepo', {

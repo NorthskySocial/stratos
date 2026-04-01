@@ -1,10 +1,9 @@
-import { sql } from 'kysely'
+import { sql, Kysely } from 'kysely'
 import { BackgroundQueue, Database } from '@atproto/bsky'
 import { IdResolver, MemoryCache } from '@atproto/identity'
 import { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import PQueue from 'p-queue'
 import type { DbConfig, IdentityConfig, IndexerConfig } from './config.ts'
-import { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
 
 const DID_CACHE_STALE_TTL = 5 * 60 * 1000 // 5 minutes
 const DID_CACHE_MAX_TTL = 60 * 60 * 1000 // 1 hour
@@ -28,7 +27,9 @@ export function createDatabase(cfg: DbConfig): Database {
   // Note: These are added to the PostgreSQL bsky schema
   void (async () => {
     try {
-      const rawDb = (db as unknown as { db: Kysely<unknown> }).db
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+      const rawDb = (db as any).db as Kysely<Record<string, unknown>>
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await rawDb.execute(sql`
         CREATE TABLE IF NOT EXISTS stratos_enrollment (
           did TEXT PRIMARY KEY,
@@ -37,6 +38,7 @@ export function createDatabase(cfg: DbConfig): Database {
           updatedAt TEXT NOT NULL
         )
       `)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await rawDb.execute(sql`
         CREATE TABLE IF NOT EXISTS stratos_boundary (
           did TEXT NOT NULL,
@@ -44,19 +46,22 @@ export function createDatabase(cfg: DbConfig): Database {
           PRIMARY KEY (did, boundary)
         )
       `)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await rawDb.execute(sql`
-        CREATE TABLE IF NOT EXISTS stratos_cursor (
+        CREATE TABLE IF NOT EXISTS stratos_sync_cursor (
           did TEXT PRIMARY KEY,
           seq INTEGER NOT NULL,
           updatedAt TEXT NOT NULL
         )
       `)
       // Optimized index for boundary-based hydration
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await rawDb.execute(sql`
         CREATE INDEX IF NOT EXISTS stratos_post_boundary_idx 
         ON stratos_post (boundary)
       `)
       // Optimized index for actor-based feed queries
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await rawDb.execute(sql`
         CREATE INDEX IF NOT EXISTS stratos_post_did_indexed_at_idx 
         ON stratos_post (did, indexedAt DESC)
