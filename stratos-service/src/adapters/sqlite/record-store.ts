@@ -7,7 +7,6 @@
 import { eq } from 'drizzle-orm'
 import { CID } from '@atproto/lex-data'
 import type {
-  AtUri,
   GetRecordOptions,
   ListRecordsOptions,
   RecordDescript,

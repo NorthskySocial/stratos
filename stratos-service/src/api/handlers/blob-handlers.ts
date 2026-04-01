@@ -4,8 +4,10 @@ import { createXrpcHandler } from '../util.js'
 
 /**
  * List blobs handler for the Stratos service.
+ *
  * @param ctx - Application Context
  * @returns XRPC handler for listing blobs
+ * @throws InvalidRequestError if the DID is not found
  */
 export const listBlobsHandler = (ctx: AppContext) =>
   createXrpcHandler(ctx, 'com.atproto.sync.listBlobs', {

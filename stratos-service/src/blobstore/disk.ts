@@ -261,20 +261,43 @@ export class DiskBlobStore implements BlobStore {
     }
   }
 
+  /**
+   * Ensure the directory for the DID exists.
+   * 1. Create the directory if it doesn't exist.
+   * 2. If the directory exists, do nothing.
+   '
+   * @private
+   */
   private async ensureDir(): Promise<void> {
     await fs.mkdir(path.join(this.location, this.did), { recursive: true })
   }
 
+  /**
+   * Ensure the temporary directory exists.
+   * 1. Create the directory if it doesn't exist.
+   * 2. If the directory exists, do nothing
+   *
+   * @private
+   */
   private async ensureTemp(): Promise<void> {
     await fs.mkdir(path.join(this.tmpLocation, this.did), { recursive: true })
   }
 
+  /**
+   * Ensure the quarantine directory exists.
+   * @private
+   */
   private async ensureQuarantine(): Promise<void> {
     await fs.mkdir(path.join(this.quarantineLocation, this.did), {
       recursive: true,
     })
   }
 
+  /**
+   * Generate a random key for temporary storage
+   * @returns Randomly generated key
+   * @private
+   */
   private genKey(): string {
     return randomStr(32, 'base32')
   }

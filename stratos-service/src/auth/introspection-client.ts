@@ -268,6 +268,7 @@ export class PdsTokenVerifier implements TokenVerifier {
       if (parts.length !== 3) {
         return null
       }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
     } catch {
       return null

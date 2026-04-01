@@ -343,6 +343,7 @@ export async function createOAuthClient(
     stateStore: {
       async get(key: string) {
         const state = await stateStore.get(key)
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
         return state ? JSON.parse(state) : undefined
       },
       async set(key: string, value: unknown) {

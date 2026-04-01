@@ -120,6 +120,7 @@ export const uploadBlobHandler = (ctx: AppContext) =>
       if (body instanceof Readable) {
         const chunks: Buffer[] = []
         for await (const chunk of body) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
           chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
         }
         bytes = new Uint8Array(Buffer.concat(chunks))

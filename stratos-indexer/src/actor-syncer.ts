@@ -1,8 +1,8 @@
 import { decodeFirst } from '@atcute/cbor'
-import type { Kysely } from '@atproto/bsky/dist/data-plane/server/db/types'
-import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
+import { Kysely } from 'kysely'
 import { extractBoundaries, StratosError } from '@northskysocial/stratos-core'
 import type { CursorManager } from './cursor-manager.ts'
+import type { StratosIndexerSchema, PostTable } from './schema.ts'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 const INDEX_TRACE_WARN_LAG_MS = 5_000
@@ -70,15 +70,6 @@ interface StratosSyncParams {
   syncToken: string
 }
 
-interface PostRow {
-  uri: string
-  cid: string
-  creator: string
-  content: string
-  createdAt: string
-  indexedAt: string
-}
-
 /**
  * ActorSyncer manages the synchronization of actor data with Stratos.
  */
@@ -92,7 +83,7 @@ export class ActorSyncer {
 
   constructor(
     private did: string,
-    private db: Kysely<DatabaseSchemaType>,
+    private db: Kysely<StratosIndexerSchema>,
     private cursorManager: CursorManager,
     private options: ActorSyncerOptions,
   ) {}
@@ -245,7 +236,7 @@ export class ActorSyncer {
     this.options.onGlobalPendingChange?.(1)
 
     if (!this.queue.draining) {
-      this.drainQueue()
+      void this.drainQueue()
     }
   }
 
@@ -419,18 +410,19 @@ function extractReferencedDids(record: unknown): string[] {
   const dids = new Set<string>()
   const walk = (val: unknown) => {
     if (!val || typeof val !== 'object') return
-    if (typeof val.did === 'string' && val.did.startsWith('did:')) {
-      dids.add(val.did)
+    const obj = val as Record<string, unknown>
+    if (typeof obj.did === 'string' && obj.did.startsWith('did:')) {
+      dids.add(obj.did)
     }
     if (
-      val.$link &&
-      typeof val.$link === 'string' &&
-      val.$link.startsWith('did:')
+      obj.$link &&
+      typeof obj.$link === 'string' &&
+      obj.$link.startsWith('did:')
     ) {
       // link can be did? normally it is a CID string link.
     }
-    for (const key in val) {
-      walk(val[key])
+    for (const key in obj) {
+      walk(obj[key])
     }
   }
   walk(record)
@@ -445,7 +437,7 @@ function extractReferencedDids(record: unknown): string[] {
  * @param timestamp - Indexing timestamp
  */
 async function batchIndexStratosRecords(
-  db: Kysely<DatabaseSchemaType>,
+  db: Kysely<StratosIndexerSchema>,
   upserts: RecordUpsert[],
   deletes: string[],
   timestamp: string,
@@ -474,8 +466,8 @@ async function batchIndexStratosRecords(
           .onConflict((oc) =>
             oc.column('uri').doUpdateSet({
               cid: postRow.cid,
-              content: postRow.content,
-              indexedAt: postRow.indexedAt,
+              content: (postRow as unknown as PostTable).content,
+              indexedAt: (postRow as unknown as PostTable).indexedAt,
             }),
           )
           .execute()
@@ -531,7 +523,7 @@ function preparePostRow(
   cid: string,
   record: Record<string, unknown>,
   timestamp: string,
-): PostRow | null {
+): PostTable | null {
   if (record.$type !== STRATOS_POST_COLLECTION) return null
   return {
     uri,

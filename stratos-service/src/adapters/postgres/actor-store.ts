@@ -44,8 +44,6 @@ import type {
   SequenceOperations,
 } from '../../actor-store-types.js'
 
-type PgBacklink = { uri: string; path: string; linkTo: string }
-
 // ─── Record Reader ──────────────────────────────────────────────────────────
 
 /**

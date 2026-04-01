@@ -286,6 +286,11 @@ function buildBlobstoreConfig(env: Env): BlobstoreConfig {
   }
 }
 
+/**
+ * Build Postgres URL from environment variables.
+ * @param env - Environment variables object
+ * @returns Postgres URL string or undefined if required environment variables are missing
+ */
 function buildPostgresUrl(env: Env): string | undefined {
   const {
     STRATOS_PG_HOST,
@@ -309,6 +314,11 @@ function buildPostgresUrl(env: Env): string | undefined {
   return url.toString()
 }
 
+/**
+ * Translates environment variables into a StratosServiceConfig object.
+ * @param env - Environment variables object
+ * @returns - StratosServiceConfig
+ */
 export function envToConfig(env: Env): StratosServiceConfig {
   return {
     service: {
@@ -392,6 +402,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
 /**
  * Get the full service DID with fragment for use in source.service field
  * @example "did:plc:abc123#atproto_pns"
+ *
+ * @param config - StratosServiceConfig
+ * @returns - Full service DID with fragment
  */
 export function getServiceDidWithFragment(
   config: StratosServiceConfig,

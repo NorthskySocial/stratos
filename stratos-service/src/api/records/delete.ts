@@ -1,9 +1,5 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import {
-  type AtUri,
-  RepoWrite,
-  type Logger,
-} from '@northskysocial/stratos-core'
+import { RepoWrite } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
@@ -77,7 +73,7 @@ export async function deleteRecord(
         },
         async (prepared, store) => {
           const manager = createRepoManager(
-            ctx.logger as Logger | undefined,
+            ctx.logger,
             store,
             actorSigningKey,
             sequenceTrace,

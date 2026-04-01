@@ -29,6 +29,7 @@ import { encodeVarint } from '../varint.js'
  * @returns a CAR containing the commit block, MST inclusion proof, and
  * record block when an MST commit exists. Falls back to a minimal single-block CAR
  * for legacy repos without an MST commit.
+ * @throws InvalidRequestError
  */
 export const syncGetRecordHandler =
   (ctx: AppContext) =>
@@ -155,6 +156,7 @@ export const syncGetRecordHandler =
  *
  * @param ctx - The application context.
  * @returns The repository as a CAR file.
+ * @throws InvalidRequestError
  */
 export const syncGetRepoHandler =
   (ctx: AppContext) =>

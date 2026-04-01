@@ -1,11 +1,9 @@
 import { CID } from '@atproto/lex-data'
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import {
-  type AtUri,
   computeCid,
   encodeRecord,
   RepoWrite,
-  type Logger,
 } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context-types.js'
