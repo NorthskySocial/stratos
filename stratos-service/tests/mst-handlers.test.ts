@@ -7,7 +7,6 @@
  * - Full repo CAR building from iterateCarBlocks
  */
 import { describe, expect, it } from 'vitest'
-import { CID } from '@atproto/lex-data'
 import type { CidLink } from '@atcute/cid'
 import * as AtcuteCid from '@atcute/cid'
 import * as AtcuteCbor from '@atcute/cbor'
@@ -25,6 +24,7 @@ import {
   collectCarStream,
   makeCidStr,
 } from '@northskysocial/stratos-core/tests'
+import { parseCid } from '@northskysocial/stratos-core'
 
 const DID = 'did:plc:testhandlers'
 
@@ -201,7 +201,7 @@ describe('Commit CBOR encoding/decoding', () => {
     // Should be a valid CIDv1 string
     expect(commitCidStr).toMatch(/^baf/)
     // Should round-trip through multiformats CID
-    const parsed = CID.parse(commitCidStr)
+    const parsed = parseCid(commitCidStr)
     expect(parsed.code).toBe(0x71)
     expect(parsed.version).toBe(1)
     expect(parsed.toString()).toBe(commitCidStr)
@@ -546,7 +546,7 @@ describe('CID string interop', () => {
     const atcuteCid = await AtcuteCid.create(0x71, data)
     const atcuteStr = AtcuteCid.toString(atcuteCid)
 
-    const mfCid = CID.parse(atcuteStr)
+    const mfCid = parseCid(atcuteStr)
     expect(mfCid.toString()).toBe(atcuteStr)
 
     // Round-trip back
@@ -559,7 +559,7 @@ describe('CID string interop', () => {
     const atcuteCid = await AtcuteCid.create(0x55, data)
     const str = AtcuteCid.toString(atcuteCid)
 
-    const mfCid = CID.parse(str)
+    const mfCid = parseCid(str)
     expect(mfCid.code).toBe(0x55)
     expect(mfCid.toString()).toBe(str)
   })
@@ -569,7 +569,7 @@ describe('CID string interop', () => {
     const atcuteCid = await AtcuteCid.create(0x71, data)
     const str = AtcuteCid.toString(atcuteCid)
 
-    const mfCid = CID.parse(str)
+    const mfCid = parseCid(str)
     const atcuteBytes = atcuteCid.bytes
 
     // The raw CID byte representations should match

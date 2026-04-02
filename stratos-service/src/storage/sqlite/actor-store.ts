@@ -3,7 +3,6 @@ import * as fs from 'node:fs/promises'
 import * as crypto from '@atproto/crypto'
 import { fileExists } from '@atproto/common'
 import { AtUri } from '@atproto/syntax'
-import type { CID } from 'multiformats/cid'
 import {
   type BlobStore,
   type BlobStoreCreator,
@@ -29,6 +28,7 @@ import type {
   ActorTransactor,
 } from '../../actor-store-types.js'
 import { SqliteSequenceOps } from './sequence-ops.js'
+import { Cid } from '@atproto/lex-data'
 
 /**
  * Wrapper for StratosRecordReader that handles string | AtUri
@@ -155,7 +155,7 @@ class SqliteActorRecordTransactor
    */
   putRecord(record: {
     uri: string
-    cid: CID
+    cid: Cid
     value: Record<string, unknown>
     content: Uint8Array
     indexedAt?: string
@@ -175,7 +175,7 @@ class SqliteActorRecordTransactor
    */
   indexRecord(
     uri: string | AtUri,
-    cid: CID,
+    cid: Cid,
     record: Record<string, unknown> | null,
     action?: 'create' | 'update',
     repoRev?: string,

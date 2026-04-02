@@ -6,6 +6,7 @@ import {
   type OAuthStateStoreBackend,
 } from './client.js'
 import type { StratosServiceConfig } from '../config.js'
+import { NodeOAuthClient } from '@atproto/oauth-client-node'
 
 /**
  * Creates the OAuth client context
@@ -24,7 +25,7 @@ export async function createOAuthClientContext(
   },
   idResolver: IdResolver,
   fetchWithUserAgent: typeof fetch,
-) {
+): Promise<NodeOAuthClient> {
   return createOAuthClient(
     {
       clientId:

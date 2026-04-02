@@ -3,14 +3,13 @@
  *
  * Implements BlobMetadataReader/Writer for SQLite backend.
  */
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import { eq } from 'drizzle-orm'
-import type {
+import {
   BlobMetadata,
   BlobMetadataReader,
   BlobMetadataWriter,
-} from '@northskysocial/stratos-core'
-import {
+  parseCid,
   stratosBlob,
   type StratosDb,
   stratosRecordBlob,
@@ -27,7 +26,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
    * @param cid CID of the blob.
    * @returns BlobMetadata object if found, null otherwise.
    */
-  async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
+  async getBlobMetadata(cid: Cid): Promise<BlobMetadata | null> {
     const rows = await this.db
       .select()
       .from(stratosBlob)
@@ -53,7 +52,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
    * @param cid CID of the blob.
    * @returns True if the blob exists, false otherwise.
    */
-  async hasBlob(cid: CID): Promise<boolean> {
+  async hasBlob(cid: Cid): Promise<boolean> {
     const rows = await this.db
       .select({ cid: stratosBlob.cid })
       .from(stratosBlob)
@@ -84,7 +83,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       .where(eq(stratosRecordBlob.recordUri, recordUri))
 
     return rows.map((row) => ({
-      cid: CID.parse(row.cid),
+      cid: parseCid(row.cid),
       mimeType: row.mimeType,
       size: row.size,
       width: row.width ?? undefined,
@@ -98,12 +97,12 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
    * List all CIDs of blobs.
    * @returns Array of CIDs of blobs.
    */
-  async listAllBlobCids(): Promise<CID[]> {
+  async listAllBlobCids(): Promise<Cid[]> {
     const rows = await this.db
       .select({ cid: stratosBlob.cid })
       .from(stratosBlob)
 
-    return rows.map((row) => CID.parse(row.cid))
+    return rows.map((row) => parseCid(row.cid))
   }
 }
 
@@ -119,7 +118,7 @@ export class SqliteBlobMetadataWriter
    * @param blob Blob metadata to track.
    */
   async trackBlob(blob: {
-    cid: CID
+    cid: Cid
     mimeType: string
     size: number
     tempKey?: string | null
@@ -147,7 +146,7 @@ export class SqliteBlobMetadataWriter
    * @param recordUri - URI of the record.
    */
   async associateBlobWithRecord(
-    blobCid: CID,
+    blobCid: Cid,
     recordUri: string,
   ): Promise<void> {
     await this.db
@@ -173,7 +172,7 @@ export class SqliteBlobMetadataWriter
    * Delete a blob by CID.
    * @param cid - CID of the blob to delete.
    */
-  async deleteBlob(cid: CID): Promise<void> {
+  async deleteBlob(cid: Cid): Promise<void> {
     await this.db.delete(stratosBlob).where(eq(stratosBlob.cid, cid.toString()))
   }
 
@@ -182,7 +181,7 @@ export class SqliteBlobMetadataWriter
    * @param cid - CID of the blob to takedown.
    * @param takedownRef - Reference to the takedown.
    */
-  async takedownBlob(cid: CID, takedownRef: string): Promise<void> {
+  async takedownBlob(cid: Cid, takedownRef: string): Promise<void> {
     await this.db
       .update(stratosBlob)
       .set({ takedownRef })
@@ -193,7 +192,7 @@ export class SqliteBlobMetadataWriter
    * Restore a blob by CID.
    * @param cid - CID of the blob to restore.
    */
-  async restoreBlob(cid: CID): Promise<void> {
+  async restoreBlob(cid: Cid): Promise<void> {
     await this.db
       .update(stratosBlob)
       .set({ takedownRef: null })

@@ -1,8 +1,9 @@
-import { CID } from '@atproto/lex-data'
+import { type Cid as CID } from '@atproto/lex-data'
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import {
   computeCid,
   encodeRecord,
+  parseCid,
   RepoWrite,
 } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
@@ -128,8 +129,9 @@ export async function updateRecord(
         callerDid,
         async (reader) => {
           phases.connAcquire = performance.now() - attemptT0
+          const root = await reader.repo.getRoot()
           return {
-            rootCid: (await reader.repo.getRoot())?.toString() ?? null,
+            rootCid: root ? parseCid(root).toString() : null,
           }
         },
         async (_prepared, store) => {
@@ -223,9 +225,10 @@ async function performUpdate(
 
   return {
     uri: uri.toString(),
-    cidStr: cid.toString(),
+    cid,
+    cidStr: parseCid(cid).toString(),
     commit: {
-      cid: writeResult.commitCid.toString(),
+      cid: parseCid(writeResult.commitCid).toString(),
       rev: writeResult.rev,
     },
   }
@@ -261,7 +264,7 @@ function enqueueStubUpdate(
     collection,
     rkey,
     recordType,
-    cidStr,
+    parseCid(cidStr),
     createdAt,
   )
 }

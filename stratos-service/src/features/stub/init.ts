@@ -1,17 +1,13 @@
 import { type NodeOAuthClient } from '@atproto/oauth-client-node'
 import { type Logger } from '@northskysocial/stratos-core'
-import {
-  type RepoContext,
-  type SequenceEventEmitter,
-} from '../../context-types.js'
+import { type RepoContext, type SequenceEventEmitter, } from '../../context-types.js'
 import { type StratosServiceConfig } from '../../config.js'
 import { type ActorStore } from '../../actor-store-types.js'
 import { WriteRateLimiter } from '../../shared/rate-limiter.js'
 import { RepoWriteLocks } from '../../shared/repo-write-lock.js'
-import { StubWriterServiceImpl } from './adapter.js'
+import { type PdsAgent, StubWriterServiceImpl } from './adapter.js'
 import { BackgroundStubQueue } from './internal/background-queue.js'
 import { Agent } from '@atproto/api'
-import { type PdsAgent } from './adapter.js'
 
 /**
  * Initialize the repo context
@@ -43,8 +39,9 @@ export function initRepo(
   const stubWriter = new StubWriterServiceImpl(async (did) => {
     try {
       const session = await oauthClient.restore(did)
-      return { api: (new Agent(session) as unknown) as PdsAgent['api'] }
-    } catch {
+      return { api: new Agent(session) as unknown as PdsAgent['api'] }
+    } catch (err) {
+      logger?.error({ err }, 'Failed to restore OAuth session')
       return null
     }
   }, serviceDidWithFragment)

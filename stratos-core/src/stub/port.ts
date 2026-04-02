@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 
 /**
  * Result of writing a stub to the PDS
@@ -29,7 +29,7 @@ export interface StubWriterService {
     collection: string,
     rkey: string,
     recordType: string,
-    fullRecordCid: CID,
+    fullRecordCid: Cid,
     createdAt: string,
   ): Promise<WriteStubResult>
 

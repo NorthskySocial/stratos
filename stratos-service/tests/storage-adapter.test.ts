@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import { StratosBlockStoreReader } from '../src/features/index.js'
 import { BlockMap } from '@northskysocial/stratos-core'
 import type { ActorRepoReader } from '../src/actor-store-types.js'
@@ -9,11 +9,11 @@ function createMockRepoReader(
   blocks: Map<string, Uint8Array>,
 ): ActorRepoReader {
   return {
-    getBytes: vi.fn(async (cid: CID) => blocks.get(cid.toString()) ?? null),
-    has: vi.fn(async (cid: CID) => blocks.has(cid.toString())),
-    getBlocks: vi.fn(async (cids: CID[]) => {
+    getBytes: vi.fn(async (cid: Cid) => blocks.get(cid.toString()) ?? null),
+    has: vi.fn(async (cid: Cid) => blocks.has(cid.toString())),
+    getBlocks: vi.fn(async (cids: Cid[]) => {
       const found = new BlockMap()
-      const missing: CID[] = []
+      const missing: Cid[] = []
       for (const cid of cids) {
         const bytes = blocks.get(cid.toString())
         if (bytes) {
@@ -48,7 +48,7 @@ describe('StratosBlockStoreReader', () => {
     expect(mockReader.getBytes).toHaveBeenCalledWith(
       expect.objectContaining({ toString: expect.any(Function) }),
     )
-    const calledCid = vi.mocked(mockReader.getBytes).mock.calls[0][0] as CID
+    const calledCid = vi.mocked(mockReader.getBytes).mock.calls[0][0] as Cid
     expect(calledCid.toString()).toBe(cid.toString())
   })
 })

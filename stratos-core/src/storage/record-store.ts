@@ -1,11 +1,11 @@
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 
 /**
  * Descriptor for a stratos record
  */
 export interface RecordDescript {
   uri: string
-  cid: CID
+  cid: Cid
   collection: string
   rkey: string
 }
@@ -62,7 +62,7 @@ export interface RecordStoreReader {
   hasRecord(uri: string): Promise<boolean>
 
   /** Get record content bytes by CID */
-  getRecordContent(cid: CID): Promise<Uint8Array | null>
+  getRecordContent(cid: Cid): Promise<Uint8Array | null>
 }
 
 /**
@@ -72,7 +72,7 @@ export interface RecordStoreWriter extends RecordStoreReader {
   /** Create or update a record */
   putRecord(record: {
     uri: string
-    cid: CID
+    cid: Cid
     value: Record<string, unknown>
     content: Uint8Array
     indexedAt?: string

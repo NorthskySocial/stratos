@@ -26,7 +26,7 @@ export interface ServiceAttestation {
  * verification level indicating what was cryptographically checked.
  * - 'user-signature': full signature verification against the user's per-actor signing key + DID match
  * - 'service-signature': full signature verification against the service's signing key + DID match
- * - 'cid-integrity': CID integrity and MST path validation only (no signature check)
+ * - 'cid-integrity': Cid integrity and MST path validation only (no signature check)
  */
 export type VerificationLevel =
   | 'user-signature'

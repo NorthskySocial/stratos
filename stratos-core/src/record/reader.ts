@@ -1,4 +1,5 @@
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { parseCid } from '../atproto/index.js'
 import * as syntax from '@atproto/syntax'
 import { AtUri } from '@atproto/syntax'
 import { and, asc, desc, eq, gt, isNull, lt } from 'drizzle-orm'
@@ -18,7 +19,7 @@ import { Logger, StatusAttr } from '../types.js'
 export interface StratosRecordDescript {
   uri: string
   path: string
-  cid: CID
+  cid: Cid
 }
 
 /**
@@ -104,7 +105,7 @@ export class StratosRecordReader {
         records.push({
           uri: row.uri,
           path: `${parsed.collection}/${parsed.rkey}`,
-          cid: CID.parse(row.cid),
+          cid: parseCid(row.cid),
         })
       }
       cursor = res.at(-1)?.uri
@@ -286,14 +287,14 @@ export class StratosRecordReader {
    * @param uri - The URI of the record to retrieve the CID for.
    * @returns The CID of the current version of the record, or null if not found.
    */
-  async getCurrentRecordCid(uri: string | AtUri): Promise<CID | null> {
+  async getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null> {
     const res = await this.db
       .select({ cid: stratosRecord.cid })
       .from(stratosRecord)
       .where(eq(stratosRecord.uri, uri.toString()))
       .limit(1)
 
-    return res.length > 0 ? CID.parse(res[0].cid) : null
+    return res.length > 0 ? parseCid(res[0].cid) : null
   }
 
   /**

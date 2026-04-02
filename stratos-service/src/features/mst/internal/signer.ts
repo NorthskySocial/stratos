@@ -1,28 +1,32 @@
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Keypair } from '@atproto/crypto'
-import { BlockMap, type UnsignedCommitData } from '@northskysocial/stratos-core'
+import {
+  BlockMap,
+  parseCid,
+  type UnsignedCommitData,
+} from '@northskysocial/stratos-core'
 import { ActorRepoTransactor } from '../../../actor-store-types.js'
-import { WritePhases } from '../../../api/records/types.js'
+import { WritePhases } from '../../../api/index.js'
 
 export interface SignedCommitResult {
-  commitCid: CID
+  commitCid: Cid
   commitBytes: Uint8Array
   rev: string
 }
 
 export interface SignedCommitData {
-  commitCid: CID
+  commitCid: Cid
   commitBytes: Uint8Array
   rev: string
   allBlocks: BlockMap
-  removedCids: CID[]
+  removedCids: Cid[]
 }
 
 export interface ExtraBlock {
-  cid: CID
+  cid: Cid
   bytes: Uint8Array
 }
 
@@ -57,7 +61,7 @@ export async function signCommit(
   const commitBytes = cborEncode(signedCommit)
   const atcuteCid = await cidCreate(0x71, commitBytes)
   const commitCidStr = cidToString(atcuteCid)
-  const commitCid = CID.parse(commitCidStr)
+  const commitCid = parseCid(commitCidStr)
 
   const allBlocks = new BlockMap()
   if (extraBlocks) {
@@ -66,11 +70,11 @@ export async function signCommit(
     }
   }
   for (const [cidStr, bytes] of unsigned.newBlocks) {
-    allBlocks.set(CID.parse(cidStr), bytes)
+    allBlocks.set(parseCid(cidStr), bytes)
   }
   allBlocks.set(commitCid, commitBytes)
 
-  const removedCids = unsigned.removedCids.map((s) => CID.parse(s))
+  const removedCids = unsigned.removedCids.map((s) => parseCid(s))
 
   return {
     commitCid,

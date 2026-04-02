@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import type {
   StubWriterService,
   WriteStubResult,
@@ -62,7 +62,7 @@ export class StubWriterServiceImpl implements StubWriterService {
     collection: string,
     rkey: string,
     recordType: string,
-    fullRecordCid: CID,
+    fullRecordCid: Cid,
     createdAt: string,
   ): Promise<WriteStubResult> {
     const agent = await this.getAgent(did)

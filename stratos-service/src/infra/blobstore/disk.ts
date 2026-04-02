@@ -1,13 +1,8 @@
 import fsSync from 'node:fs'
 import * as fs from 'node:fs/promises'
 import path from 'node:path'
-import { CID } from '@atproto/lex-data'
-import {
-  aggregateErrors,
-  chunkArray,
-  fileExists,
-  rmIfExists,
-} from '@atproto/common'
+import { Cid } from '@atproto/lex-data'
+import { aggregateErrors, chunkArray, fileExists, rmIfExists, } from '@atproto/common'
 import { randomStr } from '@atproto/crypto'
 import {
   BlobNotFoundError,
@@ -69,7 +64,7 @@ export class DiskBlobStore implements BlobStore {
    * @param cid - Content identifier
    * @returns Stored path for the CID
    */
-  getStoredPath(cid: CID): string {
+  getStoredPath(cid: Cid): string {
     return path.join(this.location, this.did, cid.toString())
   }
 
@@ -79,7 +74,7 @@ export class DiskBlobStore implements BlobStore {
    * @param cid - Content identifier
    * @returns Quarantine path for the CID
    */
-  getQuarantinePath(cid: CID): string {
+  getQuarantinePath(cid: Cid): string {
     return path.join(this.quarantineLocation, this.did, cid.toString())
   }
 
@@ -99,7 +94,7 @@ export class DiskBlobStore implements BlobStore {
    * @param cid - Content identifier
    * @returns True if stored storage has the file, false otherwise
    */
-  async hasStored(cid: CID): Promise<boolean> {
+  async hasStored(cid: Cid): Promise<boolean> {
     return fileExists(this.getStoredPath(cid))
   }
 
@@ -127,7 +122,7 @@ export class DiskBlobStore implements BlobStore {
    * @param key - Key for temporary storage
    * @param cid - Content identifier
    */
-  async makePermanent(key: string, cid: CID): Promise<void> {
+  async makePermanent(key: string, cid: Cid): Promise<void> {
     await this.ensureDir()
     const tmpPath = this.getTmpPath(key)
     const storedPath = this.getStoredPath(cid)
@@ -151,7 +146,7 @@ export class DiskBlobStore implements BlobStore {
    * @param bytes - Data to store
    */
   async putPermanent(
-    cid: CID,
+    cid: Cid,
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<void> {
     await this.ensureDir()
@@ -166,7 +161,7 @@ export class DiskBlobStore implements BlobStore {
    *
    * @param cid - Content identifier
    */
-  async quarantine(cid: CID): Promise<void> {
+  async quarantine(cid: Cid): Promise<void> {
     await this.ensureQuarantine()
     const storedPath = this.getStoredPath(cid)
     const quarantinePath = this.getQuarantinePath(cid)
@@ -185,7 +180,7 @@ export class DiskBlobStore implements BlobStore {
    *
    * @param cid - Content identifier
    */
-  async unquarantine(cid: CID): Promise<void> {
+  async unquarantine(cid: Cid): Promise<void> {
     await this.ensureDir()
     const quarantinePath = this.getQuarantinePath(cid)
     const storedPath = this.getStoredPath(cid)
@@ -205,7 +200,7 @@ export class DiskBlobStore implements BlobStore {
    * @param cid - Content identifier
    * @returns Bytes of the blob
    */
-  async getBytes(cid: CID): Promise<Uint8Array> {
+  async getBytes(cid: Cid): Promise<Uint8Array> {
     try {
       const buffer = await fs.readFile(this.getStoredPath(cid))
       return new Uint8Array(buffer)
@@ -222,7 +217,7 @@ export class DiskBlobStore implements BlobStore {
    *
    * @param cid - Content identifier
    */
-  async getStream(cid: CID): Promise<AsyncIterable<Uint8Array>> {
+  async getStream(cid: Cid): Promise<AsyncIterable<Uint8Array>> {
     const filePath = this.getStoredPath(cid)
     const exists = await fileExists(filePath)
     if (!exists) {
@@ -236,7 +231,7 @@ export class DiskBlobStore implements BlobStore {
    *
    * @param cid - Content identifier
    */
-  async delete(cid: CID): Promise<void> {
+  async delete(cid: Cid): Promise<void> {
     await rmIfExists(this.getStoredPath(cid))
   }
 
@@ -245,7 +240,7 @@ export class DiskBlobStore implements BlobStore {
    *
    * @param cids - Content identifiers
    */
-  async deleteMany(cids: CID[]): Promise<void> {
+  async deleteMany(cids: Cid[]): Promise<void> {
     const errors: unknown[] = []
     for (const chunk of chunkArray(cids, 500)) {
       await Promise.all(

@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { Cid as CID } from '@atproto/lex-data'
 import { and, asc, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm'
 import type {
   AtUri,
@@ -10,6 +10,7 @@ import type {
   RecordValue,
 } from '@northskysocial/stratos-core'
 import {
+  parseCid,
   pgStratosBacklink,
   pgStratosRecord,
   pgStratosRepoBlock,
@@ -61,7 +62,7 @@ export class PgRecordStoreReader implements RecordStoreReader {
           const parsed = new AtUriSyntax(row.uri)
           records.push({
             uri: row.uri,
-            cid: CID.parse(row.cid),
+            cid: parseCid(row.cid),
             collection: parsed.collection,
             rkey: parsed.rkey,
           })

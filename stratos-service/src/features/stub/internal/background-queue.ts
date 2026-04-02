@@ -1,5 +1,9 @@
-import { CID } from '@atproto/lex-data'
-import type { Logger, StubWriterService } from '@northskysocial/stratos-core'
+import { Cid } from '@atproto/lex-data'
+import {
+  Logger,
+  parseCid,
+  StubWriterService,
+} from '@northskysocial/stratos-core'
 
 interface StubWriteOp {
   type: 'write'
@@ -7,7 +11,7 @@ interface StubWriteOp {
   collection: string
   rkey: string
   recordType: string
-  fullRecordCid: CID
+  fullRecordCid: Cid
   createdAt: string
 }
 
@@ -52,7 +56,7 @@ export class BackgroundStubQueue {
    * @param collection - The collection name for the stub record.
    * @param rkey - The record key for the stub record.
    * @param recordType - The type of the stub record.
-   * @param fullRecordCid - The CID of the full record.
+   * @param fullRecordCid - The Cid of the full record.
    * @param createdAt - The creation timestamp of the stub record.
    */
   enqueueWrite(
@@ -60,12 +64,12 @@ export class BackgroundStubQueue {
     collection: string,
     rkey: string,
     recordType: string,
-    fullRecordCid: CID | string,
+    fullRecordCid: Cid | string,
     createdAt: string,
   ): void {
     const cid =
       typeof fullRecordCid === 'string'
-        ? CID.parse(fullRecordCid)
+        ? parseCid(fullRecordCid)
         : fullRecordCid
     this.queue.push({
       type: 'write',

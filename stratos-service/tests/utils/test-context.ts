@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { StratosServiceConfig } from '../../src/config.js'
 import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
@@ -6,7 +6,7 @@ import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 /**
  * Create a deterministic CID from data
  */
-export const createCid = async (data: string | Uint8Array): Promise<CID> => {
+export const createCid = async (data: string | Uint8Array): Promise<Cid> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)

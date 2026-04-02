@@ -1,5 +1,6 @@
 import { eq, inArray } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { parseCid } from '../atproto/index.js'
 import {
   StratosDbOrTx,
   stratosRepoBlock,
@@ -20,7 +21,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
    * Lock the root of the repository for exclusive access.
    * @returns Detailed root information including CID and revision, or null if not found.
    */
-  async lockRoot(): Promise<{ cid: CID; rev: string } | null> {
+  async lockRoot(): Promise<{ cid: Cid; rev: string } | null> {
     return this.getRootDetailed()
   }
 
@@ -30,7 +31,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
    * @param rev - New revision for the root.
    * @param did - New DID for the root.
    */
-  async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
+  async updateRoot(cid: Cid, rev: string, did: string): Promise<void> {
     await this.db
       .insert(stratosRepoRoot)
       .values({
@@ -55,7 +56,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
    * @param bytes - Bytes of the block content.
    * @param rev - Revision for which the block is being stored.
    */
-  async putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void> {
+  async putBlock(cid: Cid, bytes: Uint8Array, rev: string): Promise<void> {
     await this.db
       .insert(stratosRepoBlock)
       .values({
@@ -89,7 +90,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
         size: content.length,
         content: Buffer.from(content),
       })
-      this.cache.set(CID.parse(cidStr), content)
+      this.cache.set(parseCid(cidStr), content)
     }
 
     if (values.length === 0) return
@@ -105,7 +106,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
    * Delete a block from the repository.
    * @param cid - CID of the block to delete.
    */
-  async deleteBlock(cid: CID): Promise<void> {
+  async deleteBlock(cid: Cid): Promise<void> {
     await this.db
       .delete(stratosRepoBlock)
       .where(eq(stratosRepoBlock.cid, cid.toString()))
@@ -117,7 +118,7 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
    * Delete multiple blocks from the repository.
    * @param cids - CIDs of the blocks to delete.
    */
-  async deleteBlocks(cids: CID[]): Promise<void> {
+  async deleteBlocks(cids: Cid[]): Promise<void> {
     if (cids.length === 0) return
 
     const cidStrs = cids.map((c) => c.toString())

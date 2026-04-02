@@ -1,7 +1,7 @@
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import { AtUri } from '@atproto/syntax'
 import * as crypto from '@atproto/crypto'
 import { type CidLink, decode as cborDecode } from '@atcute/cbor'
@@ -19,6 +19,7 @@ import {
   type Logger,
   LruBlockCache,
   migrateStratosPgDb,
+  parseCid,
   pgSchema as pgActorSchema,
   pgStratosBacklink,
   pgStratosBlob,
@@ -83,7 +84,7 @@ export class PgActorRecordReader {
         records.push({
           uri: row.uri,
           path: `${parsed.collection}/${parsed.rkey}`,
-          cid: CID.parse(row.cid),
+          cid: parseCid(row.cid),
         })
       }
       cursor = res.at(-1)?.uri
@@ -234,14 +235,14 @@ export class PgActorRecordReader {
       : { applied: false }
   }
 
-  async getCurrentRecordCid(uri: string | AtUri): Promise<CID | null> {
+  async getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null> {
     const res = await this.db
       .select({ cid: pgStratosRecord.cid })
       .from(pgStratosRecord)
       .where(eq(pgStratosRecord.uri, uri.toString()))
       .limit(1)
 
-    return res.length > 0 ? CID.parse(res[0].cid) : null
+    return res.length > 0 ? parseCid(res[0].cid) : null
   }
 
   async getRecordBacklinks(opts: GetBacklinksOpts) {
@@ -309,7 +310,7 @@ export class PgActorRecordTransactor
 
   async putRecord(record: {
     uri: string
-    cid: CID
+    cid: Cid
     value: Record<string, unknown>
     content: Uint8Array
     indexedAt?: string
@@ -336,7 +337,7 @@ export class PgActorRecordTransactor
 
   async indexRecord(
     uri: string | AtUri,
-    cid: CID,
+    cid: Cid,
     record: Record<string, unknown> | null,
     action: 'create' | 'update' = 'create',
     repoRev: string,
@@ -440,23 +441,23 @@ export class PgActorRepoReader {
     return res.length > 0
   }
 
-  async getRoot(): Promise<CID | null> {
+  async getRoot(): Promise<Cid | null> {
     const root = await this.getRootDetailed()
     return root?.cid ?? null
   }
 
-  async getRootDetailed(): Promise<{ cid: CID; rev: string } | null> {
+  async getRootDetailed(): Promise<{ cid: Cid; rev: string } | null> {
     const res = (await this.db.execute(
       sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1`,
     )) as unknown as { cid: string; rev: string }[]
     if (res.length === 0) return null
     return {
-      cid: CID.parse(res[0].cid),
+      cid: parseCid(res[0].cid),
       rev: res[0].rev,
     }
   }
 
-  async getBytes(cid: CID): Promise<Uint8Array | null> {
+  async getBytes(cid: Cid): Promise<Uint8Array | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
     const cidStr = cid.toString()
@@ -475,17 +476,17 @@ export class PgActorRepoReader {
     return content
   }
 
-  async has(cid: CID): Promise<boolean> {
+  async has(cid: Cid): Promise<boolean> {
     const got = await this.getBytes(cid)
     return !!got
   }
 
-  async getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }> {
+  async getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }> {
     const cached = this.cache.getMany(cids)
     if (cached.missing.length < 1) return cached
 
     if (this.lru) {
-      const stillMissing: CID[] = []
+      const stillMissing: Cid[] = []
       for (const cid of cached.missing) {
         const lruHit = this.lru.get(cid.toString())
         if (lruHit) {
@@ -515,7 +516,7 @@ export class PgActorRepoReader {
         .from(pgStratosRepoBlock)
         .where(inArray(pgStratosRepoBlock.cid, batch))
       for (const row of res) {
-        const cid = CID.parse(row.cid)
+        const cid = parseCid(row.cid)
         const content = new Uint8Array(row.content)
         blocks.set(cid, content)
         this.lru?.set(row.cid, content)
@@ -534,7 +535,7 @@ export class PgActorRepoReader {
       const res = await this.getBlockRange(since, cursor)
       for (const row of res) {
         yield {
-          cid: CID.parse(row.cid),
+          cid: parseCid(row.cid),
           bytes: row.content,
         }
       }
@@ -599,7 +600,7 @@ export class PgActorRepoReader {
       sql`SELECT cid, content FROM stratos_repo_block WHERE "repoRev" = ${rev} LIMIT 15`,
     )) as unknown as { cid: string; content: Buffer }[]
     for (const row of res) {
-      const cid = CID.parse(row.cid)
+      const cid = parseCid(row.cid)
       if (!this.cache.has(cid)) {
         const content = new Uint8Array(row.content)
         this.cache.set(cid, content)
@@ -608,12 +609,12 @@ export class PgActorRepoReader {
     }
   }
 
-  async preloadRootSpine(commitCid: CID): Promise<void> {
+  async preloadRootSpine(commitCid: Cid): Promise<void> {
     const commitBytes = await this.getBytes(commitCid)
     if (!commitBytes) return
 
     const commit = cborDecode(commitBytes) as { data: CidLink }
-    const mstRootCid = CID.parse(commit.data.$link)
+    const mstRootCid = parseCid(commit.data.$link)
 
     const rootBytes = await this.getBytes(mstRootCid)
     if (!rootBytes) return
@@ -623,13 +624,13 @@ export class PgActorRepoReader {
       e: Array<{ t: CidLink | null }>
     }
 
-    const childCids: CID[] = []
+    const childCids: Cid[] = []
     if (rootNode.l) {
-      childCids.push(CID.parse(rootNode.l.$link))
+      childCids.push(parseCid(rootNode.l.$link))
     }
     for (const entry of rootNode.e) {
       if (entry.t) {
-        childCids.push(CID.parse(entry.t.$link))
+        childCids.push(parseCid(entry.t.$link))
       }
     }
 
@@ -649,7 +650,7 @@ export class PgActorRepoReader {
         .orderBy(asc(pgStratosRepoBlock.cid))
         .limit(1000)
       for (const row of res) {
-        cids.add(CID.parse(row.cid))
+        cids.add(parseCid(row.cid))
       }
       lastCid = res.at(-1)?.cid
     }
@@ -664,18 +665,18 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     super(db, logger, lru)
   }
 
-  async lockRoot(): Promise<{ cid: CID; rev: string } | null> {
+  async lockRoot(): Promise<{ cid: Cid; rev: string } | null> {
     const res = (await this.db.execute(
       sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1 FOR UPDATE NOWAIT`,
     )) as unknown as { cid: string; rev: string }[]
     if (res.length === 0) return null
     return {
-      cid: CID.parse(res[0].cid),
+      cid: parseCid(res[0].cid),
       rev: res[0].rev,
     }
   }
 
-  async updateRoot(cid: CID, rev: string, did: string): Promise<void> {
+  async updateRoot(cid: Cid, rev: string, did: string): Promise<void> {
     const cidStr = cid.toString()
     const indexedAt = new Date().toISOString()
     await this.db.execute(
@@ -683,7 +684,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     )
   }
 
-  async putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void> {
+  async putBlock(cid: Cid, bytes: Uint8Array, rev: string): Promise<void> {
     const cidStr = cid.toString()
     const content = Buffer.from(bytes)
     await this.db.execute(
@@ -709,7 +710,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
         size: content.length,
         content: Buffer.from(content),
       })
-      this.cache.set(CID.parse(cidStr), content)
+      this.cache.set(parseCid(cidStr), content)
       this.lru?.set(cidStr, content)
     }
 
@@ -724,7 +725,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     }
   }
 
-  async deleteBlock(cid: CID): Promise<void> {
+  async deleteBlock(cid: Cid): Promise<void> {
     await this.db
       .delete(pgStratosRepoBlock)
       .where(eq(pgStratosRepoBlock.cid, cid.toString()))
@@ -732,7 +733,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     this.lru?.delete(cid.toString())
   }
 
-  async deleteBlocks(cids: CID[]): Promise<void> {
+  async deleteBlocks(cids: Cid[]): Promise<void> {
     if (cids.length === 0) return
     const cidStrs = cids.map((c) => c.toString())
     for (let i = 0; i < cidStrs.length; i += 500) {
@@ -772,7 +773,7 @@ export class PgActorBlobReader {
     protected logger?: Logger,
   ) {}
 
-  async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
+  async getBlobMetadata(cid: Cid): Promise<BlobMetadata | null> {
     const found = await this.db
       .select()
       .from(pgStratosBlob)
@@ -787,7 +788,7 @@ export class PgActorBlobReader {
     return { size: found[0].size, mimeType: found[0].mimeType }
   }
 
-  async getBlob(cid: CID): Promise<{
+  async getBlob(cid: Cid): Promise<{
     size: number
     mimeType?: string
     stream: AsyncIterable<Uint8Array>
@@ -842,7 +843,7 @@ export class PgActorBlobReader {
     return res.map((row) => row.blobCid)
   }
 
-  async getBlobTakedownStatus(cid: CID): Promise<StatusAttr | null> {
+  async getBlobTakedownStatus(cid: Cid): Promise<StatusAttr | null> {
     const res = await this.db
       .select({ takedownRef: pgStratosBlob.takedownRef })
       .from(pgStratosBlob)
@@ -854,7 +855,7 @@ export class PgActorBlobReader {
       : { applied: false }
   }
 
-  async getRecordsForBlob(cid: CID): Promise<string[]> {
+  async getRecordsForBlob(cid: Cid): Promise<string[]> {
     const res = await this.db
       .select()
       .from(pgStratosRecordBlob)
@@ -862,7 +863,7 @@ export class PgActorBlobReader {
     return res.map((row) => row.recordUri)
   }
 
-  async hasBlob(cid: CID): Promise<boolean> {
+  async hasBlob(cid: Cid): Promise<boolean> {
     const res = await this.db
       .select({ cid: pgStratosBlob.cid })
       .from(pgStratosBlob)
@@ -880,7 +881,7 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
   }
 
   async trackBlob(blob: {
-    cid: CID
+    cid: Cid
     mimeType: string
     size: number
     tempKey?: string | null
@@ -903,7 +904,7 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
   }
 
   async associateBlobWithRecord(
-    blobCid: CID,
+    blobCid: Cid,
     recordUri: string,
   ): Promise<void> {
     await this.db
@@ -914,7 +915,7 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
 
   async processBlobs(
     recordUri: string,
-    blobs: Array<{ cid: CID; mimeType: string; tempKey?: string | null }>,
+    blobs: Array<{ cid: Cid; mimeType: string; tempKey?: string | null }>,
   ): Promise<void> {
     for (const blob of blobs) {
       if (blob.tempKey) {
@@ -937,7 +938,7 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
   }
 
   async updateBlobTakedown(
-    cid: CID,
+    cid: Cid,
     takedown: { applied: boolean; ref?: string },
   ): Promise<void> {
     await this.db
@@ -946,12 +947,12 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
       .where(eq(pgStratosBlob.cid, cid.toString()))
   }
 
-  async deleteOrphanBlobs(): Promise<CID[]> {
+  async deleteOrphanBlobs(): Promise<Cid[]> {
     const allBlobs = await this.db
       .select({ cid: pgStratosBlob.cid })
       .from(pgStratosBlob)
 
-    const deletedCids: CID[] = []
+    const deletedCids: Cid[] = []
     for (const { cid } of allBlobs) {
       const associations = await this.db
         .select({ blobCid: pgStratosRecordBlob.blobCid })
@@ -960,7 +961,7 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
         .limit(1)
 
       if (associations.length === 0) {
-        const cidObj = CID.parse(cid)
+        const cidObj = parseCid(cid)
         await this.blobstore.delete(cidObj)
         await this.db.delete(pgStratosBlob).where(eq(pgStratosBlob.cid, cid))
         deletedCids.push(cidObj)

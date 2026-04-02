@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { parseCid } from '../atproto/index.js'
 import { stratosBlob, StratosDbOrTx, stratosRecordBlob } from '../db/index.js'
 import { BlobStore, Logger, PreparedBlobRef } from '../types.js'
 import { StratosBlobReader } from './reader.js'
@@ -18,7 +19,7 @@ export class StratosBlobTransactor extends StratosBlobReader {
    * @returns A promise that resolves when the blob is successfully tracked.
    */
   async trackBlob(blob: {
-    cid: CID
+    cid: Cid
     mimeType: string
     size: number
     tempKey?: string | null
@@ -47,7 +48,7 @@ export class StratosBlobTransactor extends StratosBlobReader {
    * @returns A promise that resolves when the association is successfully created.
    */
   async associateBlobWithRecord(
-    blobCid: CID,
+    blobCid: Cid,
     recordUri: string,
   ): Promise<void> {
     await this.db
@@ -103,7 +104,7 @@ export class StratosBlobTransactor extends StratosBlobReader {
    * @returns A promise that resolves when the takedown status is successfully updated.
    */
   async updateBlobTakedown(
-    cid: CID,
+    cid: Cid,
     takedown: { applied: boolean; ref?: string },
   ): Promise<void> {
     await this.db
@@ -116,13 +117,13 @@ export class StratosBlobTransactor extends StratosBlobReader {
    * Deletes blobs that are not associated with any record from the database and blobstore.
    * @returns A promise that resolves with an array of CID objects of deleted blobs.
    */
-  async deleteOrphanBlobs(): Promise<CID[]> {
+  async deleteOrphanBlobs(): Promise<Cid[]> {
     // Using a subquery approach since Drizzle handles left joins differently
     const allBlobs = await this.db
       .select({ cid: stratosBlob.cid })
       .from(stratosBlob)
 
-    const deletedCids: CID[] = []
+    const deletedCids: Cid[] = []
     for (const { cid } of allBlobs) {
       const associations = await this.db
         .select({ blobCid: stratosRecordBlob.blobCid })
@@ -131,7 +132,7 @@ export class StratosBlobTransactor extends StratosBlobReader {
         .limit(1)
 
       if (associations.length === 0) {
-        const cidObj = CID.parse(cid)
+        const cidObj = parseCid(cid)
         await this.blobstore.delete(cidObj)
         await this.db.delete(stratosBlob).where(eq(stratosBlob.cid, cid))
         deletedCids.push(cidObj)
