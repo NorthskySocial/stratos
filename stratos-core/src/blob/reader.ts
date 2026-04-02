@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, isNull } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
 import {
   stratosBlob,
   StratosDbOrTx,
@@ -31,7 +31,7 @@ export class StratosBlobReader {
    * @param cid - CID of the blob to retrieve metadata for.
    * @returns A promise that resolves with the blob metadata if found, or null if not found.
    */
-  async getBlobMetadata(cid: CID): Promise<BlobMetadata | null> {
+  async getBlobMetadata(cid: Cid): Promise<BlobMetadata | null> {
     const found = await this.db
       .select()
       .from(stratosBlob)
@@ -56,7 +56,7 @@ export class StratosBlobReader {
    * @param cid - CID of the blob to retrieve.
    * @returns A promise that resolves with the blob metadata and stream if found, or null if not found.
    */
-  async getBlob(cid: CID): Promise<{
+  async getBlob(cid: Cid): Promise<{
     size: number
     mimeType?: string
     stream: AsyncIterable<Uint8Array>
@@ -127,7 +127,7 @@ export class StratosBlobReader {
    * @param cid - CID of the blob to retrieve takedown status for.
    * @returns A promise that resolves with the takedown status if found, or null if not found.
    */
-  async getBlobTakedownStatus(cid: CID): Promise<StatusAttr | null> {
+  async getBlobTakedownStatus(cid: Cid): Promise<StatusAttr | null> {
     const res = await this.db
       .select({ takedownRef: stratosBlob.takedownRef })
       .from(stratosBlob)
@@ -144,7 +144,7 @@ export class StratosBlobReader {
    * @param cid - CID of the blob to retrieve records for.
    * @returns A promise that resolves with an array of record URIs associated with the blob.
    */
-  async getRecordsForBlob(cid: CID): Promise<string[]> {
+  async getRecordsForBlob(cid: Cid): Promise<string[]> {
     const res = await this.db
       .select()
       .from(stratosRecordBlob)
@@ -157,7 +157,7 @@ export class StratosBlobReader {
    * @param cid - CID of the blob to check for existence.
    * @returns A promise that resolves with true if the blob exists, false otherwise.
    */
-  async hasBlob(cid: CID): Promise<boolean> {
+  async hasBlob(cid: Cid): Promise<boolean> {
     const res = await this.db
       .select({ cid: stratosBlob.cid })
       .from(stratosBlob)

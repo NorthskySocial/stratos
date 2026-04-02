@@ -5,7 +5,7 @@
  * StratosRecordReader/Transactor from stratos-core.
  */
 import { eq } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import type {
   GetRecordOptions,
   ListRecordsOptions,
@@ -121,7 +121,7 @@ export class SqliteRecordStoreReader implements RecordStoreReader {
    * @param cid - The CID of the record content.
    * @returns The record content as Uint8Array or null if not found.
    */
-  async getRecordContent(cid: CID): Promise<Uint8Array | null> {
+  async getRecordContent(cid: Cid): Promise<Uint8Array | null> {
     const rows = await this.db
       .select({ content: stratosRepoBlock.content })
       .from(stratosRepoBlock)
@@ -157,7 +157,7 @@ export class SqliteRecordStoreWriter
    */
   async putRecord(record: {
     uri: string
-    cid: CID
+    cid: Cid
     value: Record<string, unknown>
     content: Uint8Array
     indexedAt?: string

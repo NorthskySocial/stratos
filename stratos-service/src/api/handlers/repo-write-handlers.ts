@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream'
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { Did } from '@atproto/api'
@@ -135,9 +136,8 @@ export const uploadBlobHandler = (ctx: AppContext) =>
       }
 
       // Blob CIDs use raw codec (0x55) + SHA-256, matching the atproto reference
-      const RAW_CODEC = 0x55
       const hash = await sha256.digest(bytes)
-      const cid = CID.createV1(RAW_CODEC, hash)
+      const cid = CID.createV1(0x55, hash) as unknown as Cid
 
       // Phase 1: store temp blob (outside transaction, like the atproto PDS)
       const blobstore = ctx.actorStore.getBlobStore(did!)

@@ -3,7 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from '@atproto/lex-data'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { eq } from 'drizzle-orm'
@@ -15,9 +15,9 @@ import {
   stratosBacklink,
   StratosDb,
   stratosRecord,
-  stratosRepoBlock,
   StratosRecordReader,
   StratosRecordTransactor,
+  stratosRepoBlock,
 } from '../src/index.js'
 
 // Simple encoding for tests (just use JSON for simplicity)
@@ -33,7 +33,7 @@ const decodeRecord = (content: Uint8Array): Record<string, unknown> => {
 }
 
 // Create a deterministic CID from data
-const createCid = async (data: unknown): Promise<CID> => {
+const createCid = async (data: unknown): Promise<Cid> => {
   const bytes = encodeRecord(data)
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash) // 0x55 = raw codec

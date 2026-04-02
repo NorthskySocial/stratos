@@ -1,10 +1,10 @@
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 
 /**
  * A block in the repo (IPLD block)
  */
 export interface RepoBlock {
-  cid: CID
+  cid: Cid
   content: Uint8Array
 }
 
@@ -12,7 +12,7 @@ export interface RepoBlock {
  * Repo state information
  */
 export interface RepoState {
-  root: CID
+  root: Cid
   rev: string
 }
 
@@ -21,7 +21,7 @@ export interface RepoState {
  */
 export interface RepoStoreReader {
   /** Get current repo root CID */
-  getRoot(): Promise<CID | null>
+  getRoot(): Promise<Cid | null>
 
   /** Get current revision */
   getRev(): Promise<string | null>
@@ -30,13 +30,13 @@ export interface RepoStoreReader {
   getState(): Promise<RepoState | null>
 
   /** Get a block by CID */
-  getBlock(cid: CID): Promise<Uint8Array | null>
+  getBlock(cid: Cid): Promise<Uint8Array | null>
 
   /** Check if block exists */
-  hasBlock(cid: CID): Promise<boolean>
+  hasBlock(cid: Cid): Promise<boolean>
 
   /** Get multiple blocks by CIDs */
-  getBlocks(cids: CID[]): Promise<Map<string, Uint8Array>>
+  getBlocks(cids: Cid[]): Promise<Map<string, Uint8Array>>
 
   /** Count total blocks */
   blockCount(): Promise<number>
@@ -47,19 +47,19 @@ export interface RepoStoreReader {
  */
 export interface RepoStoreWriter extends RepoStoreReader {
   /** Update repo root and revision */
-  updateRoot(root: CID, rev: string): Promise<void>
+  updateRoot(root: Cid, rev: string): Promise<void>
 
   /** Store a single block */
-  putBlock(cid: CID, content: Uint8Array): Promise<void>
+  putBlock(cid: Cid, content: Uint8Array): Promise<void>
 
   /** Store multiple blocks */
   putBlocks(blocks: RepoBlock[]): Promise<void>
 
   /** Delete a block */
-  deleteBlock(cid: CID): Promise<void>
+  deleteBlock(cid: Cid): Promise<void>
 
   /** Delete multiple blocks */
-  deleteBlocks(cids: CID[]): Promise<void>
+  deleteBlocks(cids: Cid[]): Promise<void>
 
   /** Delete all blocks (dangerous - for cleanup only) */
   clearBlocks(): Promise<void>

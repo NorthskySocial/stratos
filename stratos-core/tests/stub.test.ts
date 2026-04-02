@@ -2,7 +2,7 @@
  * Unit tests for stub module domain logic
  */
 import { describe, expect, it } from 'vitest'
-import { CID } from '@atproto/lex-data'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import {
   extractSource,
@@ -12,7 +12,7 @@ import {
 } from '../src/index.js'
 
 // Helper to create deterministic CID
-async function createCid(data: string): Promise<CID> {
+async function createCid(data: string): Promise<Cid> {
   const bytes = new TextEncoder().encode(data)
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)

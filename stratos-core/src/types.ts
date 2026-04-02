@@ -1,5 +1,5 @@
 import { StratosError } from './shared/errors.js'
-import { CID } from '@atproto/lex-data'
+import { type Cid as LexCid } from '@atproto/lex-data'
 
 export enum ENROLLMENT_MODE {
   OPEN = 'open',
@@ -79,28 +79,28 @@ export interface BlobStore {
   /** Upload bytes to temporary storage, returns a key for later reference */
   putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string>
   /** Move a temporary blob to permanent storage */
-  makePermanent(key: string, cid: CID): Promise<void>
+  makePermanent(key: string, cid: LexCid): Promise<void>
   /** Upload bytes directly to permanent storage */
   putPermanent(
-    cid: CID,
+    cid: LexCid,
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
   ): Promise<void>
   /** Move a blob to quarantine (for takedowns) */
-  quarantine(cid: CID): Promise<void>
+  quarantine(cid: LexCid): Promise<void>
   /** Restore a blob from quarantine */
-  unquarantine(cid: CID): Promise<void>
+  unquarantine(cid: LexCid): Promise<void>
   /** Delete a blob from storage */
-  delete(cid: CID): Promise<void>
+  delete(cid: LexCid): Promise<void>
   /** Delete multiple blobs from storage */
-  deleteMany(cids: CID[]): Promise<void>
+  deleteMany(cids: LexCid[]): Promise<void>
   /** Check if a temporary blob exists */
   hasTemp(key: string): Promise<boolean>
   /** Check if a permanent blob exists */
-  hasStored(cid: CID): Promise<boolean>
+  hasStored(cid: LexCid): Promise<boolean>
   /** Get blob contents as bytes */
-  getBytes(cid: CID): Promise<Uint8Array>
+  getBytes(cid: LexCid): Promise<Uint8Array>
   /** Get blob contents as a stream */
-  getStream(cid: CID): Promise<AsyncIterable<Uint8Array>>
+  getStream(cid: LexCid): Promise<AsyncIterable<Uint8Array>>
 }
 
 /**
@@ -119,8 +119,8 @@ export type WriteOpAction = 'create' | 'update' | 'delete'
 export interface PreparedWrite {
   action: WriteOpAction
   uri: string
-  cid: CID | null
-  swapCid: CID | undefined
+  cid: LexCid | null
+  swapCid: LexCid | undefined
   record: Record<string, unknown> | null
   blobs: PreparedBlobRef[]
 }
@@ -131,7 +131,7 @@ export interface PreparedWrite {
 export interface PreparedCreate {
   action: 'create'
   uri: string
-  cid: CID
+  cid: LexCid
   swapCid: undefined
   record: Record<string, unknown>
   blobs: PreparedBlobRef[]
@@ -143,8 +143,8 @@ export interface PreparedCreate {
 export interface PreparedUpdate {
   action: 'update'
   uri: string
-  cid: CID
-  swapCid: CID | undefined
+  cid: LexCid
+  swapCid: LexCid | undefined
   record: Record<string, unknown>
   blobs: PreparedBlobRef[]
 }
@@ -156,7 +156,7 @@ export interface PreparedDelete {
   action: 'delete'
   uri: string
   cid: null
-  swapCid: CID | undefined
+  swapCid: LexCid | undefined
   record: null
   blobs: []
 }
@@ -165,7 +165,7 @@ export interface PreparedDelete {
  * Prepared blob reference
  */
 export interface PreparedBlobRef {
-  cid: CID
+  cid: LexCid
   mimeType: string
   constraints: BlobConstraints
   tempKey?: string
@@ -185,7 +185,7 @@ export interface BlobConstraints {
 export interface CommitOp {
   action: WriteOpAction
   path: string
-  cid: CID | null
+  cid: LexCid | null
   record: Record<string, unknown> | null
 }
 
@@ -193,10 +193,10 @@ export interface CommitOp {
  * Commit data with operations
  */
 export interface CommitData {
-  cid: CID
+  cid: LexCid
   rev: string
   since: string | null
-  prev: CID | null
+  prev: LexCid | null
   newBlocks: Map<string, Uint8Array>
   relevantBlocks: Map<string, Uint8Array>
   removedCids: Set<string>

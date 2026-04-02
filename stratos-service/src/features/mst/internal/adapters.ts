@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { Cid } from '@atproto/lex-data'
 import type { Keypair } from '@atproto/crypto'
 import type {
   RepoWrite,
@@ -47,7 +47,7 @@ export class ActorStoreSequencingService implements SequencingService {
    */
   async sequenceChange(
     _did: string,
-    commitCid: CID,
+    commitCid: Cid,
     rev: string,
     writes: RepoWrite[],
   ): Promise<void> {

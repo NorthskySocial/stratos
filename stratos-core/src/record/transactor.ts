@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
 import { AtUri } from '@atproto/syntax'
 import {
   stratosBacklink,
@@ -34,7 +34,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
    */
   async indexRecord(
     uri: AtUri | string,
-    cid: CID,
+    cid: Cid,
     record: Record<string, unknown> | null,
     action: 'create' | 'update' = 'create',
     repoRev: string,
@@ -153,7 +153,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
    */
   async putRecord(record: {
     uri: string
-    cid: CID
+    cid: Cid
     value: Record<string, unknown>
     content: Uint8Array
     indexedAt?: string

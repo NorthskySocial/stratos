@@ -1,10 +1,10 @@
 import {
-  ipldToLex as esmIpldToLex,
   BlobRef as EsmBlobRef,
+  ipldToLex as esmIpldToLex,
 } from '@atproto/lexicon'
-import { CID } from '@atproto/lex-data'
 import { CidLinkWrapper } from '@atcute/cid'
 import { createRequire } from 'node:module'
+import { parseCid } from '@northskysocial/stratos-core'
 
 const require = createRequire(import.meta.url)
 const cjsLexicon = require('@atproto/lexicon')
@@ -23,7 +23,7 @@ const fakeCidBytes = new Uint8Array([
   ...new Array(32).fill(0xab),
 ])
 const cidLink = new CidLinkWrapper(fakeCidBytes)
-const cid = CID.parse(cidLink.$link)
+const cid = parseCid(cidLink.$link)
 
 const blob = { $type: 'blob', ref: cid, mimeType: 'image/jpeg', size: 12345 }
 

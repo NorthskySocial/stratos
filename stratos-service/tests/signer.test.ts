@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CID } from '@atproto/lex-data'
+import { CID, Cid } from '@atproto/lex-data'
 import type { CidLink } from '@atcute/cid'
 import * as AtcuteCid from '@atcute/cid'
 import {
@@ -44,23 +44,23 @@ function createMockKeypair() {
 
 function createMockRepoTransactor(): ActorRepoTransactor {
   const blocks = new Map<string, Uint8Array>()
-  let rootCid: CID | null = null
+  let rootCid: Cid | null = null
   let rootRev: string | null = null
 
   return {
-    putBlock: vi.fn(async (cid: CID, bytes: Uint8Array, _rev: string) => {
+    putBlock: vi.fn(async (cid: Cid, bytes: Uint8Array, _rev: string) => {
       blocks.set(cid.toString(), bytes)
     }),
-    deleteBlocks: vi.fn(async (_cids: CID[]) => {}),
-    updateRoot: vi.fn(async (cid: CID, rev: string, _did: string) => {
+    deleteBlocks: vi.fn(async (_cids: Cid[]) => {}),
+    updateRoot: vi.fn(async (cid: Cid, rev: string, _did: string) => {
       rootCid = cid
       rootRev = rev
     }),
-    getBytes: vi.fn(async (cid: CID) => blocks.get(cid.toString()) ?? null),
-    has: vi.fn(async (cid: CID) => blocks.has(cid.toString())),
-    getBlocks: vi.fn(async (cids: CID[]) => {
+    getBytes: vi.fn(async (cid: Cid) => blocks.get(cid.toString()) ?? null),
+    has: vi.fn(async (cid: Cid) => blocks.has(cid.toString())),
+    getBlocks: vi.fn(async (cids: Cid[]) => {
       const found = new BlockMap()
-      const missing: CID[] = []
+      const missing: Cid[] = []
       for (const cid of cids) {
         const b = blocks.get(cid.toString())
         if (b) found.set(cid, b)

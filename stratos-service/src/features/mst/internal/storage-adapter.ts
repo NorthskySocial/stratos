@@ -1,6 +1,6 @@
-import { CID } from '@atproto/lex-data'
-import type { ReadonlyBlockStore, BlockMap } from '@atcute/mst'
+import type { BlockMap, ReadonlyBlockStore } from '@atcute/mst'
 import { ActorRepoReader } from '../../../actor-store-types.js'
+import { parseCid } from '@northskysocial/stratos-core'
 
 /**
  * A block store adapter for the Stratos actor repository.
@@ -16,7 +16,7 @@ export class StratosBlockStoreReader implements ReadonlyBlockStore {
    * @returns The block data as Uint8Array<ArrayBuffer> or null if not found.
    */
   async get(cid: string): Promise<Uint8Array<ArrayBuffer> | null> {
-    const bytes = await this.store.getBytes(CID.parse(cid))
+    const bytes = await this.store.getBytes(parseCid(cid))
     if (!bytes) return null
     return bytes as Uint8Array<ArrayBuffer>
   }
@@ -29,7 +29,7 @@ export class StratosBlockStoreReader implements ReadonlyBlockStore {
   async getMany(
     cids: string[],
   ): Promise<{ found: BlockMap; missing: string[] }> {
-    const result = await this.store.getBlocks(cids.map((c) => CID.parse(c)))
+    const result = await this.store.getBlocks(cids.map((c) => parseCid(c)))
     const found: BlockMap = new Map()
     for (const [cidStr, bytes] of result.blocks.entries()) {
       found.set(cidStr, bytes as Uint8Array<ArrayBuffer>)
@@ -43,6 +43,6 @@ export class StratosBlockStoreReader implements ReadonlyBlockStore {
    * @returns A Promise resolving to true if the block exists, false otherwise.
    */
   async has(cid: string): Promise<boolean> {
-    return this.store.has(CID.parse(cid))
+    return this.store.has(parseCid(cid))
   }
 }

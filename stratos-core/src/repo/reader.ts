@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm'
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { parseCid } from '../atproto/index.js'
 import { type CidLink, decode as cborDecode } from '@atcute/cbor'
 import {
   countAll,
@@ -13,7 +14,7 @@ import { Logger } from '../types.js'
  * Block for CAR streaming
  */
 export interface CarBlock {
-  cid: CID
+  cid: Cid
   bytes: Uint8Array
 }
 
@@ -23,25 +24,25 @@ export interface CarBlock {
 export class BlockMap {
   private map: Map<string, Uint8Array> = new Map()
 
-  set(cid: CID, bytes: Uint8Array): void {
+  set(cid: Cid, bytes: Uint8Array): void {
     this.map.set(cid.toString(), bytes)
   }
 
-  get(cid: CID): Uint8Array | undefined {
+  get(cid: Cid): Uint8Array | undefined {
     return this.map.get(cid.toString())
   }
 
-  has(cid: CID): boolean {
+  has(cid: Cid): boolean {
     return this.map.has(cid.toString())
   }
 
-  delete(cid: CID): boolean {
+  delete(cid: Cid): boolean {
     return this.map.delete(cid.toString())
   }
 
-  getMany(cids: CID[]): { blocks: BlockMap; missing: CID[] } {
+  getMany(cids: Cid[]): { blocks: BlockMap; missing: Cid[] } {
     const blocks = new BlockMap()
-    const missing: CID[] = []
+    const missing: Cid[] = []
     for (const cid of cids) {
       const bytes = this.get(cid)
       if (bytes) {
@@ -74,7 +75,7 @@ export class BlockMap {
 export class CidSet {
   private set: Set<string> = new Set()
 
-  constructor(cids?: CID[]) {
+  constructor(cids?: Cid[]) {
     if (cids) {
       for (const cid of cids) {
         this.add(cid)
@@ -82,20 +83,20 @@ export class CidSet {
     }
   }
 
-  add(cid: CID): void {
+  add(cid: Cid): void {
     this.set.add(cid.toString())
   }
 
-  has(cid: CID): boolean {
+  has(cid: Cid): boolean {
     return this.set.has(cid.toString())
   }
 
-  delete(cid: CID): boolean {
+  delete(cid: Cid): boolean {
     return this.set.delete(cid.toString())
   }
 
-  toList(): CID[] {
-    return Array.from(this.set).map((s) => CID.parse(s))
+  toList(): Cid[] {
+    return Array.from(this.set).map((s) => parseCid(s))
   }
 
   size(): number {
@@ -135,7 +136,7 @@ export class StratosSqlRepoReader {
    * Get the root block CID.
    * @returns The root block CID, or null if not found.
    */
-  async getRoot(): Promise<CID | null> {
+  async getRoot(): Promise<Cid | null> {
     const root = await this.getRootDetailed()
     return root?.cid ?? null
   }
@@ -144,14 +145,14 @@ export class StratosSqlRepoReader {
    * Get detailed information about the root block.
    * @returns Root block CID and revision, or null if not found.
    */
-  async getRootDetailed(): Promise<{ cid: CID; rev: string } | null> {
+  async getRootDetailed(): Promise<{ cid: Cid; rev: string } | null> {
     const res = await this.db
       .select({ cid: stratosRepoRoot.cid, rev: stratosRepoRoot.rev })
       .from(stratosRepoRoot)
       .limit(1)
     if (res.length === 0) return null
     return {
-      cid: CID.parse(res[0].cid),
+      cid: parseCid(res[0].cid),
       rev: res[0].rev,
     }
   }
@@ -161,7 +162,7 @@ export class StratosSqlRepoReader {
    * @param cid - The CID of the block to retrieve.
    * @returns The block content as Uint8Array, or null if not found.
    */
-  async getBytes(cid: CID): Promise<Uint8Array | null> {
+  async getBytes(cid: Cid): Promise<Uint8Array | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
     const found = await this.db
@@ -180,7 +181,7 @@ export class StratosSqlRepoReader {
    * @param cid - The CID of the block to check.
    * @returns True if the block exists, false otherwise.
    */
-  async has(cid: CID): Promise<boolean> {
+  async has(cid: Cid): Promise<boolean> {
     const got = await this.getBytes(cid)
     return !!got
   }
@@ -190,7 +191,7 @@ export class StratosSqlRepoReader {
    * @param cids - Array of CIDs to retrieve.
    * @returns Object containing blocks and missing CIDs.
    */
-  async getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }> {
+  async getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }> {
     const cached = this.cache.getMany(cids)
     if (cached.missing.length < 1) return cached
     const missing = new CidSet(cached.missing)
@@ -208,7 +209,7 @@ export class StratosSqlRepoReader {
         .from(stratosRepoBlock)
         .where(inArray(stratosRepoBlock.cid, batch))
       for (const row of res) {
-        const cid = CID.parse(row.cid)
+        const cid = parseCid(row.cid)
         blocks.set(cid, row.content as Uint8Array)
         missing.delete(cid)
       }
@@ -230,7 +231,7 @@ export class StratosSqlRepoReader {
       const res = await this.getBlockRange(since, cursor)
       for (const row of res) {
         yield {
-          cid: CID.parse(row.cid),
+          cid: parseCid(row.cid),
           bytes: row.content,
         }
       }
@@ -318,7 +319,7 @@ export class StratosSqlRepoReader {
       .where(eq(stratosRepoBlock.repoRev, rev))
       .limit(15)
     for (const row of res) {
-      const cid = CID.parse(row.cid)
+      const cid = parseCid(row.cid)
       if (!this.cache.has(cid)) {
         this.cache.set(cid, row.content as Uint8Array)
       }
@@ -330,12 +331,12 @@ export class StratosSqlRepoReader {
    * @param commitCid - CID of the commit to preload the root spine for.
    * @returns Promise that resolves when preloading is complete.
    */
-  async preloadRootSpine(commitCid: CID): Promise<void> {
+  async preloadRootSpine(commitCid: Cid): Promise<void> {
     const commitBytes = await this.getBytes(commitCid)
     if (!commitBytes) return
 
     const commit = cborDecode(commitBytes) as { data: CidLink }
-    const mstRootCid = CID.parse(commit.data.$link)
+    const mstRootCid = parseCid(commit.data.$link)
 
     const rootBytes = await this.getBytes(mstRootCid)
     if (!rootBytes) return
@@ -345,13 +346,13 @@ export class StratosSqlRepoReader {
       e: Array<{ t: CidLink | null }>
     }
 
-    const childCids: CID[] = []
+    const childCids: Cid[] = []
     if (rootNode.l) {
-      childCids.push(CID.parse(rootNode.l.$link))
+      childCids.push(parseCid(rootNode.l.$link))
     }
     for (const entry of rootNode.e) {
       if (entry.t) {
-        childCids.push(CID.parse(entry.t.$link))
+        childCids.push(parseCid(entry.t.$link))
       }
     }
 
@@ -375,7 +376,7 @@ export class StratosSqlRepoReader {
         .orderBy(asc(stratosRepoBlock.cid))
         .limit(1000)
       for (const row of res) {
-        cids.add(CID.parse(row.cid))
+        cids.add(parseCid(row.cid))
       }
       lastCid = res.at(-1)?.cid
     }

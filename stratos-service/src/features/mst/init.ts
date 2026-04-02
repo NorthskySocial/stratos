@@ -18,6 +18,11 @@ export interface MstContext {
   ) => SequencingService
 }
 
+/**
+ * Initialize MST context
+ * @param signingKey - Keypair for signing commits
+ * @returns MST context
+ */
 export function initMst(signingKey: Keypair): MstContext {
   const signingService = new KeypairSigningService(signingKey)
 

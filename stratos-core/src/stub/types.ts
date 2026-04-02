@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
 
 /**
  * Source field for stub records - indicates where to hydrate full content
@@ -42,7 +42,7 @@ export interface FullRecordWithBoundary {
   /** The full record value */
   value: Record<string, unknown>
   /** CID of the record */
-  cid: CID
+  cid: Cid
   /** Boundaries that restrict access */
   boundaries: string[]
 }
@@ -54,7 +54,7 @@ export interface GenerateStubInput {
   /** AT-URI of the record */
   uri: string
   /** CID of the full record */
-  cid: CID
+  cid: Cid
   /** The full record type ($type) */
   recordType: string
   /** Timestamp from full record */

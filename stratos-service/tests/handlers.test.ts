@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { Readable } from 'node:stream'
-import { CID } from '@atproto/lex-data'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
@@ -19,7 +19,7 @@ import * as dagCbor from '@ipld/dag-cbor'
 
 import { BlobStore } from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../src/context.js'
-import { encodeVarint, decodeVarint } from '../src/api/varint.js'
+import { decodeVarint, encodeVarint } from '../src/api/varint.js'
 
 const RAW_CODEC = 0x55
 const DAG_CBOR_CODEC = 0x71
@@ -36,7 +36,7 @@ function createMockBlobStore(): BlobStore {
       }
       return key
     }),
-    makePermanent: vi.fn().mockImplementation(async (key: string, cid: CID) => {
+    makePermanent: vi.fn().mockImplementation(async (key: string, cid: Cid) => {
       const bytes = tempStorage.get(key)
       if (bytes) {
         storage.set(cid.toString(), bytes)
@@ -45,17 +45,17 @@ function createMockBlobStore(): BlobStore {
     }),
     putPermanent: vi
       .fn()
-      .mockImplementation(async (cid: CID, bytes: Uint8Array) => {
+      .mockImplementation(async (cid: Cid, bytes: Uint8Array) => {
         if (Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) {
           storage.set(cid.toString(), bytes)
         }
       }),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockImplementation(async (cid: CID) => {
+    delete: vi.fn().mockImplementation(async (cid: Cid) => {
       storage.delete(cid.toString())
     }),
-    deleteMany: vi.fn().mockImplementation(async (cids: CID[]) => {
+    deleteMany: vi.fn().mockImplementation(async (cids: Cid[]) => {
       for (const cid of cids) {
         storage.delete(cid.toString())
       }
@@ -63,15 +63,15 @@ function createMockBlobStore(): BlobStore {
     hasTemp: vi.fn().mockImplementation(async (key: string) => {
       return tempStorage.has(key)
     }),
-    hasStored: vi.fn().mockImplementation(async (cid: CID) => {
+    hasStored: vi.fn().mockImplementation(async (cid: Cid) => {
       return storage.has(cid.toString())
     }),
-    getBytes: vi.fn().mockImplementation(async (cid: CID) => {
+    getBytes: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       return bytes
     }),
-    getStream: vi.fn().mockImplementation(async (cid: CID) => {
+    getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       async function* generate() {
@@ -370,7 +370,7 @@ describe('sync.getRecord CAR building', () => {
     const headerSlice = car.slice(bytesRead, bytesRead + headerLen)
     const decodedHeader = dagCbor.decode(headerSlice) as {
       version: number
-      roots: CID[]
+      roots: Cid[]
     }
     expect(decodedHeader.version).toBe(1)
     expect(decodedHeader.roots).toHaveLength(1)

@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { Cid as CID } from '@atproto/lex-data'
 import { eq, sql } from 'drizzle-orm'
 import type {
   BlobMetadata,
@@ -6,6 +6,7 @@ import type {
   BlobMetadataWriter,
 } from '@northskysocial/stratos-core'
 import {
+  parseCid,
   pgStratosBlob,
   pgStratosRecordBlob,
   type StratosPgDb,
@@ -73,7 +74,7 @@ export class PgBlobMetadataReader implements BlobMetadataReader {
         .where(eq(pgStratosRecordBlob.recordUri, recordUri))
 
       return rows.map((row) => ({
-        cid: CID.parse(row.cid),
+        cid: parseCid(row.cid),
         mimeType: row.mimeType,
         size: row.size,
         width: row.width ?? undefined,
@@ -90,7 +91,7 @@ export class PgBlobMetadataReader implements BlobMetadataReader {
         .select({ cid: pgStratosBlob.cid })
         .from(pgStratosBlob)
 
-      return rows.map((row) => CID.parse(row.cid))
+      return rows.map((row) => parseCid(row.cid))
     })
   }
 

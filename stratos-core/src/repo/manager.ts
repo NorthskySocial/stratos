@@ -1,4 +1,5 @@
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { parseCid } from '../atproto/index.js'
 import { BlockMap, StratosSqlRepoTransactor } from './index.js'
 import { buildCommit, type UnsignedCommitData } from '../mst/index.js'
 import { Logger } from '../types.js'
@@ -9,7 +10,7 @@ import { StratosPgDbOrTx } from '../db/pg.js'
  * Result of a repository write operation
  */
 export interface ApplyWritesResult {
-  commitCid: CID
+  commitCid: Cid
   rev: string
 }
 
@@ -26,7 +27,7 @@ export interface RepoWrite {
   collection: string
   rkey: string
   record?: unknown
-  cid?: CID
+  cid?: Cid
 }
 
 /**
@@ -42,7 +43,7 @@ export interface SigningService {
 export interface SequencingService {
   sequenceChange(
     did: string,
-    commitCid: CID,
+    commitCid: Cid,
     rev: string,
     writes: RepoWrite[],
   ): Promise<void>
@@ -70,7 +71,7 @@ export class ActorRepoManager {
   async applyWrites(
     did: string,
     writes: RepoWrite[],
-    extraBlocks?: { cid: CID; bytes: Uint8Array }[],
+    extraBlocks?: { cid: Cid; bytes: Uint8Array }[],
   ): Promise<ApplyWritesResult> {
     return await (
       this.db as {
@@ -137,7 +138,7 @@ export class ActorRepoManager {
     did: string,
     writes: RepoWrite[],
     transactor: StratosSqlRepoTransactor,
-    currentCommitCid: CID | null,
+    currentCommitCid: Cid | null,
   ): Promise<UnsignedCommitData> {
     const mstWrites = writes.map((w) => ({
       action: w.action,
@@ -164,7 +165,7 @@ export class ActorRepoManager {
     return {
       get: async (cidStr: string) => {
         try {
-          const bytes = await transactor.getBytes(CID.parse(cidStr))
+          const bytes = await transactor.getBytes(parseCid(cidStr))
           if (!bytes) return null
           return new Uint8Array(bytes.buffer) as Uint8Array<ArrayBuffer>
         } catch {
@@ -173,19 +174,19 @@ export class ActorRepoManager {
       },
       has: async (cidStr: string) => {
         try {
-          return await transactor.has(CID.parse(cidStr))
+          return await transactor.has(parseCid(cidStr))
         } catch {
           return false
         }
       },
       getMany: async (cidStrs: string[]) => {
         const result = await transactor.getBlocks(
-          cidStrs.map((c) => CID.parse(c)),
+          cidStrs.map((c) => parseCid(c)),
         )
         const missing: string[] = []
         const found = new Map<string, Uint8Array<ArrayBuffer>>()
         for (const cidStr of cidStrs) {
-          const bytes = result.blocks.get(CID.parse(cidStr))
+          const bytes = result.blocks.get(parseCid(cidStr))
           if (bytes) {
             found.set(
               cidStr,
@@ -210,7 +211,7 @@ export class ActorRepoManager {
   private async signCommit(
     did: string,
     unsigned: UnsignedCommitData,
-  ): Promise<{ commitCid: CID; commitBytes: Uint8Array }> {
+  ): Promise<{ commitCid: Cid; commitBytes: Uint8Array }> {
     const unsignedCommit = {
       did: unsigned.did,
       version: unsigned.version,
@@ -233,7 +234,7 @@ export class ActorRepoManager {
     const { create: cidCreate, toString: cidToString } =
       await import('@atcute/cid')
     const atcuteCid = await cidCreate(0x71, commitBytes)
-    const commitCid = CID.parse(cidToString(atcuteCid))
+    const commitCid = parseCid(cidToString(atcuteCid))
 
     return { commitCid, commitBytes }
   }
@@ -249,10 +250,10 @@ export class ActorRepoManager {
    */
   private async persistCommit(
     transactor: StratosSqlRepoTransactor,
-    commitCid: CID,
+    commitCid: Cid,
     commitBytes: Uint8Array,
     unsigned: UnsignedCommitData,
-    extraBlocks?: { cid: CID; bytes: Uint8Array }[],
+    extraBlocks?: { cid: Cid; bytes: Uint8Array }[],
   ): Promise<void> {
     const allBlocks = new BlockMap()
     if (extraBlocks) {
@@ -261,7 +262,7 @@ export class ActorRepoManager {
       }
     }
     for (const [cidStr, bytes] of unsigned.newBlocks) {
-      allBlocks.set(CID.parse(cidStr), bytes)
+      allBlocks.set(parseCid(cidStr), bytes)
     }
     allBlocks.set(commitCid, commitBytes)
 
@@ -269,7 +270,7 @@ export class ActorRepoManager {
 
     if (unsigned.removedCids.length > 0) {
       await transactor.deleteBlocks(
-        unsigned.removedCids.map((s) => CID.parse(s)),
+        unsigned.removedCids.map((s) => parseCid(s)),
       )
     }
   }

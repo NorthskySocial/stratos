@@ -74,6 +74,9 @@ export interface PdsFirehoseOptions {
   onError?: (err: Error) => void
 }
 
+/**
+ * PDS Firehose client for consuming real-time updates from a PDS (Personal Data Server).
+ */
 export class PdsFirehose {
   private subscription: FirehoseSubscription<
     typeof ComAtprotoSyncSubscribeRepos.mainSchema

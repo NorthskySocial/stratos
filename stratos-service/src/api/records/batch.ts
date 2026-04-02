@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { type Cid as CID } from '@atproto/lex-data'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { TID } from '@atproto/common-web'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
@@ -8,6 +8,7 @@ import {
   computeCid,
   encodeRecord,
   MstWriteOp,
+  parseCid,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
 import {
@@ -109,7 +110,7 @@ function buildMstOps(precomputed: PrecomputedBatchOp[]): MstWriteOp[] {
     action: pre.action,
     collection: pre.op.collection,
     rkey: pre.rkey,
-    cid: pre.action === 'delete' ? null : pre.cid!.toString(),
+    cid: pre.action === 'delete' ? null : parseCid(pre.cid!).toString(),
   }))
 }
 
@@ -150,7 +151,7 @@ async function prepareWriteResults(
         pre.action,
         rev,
       )
-      results.push({ uri: pre.uriStr, cid: pre.cid!.toString() })
+      results.push({ uri: pre.uriStr, cid: parseCid(pre.cid!).toString() })
     }
   }
   return results
@@ -188,7 +189,7 @@ async function buildCommitWithRetry(
         callerDid,
         async (reader) => {
           const rootDetails = await reader.repo.getRootDetailed()
-          const rootCid = rootDetails?.cid.toString() ?? null
+          const rootCid = rootDetails?.cid ? parseCid(rootDetails.cid).toString() : null
           const storage = new StratosBlockStoreReader(reader.repo)
           const unsigned = await buildCommit(storage, rootCid, {
             did: callerDid,
@@ -198,7 +199,7 @@ async function buildCommitWithRetry(
         },
         async ({ rootCid, unsigned }, store) => {
           const currentRoot = await store.repo.lockRoot()
-          assertRootUnchanged(currentRoot?.cid.toString() ?? null, rootCid)
+          assertRootUnchanged(currentRoot?.cid ? parseCid(currentRoot.cid).toString() : null, rootCid)
 
           await persistBatchBlocks(store, precomputed)
 

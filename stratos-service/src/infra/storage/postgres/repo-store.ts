@@ -1,4 +1,4 @@
-import { CID } from '@atproto/lex-data'
+import { Cid as CID } from '@atproto/lex-data'
 import { eq, sql } from 'drizzle-orm'
 import type {
   RepoStoreReader,
@@ -7,6 +7,7 @@ import type {
   RepoState,
 } from '@northskysocial/stratos-core'
 import {
+  parseCid,
   type StratosPgDb,
   type StratosPgDbOrTx,
   pgStratosRepoBlock,
@@ -39,7 +40,7 @@ export class PgRepoStoreReader implements RepoStoreReader {
       const row = rows[0]
       if (!row?.cid) return null
 
-      return CID.parse(row.cid)
+      return parseCid(row.cid)
     })
   }
 
@@ -65,7 +66,7 @@ export class PgRepoStoreReader implements RepoStoreReader {
       if (!row?.cid || !row?.rev) return null
 
       return {
-        root: CID.parse(row.cid),
+        root: parseCid(row.cid),
         rev: row.rev,
       }
     })

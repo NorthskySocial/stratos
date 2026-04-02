@@ -1,10 +1,10 @@
-import { CID } from '@atproto/lex-data'
-import { InvalidIdentifierError } from '../shared/errors.js'
 import {
-  cidForLex,
-  encode as cborEncode,
-  type LexValue,
-} from '@atproto/lex-cbor'
+  type Cid as LexCid,
+  decodeCid as decodeLexCid,
+  parseCid as parseLexCid,
+} from '@atproto/lex-data'
+import { InvalidIdentifierError } from '../shared/errors.js'
+import { cidForLex, encode as cborEncode, type LexValue, } from '@atproto/lex-cbor'
 import { fromUint8Array } from '@atcute/car'
 import { decode, fromBytes, toCidLink } from '@atcute/cbor'
 import { type CidLink, isCidLink } from '@atcute/cid'
@@ -25,10 +25,10 @@ export function encodeRecord(record: unknown): Uint8Array {
  * @param record - The record to compute the CID for.
  * @returns The computed CID.
  */
-export async function computeCid(record: unknown): Promise<CID> {
+export async function computeCid(record: unknown): Promise<LexCid> {
   // Compute CID using SHA-256 and DAG-CBOR codec
   const cid = await cidForLex(record as LexValue)
-  return CID.parse(cid.toString())
+  return parseCid(cid.toString())
 }
 
 export interface DecodedOp {
@@ -106,13 +106,23 @@ function readCarBlocks(buffer: Uint8Array): Map<string, unknown> {
  * @throws {InvalidIdentifierError} If the CID is invalid.
  */
 export function parseCid(
-  cid: CidLink | { bytes: Uint8Array } | CID | string,
-): CID {
-  if (cid instanceof CID) return cid
-  if (typeof cid === 'string') return CID.parse(cid)
-  if (isCidLink(cid)) return CID.parse(cid.$link)
-  if (cid && typeof cid === 'object' && 'bytes' in cid)
-    return CID.decode(cid.bytes)
+  cid: CidLink | { bytes: Uint8Array } | LexCid | string,
+): LexCid {
+  if (typeof cid === 'string') return parseLexCid(cid)
+  if (isCidLink(cid)) return parseLexCid(cid.$link)
+  if (cid && typeof cid === 'object' && 'bytes' in cid) {
+    const bytes = (cid as { bytes: Uint8Array }).bytes
+    return decodeLexCid(bytes)
+  }
+  // If it's already a Cid object (has version, code, multihash, bytes)
+  if (
+    cid &&
+    typeof cid === 'object' &&
+    'version' in cid &&
+    'multihash' in cid
+  ) {
+    return cid as LexCid
+  }
   throw new InvalidIdentifierError('invalid CID')
 }
 
@@ -128,7 +138,7 @@ export function jsonToLex(val: Record<string, unknown>): unknown {
 function toIpld(val: unknown): unknown {
   if (val == null || typeof val !== 'object') return val
   if (Array.isArray(val)) return val.map(toIpld)
-  if (isCidLink(val)) return CID.parse(val.$link)
+  if (isCidLink(val)) return parseCid(val.$link)
   if (val instanceof Uint8Array) return val
   if (val && typeof val === 'object' && '_isBuffer' in val && val._isBuffer) {
     return val as unknown as Uint8Array
@@ -138,7 +148,7 @@ function toIpld(val: unknown): unknown {
   const keys = Object.keys(obj)
 
   if (keys.length === 1 && typeof obj['$link'] === 'string') {
-    return CID.parse(obj['$link'])
+    return parseCid(obj['$link'])
   }
 
   if (keys.length === 1 && typeof obj['$bytes'] === 'string') {

@@ -156,7 +156,7 @@ export function assertRootUnchanged(
 ): void {
   if (currentRootCid !== expectedRootCid) {
     throw new InvalidRequestError(
-      'Concurrent modification detected, please retry',
+      `Concurrent modification detected (expected ${expectedRootCid}, found ${currentRootCid}), please retry`,
       'ConcurrentModification',
     )
   }

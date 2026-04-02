@@ -1,21 +1,16 @@
-import { CID } from '@atproto/lex-data'
+import { type Cid } from '@atproto/lex-data'
+import { parseCid, type UnsignedCommitData } from '@northskysocial/stratos-core'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import * as dagCbor from '@ipld/dag-cbor'
 import * as AtcuteCbor from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import * as AtcuteCid from '@atcute/cid'
 import * as CAR from '@atcute/car'
-import {
-  buildInclusionProof,
-  MemoryBlockStore,
-  NodeStore,
-  OverlayBlockStore,
-} from '@atcute/mst'
+import { buildInclusionProof, MemoryBlockStore, NodeStore, OverlayBlockStore, } from '@atcute/mst'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 
 import { fromUint8Array as repoFromCar } from '@atcute/repo'
-import { type UnsignedCommitData } from '@northskysocial/stratos-core'
 import { signCommit, StratosBlockStoreReader } from '../../features/index.js'
 import { validateUserAuth } from '../util.js'
 import { AppContext } from '../../context-types.js'
@@ -66,7 +61,7 @@ export const syncGetRecordHandler =
         const overlay = new OverlayBlockStore(new MemoryBlockStore(), adapter)
         const nodeStore = new NodeStore(overlay)
 
-        const commitRootStr = commitRoot.toString()
+        const commitRootStr = parseCid(commitRoot).toString()
         const commitBytes = await adapter.get(commitRootStr)
         if (!commitBytes) {
           throw new InvalidRequestError(
@@ -85,7 +80,7 @@ export const syncGetRecordHandler =
 
         // Collect all block CIDs: commit + proof nodes + record
         const blockCids = new Set<string>([commitRootStr, ...proofCids])
-        blockCids.add(record.cid)
+        blockCids.add(parseCid(record.cid).toString())
 
         // Build CAR
         const rootLink: CidLink = { $link: commitRootStr }
@@ -112,7 +107,7 @@ export const syncGetRecordHandler =
       }
 
       // Legacy fallback: minimal single-block CAR
-      const recordCid = CID.parse(record.cid)
+      const recordCid = parseCid(record.cid)
       let recordBytes = await store.repo.getBytes(recordCid)
       if (!recordBytes) {
         recordBytes = cborEncode(record.value as LexValue)
@@ -181,12 +176,12 @@ export const syncGetRepoHandler =
         throw new InvalidRequestError('Repo has no commits', 'RepoNotFound')
       }
 
-      const commitRootStr = commitRoot.toString()
+      const commitRootStr = parseCid(commitRoot).toString()
       const rootLink: CidLink = { $link: commitRootStr }
       const carBlocks: Array<{ cid: Uint8Array; data: Uint8Array }> = []
 
       for await (const block of store.repo.iterateCarBlocks()) {
-        const parsed = AtcuteCid.fromString(block.cid.toString())
+        const parsed = AtcuteCid.fromString(parseCid(block.cid).toString())
         carBlocks.push({ cid: parsed.bytes, data: block.bytes })
       }
 
@@ -409,7 +404,7 @@ async function persistImportedRepo(
     commit: { rev: string }
     records: Array<{ collection: string; rkey: string; cid: string }>
     signed: {
-      commitCid: CID
+      commitCid: Cid
       commitBytes: Uint8Array
       rev: string
     }
@@ -417,7 +412,7 @@ async function persistImportedRepo(
 ) {
   let count = 0
   for (const [cidStr, bytes] of data.blocks.entries()) {
-    await store.repo.putBlock(CID.parse(cidStr), bytes, data.commit.rev)
+    await store.repo.putBlock(parseCid(cidStr), bytes, data.commit.rev)
     count++
   }
 
@@ -430,7 +425,7 @@ async function persistImportedRepo(
       const value = AtcuteCbor.decode(recordBytes) as Record<string, unknown>
       await store.record.putRecord({
         uri: uri.toString(),
-        cid: CID.parse(record.cid),
+        cid: parseCid(record.cid),
         value,
         content: recordBytes,
         indexedAt: new Date().toISOString(),

@@ -10,7 +10,6 @@ export default tseslint.config(
       'node_modules/',
       '**/dist/',
       '**/node_modules/',
-      '**/tests/**',
       'test/**',
     ],
   },

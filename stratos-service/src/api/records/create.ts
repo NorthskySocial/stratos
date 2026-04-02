@@ -5,12 +5,13 @@ import * as crypto from '@atproto/crypto'
 import {
   computeCid,
   encodeRecord,
+  parseCid,
   RepoWrite,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
 import { type SequenceTrace, type WritePhases } from './types.js'
-import { CID } from '@atproto/lex-data'
+import { type Cid as CID } from '@atproto/lex-data'
 import {
   createRepoManager,
   ensureActorStoreExists as ensureStoreExists,
@@ -129,7 +130,7 @@ export async function createRecord(
 
   return {
     uri: result.uri.toString(),
-    cid: result.cid.toString(),
+    cid: parseCid(result.cid).toString(),
     commit: result.commit,
     phases,
   }
@@ -194,12 +195,12 @@ function enqueuePdsStub(
         collection,
         rkey,
         recordType,
-        cid,
+        parseCid(cid),
         createdAt,
       )
     } catch (err) {
       ctx.logger?.warn(
-        { did: callerDid, cid: cid.toString(), err },
+        { did: callerDid, cid: parseCid(cid).toString(), err },
         'failed to queue stub write',
       )
     }
@@ -322,7 +323,8 @@ async function executeTransaction(
     callerDid,
     async (reader) => {
       phases.connAcquire = performance.now() - attemptT0
-      return { rootCid: (await reader.repo.getRoot())?.toString() ?? null }
+      const root = await reader.repo.getRoot()
+      return { rootCid: root ? parseCid(root).toString() : null }
     },
     async (_prepared, store) => {
       const manager = createRepoManager(
@@ -354,9 +356,8 @@ async function executeTransaction(
       return {
         uri,
         cid,
-        cidStr: cid.toString(),
         commit: {
-          cid: writeResult.commitCid.toString(),
+          cid: parseCid(writeResult.commitCid).toString(),
           rev: writeResult.rev,
         },
       }
