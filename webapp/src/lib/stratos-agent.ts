@@ -5,6 +5,9 @@ import type { OAuthSession } from '@atproto/oauth-client-browser'
  * Creates an Agent that routes XRPC calls to a service URL
  * using the OAuth session's DPoP-authenticated fetch.
  *
+ * @param session - the OAuth session
+ * @param serviceUrl - the target service URL
+ * @returns an Agent that routes calls to the target service
  */
 export function createServiceAgent(
   session: OAuthSession,
@@ -13,6 +16,12 @@ export function createServiceAgent(
   return new Agent(createServiceFetch(session, serviceUrl))
 }
 
+/**
+ * Creates a fetch function that routes XRPC calls to a service URL
+ * @param session - the OAuth session
+ * @param serviceUrl - the target service URL
+ * @returns a fetch function that routes calls to the target service
+ */
 export function createServiceFetch(
   session: OAuthSession,
   serviceUrl: string,
@@ -25,6 +34,12 @@ export function createServiceFetch(
   }
 }
 
+/**
+ * Creates a Stratos Agent that routes XRPC calls to a specific Stratos service URL.
+ * @param session - the OAuth session
+ * @param serviceUrl - the target Stratos service URL
+ * @returns an Agent that routes calls to the target Stratos service
+ */
 export function createStratosAgent(
   session: OAuthSession,
   serviceUrl: string,

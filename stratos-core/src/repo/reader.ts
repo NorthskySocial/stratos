@@ -381,6 +381,10 @@ export class StratosSqlRepoReader {
     }
     return cids
   }
+
+  clearCache(): Promise<void> | void {
+    this.cache = new BlockMap()
+  }
 }
 
 /**

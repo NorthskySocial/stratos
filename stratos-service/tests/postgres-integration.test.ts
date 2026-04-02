@@ -7,31 +7,32 @@
  * Run: pnpm exec vitest run tests/postgres-integration.test.ts
  */
 import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  beforeEach,
   afterAll,
   afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
 } from 'vitest'
-import { AtUri } from '@atproto/syntax'
 import {
-  startPostgresContainer,
-  stopPostgresContainer,
-  createMockBlobStoreCreator,
   cborToRecord,
   createCid,
+  createMockBlobStoreCreator,
+  startPostgresContainer,
+  stopPostgresContainer,
 } from './helpers/test-env.js'
-import { PostgresActorStore } from '../src/adapters/index.js'
 import {
   createServicePgDb,
   migrateServicePgDb,
   type ServicePgDb,
 } from '../src/db/pg.js'
-import { PgEnrollmentStoreWriter } from '../src/adapters/index.js'
 import type { ActorStore } from '../src/actor-store-types.js'
 import postgres from 'postgres'
+import {
+  PgEnrollmentStoreWriter,
+  PostgresActorStore,
+} from '../src/infra/storage/postgres/index.js'
 
 describe('PostgreSQL Backend Integration', () => {
   let pgUrl: string

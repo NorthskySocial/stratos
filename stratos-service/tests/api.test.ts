@@ -18,7 +18,7 @@ import {
   StratosActorStore,
 } from '../src/context.js'
 import { createRecord } from '../src/api/index.js'
-import { WriteRateLimiter } from '../src/rate-limiter.js'
+import { WriteRateLimiter } from '../src/shared/rate-limiter.js'
 import { Did } from '@atproto/api'
 
 import { cborToRecord, createCid, createMockBlobStore } from './utils/index.js'

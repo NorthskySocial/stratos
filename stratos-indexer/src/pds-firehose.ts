@@ -1,22 +1,21 @@
 import { FirehoseSubscription } from '@atcute/firehose'
 import { fromBytes } from '@atcute/cbor'
 import { ComAtprotoSyncSubscribeRepos } from '@atcute/atproto'
-import type { WriteOpAction } from '@atproto/repo'
 import { AtUri } from '@atproto/syntax'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
-import type { BackgroundQueue } from '@atproto/bsky'
-import type { WorkerPool } from './worker-pool.ts'
-import type { CursorManager } from './cursor-manager.ts'
 import type { HandleDedup } from './handle-dedup.ts'
 import {
+  type BackgroundQueue,
   decodeCommitOps,
-  extractBoundaries,
+  ENROLLMENT_COLLECTION,
   jsonToLex,
   parseCid,
+  parseEnrollmentRecord,
 } from '@northskysocial/stratos-core'
 import { fromUint8Array } from '@atcute/car'
-
-const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
+import type { CursorManager } from './cursor-manager.ts'
+import type { WorkerPool } from './worker-pool.ts'
+import { WriteOpAction } from '@atproto/repo'
 
 type SubscribeReposMessage = ComAtprotoSyncSubscribeRepos.$message
 
@@ -65,16 +64,13 @@ interface SyncWork {
   >
 }
 
-type FirehoseWork = CommitWork | IdentityWork | AccountWork | SyncWork
+export type FirehoseWork = CommitWork | IdentityWork | AccountWork | SyncWork
 
 export interface PdsFirehoseOptions {
   repoProvider: string
-  indexingService: IndexingService
-  background: BackgroundQueue
-  workerPool: WorkerPool<FirehoseWork>
   cursorManager: CursorManager
-  enrollmentCallback: EnrollmentCallback
-  handleDedup: HandleDedup
+  workerPool: WorkerPool<FirehoseWork>
+  onWork: (work: FirehoseWork) => void
   onError?: (err: Error) => void
 }
 
@@ -146,7 +142,7 @@ export class PdsFirehose {
       },
       onConnectionError: (event: Event) => {
         this.opts.onError?.(
-          new Error('pds firehose connection error', { cause: event }),
+          new Error(`pds firehose connection error: ${JSON.stringify(event)}`),
         )
       },
       onError: (error: string, message?: string) => {
@@ -190,7 +186,9 @@ export class PdsFirehose {
       } catch (err) {
         if (this.running) {
           this.opts.onError?.(
-            new Error('pds firehose consumption error', { cause: err }),
+            new Error(
+              `pds firehose consumption error: ${err instanceof Error ? err.message : String(err)}`,
+            ),
           )
         }
       }
@@ -290,7 +288,9 @@ async function processCommit(
   const rawOps = message.ops
 
   if (handleDedup.shouldIndex(did)) {
-    background.add(() => indexingService.indexHandle(did, timestamp))
+    background.add(`indexHandle-${did}`, async () => {
+      await indexingService.indexHandle(did, timestamp)
+    })
   }
 
   console.log({ did, traceId }, 'processing firehose commit')
@@ -316,9 +316,7 @@ async function processCommit(
       uri,
       parseCid(op.cid),
       jsonToLex(op.record),
-      op.action === 'create'
-        ? ('create' as WriteOpAction)
-        : ('update' as WriteOpAction),
+      op.action === 'create' ? WriteOpAction.Create : WriteOpAction.Update,
       message.time,
     )
 
@@ -334,18 +332,25 @@ async function processCommit(
  */
 function checkEnrollmentOp(
   did: string,
-  op: { action: string; collection: string; record?: Record<string, unknown> },
+  op: {
+    action: string
+    collection: string
+    rkey: string
+    record?: Record<string, unknown>
+  },
   enrollmentCallback: EnrollmentCallback,
 ): void {
   if (op.collection !== ENROLLMENT_COLLECTION) return
 
   if (op.action === 'create' || op.action === 'update') {
     if (!op.record) return
-    const serviceUrl =
-      typeof op.record.service === 'string' ? op.record.service : ''
-    const boundaries = extractBoundaries(op.record)
-    if (serviceUrl) {
-      enrollmentCallback.onEnrollmentDiscovered(did, serviceUrl, boundaries)
+    const enrollment = parseEnrollmentRecord(op.record, op.rkey)
+    if (enrollment) {
+      enrollmentCallback.onEnrollmentDiscovered(
+        did,
+        enrollment.service,
+        enrollment.boundaries.map((b) => b.value),
+      )
     }
   } else if (op.action === 'delete') {
     enrollmentCallback.onEnrollmentRemoved(did)

@@ -2,7 +2,7 @@ import { decodeFirst } from '@atcute/cbor'
 import { Kysely } from 'kysely'
 import { extractBoundaries, StratosError } from '@northskysocial/stratos-core'
 import type { CursorManager } from './cursor-manager.ts'
-import type { StratosIndexerSchema, PostTable } from './schema.ts'
+import type { PostTable, StratosIndexerSchema } from './schema.ts'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 const INDEX_TRACE_WARN_LAG_MS = 5_000

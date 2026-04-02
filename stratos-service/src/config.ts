@@ -106,7 +106,7 @@ const envSchema = z
 
     // Admin auth (optional)
     STRATOS_ADMIN_PASSWORD: z.string().optional(),
-    // External allow list (optional)
+    // External allowlist (optional)
     STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
     STRATOS_VALKEY_URL: z.string().url().optional(),
     STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),

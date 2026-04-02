@@ -8,31 +8,28 @@ import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import { randomBytes } from 'node:crypto'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
-import { buildCommit } from '@northskysocial/stratos-core'
-
-import { StratosError } from '@northskysocial/stratos-core'
+import { buildCommit, StratosError } from '@northskysocial/stratos-core'
 import {
   type AppContext,
   createAppContext,
   destroyAppContext,
 } from './context.js'
 import { createLogger } from './logger.js'
-import { type StratosServiceConfig, envToConfig, parseEnv } from './config.js'
+import { envToConfig, parseEnv, type StratosServiceConfig } from './config.js'
 import { registerHandlers } from './api/handlers.js'
 import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
-import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
+import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
 import {
   registerEnrollmentHandlers,
   registerHydrationHandlers,
-} from './features/index.js'
-import {
-  StratosBlockStoreReader,
   signAndPersistCommit,
+  StratosBlockStoreReader,
 } from './features/index.js'
 
 export { type StratosServiceConfig, type AppContext }
-export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
+export { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
+export * from './shared/user-agent.js'
 
 /**
  * Stratos service server
@@ -45,6 +42,35 @@ export class StratosServer {
   constructor(ctx: AppContext, app: express.Application) {
     this.ctx = ctx
     this.app = app
+  }
+
+  /**
+   * Create and start the Stratos server
+   *
+   * @param cfg - Stratos service configuration
+   * @param blobstore - Blob store creator
+   * @param cborToRecord - CBOR to record conversion function
+   * @param logger - Optional logger instance
+   * @returns Promise resolving to StratosServer instance
+   */
+  static async create(
+    cfg: StratosServiceConfig,
+    blobstore: BlobStoreCreator,
+    cborToRecord: (content: Uint8Array) => Record<string, unknown>,
+    logger?: Logger,
+  ): Promise<StratosServer> {
+    const ctx = await createAppContext({
+      cfg,
+      blobstore,
+      cborToRecord,
+      logger,
+    })
+
+    const app = ctx.app
+    this.setupMiddleware(app, ctx)
+    this.registerRoutes(app, ctx, cfg)
+
+    return new StratosServer(ctx, app)
   }
 
   /**
@@ -305,6 +331,7 @@ export class StratosServer {
             {
               code: err.code,
               err: err.message,
+              cause: err.cause,
             },
             'domain error',
           )
@@ -342,35 +369,6 @@ export class StratosServer {
         })
       },
     )
-  }
-
-  /**
-   * Create and start the Stratos server
-   *
-   * @param cfg - Stratos service configuration
-   * @param blobstore - Blob store creator
-   * @param cborToRecord - CBOR to record conversion function
-   * @param logger - Optional logger instance
-   * @returns Promise resolving to StratosServer instance
-   */
-  static async create(
-    cfg: StratosServiceConfig,
-    blobstore: BlobStoreCreator,
-    cborToRecord: (content: Uint8Array) => Record<string, unknown>,
-    logger?: Logger,
-  ): Promise<StratosServer> {
-    const ctx = await createAppContext({
-      cfg,
-      blobstore,
-      cborToRecord,
-      logger,
-    })
-
-    const app = ctx.app
-    this.setupMiddleware(app, ctx)
-    this.registerRoutes(app, ctx, cfg)
-
-    return new StratosServer(ctx, app)
   }
 
   /**

@@ -1,5 +1,5 @@
-import { desc, asc, gt } from 'drizzle-orm'
-import { stratosSeq, type StratosDbOrTx } from '@northskysocial/stratos-core'
+import { asc, desc, gt } from 'drizzle-orm'
+import { type StratosDbOrTx, stratosSeq } from '@northskysocial/stratos-core'
 import type { SequenceOperations } from '../../actor-store-types.js'
 
 /**

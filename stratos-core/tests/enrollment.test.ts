@@ -73,7 +73,7 @@ describe('Enrollment Domain Logic', () => {
       expect(isDidAllowed(config, 'did:plc:random')).toBe(true)
     })
 
-    it('should only allow listed DIDs in allowlist mode', () => {
+    it('should only allowlisted DIDs in allowlist mode', () => {
       const config: EnrollmentConfig = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: ['did:plc:allowed1', 'did:plc:allowed2'],
@@ -96,7 +96,7 @@ describe('Enrollment Domain Logic', () => {
       expect(isPdsAllowed(config, 'https://any.pds')).toBe(true)
     })
 
-    it('should only allow listed PDS endpoints in allowlist mode', () => {
+    it('should only allowlisted PDS endpoints in allowlist mode', () => {
       const config: EnrollmentConfig = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],

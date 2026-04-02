@@ -62,12 +62,20 @@ function registerEnrollmentStatus(server: XrpcServer, ctx: AppContext): void {
   })
 }
 
+/**
+ * Build enrollment status response
+ * @param ctx - The application context
+ * @param did - The decentralized identifier (DID) of the enrollment
+ * @param enrollment - The enrollment record
+ * @param authenticatedDid - The authenticated DID, if available
+ * @returns The enrollment status response
+ */
 async function buildEnrollmentStatusResponse(
   ctx: AppContext,
   did: string,
   enrollment: Enrollment,
   authenticatedDid?: string,
-) {
+): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = {
     did,
     enrolled: true,
@@ -94,6 +102,14 @@ async function buildEnrollmentStatusResponse(
   return body
 }
 
+/**
+ * Try to create attestation for enrollment status
+ * @param ctx - The application context
+ * @param did - The decentralized identifier (DID) of the enrollment
+ * @param boundaries - The boundaries for attestation
+ * @param signingKeyDid - The signing key DID
+ * @returns The attestation result or undefined if failed
+ */
 async function tryCreateAttestation(
   ctx: AppContext,
   did: string,
@@ -308,6 +324,10 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
   )
 }
 
+/**
+ * Register remove boundary handler for admin
+ * @param ctx - The application context
+ */
 function registerRemoveBoundaryHandler(ctx: AppContext): void {
   // POST /xrpc/zone.stratos.admin.removeBoundary
   ctx.app.post(

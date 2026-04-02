@@ -16,14 +16,21 @@ export interface PdsAgent {
           createRecord: (params: {
             repo: string
             collection: string
-            rkey: string
-            record: unknown
-          }) => Promise<{ data: { uri: string; cid: string } }>
-          deleteRecord: (params: {
-            repo: string
-            collection: string
-            rkey: string
-          }) => Promise<void>
+            rkey?: string
+            record: Record<string, unknown>
+            swapRecord?: string | null
+            swapCommit?: string | null
+          }, opts?: Record<string, unknown>) => Promise<{ data: { uri: string; cid: string } }>
+          deleteRecord: (
+            params: {
+              repo: string
+              collection: string
+              rkey: string
+              swapRecord?: string | null
+              swapCommit?: string | null
+            },
+            opts?: Record<string, unknown>,
+          ) => Promise<void>
         }
       }
     }
@@ -76,7 +83,7 @@ export class StubWriterServiceImpl implements StubWriterService {
       repo: did,
       collection,
       rkey,
-      record: stub,
+      record: stub as unknown as Record<string, unknown>,
     })
 
     return {

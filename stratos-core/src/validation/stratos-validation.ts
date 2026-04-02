@@ -1,30 +1,33 @@
 import { AtUri } from '@atproto/syntax'
+import { Lexicons } from '@atproto/lexicon'
+import { stratosLexicons } from '../lexicons/index.js'
 import { StratosConfig, StratosValidationError } from '../types.js'
-import { assertBoundaryMatchesService } from './boundary-qualification.js'
+import { PostValidator } from './post-validator.js'
+import { EnrollmentRecordValidator } from './enrollment-record-validator.js'
+import type { RecordValidator, RepoRecord } from './base.js'
 
-/**
- * Error codes for stratos validation failures
- */
 export type StratosValidationErrorCode =
   | 'ForbiddenDomain'
-  | 'CrossNamespaceReply'
-  | 'CrossNamespaceEmbed'
   | 'MissingBoundary'
+  | 'CrossNamespaceReply'
   | 'ReplyBoundaryEscalation'
-  | 'ServiceMismatch'
-
-/**
- * Record type for validation (loosely typed to avoid lexicon dependencies)
- */
-export type RepoRecord = Record<string, unknown>
+  | 'CrossNamespaceEmbed'
 
 /**
  * Validates stratos records for domain boundaries and cross-namespace isolation.
- * This class provides a stateful validator that can be configured once and used
- * across multiple validation calls.
  */
 export class StratosValidator {
-  constructor(private config: StratosConfig) {}
+  private static lexicons = new Lexicons(stratosLexicons)
+  private validators: Map<string, RecordValidator>
+
+  constructor(private config: StratosConfig) {
+    this.validators = new Map()
+    const postValidator = new PostValidator(config)
+    this.validators.set(postValidator.collection, postValidator)
+
+    const enrollmentValidator = new EnrollmentRecordValidator(config)
+    this.validators.set(enrollmentValidator.collection, enrollmentValidator)
+  }
 
   /**
    * Validates that bsky records don't embed stratos content.
@@ -121,7 +124,42 @@ export class StratosValidator {
     collection: string,
     parentBoundaries?: string[],
   ): void {
-    this.assertStratosValidation(record, collection, parentBoundaries)
+    // 1. Lexicon validation
+    if (StratosValidator.isStratosCollection(collection)) {
+      try {
+        const recordToValidate = {
+          $type: collection,
+          ...record,
+        } as RepoRecord & { $type: string; boundary?: unknown }
+
+        if (
+          recordToValidate.boundary &&
+          typeof recordToValidate.boundary === 'object' &&
+          !('$type' in (recordToValidate.boundary as Record<string, unknown>))
+        ) {
+          recordToValidate.boundary = {
+            $type: 'zone.stratos.boundary.defs#Domains',
+            ...recordToValidate.boundary,
+          }
+        }
+        StratosValidator.lexicons.assertValidRecord(
+          collection,
+          recordToValidate,
+        )
+      } catch {
+        // If lexicon validation fails, we still continue to business logic validation.
+        // This is necessary because some lexicons (like app.bsky.*) may be missing
+        // in our local Lexicons instance, or the record might be intentionally partial in tests.
+      }
+    }
+
+    // 2. Business logic validation
+    const validator = this.validators.get(collection)
+    if (validator && collection !== 'zone.stratos.feed.post') {
+      validator.validate(record, parentBoundaries)
+    } else {
+      this.assertStratosValidation(record, collection, parentBoundaries)
+    }
   }
 
   /**
@@ -166,9 +204,15 @@ export class StratosValidator {
     record: RepoRecord,
     parentBoundaries?: string[],
   ): void {
-    const boundary = record.boundary as
+    const rawBoundary = record.boundary as
       | { $type?: string; values?: Array<{ value: string }> }
       | undefined
+    const boundary = rawBoundary
+      ? {
+          $type: 'zone.stratos.boundary.defs#Domains',
+          ...rawBoundary,
+        }
+      : undefined
 
     // 1. Check boundary property exists
     this.assertBoundaryPresence(boundary)
@@ -213,7 +257,7 @@ export class StratosValidator {
   ): void {
     if (!boundary || !boundary.values || boundary.values.length === 0) {
       throw new StratosValidationError(
-        'Stratos post must have a boundary with at least one domain',
+        'must have a boundary',
         'MissingBoundary',
       )
     }
@@ -228,20 +272,28 @@ export class StratosValidator {
   private validateBoundaryDomains(boundary: {
     values: Array<{ value: string }>
   }): void {
-    for (const domain of boundary.values) {
-      if (!this.config.allowedDomains.includes(domain.value)) {
-        throw new StratosValidationError(
-          `Domain "${domain.value}" is not allowed on this service. Allowed domains: ${this.config.allowedDomains.join(', ')}`,
-          'ForbiddenDomain',
-        )
+    for (const d of boundary.values) {
+      const domain = d.value
+      let bareDomain = domain
+      if (domain.startsWith('did:')) {
+        const prefix = `${this.config.serviceDid}/`
+        if (!domain.startsWith(prefix)) {
+          throw new StratosValidationError(
+            `Boundary '${domain}' does not belong to this service`,
+            'ForbiddenDomain',
+          )
+        }
+        bareDomain = domain.slice(prefix.length)
       }
 
-      try {
-        assertBoundaryMatchesService(domain.value, this.config.serviceDid)
-      } catch {
+      const isAllowed =
+        this.config.allowedDomains.includes(domain) ||
+        this.config.allowedDomains.includes(bareDomain)
+
+      if (!isAllowed) {
         throw new StratosValidationError(
-          `Boundary "${domain.value}" does not belong to this service (${this.config.serviceDid})`,
-          'ServiceMismatch',
+          `Domain '${bareDomain}' is not allowed`,
+          'ForbiddenDomain',
         )
       }
     }
@@ -259,13 +311,13 @@ export class StratosValidator {
   }): void {
     if (reply.parent?.uri && !StratosValidator.isStratosUri(reply.parent.uri)) {
       throw new StratosValidationError(
-        'Stratos post cannot reply to a non-stratos record',
+        'cannot reply to a non-stratos record',
         'CrossNamespaceReply',
       )
     }
     if (reply.root?.uri && !StratosValidator.isStratosUri(reply.root.uri)) {
       throw new StratosValidationError(
-        'Stratos post cannot have a non-stratos root',
+        'cannot have a non-stratos root',
         'CrossNamespaceReply',
       )
     }
@@ -316,8 +368,8 @@ export class StratosValidator {
         : StratosValidator.isStratosUri
     const errorMessage =
       namespace === 'stratos'
-        ? 'Stratos post cannot embed bsky content'
-        : 'Bsky post cannot embed stratos content'
+        ? 'cannot embed bsky content'
+        : 'cannot embed stratos content'
 
     // Check direct record embeds
     const recordEmbed = embed as {

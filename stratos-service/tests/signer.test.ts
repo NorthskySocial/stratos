@@ -48,13 +48,10 @@ function createMockRepoTransactor(): ActorRepoTransactor {
   let rootRev: string | null = null
 
   return {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     putBlock: vi.fn(async (cid: CID, bytes: Uint8Array, _rev: string) => {
       blocks.set(cid.toString(), bytes)
     }),
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     deleteBlocks: vi.fn(async (_cids: CID[]) => {}),
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     updateRoot: vi.fn(async (cid: CID, rev: string, _did: string) => {
       rootCid = cid
       rootRev = rev
@@ -277,7 +274,7 @@ describe('signAndPersistCommit', () => {
     expect((decoded.data as CidLink).$link).toBe(unsigned.data)
     expect(decoded.rev).toBe(unsigned.rev)
     expect(isBytes(decoded.sig)).toBe(true)
-    expect(fromBytes(decoded.sig as unknown as Bytes).length).toBe(64)
+    expect(fromBytes(decoded.sig as Bytes).length).toBe(64)
   })
 
   it('should delete removed CIDs when present', async () => {

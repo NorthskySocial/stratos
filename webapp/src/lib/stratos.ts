@@ -3,13 +3,9 @@ import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { encode as cborEncode } from '@atcute/cbor'
 import { verifySignature } from '@atproto/crypto'
 
-export const STRATOS_URL = import.meta.env.VITE_STRATOS_URL as
-  | string
-  | undefined
+export const STRATOS_URL = import.meta.env.VITE_STRATOS_URL
 
-export const APPVIEW_URL = import.meta.env.VITE_APPVIEW_URL as
-  | string
-  | undefined
+export const APPVIEW_URL = import.meta.env.VITE_APPVIEW_URL
 
 export interface ServiceAttestation {
   sig: Uint8Array

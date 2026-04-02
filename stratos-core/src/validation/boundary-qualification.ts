@@ -1,4 +1,22 @@
-const QUALIFIED_BOUNDARY_SEPARATOR = '/'
+/**
+ * Error thrown when a boundary does not belong to the expected service.
+ */
+export class BoundaryServiceMismatchError extends Error {
+  public readonly code = 'ServiceMismatch'
+
+  constructor(
+    public readonly boundary: string,
+    public readonly expectedServiceDid: string,
+    public readonly actualServiceDid: string,
+  ) {
+    super(
+      `Boundary "${boundary}" belongs to service ${actualServiceDid}, not ${expectedServiceDid}`,
+    )
+    this.name = 'BoundaryServiceMismatchError'
+  }
+}
+
+export const QUALIFIED_BOUNDARY_SEPARATOR = '/'
 
 /**
  * Qualify a bare boundary name with a service DID.
@@ -77,6 +95,7 @@ export function parseQualifiedBoundary(
  *
  * @param boundary - The qualified boundary to check.
  * @param serviceDid - The service DID to check against.
+ * @throws BoundaryServiceMismatchError if the boundary does not belong to the service.
  */
 export function assertBoundaryMatchesService(
   boundary: string,
@@ -109,22 +128,4 @@ export function ensureQualifiedBoundaries(
     }
     return qualifyBoundary(serviceDid, b)
   })
-}
-
-/**
- * Error thrown when a boundary does not belong to the expected service.
- */
-export class BoundaryServiceMismatchError extends Error {
-  public readonly code = 'ServiceMismatch'
-
-  constructor(
-    public readonly boundary: string,
-    public readonly expectedServiceDid: string,
-    public readonly actualServiceDid: string,
-  ) {
-    super(
-      `Boundary "${boundary}" belongs to service ${actualServiceDid}, not ${expectedServiceDid}`,
-    )
-    this.name = 'BoundaryServiceMismatchError'
-  }
 }

@@ -1,94 +1,51 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import * as fsSync from 'node:fs'
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import { EventEmitter } from 'node:events'
 import express from 'express'
 import * as crypto from '@atproto/crypto'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
-import { Agent } from '@atproto/api'
-import type { LexiconDoc } from '@atproto/lexicon'
 import { fileExists } from '@atproto/common'
-import { WriteRateLimiter } from './rate-limiter.js'
-import { RepoWriteLocks } from './repo-write-lock.js'
 
-import { createAttestationPayload } from '@northskysocial/stratos-core'
+import { sql } from 'drizzle-orm'
 import {
-  BackgroundStubQueue,
-  ExternalAllowListProvider,
+  createAttestationPayload,
+  DefaultLexiconProvider,
+} from '@northskysocial/stratos-core'
+import {
+  initEnrollment,
+  initHydration,
+  initRepo,
   MigratingBoundaryResolver,
-  PdsAgent,
-  ProfileRecordWriterImpl,
-  StubWriterServiceImpl,
 } from './features/index.js'
 
 import { getServiceDidWithFragment } from './config.js'
 import { createStorageContext } from './storage-context.js'
 import { createIdResolver } from './identity-resolver.js'
 import { createOAuthClientContext } from './oauth/client-factory.js'
-import { DpopVerifier } from './auth/index.js'
-import { buildUserAgent, createFetchWithUserAgent } from './user-agent.js'
+import { DpopVerifier } from './infra/auth/index.js'
+import {
+  type OAuthSessionStoreBackend,
+  type OAuthStateStoreBackend,
+} from './oauth/client.js'
+import {
+  buildUserAgent,
+  createFetchWithUserAgent,
+} from './shared/user-agent.js'
 import { VERSION } from './version.js'
-import { RedisCache } from './adapters/redis-cache.js'
-import { ServiceFactory } from './service-factory.js'
 import {
   type AppContext,
   type AppContextOptions,
   type EnrollmentEventEmitter,
   type SequenceEventEmitter,
+  StorageContext,
 } from './context-types.js'
-import { createAuthVerifiers } from './auth/verifiers.js'
+import { createAuthVerifiers } from './infra/auth/verifiers.js'
+import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 
 export * from './context-types.js'
 export { SqliteSequenceOps } from './storage/sqlite/sequence-ops.js'
 export { StratosActorStore } from './storage/sqlite/actor-store.js'
 export { SqliteEnrollmentStore } from './storage/sqlite/enrollment-store.js'
-
-/**
- * Load Stratos lexicon documents from the lexicons directory
- */
-export function loadStratosLexicons(): LexiconDoc[] {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url))
-  const lexiconsDir = path.resolve(__dirname, 'lexicons')
-  const lexicons: LexiconDoc[] = []
-
-  function loadFromDir(dir: string) {
-    if (!fsSync.existsSync(dir)) return
-    try {
-      const entries = fsSync.readdirSync(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          loadFromDir(fullPath)
-        } else if (entry.name.endsWith('.json')) {
-          const content = fsSync.readFileSync(fullPath, 'utf-8')
-          const doc = JSON.parse(content) as LexiconDoc
-          if (doc && doc.id) {
-            lexicons.push(doc)
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`[DEBUG_LOG] Error loading lexicon from ${dir}:`, err)
-    }
-  }
-
-  console.log(`[DEBUG_LOG] Loading lexicons from: ${lexiconsDir}`)
-  loadFromDir(lexiconsDir)
-  console.log(`[DEBUG_LOG] Loaded ${lexicons.length} lexicons`)
-  if (lexicons.length === 0) {
-    // Return at least one valid lexicon to satisfy XrpcServer
-    return [
-      {
-        lexicon: 1,
-        id: 'zone.stratos.empty',
-        defs: { main: { type: 'query' } },
-      } as LexiconDoc,
-    ]
-  }
-  return lexicons
-}
 
 /**
  * Loads the signing key from storage or creates a new one if it doesn't exist
@@ -117,15 +74,21 @@ async function loadSigningKey(
  * @param opts - Configuration options for the application context.
  * @returns Initialized application context.
  */
+// eslint-disable-next-line max-lines-per-function
 export async function createAppContext(
   opts: AppContextOptions,
 ): Promise<AppContext> {
   const { cfg, logger } = opts
 
-  const { fetchWithUserAgent } = initUserAgent(cfg)
+  const userAgent = buildUserAgent(
+    VERSION,
+    cfg.service.repoUrl || 'https://github.com/northskysocial/stratos',
+    cfg.userAgent.operatorContact ?? 'unknown',
+  )
+  const fetchWithUserAgent = createFetchWithUserAgent(userAgent)
 
   const storage = await createStorageContext(opts)
-  const { enrollmentStore, actorStore, db, destroy: storageDestroy } = storage
+  const { enrollmentStore, actorStore, destroy: storageDestroy } = storage
 
   const identity = await initIdentity(
     cfg,
@@ -136,48 +99,57 @@ export async function createAppContext(
   const { idResolver, signingKey, oauthClient } = identity
 
   const { enrollmentEvents, sequenceEvents } = initEventEmitters()
-  const allowListProvider = await initAllowListProvider(cfg, logger)
 
-  const { dpopVerifier, authVerifier } = initAuth(
+  const enrollmentCtx = await initEnrollment(
+    cfg,
+    enrollmentStore,
+    actorStore,
+    enrollmentEvents,
+    idResolver,
+    oauthClient,
+    logger,
+  )
+
+  const allowListProvider = enrollmentCtx.allowListProvider
+
+  const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
     cfg,
     idResolver,
     oauthClient,
     enrollmentStore,
     allowListProvider,
+    logger,
   )
 
-  const services = initStratosServices(
+  const hydrationCtx = initHydration(enrollmentStore)
+
+  const repoCtx = initRepo(
     cfg,
-    storage,
-    identity,
-    enrollmentEvents,
-    allowListProvider,
+    actorStore,
+    sequenceEvents,
+    oauthClient,
+    getServiceDidWithFragment(cfg),
     logger,
   )
 
   const ctx: AppContext = {
     cfg,
     version: VERSION,
-    idResolver,
-    oauthClient,
-    signingKey,
+    ...identity,
+    ...storage,
+    ...enrollmentCtx,
+    ...hydrationCtx,
+    ...repoCtx,
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
-    enrollmentStore,
-    actorStore,
-    db,
-    writeRateLimiter: initWriteRateLimiter(cfg),
-    rateLimits: undefined as any, // initialized below
-    repoWriteLocks: new RepoWriteLocks(),
-    ...services,
+    rateLimits: repoCtx.writeRateLimiter,
     authVerifier,
-    allowListProvider,
-    xrpcServer: new XrpcServer(loadStratosLexicons()),
+    xrpcServer,
+    lexiconProvider,
+    oauthStores: storage.oauthStores,
     app: initExpressApp(),
     logger,
     dpopVerifier,
-    enrollmentEvents,
-    sequenceEvents,
 
     async getActorSigningKey(did: string) {
       const keypair = await actorStore.loadSigningKey(did)
@@ -195,13 +167,26 @@ export async function createAppContext(
     },
 
     async checkHealth() {
-      return { status: 'ok', components: { db: 'ok', blobstore: 'ok' } }
+      const dbOk = await storage.db
+        ?.run(sql`SELECT 1`)
+        .then(() => 'ok' as const)
+        .catch(() => 'error' as const)
+      return {
+        status: dbOk === 'ok' ? 'ok' : 'error',
+        components: {
+          db: dbOk ?? 'error',
+          blobstore: 'ok',
+        },
+      }
     },
 
     async destroy() {
       await storageDestroy()
-      if (allowListProvider) await allowListProvider.stop()
-      this.stubQueue.stop()
+      repoCtx.repoWriteLocks.destroy()
+      repoCtx.stubQueue.stop()
+      if (enrollmentCtx.allowListProvider) {
+        await enrollmentCtx.allowListProvider.stop()
+      }
     },
   }
 
@@ -210,60 +195,51 @@ export async function createAppContext(
   return ctx
 }
 
-function initStratosServices(
-  cfg: AppContextOptions['cfg'],
-  storage: { enrollmentStore: any; actorStore: any },
-  identity: { signingKey: any; oauthClient: any },
-  enrollmentEvents: EnrollmentEventEmitter,
-  allowListProvider?: ExternalAllowListProvider,
-  logger?: AppContext['logger'],
-) {
-  const { enrollmentStore, actorStore } = storage
-  const { signingKey, oauthClient } = identity
-
-  const serviceFactory = new ServiceFactory({
-    enrollmentStore,
-    actorStore,
-    enrollmentEvents,
-    serviceUrl: cfg.service.publicUrl,
-    signingKey,
-    logger,
-  })
-
-  const stubWriter = initStubWriter(oauthClient, getServiceDidWithFragment(cfg))
-
-  return {
-    enrollmentService: serviceFactory.createEnrollmentService(),
-    profileRecordWriter: initProfileRecordWriter(oauthClient),
-    boundaryResolver: serviceFactory.createBoundaryResolver(),
-    stubWriter,
-    stubQueue: new BackgroundStubQueue(stubWriter, logger),
-  }
-}
-
+/**
+ * Initializes identity components for the application context.
+ * @param cfg - Configuration options for the application.
+ * @param oauthStores - OAuth stores for token management.
+ * @param fetchWithUserAgent - Fetch function with user agent.
+ * @param logger - Optional logger for logging.
+ * @returns Initialized identity components.
+ */
 async function initIdentity(
   cfg: AppContextOptions['cfg'],
-  oauthStores: any,
-  fetchWithUserAgent: any,
+  oauthStores: StorageContext['oauthStores'],
+  fetchWithUserAgent: typeof globalThis.fetch,
   logger?: AppContext['logger'],
 ) {
   const idResolver = createIdResolver(cfg, fetchWithUserAgent, logger)
   const signingKey = await loadSigningKey(cfg)
   const oauthClient = await createOAuthClientContext(
     cfg,
-    oauthStores,
+    oauthStores as {
+      sessionStore: OAuthSessionStoreBackend
+      stateStore: OAuthStateStoreBackend
+    },
     idResolver,
     fetchWithUserAgent,
   )
   return { idResolver, signingKey, oauthClient }
 }
 
+/**
+ * Initializes authentication components for the application context.
+ * @param cfg - Configuration options for the application.
+ * @param idResolver - Identity resolver for user authentication.
+ * @param oauthClient - OAuth client context for token management.
+ * @param enrollmentStore - Store for managing user enrollments.
+ * @param allowListProvider - Optional provider for external allowlists.
+ * @param logger - Logger instance for logging application events.
+ * @returns Initialized authentication components.
+ */
 function initAuth(
   cfg: AppContextOptions['cfg'],
   idResolver: AppContext['idResolver'],
   oauthClient: AppContext['oauthClient'],
   enrollmentStore: AppContext['enrollmentStore'],
   allowListProvider?: ExternalAllowListProvider,
+  logger?: AppContext['logger'],
 ) {
   const dpopVerifier = new DpopVerifier({
     serviceDid: cfg.service.did,
@@ -272,40 +248,30 @@ function initAuth(
     allowListProvider,
   })
 
+  const lexiconProvider = new DefaultLexiconProvider()
+  const xrpcServer = new XrpcServer(lexiconProvider.getAll())
+
   const authVerifier = createAuthVerifiers(
     cfg.service.did,
     idResolver,
     oauthClient,
+    cfg,
     enrollmentStore,
     cfg.admin?.password,
     dpopVerifier,
     allowListProvider,
     cfg.stratos.devMode === true,
     cfg.syncToken,
+    logger,
   )
 
-  return { dpopVerifier, authVerifier }
+  return { dpopVerifier, authVerifier, lexiconProvider, xrpcServer }
 }
 
-function initUserAgent(cfg: AppContextOptions['cfg']) {
-  const userAgent = buildUserAgent(
-    VERSION,
-    cfg.userAgent.repoUrl,
-    cfg.userAgent.operatorContact,
-  )
-  const fetchWithUserAgent = createFetchWithUserAgent(userAgent)
-  return { userAgent, fetchWithUserAgent }
-}
-
-function initWriteRateLimiter(cfg: AppContextOptions['cfg']): WriteRateLimiter {
-  return new WriteRateLimiter({
-    maxWrites: cfg.stratos?.writeRateLimit?.maxWrites ?? 300,
-    windowMs: cfg.stratos?.writeRateLimit?.windowMs ?? 60000,
-    cooldownMs: cfg.stratos?.writeRateLimit?.cooldownMs ?? 10000,
-    cooldownJitterMs: cfg.stratos?.writeRateLimit?.cooldownJitterMs ?? 0,
-  })
-}
-
+/**
+ * Initializes event emitters for the application context.
+ * @returns Initialized event emitters.
+ */
 function initEventEmitters() {
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
   const sequenceEvents: SequenceEventEmitter = new EventEmitter()
@@ -313,57 +279,20 @@ function initEventEmitters() {
   return { enrollmentEvents, sequenceEvents }
 }
 
-function initStubWriter(
-  oauthClient: AppContext['oauthClient'],
-  serviceDidWithFragment: string,
-): StubWriterServiceImpl {
-  return new StubWriterServiceImpl(async (did) => {
-    try {
-      const session = await oauthClient.restore(did)
-      return new Agent(session) as unknown as PdsAgent
-    } catch {
-      return null
-    }
-  }, serviceDidWithFragment)
-}
-
-function initProfileRecordWriter(
-  oauthClient: AppContext['oauthClient'],
-): ProfileRecordWriterImpl {
-  return new ProfileRecordWriterImpl(async (did: string) => {
-    try {
-      const session = await oauthClient.restore(did)
-      return { api: new Agent(session) }
-    } catch {
-      return null
-    }
-  })
-}
-
-async function initAllowListProvider(
-  cfg: AppContextOptions['cfg'],
-  logger?: AppContext['logger'],
-): Promise<ExternalAllowListProvider | undefined> {
-  if (!cfg.enrollment.allowListUrl) return undefined
-  const cache = cfg.enrollment.valkeyUrl
-    ? new RedisCache(cfg.enrollment.valkeyUrl)
-    : undefined
-  const provider = new ExternalAllowListProvider(
-    cfg.enrollment.allowListUrl,
-    cache,
-    cfg.enrollment.allowListBootstrapName,
-    logger,
-  )
-  await provider.start()
-  return provider
-}
-
+/**
+ * Initializes Express application for the application context.
+ * @returns Initialized Express application.
+ */
 function initExpressApp(): express.Express {
   const app = express()
   app.disable('x-powered-by')
   return app
 }
 
+/**
+ * Sets up the migration callback for the application context.
+ * @param ctx - Application context.
+ */
 function setupMigrationCallback(ctx: AppContext) {
   if (!(ctx.boundaryResolver instanceof MigratingBoundaryResolver)) return
 

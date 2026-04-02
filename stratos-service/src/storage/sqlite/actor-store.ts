@@ -36,18 +36,46 @@ import { SqliteSequenceOps } from './sequence-ops.js'
 class SqliteActorRecordReader implements IActorRecordReader {
   constructor(public readonly reader: StratosRecordReader) {}
 
+  /**
+   * Get the total number of records in the store
+   * @returns Total record count
+   */
   recordCount() {
     return this.reader.recordCount()
   }
+
+  /**
+   * List all records in the store
+   * @returns Array of ActorRecord objects
+   */
   listAll() {
     return this.reader.listAll()
   }
+
+  /**
+   * List all unique collection URIs in the store
+   * @returns Array of collection URIs
+   */
   listCollections() {
     return this.reader.listCollections()
   }
+
+  /**
+   * List records for a specific collection
+   * @param opts - Options for listing records
+   * @returns Array of ActorRecord objects
+   */
   listRecordsForCollection(opts: ListRecordsOpts) {
     return this.reader.listRecordsForCollection(opts)
   }
+
+  /**
+   * Get a specific record by URI and CID
+   * @param uri - URI of the record
+   * @param cid - CID of the record
+   * @param includeSoftDeleted - Include soft-deleted records (default: false)
+   * @returns ActorRecord object or undefined if not found
+   */
   getRecord(
     uri: string | AtUri,
     cid: string | null,
@@ -55,6 +83,14 @@ class SqliteActorRecordReader implements IActorRecordReader {
   ) {
     return this.reader.getRecord(uri, cid, includeSoftDeleted)
   }
+
+  /**
+   * Check if a record exists by URI and CID
+   * @param uri - URI of the record
+   * @param cid - CID of the record
+   * @param includeSoftDeleted - Include soft-deleted records (default: false)
+   * @returns True if record exists, false otherwise
+   */
   hasRecord(
     uri: string | AtUri,
     cid: string | null,
@@ -62,15 +98,40 @@ class SqliteActorRecordReader implements IActorRecordReader {
   ) {
     return this.reader.hasRecord(uri, cid, includeSoftDeleted)
   }
+
+  /**
+   * Get the takedown status of a record by URI
+   * @param uri - URI of the record
+   * @returns Takedown status of the record
+   */
   getRecordTakedownStatus(uri: string | AtUri) {
     return this.reader.getRecordTakedownStatus(uri)
   }
+
+  /**
+   * Get the current CID of a record by URI
+   * @param uri - URI of the record
+   * @returns CID of the current record or undefined if not found
+   */
   getCurrentRecordCid(uri: string | AtUri) {
     return this.reader.getCurrentRecordCid(uri)
   }
+
+  /**
+   * Get backlinks for a record by URI
+   * @param opts - Options for getting backlinks
+   * @returns Array of backlink records
+   */
   getRecordBacklinks(opts: GetBacklinksOpts) {
     return this.reader.getRecordBacklinks(opts)
   }
+
+  /**
+   * Get backlink conflicts for a record by URI and record data
+   * @param uri - URI of the record
+   * @param record - Record data to check for conflicts
+   * @returns Array of backlink conflicts
+   */
   getBacklinkConflicts(uri: string | AtUri, record: Record<string, unknown>) {
     return this.reader.getBacklinkConflicts(uri, record)
   }
@@ -87,6 +148,11 @@ class SqliteActorRecordTransactor
     super(transactor)
   }
 
+  /**
+   * Put a record with the given data
+   * @param record - Record data to put
+   * @returns Promise that resolves when the record is put
+   */
   putRecord(record: {
     uri: string
     cid: CID
@@ -97,6 +163,16 @@ class SqliteActorRecordTransactor
     return this.transactor.putRecord(record)
   }
 
+  /**
+   * Index a record with the given data
+   * @param uri - URI of the record
+   * @param cid - CID of the record
+   * @param record - Record data to index
+   * @param action - Action type ('create' or 'update')
+   * @param repoRev - Repository revision (optional)
+   * @param timestamp - Timestamp (optional)
+   * @returns Promise that resolves when the record is indexed
+   */
   indexRecord(
     uri: string | AtUri,
     cid: CID,
@@ -115,14 +191,29 @@ class SqliteActorRecordTransactor
     )
   }
 
+  /**
+   * Delete a record by URI
+   * @param uri - URI of the record to delete
+   * @returns Promise that resolves when the record is deleted
+   */
   deleteRecord(uri: string | AtUri) {
     return this.transactor.deleteRecord(uri)
   }
 
+  /**
+   * Remove backlinks for a record by URI
+   * @param uri - URI of the record to remove backlinks for
+   * @returns Promise that resolves when the backlinks are removed
+   */
   removeBacklinksByUri(uri: string | AtUri) {
     return this.transactor.removeBacklinksByUri(uri)
   }
 
+  /**
+   * Add backlinks for a record
+   * @param backlinks - Array of backlinks to add
+   * @returns Promise that resolves when the backlinks are added
+   */
   addBacklinks(
     backlinks: Array<{ uri: string | AtUri; path: string; linkTo: string }>,
   ) {
@@ -135,6 +226,12 @@ class SqliteActorRecordTransactor
     )
   }
 
+  /**
+   * Update the takedown status of a record
+   * @param uri - URI of the record to update
+   * @param takedown - Takedown status and reference (optional)
+   * @returns Promise that resolves when the takedown status is updated
+   */
   updateRecordTakedown(
     uri: string | AtUri,
     takedown: { applied: boolean; ref?: string },

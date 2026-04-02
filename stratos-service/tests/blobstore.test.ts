@@ -1,7 +1,7 @@
 /**
  * Tests for blob storage adapters (DiskBlobStore, S3BlobStoreAdapter)
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -11,10 +11,10 @@ import { sha256 } from 'multiformats/hashes/sha2'
 
 import { DiskBlobStore } from '../src/index.js'
 import {
-  readableToAsyncIterable,
   asyncIterableToReadable,
   collectAsyncIterable,
-} from '../src/blobstore/index.js'
+  readableToAsyncIterable,
+} from '../src/infra/blobstore/index.js'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<CID> => {

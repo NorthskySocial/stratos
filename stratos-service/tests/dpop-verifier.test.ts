@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import {
-  DpopVerifier,
-  DpopVerificationError,
-} from '../src/auth/dpop-verifier.js'
 import jwt from 'jsonwebtoken'
+import { DpopVerificationError, DpopVerifier } from '../src/infra/auth/index.js'
 
 describe('DpopVerifier', () => {
   const mockEnrollmentStore = {

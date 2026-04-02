@@ -1,3 +1,4 @@
+import { StratosError } from './shared/errors.js'
 import { CID } from '@atproto/lex-data'
 
 export enum ENROLLMENT_MODE {
@@ -63,9 +64,9 @@ export interface Logger {
 /**
  * Error thrown when a blob is not found in storage
  */
-export class BlobNotFoundError extends Error {
-  constructor(message = 'Blob not found') {
-    super(message)
+export class BlobNotFoundError extends StratosError {
+  constructor(message = 'Blob not found', options?: { cause?: unknown }) {
+    super(message, 'BlobNotFound', options)
     this.name = 'BlobNotFoundError'
   }
 }
@@ -254,12 +255,13 @@ export interface BacklinkOpts {
 /**
  * Stratos validation error
  */
-export class StratosValidationError extends Error {
+export class StratosValidationError extends StratosError {
   constructor(
     message: string,
-    public code: string,
+    public override code: string,
+    options?: { cause?: unknown },
   ) {
-    super(message)
+    super(message, code, options)
     this.name = 'StratosValidationError'
   }
 }

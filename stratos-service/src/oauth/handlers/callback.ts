@@ -7,7 +7,7 @@ import {
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
-import { validateEnrollment } from '../../auth/index.js'
+import { validateEnrollment } from '../../features/enrollment/internal/validation.js'
 
 export const handleCallback = (config: OAuthRoutesConfig) => {
   const {
