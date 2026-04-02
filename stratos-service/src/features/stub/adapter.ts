@@ -13,14 +13,17 @@ export interface PdsAgent {
     com: {
       atproto: {
         repo: {
-          createRecord: (params: {
-            repo: string
-            collection: string
-            rkey?: string
-            record: Record<string, unknown>
-            swapRecord?: string | null
-            swapCommit?: string | null
-          }, opts?: Record<string, unknown>) => Promise<{ data: { uri: string; cid: string } }>
+          createRecord: (
+            params: {
+              repo: string
+              collection: string
+              rkey?: string
+              record: Record<string, unknown>
+              swapRecord?: string | null
+              swapCommit?: string | null
+            },
+            opts?: Record<string, unknown>,
+          ) => Promise<{ data: { uri: string; cid: string } }>
           deleteRecord: (
             params: {
               repo: string

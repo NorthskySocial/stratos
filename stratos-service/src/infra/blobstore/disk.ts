@@ -2,7 +2,12 @@ import fsSync from 'node:fs'
 import * as fs from 'node:fs/promises'
 import path from 'node:path'
 import { Cid } from '@atproto/lex-data'
-import { aggregateErrors, chunkArray, fileExists, rmIfExists, } from '@atproto/common'
+import {
+  aggregateErrors,
+  chunkArray,
+  fileExists,
+  rmIfExists,
+} from '@atproto/common'
 import { randomStr } from '@atproto/crypto'
 import {
   BlobNotFoundError,

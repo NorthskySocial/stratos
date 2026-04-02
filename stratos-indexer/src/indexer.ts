@@ -21,7 +21,10 @@ import {
   backfillSingleActor,
 } from './backfill.js'
 import { EnrollmentCallback } from './pds/pds-firehose.ts'
-import type { NewStratosSyncCursor, StratosIndexerSchema } from './storage/schema.ts'
+import type {
+  NewStratosSyncCursor,
+  StratosIndexerSchema,
+} from './storage/schema.ts'
 
 export class Indexer {
   private static readonly BACKFILLED_TTL_MS = 30 * 60 * 1000
