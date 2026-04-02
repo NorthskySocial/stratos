@@ -1,3 +1,4 @@
+import { CID } from 'multiformats/cid'
 import { type Cid } from '@atproto/lex-data'
 import {
   S3BlobStore as AtprotoS3BlobStore,
@@ -98,7 +99,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    * @param cid - Content identifier for the permanent data
    */
   async makePermanent(key: string, cid: Cid): Promise<void> {
-    return this.inner.makePermanent(key, cid)
+    return this.inner.makePermanent(key, cid as unknown as CID)
   }
 
   /**
@@ -114,7 +115,7 @@ export class S3BlobStoreAdapter implements BlobStore {
     const input = !(Symbol.asyncIterator in bytes)
       ? bytes
       : asyncIterableToReadable(bytes)
-    return this.inner.putPermanent(cid, input)
+    return this.inner.putPermanent(cid as unknown as CID, input)
   }
 
   /**
@@ -124,7 +125,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    */
   async quarantine(cid: Cid): Promise<void> {
     try {
-      return await this.inner.quarantine(cid)
+      return await this.inner.quarantine(cid as unknown as CID)
     } catch (err) {
       // Re-throw with our BlobNotFoundError for consistency
       if (isBlobNotFoundError(err)) {
@@ -141,7 +142,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    */
   async unquarantine(cid: Cid): Promise<void> {
     try {
-      return await this.inner.unquarantine(cid)
+      return await this.inner.unquarantine(cid as unknown as CID)
     } catch (err) {
       if (isBlobNotFoundError(err)) {
         throw new BlobNotFoundError()
@@ -158,7 +159,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    */
   async getBytes(cid: Cid): Promise<Uint8Array> {
     try {
-      return await this.inner.getBytes(cid)
+      return await this.inner.getBytes(cid as unknown as CID)
     } catch (err) {
       if (isBlobNotFoundError(err)) {
         throw new BlobNotFoundError()
@@ -175,7 +176,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    */
   async getStream(cid: Cid): Promise<AsyncIterable<Uint8Array>> {
     try {
-      const readable = await this.inner.getStream(cid)
+      const readable = await this.inner.getStream(cid as unknown as CID)
       return readableToAsyncIterable(readable)
     } catch (err) {
       if (isBlobNotFoundError(err)) {
@@ -202,7 +203,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    * @returns True if the blob exists, false otherwise
    */
   async hasStored(cid: Cid): Promise<boolean> {
-    return this.inner.hasStored(cid)
+    return this.inner.hasStored(cid as unknown as CID)
   }
 
   /**
@@ -211,7 +212,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    * @param cid - Content identifier for the blob to delete
    */
   async delete(cid: Cid): Promise<void> {
-    return this.inner.delete(cid)
+    return this.inner.delete(cid as unknown as CID)
   }
 
   /**
@@ -220,7 +221,7 @@ export class S3BlobStoreAdapter implements BlobStore {
    * @param cids - Content identifiers for the blobs to delete
    */
   async deleteMany(cids: Cid[]): Promise<void> {
-    return this.inner.deleteMany(cids)
+    return this.inner.deleteMany(cids as unknown as CID[])
   }
 }
 

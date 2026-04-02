@@ -7,6 +7,9 @@ const DEFAULT_MAX_WRITES = 300
 const DEFAULT_WINDOW_MS = 60_000
 const DEFAULT_COOLDOWN_MS = 10_000
 
+/**
+ * Error thrown when a rate limit is exceeded.
+ */
 export class RateLimitError extends XRPCError {
   retryAfter: number
 
