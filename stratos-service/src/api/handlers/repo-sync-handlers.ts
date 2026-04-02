@@ -6,7 +6,12 @@ import * as AtcuteCbor from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import * as AtcuteCid from '@atcute/cid'
 import * as CAR from '@atcute/car'
-import { buildInclusionProof, MemoryBlockStore, NodeStore, OverlayBlockStore, } from '@atcute/mst'
+import {
+  buildInclusionProof,
+  MemoryBlockStore,
+  NodeStore,
+  OverlayBlockStore,
+} from '@atcute/mst'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 

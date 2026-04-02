@@ -189,7 +189,9 @@ async function buildCommitWithRetry(
         callerDid,
         async (reader) => {
           const rootDetails = await reader.repo.getRootDetailed()
-          const rootCid = rootDetails?.cid ? parseCid(rootDetails.cid).toString() : null
+          const rootCid = rootDetails?.cid
+            ? parseCid(rootDetails.cid).toString()
+            : null
           const storage = new StratosBlockStoreReader(reader.repo)
           const unsigned = await buildCommit(storage, rootCid, {
             did: callerDid,
@@ -199,7 +201,10 @@ async function buildCommitWithRetry(
         },
         async ({ rootCid, unsigned }, store) => {
           const currentRoot = await store.repo.lockRoot()
-          assertRootUnchanged(currentRoot?.cid ? parseCid(currentRoot.cid).toString() : null, rootCid)
+          assertRootUnchanged(
+            currentRoot?.cid ? parseCid(currentRoot.cid).toString() : null,
+            rootCid,
+          )
 
           await persistBatchBlocks(store, precomputed)
 

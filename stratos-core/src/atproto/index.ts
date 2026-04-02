@@ -4,7 +4,11 @@ import {
   parseCid as parseLexCid,
 } from '@atproto/lex-data'
 import { InvalidIdentifierError } from '../shared/errors.js'
-import { cidForLex, encode as cborEncode, type LexValue, } from '@atproto/lex-cbor'
+import {
+  cidForLex,
+  encode as cborEncode,
+  type LexValue,
+} from '@atproto/lex-cbor'
 import { fromUint8Array } from '@atcute/car'
 import { decode, fromBytes, toCidLink } from '@atcute/cbor'
 import { type CidLink, isCidLink } from '@atcute/cid'

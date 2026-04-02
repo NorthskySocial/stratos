@@ -1,6 +1,9 @@
 import { type NodeOAuthClient } from '@atproto/oauth-client-node'
 import { type Logger } from '@northskysocial/stratos-core'
-import { type RepoContext, type SequenceEventEmitter, } from '../../context-types.js'
+import {
+  type RepoContext,
+  type SequenceEventEmitter,
+} from '../../context-types.js'
 import { type StratosServiceConfig } from '../../config.js'
 import { type ActorStore } from '../../actor-store-types.js'
 import { WriteRateLimiter } from '../../shared/rate-limiter.js'
