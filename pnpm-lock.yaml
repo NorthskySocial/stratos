@@ -100,6 +100,9 @@ importers:
 
   stratos-core:
     dependencies:
+      '@atcute/atproto':
+        specifier: ^3.1.10
+        version: 3.1.10
       '@atcute/car':
         specifier: ^5.1.1
         version: 5.1.1
@@ -109,6 +112,9 @@ importers:
       '@atcute/cid':
         specifier: ^2.4.1
         version: 2.4.1
+      '@atcute/client':
+        specifier: ^4.2.1
+        version: 4.2.1
       '@atcute/mst':
         specifier: ^0.1.2
         version: 0.1.2
@@ -234,6 +240,9 @@ importers:
 
   stratos-service:
     dependencies:
+      '@atcute/atproto':
+        specifier: ^3.1.10
+        version: 3.1.10
       '@atcute/car':
         specifier: ^5.1.1
         version: 5.1.1
@@ -243,6 +252,9 @@ importers:
       '@atcute/cid':
         specifier: ^2.4.1
         version: 2.4.1
+      '@atcute/client':
+        specifier: ^4.2.1
+        version: 4.2.1
       '@atcute/mst':
         specifier: ^0.1.2
         version: 0.1.2
@@ -421,6 +433,9 @@ importers:
       '@atproto/oauth-client-browser':
         specifier: ^0.3.17
         version: 0.3.41
+      '@atproto/oauth-types':
+        specifier: ^0.6.3
+        version: 0.6.3
       '@atproto/syntax':
         specifier: ^0.3.0
         version: 0.3.4

@@ -3,6 +3,7 @@ import { BlockMap, StratosSqlRepoTransactor } from './index.js'
 import { buildCommit, type UnsignedCommitData } from '../mst/index.js'
 import { Logger } from '../types.js'
 import { StratosDbOrTx } from '../db/index.js'
+import { StratosPgDbOrTx } from '../db/pg.js'
 
 /**
  * Result of a repository write operation
@@ -11,6 +12,11 @@ export interface ApplyWritesResult {
   commitCid: CID
   rev: string
 }
+
+/**
+ * A type representing either a SQLite or Postgres database/transaction
+ */
+export type ActorStoreDb = StratosDbOrTx | StratosPgDbOrTx
 
 /**
  * A write operation for the repository
@@ -47,7 +53,7 @@ export interface SequencingService {
  */
 export class ActorRepoManager {
   constructor(
-    private db: StratosDbOrTx,
+    private db: ActorStoreDb,
     private signingService: SigningService,
     private sequencingService: SequencingService,
     private logger?: Logger,
@@ -69,11 +75,14 @@ export class ActorRepoManager {
     return await (
       this.db as {
         transaction: (
-          fn: (tx: StratosDbOrTx) => Promise<ApplyWritesResult>,
+          fn: (tx: ActorStoreDb) => Promise<ApplyWritesResult>,
         ) => Promise<ApplyWritesResult>
       }
-    ).transaction(async (tx: StratosDbOrTx) => {
-      const transactor = new StratosSqlRepoTransactor(tx, this.logger)
+    ).transaction(async (tx: ActorStoreDb) => {
+      const transactor = new StratosSqlRepoTransactor(
+        tx as StratosDbOrTx,
+        this.logger,
+      )
 
       // 1. Get the current root (and lock it if the DB supports it)
       const currentRootDetailed = await transactor.lockRoot()
@@ -157,7 +166,7 @@ export class ActorRepoManager {
         try {
           const bytes = await transactor.getBytes(CID.parse(cidStr))
           if (!bytes) return null
-          return new Uint8Array(bytes)
+          return new Uint8Array(bytes.buffer) as Uint8Array<ArrayBuffer>
         } catch {
           return null
         }
@@ -174,11 +183,14 @@ export class ActorRepoManager {
           cidStrs.map((c) => CID.parse(c)),
         )
         const missing: string[] = []
-        const found = new Map<string, Uint8Array>()
+        const found = new Map<string, Uint8Array<ArrayBuffer>>()
         for (const cidStr of cidStrs) {
           const bytes = result.blocks.get(CID.parse(cidStr))
           if (bytes) {
-            found.set(cidStr, bytes)
+            found.set(
+              cidStr,
+              new Uint8Array(bytes.buffer) as Uint8Array<ArrayBuffer>,
+            )
           } else {
             missing.push(cidStr)
           }

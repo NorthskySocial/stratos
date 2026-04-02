@@ -5,9 +5,13 @@ import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { CID } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
-import type { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
+import type {
+  BlobStore,
+  BlobStoreCreator,
+  BlobContentStore,
+} from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../../src/context.js'
-import { PostgresActorStore } from '../../src/adapters/index.js'
+import { PostgresStorageFactory as PostgresActorStore } from '../../src/infra/storage/postgres/factory.js'
 import type { ActorStore } from '../../src/actor-store-types.js'
 import {
   PostgreSqlContainer,
@@ -47,7 +51,7 @@ export async function createCid(data: string | Uint8Array): Promise<CID> {
   return CID.createV1(0x55, hash)
 }
 
-export function createMockBlobStore(): BlobStore {
+export function createMockBlobStore(): BlobStore & BlobContentStore {
   const storage = new Map<string, Uint8Array>()
   return {
     putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
@@ -67,10 +71,10 @@ export function createMockBlobStore(): BlobStore {
       .mockImplementation(
         async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
           if (!(Symbol.asyncIterator in bytes)) {
-            storage.set(cid.toString(), bytes)
+            storage.set(cid.toString(), bytes as Uint8Array)
           } else {
             const chunks: Uint8Array[] = []
-            for await (const chunk of bytes) {
+            for await (const chunk of bytes as AsyncIterable<Uint8Array>) {
               chunks.push(chunk)
             }
             const total = new Uint8Array(
@@ -95,23 +99,25 @@ export function createMockBlobStore(): BlobStore {
         storage.delete(cid.toString())
       }
     }),
-    hasTemp: vi
-      .fn()
-      .mockImplementation(async (key: string) => storage.has(key)),
+    deleteContent: vi.fn().mockImplementation(async (cid: CID) => {
+      storage.delete(cid.toString())
+    }),
+    hasTemp: vi.fn().mockImplementation(async (key: string) => storage.has(key)),
     hasStored: vi
       .fn()
       .mockImplementation(async (cid: CID) => storage.has(cid.toString())),
     getBytes: vi.fn().mockImplementation(async (cid: CID) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
+      if (!bytes) return null
       return bytes
     }),
     getStream: vi.fn().mockImplementation(async (cid: CID) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
+      if (!bytes) return null
       async function* generate() {
         yield bytes!
       }
+      // @ts-ignore - simplified stream for mock
       return generate()
     }),
   }
@@ -164,12 +170,13 @@ async function createSqliteBackend(): Promise<TestBackend> {
 async function createPostgresBackend(
   postgresUrl: string,
 ): Promise<TestBackend> {
-  const blobstore = createMockBlobStoreCreator()
+  const blobstore = createMockBlobStoreCreator() as unknown as (did: string) => BlobContentStore
   const actorStore = new PostgresActorStore({
     connectionString: postgresUrl,
-    blobstore,
+    serviceDb: {} as any,
+    blobContentStoreCreator: blobstore,
     cborToRecord,
-  })
+  }) as unknown as ActorStore
 
   return {
     actorStore,

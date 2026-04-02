@@ -8,21 +8,21 @@ import {
   type BlobStoreCreator,
   type BoundaryResolver,
   type EnrollmentService,
+  type EnrollmentStoreReader,
   type Logger,
   type StubWriterService,
+  type LexiconProvider,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
-import {
-  BackgroundStubQueue,
-  ExternalAllowListProvider,
-} from './features/index.js'
+import { BackgroundStubQueue } from './features/stub/internal/background-queue.js'
+import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { type StratosServiceConfig } from './config.js'
 import { type EnrollmentStore } from './oauth/routes.js'
 import { type ServiceDb } from './db/index.js'
-import { AuthVerifiers } from './auth/verifiers.js'
-import { DpopVerifier } from './auth/index.js'
-import { WriteRateLimiter } from './rate-limiter.js'
-import { RepoWriteLocks } from './repo-write-lock.js'
+import { AuthVerifiers } from './infra/auth/verifiers.js'
+import { DpopVerifier } from './infra/auth/index.js'
+import { WriteRateLimiter } from './shared/rate-limiter.js'
+import { RepoWriteLocks } from './shared/repo-write-lock.js'
 
 /**
  * Identity context for Stratos service
@@ -47,31 +47,68 @@ export interface IdentityContext {
 export interface StorageContext {
   db?: ServiceDb
   actorStore: ActorStore
-  enrollmentStore: EnrollmentStore
+  enrollmentStore: EnrollmentStore & EnrollmentStoreReader
   writeRateLimiter: WriteRateLimiter
   rateLimits: WriteRateLimiter // Added for compatibility
   repoWriteLocks: RepoWriteLocks
+  oauthStores: {
+    sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
+    stateStore: import('./oauth/client.js').OAuthStateStoreBackend
+  }
+}
+
+/**
+ * Enrollment context for Stratos service
+ */
+export interface EnrollmentContext {
+  enrollmentService: EnrollmentService
+  enrollmentStore: EnrollmentStore & EnrollmentStoreReader
+  profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
+  allowListProvider?: ExternalAllowListProvider
+  enrollmentEvents: EnrollmentEventEmitter
+}
+
+/**
+ * Hydration context for Stratos service
+ */
+export interface HydrationContext {
+  boundaryResolver: BoundaryResolver
+}
+
+/**
+ * Repository context for Stratos service
+ */
+export interface RepoContext {
+  actorStore: ActorStore
+  repoWriteLocks: RepoWriteLocks
+  writeRateLimiter: WriteRateLimiter
+  stubWriter: StubWriterService
+  stubQueue: BackgroundStubQueue
+  sequenceEvents: SequenceEventEmitter
 }
 
 /**
  * Application context for Stratos service
  */
-export interface AppContext extends IdentityContext, StorageContext {
+export interface AppContext
+  extends
+    IdentityContext,
+    StorageContext,
+    EnrollmentContext,
+    HydrationContext,
+    RepoContext {
   cfg: StratosServiceConfig
   version: string
-  enrollmentService: EnrollmentService
-  profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
-  boundaryResolver: BoundaryResolver
-  stubWriter: StubWriterService
-  stubQueue: BackgroundStubQueue
   authVerifier: AuthVerifiers
-  allowListProvider?: ExternalAllowListProvider
   xrpcServer: XrpcServer
+  lexiconProvider: LexiconProvider
   app: express.Application
   logger?: Logger
   dpopVerifier: DpopVerifier
-  enrollmentEvents: EnrollmentEventEmitter
-  sequenceEvents: SequenceEventEmitter
+  oauthStores: {
+    sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
+    stateStore: import('./oauth/client.js').OAuthStateStoreBackend
+  }
   destroy: () => Promise<void>
 
   checkHealth(): Promise<{

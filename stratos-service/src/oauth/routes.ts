@@ -2,15 +2,14 @@ import express from 'express'
 import { Agent } from '@atproto/api'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
-import type { Logger } from '@northskysocial/stratos-core'
-import { EnrollmentConfig } from '../auth/enrollment.js'
-import type { RequestHeaders } from '../auth/index.js'
-import type { AllowListProvider } from '../features/index.js'
+import type { EnrollmentConfig, Logger } from '@northskysocial/stratos-core'
+import type { RequestHeaders } from '../infra/auth/index.js'
 
 import { handleAuthorize } from './handlers/authorize.js'
 import { handleCallback } from './handlers/callback.js'
 import { handleStatus } from './handlers/status.js'
 import { handleRevoke } from './handlers/revoke.js'
+import { AllowListProvider } from '../features/enrollment/internal/allow-list.js'
 
 /**
  * Converts a service DID to a valid AT Protocol record key.
@@ -68,7 +67,7 @@ export interface OAuthRoutesConfig {
   allowListProvider?: AllowListProvider
   logger?: Logger
   devMode?: boolean
-  dpopVerifier: import('../auth/dpop-verifier.js').DpopVerifier
+  dpopVerifier: import('../infra/auth/dpop-verifier.js').DpopVerifier
   profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   initRepo: (did: string) => Promise<void>
   createSigningKey: (did: string) => Promise<string>

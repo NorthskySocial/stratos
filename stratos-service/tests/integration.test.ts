@@ -20,7 +20,8 @@ import {
 import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import { EnrollmentServiceImpl } from '../src/features/index.js'
-import { EnrollmentConfig, validateEnrollment } from '../src/auth/index.js'
+import { type StratosServiceConfig } from '../src/config.js'
+import { validateEnrollment } from '../src/features/enrollment/internal/validation.js'
 import {
   closeServiceDb,
   createServiceDb,
@@ -174,7 +175,7 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('Enrollment Flow', () => {
     it('should validate enrollment for open mode', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
@@ -191,7 +192,7 @@ describe('Integration: Full Stratos Flow', () => {
     })
 
     it('should validate enrollment for allowlist mode with allowed DID', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [testDid],
         allowedPdsEndpoints: [],
@@ -208,7 +209,7 @@ describe('Integration: Full Stratos Flow', () => {
     })
 
     it('should validate enrollment for allowlist mode with allowed PDS', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
@@ -237,7 +238,7 @@ describe('Integration: Full Stratos Flow', () => {
     })
 
     it('should reject enrollment when DID cannot be resolved', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],

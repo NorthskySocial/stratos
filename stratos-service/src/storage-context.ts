@@ -12,11 +12,7 @@ import {
   createServicePgDb,
   migrateServicePgDb,
 } from './db/pg.js'
-import {
-  PgEnrollmentStoreWriter,
-  PostgresActorStore,
-} from './adapters/index.js'
-import { CachedEnrollmentStore } from './adapters/cached-enrollment-store.js'
+import { CachedEnrollmentStore } from './infra/storage/cached-enrollment-store.js'
 import { type EnrollmentStore } from './oauth/routes.js'
 import { SqliteEnrollmentStore } from './storage/sqlite/enrollment-store.js'
 import { StratosActorStore } from './storage/sqlite/actor-store.js'
@@ -29,6 +25,10 @@ import {
 import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
 import type { AppContextOptions } from './context-types.js'
+import {
+  PgEnrollmentStoreWriter,
+  PostgresActorStore,
+} from './infra/storage/postgres/index.js'
 
 export interface StorageContext {
   db?: ServiceDb

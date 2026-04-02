@@ -12,7 +12,7 @@
   "scripts": {
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
-    "lint": "eslint test && pnpm -r run lint",
+    "lint": "pnpm -r run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest",

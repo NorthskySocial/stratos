@@ -18,6 +18,15 @@ import {
 import type { EnrollmentStore } from '../../oauth/routes.js'
 import type { EnrollmentEventEmitter } from '../../context-types.js'
 
+export interface MigrationDeps {
+  enrollmentStore: {
+    getBoundaries(did: string): Promise<string[]>
+    setBoundaries(did: string, boundaries: string[]): Promise<void>
+  }
+  serviceDid: string
+  logger?: Logger
+}
+
 /**
  * Implementation of EnrollmentService port
  */
@@ -103,6 +112,14 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     })
   }
 
+  /**
+   * Save enrollment record for a user.
+   *
+   * @param did - The user's DID.
+   * @param signingKeyDid - The DID of the signing key.
+   * @param now - The current date and time.
+   * @private
+   */
   private async saveEnrollment(did: string, signingKeyDid: string, now: Date) {
     await this.enrollmentStore.enroll({
       did,
@@ -128,6 +145,15 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     })
   }
 
+  /**
+   * Create an enrollment object for a user.
+   *
+   * @param did - The user's DID.
+   * @param boundaries - The boundaries for the user's enrollment.
+   * @param signingKeyDid - The DID of the signing key.
+   * @param now - The current date and time.
+   * @private
+   */
   private createEnrollmentObject(
     did: string,
     boundaries: string[],
@@ -195,15 +221,6 @@ export class EnrollmentBoundaryResolver implements BoundaryResolver {
   }
 }
 
-export interface MigrationDeps {
-  enrollmentStore: {
-    getBoundaries(did: string): Promise<string[]>
-    setBoundaries(did: string, boundaries: string[]): Promise<void>
-  }
-  serviceDid: string
-  logger?: Logger
-}
-
 /**
  * Wraps a BoundaryResolver with lazy migration (read-repair).
  * When legacy bare-name boundaries are returned, qualifies them in-place,
@@ -214,6 +231,12 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
 
   constructor(private deps: MigrationDeps) {}
 
+  /**
+   * Get boundaries for a user, migrating if necessary.
+   *
+   * @param did - The user's DID.
+   * @returns The user's boundaries, possibly migrated.
+   */
   async getBoundaries(did: string): Promise<string[]> {
     const boundaries = await this.deps.enrollmentStore.getBoundaries(did)
     if (boundaries.length === 0) return boundaries
@@ -221,6 +244,14 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
     return await this.migrateIfNeeded(did, boundaries)
   }
 
+  /**
+   * Migrate boundaries for a user if necessary.
+   *
+   * @param did - The user's DID.
+   * @param boundaries - The user's current boundaries.
+   * @returns The user's boundaries, possibly migrated.
+   * @private
+   */
   private async migrateIfNeeded(
     did: string,
     boundaries: string[],
@@ -245,6 +276,15 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
     return qualified
   }
 
+  /**
+   * Persist migrated boundaries for a user.
+   *
+   * @param did - The user's DID.
+   * @param qualified - The user's boundaries in qualified format.
+   * @param oldCount - The number of boundaries before migration.
+   * @returns True if the migration was successful, false otherwise.
+   * @private
+   */
   private async persistMigrated(
     did: string,
     qualified: string[],

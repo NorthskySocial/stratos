@@ -2,6 +2,9 @@
  * Extract the friendly display name from a boundary value.
  * Qualified boundaries like "did:web:stratos.example.com/engineering" → "engineering"
  * Legacy bare names like "engineering" pass through unchanged.
+ *
+ * @param boundary The boundary value to extract the display name from.
+ * @returns The display name of the boundary.
  */
 export function displayBoundary(boundary: string): string {
   if (boundary.startsWith('did:') && boundary.includes('/')) {

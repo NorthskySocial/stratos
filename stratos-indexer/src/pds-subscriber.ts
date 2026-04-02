@@ -1,12 +1,14 @@
 import {
   type EnrollmentCallback,
+  type FirehoseWork,
   PdsFirehose,
   processFirehoseWork,
 } from './pds-firehose.js'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
-import { WorkerPool } from './worker-pool.js'
-import { HandleDedup } from './handle-dedup.js'
+import type { CursorManager } from './cursor-manager.js'
 import { BackgroundQueue } from '@northskysocial/stratos-core'
+import { HandleDedup } from './handle-dedup.ts'
+import { WorkerPool } from './worker-pool.ts'
 
 export interface PdsSubscriberOptions {
   repoProvider: string
@@ -14,6 +16,7 @@ export interface PdsSubscriberOptions {
   background: BackgroundQueue
   enrollmentCallback: EnrollmentCallback
   handleDedup: HandleDedup
+  cursorManager: CursorManager
   concurrency: number
   maxQueueSize: number
   onError?: (err: Error) => void
@@ -25,7 +28,7 @@ export interface PdsSubscriberOptions {
  */
 export class PdsSubscriber {
   private firehose: PdsFirehose
-  private workerPool: WorkerPool
+  private readonly workerPool: WorkerPool<FirehoseWork>
 
   /**
    * Create a new PDS subscriber with the given options.
@@ -41,12 +44,12 @@ export class PdsSubscriber {
    * @returns A new PDS subscriber instance.
    */
   constructor(opts: PdsSubscriberOptions) {
-    this.workerPool = new WorkerPool(
+    this.workerPool = new WorkerPool<FirehoseWork>(
       opts.concurrency,
       opts.maxQueueSize,
-      async (work: unknown) => {
+      async (work) => {
         await processFirehoseWork(
-          work as Parameters<typeof processFirehoseWork>[0],
+          work,
           opts.indexingService,
           opts.background,
           opts.enrollmentCallback,
@@ -67,9 +70,10 @@ export class PdsSubscriber {
 
     this.firehose = new PdsFirehose({
       repoProvider: opts.repoProvider,
+      cursorManager: opts.cursorManager,
+      workerPool: this.workerPool,
       onWork: (work) => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-        void (this.workerPool as any).add(work)
+        void this.workerPool.submit(work)
       },
       onError: (err) => {
         if (opts.onError) {

@@ -113,6 +113,10 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
     this.cache.delete(cid)
   }
 
+  /**
+   * Delete multiple blocks from the repository.
+   * @param cids - CIDs of the blocks to delete.
+   */
   async deleteBlocks(cids: CID[]): Promise<void> {
     if (cids.length === 0) return
 
@@ -130,13 +134,20 @@ export class StratosSqlRepoTransactor extends StratosSqlRepoReader {
     }
   }
 
+  /**
+   * Delete all blocks for a given revision.
+   * @param rev - Revision to delete blocks for.
+   */
   async deleteBlocksForRev(rev: string): Promise<void> {
     await this.db
       .delete(stratosRepoBlock)
       .where(eq(stratosRepoBlock.repoRev, rev))
   }
 
-  clearCache(): void {
+  /**
+   * Clears the repository block cache.
+   */
+  override async clearCache(): Promise<void> {
     this.cache = new BlockMap()
   }
 }

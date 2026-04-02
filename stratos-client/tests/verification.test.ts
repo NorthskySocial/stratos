@@ -215,7 +215,7 @@ describe('fetchAndVerifyRecord', () => {
     const publicKeyMultibase = didKey.slice('did:key:'.length)
 
     const mockFetch = vi.fn(
-      () =>
+      async () =>
         new Response(
           JSON.stringify({
             '@context': [
@@ -253,7 +253,7 @@ describe('fetchAndVerifyRecord', () => {
 
   it('throws when DID document has no #atproto verificationMethod', async () => {
     const mockFetch = vi.fn(
-      () =>
+      async () =>
         new Response(
           JSON.stringify({
             '@context': ['https://www.w3.org/ns/did/v1'],
@@ -279,7 +279,7 @@ describe('fetchAndVerifyRecord', () => {
 
   it('ignores verificationMethods without #atproto fragment', async () => {
     const mockFetch = vi.fn(
-      () =>
+      async () =>
         new Response(
           JSON.stringify({
             '@context': ['https://www.w3.org/ns/did/v1'],
@@ -410,7 +410,7 @@ describe('fetchAndVerifyRecord', () => {
       TEST_RKEY,
     )
 
-    const mockFetch = vi.fn<typeof fetch>(() => new Response(carBytes))
+    const mockFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     await fetchAndVerifyRecord(
       'https://stratos.example.com',

@@ -33,6 +33,9 @@ export interface HydrateRecordsOutput {
 
 /**
  * Register hydration handlers with the XRPC server
+ *
+ * @param server - XRPC server
+ * @param ctx - Application context
  */
 export function registerHydrationHandlers(
   server: XrpcServer,
@@ -104,6 +107,10 @@ export function registerHydrationHandlers(
   })
 }
 
+/**
+ * Validate input for hydrateRecords
+ * @param body - Input body
+ */
 function validateHydrateRecordsInput(body: HydrateRecordsInput | undefined) {
   if (!body?.uris || !Array.isArray(body.uris)) {
     throw new InvalidRequestError('URIs array required', 'InvalidInput')
@@ -117,6 +124,12 @@ function validateHydrateRecordsInput(body: HydrateRecordsInput | undefined) {
   }
 }
 
+/**
+ * Get hydration context
+ * @param ctx - Application context
+ * @param viewerDid - DID of the viewer
+ * @returns Hydration context
+ */
 async function getHydrationContext(ctx: AppContext, viewerDid: string | null) {
   let viewerDomains: string[] = []
   if (viewerDid) {
@@ -125,6 +138,10 @@ async function getHydrationContext(ctx: AppContext, viewerDid: string | null) {
   return createHydrationContext(viewerDid, viewerDomains)
 }
 
+/**
+ * Handle hydration result
+ * @param result - Hydration result
+ */
 function handleHydrationResult(result: HydrationResult) {
   if (result.status === 'not-found') {
     throw new InvalidRequestError('Record not found', 'RecordNotFound')

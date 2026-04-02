@@ -230,6 +230,12 @@ export class HydrationServiceImpl implements HydrationService {
     return { records, notFound, blocked }
   }
 
+  /**
+   * Group hydration requests by owner DID
+   * @param requests - Array of hydration requests
+   * @returns Map of owner DIDs to arrays of hydration requests
+   * @private
+   */
   private groupRequestsByOwner(
     requests: HydrationRequest[],
   ): Map<string, HydrationRequest[]> {
@@ -248,6 +254,17 @@ export class HydrationServiceImpl implements HydrationService {
     return byOwner
   }
 
+  /**
+   * Process hydration request
+   * @param request - Hydration request
+   * @param ownerDid - DID of the owner
+   * @param recordMap - Map of records
+   * @param context - Hydration context
+   * @param records - Array of hydrated records
+   * @param notFound - Array of not found URIs
+   * @param blocked - Array of blocked URIs
+   * @private
+   */
   private processHydrationRequest(
     request: HydrationRequest,
     ownerDid: string,

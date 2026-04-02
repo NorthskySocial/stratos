@@ -7,11 +7,11 @@
  * indexer will encounter — including the expiry case that triggers on
  * reconnect when a stale token is reused.
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { createServiceJwt } from '@atproto/xrpc-server'
 import type { IdResolver } from '@atproto/identity'
-import { verifyServiceAuth } from '../src/auth/index.js'
+import { verifyServiceAuth } from '../src/infra/auth/index.js'
 
 const OUR_DID = 'did:web:stratos.test'
 const LXM = 'zone.stratos.sync.subscribeRecords'

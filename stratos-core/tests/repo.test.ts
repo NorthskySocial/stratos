@@ -390,7 +390,7 @@ describe('Repo Transactor', () => {
 
       expect(transactor.cache.size()).toBe(1)
 
-      transactor.clearCache()
+      await transactor.clearCache()
 
       expect(transactor.cache.size()).toBe(0)
     })

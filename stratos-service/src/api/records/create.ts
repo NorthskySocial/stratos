@@ -36,6 +36,21 @@ export interface CreateRecordOutput {
   validationStatus?: string
 }
 
+interface PrecomputedRecordData {
+  uri: AtUri
+  recordBytes: Uint8Array<ArrayBufferLike>
+  cid: CID
+}
+
+interface TransactionResult {
+  uri: AtUri
+  cid: CID
+  commit?: {
+    cid: string
+    rev: string
+  }
+}
+
 /**
  * Create a new record in the stratos store
  *
@@ -123,7 +138,12 @@ export async function createRecord(
 /**
  * Pre-compute record data (URI, bytes, CID) outside of transaction.
  *
- * @private
+ * @param callerDid - DID of the caller
+ * @param collection - Collection NSID
+ * @param record - Record data
+ * @param inputRkey - Optional record key
+ * @param phases - Write phases for tracking performance
+ * @returns Precomputed record data
  */
 async function precomputeRecordData(
   callerDid: string,
@@ -131,7 +151,7 @@ async function precomputeRecordData(
   record: unknown,
   inputRkey: string | undefined,
   phases: WritePhases,
-) {
+): Promise<PrecomputedRecordData> {
   const t0 = performance.now()
   const rkey = inputRkey ?? TID.nextStr()
   const uri = AtUri.make(callerDid, collection, rkey)
@@ -239,10 +259,10 @@ async function performCreateTransaction(
   record: unknown,
   recordBytes: Uint8Array,
   cid: CID,
-  actorSigningKey: crypto.Keypair | string,
+  actorSigningKey: crypto.Keypair,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
-) {
+): Promise<TransactionResult> {
   const t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   try {
@@ -293,10 +313,10 @@ async function executeTransaction(
   record: unknown,
   recordBytes: Uint8Array,
   cid: CID,
-  actorSigningKey: crypto.Keypair | string,
+  actorSigningKey: crypto.Keypair,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
-) {
+): Promise<TransactionResult> {
   const attemptT0 = performance.now()
   return ctx.actorStore.readThenTransact(
     callerDid,

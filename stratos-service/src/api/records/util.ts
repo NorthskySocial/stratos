@@ -1,12 +1,12 @@
+import type { Logger } from '@northskysocial/stratos-core'
 import { ActorRepoManager } from '@northskysocial/stratos-core'
 import type { ActorStore, ActorTransactor } from '../../actor-store-types.js'
 import type { Keypair } from '@atproto/crypto'
+import type { SequenceTrace } from './types.js'
 import {
   ActorStoreSequencingService,
   KeypairSigningService,
-} from '../../features/index.js'
-import type { SequenceTrace } from './types.js'
-import type { Logger } from '@northskysocial/stratos-core'
+} from '../../features/mst/internal/adapters.js'
 
 /**
  * Helper to create an ActorRepoManager with standard signing and sequencing services
@@ -20,19 +20,10 @@ import type { Logger } from '@northskysocial/stratos-core'
 export function createRepoManager(
   logger: Logger | undefined,
   store: ActorTransactor,
-  actorSigningKey: Keypair | string,
+  actorSigningKey: Keypair,
   sequenceTrace: SequenceTrace,
-) {
-  const signingKey =
-    typeof actorSigningKey === 'string'
-      ? (undefined as unknown as Keypair) // This might need a real Keypair if it's a string
-      : actorSigningKey
-
-  if (!signingKey && typeof actorSigningKey === 'string') {
-    throw new Error('String-based signing keys are not yet supported')
-  }
-
-  const signingService = new KeypairSigningService(signingKey)
+): ActorRepoManager {
+  const signingService = new KeypairSigningService(actorSigningKey)
   const sequencingService = new ActorStoreSequencingService(
     store,
     sequenceTrace,
@@ -55,7 +46,7 @@ export function createRepoManager(
 export async function ensureActorStoreExists(
   actorStore: ActorStore,
   did: string,
-) {
+): Promise<void> {
   const exists = await actorStore.exists(did)
   if (!exists) {
     await actorStore.create(did)

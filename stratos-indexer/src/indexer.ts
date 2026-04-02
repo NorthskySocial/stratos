@@ -1,3 +1,7 @@
+import {
+  DefaultLexiconProvider,
+  type LexiconProvider,
+} from '@northskysocial/stratos-core'
 import type { IndexerConfig } from './config.ts'
 import type { Database } from '@atproto/bsky'
 import { Kysely, sql } from 'kysely'
@@ -32,8 +36,11 @@ export class Indexer {
   private backfilledDidsSweepTimer: ReturnType<typeof setInterval> | null = null
   private activeBackfills = 0
   private readonly maxConcurrentBackfills = 2
+  private lexiconProvider: LexiconProvider
 
-  constructor(private config: IndexerConfig) {}
+  constructor(private config: IndexerConfig) {
+    this.lexiconProvider = new DefaultLexiconProvider()
+  }
 
   /**
    * Start the indexer service
@@ -89,6 +96,7 @@ export class Indexer {
       background,
       enrollmentCallback,
       handleDedup,
+      cursorManager: this.cursorManager!,
       concurrency: this.config.worker.concurrency,
       maxQueueSize: this.config.worker.maxQueueSize,
       onError: (err) =>

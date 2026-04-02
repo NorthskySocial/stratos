@@ -46,6 +46,4 @@ docs/*-prompt.md
 .github/*-instructions.md
 
 # CDK
-infra/
-
 docs/.vitepress/cache

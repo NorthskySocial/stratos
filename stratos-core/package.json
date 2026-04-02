@@ -39,9 +39,11 @@
     "lint": "eslint --ext .ts"
   },
   "dependencies": {
+    "@atcute/atproto": "^3.1.10",
     "@atcute/car": "^5.1.1",
     "@atcute/cbor": "^2.3.2",
     "@atcute/cid": "^2.4.1",
+    "@atcute/client": "^4.2.1",
     "@atcute/mst": "^0.1.2",
     "@atcute/uint8array": "^1.1.1",
     "@atproto/common-web": "^0.4.16",
