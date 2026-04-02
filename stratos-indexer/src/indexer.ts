@@ -9,19 +9,19 @@ import {
   createDatabase,
   createIdResolver,
   createIndexingService,
-} from './db.ts'
-import { HandleDedup } from './handle-dedup.ts'
-import { CursorManager } from './cursor-manager.ts'
-import { PdsSubscriber } from './pds-subscriber.js'
-import { StratosSyncManager } from './sync-manager.js'
+} from './storage/db.ts'
+import { HandleDedup } from './util/handle-dedup.ts'
+import { CursorManager } from './storage/cursor-manager.ts'
+import { PdsSubscriber } from './pds/pds-subscriber.js'
+import { StratosSyncManager } from './sync/sync-manager.js'
 import {
   backfillActors,
   type BackfillOptions,
   backfillRepos,
   backfillSingleActor,
 } from './backfill.js'
-import { EnrollmentCallback } from './pds-firehose.ts'
-import type { NewStratosSyncCursor, StratosIndexerSchema } from './schema.ts'
+import { EnrollmentCallback } from './pds/pds-firehose.ts'
+import type { NewStratosSyncCursor, StratosIndexerSchema } from './storage/schema.ts'
 
 export class Indexer {
   private static readonly BACKFILLED_TTL_MS = 30 * 60 * 1000

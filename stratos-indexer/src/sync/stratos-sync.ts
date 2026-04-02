@@ -1,9 +1,9 @@
 import { decodeFirst } from '@atcute/cbor'
 import { Kysely } from 'kysely'
 import { StratosError } from '@northskysocial/stratos-core'
-import type { CursorManager } from './cursor-manager.ts'
+import type { CursorManager } from '../storage/cursor-manager.ts'
 import { ActorSyncer } from './actor-syncer.ts'
-import type { StratosIndexerSchema } from './schema.ts'
+import type { StratosIndexerSchema } from '../storage/schema.ts'
 
 export interface StratosActorSyncOptions {
   maxConcurrentActorSyncs: number

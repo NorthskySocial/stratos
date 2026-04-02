@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CursorManager } from '../src/index.ts'
 import { StratosActorSync, StratosActorSyncOptions } from '../src/index.ts'
-import { ActorSyncer } from '../src/actor-syncer.ts'
+import { ActorSyncer } from '../src/sync/actor-syncer.ts'
 
 function createTestSync(opts: Partial<StratosActorSyncOptions> = {}) {
   const errors: Error[] = []

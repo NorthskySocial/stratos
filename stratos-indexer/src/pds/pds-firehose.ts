@@ -3,7 +3,7 @@ import { fromBytes } from '@atcute/cbor'
 import { ComAtprotoSyncSubscribeRepos } from '@atcute/atproto'
 import { AtUri } from '@atproto/syntax'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
-import type { HandleDedup } from './handle-dedup.ts'
+import type { HandleDedup } from '../util/handle-dedup.ts'
 import {
   type BackgroundQueue,
   decodeCommitOps,
@@ -13,8 +13,8 @@ import {
   parseEnrollmentRecord,
 } from '@northskysocial/stratos-core'
 import { fromUint8Array } from '@atcute/car'
-import type { CursorManager } from './cursor-manager.ts'
-import type { WorkerPool } from './worker-pool.ts'
+import type { CursorManager } from '../storage/cursor-manager.ts'
+import type { WorkerPool } from '../util/worker-pool.ts'
 import { WriteOpAction } from '@atproto/repo'
 
 type SubscribeReposMessage = ComAtprotoSyncSubscribeRepos.$message

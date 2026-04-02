@@ -3,13 +3,13 @@ import {
   StratosServiceSubscription,
   type StratosSyncConfig,
 } from './stratos-sync.js'
-import type { CursorManager } from './cursor-manager.js'
-import type { EnrollmentCallback } from './pds-firehose.js'
+import type { CursorManager } from '../storage/cursor-manager.js'
+import type { EnrollmentCallback } from '../pds/pds-firehose.js'
 import { Kysely } from 'kysely'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import type { BackgroundQueue } from '@atproto/bsky/dist/background.js'
-import type { BackfillOptions } from './backfill.js'
-import type { StratosIndexerSchema } from './schema.ts'
+import type { BackfillOptions } from '../backfill.js'
+import type { StratosIndexerSchema } from '../storage/schema.ts'
 
 export interface StratosSyncManagerOptions {
   config: {
