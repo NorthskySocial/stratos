@@ -5,10 +5,10 @@ import {
   processFirehoseWork,
 } from './pds-firehose.js'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
-import type { CursorManager } from './cursor-manager.js'
+import type { CursorManager } from '../storage/cursor-manager.js'
 import { BackgroundQueue } from '@northskysocial/stratos-core'
-import { HandleDedup } from './handle-dedup.ts'
-import { WorkerPool } from './worker-pool.ts'
+import { HandleDedup } from '../util/handle-dedup.ts'
+import { WorkerPool } from '../util/worker-pool.ts'
 
 export interface PdsSubscriberOptions {
   repoProvider: string

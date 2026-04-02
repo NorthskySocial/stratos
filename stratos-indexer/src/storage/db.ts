@@ -3,7 +3,7 @@ import { BackgroundQueue, Database } from '@atproto/bsky'
 import { IdResolver, MemoryCache } from '@atproto/identity'
 import { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import PQueue from 'p-queue'
-import type { DbConfig, IdentityConfig, IndexerConfig } from './config.ts'
+import type { DbConfig, IdentityConfig, IndexerConfig } from '../config.ts'
 
 const DID_CACHE_STALE_TTL = 5 * 60 * 1000 // 5 minutes
 const DID_CACHE_MAX_TTL = 60 * 60 * 1000 // 1 hour

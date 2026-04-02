@@ -2,7 +2,7 @@ import { WriteOpAction } from '@atproto/repo'
 import { AtUri } from '@atproto/syntax'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import PQueue from 'p-queue'
-import type { EnrollmentCallback } from './pds-firehose.ts'
+import type { EnrollmentCallback } from './pds/pds-firehose.ts'
 import {
   extractBoundaries,
   jsonToLex,

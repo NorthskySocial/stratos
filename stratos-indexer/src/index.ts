@@ -1,17 +1,15 @@
 export { Indexer } from './indexer.ts'
 export { loadConfig } from './config.ts'
 export type { IndexerConfig } from './config.ts'
-export { WorkerPool } from './worker-pool.ts'
-export { CursorManager } from './cursor-manager.ts'
-export { PdsFirehose, processFirehoseWork } from './pds-firehose.ts'
-export type { EnrollmentCallback } from './pds-firehose.ts'
+export { WorkerPool } from './util/worker-pool.ts'
+export { CursorManager } from './storage/cursor-manager.ts'
+export { PdsFirehose, processFirehoseWork } from './pds/pds-firehose.ts'
+export type { EnrollmentCallback } from './pds/pds-firehose.ts'
 export {
   StratosServiceSubscription,
   StratosActorSync,
-  indexStratosRecord,
-  deleteStratosRecord,
-} from './stratos-sync.ts'
-export type { StratosActorSyncOptions } from './stratos-sync.ts'
+} from './sync/stratos-sync.ts'
+export type { StratosActorSyncOptions } from './sync/stratos-sync.ts'
 export {
   backfillRepos,
   backfillActors,
