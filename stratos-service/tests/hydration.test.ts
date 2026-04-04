@@ -238,53 +238,54 @@ describe('Hydration Features', () => {
       mockRecordResolver.getRecords.mockImplementation(
         (did: string, uris: string[]) => {
           const map = new Map()
-        if (did === 'did:plc:shinji') {
-          for (const u of uris) {
-            if (u === uri1) {
-              // The key must match what processHydrationRequest expects
-              // It uses new AtUriSyntax(request.uri) which is the same as AtUri
-              map.set(
-                Array.from(map.keys()).find((k) => k.toString() === uri1) ||
-                  new AtUri(uri1),
-                record1,
-              )
+          if (did === 'did:plc:shinji') {
+            for (const u of uris) {
+              if (u === uri1) {
+                // The key must match what processHydrationRequest expects
+                // It uses new AtUriSyntax(request.uri) which is the same as AtUri
+                map.set(
+                  Array.from(map.keys()).find((k) => k.toString() === uri1) ||
+                    new AtUri(uri1),
+                  record1,
+                )
+              }
+            }
+          } else if (did === 'did:plc:rei') {
+            for (const u of uris) {
+              if (u === uri2) {
+                map.set(
+                  Array.from(map.keys()).find((k) => k.toString() === uri2) ||
+                    new AtUri(uri2),
+                  record2,
+                )
+              }
             }
           }
-        } else if (did === 'did:plc:rei') {
-          for (const u of uris) {
-            if (u === uri2) {
-              map.set(
-                Array.from(map.keys()).find((k) => k.toString() === uri2) ||
-                  new AtUri(uri2),
-                record2,
-              )
+
+          // Actually, the implementation of HydrationServiceImpl.hydrateRecords calls:
+          // const recordMap = await this.recordResolver.getRecords(ownerDid, uris)
+          // and processHydrationRequest calls:
+          // const atUri = new AtUriSyntax(request.uri)
+          // const record = recordMap.get(atUri)
+          // For Map.get(atUri) to work, it MUST be the same object or we need to mock Map.get.
+
+          const originalGet = map.get.bind(map)
+          map.get = (key: any) => {
+            if (
+              key instanceof AtUri ||
+              (key && typeof key.toString === 'function')
+            ) {
+              const str = key.toString()
+              for (const [k, v] of map.entries()) {
+                if (k.toString() === str) return v
+              }
             }
+            return originalGet(key)
           }
-        }
 
-        // Actually, the implementation of HydrationServiceImpl.hydrateRecords calls:
-        // const recordMap = await this.recordResolver.getRecords(ownerDid, uris)
-        // and processHydrationRequest calls:
-        // const atUri = new AtUriSyntax(request.uri)
-        // const record = recordMap.get(atUri)
-        // For Map.get(atUri) to work, it MUST be the same object or we need to mock Map.get.
-
-        const originalGet = map.get.bind(map)
-        map.get = (key: any) => {
-          if (
-            key instanceof AtUri ||
-            (key && typeof key.toString === 'function')
-          ) {
-            const str = key.toString()
-            for (const [k, v] of map.entries()) {
-              if (k.toString() === str) return v
-            }
-          }
-          return originalGet(key)
-        }
-
-        return Promise.resolve(map)
-      })
+          return Promise.resolve(map)
+        },
+      )
 
       const result = await service.hydrateRecords(
         [{ uri: uri1 }, { uri: uri2 }],
