@@ -15,7 +15,7 @@
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "format": "prettier --write .",
-    "lint": "eslint --ext .ts src",
+    "lint": "eslint --ext .ts .",
     "codegen": "lex gen-server ../lexicons --out ./src/lexicon",
     "generate:version": "tsx scripts/generate-version.ts"
   },
