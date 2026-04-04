@@ -18,3 +18,6 @@ export * from './hydration/index.js'
 
 // Attestation
 export * from './attestation/index.js'
+export * from './atproto/index.js'
+export * from './config/index.js'
+export * from './lexicons/index.js'

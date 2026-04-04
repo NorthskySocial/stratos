@@ -1,57 +1,57 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="al-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="al-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- Client → Stratos -->
         <path
           id="al-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#al-ml)"
           d="M 170 248 L 310 248"
+          marker-end="url(#al-ml)"
+          stroke="#9145EC"
         />
         <!-- Stratos → Eligibility -->
         <path
           id="al-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#al-ml)"
           d="M 510 248 L 655 248"
+          marker-end="url(#al-ml)"
+          stroke="#9145EC"
         />
         <!-- Stratos → PDS (diagonal down) -->
         <path
           id="al-a3"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#al-mg)"
           d="M 407 298 L 387 375"
+          marker-end="url(#al-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Left: User -->
-      <div class="node" id="al-nc" style="left: 20px; top: 195px; width: 150px">
+      <div id="al-nc" class="node" style="left: 20px; top: 195px; width: 150px">
         <div class="ni">🧑</div>
         <div class="nn">User</div>
         <div class="ns">OAuth request</div>
@@ -59,8 +59,8 @@
 
       <!-- Center: Stratos -->
       <div
-        class="node"
         id="al-nst"
+        class="node"
         style="left: 310px; top: 195px; width: 200px"
       >
         <div class="ni">⚙️</div>
@@ -70,8 +70,8 @@
 
       <!-- Right: Eligibility Checks -->
       <div
-        class="node"
         id="al-nel"
+        class="node"
         style="left: 655px; top: 195px; width: 190px"
       >
         <div class="ni">✅</div>
@@ -81,8 +81,8 @@
 
       <!-- Bottom: PDS -->
       <div
-        class="node"
         id="al-npds"
+        class="node"
         style="left: 310px; top: 375px; width: 165px"
       >
         <div class="ni">🗄️</div>
@@ -94,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

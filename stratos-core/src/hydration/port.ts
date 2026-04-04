@@ -1,3 +1,4 @@
+import type { AtUri } from '../shared/index.js'
 import type {
   BatchHydrationResult,
   HydrationContext,
@@ -74,7 +75,7 @@ export interface RecordResolver {
     uris: string[],
   ): Promise<
     Map<
-      string,
+      AtUri,
       {
         uri: string
         cid: string

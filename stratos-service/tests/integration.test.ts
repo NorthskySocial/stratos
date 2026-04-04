@@ -3,37 +3,34 @@
  * Tests the complete flow from enrollment to record operations
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
-import { AtUri } from '@atproto/syntax'
 
 import {
-  assertBskyNoCrossNamespaceEmbed,
-  assertStratosValidation,
   BlobStore,
   BlobStoreCreator,
   ENROLLMENT_MODE,
-  extractBoundaryDomains,
-  isBskyUri,
-  isStratosCollection,
-  isStratosUri,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 
+import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
-import { EnrollmentConfig, validateEnrollment } from '../src/auth'
+import { EnrollmentServiceImpl } from '../src/features/index.js'
+import { type StratosServiceConfig } from '../src/config.js'
+import { validateEnrollment } from '../src/features/enrollment/internal/validation.js'
 import {
   closeServiceDb,
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
+} from '../src/db/index.js'
 
 // Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
+const createCid = async (data: string | Uint8Array): Promise<Cid> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
@@ -49,7 +46,7 @@ function createMockBlobStore(): BlobStore {
       storage.set(key, bytes)
       return key
     }),
-    makePermanent: vi.fn().mockImplementation(async (key: string, cid: CID) => {
+    makePermanent: vi.fn().mockImplementation(async (key: string, cid: Cid) => {
       const bytes = storage.get(key)
       if (bytes) {
         storage.set(cid.toString(), bytes)
@@ -59,8 +56,8 @@ function createMockBlobStore(): BlobStore {
     putPermanent: vi
       .fn()
       .mockImplementation(
-        async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-          if (bytes instanceof Uint8Array) {
+        async (cid: Cid, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
+          if (!(Symbol.asyncIterator in bytes)) {
             storage.set(cid.toString(), bytes)
           } else {
             const chunks: Uint8Array[] = []
@@ -81,10 +78,10 @@ function createMockBlobStore(): BlobStore {
       ),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockImplementation(async (cid: CID) => {
+    delete: vi.fn().mockImplementation(async (cid: Cid) => {
       storage.delete(cid.toString())
     }),
-    deleteMany: vi.fn().mockImplementation(async (cids: CID[]) => {
+    deleteMany: vi.fn().mockImplementation(async (cids: Cid[]) => {
       for (const cid of cids) {
         storage.delete(cid.toString())
       }
@@ -92,15 +89,15 @@ function createMockBlobStore(): BlobStore {
     hasTemp: vi.fn().mockImplementation(async (key: string) => {
       return storage.has(key)
     }),
-    hasStored: vi.fn().mockImplementation(async (cid: CID) => {
+    hasStored: vi.fn().mockImplementation(async (cid: Cid) => {
       return storage.has(cid.toString())
     }),
-    getBytes: vi.fn().mockImplementation(async (cid: CID) => {
+    getBytes: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       return bytes
     }),
-    getStream: vi.fn().mockImplementation(async (cid: CID) => {
+    getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       async function* generate() {
@@ -129,12 +126,14 @@ function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
 }
 
 // Mock IdResolver
-function createMockIdResolver(didDoc: { id: string; service?: any[] } | null) {
+function createMockIdResolver(
+  didDoc: { id: string; service?: unknown[] } | null,
+) {
   return {
     did: {
       resolve: vi.fn().mockResolvedValue(didDoc),
     },
-  } as any
+  } as unknown as IdResolver
 }
 
 describe('Integration: Full Stratos Flow', () => {
@@ -176,33 +175,41 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('Enrollment Flow', () => {
     it('should validate enrollment for open mode', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
 
       const mockResolver = createMockIdResolver(null)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(true)
     })
 
     it('should validate enrollment for allowlist mode with allowed DID', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [testDid],
         allowedPdsEndpoints: [],
       }
 
       const mockResolver = createMockIdResolver(null)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(true)
     })
 
     it('should validate enrollment for allowlist mode with allowed PDS', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
@@ -220,21 +227,29 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       const mockResolver = createMockIdResolver(didDoc)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(true)
       expect(result.pdsEndpoint).toBe(testPds)
     })
 
     it('should reject enrollment when DID cannot be resolved', async () => {
-      const config: EnrollmentConfig = {
+      const config: StratosServiceConfig['enrollment'] = {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
       }
 
       const mockResolver = createMockIdResolver(null)
-      const result = await validateEnrollment(config, testDid, mockResolver)
+      const result = await validateEnrollment(
+        config,
+        testDid,
+        mockResolver as any,
+      )
 
       expect(result.allowed).toBe(false)
       expect(result.reason).toBe('DidNotResolved')
@@ -248,7 +263,7 @@ describe('Integration: Full Stratos Flow', () => {
         signingKeyDid: 'did:key:zDnaeTestKey123',
         active: true,
         enrollmentRkey: 'did:web:stratos.test',
-      })
+      } as any)
 
       const isEnrolled = await enrollmentStore.isEnrolled(testDid)
       expect(isEnrolled).toBe(true)
@@ -287,13 +302,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       // Create record
       await actorStore.transact(testDid, async (store) => {
-        await store.record.indexRecord(
-          new AtUri(uri),
-          cid,
-          record,
-          'create',
-          'rev1',
-        )
+        await store.record.indexRecord(uri, cid, record, 'create', 'rev1')
       })
 
       // Read record
@@ -309,21 +318,21 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/1`),
+          `at://${testDid}/zone.stratos.feed.post/1`,
           cid,
           { text: 'Post 1' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.feed.post/2`),
+          `at://${testDid}/zone.stratos.feed.post/2`,
           cid,
           { text: 'Post 2' },
           'create',
           'rev1',
         )
         await store.record.indexRecord(
-          new AtUri(`at://${testDid}/zone.stratos.graph.follow/1`),
+          `at://${testDid}/zone.stratos.graph.follow/1`,
           cid,
           { subject: 'did:plc:other' },
           'create',
@@ -346,7 +355,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(uri),
+          uri,
           cid,
           { text: 'Delete me' },
           'create',
@@ -359,7 +368,7 @@ describe('Integration: Full Stratos Flow', () => {
       ).toBe(1)
 
       await actorStore.transact(testDid, async (store) => {
-        await store.record.deleteRecord(new AtUri(uri))
+        await store.record.deleteRecord(uri)
       })
 
       expect(
@@ -373,7 +382,7 @@ describe('Integration: Full Stratos Flow', () => {
 
       await actorStore.transact(testDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(postUri),
+          postUri,
           cid,
           {
             text: 'Replying to someone',
@@ -433,7 +442,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).not.toThrow()
     })
 
@@ -455,7 +467,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).not.toThrow()
     })
 
@@ -477,7 +492,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).toThrow('cannot reply to a non-stratos record')
     })
 
@@ -496,7 +514,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertStratosValidation(record, 'zone.stratos.feed.post', stratosConfig)
+        new StratosValidator(stratosConfig).assertValid(
+          record,
+          'zone.stratos.feed.post',
+        )
       }).toThrow('cannot embed bsky content')
     })
 
@@ -511,7 +532,10 @@ describe('Integration: Full Stratos Flow', () => {
       }
 
       expect(() => {
-        assertBskyNoCrossNamespaceEmbed(record, 'app.bsky.feed.post')
+        StratosValidator.assertBskyNoCrossNamespaceEmbed(
+          record,
+          'app.bsky.feed.post',
+        )
       }).toThrow('cannot embed stratos content')
     })
 
@@ -525,7 +549,7 @@ describe('Integration: Full Stratos Flow', () => {
         },
       }
 
-      const domains = extractBoundaryDomains(record)
+      const domains = StratosValidator.extractBoundaryDomains(record)
       expect(domains).toEqual([
         'did:web:nerv.tokyo.jp/evangelion',
         'did:web:nerv.tokyo.jp/magi',
@@ -535,58 +559,84 @@ describe('Integration: Full Stratos Flow', () => {
 
   describe('URI Classification', () => {
     it('should correctly identify stratos URIs', () => {
-      expect(isStratosUri('at://did:plc:abc/zone.stratos.feed.post/123')).toBe(
-        true,
-      )
       expect(
-        isStratosUri('at://did:plc:abc/zone.stratos.graph.follow/456'),
+        StratosValidator.isStratosUri(
+          'at://did:plc:abc/zone.stratos.feed.post/123',
+        ),
       ).toBe(true)
-      expect(isStratosUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(
-        false,
-      )
+      expect(
+        StratosValidator.isStratosUri(
+          'at://did:plc:abc/zone.stratos.graph.follow/456',
+        ),
+      ).toBe(true)
+      expect(
+        StratosValidator.isStratosUri(
+          'at://did:plc:abc/app.bsky.feed.post/123',
+        ),
+      ).toBe(false)
     })
 
     it('should correctly identify bsky URIs', () => {
-      expect(isBskyUri('at://did:plc:abc/app.bsky.feed.post/123')).toBe(true)
-      expect(isBskyUri('at://did:plc:abc/app.bsky.actor.profile/self')).toBe(
-        true,
-      )
-      expect(isBskyUri('at://did:plc:abc/zone.stratos.feed.post/123')).toBe(
-        false,
-      )
+      expect(
+        StratosValidator.isBskyUri('at://did:plc:abc/app.bsky.feed.post/123'),
+      ).toBe(true)
+      expect(
+        StratosValidator.isBskyUri(
+          'at://did:plc:abc/app.bsky.actor.profile/self',
+        ),
+      ).toBe(true)
+      expect(
+        StratosValidator.isBskyUri(
+          'at://did:plc:abc/zone.stratos.feed.post/123',
+        ),
+      ).toBe(false)
     })
 
     it('should correctly identify stratos collections', () => {
-      expect(isStratosCollection('zone.stratos.feed.post')).toBe(true)
-      expect(isStratosCollection('zone.stratos.graph.follow')).toBe(true)
-      expect(isStratosCollection('app.bsky.feed.post')).toBe(false)
-      expect(isStratosCollection('com.atproto.repo.record')).toBe(false)
+      expect(
+        StratosValidator.isStratosCollection('zone.stratos.feed.post'),
+      ).toBe(true)
+      expect(
+        StratosValidator.isStratosCollection('zone.stratos.graph.follow'),
+      ).toBe(true)
+      expect(StratosValidator.isStratosCollection('app.bsky.feed.post')).toBe(
+        false,
+      )
+      expect(
+        StratosValidator.isStratosCollection('com.atproto.repo.record'),
+      ).toBe(false)
     })
   })
 
   describe('Actor Lifecycle', () => {
-    it('should handle complete actor lifecycle', async () => {
+    it('should handle complete actor lifecycle (hard delete)', async () => {
       const actorDid = 'did:plc:lifecycle'
+      const actorStoreDestroyer = vi.fn().mockImplementation(async (did) => {
+        await actorStore.destroy(did)
+      })
+
+      const enrollmentService = new EnrollmentServiceImpl(
+        enrollmentStore,
+        async (did) => {
+          await actorStore.create(did)
+        },
+        actorStoreDestroyer,
+      )
 
       // 1. Enroll
-      await enrollmentStore.enroll({
-        did: actorDid,
-        enrolledAt: new Date().toISOString(),
-        pdsEndpoint: 'https://pds.test.com',
-        signingKeyDid: 'did:key:zDnaeTestKey123',
-        active: true,
-      })
+      await enrollmentService.enroll(
+        actorDid,
+        ['did:web:test.com/domain'],
+        'did:key:zDnaeTestKey123' as any,
+      )
       expect(await enrollmentStore.isEnrolled(actorDid)).toBe(true)
-
-      // 2. Create actor store
-      await actorStore.create(actorDid)
       expect(await actorStore.exists(actorDid)).toBe(true)
 
-      // 3. Create some records
+      // 2. Create some records
       const cid = await createCid('lifecycle test')
       await actorStore.transact(actorDid, async (store) => {
         await store.record.indexRecord(
-          new AtUri(`at://${actorDid}/zone.stratos.feed.post/1`),
+          `at://${actorDid}/zone.stratos.feed.post/1`,
           cid,
           { text: 'Post 1' },
           'create',
@@ -594,19 +644,21 @@ describe('Integration: Full Stratos Flow', () => {
         )
       })
 
-      // 4. Verify records exist
+      // 3. Verify records exist
       const count = await actorStore.read(actorDid, (s) =>
         s.record.recordCount(),
       )
       expect(count).toBe(1)
 
-      // 5. Unenroll
-      await enrollmentStore.unenroll(actorDid)
-      expect(await enrollmentStore.isEnrolled(actorDid)).toBe(false)
+      // 4. Unenroll (Full hard delete)
+      await enrollmentService.unenroll(actorDid)
 
-      // 6. Destroy actor store
-      await actorStore.destroy(actorDid)
+      // 5. Verify hard delete
+      expect(await enrollmentStore.isEnrolled(actorDid)).toBe(false)
+      const storedEnrollment = await enrollmentStore.getEnrollment(actorDid)
+      expect(storedEnrollment).toBeNull()
       expect(await actorStore.exists(actorDid)).toBe(false)
+      expect(actorStoreDestroyer).toHaveBeenCalledWith(actorDid)
     })
   })
 })

@@ -1,154 +1,27 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
-import { sha256 } from 'multiformats/hashes/sha2'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { AtUri } from '@atproto/syntax'
 
-import { BlobStore, ENROLLMENT_MODE } from '@northskysocial/stratos-core'
 import {
   closeServiceDb,
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
+} from '../src/db/index.js'
 
-import { StratosServiceConfig } from '../src'
 import {
   AppContext,
   SqliteEnrollmentStore,
   StratosActorStore,
 } from '../src/context.js'
-import { createRecord } from '../src/api'
-import { WriteRateLimiter } from '../src/rate-limiter.js'
+import { createRecord } from '../src/api/index.js'
+import { WriteRateLimiter } from '../src/shared/rate-limiter.js'
 import { Did } from '@atproto/api'
 
-// Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
-  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
-  const hash = await sha256.digest(bytes)
-  return CID.createV1(0x55, hash)
-}
-
-// Mock blob store
-function createMockBlobStore(): BlobStore {
-  const storage = new Map<string, Uint8Array>()
-  const tempStorage = new Map<string, Uint8Array>()
-
-  return {
-    putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
-      const key = `temp-${randomBytes(8).toString('hex')}`
-      if (bytes instanceof Uint8Array) {
-        tempStorage.set(key, bytes)
-      }
-      return key
-    }),
-    makePermanent: vi.fn().mockImplementation(async (key: string, cid: CID) => {
-      const bytes = tempStorage.get(key)
-      if (bytes) {
-        storage.set(cid.toString(), bytes)
-        tempStorage.delete(key)
-      }
-    }),
-    putPermanent: vi
-      .fn()
-      .mockImplementation(async (cid: CID, bytes: Uint8Array) => {
-        if (bytes instanceof Uint8Array) {
-          storage.set(cid.toString(), bytes)
-        }
-      }),
-    quarantine: vi.fn().mockResolvedValue(undefined),
-    unquarantine: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockImplementation(async (cid: CID) => {
-      storage.delete(cid.toString())
-    }),
-    deleteMany: vi.fn().mockImplementation(async (cids: CID[]) => {
-      for (const cid of cids) {
-        storage.delete(cid.toString())
-      }
-    }),
-    hasTemp: vi.fn().mockImplementation(async (key: string) => {
-      return tempStorage.has(key)
-    }),
-    hasStored: vi.fn().mockImplementation(async (cid: CID) => {
-      return storage.has(cid.toString())
-    }),
-    getBytes: vi.fn().mockImplementation(async (cid: CID) => {
-      const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
-      return bytes
-    }),
-    getStream: vi.fn().mockImplementation(async (cid: CID) => {
-      const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
-      async function* generate() {
-        yield bytes!
-      }
-      return generate()
-    }),
-  }
-}
-
-// CBOR decoder mock (just JSON for testing)
-function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
-  return JSON.parse(new TextDecoder().decode(bytes))
-}
-
-// Create a minimal test config
-function createTestConfig(dataDir: string): StratosServiceConfig {
-  return {
-    service: {
-      did: 'did:web:stratos.test',
-      serviceFragment: 'atproto_pns',
-      port: 3100,
-      publicUrl: 'https://stratos.test',
-      repoUrl: 'https://github.com/NorthskySocial/stratos',
-    },
-    storage: {
-      backend: 'sqlite',
-      dataDir,
-    },
-    blobstore: {
-      provider: 'disk',
-      location: `${dataDir}/blobs`,
-    },
-    stratos: {
-      serviceDid: 'did:web:nerv.tokyo.jp',
-      allowedDomains: [
-        'did:web:nerv.tokyo.jp/engineering',
-        'did:web:nerv.tokyo.jp/design',
-      ],
-      retentionDays: 30,
-      importMaxBytes: 256 * 1024 * 1024,
-      writeRateLimit: {
-        maxWrites: 300,
-        windowMs: 60_000,
-        cooldownMs: 10_000,
-        cooldownJitterMs: 1_000,
-      },
-    },
-    enrollment: {
-      mode: ENROLLMENT_MODE.OPEN,
-      allowedDids: [],
-      allowedPdsEndpoints: [],
-    },
-    identity: {
-      plcUrl: 'https://plc.directory',
-    },
-    oauth: {},
-    logging: {
-      level: 'info',
-    },
-    dpop: {
-      requireNonce: false,
-    },
-    userAgent: {
-      repoUrl: 'https://github.com/NorthskySocial/stratos',
-    },
-  }
-}
+import { cborToRecord, createCid, createMockBlobStore } from './utils/index.js'
 
 // Create minimal app context for testing API functions
 interface TestContext {
@@ -193,13 +66,16 @@ describe('API Records', () => {
     // Simple in-memory enrollment store for testing
     const enrolledDids = new Set<string>()
     const enrollmentStore = {
-      isEnrolled: async (did: string) => enrolledDids.has(did),
+      isEnrolled: (did: string) => Promise.resolve(enrolledDids.has(did)),
       enroll: async (record: {
         did: string
         enrolledAt: string
-        pdsEndpoint?: string
+        pdsEndpoint?: string | undefined
+        signingKeyDid?: string | undefined
+        active?: boolean | undefined
       }) => {
         enrolledDids.add(record.did)
+        await Promise.resolve()
       },
     }
 

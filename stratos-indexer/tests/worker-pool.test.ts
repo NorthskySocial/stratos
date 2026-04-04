@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { WorkerPool } from '../src/worker-pool.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { WorkerPool } from '../src/index.ts'
 
 describe('WorkerPool', () => {
   let errors: Error[]
@@ -91,9 +91,9 @@ describe('WorkerPool', () => {
     )
 
     // 1 active + 2 queued fills the pool
-    pool.submit(1)
-    pool.submit(2)
-    pool.submit(3)
+    void pool.submit(1)
+    void pool.submit(2)
+    void pool.submit(3)
 
     await new Promise((r) => setTimeout(r, 20))
 
@@ -132,9 +132,9 @@ describe('WorkerPool', () => {
       onError,
     )
 
-    pool.submit(1)
-    pool.submit(2)
-    pool.submit(3)
+    void pool.submit(1)
+    void pool.submit(2)
+    void pool.submit(3)
 
     await new Promise((r) => setTimeout(r, 20))
 

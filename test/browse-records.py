@@ -19,9 +19,9 @@ import json
 import os
 import sys
 import textwrap
+from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
 
 CONFIG = {"url": "http://localhost:3100"}
 DEFAULT_COLLECTION = "zone.stratos.feed.post"
@@ -35,15 +35,15 @@ PDS_CACHE: dict[str, str] = {}
 
 class C:
     """ANSI color codes for terminal output."""
-    PDS = "\033[36m"       # cyan — PDS content
-    STRATOS = "\033[35m"   # magenta — Stratos content
+    PDS = "\033[36m"  # cyan — PDS content
+    STRATOS = "\033[35m"  # magenta — Stratos content
     BOUNDARY = "\033[33m"  # yellow — boundary info
-    HEAD = "\033[1m"       # bold — headers
-    DIM = "\033[2m"        # dim — secondary info
-    INFO = "\033[34m"      # blue — info messages
-    ERR = "\033[31m"       # red — errors
-    OK = "\033[32m"        # green — success
-    R = "\033[0m"          # reset
+    HEAD = "\033[1m"  # bold — headers
+    DIM = "\033[2m"  # dim — secondary info
+    INFO = "\033[34m"  # blue — info messages
+    ERR = "\033[31m"  # red — errors
+    OK = "\033[32m"  # green — success
+    R = "\033[0m"  # reset
 
 
 def load_test_state():
@@ -239,7 +239,8 @@ def format_source_field(source: dict, indent: str = "      ") -> str:
 
 def list_stratos_collections(did: str, stratos_url: str) -> list[str]:
     """List collections available on a Stratos service for a DID."""
-    status, body = http_get_json(f"{stratos_url}/xrpc/com.atproto.repo.describeRepo?repo={quote(did)}")
+    status, body = http_get_json(
+        f"{stratos_url}/xrpc/com.atproto.repo.describeRepo?repo={quote(did)}")
     if status == 200 and isinstance(body, dict):
         return body.get("collections", [])
     return []
@@ -330,7 +331,8 @@ def cmd_discover(user: str):
             pds_recs = pds_list_records(did, collection, 10) or []
 
             total = max(len(stratos_recs), len(pds_recs))
-            print(f"\n        {C.HEAD}{collection}{C.R} ({total} record{'s' if total != 1 else ''})")
+            print(
+                f"\n        {C.HEAD}{collection}{C.R} ({total} record{'s' if total != 1 else ''})")
 
             # Index by rkey
             s_by_rkey: dict[str, dict] = {}
@@ -369,7 +371,8 @@ def cmd_discover(user: str):
                     p_val = p_rec.get("value", {})
                     source = p_val.get("source")
                     if source:
-                        print(f"              {C.PDS}PDS: stub → service: {source.get('service', '?')}{C.R}")
+                        print(
+                            f"              {C.PDS}PDS: stub → service: {source.get('service', '?')}{C.R}")
                     else:
                         print(f"              {C.PDS}PDS: full record (no source){C.R}")
                 else:
@@ -381,7 +384,8 @@ def cmd_discover(user: str):
                     text = s_val.get("text", "")
                     print(f"              {C.STRATOS}Stratos: {C.BOUNDARY}{boundaries}{C.R}")
                     if text:
-                        wrapped = textwrap.fill(text, width=56, initial_indent="              ", subsequent_indent="              ")
+                        wrapped = textwrap.fill(text, width=56, initial_indent="              ",
+                                                subsequent_indent="              ")
                         print(f"{C.STRATOS}{wrapped}{C.R}")
                 else:
                     print(f"              {C.DIM}Stratos: not visible{C.R}")
@@ -429,7 +433,8 @@ def cmd_list(repo: str, collection: str, caller_did: str | None, limit: int = 50
         "",
         f"  {C.HEAD}Records in {collection}{C.R}",
         f"  Repo:   {friendly_name(repo_did)} ({repo_did})",
-        f"  Viewer: {viewer}" + (f" ({caller_did})" if caller_did and not caller_did.startswith("did:") else ""),
+        f"  Viewer: {viewer}" + (
+            f" ({caller_did})" if caller_did and not caller_did.startswith("did:") else ""),
         "",
         sep="\n",
     )
@@ -506,7 +511,8 @@ def cmd_list(repo: str, collection: str, caller_did: str | None, limit: int = 50
                 print(f"      {C.PDS}record (no source field — not a stub){C.R}")
                 text = p_val.get("text", "")
                 if text:
-                    wrapped = textwrap.fill(text, width=72, initial_indent="      ", subsequent_indent="      ")
+                    wrapped = textwrap.fill(text, width=72, initial_indent="      ",
+                                            subsequent_indent="      ")
                     print(f"{C.PDS}{wrapped}{C.R}")
         else:
             print(f"      {C.DIM}PDS: (not fetched or not found){C.R}")
@@ -518,7 +524,8 @@ def cmd_list(repo: str, collection: str, caller_did: str | None, limit: int = 50
             print(f"      {C.STRATOS}Stratos ({CONFIG['url']}){C.R}")
             print(f"      {C.BOUNDARY}boundaries: {boundaries}{C.R}")
             if text:
-                wrapped = textwrap.fill(text, width=72, initial_indent="      ", subsequent_indent="      ")
+                wrapped = textwrap.fill(text, width=72, initial_indent="      ",
+                                        subsequent_indent="      ")
                 print(f"{C.STRATOS}{wrapped}{C.R}")
         else:
             print(f"      {C.DIM}Stratos: (not visible — may be boundary-restricted){C.R}")
@@ -528,7 +535,8 @@ def cmd_list(repo: str, collection: str, caller_did: str | None, limit: int = 50
     stratos_cursor = stratos_body.get("cursor") if stratos_status == 200 else None
     if stratos_cursor:
         print(f"  {C.DIM}(more records available — cursor: {stratos_cursor}){C.R}")
-    print(f"  {C.DIM}Shown: {len(all_rkeys)} record(s) — {C.STRATOS}Stratos: {len(stratos_records)}{C.R}{C.DIM}, {C.PDS}PDS: {len(pds_records) if pds_records is not None else '?'}{C.R}")
+    print(
+        f"  {C.DIM}Shown: {len(all_rkeys)} record(s) — {C.STRATOS}Stratos: {len(stratos_records)}{C.R}{C.DIM}, {C.PDS}PDS: {len(pds_records) if pds_records is not None else '?'}{C.R}")
 
 
 def cmd_get(uri: str, caller_did: str | None):
@@ -566,7 +574,8 @@ def cmd_get(uri: str, caller_did: str | None):
             if created:
                 print(f"  {C.DIM}createdAt: {created}{C.R}")
         else:
-            record_lines = "\n".join(f"    {C.PDS}{line}{C.R}" for line in format_record(p_val).splitlines())
+            record_lines = "\n".join(
+                f"    {C.PDS}{line}{C.R}" for line in format_record(p_val).splitlines())
             print(f"  {C.PDS}Full record (no source — not a stub):{C.R}", record_lines, sep="\n")
     else:
         print(f"  {C.DIM}(not found on PDS or PDS not reachable){C.R}")
@@ -584,7 +593,8 @@ def cmd_get(uri: str, caller_did: str | None):
         value = body.get("value", {})
         cid = body.get("cid", "?")
         boundaries = format_boundaries(value)
-        record_lines = "\n".join(f"    {C.STRATOS}{line}{C.R}" for line in format_record(value).splitlines())
+        record_lines = "\n".join(
+            f"    {C.STRATOS}{line}{C.R}" for line in format_record(value).splitlines())
         print(
             f"  {C.STRATOS}CID: {cid}{C.R}",
             f"  {C.BOUNDARY}Boundaries: {boundaries}{C.R}",
@@ -653,7 +663,8 @@ def cmd_hydrate(uri: str, caller_did: str | None):
         rec = records[0]
         value = rec.get("value", {})
         boundaries = format_boundaries(value)
-        record_lines = "\n".join(f"    {C.STRATOS}{line}{C.R}" for line in format_record(value).splitlines())
+        record_lines = "\n".join(
+            f"    {C.STRATOS}{line}{C.R}" for line in format_record(value).splitlines())
         print(
             f"  {C.STRATOS}CID:        {rec.get('cid', '?')}{C.R}",
             f"  {C.BOUNDARY}Boundaries: {boundaries}{C.R}",
@@ -796,9 +807,12 @@ def main():
     parser.add_argument("--list", metavar="USER", help="List records for a user (name or DID)")
     parser.add_argument("--collection", default=DEFAULT_COLLECTION, help="Collection NSID")
     parser.add_argument("--get", metavar="AT_URI", help="Get a specific record by AT-URI")
-    parser.add_argument("--hydrate", metavar="AT_URI", help="Hydrate a record (shows blocked status)")
-    parser.add_argument("--discover", metavar="USER", help="Discover Stratos via ATProto (DID → PDS → enrollment → records)")
-    parser.add_argument("--as", dest="viewer", metavar="USER", help="Authenticate as this user (name or DID)")
+    parser.add_argument("--hydrate", metavar="AT_URI",
+                        help="Hydrate a record (shows blocked status)")
+    parser.add_argument("--discover", metavar="USER",
+                        help="Discover Stratos via ATProto (DID → PDS → enrollment → records)")
+    parser.add_argument("--as", dest="viewer", metavar="USER",
+                        help="Authenticate as this user (name or DID)")
     parser.add_argument("--limit", type=int, default=50, help="Max records to return")
 
     args = parser.parse_args()

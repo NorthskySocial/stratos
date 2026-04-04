@@ -35,6 +35,10 @@ export function canAccessRecord(input: AccessCheckInput): boolean {
 
 /**
  * Check if two arrays have at least one common element
+ *
+ * @param a - First array
+ * @param b - Second array
+ * @returns true if there is at least one element in common
  */
 export function hasIntersection(a: string[], b: string[]): boolean {
   const setB = new Set(b)
@@ -104,7 +108,7 @@ export function createHydrationContext(
   viewerDomains: string[],
 ): HydrationContext {
   return {
-    viewerDid,
+    viewerDid: viewerDid ? viewerDid : null,
     viewerDomains,
   }
 }

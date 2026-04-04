@@ -123,7 +123,8 @@ function PostCard({ post }) {
 
 ## Recommended UX Checklist
 
-- Always make it visually clear when content is private (different background, lock icon, domain badges).
+- Always make it visually clear when content is private (different background, lock icon, domain
+  badges).
 - Default to the user's first enrolled domain in the composer to reduce friction.
 - Disable the post button when no domain is selected for a private post.
 - Show an enrollment prompt before displaying the private post composer if the user isn't enrolled.

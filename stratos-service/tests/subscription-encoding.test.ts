@@ -5,16 +5,16 @@
  * records.ts). The subscription handler must CBOR-decode them, not
  * JSON.parse. These tests verify the roundtrip works correctly.
  */
-import { describe, it, expect } from 'vitest'
-import { encode as cborEncode } from '@atproto/lex-cbor'
+import { describe, expect, it } from 'vitest'
+import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import {
   formatEvent,
   matchesDomain,
   type SeqEvent,
-} from '../src/subscription/subscribe-records.js'
+} from '../src/subscription/index.js'
 
 function createCborEvent(event: Record<string, unknown>): Uint8Array {
-  return new Uint8Array(cborEncode(event))
+  return new Uint8Array(cborEncode(event as unknown as LexValue))
 }
 
 function createSeqEvent(
@@ -60,7 +60,9 @@ describe('Subscription CBOR encoding roundtrip', () => {
       expect(result.ops).toHaveLength(1)
       expect(result.ops[0].action).toBe('create')
       expect(result.ops[0].path).toBe('zone.stratos.feed.post/abc')
-      expect(result.ops[0].record?.text).toBe('Shinji, get in the robot!')
+      expect((result.ops[0].record as any)?.text).toBe(
+        'Shinji, get in the robot!',
+      )
     })
 
     it('decodes CBOR-encoded event with multiple ops', () => {
@@ -86,8 +88,8 @@ describe('Subscription CBOR encoding roundtrip', () => {
       const result = formatEvent(seqEvent)
 
       expect(result.ops).toHaveLength(2)
-      expect(result.ops[0].record?.text).toBe('First post')
-      expect(result.ops[1].record?.text).toBe('Second post')
+      expect((result.ops[0].record as any)?.text).toBe('First post')
+      expect((result.ops[1].record as any)?.text).toBe('Second post')
     })
 
     it('returns empty ops for invalid CBOR data', () => {

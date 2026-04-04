@@ -1,68 +1,68 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="ef-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="ef-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <path
           id="ef-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ef-ml)"
           d="M 190 224 L 326 214"
+          marker-end="url(#ef-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ef-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ef-ml)"
           d="M 426 270 L 322 352"
+          marker-end="url(#ef-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ef-a3"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ef-ml)"
           d="M 398 404 L 428 404"
+          marker-end="url(#ef-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ef-a4"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#ef-mg)"
           d="M 526 214 L 716 224"
+          marker-end="url(#ef-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
-      <div class="node" id="ef-nu" style="left: 40px; top: 178px; width: 155px">
+      <div id="ef-nu" class="node" style="left: 40px; top: 178px; width: 155px">
         <div class="ni">🧑</div>
         <div class="nn">User</div>
         <div class="ns">alice.bsky.social</div>
       </div>
 
       <div
-        class="node"
         id="ef-nst"
+        class="node"
         style="left: 326px; top: 168px; width: 200px"
       >
         <div class="ni">⚙️</div>
@@ -71,8 +71,8 @@
       </div>
 
       <div
-        class="node"
         id="ef-npds"
+        class="node"
         style="left: 716px; top: 178px; width: 162px"
       >
         <div class="ni">🗄️</div>
@@ -81,8 +81,8 @@
       </div>
 
       <div
-        class="node gone"
         id="ef-nkey"
+        class="node gone"
         style="left: 246px; top: 352px; width: 155px"
       >
         <div class="ni">🔑</div>
@@ -91,8 +91,8 @@
       </div>
 
       <div
-        class="node gone"
         id="ef-natt"
+        class="node gone"
         style="left: 428px; top: 348px; width: 204px"
       >
         <div class="ni">✍️</div>
@@ -118,7 +118,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

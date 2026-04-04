@@ -4,9 +4,9 @@ import {
   migrateServiceDb,
   closeServiceDb,
   enrollmentBoundary,
-} from '../src/db'
-import type { ServiceDb } from '../src/db'
-import { SqliteEnrollmentStore } from '../src/context'
+} from '../src/db/index.js'
+import type { ServiceDb } from '../src/db/index.js'
+import { SqliteEnrollmentStore } from '../src/context.js'
 import { eq } from 'drizzle-orm'
 
 let db: ServiceDb

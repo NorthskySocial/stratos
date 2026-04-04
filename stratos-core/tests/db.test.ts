@@ -1,20 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { sql, eq } from 'drizzle-orm'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import os from 'node:os'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { eq, sql } from 'drizzle-orm'
+import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
+import * as os from 'node:os'
 import {
+  closeStratosDb,
   createStratosDb,
   migrateStratosDb,
-  closeStratosDb,
-  StratosDb,
-  stratosRepoRoot,
-  stratosRepoBlock,
-  stratosRecord,
-  stratosBlob,
   stratosBacklink,
+  stratosBlob,
+  StratosDb,
+  stratosRecord,
+  stratosRepoBlock,
+  stratosRepoRoot,
   stratosSeq,
-} from '../src'
+} from '../src/index.js'
 
 describe('stratos-db', () => {
   let db: StratosDb
@@ -314,7 +314,7 @@ describe('stratos-db', () => {
 
       expect(retrieved).toBeDefined()
       expect(retrieved?.size).toBe(5)
-      expect(Buffer.from(retrieved!.content)).toEqual(Buffer.from(content))
+      expect(Buffer.from(retrieved.content)).toEqual(Buffer.from(content))
     })
   })
 

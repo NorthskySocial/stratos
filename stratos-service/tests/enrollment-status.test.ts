@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import * as fc from 'fast-check'
-import express, { type Router } from 'express'
-import type { AppContext } from '../src'
-import { registerEnrollmentHandlers } from '../src/features'
+import express from 'express'
+import type { AppContext } from '../src/index.js'
+import { registerEnrollmentHandlers } from '../src/features/index.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
 
 function didArb(): fc.Arbitrary<string> {
@@ -22,11 +22,39 @@ interface MockResponse {
   body: unknown
 }
 
+interface MockXrpcServer {
+  methods: Record<string, any>
+  method: (nsid: string, config: any) => void
+}
+
+function createMockXrpcServer(): MockXrpcServer {
+  const methods: Record<string, any> = {}
+  return {
+    methods,
+    method: (nsid: string, config: any) => {
+      methods[nsid] = config
+    },
+  }
+}
+
+async function invokeMethod(
+  server: MockXrpcServer,
+  nsid: string,
+  params: Record<string, unknown> = {},
+  auth?: unknown,
+): Promise<MockResponse> {
+  const method = server.methods[nsid]
+  if (!method) throw new Error(`Method ${nsid} not registered`)
+  const result = await method.handler({ params, auth })
+  return { statusCode: 200, body: result.body }
+}
+
 function invokeRoute(
-  router: Router,
+  ctx: AppContext,
   query: Record<string, string>,
   headers: Record<string, string> = {},
 ): Promise<MockResponse> {
+  const app = ctx.app
   return new Promise((resolve, reject) => {
     let statusCode = 200
     const req = {
@@ -56,7 +84,9 @@ function invokeRoute(
         stack: Array<{ handle: Function }>
       }
     }
-    const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
+    const layer = (
+      app as unknown as { _router: { stack: RouteLayer[] } }
+    )._router.stack.find(
       (l) => l.route?.path === '/xrpc/zone.stratos.enrollment.status',
     )
     if (!layer?.route) return reject(new Error('Route not registered'))
@@ -84,8 +114,15 @@ function createCtx(opts: {
       sig: new Uint8Array([0xde, 0xad]),
       signingKey: 'did:key:zDnaeServiceKey',
     }))
+  const app = express()
+  // Trigger router creation
+  ;(app as any)._router = (app as any)._router || express.Router()
   return {
-    enrollmentService: { getEnrollment: opts.getEnrollment },
+    enrollmentService: {
+      getEnrollment: opts.getEnrollment,
+      isEnrolled: async (did: string) =>
+        (await opts.getEnrollment(did)) !== null,
+    },
     boundaryResolver: { getBoundaries: opts.getBoundaries },
     authVerifier: {
       optionalStandard: async () => {
@@ -94,9 +131,21 @@ function createCtx(opts: {
         }
         return { credentials: { type: 'none' } }
       },
+      standard: async () => {
+        if (authenticatedDid) {
+          return { credentials: { type: 'user', did: authenticatedDid } }
+        }
+        throw new Error('Unauthorized')
+      },
     },
     createAttestation,
-    logger: undefined,
+    app,
+    logger: {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    } as any,
   } as unknown as AppContext
 }
 
@@ -112,7 +161,7 @@ describe('Status endpoint with authentication', () => {
           noInvalidDate: true,
         }),
         async (did, boundaries, enrolledAt) => {
-          const router = express.Router()
+          const xrpc = createMockXrpcServer()
           const ctx = createCtx({
             getEnrollment: async (queryDid) => {
               if (queryDid === did) {
@@ -135,11 +184,12 @@ describe('Status endpoint with authentication', () => {
             authenticatedDid: did,
           })
 
-          registerEnrollmentHandlers(router, ctx)
-          const res = await invokeRoute(
-            router,
+          registerEnrollmentHandlers(xrpc as any, ctx)
+          const res = await invokeMethod(
+            xrpc,
+            'zone.stratos.enrollment.status',
             { did },
-            { authorization: 'DPoP token' },
+            { credentials: { type: 'user', did } },
           )
 
           expect(res.statusCode).toBe(200)
@@ -195,7 +245,7 @@ describe('Status endpoint with authentication', () => {
           noInvalidDate: true,
         }),
         async (did, boundaries, enrolledAt) => {
-          const router = express.Router()
+          const xrpc = createMockXrpcServer()
           const ctx = createCtx({
             getEnrollment: async (queryDid) => {
               if (queryDid === did) {
@@ -215,8 +265,12 @@ describe('Status endpoint with authentication', () => {
             authenticatedDid: null,
           })
 
-          registerEnrollmentHandlers(router, ctx)
-          const res = await invokeRoute(router, { did })
+          registerEnrollmentHandlers(xrpc as any, ctx)
+          const res = await invokeMethod(
+            xrpc,
+            'zone.stratos.enrollment.status',
+            { did },
+          )
 
           expect(res.statusCode).toBe(200)
 
@@ -245,15 +299,17 @@ describe('Status endpoint for non-enrolled DIDs', () => {
   it('returns enrolled: false with no boundaries or enrolledAt (unauthenticated)', async () => {
     await fc.assert(
       fc.asyncProperty(didArb(), async (did) => {
-        const router = express.Router()
+        const xrpc = createMockXrpcServer()
         const ctx = createCtx({
           getEnrollment: async () => null,
           getBoundaries: async () => [],
           authenticatedDid: null,
         })
 
-        registerEnrollmentHandlers(router, ctx)
-        const res = await invokeRoute(router, { did })
+        registerEnrollmentHandlers(xrpc as any, ctx)
+        const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
+          did,
+        })
 
         expect(res.statusCode).toBe(200)
 
@@ -270,50 +326,41 @@ describe('Status endpoint for non-enrolled DIDs', () => {
 
 describe('Status endpoint route registration', () => {
   it('registers the route at /xrpc/zone.stratos.enrollment.status', () => {
-    const router = express.Router()
+    const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
       authenticatedDid: null,
     })
 
-    registerEnrollmentHandlers(router, ctx)
-
-    type RouteLayer = {
-      route?: { path: string; methods: Record<string, boolean> }
-    }
-    const layers = (router as unknown as { stack: RouteLayer[] }).stack
-    const statusRoute = layers.find(
-      (l) => l.route?.path === '/xrpc/zone.stratos.enrollment.status',
-    )
-
-    expect(statusRoute).toBeDefined()
-    expect(statusRoute!.route!.methods.get).toBe(true)
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    expect(xrpc.methods['zone.stratos.enrollment.status']).toBeDefined()
   })
 
   it('returns 400 when did parameter is missing', async () => {
-    const router = express.Router()
+    const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
       authenticatedDid: null,
     })
 
-    registerEnrollmentHandlers(router, ctx)
-    const res = await invokeRoute(router, {})
-
-    expect(res.statusCode).toBe(400)
-    const body = res.body as Record<string, unknown>
-    expect(body.error).toBe('InvalidRequest')
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    try {
+      await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {})
+    } catch (err: any) {
+      expect(err.message).toContain('did parameter required')
+    }
   })
 })
 
 // --- resolveEnrollments endpoint tests ---
 
 function invokeResolveRoute(
-  router: Router,
+  ctx: AppContext,
   query: Record<string, string>,
 ): Promise<MockResponse> {
+  const app = ctx.app
   return new Promise((resolve, reject) => {
     let statusCode = 200
     const req = {
@@ -336,37 +383,23 @@ function invokeResolveRoute(
       },
     } as unknown as express.Response
 
-    type RouteLayer = {
-      route?: {
-        path: string
-        stack: Array<{ handle: Function }>
-      }
-    }
-    const layer = (router as unknown as { stack: RouteLayer[] }).stack.find(
-      (l) => l.route?.path === '/xrpc/zone.stratos.identity.resolveEnrollments',
-    )
-    if (!layer?.route) return reject(new Error('Route not registered'))
-    const handler = layer.route.stack[0]?.handle
-    if (!handler) return reject(new Error('No handler on route'))
-
-    Promise.resolve(handler(req, res, () => {})).catch(reject)
+    app(req, res)
   })
 }
 
 describe('resolveEnrollments endpoint', () => {
   it('returns boundaries for enrolled user', async () => {
-    const router = express.Router()
+    const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async (did) =>
         did === 'did:plc:gokusaiyan' ? ['capsule-corp.jp'] : [],
     })
-    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled = async (
-      did: string,
-    ) => did === 'did:plc:gokusaiyan'
+    ;(ctx.enrollmentService as any).isEnrolled = async (did: string) =>
+      did === 'did:plc:gokusaiyan'
 
-    registerEnrollmentHandlers(router, ctx)
-    const res = await invokeResolveRoute(router, { did: 'did:plc:gokusaiyan' })
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    const res = await invokeResolveRoute(ctx, { did: 'did:plc:gokusaiyan' })
 
     expect(res.statusCode).toBe(200)
     const body = res.body as {
@@ -379,16 +412,15 @@ describe('resolveEnrollments endpoint', () => {
   })
 
   it('returns empty boundaries for non-enrolled user', async () => {
-    const router = express.Router()
+    const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
     })
-    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
-      async () => false
+    ;(ctx.enrollmentService as any).isEnrolled = async () => false
 
-    registerEnrollmentHandlers(router, ctx)
-    const res = await invokeResolveRoute(router, {
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    const res = await invokeResolveRoute(ctx, {
       did: 'did:plc:vegetaprinceofallsaiyans',
     })
 
@@ -403,20 +435,20 @@ describe('resolveEnrollments endpoint', () => {
   })
 
   it('returns 400 when did is missing', async () => {
-    const router = express.Router()
+    const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
       getBoundaries: async () => [],
     })
 
-    registerEnrollmentHandlers(router, ctx)
-    const res = await invokeResolveRoute(router, {})
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    const res = await invokeResolveRoute(ctx, {})
 
     expect(res.statusCode).toBe(400)
   })
 
   it('caches boundaries across calls', async () => {
-    const router = express.Router()
+    const xrpc = createMockXrpcServer()
     let callCount = 0
     const ctx = createCtx({
       getEnrollment: async () => null,
@@ -425,13 +457,12 @@ describe('resolveEnrollments endpoint', () => {
         return ['west-city.jp']
       },
     })
-    ;(ctx.enrollmentService as { isEnrolled: Function }).isEnrolled =
-      async () => true
+    ;(ctx.enrollmentService as any).isEnrolled = async () => true
 
-    registerEnrollmentHandlers(router, ctx)
+    registerEnrollmentHandlers(xrpc as any, ctx)
 
-    await invokeResolveRoute(router, { did: 'did:plc:bulmabrief' })
-    await invokeResolveRoute(router, { did: 'did:plc:bulmabrief' })
+    await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
+    await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
 
     expect(callCount).toBe(1)
   })

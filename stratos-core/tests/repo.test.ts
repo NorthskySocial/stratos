@@ -1,28 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { eq } from 'drizzle-orm'
 
 import {
-  StratosSqlRepoReader,
-  StratosSqlRepoTransactor,
   BlockMap,
-} from '../src'
-import {
+  closeStratosDb,
   createStratosDb,
   migrateStratosDb,
-  closeStratosDb,
-  StratosDb,
-  stratosRepoRoot,
+  type StratosDb,
   stratosRepoBlock,
-} from '../src'
+  stratosRepoRoot,
+  StratosSqlRepoReader,
+  StratosSqlRepoTransactor,
+} from '../src/index.js'
 
 // Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
+const createCid = async (data: string | Uint8Array): Promise<Cid> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
