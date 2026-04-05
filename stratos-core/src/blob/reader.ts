@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, isNull } from 'drizzle-orm'
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import {
   stratosBlob,
   StratosDbOrTx,
@@ -72,7 +72,11 @@ export class StratosBlobReader {
         stream,
       }
     } catch (err) {
-      this.logger?.error(`Failed to retrieve blob ${cid.toString()}: ${err}`)
+      this.logger?.error(
+        `Failed to retrieve blob ${cid.toString()}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
       return null
     }
   }

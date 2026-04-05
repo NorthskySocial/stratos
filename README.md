@@ -37,26 +37,70 @@ User -> OAuth enrollment -> Stratos service
 
 ## Local Development
 
-### Install and verify
+### Prerequisites
 
-```bash
-pnpm install
-pnpm build
-pnpm test
-```
+- [Node.js](https://nodejs.org/) (v20+)
+- [pnpm](https://pnpm.io/) (v9+)
+- [Deno](https://deno.land/) (v2+) - for indexer and e2e tests
+- [Docker](https://www.docker.com/) (optional, for database and quick start)
 
-### Start the service
+### Quick Start (Docker)
+
+The easiest way to get the full stack running (Service + Indexer + Postgres) is using Docker Compose:
 
 ```bash
 cp .env.example .env
-pnpm --filter @northskysocial/stratos-service dev
+# Edit .env and set required variables:
+# STRATOS_SERVICE_DID=did:web:localhost
+# STRATOS_PUBLIC_URL=http://localhost:3100
+# STRATOS_ALLOWED_DOMAINS=example.com
+
+docker compose up --build
 ```
 
-For end-to-end coverage, run the integration suite from the repo root, see `test/` for details:
+### Manual Setup
 
-```bash
-pnpm e2etest
-```
+1. **Install dependencies and build packages:**
+
+   ```bash
+   pnpm install
+   pnpm build
+   ```
+
+2. **Configure the environment:**
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your local settings
+   ```
+
+3. **Start the Stratos Service:**
+
+   ```bash
+   pnpm --filter @northskysocial/stratos-service dev
+   ```
+
+4. **Start the Indexer (requires Deno):**
+
+   ```bash
+   # In a separate terminal
+   cd stratos-indexer
+   deno run --allow-all src/bin/main.ts
+   ```
+
+5. **Start the Web UI (Svelte demo):**
+
+   ```bash
+   # In a separate terminal
+   pnpm --filter @northskysocial/stratos-webapp dev
+   ```
+
+### Running Tests
+
+| Scope               | Command        |
+| ------------------- | -------------- |
+| Unit tests (Vitest) | `pnpm test`    |
+| End-to-end (Deno)   | `pnpm e2etest` |
 
 ## Configuration Highlights
 
@@ -135,13 +179,6 @@ standalone `stratos-indexer` package is responsible for:
 
 That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in
 `atproto-stratos`, while ingestion lives here in `stratos-indexer`.
-
-## Testing
-
-| Command        | Scope                  |
-| -------------- | ---------------------- |
-| `pnpm test`    | Vitest across packages |
-| `pnpm e2etest` | End-to-end suite       |
 
 ## Related Docs
 

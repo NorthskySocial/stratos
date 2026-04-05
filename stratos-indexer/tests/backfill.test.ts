@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   backfillActors,
-  type BackfillOptions,
+  BackfillOptions,
   backfillRepos,
   backfillSingleActor,
-} from '../src/backfill.ts'
+} from '../src/backfill'
 
 function makeOpts(overrides?: Partial<BackfillOptions>): BackfillOptions {
   return {
@@ -55,13 +55,25 @@ describe('backfillActors', () => {
     expect(count).toBe(3)
     expect(opts.onProgress).toHaveBeenCalledTimes(3)
 
-    const listRecordsCalls = fetchSpy.mock.calls.filter(([url]) =>
-      String(url).includes('listRecords'),
-    )
+    const listRecordsCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      return urlString.includes('listRecords')
+    })
     expect(listRecordsCalls).toHaveLength(3)
 
-    const repos = listRecordsCalls.map(([url]) => {
-      const parsed = new URL(String(url))
+    const repos = listRecordsCalls.map(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      const parsed = new URL(urlString)
       return parsed.searchParams.get('repo')
     })
     expect(repos).toContain(shinji)
@@ -80,9 +92,15 @@ describe('backfillActors', () => {
     const opts = makeOpts()
     await backfillActors(opts, ['did:plc:misato-katsuragi'])
 
-    const listReposCalls = fetchSpy.mock.calls.filter(([url]) =>
-      String(url).includes('listRepos'),
-    )
+    const listReposCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      return urlString.includes('listRepos')
+    })
     expect(listReposCalls).toHaveLength(0)
   })
 
@@ -157,7 +175,14 @@ describe('backfillSingleActor', () => {
     await backfillSingleActor(opts, 'did:plc:toji-suzuhara')
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const url = new URL(String(fetchSpy.mock.calls[0][0]))
+    const firstCallInput = fetchSpy.mock.calls[0][0]
+    const urlString =
+      typeof firstCallInput === 'string'
+        ? firstCallInput
+        : firstCallInput instanceof URL
+          ? firstCallInput.toString()
+          : firstCallInput.url
+    const url = new URL(urlString)
     expect(url.searchParams.get('repo')).toBe('did:plc:toji-suzuhara')
   })
 })
@@ -198,9 +223,15 @@ describe('backfillRepos', () => {
 
     expect(count).toBe(2)
 
-    const listReposCalls = fetchSpy.mock.calls.filter(([url]) =>
-      String(url).includes('listRepos'),
-    )
+    const listReposCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      return urlString.includes('listRepos')
+    })
     expect(listReposCalls.length).toBeGreaterThan(0)
   })
 })

@@ -32,23 +32,23 @@ export interface GetEventsSinceOptions {
  */
 export interface SequenceStoreReader {
   /** Get the latest sequence number */
-  getLatestSeq(): Promise<number | null>
+  getLatestSeq: () => Promise<number | null>
 
   /** Get events since a sequence number */
-  getEventsSince(
+  getEventsSince: (
     seq: number,
     options?: GetEventsSinceOptions,
-  ): Promise<SequenceEvent[]>
+  ) => Promise<SequenceEvent[]>
 
   /** Get a single event by sequence number */
-  getEvent(seq: number): Promise<SequenceEvent | null>
+  getEvent: (seq: number) => Promise<SequenceEvent | null>
 
   /** Get events in a range */
-  getEventsRange(
+  getEventsRange: (
     startSeq: number,
     endSeq: number,
     options?: GetEventsSinceOptions,
-  ): Promise<SequenceEvent[]>
+  ) => Promise<SequenceEvent[]>
 }
 
 /**
@@ -70,8 +70,8 @@ export interface AppendEventInput {
  */
 export interface SequenceStoreWriter extends SequenceStoreReader {
   /** Append a new event to the sequence log */
-  appendEvent(event: AppendEventInput): Promise<number>
+  appendEvent: (event: AppendEventInput) => Promise<number>
 
   /** Truncate events before a sequence number (for cleanup) */
-  truncateBefore(seq: number): Promise<number>
+  truncateBefore: (seq: number) => Promise<number>
 }

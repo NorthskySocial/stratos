@@ -4,16 +4,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: indexer
     container_name: stratos-indexer
-    command: deno run --allow-all stratos-indexer/src/index.ts
     restart: unless-stopped
     ports:
       - '3002:3002'
     environment:
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
+      STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL}
       # Database (required) - Shared with AppView
-      BSKY_DB_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/bsky
-      BSKY_DB_POSTGRES_SCHEMA: bsky
-      BSKY_DB_POOL_SIZE: 20
+      BSKY_DB_POSTGRES_URL: ${BSKY_DB_POSTGRES_URL:-postgres://stratos:stratos@postgres:5432/bsky}
+      BSKY_DB_POSTGRES_SCHEMA: ${BSKY_DB_POSTGRES_SCHEMA:-bsky}
+      BSKY_DB_POOL_SIZE: ${BSKY_DB_POOL_SIZE:-20}
 
       # PDS
       BSKY_REPO_PROVIDER: ${BSKY_REPO_PROVIDER:-https://bsky.social}
@@ -44,6 +46,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: stratos
     container_name: stratos
     restart: unless-stopped
     ports:
@@ -94,7 +97,7 @@ services:
 
       # OAuth consent screen branding (all optional)
       # Set STRATOS_OAUTH_LOGO_URI to ${STRATOS_PUBLIC_URL}/assets/<file> to self-host the logo
-      STRATOS_OAUTH_CLIENT_NAME: ${STRATOS_OAUTH_CLIENT_NAME:-}
+      STRATOS_OAUTH_CLIENT_NAME: ${STRATOS_OAUTH_CLIENT_NAME:-Stratos}
       STRATOS_OAUTH_LOGO_URI: ${STRATOS_OAUTH_LOGO_URI:-}
       STRATOS_OAUTH_TOS_URI: ${STRATOS_OAUTH_TOS_URI:-}
       STRATOS_OAUTH_POLICY_URI: ${STRATOS_OAUTH_POLICY_URI:-}

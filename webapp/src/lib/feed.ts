@@ -58,9 +58,9 @@ function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
     | undefined
   if (
     !reply?.root?.uri ||
-    !reply?.root?.cid ||
-    !reply?.parent?.uri ||
-    !reply?.parent?.cid
+    !reply.root.cid ||
+    !reply.parent?.uri ||
+    !reply.parent.cid
   ) {
     return null
   }
@@ -95,8 +95,8 @@ function mapFeedViewPosts(
       {
         uri: item.post.uri,
         cid: item.post.cid,
-        text: (val.text as string) ?? '',
-        createdAt: (val.createdAt as string) ?? item.post.indexedAt ?? '',
+        text: val.text as string,
+        createdAt: val.createdAt as string,
         isPrivate,
         reply: parseReplyRef(val),
         author: did,
@@ -128,8 +128,8 @@ export async function fetchRepoPublicPosts(
       return {
         uri: r.uri,
         cid: r.cid,
-        text: (val.text as string) ?? '',
-        createdAt: (val.createdAt as string) ?? '',
+        text: val.text as string,
+        createdAt: val.createdAt as string,
         isPrivate: false,
         reply: parseReplyRef(val),
         author: did,
@@ -179,8 +179,8 @@ export async function fetchStratosPosts(
       return {
         uri: r.uri,
         cid: r.cid,
-        text: (val.text as string) ?? '',
-        createdAt: (val.createdAt as string) ?? '',
+        text: val.text as string,
+        createdAt: val.createdAt as string,
         isPrivate: true,
         reply: parseReplyRef(val),
         author: authorFromUri(r.uri),

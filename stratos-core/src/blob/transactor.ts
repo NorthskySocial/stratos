@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto/index.js'
 import { stratosBlob, StratosDbOrTx, stratosRecordBlob } from '../db/index.js'
 import { BlobStore, Logger, PreparedBlobRef } from '../types.js'

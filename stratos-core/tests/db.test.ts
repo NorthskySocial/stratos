@@ -14,7 +14,7 @@ import {
   stratosRepoBlock,
   stratosRepoRoot,
   stratosSeq,
-} from '../src/index.js'
+} from '../src'
 
 describe('stratos-db', () => {
   let db: StratosDb

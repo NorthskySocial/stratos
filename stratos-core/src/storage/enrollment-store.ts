@@ -27,19 +27,21 @@ export interface ListEnrollmentsOptions {
  */
 export interface EnrollmentStoreReader {
   /** Check if user is enrolled */
-  isEnrolled(did: string): Promise<boolean>
+  isEnrolled: (did: string) => Promise<boolean>
 
   /** Get enrollment record */
-  getEnrollment(did: string): Promise<StoredEnrollment | null>
+  getEnrollment: (did: string) => Promise<StoredEnrollment | null>
 
   /** List all enrollments */
-  listEnrollments(options?: ListEnrollmentsOptions): Promise<StoredEnrollment[]>
+  listEnrollments: (
+    options?: ListEnrollmentsOptions,
+  ) => Promise<StoredEnrollment[]>
 
   /** Count total enrollments */
-  enrollmentCount(): Promise<number>
+  enrollmentCount: () => Promise<number>
 
   /** Get boundaries for a user */
-  getBoundaries(did: string): Promise<string[]>
+  getBoundaries: (did: string) => Promise<string[]>
 }
 
 /**
@@ -48,23 +50,23 @@ export interface EnrollmentStoreReader {
  */
 export interface EnrollmentStoreWriter extends EnrollmentStoreReader {
   /** Enroll a user */
-  enroll(enrollment: StoredEnrollment): Promise<void>
+  enroll: (enrollment: StoredEnrollment) => Promise<void>
 
   /** Unenroll a user */
-  unenroll(did: string): Promise<void>
+  unenroll: (did: string) => Promise<void>
 
   /** Update enrollment (e.g., PDS endpoint) */
-  updateEnrollment(
+  updateEnrollment: (
     did: string,
     updates: Partial<Omit<StoredEnrollment, 'did'>>,
-  ): Promise<void>
+  ) => Promise<void>
 
   /** Set all boundaries for a user (replaces existing) */
-  setBoundaries(did: string, boundaries: string[]): Promise<void>
+  setBoundaries: (did: string, boundaries: string[]) => Promise<void>
 
   /** Add a single boundary for a user */
-  addBoundary(did: string, boundary: string): Promise<void>
+  addBoundary: (did: string, boundary: string) => Promise<void>
 
   /** Remove a single boundary from a user */
-  removeBoundary(did: string, boundary: string): Promise<void>
+  removeBoundary: (did: string, boundary: string) => Promise<void>
 }

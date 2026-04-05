@@ -53,6 +53,9 @@ const DEFAULT_ACTOR_SYNC_OPTIONS: StratosActorSyncOptions = {
 
 // --- Service-level enrollment stream ---
 
+/**
+ * Stratos service subscription manager for enrollment and unenrollment events.
+ */
 export class StratosServiceSubscription {
   private ws: WebSocket | null = null
   private running = false
@@ -64,15 +67,25 @@ export class StratosServiceSubscription {
     private onError?: (err: Error) => void,
   ) {}
 
+  /**
+   * Check if the Stratos service enrollment stream is connected.
+   * @returns True if the stream is connected, false otherwise.
+   */
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
+  /**
+   * Start the Stratos service enrollment stream.
+   */
   start(): void {
     this.running = true
     this.connect()
   }
 
+  /**
+   * Stop the Stratos service enrollment stream.
+   */
   stop(): void {
     this.running = false
     if (this.ws) {
@@ -83,6 +96,7 @@ export class StratosServiceSubscription {
 
   /**
    * Connect to the Stratos service enrollment stream.
+   * @private
    */
   private connect(): void {
     if (!this.running) return
@@ -103,9 +117,15 @@ export class StratosServiceSubscription {
     }
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
+      const errorMsg =
+        e.error instanceof Error
+          ? e.error.message
+          : typeof e.error === 'string'
+            ? e.error
+            : 'unknown'
       const cause = e.error instanceof Error ? e.error : undefined
       this.onError?.(
-        new StratosError(`Enrollment stream error: ${e.error || 'unknown'}`, {
+        new StratosError(`Enrollment stream error: ${errorMsg}`, {
           cause,
         }),
       )
@@ -119,20 +139,29 @@ export class StratosServiceSubscription {
     }
   }
 
+  /**
+   * Schedule a reconnect attempt after a connection is closed.
+   * @private
+   */
   private scheduleReconnect(): void {
     this.reconnectAttempt++
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000)
     setTimeout(() => this.connect(), delay)
   }
 
+  /**
+   * Handle incoming messages from the Stratos enrollment stream.
+   * @param data - The message data.
+   * @private
+   */
   private async handleMessage(data: Uint8Array): Promise<void> {
     try {
-      const msg = decodeFirst(data) as Record<string, unknown>
+      const msg = decodeFirst(data) as unknown as Record<string, unknown>
       if (msg.t === '#enrollment') {
         const enrollment = msg as unknown as EnrollmentMessage
         if (enrollment.action === 'enroll') {
-          this.callbacks.onEnroll(enrollment.did, enrollment.boundaries || [])
-        } else if (enrollment.action === 'unenroll') {
+          this.callbacks.onEnroll(enrollment.did, enrollment.boundaries ?? [])
+        } else {
           this.callbacks.onUnenroll(enrollment.did)
         }
       }
@@ -187,9 +216,9 @@ export class StratosActorSync {
       if (this.indexedCount > 0 || this.deletedCount > 0) {
         console.log(
           {
-            indexed: this.indexedCount,
-            deleted: this.deletedCount,
-            activeActors: this.syncers.size,
+            indexed: this.indexedCount.toString(),
+            deleted: this.deletedCount.toString(),
+            activeActors: this.syncers.size.toString(),
           },
           'stratos sync stats',
         )
@@ -287,7 +316,12 @@ export class StratosActorSync {
   /**
    * Get statistics about the current state of the indexer.
    */
-  getStats() {
+  getStats(): {
+    activeConnections: number
+    waitingActors: number
+    globalPending: number
+    activeSyncs: number
+  } {
     return {
       activeConnections: this.syncers.size,
       waitingActors: this.waitingActors.length,
@@ -418,7 +452,11 @@ function buildWsUrl(
   url.pathname = '/xrpc/zone.stratos.sync.subscribeRecords'
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) {
-      url.searchParams.set(key, String(value))
+      if (typeof value === 'object' && value !== null) {
+        url.searchParams.set(key, JSON.stringify(value))
+      } else {
+        url.searchParams.set(key, String(value as string))
+      }
     }
   }
   return url.toString()

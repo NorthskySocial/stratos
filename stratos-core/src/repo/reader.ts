@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm'
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto/index.js'
 import { type CidLink, decode as cborDecode } from '@atcute/cbor'
 import {
@@ -104,7 +104,7 @@ export class CidSet {
   }
 }
 
-type RevCursor = {
+interface RevCursor {
   rev: string
   cid: string
 }
@@ -236,7 +236,7 @@ export class StratosSqlRepoReader {
         }
       }
       const lastRow = res.at(-1)
-      if (lastRow && lastRow.repoRev) {
+      if (lastRow?.repoRev) {
         cursor = {
           rev: lastRow.repoRev,
           cid: lastRow.cid,

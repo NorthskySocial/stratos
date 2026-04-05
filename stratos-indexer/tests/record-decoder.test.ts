@@ -85,7 +85,7 @@ describe('jsonToLex', () => {
     const cidStr = 'bafyreie5cvv4h45feadgeuwhbcutmh6t7ceseocckahdoe6uat64zmz454'
     const result = jsonToLex({ $link: cidStr })
     expect(result).toBeDefined()
-    expect(result!.toString()).toBe(cidStr)
+    expect(String(result)).toBe(cidStr)
   })
 
   it('passes through primitive values', () => {

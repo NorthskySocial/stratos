@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Cid } from '@atproto/lex-data'
-import { StratosBlockStoreReader } from '../src/features/index.js'
+import { StratosBlockStoreReader } from '../src/features'
 import { BlockMap } from '@northskysocial/stratos-core'
 import type { ActorRepoReader } from '../src/actor-store-types.js'
 import { createCid as makeCid } from './utils/test-context.js'

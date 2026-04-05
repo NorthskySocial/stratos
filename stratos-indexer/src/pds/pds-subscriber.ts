@@ -7,8 +7,8 @@ import {
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import type { CursorManager } from '../storage/cursor-manager.js'
 import { BackgroundQueue } from '@northskysocial/stratos-core'
-import { HandleDedup } from '../util/handle-dedup.ts'
-import { WorkerPool } from '../util/worker-pool.ts'
+import { HandleDedup } from '../util/handle-dedup.js'
+import { WorkerPool } from '../util/worker-pool.js'
 
 export interface PdsSubscriberOptions {
   repoProvider: string
@@ -91,7 +91,7 @@ export class PdsSubscriber {
    * @property {number} pendingCount - The number of pending work items in the worker pool.
    * @property {number} runningCount - The number of running work items in the worker pool.
    */
-  get stats() {
+  get stats(): { pendingCount: number; runningCount: number } {
     return {
       pendingCount: this.workerPool.pendingCount,
       runningCount: this.workerPool.runningCount,
@@ -101,14 +101,14 @@ export class PdsSubscriber {
   /**
    * Start the PDS subscriber by connecting to the firehose and worker pool.
    */
-  start() {
+  start(): void {
     this.firehose.start()
   }
 
   /**
    * Stop the PDS subscriber by disconnecting from the firehose and worker pool.
    */
-  stop() {
+  stop(): void {
     this.firehose.stop()
     void this.workerPool.stop()
   }

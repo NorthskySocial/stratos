@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import { AtUri } from '@atproto/syntax'
 import {
   stratosBacklink,
@@ -49,7 +49,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
       collection: atUri.collection,
       rkey: atUri.rkey,
       repoRev: repoRev,
-      indexedAt: timestamp || new Date().toISOString(),
+      indexedAt: timestamp ?? new Date().toISOString(),
     }
 
     if (!atUri.hostname.startsWith('did:')) {

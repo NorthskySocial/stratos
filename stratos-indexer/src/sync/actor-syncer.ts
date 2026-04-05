@@ -170,10 +170,14 @@ export class ActorSyncer {
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
       if (!this.intentionallyClosed) {
+        const errorMsg =
+          e.error instanceof Error
+            ? e.error.message
+            : typeof e.error === 'string'
+              ? e.error
+              : 'unknown'
         this.options.onError?.(
-          new StratosError(
-            `WebSocket error for ${this.did}: ${e.error || 'unknown'}`,
-          ),
+          new StratosError(`WebSocket error for ${this.did}: ${errorMsg}`),
         )
       }
     }
@@ -271,7 +275,8 @@ export class ActorSyncer {
           continue
         }
 
-        const data = this.queue.pending.shift()!
+        const data = this.queue.pending.shift()
+        if (!data) continue
         this.options.onGlobalPendingChange?.(-1)
 
         this.options.onSyncStarted()
@@ -332,7 +337,7 @@ export class ActorSyncer {
         }
         return { upsert }
       }
-    } else if (op.action === 'delete') {
+    } else {
       return { delete: uri }
     }
     return {}
@@ -391,7 +396,7 @@ function buildWsUrl(serviceUrl: string, params: StratosSyncParams): string {
  */
 function decodeXrpcFrame(data: Uint8Array): StratosSyncCommit | null {
   try {
-    const frame = decodeFirst(data) as XrpcFrame
+    const frame = decodeFirst(data) as unknown as XrpcFrame
     if (frame.t === '#commit') {
       return frame as unknown as StratosSyncCommit
     }

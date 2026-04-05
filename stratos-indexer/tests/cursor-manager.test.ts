@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import {
-  CursorManager,
-  type CursorState,
-} from '../src/storage/cursor-manager.ts'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { CursorManager, type CursorState } from '../src/storage/cursor-manager'
 
 describe('CursorManager', () => {
   let flushed: CursorState[]

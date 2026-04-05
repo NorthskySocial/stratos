@@ -1,5 +1,8 @@
 import type http from 'node:http'
 import path from 'node:path'
+import { config as dotenvConfig } from 'dotenv'
+dotenvConfig({ path: path.join(process.cwd(), '../.env') })
+dotenvConfig()
 import express from 'express'
 import './types.js'
 import cors from 'cors'

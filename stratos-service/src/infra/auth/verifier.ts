@@ -13,7 +13,7 @@ import {
   EnrollmentConfig,
   EnrollmentDeniedError,
 } from '@northskysocial/stratos-core'
-import { assertEnrollment } from '../../features/enrollment/internal/validation.js'
+import { assertEnrollment } from '../../features/index.js'
 
 export type XrpcAuthVerifier = MethodAuthVerifier
 

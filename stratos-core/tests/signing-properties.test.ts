@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as fc from 'fast-check'
-import {
-  encode as cborEncode,
-  decode as cborDecode,
-  toBytes as cborToBytes,
-} from '@atcute/cbor'
-import { createAttestationPayload } from '../src/index.js'
+import { decode as cborDecode } from '@atcute/cbor'
+import { createAttestationPayload } from '../src'
 
 describe('Signing and Attestation Property-Based Tests', () => {
   it('should create consistent attestation payloads', () => {

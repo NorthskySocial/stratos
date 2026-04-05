@@ -108,7 +108,7 @@ export function createHydrationContext(
   viewerDomains: string[],
 ): HydrationContext {
   return {
-    viewerDid: viewerDid ? viewerDid : null,
+    viewerDid: viewerDid ?? null,
     viewerDomains,
   }
 }

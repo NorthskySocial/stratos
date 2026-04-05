@@ -32,7 +32,7 @@ import postgres from 'postgres'
 import {
   PgEnrollmentStoreWriter,
   PostgresActorStore,
-} from '../src/infra/storage/postgres/index.js'
+} from '../src/infra/storage/postgres'
 
 describe('PostgreSQL Backend Integration', () => {
   let pgUrl: string
