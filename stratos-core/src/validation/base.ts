@@ -17,7 +17,7 @@ export interface RecordValidator {
    * @param parentBoundaries - The boundaries of the parent record, if this is a reply.
    * @throws StratosValidationError if the record is invalid.
    */
-  validate(record: RepoRecord, parentBoundaries?: string[]): void
+  validate: (record: RepoRecord, parentBoundaries?: string[]) => void
 }
 
 /**

@@ -24,14 +24,14 @@ export interface StubWriterService {
    * @param fullRecordCid - CID of the full record in Stratos
    * @param createdAt - Timestamp from the full record
    */
-  writeStub(
+  writeStub: (
     did: string,
     collection: string,
     rkey: string,
     recordType: string,
     fullRecordCid: Cid,
     createdAt: string,
-  ): Promise<WriteStubResult>
+  ) => Promise<WriteStubResult>
 
   /**
    * Delete a stub record from the user's PDS
@@ -39,5 +39,5 @@ export interface StubWriterService {
    * @param collection - Record collection NSID
    * @param rkey - Record key
    */
-  deleteStub(did: string, collection: string, rkey: string): Promise<void>
+  deleteStub: (did: string, collection: string, rkey: string) => Promise<void>
 }

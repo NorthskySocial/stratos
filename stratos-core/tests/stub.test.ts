@@ -9,7 +9,7 @@ import {
   generateStub,
   isStubRecord,
   parseServiceDid,
-} from '../src/index.js'
+} from '../src'
 
 // Helper to create deterministic CID
 async function createCid(data: string): Promise<Cid> {

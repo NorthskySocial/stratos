@@ -3,7 +3,7 @@ import { fromBytes } from '@atcute/cbor'
 import { ComAtprotoSyncSubscribeRepos } from '@atcute/atproto'
 import { AtUri } from '@atproto/syntax'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
-import type { HandleDedup } from '../util/handle-dedup.ts'
+import type { HandleDedup } from '../util/handle-dedup.js'
 import {
   type BackgroundQueue,
   decodeCommitOps,
@@ -13,8 +13,8 @@ import {
   parseEnrollmentRecord,
 } from '@northskysocial/stratos-core'
 import { fromUint8Array } from '@atcute/car'
-import type { CursorManager } from '../storage/cursor-manager.ts'
-import type { WorkerPool } from '../util/worker-pool.ts'
+import type { CursorManager } from '../storage/cursor-manager.js'
+import type { WorkerPool } from '../util/worker-pool.js'
 import { WriteOpAction } from '@atproto/repo'
 
 type SubscribeReposMessage = ComAtprotoSyncSubscribeRepos.$message
@@ -144,9 +144,32 @@ export class PdsFirehose {
         }
       },
       onConnectionError: (event: Event) => {
+        let details = ''
+        try {
+          // Event objects don't stringify well, try to extract some info
+          if (event instanceof ErrorEvent) {
+            details = ` message=${event.message}`
+          } else if ('message' in event) {
+            details = ` message=${(event as any).message}`
+          }
+          if ('type' in event) {
+            details += ` type=${event.type}`
+          }
+        } catch {
+          // fallback
+        }
         this.opts.onError?.(
-          new Error(`pds firehose connection error: ${JSON.stringify(event)}`),
+          new Error(
+            `pds firehose connection error:${details} (service=${this.opts.repoProvider})`,
+          ),
         )
+        // Reconnect on error
+        setTimeout(() => {
+          if (this.running) {
+            console.log('pds firehose reconnecting...')
+            this.connect()
+          }
+        }, 5000)
       },
       onError: (error: string, message?: string) => {
         this.opts.onError?.(
@@ -169,8 +192,10 @@ export class PdsFirehose {
 
     void (async () => {
       try {
-        this.ws = (this.subscription as { socket?: WebSocket }).socket ?? null
-        for await (const message of this.subscription!) {
+        const subscription = this.subscription
+        if (!subscription) return
+        this.ws = (subscription as { socket?: WebSocket }).socket ?? null
+        for await (const message of subscription) {
           if (!this.running) break
 
           const work = this.classifyMessage(message)
@@ -190,9 +215,16 @@ export class PdsFirehose {
         if (this.running) {
           this.opts.onError?.(
             new Error(
-              `pds firehose consumption error: ${err instanceof Error ? err.message : String(err)}`,
+              `pds firehose consumption error: ${err instanceof Error ? err.message : String(err)} (service=${this.opts.repoProvider})`,
             ),
           )
+          // Reconnect on error
+          setTimeout(() => {
+            if (this.running) {
+              console.log('pds firehose reconnecting...')
+              this.connect()
+            }
+          }, 1000)
         }
       }
     })()
@@ -215,6 +247,8 @@ export class PdsFirehose {
         return { type: 'account', message, traceId }
       case 'com.atproto.sync.subscribeRepos#sync':
         return { type: 'sync', message, traceId }
+      case 'com.atproto.sync.subscribeRepos#info':
+        return null
       default:
         return null
     }
@@ -300,8 +334,6 @@ async function processCommit(
   await indexingService.setCommitLastSeen(did, parseCid(commitCid), rev)
 
   const blocks = fromBytes(rawBlocks)
-  if (!blocks?.length) return
-
   const ops = decodeCommitOps(blocks, rawOps)
 
   for (const op of ops) {

@@ -7,10 +7,14 @@ import type { CursorManager } from '../storage/cursor-manager.js'
 import type { EnrollmentCallback } from '../pds/pds-firehose.js'
 import { Kysely } from 'kysely'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
-import type { BackgroundQueue } from '@atproto/bsky/dist/background.js'
 import type { BackfillOptions } from '../backfill.js'
-import type { StratosIndexerSchema } from '../storage/schema.ts'
+import type { StratosIndexerSchema } from '../storage/schema.js'
+import { BackgroundQueue } from '@atproto/bsky'
 
+/**
+ * Options for the Stratos sync manager.
+ * @interface
+ */
 export interface StratosSyncManagerOptions {
   config: {
     stratos: {
@@ -46,6 +50,10 @@ export interface StratosSyncManagerOptions {
   onError?: (err: Error) => void
 }
 
+/**
+ * A Stratos sync manager that manages the synchronization of actors and records from a Stratos service.
+ * @class
+ */
 export class StratosSyncManager {
   private serviceSub: StratosServiceSubscription
   private actorSync: StratosActorSync
@@ -66,8 +74,7 @@ export class StratosSyncManager {
     }
 
     this.actorSync = new StratosActorSync(
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-      (opts.db as any).db as Kysely<StratosIndexerSchema>,
+      (opts.db as unknown as { db: Kysely<StratosIndexerSchema> }).db,
       syncConfig,
       opts.cursorManager,
       (err) => {
@@ -95,10 +102,12 @@ export class StratosSyncManager {
         reconnectMaxAttempts: opts.config.worker.actorSyncReconnectMaxAttempts,
       },
       (did) => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-        void (opts.background as any).add(() =>
-          opts.indexingService.indexHandle(did, new Date().toISOString()),
-        )
+        const background = opts.background as unknown as {
+          add: (fn: () => void) => void
+        }
+        background.add(() => {
+          void opts.indexingService.indexHandle(did, new Date().toISOString())
+        })
       },
     )
 
@@ -106,14 +115,14 @@ export class StratosSyncManager {
       syncConfig,
       {
         onEnroll: (did, boundaries) => {
-          void opts.enrollmentCallback.onEnrollmentDiscovered(
+          opts.enrollmentCallback.onEnrollmentDiscovered(
             did,
             opts.config.stratos.serviceUrl,
             boundaries,
           )
         },
         onUnenroll: (did) => {
-          void opts.enrollmentCallback.onEnrollmentRemoved(did)
+          opts.enrollmentCallback.onEnrollmentRemoved(did)
         },
       },
       (err) => {
@@ -130,16 +139,16 @@ export class StratosSyncManager {
    * Start the Stratos sync manager by starting the actor sync and service subscription.
    */
   start(): void {
-    void this.actorSync.start()
-    void this.serviceSub.start()
+    this.actorSync.start()
+    this.serviceSub.start()
   }
 
   /**
    * Stop the Stratos sync manager by stopping the actor sync and service subscription.
    */
   stop(): void {
-    void this.serviceSub.stop()
-    void this.actorSync.stop()
+    this.serviceSub.stop()
+    this.actorSync.stop()
   }
 
   /**
@@ -154,7 +163,7 @@ export class StratosSyncManager {
    * Add an actor to the Stratos sync manager.
    * @param did - The DID of the actor to add.
    */
-  addActor(did: string) {
+  addActor(did: string): void {
     this.actorSync.addActor(did)
   }
 
@@ -162,7 +171,7 @@ export class StratosSyncManager {
    * Remove an actor from the Stratos sync manager.
    * @param did - The DID of the actor to remove.
    */
-  removeActor(did: string) {
+  removeActor(did: string): void {
     this.actorSync.removeActor(did)
   }
 

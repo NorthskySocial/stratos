@@ -12,7 +12,6 @@ import {
 import { fromUint8Array } from '@atcute/car'
 import { decode, fromBytes, toCidLink } from '@atcute/cbor'
 import { type CidLink, isCidLink } from '@atcute/cid'
-import { ipldToLex } from '@atproto/lexicon'
 
 /**
  * Encodes a record using CBOR.
@@ -58,7 +57,7 @@ export function decodeCommitOps(
     cid?: { $link: string } | string | null
   }>,
 ): DecodedOp[] {
-  if (!blocks?.length) return []
+  if (!blocks.length) return []
 
   const car = readCarBlocks(blocks)
   const decoded: DecodedOp[] = []
@@ -114,24 +113,19 @@ export function parseCid(
 ): LexCid {
   if (typeof cid === 'string') return parseLexCid(cid)
   if (isCidLink(cid)) return parseLexCid(cid.$link)
-  if (cid && typeof cid === 'object' && 'bytes' in cid) {
+  if (typeof cid === 'object' && 'bytes' in cid) {
     const bytes = (cid as { bytes: Uint8Array }).bytes
     return decodeLexCid(bytes)
   }
   // If it's already a Cid object (has version, code, multihash, bytes)
-  if (
-    cid &&
-    typeof cid === 'object' &&
-    'version' in cid &&
-    'multihash' in cid
-  ) {
+  if (typeof cid === 'object' && 'version' in cid && 'multihash' in cid) {
     return cid as LexCid
   }
   throw new InvalidIdentifierError('invalid CID')
 }
 
 export function jsonToLex(val: Record<string, unknown>): unknown {
-  return ipldToLex(toIpld(val))
+  return toIpld(val)
 }
 
 /**
@@ -144,7 +138,7 @@ function toIpld(val: unknown): unknown {
   if (Array.isArray(val)) return val.map(toIpld)
   if (isCidLink(val)) return parseCid(val.$link)
   if (val instanceof Uint8Array) return val
-  if (val && typeof val === 'object' && '_isBuffer' in val && val._isBuffer) {
+  if (typeof val === 'object' && '_isBuffer' in val && val._isBuffer) {
     return val as unknown as Uint8Array
   }
 

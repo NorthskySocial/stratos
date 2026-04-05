@@ -1,4 +1,5 @@
 import type { LexiconDoc } from '@atproto/lexicon'
+import { atprotoLexicons } from './atproto.js'
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
 import zoneStratosBoundaryDefs from '../../../lexicons/zone/stratos/boundary/defs.json' with { type: 'json' }
 import zoneStratosDefs from '../../../lexicons/zone/stratos/defs.json' with { type: 'json' }
@@ -14,6 +15,7 @@ import zoneStratosSyncGetRepo from '../../../lexicons/zone/stratos/sync/getRepo.
 import zoneStratosSyncSubscribeRecords from '../../../lexicons/zone/stratos/sync/subscribeRecords.json' with { type: 'json' }
 
 export const stratosLexicons: LexiconDoc[] = [
+  ...atprotoLexicons,
   zoneStratosActorEnrollment as LexiconDoc,
   zoneStratosBoundaryDefs as LexiconDoc,
   zoneStratosDefs as LexiconDoc,
@@ -30,8 +32,8 @@ export const stratosLexicons: LexiconDoc[] = [
 ]
 
 export interface LexiconProvider {
-  getAll(): LexiconDoc[]
-  get(id: string): LexiconDoc | undefined
+  getAll: () => LexiconDoc[]
+  get: (id: string) => LexiconDoc | undefined
 }
 
 export class DefaultLexiconProvider implements LexiconProvider {

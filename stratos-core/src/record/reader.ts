@@ -1,4 +1,4 @@
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto/index.js'
 import * as syntax from '@atproto/syntax'
 import { AtUri } from '@atproto/syntax'
@@ -8,6 +8,7 @@ import {
   StratosBacklink,
   stratosBacklink,
   StratosDbOrTx,
+  StratosRecord,
   stratosRecord,
   stratosRepoBlock,
 } from '../db/index.js'
@@ -222,7 +223,6 @@ export class StratosRecordReader {
       .limit(1)
 
     const record = res[0]
-    if (!record) return null
     return {
       uri: record.uri,
       cid: record.cid,
@@ -302,7 +302,7 @@ export class StratosRecordReader {
    * @param opts - Options for retrieving backlinks.
    * @returns An array of backlinks for the specified record.
    */
-  async getRecordBacklinks(opts: GetBacklinksOpts) {
+  async getRecordBacklinks(opts: GetBacklinksOpts): Promise<StratosRecord[]> {
     const { collection, path, linkTo } = opts
     return this.db
       .select({
@@ -345,8 +345,8 @@ export class StratosRecordReader {
         linkTo: backlink.linkTo,
       })
 
-      for (const { rkey } of backlinks) {
-        conflicts.push(AtUri.make(atUri.hostname, atUri.collection, rkey))
+      for (const row of backlinks) {
+        conflicts.push(AtUri.make(atUri.hostname, atUri.collection, row.rkey))
       }
     }
 
@@ -368,7 +368,7 @@ export function getStratosBacklinks(
   const backlinks: StratosBacklink[] = []
 
   // Extract subject references
-  const subject = record?.['subject']
+  const subject = record['subject']
   if (typeof subject === 'string') {
     try {
       syntax.ensureValidDid(subject)

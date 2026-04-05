@@ -37,6 +37,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@vitest/coverage-v8": "^4.0.18"
+    "@vitest/coverage-v8": "^4.0.18",
+    "dotenv": "^17.4.0"
   }
 }

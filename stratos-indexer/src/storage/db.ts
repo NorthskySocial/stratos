@@ -3,7 +3,7 @@ import { BackgroundQueue, Database } from '@atproto/bsky'
 import { IdResolver, MemoryCache } from '@atproto/identity'
 import { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import PQueue from 'p-queue'
-import type { DbConfig, IdentityConfig, IndexerConfig } from '../config.ts'
+import type { DbConfig, IdentityConfig, IndexerConfig } from '../config.js'
 
 const DID_CACHE_STALE_TTL = 5 * 60 * 1000 // 5 minutes
 const DID_CACHE_MAX_TTL = 60 * 60 * 1000 // 1 hour
@@ -29,43 +29,64 @@ export function createDatabase(cfg: DbConfig): Database {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
       const rawDb = (db as any).db as Kysely<Record<string, unknown>>
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-      await rawDb.execute(sql`
+      await sql`
         CREATE TABLE IF NOT EXISTS stratos_enrollment (
           did TEXT PRIMARY KEY,
           serviceUrl TEXT NOT NULL,
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL
         )
-      `)
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-      await rawDb.execute(sql`
-        CREATE TABLE IF NOT EXISTS stratos_boundary (
-          did TEXT NOT NULL,
+      `.execute(rawDb)
+      await sql`
+        CREATE TABLE IF NOT EXISTS stratos_boundary
+        (
+          did      TEXT NOT NULL,
           boundary TEXT NOT NULL,
           PRIMARY KEY (did, boundary)
         )
-      `)
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-      await rawDb.execute(sql`
+      `.execute(rawDb)
+      await sql`
         CREATE TABLE IF NOT EXISTS stratos_sync_cursor (
           did TEXT PRIMARY KEY,
           seq INTEGER NOT NULL,
           updatedAt TEXT NOT NULL
         )
-      `)
+      `.execute(rawDb)
+      await sql`
+        CREATE TABLE IF NOT EXISTS post (
+          uri TEXT PRIMARY KEY,
+          cid TEXT NOT NULL,
+          creator TEXT NOT NULL,
+          content TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          indexedAt TEXT NOT NULL
+        )
+      `.execute(rawDb)
+      await sql`
+        CREATE TABLE IF NOT EXISTS stratos_record (
+          uri TEXT PRIMARY KEY,
+          cid TEXT NOT NULL,
+          json TEXT NOT NULL,
+          indexedAt TEXT NOT NULL
+        )
+      `.execute(rawDb)
+      await sql`
+        CREATE TABLE IF NOT EXISTS stratos_record_boundary (
+          uri TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          PRIMARY KEY (uri, boundary)
+        )
+      `.execute(rawDb)
       // Optimized index for boundary-based hydration
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-      await rawDb.execute(sql`
+      await sql`
         CREATE INDEX IF NOT EXISTS stratos_post_boundary_idx 
-        ON stratos_post (boundary)
-      `)
+        ON stratos_record_boundary (boundary)
+      `.execute(rawDb)
       // Optimized index for actor-based feed queries
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-      await rawDb.execute(sql`
+      await sql`
         CREATE INDEX IF NOT EXISTS stratos_post_did_indexed_at_idx 
-        ON stratos_post (did, indexedAt DESC)
-      `)
+        ON post (creator, indexedAt DESC)
+      `.execute(rawDb)
     } catch (err) {
       console.error(
         { err },

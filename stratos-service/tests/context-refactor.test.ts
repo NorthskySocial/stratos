@@ -1,14 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { createAppContext } from '../src/context.js'
-import {
-  createTestConfig,
-  createMockBlobStore,
-  cborToRecord,
-} from './utils/index.js'
+import { cborToRecord, createMockBlobStore, createTestConfig } from './utils'
 
 describe('AppContext Refactoring', () => {
   let testDir: string

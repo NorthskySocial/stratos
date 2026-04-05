@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { StubWriterServiceImpl } from '../src/features/index.js'
+import { StubWriterServiceImpl } from '../src/features'
 import { NotEnrolledError } from '@northskysocial/stratos-core'
 
 describe('StubWriterServiceImpl', () => {

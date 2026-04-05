@@ -8,7 +8,7 @@ import {
   encode as cborEncode,
   toBytes as cborToBytes,
 } from '@atcute/cbor'
-import { buildCommit, type MstWriteOp } from '../src/index.js'
+import { buildCommit, type MstWriteOp } from '../src'
 
 const DID = 'did:plc:abc123'
 

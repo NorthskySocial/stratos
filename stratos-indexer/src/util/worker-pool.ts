@@ -4,6 +4,10 @@ export interface WorkerTask<T = unknown> {
   reject: (err: Error) => void
 }
 
+/**
+ * A worker pool that executes tasks asynchronously.
+ * @class
+ */
 export class WorkerPool<T = unknown> {
   private queue: WorkerTask<T>[] = []
   private activeCount = 0
@@ -77,7 +81,8 @@ export class WorkerPool<T = unknown> {
 
   private drain(): void {
     while (this.activeCount < this.concurrency && this.queue.length > 0) {
-      const task = this.queue.shift()!
+      const task = this.queue.shift()
+      if (!task) break
       this.activeCount++
       this.execute(task)
     }
@@ -111,8 +116,8 @@ export class WorkerPool<T = unknown> {
       this.queue.length < this.maxQueueSize &&
       this.drainWaiters.length > 0
     ) {
-      const waiter = this.drainWaiters.shift()!
-      waiter()
+      const waiter = this.drainWaiters.shift()
+      if (waiter) waiter()
     }
   }
 }

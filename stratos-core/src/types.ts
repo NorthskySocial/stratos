@@ -1,5 +1,5 @@
 import { StratosError } from './shared/errors.js'
-import { type Cid as LexCid } from '@atproto/lex-data'
+import type { Cid as LexCid } from '@atproto/lex-data'
 
 export enum ENROLLMENT_MODE {
   OPEN = 'open',
@@ -48,17 +48,17 @@ export interface StatusAttr {
  * Background queue interface for async operations
  */
 export interface BackgroundQueue {
-  add(name: string, task: () => Promise<void>): void
+  add: (name: string, task: () => Promise<void>) => void
 }
 
 /**
  * Logger interface for dependency injection
  */
 export interface Logger {
-  debug(obj: object | string, msg?: string): void
-  info(obj: object | string, msg?: string): void
-  warn(obj: object | string, msg?: string): void
-  error(obj: object | string, msg?: string): void
+  debug: (obj: object | string, msg?: string) => void
+  info: (obj: object | string, msg?: string) => void
+  warn: (obj: object | string, msg?: string) => void
+  error: (obj: object | string, msg?: string) => void
 }
 
 /**
@@ -77,30 +77,30 @@ export class BlobNotFoundError extends StratosError {
  */
 export interface BlobStore {
   /** Upload bytes to temporary storage, returns a key for later reference */
-  putTemp(bytes: Uint8Array | AsyncIterable<Uint8Array>): Promise<string>
+  putTemp: (bytes: Uint8Array | AsyncIterable<Uint8Array>) => Promise<string>
   /** Move a temporary blob to permanent storage */
-  makePermanent(key: string, cid: LexCid): Promise<void>
+  makePermanent: (key: string, cid: LexCid) => Promise<void>
   /** Upload bytes directly to permanent storage */
-  putPermanent(
+  putPermanent: (
     cid: LexCid,
     bytes: Uint8Array | AsyncIterable<Uint8Array>,
-  ): Promise<void>
+  ) => Promise<void>
   /** Move a blob to quarantine (for takedowns) */
-  quarantine(cid: LexCid): Promise<void>
+  quarantine: (cid: LexCid) => Promise<void>
   /** Restore a blob from quarantine */
-  unquarantine(cid: LexCid): Promise<void>
+  unquarantine: (cid: LexCid) => Promise<void>
   /** Delete a blob from storage */
-  delete(cid: LexCid): Promise<void>
+  delete: (cid: LexCid) => Promise<void>
   /** Delete multiple blobs from storage */
-  deleteMany(cids: LexCid[]): Promise<void>
+  deleteMany: (cids: LexCid[]) => Promise<void>
   /** Check if a temporary blob exists */
-  hasTemp(key: string): Promise<boolean>
+  hasTemp: (key: string) => Promise<boolean>
   /** Check if a permanent blob exists */
-  hasStored(cid: LexCid): Promise<boolean>
+  hasStored: (cid: LexCid) => Promise<boolean>
   /** Get blob contents as bytes */
-  getBytes(cid: LexCid): Promise<Uint8Array>
+  getBytes: (cid: LexCid) => Promise<Uint8Array>
   /** Get blob contents as a stream */
-  getStream(cid: LexCid): Promise<AsyncIterable<Uint8Array>>
+  getStream: (cid: LexCid) => Promise<AsyncIterable<Uint8Array>>
 }
 
 /**

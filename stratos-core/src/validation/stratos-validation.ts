@@ -255,7 +255,7 @@ export class StratosValidator {
   private assertBoundaryPresence(
     boundary: { $type?: string; values?: Array<{ value: string }> } | undefined,
   ): void {
-    if (!boundary || !boundary.values || boundary.values.length === 0) {
+    if (!boundary?.values || boundary.values.length === 0) {
       throw new StratosValidationError(
         'must have a boundary',
         'MissingBoundary',

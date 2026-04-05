@@ -1,5 +1,5 @@
 import { eq, inArray } from 'drizzle-orm'
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto/index.js'
 import {
   StratosDbOrTx,

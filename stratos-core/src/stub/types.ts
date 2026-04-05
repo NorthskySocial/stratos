@@ -1,4 +1,4 @@
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 
 /**
  * Source field for stub records - indicates where to hydrate full content

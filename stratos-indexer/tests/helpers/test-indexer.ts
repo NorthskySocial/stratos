@@ -1,6 +1,5 @@
-import { Indexer } from '../../src/indexer.ts'
-import type { IndexerConfig } from '../../src/config.ts'
-import { loadConfig } from '../../src/config.ts'
+import type { IndexerConfig } from '../../src'
+import { Indexer, loadConfig } from '../../src'
 
 export class TestIndexer {
   public indexer: Indexer
@@ -11,7 +10,9 @@ export class TestIndexer {
     this.originalEnv = { ...process.env }
   }
 
-  static async create(overrides: Partial<NodeJS.ProcessEnv> = {}) {
+  static async create(
+    overrides: Partial<NodeJS.ProcessEnv> = {},
+  ): Promise<TestIndexer> {
     // Default test environment
     const testEnv = {
       BSKY_DB_POSTGRES_URL: 'postgres://localhost:5432/bsky_test',
@@ -36,11 +37,11 @@ export class TestIndexer {
     }
   }
 
-  async start() {
+  async start(): Promise<void> {
     await this.indexer.start()
   }
 
-  async stop() {
+  async stop(): Promise<void> {
     await this.indexer.stop()
   }
 }

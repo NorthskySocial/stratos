@@ -6,7 +6,7 @@ import {
   extractBoundaries,
   jsonToLex,
   parseCid,
-} from '../src/atproto/index.js'
+} from '../src'
 
 describe('ATProto Utilities', () => {
   describe('encodeRecord and computeCid', () => {

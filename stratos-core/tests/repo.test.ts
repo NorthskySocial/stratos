@@ -17,7 +17,7 @@ import {
   stratosRepoRoot,
   StratosSqlRepoReader,
   StratosSqlRepoTransactor,
-} from '../src/index.js'
+} from '../src'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<Cid> => {

@@ -12,31 +12,31 @@ export interface EnrollmentService {
    * @param signingKeyDid - string of the user's signing key'
    * @returns The created enrollment
    */
-  enroll(
+  enroll: (
     did: string,
     boundaries: string[],
     signingKeyDid: string,
-  ): Promise<Enrollment>
+  ) => Promise<Enrollment>
 
   /**
    * Check if a user is enrolled
    * @param did - User's string
    * @returns True if the user is enrolled
    */
-  isEnrolled(did: string): Promise<boolean>
+  isEnrolled: (did: string) => Promise<boolean>
 
   /**
    * Get enrollment data for a user
    * @param did - User's string
    * @returns Enrollment data or null if not enrolled
    */
-  getEnrollment(did: string): Promise<Enrollment | null>
+  getEnrollment: (did: string) => Promise<Enrollment | null>
 
   /**
    * Remove a user's enrollment
    * @param did - User's string
    */
-  unenroll(did: string): Promise<void>
+  unenroll: (did: string) => Promise<void>
 }
 
 /**
@@ -49,7 +49,7 @@ export interface EnrollmentValidator {
    * @param did - User's string
    * @returns Validation result with allowed status and reason
    */
-  validate(did: string): Promise<EnrollmentValidationResult>
+  validate: (did: string) => Promise<EnrollmentValidationResult>
 }
 
 /**
@@ -62,7 +62,7 @@ export interface BoundaryResolver {
    * @param did - User's string
    * @returns Array of domain strings the user has access to
    */
-  getBoundaries(did: string): Promise<string[]>
+  getBoundaries: (did: string) => Promise<string[]>
 }
 
 /**
@@ -75,16 +75,16 @@ export interface ProfileRecordWriter {
    * @param rkey - Record key (usually service string)
    * @param record - Enrollment record content
    */
-  putEnrollmentRecord(
+  putEnrollmentRecord: (
     did: string,
     rkey: string,
     record: Record<string, unknown>,
-  ): Promise<void>
+  ) => Promise<void>
 
   /**
    * Delete an enrollment record from the user's PDS
    * @param did - User's string
    * @param rkey - Record key to delete
    */
-  deleteEnrollmentRecord(did: string, rkey: string): Promise<void>
+  deleteEnrollmentRecord: (did: string, rkey: string) => Promise<void>
 }

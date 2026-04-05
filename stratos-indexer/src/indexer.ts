@@ -2,16 +2,16 @@ import {
   DefaultLexiconProvider,
   type LexiconProvider,
 } from '@northskysocial/stratos-core'
-import type { IndexerConfig } from './config.ts'
+import type { IndexerConfig } from './config.js'
 import type { Database } from '@atproto/bsky'
-import { Kysely, sql } from 'kysely'
+import { type Kysely, sql } from 'kysely'
 import {
   createDatabase,
   createIdResolver,
   createIndexingService,
-} from './storage/db.ts'
-import { HandleDedup } from './util/handle-dedup.ts'
-import { CursorManager } from './storage/cursor-manager.ts'
+} from './storage/db.js'
+import { HandleDedup } from './util/handle-dedup.js'
+import { CursorManager } from './storage/cursor-manager.js'
 import { PdsSubscriber } from './pds/pds-subscriber.js'
 import { StratosSyncManager } from './sync/sync-manager.js'
 import {
@@ -20,11 +20,11 @@ import {
   backfillRepos,
   backfillSingleActor,
 } from './backfill.js'
-import { EnrollmentCallback } from './pds/pds-firehose.ts'
+import type { EnrollmentCallback } from './pds/pds-firehose.js'
 import type {
   NewStratosSyncCursor,
   StratosIndexerSchema,
-} from './storage/schema.ts'
+} from './storage/schema.js'
 
 export class Indexer {
   private static readonly BACKFILLED_TTL_MS = 30 * 60 * 1000
@@ -65,6 +65,9 @@ export class Indexer {
     )
 
     await this.initCursorManager(db)
+    if (!this.cursorManager) {
+      throw new Error('failed to initialize cursor manager')
+    }
 
     this.startHealthServer()
 
@@ -99,7 +102,7 @@ export class Indexer {
       background,
       enrollmentCallback,
       handleDedup,
-      cursorManager: this.cursorManager!,
+      cursorManager: this.cursorManager,
       concurrency: this.config.worker.concurrency,
       maxQueueSize: this.config.worker.maxQueueSize,
       onError: (err) =>
@@ -109,22 +112,21 @@ export class Indexer {
     // Stratos Sync Manager (Service Subscription + Per-actor Sync)
     this.syncManager = new StratosSyncManager({
       config: this.config,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-      db: (db as any).db as Kysely<StratosIndexerSchema>,
-      cursorManager: this.cursorManager!,
+      db: (db as unknown as { db: Kysely<StratosIndexerSchema> }).db,
+      cursorManager: this.cursorManager,
       indexingService,
       background,
       enrollmentCallback,
-      onReferencedActorBackfill: (did, opts) =>
+      onReferencedActorBackfill: (did: string, opts: BackfillOptions) =>
         this.backfillReferencedActor(did, opts),
-      onError: (err) =>
+      onError: (err: Error) =>
         console.error({ err: err.message }, 'sync manager error'),
     })
 
     await this.runAllBackfills(indexingService, background, backfillOpts)
 
     this.pdsSubscriber.start()
-    void this.syncManager.start()
+    this.syncManager.start()
 
     this.startStatsLogging()
 
@@ -190,15 +192,12 @@ export class Indexer {
       }
     }
 
-    // 5. Close database
-    if (this.db) {
-      try {
-        await this.db.close()
-      } catch (err) {
-        console.error({ err }, 'failed to close database')
-      }
-      this.db = null
+    try {
+      await this.db.close()
+    } catch (err) {
+      console.error({ err }, 'failed to close database')
     }
+    this.db = null
 
     console.log('stratos indexer stopped')
   }
@@ -218,10 +217,11 @@ export class Indexer {
   private async checkDbHealth(): Promise<boolean> {
     try {
       if (this.db) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-        const rawDb = (this.db as any).db as Kysely<StratosIndexerSchema>
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        await rawDb.execute(sql`SELECT 1`)
+        const rawDb = (
+          this.db as unknown as { db: Kysely<StratosIndexerSchema> }
+        ).db
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+        await (rawDb as any).execute(sql`SELECT 1`)
         return true
       }
     } catch (err) {

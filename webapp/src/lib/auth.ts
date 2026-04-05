@@ -44,17 +44,15 @@ function buildClientMetadata(): OAuthClientMetadataInput {
  * @returns the OAuth client instance
  */
 function getClient(): BrowserOAuthClient {
-  if (!client) {
-    client = new BrowserOAuthClient({
-      handleResolver: HANDLE_RESOLVER,
-      responseMode: 'query',
-      ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
-      onDelete: (_sub, _cause) => {
-        currentSession = null
-        sessionDeletedCallback?.()
-      },
-    })
-  }
+  client ??= new BrowserOAuthClient({
+    handleResolver: HANDLE_RESOLVER,
+    responseMode: 'query',
+    ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
+    onDelete: (_sub, _cause) => {
+      currentSession = null
+      sessionDeletedCallback?.()
+    },
+  })
   return client
 }
 

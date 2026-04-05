@@ -1,4 +1,4 @@
-import { type Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto/index.js'
 import { BlockMap, StratosSqlRepoTransactor } from './index.js'
 import { buildCommit, type UnsignedCommitData } from '../mst/index.js'
@@ -34,19 +34,19 @@ export interface RepoWrite {
  * Service for signing repository commits
  */
 export interface SigningService {
-  signCommit(did: string, unsignedBytes: Uint8Array): Promise<Uint8Array>
+  signCommit: (did: string, unsignedBytes: Uint8Array) => Promise<Uint8Array>
 }
 
 /**
  * Service for sequencing repository changes
  */
 export interface SequencingService {
-  sequenceChange(
+  sequenceChange: (
     did: string,
     commitCid: Cid,
     rev: string,
     writes: RepoWrite[],
-  ): Promise<void>
+  ) => Promise<void>
 }
 
 /**

@@ -69,7 +69,7 @@ export function createStratosDb(
         await db.run(stmt)
       } catch (err) {
         // Ignore SQLITE_BUSY errors for WAL pragma - another connection may have set it
-        const errCode = (err as { code?: string })?.code
+        const errCode = (err as { code?: string }).code
         if (errCode !== 'SQLITE_BUSY') {
           throw err
         }
