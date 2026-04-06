@@ -98,7 +98,8 @@ export class ActorStoreRecordResolver implements RecordResolver {
           const boundaries = StratosValidator.extractBoundaryDomains(
             record.value,
           )
-          result.set(atUri, {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
+          result.set(atUri.toString() as any, {
             uri: record.uri,
             cid: record.cid,
             value: record.value,
@@ -277,8 +278,8 @@ export class HydrationServiceImpl implements HydrationService {
     notFound: string[],
     blocked: string[],
   ): void {
-    const atUri = new AtUriSyntax(request.uri)
-    const record = recordMap.get(atUri)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
+    const record = recordMap.get(request.uri as any)
 
     if (!record || (request.cid && record.cid !== request.cid)) {
       notFound.push(request.uri)

@@ -1,8 +1,8 @@
-import type http from 'node:http'
-import path from 'node:path'
 import { config as dotenvConfig } from 'dotenv'
-dotenvConfig({ path: path.join(process.cwd(), '../.env') })
-dotenvConfig()
+import path from 'node:path'
+dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
+dotenvConfig({ override: false })
+import type http from 'node:http'
 import express from 'express'
 import './types.js'
 import cors from 'cors'
@@ -472,6 +472,14 @@ export async function main(): Promise<void> {
     logger,
   )
   await server.start()
+  server.ctx.logger?.info(
+    {
+      publicUrl: cfg.service.publicUrl,
+      did: cfg.service.did,
+      devMode: cfg.stratos.devMode,
+    },
+    'Stratos configuration',
+  )
 
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   process.on('SIGTERM', async () => {

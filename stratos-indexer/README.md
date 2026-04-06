@@ -92,7 +92,3 @@ Run unit tests:
 ```bash
 pnpm exec vitest run stratos-indexer
 ```
-
-## License
-
-MIT

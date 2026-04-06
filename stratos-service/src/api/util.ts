@@ -64,11 +64,14 @@ export function createXrpcHandler<
   return async (handlerCtx: HandlerContext): Promise<HandlerResponse> => {
     const requestId = makeRequestId(methodName.split('.').pop() || methodName)
     const start = Date.now()
-    const { auth, input, params } = handlerCtx
+    let { auth, input } = handlerCtx
+    let params = handlerCtx.params || (handlerCtx as any).req?.query || {}
 
     let did: string | undefined
     if (auth?.credentials?.did) {
       did = auth.credentials.did
+    } else if (handlerCtx.req?.auth?.credentials?.did) {
+      did = handlerCtx.req.auth.credentials.did
     }
 
     if (options.requireAuth !== false && !did) {

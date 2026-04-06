@@ -9,12 +9,12 @@ import { randomBytes } from 'crypto'
 import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 
-import { DiskBlobStore } from '../src/index.js'
+import { DiskBlobStore } from '../src'
 import {
   asyncIterableToReadable,
   collectAsyncIterable,
   readableToAsyncIterable,
-} from '../src/infra/blobstore/index.js'
+} from '../src/infra/blobstore'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<Cid> => {

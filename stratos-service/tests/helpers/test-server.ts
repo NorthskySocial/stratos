@@ -2,9 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdir, rm } from 'node:fs/promises'
-import { StratosServer } from '../../src/index.js'
+import { StratosServer } from '../../src'
 import { envToConfig, parseEnv } from '../../src/config.js'
-import { createMockBlobStoreCreator, cborToRecord } from './test-env.js'
+import { cborToRecord, createMockBlobStoreCreator } from './test-env.js'
 import { createLogger } from '../../src/logger.js'
 
 export class TestServer {
@@ -12,6 +12,13 @@ export class TestServer {
     public server: StratosServer,
     public dataDir: string,
   ) {}
+
+  get url() {
+    if (!this.server.server) throw new Error('Server not started')
+    const address = this.server.server.address()
+    if (typeof address === 'string') return address
+    return `http://localhost:${address?.port}`
+  }
 
   static async create() {
     const dataDir = join(
@@ -63,12 +70,5 @@ export class TestServer {
   async stop() {
     await this.server.stop()
     await rm(this.dataDir, { recursive: true, force: true })
-  }
-
-  get url() {
-    if (!this.server.server) throw new Error('Server not started')
-    const address = this.server.server.address()
-    if (typeof address === 'string') return address
-    return `http://localhost:${address?.port}`
   }
 }

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { MigratingBoundaryResolver } from '../src/features/index.js'
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
+import { MigratingBoundaryResolver } from '../src/features'
 
 const BEBOP_SERVICE = 'did:web:bebop.cowboy.space'
 

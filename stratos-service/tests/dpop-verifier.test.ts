@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import jwt from 'jsonwebtoken'
-import { DpopVerificationError, DpopVerifier } from '../src/infra/auth/index.js'
+import { DpopVerificationError, DpopVerifier } from '../src/infra/auth'
 
 describe('DpopVerifier', () => {
   const mockEnrollmentStore = {
@@ -130,6 +130,52 @@ describe('DpopVerifier', () => {
     await expect(verifier.verify(req as any)).rejects.toMatchObject({
       code: 'key_binding_mismatch',
     })
+  })
+
+  it('should throw if DPoP htm (method) mismatch', async () => {
+    const claims = {
+      sub: 'did:plc:user1',
+      iss: 'https://pds.example.com',
+      exp: Math.floor(Date.now() / 1000) + 60,
+      cnf: { jkt: 'test-jkt' },
+    }
+    const accessToken = jwt.sign(claims, 'secret')
+
+    const req = {
+      method: 'POST',
+      url: '/xrpc/some.procedure',
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: 'test-proof',
+      },
+    }
+
+    mockDpopManager.checkProof.mockRejectedValue(new Error('htm mismatch'))
+
+    await expect(verifier.verify(req as any)).rejects.toThrow('htm mismatch')
+  })
+
+  it('should throw if DPoP htu (URL) mismatch', async () => {
+    const claims = {
+      sub: 'did:plc:user1',
+      iss: 'https://pds.example.com',
+      exp: Math.floor(Date.now() / 1000) + 60,
+      cnf: { jkt: 'test-jkt' },
+    }
+    const accessToken = jwt.sign(claims, 'secret')
+
+    const req = {
+      method: 'GET',
+      url: '/xrpc/wrong.procedure',
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: 'test-proof',
+      },
+    }
+
+    mockDpopManager.checkProof.mockRejectedValue(new Error('htu mismatch'))
+
+    await expect(verifier.verify(req as any)).rejects.toThrow('htu mismatch')
   })
 
   it('should throw if user not enrolled', async () => {

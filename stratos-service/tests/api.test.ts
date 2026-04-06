@@ -10,18 +10,18 @@ import {
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db/index.js'
+} from '../src/db'
 
 import {
   AppContext,
   SqliteEnrollmentStore,
   StratosActorStore,
 } from '../src/context.js'
-import { createRecord } from '../src/api/index.js'
+import { createRecord } from '../src/api'
 import { WriteRateLimiter } from '../src/shared/rate-limiter.js'
 import { Did } from '@atproto/api'
 
-import { cborToRecord, createCid, createMockBlobStore } from './utils/index.js'
+import { cborToRecord, createCid, createMockBlobStore } from './utils'
 
 // Create minimal app context for testing API functions
 interface TestContext {

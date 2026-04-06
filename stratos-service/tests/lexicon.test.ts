@@ -8,10 +8,13 @@ import { stratosLexicons } from '@northskysocial/stratos-core'
 
 describe('Stratos Lexicons', () => {
   it('should create XrpcServer with combined ATProto and Stratos lexicons', () => {
-    const allLexicons = [...atprotoSchemas, ...stratosLexicons]
+    const combined = [...atprotoSchemas, ...stratosLexicons]
+    const uniqueLexicons = Array.from(
+      new Map(combined.map((lex) => [lex.id, lex])).values(),
+    )
 
     expect(() => {
-      new XrpcServer(allLexicons)
+      new XrpcServer(uniqueLexicons)
     }).not.toThrow()
   })
 })

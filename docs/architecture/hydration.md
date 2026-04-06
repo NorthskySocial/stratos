@@ -85,6 +85,14 @@ Stratos `com.atproto.repo.getRecord` applies boundary access control:
 | Caller not enrolled                    | 404                  |
 | Unauthenticated (stub only)            | 404                  |
 
+### Batch Hydration (`hydrateRecords`)
+
+AppViews typically use `zone.stratos.repo.hydrateRecords` to hydrate multiple stubs for a feed.
+
+- Returns a list of successfully hydrated records.
+- Records the viewer cannot access are listed in `blocked`.
+- Missing records are listed in `notFound`.
+
 The 404 response for denied access is deliberate — it avoids leaking the existence of records to
 unauthorized viewers.
 

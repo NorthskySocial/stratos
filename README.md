@@ -2,8 +2,18 @@
 
 Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the
 user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream
-AppViews serve boundary-filtered content without inventing a separate identity model. The service is
-written in typescript with postgres and sqlite support.
+AppViews serve boundary-filtered content without inventing a separate identity model.
+
+## Documentation
+
+For full documentation, including architecture deep-dives, operator guides, and client integration, visit the [Stratos Homepage](https://stratos.zone/) (or browse the `docs/` directory).
+
+- [**Introduction**](./docs/guide/introduction.md) — What is Stratos and how does it work?
+- [**Quick Start (Docker)**](#quick-start-docker) — Get running in minutes.
+- [**Client Integration**](./docs/client/getting-started.md) — Add Stratos to your ATProtocol app.
+- [**Operator Guide**](./docs/operator/overview.md) — Deploy and manage a Stratos service.
+- [**Architecture**](./docs/architecture/hydration.md) — Technical details on repositories and hydration.
+- [**Glossary**](./docs/guide/glossary.md) — Key terms and concepts.
 
 ## What the Repository Contains
 
@@ -14,37 +24,9 @@ written in typescript with postgres and sqlite support.
 | `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers for clients                   |
 | `stratos-indexer` | Standalone indexer that consumes PDS + Stratos streams and writes to AppView PostgreSQL |
 | `webapp`          | Svelte demo client for enrollment and private posting                                   |
-| `test`            | Deno end-to-end test suite                                                              |
-| `docs`            | Operator, client, and architecture documentation                                        |
+| `docs`            | Full project documentation                                                              |
 
-## Core Model
-
-- Users enroll with a Stratos service via OAuth.
-- The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
-- Private records live in Stratos, not on the user's PDS.
-- Records can carry one or more boundary values such as `posters-madness` or `tech`.
-- A viewer can access a record only if they share at least one boundary with it.
-
-## Request Flow
-
-```text
-User -> OAuth enrollment -> Stratos service
-     -> enrollment record on PDS (`zone.stratos.actor.enrollment`)
-     -> private records stored in Stratos
-     -> standalone stratos-indexer writes boundary-aware rows into AppView Postgres
-     -> AppView serves `zone.stratos.feed.*` queries
-```
-
-## Local Development
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v20+)
-- [pnpm](https://pnpm.io/) (v9+)
-- [Deno](https://deno.land/) (v2+) - for indexer and e2e tests
-- [Docker](https://www.docker.com/) (optional, for database and quick start)
-
-### Quick Start (Docker)
+## Quick Start (Docker)
 
 The easiest way to get the full stack running (Service + Indexer + Postgres) is using Docker Compose:
 
@@ -74,13 +56,26 @@ docker compose up --build
    # Edit .env with your local settings
    ```
 
-3. **Start the Stratos Service:**
+3. **Start for Local Development (with localtunnel):**
+
+   This is the recommended way to develop locally, as it automatically sets up HTTPS tunnels required for ATProto OAuth.
+
+   ```bash
+   pnpm dev:local
+   ```
+
+   This will start both the Stratos Service and the Web UI, and provide you with public URLs.
+
+   > [!NOTE]
+   > This command runs in the foreground. Open a separate terminal for any other commands (like starting the indexer or running tests).
+
+4. **Start the Stratos Service (Direct):**
 
    ```bash
    pnpm --filter @northskysocial/stratos-service dev
    ```
 
-4. **Start the Indexer (requires Deno):**
+5. **Start the Indexer (requires Deno):**
 
    ```bash
    # In a separate terminal
@@ -88,7 +83,7 @@ docker compose up --build
    deno run --allow-all src/bin/main.ts
    ```
 
-5. **Start the Web UI (Svelte demo):**
+6. **Start the Web UI (Direct):**
 
    ```bash
    # In a separate terminal
@@ -182,9 +177,8 @@ That separation matters when updating docs or deployment plans: query-time Strat
 
 ## Related Docs
 
-- `docs/operator-guide.md`
-- `docs/client-guide.md`
-- `docs/hydration-architecture.md`
-- `docs/enrollment-signing.md`
-- `stratos-client/README.md`
-- `stratos-indexer/CONFIGURATION.md`
+- [Operator Overview](./docs/operator/overview.md)
+- [Client Getting Started](./docs/client/getting-started.md)
+- [Hydration Architecture](./docs/architecture/hydration.md)
+- [Enrollment Signing](./docs/architecture/enrollment-signing.md)
+- [Glossary](./docs/guide/glossary.md)
