@@ -62,7 +62,9 @@ describe('applyWritesBatch PDS Stubs', () => {
     ctx = {
       serviceDid: 'did:web:stratos.actor',
       cfg: {
+        serviceDid: 'did:web:stratos.actor',
         stratos: {
+          serviceDid: 'did:web:stratos.actor',
           allowedDomains: ['stratos.actor'],
           boundaries: {
             requireOne: true,
@@ -73,7 +75,7 @@ describe('applyWritesBatch PDS Stubs', () => {
       actorStore,
       stubQueue,
       boundaryResolver: {
-        getBoundaries: vi.fn().mockResolvedValue(['stratos.actor']),
+        getBoundaries: vi.fn().mockResolvedValue(['did:web:stratos.actor/stratos.actor']),
       } as any,
       repoWriteLocks: {
         acquire: vi.fn().mockResolvedValue(() => {}),
@@ -100,7 +102,7 @@ describe('applyWritesBatch PDS Stubs', () => {
       signingKeyDid: 'did:key:zDnaeTestKey123',
       active: true,
       enrollmentRkey: 'enroll1',
-      boundaries: ['stratos.actor'],
+      boundaries: ['did:web:stratos.actor/stratos.actor'],
     })
     await actorStore.create(testDid)
   })

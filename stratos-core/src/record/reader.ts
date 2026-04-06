@@ -223,6 +223,7 @@ export class StratosRecordReader {
       .limit(1)
 
     const record = res[0]
+    if (!record) return null
     return {
       uri: record.uri,
       cid: record.cid,

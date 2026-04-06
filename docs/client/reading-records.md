@@ -25,6 +25,34 @@ When a record is created in Stratos, two records are written:
 AppViews and clients detect the `source` field and hydrate by calling `getRecord` at the service
 endpoint.
 
+### Batch Hydration
+
+When rendering a feed, AppViews use batch hydration to fetch multiple records efficiently:
+
+```typescript
+async function hydrateBatch(
+  stratosEndpoint: string,
+  accessToken: string,
+  uris: string[],
+) {
+  const response = await fetch(
+    `${stratosEndpoint}/xrpc/zone.stratos.repo.hydrateRecords`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ uris }),
+    },
+  )
+
+  const result = await response.json()
+  // result = { records: [...], blocked: [...], notFound: [...] }
+  return result
+}
+```
+
 ## Using `stratos-client` for Verified Reads
 
 The `fetchAndVerifyRecord()` helper fetches a record with its inclusion proof (CAR) from the Stratos

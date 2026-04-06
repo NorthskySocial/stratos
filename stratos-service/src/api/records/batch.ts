@@ -228,6 +228,21 @@ async function buildCommitWithRetry(
             sequenceTrace,
           )
 
+          for (const pre of precomputed) {
+            if (pre.action === 'delete') {
+              ctx.stubQueue.enqueueDelete(callerDid, pre.op.collection, pre.rkey)
+            } else {
+              ctx.stubQueue.enqueueWrite(
+                callerDid,
+                pre.op.collection,
+                pre.rkey,
+                pre.op.collection,
+                pre.cid!.toString(),
+                commitResult.rev,
+              )
+            }
+          }
+
           return {
             results,
             commit: {

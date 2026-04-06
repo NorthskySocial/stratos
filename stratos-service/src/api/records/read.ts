@@ -43,7 +43,7 @@ export async function getRecord(
       new AtUriSyntax(uri),
       cid ?? null,
     )
-    if (!record) {
+    if (!record || !record.value) {
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 

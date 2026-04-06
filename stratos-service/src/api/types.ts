@@ -18,6 +18,7 @@ export interface HandlerContext {
   input?: HandlerInput
   params: HandlerParams
   auth?: HandlerAuth
+  req?: any // Support for access to underlying request
 }
 
 export interface HandlerResponse {

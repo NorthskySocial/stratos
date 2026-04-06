@@ -18,7 +18,7 @@ const envSchema = z
     /** Fragment for service entry in DID document (e.g., 'atproto_pns') */
     STRATOS_SERVICE_FRAGMENT: z.string().default('atproto_pns'),
     STRATOS_PORT: z.coerce.number().int().positive().default(3100),
-    STRATOS_PUBLIC_URL: z.string().url(),
+    STRATOS_PUBLIC_URL: z.string().url().default('http://localhost:3100'),
 
     STRATOS_BLOCK_CACHE_SIZE: z.coerce.number().int().positive().optional(),
     STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
@@ -126,7 +126,7 @@ const envSchema = z
     // User-Agent
     STRATOS_REPO_URL: z
       .string()
-      .default('https://github.com/NorthskySocial/stratos'),
+      .default('http://localhost:3100'),
     STRATOS_OPERATOR_CONTACT: z
       .string()
       .optional()
@@ -320,12 +320,35 @@ function buildPostgresUrl(env: Env): string | undefined {
  * @returns - StratosServiceConfig
  */
 export function envToConfig(env: Env): StratosServiceConfig {
+  let publicUrl = env.STRATOS_PUBLIC_URL
+  if (
+    env.STRATOS_DEV_MODE &&
+    (!publicUrl ||
+      publicUrl === 'https://stratos.example.com' ||
+      publicUrl === 'http://localhost:3100' ||
+      publicUrl === 'undefined')
+  ) {
+    // If we're in dev mode and using a default/placeholder URL,
+    // check if we can see an NGROK URL in the environment
+    if (
+      process.env.VITE_STRATOS_URL &&
+      process.env.VITE_STRATOS_URL !== 'undefined'
+    ) {
+      publicUrl = process.env.VITE_STRATOS_URL
+    } else if (env.STRATOS_REPO_URL && env.STRATOS_REPO_URL.includes('ngrok')) {
+      publicUrl = env.STRATOS_REPO_URL
+    }
+  }
+
+  // Ensure publicUrl is a string, even if empty, to avoid 'undefined' string later
+  publicUrl = publicUrl ?? ''
+
   return {
     service: {
       did: env.STRATOS_SERVICE_DID,
       serviceFragment: env.STRATOS_SERVICE_FRAGMENT,
       port: env.STRATOS_PORT,
-      publicUrl: env.STRATOS_PUBLIC_URL,
+      publicUrl,
       repoUrl: env.STRATOS_REPO_URL,
     },
     storage: {

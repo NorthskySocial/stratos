@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import express from 'express'
-import { createOAuthRoutes } from '../src/oauth/routes.js'
-import { createMockEnrollment } from './utils/index.js'
+import { createOAuthRoutes } from '../src/oauth'
+import { createMockEnrollment } from './utils'
+// Extract mocks from the module
+import * as atproto from '@atproto/api'
 
 vi.mock('@atproto/api', () => {
   const mockPutRecord = vi.fn().mockResolvedValue({
@@ -25,8 +27,6 @@ vi.mock('@atproto/api', () => {
   }
 })
 
-// Extract mocks from the module
-import * as atproto from '@atproto/api'
 const { mockPutRecord } = atproto as any
 
 describe('Re-enrollment', () => {

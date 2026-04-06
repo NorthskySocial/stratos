@@ -17,6 +17,20 @@ import {
   uploadBlobHandler,
 } from './handlers/index.js'
 
+export enum HANDLER_METHOD {
+  CREATE_RECORD = 'com.atproto.repo.createRecord',
+  DELETE_RECORD = 'com.atproto.repo.deleteRecord',
+  UPLOAD_BLOB = 'com.atproto.repo.uploadBlob',
+  GET_RECORD = 'com.atproto.repo.getRecord',
+  LIST_RECORDS = 'com.atproto.repo.listRecords',
+  DESCRIBE_REPO = 'com.atproto.repo.describeRepo',
+  APPLY_WRITES = 'com.atproto.repo.applyWrites',
+  LIST_BLOBS = 'com.atproto.sync.listBlobs',
+  SYNC_GET_RECORD = 'com.atproto.sync.getRecord',
+  SYNC_GET_REPO = 'zone.stratos.sync.getRepo',
+  IMPORT_REPO = 'zone.stratos.repo.importRepo',
+}
+
 /**
  * Register handlers for the application
  * @param server XRPC server instance
@@ -26,57 +40,56 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   const xrpc = server as unknown as XrpcServerInternal
   const { authVerifier } = ctx
 
-  xrpc.method('com.atproto.repo.createRecord', {
+  xrpc.method(HANDLER_METHOD.CREATE_RECORD, {
     auth: authVerifier.standard,
     handler: createRecordHandler(ctx),
   })
 
-  xrpc.method('com.atproto.repo.deleteRecord', {
+  xrpc.method(HANDLER_METHOD.DELETE_RECORD, {
     auth: authVerifier.standard,
     handler: deleteRecordHandler(ctx),
   })
 
-  xrpc.method('com.atproto.repo.uploadBlob', {
+  xrpc.method(HANDLER_METHOD.UPLOAD_BLOB, {
     auth: authVerifier.standard,
     handler: uploadBlobHandler(ctx),
   })
 
-  xrpc.method('com.atproto.repo.getRecord', {
+  xrpc.method(HANDLER_METHOD.GET_RECORD, {
     auth: authVerifier.optionalStandard,
     handler: getRecordHandler(ctx),
   })
 
-  xrpc.method('com.atproto.repo.listRecords', {
+  xrpc.method(HANDLER_METHOD.LIST_RECORDS, {
     auth: authVerifier.optionalStandard,
     handler: listRecordsHandler(ctx),
   })
 
-  xrpc.method('com.atproto.repo.describeRepo', {
+  xrpc.method(HANDLER_METHOD.DESCRIBE_REPO, {
     handler: describeRepoHandler(ctx),
   })
 
-  xrpc.method('com.atproto.repo.applyWrites', {
+  xrpc.method(HANDLER_METHOD.APPLY_WRITES, {
     auth: authVerifier.standard,
     handler: applyWritesHandler(ctx),
   })
 
-  xrpc.method('com.atproto.sync.listBlobs', {
+  xrpc.method(HANDLER_METHOD.LIST_BLOBS, {
     handler: listBlobsHandler(ctx),
   })
 
-  xrpc.method('com.atproto.sync.getRecord', {
+  xrpc.method(HANDLER_METHOD.SYNC_GET_RECORD, {
     handler: syncGetRecordHandler(ctx),
   })
 
-  xrpc.method('zone.stratos.sync.getRepo', {
+  xrpc.method(HANDLER_METHOD.SYNC_GET_REPO, {
     handler: syncGetRepoHandler(ctx),
   })
 
-  xrpc.method('zone.stratos.repo.importRepo', {
+  xrpc.method(HANDLER_METHOD.IMPORT_REPO, {
     auth: authVerifier.standard,
     handler: importRepoHandler(ctx),
   })
 
-  // Feature handlers
   registerHydrationHandlers(server, ctx)
 }

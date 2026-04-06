@@ -114,13 +114,18 @@ export async function checkStratosServiceStatus(
   serviceUrl: string,
   did: string,
 ): Promise<StratosServiceStatus> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
     const url = new URL('/xrpc/zone.stratos.enrollment.status', serviceUrl)
     url.searchParams.set('did', did)
-    const res = await fetch(url.href)
+    const res = await fetch(url.href, { signal: controller.signal })
+    clearTimeout(timeoutId)
     if (!res.ok) return { enrolled: false }
     return await res.json()
-  } catch {
+  } catch (err) {
+    clearTimeout(timeoutId)
+    console.warn(`Failed to check Stratos status at ${serviceUrl}:`, err)
     return { enrolled: false }
   }
 }
@@ -150,13 +155,18 @@ export async function verifyAttestation(
 export async function fetchServerDomains(
   serviceUrl: string,
 ): Promise<string[]> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
     const url = new URL('/xrpc/zone.stratos.server.listDomains', serviceUrl)
-    const res = await fetch(url.href)
+    const res = await fetch(url.href, { signal: controller.signal })
+    clearTimeout(timeoutId)
     if (!res.ok) return []
     const data = await res.json()
     return Array.isArray(data.domains) ? data.domains : []
-  } catch {
+  } catch (err) {
+    clearTimeout(timeoutId)
+    console.warn(`Failed to fetch domains from ${serviceUrl}:`, err)
     return []
   }
 }

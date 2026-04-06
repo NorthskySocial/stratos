@@ -51,6 +51,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       }
 
       // Start the authorization flow
+      logger?.debug({ handle, scope: OAUTH_SCOPE }, 'Starting OAuth authorization')
       const authUrl = await oauthClient.authorize(handle, {
         scope: OAUTH_SCOPE,
       })
@@ -65,9 +66,20 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
         'OAuth authorize failed',
       )
       console.error('OAuth authorize failed:', errorMsg, errorStack)
-      res.status(500).json({
+
+      // Check for common error types from @atproto/oauth-client-node
+      // Handle resolution or PDS discovery failures should be 400
+      const isResolutionError =
+        errorMsg.toLowerCase().includes('resolve') ||
+        errorMsg.toLowerCase().includes('handle') ||
+        errorMsg.toLowerCase().includes('did') ||
+        errorMsg.toLowerCase().includes('discovery')
+
+      res.status(isResolutionError ? 400 : 500).json({
         error: 'AuthorizationError',
-        message: 'Failed to start authorization flow',
+        message: config.devMode
+          ? `Failed to start authorization flow: ${errorMsg}`
+          : 'Failed to start authorization flow',
       })
     }
   }

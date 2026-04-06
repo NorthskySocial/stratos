@@ -65,6 +65,7 @@
   },
   "devDependencies": {
     "@atproto/lex-cli": "^0.9.8",
+    "@atcute/cbor": "^2.3.2",
     "@eslint/js": "^10.0.1",
     "@testcontainers/postgresql": "^11.12.0",
     "@types/cookie-parser": "^1.4.10",

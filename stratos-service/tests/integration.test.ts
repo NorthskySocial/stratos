@@ -19,15 +19,14 @@ import {
 
 import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
-import { EnrollmentServiceImpl } from '../src/features/index.js'
-import { type StratosServiceConfig } from '../src/config.js'
-import { validateEnrollment } from '../src/features/enrollment/internal/validation.js'
+import { EnrollmentServiceImpl, validateEnrollment } from '../src/features'
+import { type StratosServiceConfig } from '../src'
 import {
   closeServiceDb,
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db/index.js'
+} from '../src/db'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<Cid> => {

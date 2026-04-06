@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EnrollmentStore } from '../src/oauth/routes.js'
-import { migrateEnrollmentRkey, serviceDIDToRkey } from '../src/oauth/routes.js'
+import type { EnrollmentStore } from '../src/oauth'
+import { migrateEnrollmentRkey, serviceDIDToRkey } from '../src/oauth'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { Agent } from '@atproto/api'
 import type { ProfileRecordWriter } from '@northskysocial/stratos-core'

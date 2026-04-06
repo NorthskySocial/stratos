@@ -1,9 +1,6 @@
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import { InvalidRequestError } from '@atproto/xrpc-server'
-import {
-  createHydrationContext,
-  type HydrationResult,
-} from '@northskysocial/stratos-core'
+import { createHydrationContext, type HydrationResult, } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'
 
@@ -52,8 +49,12 @@ export function registerHydrationHandlers(
   xrpc.method('zone.stratos.repo.hydrateRecords', {
     handler: createXrpcHandler(ctx, 'zone.stratos.repo.hydrateRecords', {
       requireAuth: false,
-      handler: async ({ input, auth }) => {
-        const body = input as HydrateRecordsInput | undefined
+      handler: async (args) => {
+        const { input, auth, did } = args
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
+        const body = (input ?? (args as any).req?.body) as
+          | HydrateRecordsInput
+          | undefined
         validateHydrateRecordsInput(body)
 
         if (body!.uris.length === 0) {
@@ -66,7 +67,7 @@ export function registerHydrationHandlers(
 
         const context = await getHydrationContext(
           ctx,
-          auth?.credentials?.did ?? null,
+          did ?? auth?.credentials?.did ?? null,
         )
         const requests = body!.uris.map((uri) => ({ uri }))
         const result = await hydrationService.hydrateRecords(requests, context)
@@ -83,7 +84,7 @@ export function registerHydrationHandlers(
   xrpc.method('zone.stratos.repo.hydrateRecord', {
     handler: createXrpcHandler(ctx, 'zone.stratos.repo.hydrateRecord', {
       requireAuth: false,
-      handler: async ({ params, auth }) => {
+      handler: async ({ params, auth, did }) => {
         const uri = params.uri as string | undefined
         const cid = params.cid as string | undefined
 
@@ -93,7 +94,7 @@ export function registerHydrationHandlers(
 
         const context = await getHydrationContext(
           ctx,
-          auth?.credentials?.did ?? null,
+          did ?? auth?.credentials?.did ?? null,
         )
         const result = await hydrationService.hydrateRecord(
           { uri: uri, cid },
@@ -101,7 +102,13 @@ export function registerHydrationHandlers(
         )
 
         handleHydrationResult(result)
-        return result
+        if (result.status === 'success') {
+          return result.record
+        }
+        throw new InvalidRequestError(
+          'Unexpected hydration status',
+          'HydrationError',
+        )
       },
     }),
   })

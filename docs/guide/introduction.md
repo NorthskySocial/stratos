@@ -40,7 +40,8 @@ ecosystem.
 
 ## Next Steps
 
-- Read [Core Concepts](/guide/concepts) to understand boundaries, enrollment, and hydration.
+- Read the [Glossary](/guide/glossary) for key terms and concepts.
+- Follow the [First Post Tutorial](/guide/first-post) to get started as a user.
 - Follow the [Client Integration Guide](/client/getting-started) to add Stratos to your app.
 - See the [Operator Guide](/operator/overview) to deploy a Stratos service.
 - Explore the [Architecture](/architecture/hydration) for deep technical detail.

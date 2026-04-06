@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import express from 'express'
-import type { AppContext } from '../src/context.js'
-import type { EnrollmentStore } from '../src/oauth/routes.js'
-import { registerEnrollmentHandlers } from '../src/features/index.js'
+import type { AppContext } from '../src'
+import type { EnrollmentStore } from '../src/oauth'
+import { registerEnrollmentHandlers } from '../src/features'
 
 interface MockResponse {
   statusCode: number

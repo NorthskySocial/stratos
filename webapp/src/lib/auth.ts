@@ -24,10 +24,17 @@ function isLoopback(): boolean {
 function buildClientMetadata(): OAuthClientMetadataInput {
   const origin = window.location.origin
   return {
-    client_id: `${origin}/client-metadata.json`,
+    client_id:
+      import.meta.env.VITE_WEBAPP_URL && !isLoopback()
+        ? `${import.meta.env.VITE_WEBAPP_URL}/client-metadata.json`
+        : `${origin}/client-metadata.json`,
     client_name: 'Stratos',
-    client_uri: origin,
-    redirect_uris: [`${origin}/`],
+    client_uri: import.meta.env.VITE_WEBAPP_URL && !isLoopback() ? import.meta.env.VITE_WEBAPP_URL : origin,
+    redirect_uris: [
+      import.meta.env.VITE_WEBAPP_URL && !isLoopback()
+        ? `${import.meta.env.VITE_WEBAPP_URL}/`
+        : `${origin}/`,
+    ],
     scope:
       'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
     grant_types: ['authorization_code', 'refresh_token'],

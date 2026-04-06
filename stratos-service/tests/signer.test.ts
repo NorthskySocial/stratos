@@ -9,7 +9,7 @@ import {
   isBytes,
 } from '@atcute/cbor'
 import { MemoryBlockStore } from '@atcute/mst'
-import { signAndPersistCommit, signCommit } from '../src/features/index.js'
+import { signAndPersistCommit, signCommit } from '../src/features'
 import {
   BlockMap,
   buildCommit,

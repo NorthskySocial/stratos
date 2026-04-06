@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildUserAgent, createFetchWithUserAgent } from '../src/index.js'
+import { buildUserAgent, createFetchWithUserAgent } from '../src'
 
 describe('buildUserAgent', () => {
   it('builds user-agent string with undefined operator contact', () => {
