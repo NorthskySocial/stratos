@@ -51,12 +51,10 @@ describe('handleCallback', () => {
       serviceDid: 'did:web:localhost%3A3100',
       initRepo: vi.fn(),
       createSigningKey: vi.fn().mockResolvedValue('did:key:zQ3sh...'),
-      createAttestation: vi
-        .fn()
-        .mockResolvedValue({
-          sig: new Uint8Array(),
-          signingKey: 'did:key:zQ3sh...',
-        }),
+      createAttestation: vi.fn().mockResolvedValue({
+        sig: new Uint8Array(),
+        signingKey: 'did:key:zQ3sh...',
+      }),
     }
   })
 
