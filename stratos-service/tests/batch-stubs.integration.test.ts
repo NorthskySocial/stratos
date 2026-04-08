@@ -75,7 +75,9 @@ describe('applyWritesBatch PDS Stubs', () => {
       actorStore,
       stubQueue,
       boundaryResolver: {
-        getBoundaries: vi.fn().mockResolvedValue(['did:web:stratos.actor/stratos.actor']),
+        getBoundaries: vi
+          .fn()
+          .mockResolvedValue(['did:web:stratos.actor/stratos.actor']),
       } as any,
       repoWriteLocks: {
         acquire: vi.fn().mockResolvedValue(() => {}),

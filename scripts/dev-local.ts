@@ -71,7 +71,10 @@ async function start() {
     )
 
     // Ensure we have a template to work from
-    if (!fs.existsSync(clientMetadataTemplatePath) && fs.existsSync(clientMetadataPath)) {
+    if (
+      !fs.existsSync(clientMetadataTemplatePath) &&
+      fs.existsSync(clientMetadataPath)
+    ) {
       fs.copyFileSync(clientMetadataPath, clientMetadataTemplatePath)
       console.log(`Created template from ${clientMetadataPath}`)
     }
@@ -86,7 +89,9 @@ async function start() {
     // Attempt to fetch public IP for verification (optional for ngrok)
     let publicIp = 'unknown'
     try {
-      const response = await fetch('https://api.ipify.org').then(res => res.text())
+      const response = await fetch('https://api.ipify.org').then((res) =>
+        res.text(),
+      )
       publicIp = response
     } catch {
       // Ignore errors
@@ -131,9 +136,7 @@ async function start() {
     // 5. Wait for services to be ready
     console.log('Waiting for services to be ready on localhost...')
     const [serviceReady, webappReady] = await Promise.all([
-      waitForOk(
-        'http://localhost:3100/ready',
-      ),
+      waitForOk('http://localhost:3100/ready'),
       waitForOk('http://localhost:5173/'),
     ])
 
@@ -159,7 +162,7 @@ async function start() {
 `
     console.log(helpMsg)
 
-    // ngrok doesn't have the 511 interstitial issue like localtunnel, 
+    // ngrok doesn't have the 511 interstitial issue like localtunnel,
     // but we can still keep a basic health check if desired.
     const checkInterval = setInterval(async () => {
       // Basic connectivity check

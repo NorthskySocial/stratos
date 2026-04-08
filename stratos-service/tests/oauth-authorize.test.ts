@@ -36,10 +36,12 @@ describe('handleAuthorize', () => {
     await handler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(400)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'InvalidRequest',
-      message: 'Handle parameter required',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'InvalidRequest',
+        message: 'Handle parameter required',
+      }),
+    )
   })
 
   it('redirects to auth URL on success', async () => {
@@ -61,7 +63,9 @@ describe('handleAuthorize', () => {
   })
 
   it('returns 400 if authorize fails with a resolution error', async () => {
-    mockOauthClient.authorize.mockRejectedValue(new Error('Handle resolution failed'))
+    mockOauthClient.authorize.mockRejectedValue(
+      new Error('Handle resolution failed'),
+    )
 
     const handler = handleAuthorize(config)
     const req: any = { query: { handle: 'alice.test' } }
@@ -73,15 +77,19 @@ describe('handleAuthorize', () => {
     await handler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(400)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'AuthorizationError',
-      message: 'Failed to start authorization flow',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'AuthorizationError',
+        message: 'Failed to start authorization flow',
+      }),
+    )
   })
 
   it('includes error message in devMode', async () => {
     config.devMode = true
-    mockOauthClient.authorize.mockRejectedValue(new Error('Handle resolution failed'))
+    mockOauthClient.authorize.mockRejectedValue(
+      new Error('Handle resolution failed'),
+    )
 
     const handler = handleAuthorize(config)
     const req: any = { query: { handle: 'alice.test' } }
@@ -93,9 +101,11 @@ describe('handleAuthorize', () => {
     await handler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(400)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'AuthorizationError',
-      message: 'Failed to start authorization flow: Handle resolution failed',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'AuthorizationError',
+        message: 'Failed to start authorization flow: Handle resolution failed',
+      }),
+    )
   })
 })

@@ -29,7 +29,10 @@ function buildClientMetadata(): OAuthClientMetadataInput {
         ? `${import.meta.env.VITE_WEBAPP_URL}/client-metadata.json`
         : `${origin}/client-metadata.json`,
     client_name: 'Stratos',
-    client_uri: import.meta.env.VITE_WEBAPP_URL && !isLoopback() ? import.meta.env.VITE_WEBAPP_URL : origin,
+    client_uri:
+      import.meta.env.VITE_WEBAPP_URL && !isLoopback()
+        ? import.meta.env.VITE_WEBAPP_URL
+        : origin,
     redirect_uris: [
       import.meta.env.VITE_WEBAPP_URL && !isLoopback()
         ? `${import.meta.env.VITE_WEBAPP_URL}/`

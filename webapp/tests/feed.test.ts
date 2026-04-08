@@ -6,7 +6,7 @@ import {
   feedStats,
   resolveHandles,
   groupIntoThreads,
-  type FeedPost
+  type FeedPost,
 } from '../src/lib/feed'
 
 const createPost = (overrides: Partial<FeedPost> = {}): FeedPost => ({
@@ -24,12 +24,21 @@ const createPost = (overrides: Partial<FeedPost> = {}): FeedPost => ({
 describe('feed logic', () => {
   describe('buildUnifiedFeed', () => {
     it('combines and sorts posts by date descending', () => {
-      const p1 = createPost({ createdAt: '2024-01-01T10:00:00Z', uri: 'at://1' })
-      const p2 = createPost({ createdAt: '2024-01-01T12:00:00Z', uri: 'at://2' })
-      const p3 = createPost({ createdAt: '2024-01-01T11:00:00Z', uri: 'at://3' })
+      const p1 = createPost({
+        createdAt: '2024-01-01T10:00:00Z',
+        uri: 'at://1',
+      })
+      const p2 = createPost({
+        createdAt: '2024-01-01T12:00:00Z',
+        uri: 'at://2',
+      })
+      const p3 = createPost({
+        createdAt: '2024-01-01T11:00:00Z',
+        uri: 'at://3',
+      })
 
       const unified = buildUnifiedFeed([p1], [p2, p3])
-      expect(unified.map(p => p.uri)).toEqual(['at://2', 'at://3', 'at://1'])
+      expect(unified.map((p) => p.uri)).toEqual(['at://2', 'at://3', 'at://1'])
     })
   })
 
@@ -52,10 +61,16 @@ describe('feed logic', () => {
 
     it('filters private posts by domain but keeps all public posts', () => {
       const publicPost = createPost({ isPrivate: false, boundaries: ['other'] })
-      const privatePostEng = createPost({ isPrivate: true, boundaries: ['eng'] })
+      const privatePostEng = createPost({
+        isPrivate: true,
+        boundaries: ['eng'],
+      })
       const privatePostHr = createPost({ isPrivate: true, boundaries: ['hr'] })
 
-      const filtered = filterByDomain([publicPost, privatePostEng, privatePostHr], 'eng')
+      const filtered = filterByDomain(
+        [publicPost, privatePostEng, privatePostHr],
+        'eng',
+      )
       expect(filtered).toContain(publicPost)
       expect(filtered).toContain(privatePostEng)
       expect(filtered).not.toContain(privatePostHr)
@@ -95,17 +110,26 @@ describe('feed logic', () => {
       const root = createPost({ uri: 'at://root', cid: 'c1' })
       const reply1 = createPost({
         uri: 'at://reply1',
-        reply: { root: { uri: 'at://root', cid: 'c1' }, parent: { uri: 'at://root', cid: 'c1' } },
-        createdAt: '2024-01-01T12:01:00Z'
+        reply: {
+          root: { uri: 'at://root', cid: 'c1' },
+          parent: { uri: 'at://root', cid: 'c1' },
+        },
+        createdAt: '2024-01-01T12:01:00Z',
       })
       const reply2 = createPost({
         uri: 'at://reply2',
-        reply: { root: { uri: 'at://root', cid: 'c1' }, parent: { uri: 'at://root', cid: 'c1' } },
-        createdAt: '2024-01-01T12:02:00Z'
+        reply: {
+          root: { uri: 'at://root', cid: 'c1' },
+          parent: { uri: 'at://root', cid: 'c1' },
+        },
+        createdAt: '2024-01-01T12:02:00Z',
       })
       const subReply = createPost({
         uri: 'at://subreply',
-        reply: { root: { uri: 'at://root', cid: 'c1' }, parent: { uri: 'at://reply1', cid: 'c1' } }
+        reply: {
+          root: { uri: 'at://root', cid: 'c1' },
+          parent: { uri: 'at://reply1', cid: 'c1' },
+        },
       })
 
       const threads = groupIntoThreads([root, reply1, reply2, subReply])
@@ -120,13 +144,16 @@ describe('feed logic', () => {
     })
 
     it('treats posts with missing parents as root posts', () => {
-        const orphan = createPost({
-            uri: 'at://orphan',
-            reply: { root: { uri: 'at://missing', cid: 'x' }, parent: { uri: 'at://missing', cid: 'x' } }
-        })
-        const threads = groupIntoThreads([orphan])
-        expect(threads.length).toBe(1)
-        expect(threads[0].post.uri).toBe('at://orphan')
+      const orphan = createPost({
+        uri: 'at://orphan',
+        reply: {
+          root: { uri: 'at://missing', cid: 'x' },
+          parent: { uri: 'at://missing', cid: 'x' },
+        },
+      })
+      const threads = groupIntoThreads([orphan])
+      expect(threads.length).toBe(1)
+      expect(threads[0].post.uri).toBe('at://orphan')
     })
   })
 })
