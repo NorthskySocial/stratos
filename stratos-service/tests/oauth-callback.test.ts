@@ -51,7 +51,12 @@ describe('handleCallback', () => {
       serviceDid: 'did:web:localhost%3A3100',
       initRepo: vi.fn(),
       createSigningKey: vi.fn().mockResolvedValue('did:key:zQ3sh...'),
-      createAttestation: vi.fn().mockResolvedValue({ sig: new Uint8Array(), signingKey: 'did:key:zQ3sh...' }),
+      createAttestation: vi
+        .fn()
+        .mockResolvedValue({
+          sig: new Uint8Array(),
+          signingKey: 'did:key:zQ3sh...',
+        }),
     }
   })
 
@@ -59,9 +64,11 @@ describe('handleCallback', () => {
     const session = { sub: 'did:plc:alice' }
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
-    
+
     const handler = handleCallback(config)
-    const req: any = { url: 'http://localhost:3100/oauth/callback?code=foo&state=bar' }
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
     const res: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -72,11 +79,13 @@ describe('handleCallback', () => {
 
     expect(mockOauthClient.callback).toHaveBeenCalled()
     expect(mockEnrollmentStore.enroll).toHaveBeenCalled()
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      enrolled: true,
-      did: 'did:plc:alice',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        enrolled: true,
+        did: 'did:plc:alice',
+      }),
+    )
   })
 
   it('handles successful existing enrollment', async () => {
@@ -87,9 +96,11 @@ describe('handleCallback', () => {
       did: 'did:plc:alice',
       enrollmentRkey: 'did:web:localhost:3100',
     })
-    
+
     const handler = handleCallback(config)
-    const req: any = { url: 'http://localhost:3100/oauth/callback?code=foo&state=bar' }
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
     const res: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -100,26 +111,30 @@ describe('handleCallback', () => {
 
     expect(mockOauthClient.callback).toHaveBeenCalled()
     expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      enrolled: false,
-      did: 'did:plc:alice',
-      message: 'Already enrolled in Stratos',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        enrolled: false,
+        did: 'did:plc:alice',
+        message: 'Already enrolled in Stratos',
+      }),
+    )
   })
 
   it('denies enrollment if not allowed', async () => {
     const session = { sub: 'did:plc:malice' }
     mockOauthClient.callback.mockResolvedValue({ session })
-    
+
     // Configure to only allow a specific DID
     config.enrollmentConfig = {
       mode: 'closed',
       allowedDids: ['did:plc:alice'],
     }
-    
+
     const handler = handleCallback(config)
-    const req: any = { url: 'http://localhost:3100/oauth/callback?code=foo&state=bar' }
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
     const res: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -129,17 +144,21 @@ describe('handleCallback', () => {
 
     expect(mockOauthClient.revoke).toHaveBeenCalledWith('did:plc:malice')
     expect(res.status).toHaveBeenCalledWith(403)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'EnrollmentDenied',
-      message: 'Your account is not eligible for this Stratos service',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'EnrollmentDenied',
+        message: 'Your account is not eligible for this Stratos service',
+      }),
+    )
   })
 
   it('handles OAuth callback failure', async () => {
     mockOauthClient.callback.mockRejectedValue(new Error('OAuth failed'))
-    
+
     const handler = handleCallback(config)
-    const req: any = { url: 'http://localhost:3100/oauth/callback?code=foo&state=bar' }
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
     const res: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -148,24 +167,28 @@ describe('handleCallback', () => {
     await handler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(500)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'CallbackError',
-      message: 'Failed to complete authorization',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'CallbackError',
+        message: 'Failed to complete authorization',
+      }),
+    )
   })
 
   it('handles DID resolution failure when checking PDS allowlist', async () => {
     const session = { sub: 'did:plc:alice' }
     mockOauthClient.callback.mockResolvedValue({ session })
-    
+
     config.enrollmentConfig = {
       mode: 'closed',
       allowedPdsEndpoints: ['https://pds.example.com'],
     }
     mockIdResolver.did.resolve.mockRejectedValue(new Error('Resolution failed'))
-    
+
     const handler = handleCallback(config)
-    const req: any = { url: 'http://localhost:3100/oauth/callback?code=foo&state=bar' }
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
     const res: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -174,10 +197,12 @@ describe('handleCallback', () => {
     await handler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(403)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'EnrollmentDenied',
-      message: 'Could not verify your identity',
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'EnrollmentDenied',
+        message: 'Could not verify your identity',
+      }),
+    )
   })
 
   it('handles re-enrollment logic correctly', async () => {
@@ -189,9 +214,11 @@ describe('handleCallback', () => {
       did: 'did:plc:alice',
       enrollmentRkey: 'old-rkey', // Trigger migration
     })
-    
+
     const handler = handleCallback(config)
-    const req: any = { url: 'http://localhost:3100/oauth/callback?code=foo&state=bar' }
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
     const res: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -201,9 +228,11 @@ describe('handleCallback', () => {
     await handler(req, res)
 
     // Should still return success
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      enrolled: false,
-    }))
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        enrolled: false,
+      }),
+    )
   })
 })

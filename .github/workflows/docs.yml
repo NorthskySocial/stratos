@@ -51,7 +51,7 @@ jobs:
       - name: Markdown Lint
         uses: DavidAnson/markdownlint-cli2-action@v19
         with:
-          globs: "**/*.md"
+          globs: '**/*.md'
 
       - name: Check Broken Links
         uses: lycheeverse/lychee-action@v2

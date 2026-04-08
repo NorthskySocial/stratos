@@ -151,14 +151,17 @@ When building a unified feed (e.g., `app.bsky.feed.getTimeline`), you can mix pu
 
 ```typescript
 async function getUnifiedFeed(viewerDid: string, viewerDomains: string[]) {
-  const posts = await db.selectFrom('posts')
+  const posts = await db
+    .selectFrom('posts')
     .leftJoin('stratos_posts', 'posts.uri', 'stratos_posts.uri')
-    .where((eb) => eb.or([
-      // Public posts (not in Stratos)
-      eb('stratos_posts.uri', 'is', null),
-      // Private posts with boundary overlap
-      eb('stratos_posts.boundary_domains', '?|', viewerDomains)
-    ]))
+    .where((eb) =>
+      eb.or([
+        // Public posts (not in Stratos)
+        eb('stratos_posts.uri', 'is', null),
+        // Private posts with boundary overlap
+        eb('stratos_posts.boundary_domains', '?|', viewerDomains),
+      ]),
+    )
     .orderBy('posts.createdAt', 'desc')
     .limit(50)
     .execute()

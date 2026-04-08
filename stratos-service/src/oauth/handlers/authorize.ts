@@ -51,7 +51,10 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       }
 
       // Start the authorization flow
-      logger?.debug({ handle, scope: OAUTH_SCOPE }, 'Starting OAuth authorization')
+      logger?.debug(
+        { handle, scope: OAUTH_SCOPE },
+        'Starting OAuth authorization',
+      )
       const authUrl = await oauthClient.authorize(handle, {
         scope: OAUTH_SCOPE,
       })

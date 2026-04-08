@@ -1,6 +1,9 @@
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import { InvalidRequestError } from '@atproto/xrpc-server'
-import { createHydrationContext, type HydrationResult, } from '@northskysocial/stratos-core'
+import {
+  createHydrationContext,
+  type HydrationResult,
+} from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'
 

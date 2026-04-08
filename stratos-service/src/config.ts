@@ -124,9 +124,7 @@ const envSchema = z
       .transform((v) => v || undefined),
 
     // User-Agent
-    STRATOS_REPO_URL: z
-      .string()
-      .default('http://localhost:3100'),
+    STRATOS_REPO_URL: z.string().default('http://localhost:3100'),
     STRATOS_OPERATOR_CONTACT: z
       .string()
       .optional()
