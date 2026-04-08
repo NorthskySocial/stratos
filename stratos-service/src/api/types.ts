@@ -18,6 +18,7 @@ export interface HandlerContext {
   input?: HandlerInput
   params: HandlerParams
   auth?: HandlerAuth
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   req?: any // Support for access to underlying request
 }
 

@@ -6,6 +6,7 @@ import type {
   HandlerContext,
   HandlerFn,
   HandlerInput,
+  HandlerParams,
   HandlerResponse,
 } from './types.js'
 
@@ -30,9 +31,116 @@ export function validateUserAuth(auth: HandlerAuth | undefined): {
  * @param method - Method name
  * @returns Unique request ID
  */
-export function makeRequestId(method: string): string {
+function makeRequestId(method: string): string {
   const rand = Math.random().toString(36).slice(2, 8)
   return `${method}-${Date.now().toString(36)}-${rand}`
+}
+
+/**
+ * Extracts DID from handler context
+ *
+ * @param handlerCtx - XRPC handler context
+ * @returns DID if found
+ */
+function extractDid(handlerCtx: HandlerContext): string | undefined {
+  const { auth } = handlerCtx
+  if (auth?.credentials?.did) {
+    return auth.credentials.did
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (handlerCtx.req?.auth?.credentials?.did) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-member-access
+    return handlerCtx.req.auth.credentials.did
+  }
+  return undefined
+}
+
+/**
+ * Maps StratosError to XRPC errors and logs if necessary
+ *
+ * @param err - Error to handle
+ * @param ctx - Application context
+ * @param logInfo - Logging metadata
+ * @throws InvalidRequestError if err is StratosError, otherwise rethrows err
+ */
+function handleRequestError(
+  err: unknown,
+  ctx: AppContext,
+  logInfo: {
+    requestId: string
+    method: string
+    did?: string
+    durationMs: number
+  },
+): never {
+  const { requestId, method, did, durationMs } = logInfo
+
+  if (err instanceof StratosError) {
+    ctx.logger?.warn(
+      {
+        requestId,
+        method,
+        did,
+        code: err.code,
+        durationMs,
+      },
+      err.message,
+    )
+    throw new InvalidRequestError(err.message, err.code)
+  }
+
+  // Log unexpected errors
+  ctx.logger?.error(
+    {
+      requestId,
+      method,
+      did,
+      durationMs,
+      err:
+        err instanceof Error
+          ? { message: err.message, stack: err.stack }
+          : String(err),
+    },
+    'request failed',
+  )
+
+  throw err
+}
+
+/**
+ * Logs the start of an XRPC request
+ *
+ * @param ctx - Application context
+ * @param logInfo - Logging metadata
+ */
+function logRequestStart(
+  ctx: AppContext,
+  logInfo: {
+    requestId: string
+    method: string
+    did?: string
+    params: HandlerParams
+  },
+): void {
+  ctx.logger?.debug(logInfo, 'handling request')
+}
+
+/**
+ * Logs the successful completion of an XRPC request
+ *
+ * @param ctx - Application context
+ * @param logInfo - Logging metadata
+ */
+function logRequestSuccess(
+  ctx: AppContext,
+  logInfo: {
+    requestId: string
+    method: string
+    did?: string
+    durationMs: number
+  },
+): void {
+  ctx.logger?.info(logInfo, 'request completed')
 }
 
 /**
@@ -64,29 +172,21 @@ export function createXrpcHandler<
   return async (handlerCtx: HandlerContext): Promise<HandlerResponse> => {
     const requestId = makeRequestId(methodName.split('.').pop() || methodName)
     const start = Date.now()
-    let { auth, input } = handlerCtx
-    let params = handlerCtx.params || (handlerCtx as any).req?.query || {}
-
-    let did: string | undefined
-    if (auth?.credentials?.did) {
-      did = auth.credentials.did
-    } else if (handlerCtx.req?.auth?.credentials?.did) {
-      did = handlerCtx.req.auth.credentials.did
-    }
+    const { auth, input } = handlerCtx
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+    const params = handlerCtx.params || (handlerCtx as any).req?.query || {}
+    const did = extractDid(handlerCtx)
 
     if (options.requireAuth !== false && !did) {
       throw new AuthRequiredError()
     }
 
-    ctx.logger?.debug(
-      {
-        requestId,
-        method: methodName,
-        did,
-        params,
-      },
-      'handling request',
-    )
+    logRequestStart(ctx, {
+      requestId,
+      method: methodName,
+      did,
+      params,
+    })
 
     try {
       const result = await options.handler({
@@ -98,55 +198,24 @@ export function createXrpcHandler<
         fullInput: input,
       })
 
-      const durationMs = Date.now() - start
-      ctx.logger?.info(
-        {
-          requestId,
-          method: methodName,
-          did,
-          durationMs,
-        },
-        'request completed',
-      )
+      logRequestSuccess(ctx, {
+        requestId,
+        method: methodName,
+        did,
+        durationMs: Date.now() - start,
+      })
 
       return {
         encoding: 'application/json',
         body: result,
       }
     } catch (err) {
-      const durationMs = Date.now() - start
-
-      // Map StratosError to XRPC errors
-      if (err instanceof StratosError) {
-        ctx.logger?.warn(
-          {
-            requestId,
-            method: methodName,
-            did,
-            code: err.code,
-            durationMs,
-          },
-          err.message,
-        )
-        throw new InvalidRequestError(err.message, err.code)
-      }
-
-      // Log unexpected errors
-      ctx.logger?.error(
-        {
-          requestId,
-          method: methodName,
-          did,
-          durationMs,
-          err:
-            err instanceof Error
-              ? { message: err.message, stack: err.stack }
-              : String(err),
-        },
-        'request failed',
-      )
-
-      throw err
+      handleRequestError(err, ctx, {
+        requestId,
+        method: methodName,
+        did,
+        durationMs: Date.now() - start,
+      })
     }
   }
 }

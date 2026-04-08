@@ -150,6 +150,7 @@ export class PdsFirehose {
           if (event instanceof ErrorEvent) {
             details = ` message=${event.message}`
           } else if ('message' in event) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
             details = ` message=${(event as any).message}`
           }
           if ('type' in event) {
