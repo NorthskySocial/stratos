@@ -16,7 +16,6 @@ import {
   StratosBlockStoreReader,
 } from '../../features/index.js'
 import {
-  assertRootUnchanged,
   validateWritableRecord,
   withConcurrencyRetry,
 } from './validation.js'
@@ -185,26 +184,19 @@ async function buildCommitWithRetry(
     await ensureActorStoreExists(ctx.actorStore, callerDid)
 
     const retry = await withConcurrencyRetry(async () => {
-      return ctx.actorStore.readThenTransact(
-        callerDid,
-        async (reader) => {
-          const rootDetails = await reader.repo.getRootDetailed()
-          const rootCid = rootDetails?.cid
-            ? parseCid(rootDetails.cid).toString()
+      // WARNING: Use transact() — not readThenTransact(). lockRoot() (FOR UPDATE)
+      // provides the root and row lock in one query; a separate read phase doubles
+      // the root query and loses the lock. See create.ts for full rationale.
+      return ctx.actorStore.transact(callerDid, async (store) => {
+          const currentRoot = await store.repo.lockRoot()
+          const rootCid = currentRoot?.cid
+            ? parseCid(currentRoot.cid).toString()
             : null
-          const storage = new StratosBlockStoreReader(reader.repo)
+          const storage = new StratosBlockStoreReader(store.repo)
           const unsigned = await buildCommit(storage, rootCid, {
             did: callerDid,
             writes: mstOps,
           })
-          return { rootCid, unsigned }
-        },
-        async ({ rootCid, unsigned }, store) => {
-          const currentRoot = await store.repo.lockRoot()
-          assertRootUnchanged(
-            currentRoot?.cid ? parseCid(currentRoot.cid).toString() : null,
-            rootCid,
-          )
 
           await persistBatchBlocks(store, precomputed)
 
@@ -254,8 +246,7 @@ async function buildCommitWithRetry(
               rev: commitResult.rev,
             },
           }
-        },
-      )
+      })
     }, ctx.logger)
     result = retry.result
   } finally {

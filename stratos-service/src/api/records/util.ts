@@ -8,15 +8,11 @@ import {
   KeypairSigningService,
 } from '../../features/mst/internal/adapters.js'
 
-/**
- * Helper to create an ActorRepoManager with standard signing and sequencing services
- *
- * @param logger - Logger instance
- * @param store - Actor transactor store
- * @param actorSigningKey - Private key for signing commits
- * @param sequenceTrace - Sequence trace for tracking commit sequencing
- * @returns ActorRepoManager instance
- */
+// WARNING: Do NOT pass store.repo.db to ActorRepoManager. The manager must
+// receive the full repo transactor (store.repo) at the applyWrites() callsite
+// so MST operations go through the LRU block cache. Passing a raw db handle
+// creates a fresh empty cache per write, causing unnecessary queries and
+// connection pool exhaustion under load.
 export function createRepoManager(
   logger: Logger | undefined,
   store: ActorTransactor,
@@ -28,12 +24,7 @@ export function createRepoManager(
     store,
     sequenceTrace,
   )
-  return new ActorRepoManager(
-    store.repo.db,
-    signingService,
-    sequencingService,
-    logger,
-  )
+  return new ActorRepoManager(signingService, sequencingService, logger)
 }
 
 /**
