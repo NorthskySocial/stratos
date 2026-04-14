@@ -318,49 +318,50 @@ async function executeTransaction(
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
+  // WARNING: Use `transact()` — not `readThenTransact()`. The manager calls
+  // lockRoot() (FOR UPDATE) internally, so a separate read phase would double
+  // the root query and lose the row lock, leading to failed writes under concurrency.
   const attemptT0 = performance.now()
-  return ctx.actorStore.readThenTransact(
-    callerDid,
-    async (reader) => {
-      phases.connAcquire = performance.now() - attemptT0
-      const root = await reader.repo.getRoot()
-      return { rootCid: root ? parseCid(root).toString() : null }
-    },
-    async (_prepared, store) => {
-      const manager = createRepoManager(
-        ctx.logger,
-        store,
-        actorSigningKey,
-        sequenceTrace,
-      )
+  return ctx.actorStore.transact(callerDid, async (store) => {
+    phases.connAcquire = performance.now() - attemptT0
+    const manager = createRepoManager(
+      ctx.logger,
+      store,
+      actorSigningKey,
+      sequenceTrace,
+    )
 
-      const repoWrites: RepoWrite[] = [
-        { action: 'create', collection, rkey, record, cid },
-      ]
+    const repoWrites: RepoWrite[] = [
+      { action: 'create', collection, rkey, record, cid },
+    ]
 
-      const writeResult = await manager.applyWrites(callerDid, repoWrites, [
-        { cid, bytes: recordBytes },
-      ])
+    // Pass store.repo directly — it carries the LRU block cache. Passing
+    // store.repo.db instead would bypass the cache and hit PG on every MST read.
+    const writeResult = await manager.applyWrites(
+      callerDid,
+      repoWrites,
+      store.repo,
+      [{ cid, bytes: recordBytes }],
+    )
 
-      const uri = AtUri.make(callerDid, collection, rkey)
-      const ti = performance.now()
-      await store.record.indexRecord(
-        uri.toString(),
-        cid,
-        record as Record<string, unknown>,
-        'create',
-        writeResult.rev,
-      )
-      phases.transactPersist = performance.now() - ti
+    const uri = AtUri.make(callerDid, collection, rkey)
+    const ti = performance.now()
+    await store.record.indexRecord(
+      uri.toString(),
+      cid,
+      record as Record<string, unknown>,
+      'create',
+      writeResult.rev,
+    )
+    phases.transactPersist = performance.now() - ti
 
-      return {
-        uri,
-        cid,
-        commit: {
-          cid: parseCid(writeResult.commitCid).toString(),
-          rev: writeResult.rev,
-        },
-      }
-    },
-  )
+    return {
+      uri,
+      cid,
+      commit: {
+        cid: parseCid(writeResult.commitCid).toString(),
+        rev: writeResult.rev,
+      },
+    }
+  })
 }

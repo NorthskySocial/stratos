@@ -1,27 +1,19 @@
+// WARNING: These imports MUST remain top-level static imports. Switching to
+// dynamic `await import()` adds per-call promise/resolution overhead inside the
+// transaction, causing ~38% throughput loss and crypto signing stalls under load.
+import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
+import { create as cidCreate, toString as cidToString } from '@atcute/cid'
 import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto/index.js'
-import { BlockMap, StratosSqlRepoTransactor } from './index.js'
+import { BlockMap } from './reader.js'
 import { buildCommit, type UnsignedCommitData } from '../mst/index.js'
 import { Logger } from '../types.js'
-import { StratosDbOrTx } from '../db/index.js'
-import { StratosPgDbOrTx } from '../db/pg.js'
 
-/**
- * Result of a repository write operation
- */
 export interface ApplyWritesResult {
   commitCid: Cid
   rev: string
 }
 
-/**
- * A type representing either a SQLite or Postgres database/transaction
- */
-export type ActorStoreDb = StratosDbOrTx | StratosPgDbOrTx
-
-/**
- * A write operation for the repository
- */
 export interface RepoWrite {
   action: 'create' | 'update' | 'delete'
   collection: string
@@ -30,16 +22,10 @@ export interface RepoWrite {
   cid?: Cid
 }
 
-/**
- * Service for signing repository commits
- */
 export interface SigningService {
   signCommit: (did: string, unsignedBytes: Uint8Array) => Promise<Uint8Array>
 }
 
-/**
- * Service for sequencing repository changes
- */
 export interface SequencingService {
   sequenceChange: (
     did: string,
@@ -50,94 +36,83 @@ export interface SequencingService {
 }
 
 /**
- * Manager for actor repository operations
+ * Minimal interface for repo transactors — satisfied by both
+ * StratosSqlRepoTransactor (SQLite) and PgActorRepoTransactor (Postgres).
  */
+export interface RepoTransactor {
+  lockRoot(): Promise<{ cid: Cid; rev: string } | null>
+  updateRoot(cid: Cid, rev: string, did: string): Promise<void>
+  getBytes(cid: Cid): Promise<Uint8Array | null>
+  has(cid: Cid): Promise<boolean>
+  getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }>
+  putBlocks(blocks: BlockMap, rev: string): Promise<void>
+  deleteBlocks(cids: Cid[]): Promise<void>
+}
+
+// WARNING: This class is performance-critical. Refactoring/restructuring has
+// previously caused ~38% throughput regression and ~60% latency increase. Do not:
+// - Wrap applyWrites() in a nested transaction (savepoints add journal + lock overhead)
+// - Replace the RepoTransactor param with a raw db handle (bypasses the LRU block cache,
+//   causing every MST block fetch to hit the database)
+// - Convert static imports to dynamic `await import()` (per-call promise overhead)
+// - Make persist operations sequential instead of concurrent (connection stalls)
+// See PR #83 for the full regression analysis.
 export class ActorRepoManager {
   constructor(
-    private db: ActorStoreDb,
     private signingService: SigningService,
     private sequencingService: SequencingService,
     private logger?: Logger,
   ) {}
 
-  /**
-   * Apply a batch of writes to an actor's repository
-   *
-   * @param did - DID of the actor
-   * @param writes - Array of write operations
-   * @param extraBlocks - Optional array of extra blocks to include in the commit
-   * @returns CID of the committed changes
-   */
   async applyWrites(
     did: string,
     writes: RepoWrite[],
+    transactor: RepoTransactor,
     extraBlocks?: { cid: Cid; bytes: Uint8Array }[],
   ): Promise<ApplyWritesResult> {
-    return await (
-      this.db as {
-        transaction: (
-          fn: (tx: ActorStoreDb) => Promise<ApplyWritesResult>,
-        ) => Promise<ApplyWritesResult>
-      }
-    ).transaction(async (tx: ActorStoreDb) => {
-      const transactor = new StratosSqlRepoTransactor(
-        tx as StratosDbOrTx,
-        this.logger,
-      )
+    const currentRootDetailed = await transactor.lockRoot()
+    const currentCommitCid = currentRootDetailed?.cid ?? null
 
-      // 1. Get the current root (and lock it if the DB supports it)
-      const currentRootDetailed = await transactor.lockRoot()
-      const currentCommitCid = currentRootDetailed?.cid ?? null
+    const unsigned = await this.buildUnsignedCommit(
+      did,
+      writes,
+      transactor,
+      currentCommitCid,
+    )
 
-      // 2. Build the new MST and unsigned commit
-      const unsigned = await this.buildUnsignedCommit(
-        did,
-        writes,
-        transactor,
-        currentCommitCid,
-      )
+    const { commitCid, commitBytes } = await this.signCommit(did, unsigned)
 
-      // 3. Sign the commit and generate its CID
-      const { commitCid, commitBytes } = await this.signCommit(did, unsigned)
+    const allBlocks = this.collectBlocks(
+      commitCid,
+      commitBytes,
+      unsigned,
+      extraBlocks,
+    )
+    const removedCids = unsigned.removedCids.map((s) => parseCid(s))
 
-      // 4. Persist blocks and update root
-      await this.persistCommit(
-        transactor,
-        commitCid,
-        commitBytes,
-        unsigned,
-        extraBlocks,
-      )
-
-      // 5. Update root and sequence the change
-      await transactor.updateRoot(commitCid, unsigned.rev, did)
-      await this.sequencingService.sequenceChange(
+    // Concurrent persist — do NOT serialize these. Sequential writes hold the
+    // transaction open longer, exhausting the connection pool under load.
+    await Promise.all([
+      transactor.putBlocks(allBlocks, unsigned.rev),
+      removedCids.length > 0
+        ? transactor.deleteBlocks(removedCids)
+        : undefined,
+      transactor.updateRoot(commitCid, unsigned.rev, did),
+      this.sequencingService.sequenceChange(
         did,
         commitCid,
         unsigned.rev,
         writes,
-      )
+      ),
+    ])
 
-      return {
-        commitCid,
-        rev: unsigned.rev,
-      }
-    })
+    return { commitCid, rev: unsigned.rev }
   }
 
-  /**
-   * Builds an unsigned commit from a batch of writes
-   *
-   * @param did - DID of the actor
-   * @param writes - Array of write operations
-   * @param transactor - Transaction object
-   * @param currentCommitCid - CID of the current commit, or null if starting a new repo
-   * @returns Unsigned commit data
-   */
   private async buildUnsignedCommit(
     did: string,
     writes: RepoWrite[],
-    transactor: StratosSqlRepoTransactor,
+    transactor: RepoTransactor,
     currentCommitCid: Cid | null,
   ): Promise<UnsignedCommitData> {
     const mstWrites = writes.map((w) => ({
@@ -155,13 +130,7 @@ export class ActorRepoManager {
     })
   }
 
-  /**
-   * Creates a storage adapter for the MST builder
-   *
-   * @param transactor - Transaction object
-   * @returns Storage adapter object
-   */
-  private createMstStorageAdapter(transactor: StratosSqlRepoTransactor) {
+  private createMstStorageAdapter(transactor: RepoTransactor) {
     return {
       get: async (cidStr: string) => {
         try {
@@ -198,13 +167,6 @@ export class ActorRepoManager {
     }
   }
 
-  /**
-   * Signs a commit and returns its CID and encoded bytes
-   *
-   * @param did - DID of the actor
-   * @param unsigned - Unsigned commit data
-   * @returns CID and encoded bytes of the signed commit
-   */
   private async signCommit(
     did: string,
     unsigned: UnsignedCommitData,
@@ -217,8 +179,6 @@ export class ActorRepoManager {
       prev: null,
     }
 
-    const { encode: cborEncode, toBytes: cborToBytes } =
-      await import('@atcute/cbor')
     const unsignedBytes = cborEncode(unsignedCommit)
     const sig = await this.signingService.signCommit(did, unsignedBytes)
 
@@ -228,30 +188,18 @@ export class ActorRepoManager {
     }
 
     const commitBytes = cborEncode(signedCommit)
-    const { create: cidCreate, toString: cidToString } =
-      await import('@atcute/cid')
     const atcuteCid = await cidCreate(0x71, commitBytes)
     const commitCid = parseCid(cidToString(atcuteCid))
 
     return { commitCid, commitBytes }
   }
 
-  /**
-   * Persists all blocks related to a commit
-   *
-   * @param transactor - Transaction object
-   * @param commitCid - CID of the commit
-   * @param commitBytes - Encoded bytes of the commit
-   * @param unsigned - Unsigned commit data
-   * @param extraBlocks - Optional array of extra blocks to include in the commit
-   */
-  private async persistCommit(
-    transactor: StratosSqlRepoTransactor,
+  private collectBlocks(
     commitCid: Cid,
     commitBytes: Uint8Array,
     unsigned: UnsignedCommitData,
     extraBlocks?: { cid: Cid; bytes: Uint8Array }[],
-  ): Promise<void> {
+  ): BlockMap {
     const allBlocks = new BlockMap()
     if (extraBlocks) {
       for (const block of extraBlocks) {
@@ -262,13 +210,6 @@ export class ActorRepoManager {
       allBlocks.set(parseCid(cidStr), bytes)
     }
     allBlocks.set(commitCid, commitBytes)
-
-    await transactor.putBlocks(allBlocks, unsigned.rev)
-
-    if (unsigned.removedCids.length > 0) {
-      await transactor.deleteBlocks(
-        unsigned.removedCids.map((s) => parseCid(s)),
-      )
-    }
+    return allBlocks
   }
 }
