@@ -47,6 +47,7 @@ export interface RepoTransactor {
   getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }>
   putBlocks(blocks: BlockMap, rev: string): Promise<void>
   deleteBlocks(cids: Cid[]): Promise<void>
+  preloadRootSpine?(commitCid: Cid): Promise<void>
 }
 
 // WARNING: This class is performance-critical. Refactoring/restructuring has
@@ -72,6 +73,10 @@ export class ActorRepoManager {
   ): Promise<ApplyWritesResult> {
     const currentRootDetailed = await transactor.lockRoot()
     const currentCommitCid = currentRootDetailed?.cid ?? null
+
+    if (currentCommitCid && transactor.preloadRootSpine) {
+      await transactor.preloadRootSpine(currentCommitCid)
+    }
 
     const unsigned = await this.buildUnsignedCommit(
       did,
