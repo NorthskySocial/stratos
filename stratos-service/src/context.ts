@@ -6,7 +6,6 @@ import * as crypto from '@atproto/crypto'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
 import { fileExists } from '@atproto/common'
 
-import { sql } from 'drizzle-orm'
 import {
   createAttestationPayload,
   DefaultLexiconProvider,
@@ -167,14 +166,11 @@ export async function createAppContext(
     },
 
     async checkHealth() {
-      const dbOk = await storage.db
-        ?.run(sql`SELECT 1`)
-        .then(() => 'ok' as const)
-        .catch(() => 'error' as const)
+      const dbOk = await storage.checkDbHealth()
       return {
         status: dbOk === 'ok' ? 'ok' : 'error',
         components: {
-          db: dbOk ?? 'error',
+          db: dbOk,
           blobstore: 'ok',
         },
       }
