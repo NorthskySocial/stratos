@@ -155,6 +155,12 @@ export async function createAppContext(
     logger,
     dpopVerifier,
 
+    /**
+     * Returns the actor's signing keypair, using a TTL cache to avoid
+     * redundant DB lookups and P256 key imports on every write.
+     *
+     * @param did - DID of the actor
+     */
     async getActorSigningKey(did: string) {
       const now = Date.now()
       const cached = signingKeyCache.get(did)

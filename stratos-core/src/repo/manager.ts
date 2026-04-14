@@ -9,11 +9,13 @@ import { BlockMap } from './reader.js'
 import { buildCommit, type UnsignedCommitData } from '../mst/index.js'
 import { Logger } from '../types.js'
 
+/** Result of a repository write operation. */
 export interface ApplyWritesResult {
   commitCid: Cid
   rev: string
 }
 
+/** A write operation for the repository. */
 export interface RepoWrite {
   action: 'create' | 'update' | 'delete'
   collection: string
@@ -22,10 +24,12 @@ export interface RepoWrite {
   cid?: Cid
 }
 
+/** Service for signing repository commits. */
 export interface SigningService {
   signCommit: (did: string, unsignedBytes: Uint8Array) => Promise<Uint8Array>
 }
 
+/** Service for sequencing repository changes. */
 export interface SequencingService {
   sequenceChange: (
     did: string,
@@ -65,6 +69,14 @@ export class ActorRepoManager {
     private logger?: Logger,
   ) {}
 
+  /**
+   * Apply a batch of writes to an actor's repository.
+   *
+   * @param did - DID of the actor
+   * @param writes - Array of write operations
+   * @param transactor - Repo transactor providing block storage and root locking
+   * @param extraBlocks - Optional pre-encoded blocks to include in the commit
+   */
   async applyWrites(
     did: string,
     writes: RepoWrite[],
@@ -114,6 +126,14 @@ export class ActorRepoManager {
     return { commitCid, rev: unsigned.rev }
   }
 
+  /**
+   * Builds an unsigned commit from a batch of writes.
+   *
+   * @param did - DID of the actor
+   * @param writes - Array of write operations
+   * @param transactor - Repo transactor for MST block reads
+   * @param currentCommitCid - CID of the current commit, or null for a new repo
+   */
   private async buildUnsignedCommit(
     did: string,
     writes: RepoWrite[],
@@ -135,6 +155,12 @@ export class ActorRepoManager {
     })
   }
 
+  /**
+   * Creates a storage adapter that bridges the RepoTransactor to the MST builder's
+   * expected get/has/getMany interface.
+   *
+   * @param transactor - Repo transactor for block reads
+   */
   private createMstStorageAdapter(transactor: RepoTransactor) {
     return {
       get: async (cidStr: string) => {
@@ -172,6 +198,12 @@ export class ActorRepoManager {
     }
   }
 
+  /**
+   * Signs an unsigned commit and returns its CID and CBOR-encoded bytes.
+   *
+   * @param did - DID of the actor
+   * @param unsigned - Unsigned commit data from the MST builder
+   */
   private async signCommit(
     did: string,
     unsigned: UnsignedCommitData,
@@ -199,6 +231,15 @@ export class ActorRepoManager {
     return { commitCid, commitBytes }
   }
 
+  /**
+   * Collects all blocks (extra, new MST nodes, and the signed commit) into a
+   * single BlockMap for persistence.
+   *
+   * @param commitCid - CID of the signed commit
+   * @param commitBytes - CBOR-encoded signed commit
+   * @param unsigned - Unsigned commit data containing new MST blocks
+   * @param extraBlocks - Optional pre-encoded blocks (e.g., record content)
+   */
   private collectBlocks(
     commitCid: Cid,
     commitBytes: Uint8Array,
