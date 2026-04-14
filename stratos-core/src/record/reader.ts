@@ -222,8 +222,8 @@ export class StratosRecordReader {
       .where(and(...conditions))
       .limit(1)
 
+    if (res.length === 0) return null
     const record = res[0]
-    if (!record) return null
     return {
       uri: record.uri,
       cid: record.cid,
