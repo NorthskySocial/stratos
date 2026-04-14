@@ -7,6 +7,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: 'application/json' },
       },
     },
   },
@@ -16,6 +17,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: 'application/json' },
       },
     },
   },
@@ -25,6 +27,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: '*/*' },
       },
     },
   },
@@ -61,6 +64,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: 'application/json' },
       },
     },
   },
