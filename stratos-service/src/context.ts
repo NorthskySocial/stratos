@@ -130,6 +130,12 @@ export async function createAppContext(
     logger,
   )
 
+  const SIGNING_KEY_TTL_MS = 5 * 60 * 1000
+  const signingKeyCache = new Map<
+    string,
+    { key: crypto.Keypair; expiresAt: number }
+  >()
+
   const ctx: AppContext = {
     cfg,
     version: VERSION,
@@ -150,8 +156,19 @@ export async function createAppContext(
     dpopVerifier,
 
     async getActorSigningKey(did: string) {
-      const keypair = await actorStore.loadSigningKey(did)
-      return keypair ?? (await actorStore.createSigningKey(did))
+      const now = Date.now()
+      const cached = signingKeyCache.get(did)
+      if (cached && cached.expiresAt > now) {
+        return cached.key
+      }
+      const keypair =
+        (await actorStore.loadSigningKey(did)) ??
+        (await actorStore.createSigningKey(did))
+      signingKeyCache.set(did, {
+        key: keypair,
+        expiresAt: now + SIGNING_KEY_TTL_MS,
+      })
+      return keypair
     },
 
     async createAttestation(
