@@ -48,6 +48,21 @@ This would open the door for operators to optionally enforce strict inter-servic
 policy (e.g., reject imports where the source service is reachable but refuses to confirm the
 signature). Tracked as a note in the mst-verification requirements.
 
+## mstDiff cost profiling
+
+After the LRU block cache and root spine preload (PR #83), top-level MST nodes are cached for the
+diff/rebuild. For repos with deep trees (thousands of records across many collections), `buildCommit`
+may still walk deeper nodes that aren't preloaded. Profile `buildCommit` under load with warm caches
+to determine if deeper preloading or a smarter diff strategy is warranted.
+
+## Batch-aware MST optimization
+
+`applyWritesBatch` already calls `buildCommit()` once with all MST ops, but `ActorRepoManager` is
+designed for single-record writes. If batch writes become a hot path (e.g., bulk imports), a
+dedicated batch path that builds the MST once for N writes — rather than routing through the
+single-write manager N times — could reduce overhead. Only worth pursuing if batch write throughput
+becomes a measured bottleneck.
+
 ## ~~importRepo re-signing with service key~~
 
 **Done**: The `importRepo` handler now re-signs incoming commits with the user's per-enrollment
