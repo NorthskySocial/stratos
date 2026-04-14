@@ -167,7 +167,7 @@ export class ActorRepoManager {
         try {
           const bytes = await transactor.getBytes(parseCid(cidStr))
           if (!bytes) return null
-          return new Uint8Array(bytes.buffer) as Uint8Array<ArrayBuffer>
+          return bytes.slice() as Uint8Array<ArrayBuffer>
         } catch {
           return null
         }
@@ -190,7 +190,7 @@ export class ActorRepoManager {
           if (bytes) {
             found.set(
               cidStr,
-              new Uint8Array(bytes.buffer) as Uint8Array<ArrayBuffer>,
+              bytes.slice() as Uint8Array<ArrayBuffer>,
             )
           } else {
             missing.push(cidStr)
