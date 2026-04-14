@@ -113,7 +113,7 @@ export function createAuthVerifiers(
  * @param deps - Dependencies for the verifier
  * @returns Auth verifier function
  */
-function createStandardVerifier(deps: {
+type StandardVerifierDeps = {
   devMode: boolean
   idResolver: IdResolver
   cfg: StratosServiceConfig
@@ -121,7 +121,62 @@ function createStandardVerifier(deps: {
   allowListProvider: ExternalAllowListProvider | undefined
   dpopVerifier: DpopVerifier
   logger?: Logger
-}): AuthVerifiers['standard'] {
+}
+
+async function handleDevModeAuth(
+  authHeader: string,
+  deps: StandardVerifierDeps,
+): Promise<{ credentials: { type: string; did: string } }> {
+  const did = authHeader.slice(7).trim()
+  if (did.startsWith('did:')) {
+    await verifyEnrolled(did, {
+      idResolver: deps.idResolver,
+      enrollmentStore: deps.enrollmentStore,
+      config: deps.cfg.enrollment,
+      allowListProvider: deps.allowListProvider,
+      logger: deps.logger,
+    })
+    return { credentials: { type: 'user', did } }
+  }
+  deps.logger?.info('auth rejected: dev bearer token is not a DID')
+  throw new AuthRequiredError('Authorization failed')
+}
+
+async function verifyDpopAuth(
+  ctx: Parameters<AuthVerifiers['standard']>[0],
+  deps: StandardVerifierDeps,
+): Promise<{ credentials: { type: string; did: string } }> {
+  try {
+    const result = await deps.dpopVerifier.verify(
+      {
+        method: ctx.req.method || 'GET',
+        url: ctx.req.url || '/',
+        headers: ctx.req.headers as Record<string, string | string[] | undefined>,
+      },
+      { setHeader: (name, value) => ctx.res?.setHeader(name, value) },
+    )
+
+    await verifyEnrolled(result.did, {
+      idResolver: deps.idResolver,
+      enrollmentStore: deps.enrollmentStore,
+      config: deps.cfg.enrollment,
+      allowListProvider: deps.allowListProvider,
+      logger: deps.logger,
+    })
+
+    return { credentials: { type: 'user', did: result.did } }
+  } catch (err) {
+    if (err instanceof DpopVerificationError && err.code === 'use_dpop_nonce') {
+      const nonce = deps.dpopVerifier.nextNonce()
+      if (nonce) ctx.res?.setHeader('DPoP-Nonce', nonce)
+    }
+    handleDpopError(ctx, err, deps.logger)
+  }
+}
+
+function createStandardVerifier(
+  deps: StandardVerifierDeps,
+): AuthVerifiers['standard'] {
   return async (ctx) => {
     const authHeader = ctx.req?.headers?.authorization
     if (!authHeader) {
@@ -133,72 +188,18 @@ function createStandardVerifier(deps: {
     }
 
     if (deps.devMode && authHeader.startsWith('Bearer ')) {
-      const did = authHeader.slice(7).trim()
-      if (did.startsWith('did:')) {
-        await verifyEnrolled(did, {
-          idResolver: deps.idResolver,
-          enrollmentStore: deps.enrollmentStore,
-          config: deps.cfg.enrollment,
-          allowListProvider: deps.allowListProvider,
-          logger: deps.logger,
-        })
-        return { credentials: { type: 'user', did } }
-      }
-      deps.logger?.info('auth rejected: dev bearer token is not a DID')
-      throw new AuthRequiredError('Authorization failed')
+      return handleDevModeAuth(authHeader, deps)
     }
 
     if (!authHeader.startsWith('DPoP ') || !deps.dpopVerifier) {
       deps.logger?.info(
-        {
-          path: ctx.req?.url,
-          scheme: authHeader.split(' ')[0],
-        },
+        { path: ctx.req?.url, scheme: authHeader.split(' ')[0] },
         'auth rejected: expected DPoP scheme',
       )
       throw new AuthRequiredError('DPoP authorization required')
     }
 
-    try {
-      const result = await deps.dpopVerifier.verify(
-        {
-          method: ctx.req.method || 'GET',
-          url: ctx.req.url || '/',
-          headers: ctx.req.headers as Record<
-            string,
-            string | string[] | undefined
-          >,
-        },
-        {
-          setHeader: (name, value) => ctx.res?.setHeader(name, value),
-        },
-      )
-
-      await verifyEnrolled(result.did, {
-        idResolver: deps.idResolver,
-        enrollmentStore: deps.enrollmentStore,
-        config: deps.cfg.enrollment,
-        allowListProvider: deps.allowListProvider,
-        logger: deps.logger,
-      })
-
-      return {
-        credentials: { type: 'user', did: result.did },
-      }
-    } catch (err) {
-      // On use_dpop_nonce errors, include a fresh nonce in the response
-      // so the client can retry with it
-      if (
-        err instanceof DpopVerificationError &&
-        err.code === 'use_dpop_nonce'
-      ) {
-        const nonce = deps.dpopVerifier.nextNonce()
-        if (nonce) {
-          ctx.res?.setHeader('DPoP-Nonce', nonce)
-        }
-      }
-      handleDpopError(ctx, err, deps.logger)
-    }
+    return verifyDpopAuth(ctx, deps)
   }
 }
 

@@ -73,7 +73,6 @@ async function loadSigningKey(
  * @param opts - Configuration options for the application context.
  * @returns Initialized application context.
  */
-// eslint-disable-next-line max-lines-per-function
 export async function createAppContext(
   opts: AppContextOptions,
 ): Promise<AppContext> {
