@@ -13,6 +13,15 @@ import {
 // so MST operations go through the LRU block cache. Passing a raw db handle
 // creates a fresh empty cache per write, causing unnecessary queries and
 // connection pool exhaustion under load.
+
+/**
+ * Creates an ActorRepoManager with standard signing and sequencing services.
+ *
+ * @param logger - Logger instance
+ * @param store - Actor transactor store
+ * @param actorSigningKey - Private key for signing commits
+ * @param sequenceTrace - Sequence trace for tracking commit sequencing
+ */
 export function createRepoManager(
   logger: Logger | undefined,
   store: ActorTransactor,
