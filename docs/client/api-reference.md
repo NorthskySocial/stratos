@@ -88,6 +88,48 @@ GET /xrpc/com.atproto.repo.listRecords?repo=<did>&collection=<collection>&limit=
 Authorization: Bearer <access_token>
 ```
 
+### Upload Blob
+
+Upload a blob to the repository.
+
+```
+POST /xrpc/com.atproto.repo.uploadBlob
+Authorization: Bearer <access_token>
+Content-Type: * /* (binary)
+
+<blob-data>
+```
+
+Returns: `{ blob: BlobRef }`
+
+Stratos-specific alias (preferred for boundary filtering on some implementations):
+
+```
+POST /xrpc/zone.stratos.repo.uploadBlob
+Authorization: Bearer <access_token>
+Content-Type: * /* (binary)
+
+<blob-data>
+```
+
+### Get Blob
+
+Fetch a blob from an actor's repository. Requires the viewer to have access to at least one record referencing this blob.
+
+```
+GET /xrpc/com.atproto.sync.getBlob?did=<did>&cid=<cid>
+Authorization: Bearer <access_token>
+```
+
+Returns: `* /*` (binary content)
+
+Stratos-specific alias (guarantees boundary-aware access control):
+
+```
+GET /xrpc/zone.stratos.sync.getBlob?did=<did>&cid=<cid>
+Authorization: Bearer <access_token>
+```
+
 ### Delete Record
 
 ```

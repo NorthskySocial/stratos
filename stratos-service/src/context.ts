@@ -17,7 +17,6 @@ import {
   initHydration,
   initMst,
   initRepo,
-  initSync,
   MigratingBoundaryResolver,
   EnrollmentBoundaryResolver,
 } from './features'

@@ -5,7 +5,6 @@ import {
   type HydrationResult,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
-import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'
 
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'

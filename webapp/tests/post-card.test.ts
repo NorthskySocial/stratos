@@ -138,7 +138,7 @@ describe('PostCard.svelte', () => {
 
     render(PostCard, {
       post: postWithImage,
-      stratosAgent: mockAgent as any,
+      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
       onreply: () => {},
     })
 

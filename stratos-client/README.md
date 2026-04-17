@@ -17,12 +17,13 @@ into your app.
 3. [DPoP-aware transport](#3-dpop-aware-transport)
 4. [Read path integration](#4-read-path-integration)
 5. [Write path integration](#5-write-path-integration)
-6. [Record verification](#6-record-verification)
-7. [OAuth scope declarations](#7-oauth-scope-declarations)
-8. [CORS and header requirements](#8-cors-and-header-requirements)
-9. [Known pitfalls](#9-known-pitfalls)
-10. [social-app mapping](#10-social-app-mapping)
-11. [Minimum viable adoption path](#11-minimum-viable-adoption-path)
+6. [Blob support](#6-blob-support)
+7. [Record verification](#7-record-verification)
+8. [OAuth scope declarations](#8-oauth-scope-declarations)
+9. [CORS and header requirements](#9-cors-and-header-requirements)
+10. [Known pitfalls](#10-known-pitfalls)
+11. [social-app mapping](#11-social-app-mapping)
+12. [Minimum viable adoption path](#12-minimum-viable-adoption-path)
 
 ---
 
@@ -401,9 +402,43 @@ await rpc.post('com.atproto.repo.createRecord', {
 Batch operations (`com.atproto.repo.applyWrites`) work identically — route through the service
 client.
 
+## 6. Blob Support
+
+Stratos supports boundary-aware blob management. Blobs uploaded to a Stratos service are only accessible if the viewer has access to at least one record that references that blob.
+
+### Uploading Blobs
+
+You can upload blobs using the standard `com.atproto.repo.uploadBlob` endpoint or the Stratos-specific `zone.stratos.repo.uploadBlob` alias. Both will store the blob in the user's Stratos repository.
+
+```typescript
+const response = await rpc.call('com.atproto.repo.uploadBlob', {
+  data: imageData, // Uint8Array or Blob
+})
+
+const { blob } = response.data
+// blob is a BlobRef that can be used in records
+```
+
+### Retrieving Blobs
+
+To retrieve a blob, use `com.atproto.sync.getBlob` or `zone.stratos.sync.getBlob`. The service will verify that the authenticated viewer has boundary access to at least one record referencing the requested CID.
+
+```typescript
+const response = await rpc.call('com.atproto.sync.getBlob', {
+  params: {
+    did: actorDid,
+    cid: blobCid,
+  },
+})
+
+// response.data is a Uint8Array containing the blob content
+```
+
+The Stratos-specific alias `zone.stratos.sync.getBlob` is preferred when you want to explicitly signal that you are requesting a private blob from a Stratos service.
+
 ---
 
-## 6. Record Verification
+## 7. Record Verification
 
 Stratos supports `com.atproto.sync.getRecord` which returns a CAR file containing an inclusion proof
 for a single record. Stratos maintains independent repositories per user. Record commits are signed
@@ -480,7 +515,7 @@ Verification levels:
 
 ---
 
-## 7. OAuth Scope Declarations
+## 8. OAuth Scope Declarations
 
 Stratos records use AT Protocol auth scopes. Clients should declare the scopes they need in their
 OAuth metadata and scope selector UI.
@@ -524,7 +559,7 @@ Add scopes to your `oauth-client-metadata.json`:
 
 ---
 
-## 8. CORS and Header Requirements
+## 9. CORS and Header Requirements
 
 Browser clients making cross-origin requests to a Stratos service depend on correct CORS
 configuration. This is especially critical because the Stratos service is a different origin from
@@ -659,11 +694,12 @@ from the URL it receives.
 ### Blob operations
 
 `com.atproto.sync.getBlob` is implemented by Stratos and follows boundary-based access control.
-Blob listing via `com.atproto.sync.listBlobs` is available.
+Blob listing via `com.atproto.sync.listBlobs` is available. For more details, see the
+[Blob support](#6-blob-support) section.
 
 ---
 
-## 10. social-app Mapping
+## 11. social-app Mapping
 
 For a React Native/Expo app like Bluesky's social-app:
 
@@ -723,7 +759,7 @@ const client = enrollment
 
 ---
 
-## 11. Minimum Viable Adoption Path
+## 12. Minimum Viable Adoption Path
 
 For apps that want to add basic Stratos support incrementally:
 

@@ -58,6 +58,7 @@ Stratos supports both SQLite and PostgreSQL.
 - `com.atproto.repo.listRecords`: List records in a collection.
 - `com.atproto.repo.deleteRecord`: Delete a record.
 - `com.atproto.repo.uploadBlob`: Upload a blob.
+- `com.atproto.sync.getBlob`: Fetch a blob from a repository.
 - `com.atproto.sync.getRecord`: Get a record by CID.
 
 ### Stratos-Specific Methods
@@ -68,7 +69,7 @@ Stratos supports both SQLite and PostgreSQL.
 - `zone.stratos.repo.importRepo`: Import a repository from a CAR file.
 - `zone.stratos.sync.subscribeRecords`: Actor-scoped WebSocket stream for record updates.
 - `zone.stratos.sync.getBlob`: Retrieve a blob by CID with boundary filtering.
-- `zone.stratos.sync.uploadBlob`: Upload a blob with boundary filtering.
+- `zone.stratos.repo.uploadBlob`: Upload a blob with boundary filtering.
 
 ## Development
 

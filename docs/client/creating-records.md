@@ -117,46 +117,67 @@ async function createRichPost(
 
 ## Post with Images
 
+Creating a post with images involves two steps: uploading the blob and then referencing it in the record.
+
+### 1. Upload the Blob
+
+You can use either the standard `com.atproto.repo.uploadBlob` or the Stratos-specific `zone.stratos.repo.uploadBlob`.
+
 ```typescript
-async function createPostWithImages(
+async function uploadImage(
+  stratosEndpoint: string,
+  accessToken: string,
+  imageData: Uint8Array,
+  mimeType: string
+) {
+  const response = await fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': mimeType,
+    },
+    body: imageData,
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to upload image')
+  }
+
+  const { blob } = await response.json()
+  return blob // This is a BlobRef
+}
+```
+
+### 2. Create the Post with Embed
+
+```typescript
+async function createPostWithImage(
   stratosEndpoint: string,
   accessToken: string,
   userDid: string,
   text: string,
-  images: Array<{ blob: Blob; alt: string }>,
   domains: string[],
+  blob: any, // BlobRef from uploadImage
+  altText: string = ''
 ) {
-  const uploadedImages = await Promise.all(
-    images.map(async ({ blob, alt }) => {
-      const uploadRes = await fetch(
-        `${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': blob.type,
-          },
-          body: blob,
-        },
-      )
-      const { blob: blobRef } = await uploadRes.json()
-      return { image: blobRef, alt }
-    }),
-  )
-
   const record: StratosPost = {
     $type: 'zone.stratos.feed.post',
     text,
-    embed: {
-      $type: 'zone.stratos.embed.images',
-      images: uploadedImages,
-    },
     boundary: {
       $type: 'zone.stratos.boundary.defs#Domains',
       values: domains.map((domain) => ({
         $type: 'zone.stratos.boundary.defs#Domain',
         value: domain,
       })),
+    },
+    embed: {
+      $type: 'app.bsky.embed.images',
+      images: [
+        {
+          image: blob,
+          alt: altText,
+        },
+      ],
     },
     createdAt: new Date().toISOString(),
   }

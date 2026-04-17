@@ -6,7 +6,7 @@ import {
   InvalidRequestError,
   type StreamAuthVerifier,
 } from '@atproto/xrpc-server'
-import { verifyServiceAuth, ServiceAuthResult } from './verifier.js'
+import { verifyServiceAuth } from './verifier.js'
 import { DpopVerificationError, DpopVerifier } from './index.js'
 import { EnrollmentDeniedError, type Logger, } from '@northskysocial/stratos-core'
 import { StratosServiceConfig } from '../../config.js'

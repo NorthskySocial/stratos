@@ -129,7 +129,7 @@ describe('blob-handlers', () => {
 
       expect(result).toEqual({
         encoding: 'image/png',
-        body: mockStream,
+        body: new Uint8Array(Buffer.from('hello world')),
       })
     })
 

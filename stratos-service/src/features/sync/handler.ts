@@ -14,7 +14,6 @@ export function registerSyncHandlers(
   ctx: AppContext,
 ): void {
   const xrpc = server as unknown as XrpcServerInternal
-  const { syncService } = ctx
 
   xrpc.method('zone.stratos.sync.getBlob', {
     type: 'query',

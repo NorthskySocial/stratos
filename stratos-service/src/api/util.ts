@@ -89,6 +89,12 @@ function handleRequestError(
     throw new InvalidRequestError(err.message, err.code)
   }
 
+  // Handle XRPC errors by name if instanceof fails (common in monorepos/test envs)
+  const errName = err?.constructor?.name
+  if (errName === 'InvalidRequestError' || errName === 'AuthRequiredError') {
+    throw err
+  }
+
   // Log unexpected errors
   ctx.logger?.error(
     {

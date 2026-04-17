@@ -22,7 +22,6 @@ import { registerSubscribeRecords } from './subscription'
 import { createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
 import {
-  registerEnrollmentHandlers,
   signAndPersistCommit,
   StratosBlockStoreReader,
 } from './features'

@@ -117,7 +117,7 @@
           if (response?.data) {
             resp = {data: response.data as Uint8Array}
           }
-        } catch (e) {
+        } catch {
           // Fallback to standard getBlob
           resp = await agent.api.com.atproto.sync.getBlob({
             did: post.author,

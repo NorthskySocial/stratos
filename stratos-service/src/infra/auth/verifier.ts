@@ -5,7 +5,7 @@ import * as crypto from '@atproto/crypto'
 /**
  * Service auth context (for AppView subscriptions)
  */
-export interface ServiceAuthResult {
+interface ServiceAuthResult {
   iss: string // Issuing service DID
   aud: string // Our DID
   lxm?: string // Lexicon method
