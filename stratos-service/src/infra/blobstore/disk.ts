@@ -122,6 +122,21 @@ export class DiskBlobStore implements BlobStore {
   }
 
   /**
+   * Get temporary data as a stream from disk storage
+   *
+   * @param key - Key for temporary storage
+   * @returns Stream of data from the temporary file
+   */
+  async getTempStream(key: string): Promise<AsyncIterable<Uint8Array>> {
+    const tmpPath = this.getTmpPath(key)
+    const exists = await fileExists(tmpPath)
+    if (!exists) {
+      throw new BlobNotFoundError()
+    }
+    return readableToAsyncIterable(fsSync.createReadStream(tmpPath))
+  }
+
+  /**
    * Move temporary data to permanent storage
    *
    * @param key - Key for temporary storage

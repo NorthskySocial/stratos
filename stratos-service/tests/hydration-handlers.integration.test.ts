@@ -21,7 +21,10 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db'
-import { registerHydrationHandlers } from '../src/features'
+import {
+  initHydration,
+  registerHydrationHandlers,
+} from '../src/features'
 import { createMockBlobStore, createTestConfig } from './utils'
 
 describe('Hydration Handlers', () => {
@@ -36,9 +39,11 @@ describe('Hydration Handlers', () => {
   let url: string
 
   const testDid = 'did:plc:shinji-ikari'
+  const otherDid = 'did:plc:asuka-langley'
   const serviceDid = 'did:web:nerv.tokyo.jp'
   const collection = 'zone.stratos.feed.post'
-  const boundary = 'did:web:nerv.tokyo.jp/engineering'
+  const engineeringBoundary = 'did:web:nerv.tokyo.jp/engineering'
+  const pilotBoundary = 'did:web:nerv.tokyo.jp/pilot'
 
   beforeEach(async () => {
     dataDir = join(tmpdir(), `stratos-test-${randomBytes(8).toString('hex')}`)
@@ -55,6 +60,11 @@ describe('Hydration Handlers', () => {
       cborToRecord: (content) => decode(content) as Record<string, unknown>,
     })
 
+    const hydrationCtx = initHydration(actorStore, enrollmentStore, {
+      getBlobMetadata: vi.fn(),
+      putBlobMetadata: vi.fn(),
+    } as any)
+
     ctx = {
       cfg: {
         ...cfg,
@@ -69,11 +79,14 @@ describe('Hydration Handlers', () => {
       actorStore,
       enrollmentStore,
       serviceDid,
+      hydrationService: hydrationCtx.hydrationService,
+      syncService: hydrationCtx.syncService,
       boundaryResolver: {
         getBoundaries: vi.fn().mockImplementation(async (did: string) => {
           console.log(`[DEBUG_LOG] Resolving boundaries for: ${did}`)
-          if (did === testDid) return [boundary]
-          if (did === 'did:plc:authorized') return [boundary]
+          if (did === testDid) return [engineeringBoundary, pilotBoundary]
+          if (did === otherDid) return [pilotBoundary]
+          if (did === 'did:plc:authorized') return [engineeringBoundary]
           return []
         }),
       },
@@ -125,6 +138,7 @@ describe('Hydration Handlers', () => {
       if (auth?.startsWith('Bearer did:')) {
         const did = auth.slice(7)
         console.log(`[DEBUG_LOG] Setting req.auth for DID: ${did}`)
+        // @ts-ignore
         req['auth'] = { credentials: { did, type: 'dpop' } }
       }
       next()
@@ -140,21 +154,38 @@ describe('Hydration Handlers', () => {
     // Setup actor and a record
     await actorStore.create(testDid)
     await actorStore.transact(testDid, async (store) => {
-      const record = {
+      const record1 = {
         $type: collection,
-        text: 'Hydrate me',
+        text: 'Unit-01: Shinji Ikari',
         createdAt: new Date().toISOString(),
         boundary: {
           $type: 'zone.stratos.boundary.defs#Domains',
-          values: [{ value: boundary }],
+          values: [{ value: engineeringBoundary }],
         },
       }
-      const cid = await computeCid(record)
+      const cid1 = await computeCid(record1)
       await store.record.putRecord({
         uri: `at://${testDid}/${collection}/post1`,
-        cid,
-        value: record,
-        content: encodeRecord(record),
+        cid: cid1,
+        value: record1,
+        content: encodeRecord(record1),
+      })
+
+      const record2 = {
+        $type: collection,
+        text: 'Unit-00: Rei Ayanami',
+        createdAt: new Date().toISOString(),
+        boundary: {
+          $type: 'zone.stratos.boundary.defs#Domains',
+          values: [{ value: pilotBoundary }],
+        },
+      }
+      const cid2 = await computeCid(record2)
+      await store.record.putRecord({
+        uri: `at://${testDid}/${collection}/post2`,
+        cid: cid2,
+        value: record2,
+        content: encodeRecord(record2),
       })
     })
   })
@@ -177,13 +208,27 @@ describe('Hydration Handlers', () => {
 
       expect(res.status).toBe(200)
       expect(res.data.uri).toBe(`at://${testDid}/${collection}/post1`)
-      expect(res.data.value).toMatchObject({ text: 'Hydrate me' })
+      expect(res.data.value).toMatchObject({ text: 'Unit-01: Shinji Ikari' })
     })
 
-    it('should throw RecordBlocked for unauthorized viewer', async () => {
+    it('should allow a viewer with a different matching boundary', async () => {
+      const res = await axios.get(
+        `${url}/xrpc/zone.stratos.repo.hydrateRecord`,
+        {
+          params: { uri: `at://${testDid}/${collection}/post2` },
+          headers: { Authorization: `Bearer ${otherDid}` },
+        },
+      )
+
+      expect(res.status).toBe(200)
+      expect(res.data.uri).toBe(`at://${testDid}/${collection}/post2`)
+      expect(res.data.value).toMatchObject({ text: 'Unit-00: Rei Ayanami' })
+    })
+
+    it('should throw RecordBlocked for unauthorized viewer (no matching boundaries)', async () => {
       const promise = axios.get(`${url}/xrpc/zone.stratos.repo.hydrateRecord`, {
         params: { uri: `at://${testDid}/${collection}/post1` },
-        headers: { Authorization: 'Bearer did:plc:unauthorized' },
+        headers: { Authorization: `Bearer ${otherDid}` },
       })
 
       await expect(promise).rejects.toMatchObject({

@@ -160,6 +160,7 @@ export interface ActorBlobReader {
   }): Promise<string[]>
   getBlobTakedownStatus(cid: Cid): Promise<StatusAttr | null>
   getRecordsForBlob(cid: Cid): Promise<string[]>
+  getBoundariesForBlob(blobCid: Cid): Promise<string[]>
   hasBlob(cid: Cid): Promise<boolean>
 }
 
@@ -173,6 +174,8 @@ export interface ActorBlobTransactor extends ActorBlobReader {
     height?: number | null
   }): Promise<void>
   associateBlobWithRecord(blobCid: Cid, recordUri: string): Promise<void>
+  associateBlobWithBoundary(blobCid: Cid, boundary: string): Promise<void>
+  removeBlobBoundaryAssociations(blobCid: Cid): Promise<void>
   processBlobs(
     recordUri: string,
     blobs: Array<{ cid: Cid; mimeType: string; tempKey?: string | null }>,

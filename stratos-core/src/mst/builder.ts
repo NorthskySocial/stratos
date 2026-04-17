@@ -1,5 +1,5 @@
 import { TID } from '@atproto/common-web'
-import { MstError } from '../shared/errors.js'
+import { MstError } from '../shared'
 import { type CidLink, decode as cborDecode } from '@atcute/cbor'
 import {
   type BlockMap,

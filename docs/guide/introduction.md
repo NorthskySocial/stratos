@@ -36,7 +36,17 @@ ecosystem.
 | `stratos-service` | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters      |
 | `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers                  |
 | `stratos-indexer` | Standalone indexer consuming PDS + Stratos streams into AppView PostgreSQL |
-| `webapp`          | Svelte demo client for enrollment and private posting                      |
+| `webapp`          | [Svelte demo client](/guide/webapp) for enrollment and private posting     |
+| `lexicons`        | JSON-based lexicon definitions                                             |
+
+## Architecture
+
+For a deeper dive into the technical details of Stratos, see the following documentation:
+
+- [**Hydration Architecture**](/architecture/hydration) — How Stratos uses the source field pattern to keep data private.
+- [**Indexer Architecture**](/indexer-architecture) — How the standalone indexer consumes PDS and Stratos sync streams.
+- [**Enrollment Signing**](/architecture/enrollment-signing) — How user keys and boundary attestations are managed.
+- [**Multi-Domain Enrollment**](/architecture/multi-domain-enrollment) — How users can enroll in multiple boundaries across different services.
 
 ## Next Steps
 

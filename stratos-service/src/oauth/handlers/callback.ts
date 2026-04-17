@@ -1,25 +1,21 @@
 import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
-import type { Logger } from '@northskysocial/stratos-core'
+import type { EnrollmentValidationResult, Logger } from '@northskysocial/stratos-core'
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
 import {
   migrateEnrollmentRkey,
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
-import { validateEnrollment } from '../../features/enrollment/internal/validation.js'
 
 export const handleCallback = (config: OAuthRoutesConfig) => {
   const {
     oauthClient,
-    enrollmentConfig,
     enrollmentStore,
-    idResolver,
     serviceEndpoint,
     serviceDid,
     defaultBoundaries = [],
     autoEnrollDomains,
-    allowListProvider,
     logger,
     devMode = false,
     profileRecordWriter,
@@ -45,12 +41,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       const did = session.sub
 
       // Validate enrollment eligibility
-      const enrollmentResult = await validateEnrollment(
-        enrollmentConfig,
-        did,
-        idResolver,
-        allowListProvider,
-      )
+      const enrollmentResult: EnrollmentValidationResult =
+        await config.enrollmentValidator.validate(did)
 
       if (!enrollmentResult.allowed) {
         return denyEnrollment(res, did, enrollmentResult.reason, oauthClient)
@@ -68,6 +60,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           serviceDid,
           profileRecordWriter,
           createAttestation,
+          autoEnrollDomains,
+          defaultBoundaries,
           logger,
         })
       } else {
@@ -132,6 +126,8 @@ async function handleExistingEnrollment(deps: {
   serviceDid: string
   profileRecordWriter: OAuthRoutesConfig['profileRecordWriter']
   createAttestation: OAuthRoutesConfig['createAttestation']
+  autoEnrollDomains: string[] | undefined
+  defaultBoundaries: string[]
   logger: Logger | undefined
 }) {
   const {
@@ -159,40 +155,42 @@ async function handleExistingEnrollment(deps: {
   // Ensure PDS record exists (in case user deleted it but stayed enrolled in Stratos)
   const enrollment = await enrollmentStore.getEnrollment(did)
   if (enrollment && enrollment.active) {
-    const boundaries = await enrollmentStore.getBoundaries(did)
+    const currentBoundaries = await enrollmentStore.getBoundaries(did)
+    const newBoundaries = selectEnrollBoundaries(
+      deps.autoEnrollDomains,
+      deps.defaultBoundaries,
+    )
+
+    const boundariesChanged =
+      JSON.stringify(currentBoundaries.sort()) !==
+      JSON.stringify(newBoundaries.sort())
+
+    if (boundariesChanged) {
+      await enrollmentStore.setBoundaries(did, newBoundaries)
+      logger?.info({ did, newBoundaries }, 'updated enrollment boundaries')
+    }
+
+    const boundaries = boundariesChanged ? newBoundaries : currentBoundaries
     const attestation = await createAttestation(
       did,
       boundaries,
       enrollment.signingKeyDid,
     )
 
-    try {
-      await profileRecordWriter.putEnrollmentRecord(
-        did,
-        enrollment.enrollmentRkey!,
-        {
-          service: serviceEndpoint,
-          boundaries: boundaries.map((value: string) => ({ value })),
-          signingKey: enrollment.signingKeyDid,
-          attestation: {
-            sig: attestation.sig,
-            signingKey: attestation.signingKey,
-          },
-          createdAt: new Date().toISOString(),
+    await profileRecordWriter.putEnrollmentRecord(
+      did,
+      enrollment.enrollmentRkey!,
+      {
+        service: serviceEndpoint,
+        boundaries: boundaries.map((value: string) => ({ value })),
+        signingKey: enrollment.signingKeyDid,
+        attestation: {
+          sig: attestation.sig,
+          signingKey: attestation.signingKey,
         },
-      )
-    } catch (profileErr) {
-      logger?.warn(
-        {
-          err:
-            profileErr instanceof Error
-              ? profileErr.message
-              : String(profileErr),
-          did,
-        },
-        'failed to restore profile record',
-      )
-    }
+        createdAt: new Date().toISOString(),
+      },
+    )
   }
 }
 
@@ -220,7 +218,6 @@ async function handleNewEnrollment(deps: {
     createAttestation,
     enrollBoundaries,
     pdsEndpoint,
-    logger,
   } = deps
 
   // Initialize actor store and repo with an empty signed commit
@@ -237,27 +234,16 @@ async function handleNewEnrollment(deps: {
   // Write profile record to user's PDS for endpoint discovery
   // Uses putRecord with service DID as rkey for deterministic addressing
   const enrollmentRkey = serviceDIDToRkey(serviceDid)
-  try {
-    await profileRecordWriter.putEnrollmentRecord(did, enrollmentRkey, {
-      service: serviceEndpoint,
-      boundaries: enrollBoundaries.map((value: string) => ({ value })),
-      signingKey: userSigningKeyDid,
-      attestation: {
-        sig: attestation.sig,
-        signingKey: attestation.signingKey,
-      },
-      createdAt: new Date().toISOString(),
-    })
-  } catch (profileErr) {
-    logger?.warn(
-      {
-        err:
-          profileErr instanceof Error ? profileErr.message : String(profileErr),
-        did,
-      },
-      'failed to write profile record',
-    )
-  }
+  await profileRecordWriter.putEnrollmentRecord(did, enrollmentRkey, {
+    service: serviceEndpoint,
+    boundaries: enrollBoundaries.map((value: string) => ({ value })),
+    signingKey: userSigningKeyDid,
+    attestation: {
+      sig: attestation.sig,
+      signingKey: attestation.signingKey,
+    },
+    createdAt: new Date().toISOString(),
+  })
 
   // Create enrollment record
   await enrollmentStore.enroll({

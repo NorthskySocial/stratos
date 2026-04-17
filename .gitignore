@@ -47,3 +47,5 @@ docs/*-prompt.md
 
 # CDK
 docs/.vitepress/cache
+/webapp/public/client-metadata.json
+/webapp/playwright-report

@@ -11,7 +11,7 @@ import type {
   ListEnrollmentsOptions,
   StoredEnrollment,
 } from '@northskysocial/stratos-core'
-import { enrollment, enrollmentBoundary, ServiceDb } from '../../../db/index.js'
+import { enrollment, enrollmentBoundary, ServiceDb } from '../../../db'
 
 /**
  * SQLite implementation of EnrollmentStoreReader

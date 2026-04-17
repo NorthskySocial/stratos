@@ -148,7 +148,7 @@ async function createPostWithImages(
     $type: 'zone.stratos.feed.post',
     text,
     embed: {
-      $type: 'app.bsky.embed.images',
+      $type: 'zone.stratos.embed.images',
       images: uploadedImages,
     },
     boundary: {

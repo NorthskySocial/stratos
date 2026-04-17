@@ -7,7 +7,7 @@ import {
   StratosDbOrTx,
   stratosRecord,
   stratosRepoBlock,
-} from '../db/index.js'
+} from '../db'
 import { Logger } from '../types.js'
 import { getStratosBacklinks, StratosRecordReader } from './reader.js'
 

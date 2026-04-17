@@ -442,4 +442,90 @@ describe('stratos-validation', () => {
       ).toEqual([])
     })
   })
+
+  describe('extractBlobs', () => {
+    it('should extract blobs from various parts of a record', () => {
+      const record = {
+        text: 'hello',
+        image: {
+          $type: 'blob',
+          ref: {
+            $link:
+              'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+          },
+          mimeType: 'image/jpeg',
+          size: 12345,
+        },
+        nested: {
+          another: {
+            $type: 'blob',
+            ref: {
+              $link:
+                'bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzvev6wt667vyrp7k4p72e',
+            },
+            mimeType: 'application/octet-stream',
+            size: 678,
+          },
+        },
+        array: [
+          {
+            $type: 'blob',
+            ref: {
+              $link:
+                'bafybeig6xv5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+            },
+            mimeType: 'image/png',
+            size: 999,
+          },
+          'just a string',
+          {
+            nestedInArray: {
+              $type: 'blob',
+              ref: {
+                $link:
+                  'bafybeicvpx5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+              },
+              mimeType: 'image/webp',
+              size: 444,
+            },
+          },
+        ],
+      }
+
+      const blobs = StratosValidator.extractBlobs(record)
+      expect(blobs).toHaveLength(4)
+      expect(blobs).toContain(
+        'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+      )
+      expect(blobs).toContain(
+        'bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzvev6wt667vyrp7k4p72e',
+      )
+      expect(blobs).toContain(
+        'bafybeig6xv5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+      )
+      expect(blobs).toContain(
+        'bafybeicvpx5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+      )
+    })
+
+    it('should return empty array if no blobs are found', () => {
+      const record = {
+        text: 'hello',
+        notABlob: {
+          $type: 'not-blob',
+          ref: {
+            $link:
+              'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+          },
+        },
+      }
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should handle null and undefined', () => {
+      expect(StratosValidator.extractBlobs(null)).toEqual([])
+      expect(StratosValidator.extractBlobs(undefined)).toEqual([])
+      expect(StratosValidator.extractBlobs({ foo: null })).toEqual([])
+    })
+  })
 })

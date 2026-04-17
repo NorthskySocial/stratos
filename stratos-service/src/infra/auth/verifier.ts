@@ -1,113 +1,15 @@
-import {
-  InvalidRequestError,
-  type MethodAuthContext,
-  MethodAuthVerifier,
-} from '@atproto/xrpc-server'
-import {
-  type DidDocument,
-  getDidKeyFromMultibase,
-  IdResolver,
-} from '@atproto/identity'
+import { InvalidRequestError, } from '@atproto/xrpc-server'
+import { type DidDocument, getDidKeyFromMultibase, IdResolver, } from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
-import {
-  EnrollmentConfig,
-  EnrollmentDeniedError,
-} from '@northskysocial/stratos-core'
-import { assertEnrollment } from '../../features/index.js'
-
-export type XrpcAuthVerifier = MethodAuthVerifier
-
-/**
- * Access token claims from OAuth
- */
-export interface AccessTokenClaims {
-  /** User DID **/
-  sub: string
-  /** Audience (Stratos service DID) **/
-  aud?: string
-  scope?: string
-  iat?: number
-  exp?: number
-}
-
-/**
- * Authenticated user context
- */
-export interface AuthContext {
-  did: string
-  isServiceAuth: boolean
-  serviceDid?: string
-}
 
 /**
  * Service auth context (for AppView subscriptions)
  */
-export interface ServiceAuthContext {
+export interface ServiceAuthResult {
   iss: string // Issuing service DID
   aud: string // Our DID
   lxm?: string // Lexicon method
   exp: number
-}
-
-/**
- * Auth configuration
- */
-export interface AuthConfig {
-  serviceDid: string
-  enrollmentConfig: EnrollmentConfig
-  adminPassword?: string
-}
-
-/**
- * Create an auth verifier for user requests
- */
-export function createAuthVerifier(
-  config: AuthConfig,
-  idResolver: IdResolver,
-  validateAccessToken: (token: string) => Promise<AccessTokenClaims>,
-): XrpcAuthVerifier {
-  return async (ctx: MethodAuthContext) => {
-    const authHeader = ctx.req.headers.authorization
-
-    if (!authHeader) {
-      throw new InvalidRequestError('Authorization header required')
-    }
-
-    const [bearer, token] = authHeader.split(' ')
-    if (bearer?.toLowerCase() !== 'bearer' || !token) {
-      throw new InvalidRequestError('Invalid authorization header format')
-    }
-
-    // Check if this is admin auth
-    if (config.adminPassword && token === config.adminPassword) {
-      return {
-        credentials: {
-          type: 'admin',
-          did: config.serviceDid,
-        },
-      }
-    }
-
-    // Validate OAuth access token
-    const claims = await validateAccessToken(token)
-
-    // Check enrollment
-    try {
-      await assertEnrollment(config.enrollmentConfig, claims.sub, idResolver)
-    } catch (err) {
-      if (err instanceof EnrollmentDeniedError) {
-        throw new InvalidRequestError(err.message, 'NotEnrolled')
-      }
-      throw err
-    }
-
-    return {
-      credentials: {
-        type: 'user',
-        did: claims.sub,
-      },
-    }
-  }
 }
 
 export interface JwtHeader {
@@ -326,7 +228,7 @@ export async function verifyServiceAuth(
   ourDid: string,
   expectedLxm: string | undefined,
   idResolver: IdResolver,
-): Promise<ServiceAuthContext> {
+): Promise<ServiceAuthResult> {
   const { parts, payload } = parseAuthToken(authHeader)
 
   validateServiceClaims(payload, ourDid, expectedLxm)
@@ -338,20 +240,5 @@ export async function verifyServiceAuth(
     aud: payload.aud,
     lxm: payload.lxm,
     exp: payload.exp,
-  }
-}
-
-/**
- * Create a simple auth verifier that allows any user (for testing)
- *
- * @returns Auth verifier that always returns a user context
- */
-export function createOpenAuthVerifier(): XrpcAuthVerifier {
-  return async () => {
-    return {
-      credentials: {
-        type: 'none',
-      },
-    }
   }
 }

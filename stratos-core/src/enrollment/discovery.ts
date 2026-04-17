@@ -27,13 +27,6 @@ export interface StratosEnrollment {
   rkey: string
 }
 
-interface ListRecordsResponse {
-  records: Array<{
-    uri: string
-    value: unknown
-  }>
-}
-
 interface GetRecordResponse {
   uri: string
   value: unknown
@@ -105,55 +98,6 @@ export const parseEnrollmentRecord = (
     createdAt: obj.createdAt,
     rkey,
   }
-}
-
-/**
- * Extracts the rkey from an AT URI: at://did/collection/rkey
- */
-const extractRkey = (uri: string): string => {
-  const parts = uri.split('/')
-  return parts[parts.length - 1]
-}
-
-/**
- * Discovers all Stratos enrollments by listing enrollment records
- * from the user's PDS via com.atproto.repo.listRecords.
- *
- * @param did - The DID of the user.
- * @param pdsUrlOrHandler - The PDS URL or fetch handler.
- * @returns A promise that resolves to an array of discovered enrollments.
- */
-export const discoverEnrollments = async (
-  did: string,
-  pdsUrlOrHandler: string | FetchHandler,
-): Promise<StratosEnrollment[]> => {
-  const handler =
-    typeof pdsUrlOrHandler === 'string'
-      ? simpleFetchHandler({ service: pdsUrlOrHandler })
-      : pdsUrlOrHandler
-
-  const rpc = new Client({ handler })
-
-  const res = (await rpc.get('com.atproto.repo.listRecords', {
-    params: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      repo: did as any,
-      collection: ENROLLMENT_COLLECTION,
-      limit: 100,
-    },
-  })) as XRPCResponse<ListRecordsResponse>
-
-  if (!res.ok) return []
-
-  const enrollments: StratosEnrollment[] = []
-  for (const record of res.data.records) {
-    const rkey = extractRkey(record.uri)
-    const enrollment = parseEnrollmentRecord(record.value, rkey)
-    if (enrollment) {
-      enrollments.push(enrollment)
-    }
-  }
-  return enrollments
 }
 
 /**

@@ -101,14 +101,86 @@ export function isLocalService(
  *
  * @param viewerDid - DID of the viewer (null for unauthenticated)
  * @param viewerDomains - Boundary domains the viewer has access to
+ * @param serviceUrl - Optional base URL of the Stratos service for blob hydration
  * @returns HydrationContext object
  */
 export function createHydrationContext(
   viewerDid: string | null,
   viewerDomains: string[],
+  serviceUrl?: string,
 ): HydrationContext {
   return {
     viewerDid: viewerDid ?? null,
     viewerDomains,
+    serviceUrl,
   }
+}
+
+/**
+ * Hydrate blobs in a record value if they are part of a 'zone.stratos.embed.images' embed.
+ *
+ * @param value - The record value to hydrate
+ * @param ownerDid - DID of the record owner
+ * @param serviceUrl - Base URL of the Stratos service
+ * @returns The value with hydrated blobs
+ */
+export function hydrateRecordBlobs(
+  value: Record<string, unknown>,
+  ownerDid: string,
+  serviceUrl: string,
+): Record<string, unknown> {
+  if ((value as unknown) === null || typeof value !== 'object') {
+    return value
+  }
+
+  // Check if this is a Stratos post with images embed
+  if (
+    value.$type === 'zone.stratos.feed.post' &&
+    value.embed &&
+    typeof value.embed === 'object' &&
+    (value.embed as Record<string, unknown>).$type ===
+      'zone.stratos.embed.images'
+  ) {
+    const embed = value.embed as Record<string, unknown>
+    if (Array.isArray(embed.images)) {
+      embed.images = embed.images.map((img: unknown) => {
+        if (img && typeof img === 'object') {
+          const imageObj = img as Record<string, unknown>
+          if (imageObj.image && typeof imageObj.image === 'object') {
+            const blob = imageObj.image as Record<string, unknown>
+            if (
+              blob.$type === 'blob' &&
+              blob.ref &&
+              typeof blob.ref === 'object'
+            ) {
+              const ref = blob.ref as Record<string, unknown>
+              const cid = ref.$link as string | undefined
+              if (cid) {
+                // Add the hydrated URL
+                // We utilize 'zone.stratos.sync.getBlob'
+                const url = new URL(
+                  `${serviceUrl}/xrpc/zone.stratos.sync.getBlob`,
+                )
+                url.searchParams.set('did', ownerDid)
+                url.searchParams.set('cid', cid)
+                const urlString = url.toString()
+                return {
+                  ...imageObj,
+                  image: {
+                    ...blob,
+                    url: urlString,
+                  },
+                  fullsize: urlString,
+                  thumb: urlString,
+                }
+              }
+            }
+          }
+        }
+        return img
+      })
+    }
+  }
+
+  return value
 }

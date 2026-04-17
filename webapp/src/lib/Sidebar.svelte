@@ -33,10 +33,12 @@
     onSetServiceUrl,
   }: Props = $props()
 
-  let inputUrl = $state(serviceUrl)
-
-  $effect(() => {
-    inputUrl = serviceUrl
+  let inputUrl = $derived.by(() => {
+    let value = $state(serviceUrl)
+    return {
+      get value() { return value },
+      set value(v) { value = v }
+    }
   })
 </script>
 
@@ -97,13 +99,13 @@
           <input
             type="text"
             placeholder="Stratos Service URL"
-            bind:value={inputUrl}
+            bind:value={inputUrl.value}
             class="url-input"
           />
           <button
             class="set-url-btn"
-            disabled={!inputUrl}
-            onclick={() => onSetServiceUrl?.(inputUrl)}
+            disabled={!inputUrl.value}
+            onclick={() => onSetServiceUrl?.(inputUrl.value)}
           >
             Set URL
           </button>

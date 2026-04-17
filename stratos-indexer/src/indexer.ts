@@ -416,10 +416,13 @@ export class Indexer {
     >['indexingService'],
     background: ReturnType<typeof createIndexingService>['background'],
   ): EnrollmentCallback {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+    const rawDb = (this.db as any).db as Kysely<StratosIndexerSchema>
+
     return {
       onEnrollmentDiscovered: (
         did: string,
-        _serviceUrl: string,
+        serviceUrl: string,
         boundaries: string[],
       ) => {
         if (this.enrolledDids.has(did)) return
@@ -428,8 +431,50 @@ export class Indexer {
           { did, boundaries },
           'enrollment discovered, starting actor sync',
         )
-        background.add(() => {
-          void indexingService.indexHandle(did, new Date().toISOString())
+        background.add(async () => {
+          const now = new Date().toISOString()
+          try {
+            // Persist enrollment to database
+            await rawDb
+              .insertInto('stratos_enrollment')
+              .values({
+                did,
+                serviceUrl,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .onConflict((oc) =>
+                oc.column('did').doUpdateSet({
+                  serviceUrl,
+                  updatedAt: now,
+                }),
+              )
+              .execute()
+
+            // Persist boundaries
+            if (boundaries.length > 0) {
+              await rawDb
+                .deleteFrom('stratos_boundary')
+                .where('did', '=', did)
+                .execute()
+              await rawDb
+                .insertInto('stratos_boundary')
+                .values(
+                  boundaries.map((boundary) => ({
+                    did,
+                    boundary,
+                  })),
+                )
+                .execute()
+            }
+          } catch (err) {
+            console.error(
+              { err, did },
+              'failed to persist enrollment discovery',
+            )
+          }
+
+          void indexingService.indexHandle(did, now)
         })
         this.syncManager?.addActor(did)
       },
@@ -437,6 +482,20 @@ export class Indexer {
         this.enrolledDids.delete(did)
         console.log({ did }, 'enrollment removed, stopping actor sync')
         this.syncManager?.removeActor(did)
+        background.add(async () => {
+          try {
+            await rawDb
+              .deleteFrom('stratos_enrollment')
+              .where('did', '=', did)
+              .execute()
+            await rawDb
+              .deleteFrom('stratos_boundary')
+              .where('did', '=', did)
+              .execute()
+          } catch (err) {
+            console.error({ err, did }, 'failed to remove enrollment from db')
+          }
+        })
       },
     }
   }

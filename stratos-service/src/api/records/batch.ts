@@ -11,16 +11,18 @@ import {
   parseCid,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
-import {
-  signAndPersistCommit,
-  StratosBlockStoreReader,
-} from '../../features/index.js'
+import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
 import {
   assertRootUnchanged,
   validateWritableRecord,
   withConcurrencyRetry,
 } from './validation.js'
-import { sequenceChange, type SequenceTrace } from './types.js'
+import {
+  type BatchWriteResult,
+  type CommitResult,
+  sequenceChange,
+  type SequenceTrace,
+} from './types.js'
 import { ensureActorStoreExists } from './util.js'
 
 export type BatchAction = 'create' | 'update' | 'delete'
@@ -30,17 +32,6 @@ export interface BatchWriteOp {
   collection: string
   rkey: string
   record?: unknown
-}
-
-export interface BatchWriteResult {
-  results: Array<{
-    uri?: string
-    cid?: string
-  }>
-  commit: {
-    cid: string
-    rev: string
-  }
 }
 
 export interface PrecomputedBatchOp {
@@ -137,8 +128,8 @@ async function prepareWriteResults(
   },
   precomputed: PrecomputedBatchOp[],
   rev: string,
-) {
-  const results: Array<{ uri?: string; cid?: string }> = []
+): Promise<BatchWriteResult[]> {
+  const results: BatchWriteResult[] = []
   for (const pre of precomputed) {
     if (pre.action === 'delete') {
       await store.record.deleteRecord(new AtUriSyntax(pre.uriStr))
@@ -173,13 +164,10 @@ async function buildCommitWithRetry(
   sequenceTrace: SequenceTrace,
   mstOps: MstWriteOp[],
   precomputed: PrecomputedBatchOp[],
-) {
+): Promise<CommitResult> {
   const actorSigningKey = await ctx.getActorSigningKey(callerDid)
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
-  let result: {
-    results: Array<{ uri?: string; cid?: string }>
-    commit: { cid: string; rev: string }
-  }
+  let result: CommitResult
   try {
     // Ensure actor store exists (inside mutex to prevent creation race)
     await ensureActorStoreExists(ctx.actorStore, callerDid)
@@ -274,7 +262,7 @@ async function buildCommitWithRetry(
 async function persistBatchBlocks(
   store: ActorTransactor,
   precomputed: PrecomputedBatchOp[],
-) {
+): Promise<void> {
   for (const pre of precomputed) {
     if (pre.action === 'delete') {
       const existing = await store.record.getRecord(
@@ -304,7 +292,7 @@ async function sequenceBatchChanges(
   commitCid: string,
   rev: string,
   sequenceTrace: SequenceTrace,
-) {
+): Promise<void> {
   // Sequence all changes inline (same connection)
   for (const pre of precomputed) {
     await sequenceChange(store, {
@@ -332,15 +320,19 @@ export async function applyWritesBatch(
   callerDid: string,
   ops: BatchWriteOp[],
   requestId?: string,
-): Promise<BatchWriteResult> {
+): Promise<CommitResult> {
   const sequenceTrace: SequenceTrace = {
     requestId,
     queuedAtMs: Date.now(),
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
-  const precomputed = await calculatePrecomputed(ctx, callerDid, ops)
-  const mstOps = buildMstOps(precomputed)
-  const result = buildCommitWithRetry(
+  const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(
+    ctx,
+    callerDid,
+    ops,
+  )
+  const mstOps: MstWriteOp[] = buildMstOps(precomputed)
+  const result: Promise<CommitResult> = buildCommitWithRetry(
     ctx,
     callerDid,
     sequenceTrace,

@@ -4,9 +4,80 @@
     <meta charset="UTF-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <title>Stratos Demo App</title>
+    <script>
+      window.global = window
+      window.process = { env: {} }
+      if (!window.Buffer) {
+        var bufferPrototype = {
+          writeUInt32BE: function (value, offset) {
+            this[offset] = (value >>> 24) & 0xff
+            this[offset + 1] = (value >>> 16) & 0xff
+            this[offset + 2] = (value >>> 8) & 0xff
+            this[offset + 3] = value & 0xff
+            return offset + 4
+          },
+          write: function (string, offset, length, encoding) {
+            offset = offset || 0
+            var bytes = new TextEncoder().encode(string)
+            length = length || bytes.length
+            for (var i = 0; i < length; i++) {
+              this[offset + i] = bytes[i]
+            }
+            return length
+          },
+        }
+        window.Buffer = {
+          allocUnsafe: function (size) {
+            var b = new Uint8Array(size)
+            for (var key in bufferPrototype) b[key] = bufferPrototype[key]
+            return b
+          },
+          from: function (arr) {
+            var b = new Uint8Array(arr)
+            for (var key in bufferPrototype) b[key] = bufferPrototype[key]
+            return b
+          },
+          isBuffer: function () {
+            return false
+          },
+          byteLength: function (string) {
+            if (typeof string !== 'string')
+              return string.byteLength || string.length || 0
+            return new TextEncoder().encode(string).length
+          },
+          concat: function (list, totalLength) {
+            if (totalLength === undefined) {
+              totalLength = 0
+              for (var i = 0; i < list.length; i++)
+                totalLength += list[i].length
+            }
+            var result = new Uint8Array(totalLength)
+            var offset = 0
+            for (var i = 0; i < list.length; i++) {
+              result.set(list[i], offset)
+              offset += list[i].length
+            }
+            return result
+          },
+          prototype: bufferPrototype,
+        }
+      }
+      // perf_hooks polyfill for node.js modules that might leak into the browser
+      if (!window.performance) {
+        window.performance = {
+          now: function () {
+            return Date.now()
+          },
+        }
+      } else if (!window.performance.now) {
+        window.performance.now = function () {
+          return Date.now()
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
-    <script src="/src/main.ts" type="module"></script>
+    <script src="./src/main.ts" type="module"></script>
   </body>
 </html>

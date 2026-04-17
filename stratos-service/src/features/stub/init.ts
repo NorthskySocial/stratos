@@ -4,6 +4,7 @@ import {
   type RepoContext,
   type SequenceEventEmitter,
 } from '../../context-types.js'
+import { type MstContext } from '../mst/init.js'
 import { type StratosServiceConfig } from '../../config.js'
 import { type ActorStore } from '../../actor-store-types.js'
 import { WriteRateLimiter } from '../../shared/rate-limiter.js'
@@ -16,6 +17,7 @@ import { Agent } from '@atproto/api'
  * Initialize the repo context
  * @param cfg - Stratos service configuration
  * @param actorStore - Actor store
+ * @param mstCtx - MST context
  * @param sequenceEvents - Sequence event emitter
  * @param oauthClient - OAuth client
  * @param serviceDidWithFragment - Service DID with fragment
@@ -25,6 +27,7 @@ import { Agent } from '@atproto/api'
 export function initRepo(
   cfg: StratosServiceConfig,
   actorStore: ActorStore,
+  mstCtx: MstContext,
   sequenceEvents: SequenceEventEmitter,
   oauthClient: NodeOAuthClient,
   serviceDidWithFragment: string,
@@ -52,6 +55,7 @@ export function initRepo(
   const stubQueue = new BackgroundStubQueue(stubWriter, logger)
 
   return {
+    ...mstCtx,
     actorStore,
     repoWriteLocks,
     writeRateLimiter,

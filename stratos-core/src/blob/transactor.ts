@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import type { Cid } from '@atproto/lex-data'
-import { parseCid } from '../atproto/index.js'
-import { stratosBlob, StratosDbOrTx, stratosRecordBlob } from '../db/index.js'
+import { parseCid } from '../atproto'
+import { stratosBlob, stratosBlobBoundary, StratosDbOrTx, stratosRecordBlob, } from '../db'
 import { BlobStore, Logger, PreparedBlobRef } from '../types.js'
 import { StratosBlobReader } from './reader.js'
 
@@ -135,10 +135,42 @@ export class StratosBlobTransactor extends StratosBlobReader {
         const cidObj = parseCid(cid)
         await this.blobstore.delete(cidObj)
         await this.db.delete(stratosBlob).where(eq(stratosBlob.cid, cid))
+        // Also clear boundary associations just in case
+        await this.removeBlobBoundaryAssociations(cidObj)
         deletedCids.push(cidObj)
       }
     }
 
     return deletedCids
+  }
+
+  /**
+   * Associates a blob with a boundary by inserting a boundary association into the database.
+   * @param blobCid - CID of the blob to associate.
+   * @param boundary - Boundary to associate with the blob.
+   * @returns A promise that resolves when the association is successfully created.
+   */
+  async associateBlobWithBoundary(
+    blobCid: Cid,
+    boundary: string,
+  ): Promise<void> {
+    await this.db
+      .insert(stratosBlobBoundary)
+      .values({
+        blobCid: blobCid.toString(),
+        boundary,
+      })
+      .onConflictDoNothing()
+  }
+
+  /**
+   * Removes all boundary associations for a given blob from the database.
+   * @param blobCid - CID of the blob to remove associations for.
+   * @returns A promise that resolves when all associations are successfully removed.
+   */
+  async removeBlobBoundaryAssociations(blobCid: Cid): Promise<void> {
+    await this.db
+      .delete(stratosBlobBoundary)
+      .where(eq(stratosBlobBoundary.blobCid, blobCid.toString()))
   }
 }

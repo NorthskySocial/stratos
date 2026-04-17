@@ -1,10 +1,9 @@
 import type { Cid } from '@atproto/lex-data'
-import { parseCid } from '../atproto/index.js'
+import { parseCid } from '../atproto'
 import { BlockMap, StratosSqlRepoTransactor } from './index.js'
-import { buildCommit, type UnsignedCommitData } from '../mst/index.js'
+import { buildCommit, type UnsignedCommitData } from '../mst'
 import { Logger } from '../types.js'
-import { StratosDbOrTx } from '../db/index.js'
-import { StratosPgDbOrTx } from '../db/pg.js'
+import { StratosDbOrTx, StratosPgDbOrTx } from '../db'
 
 /**
  * Result of a repository write operation
@@ -163,7 +162,7 @@ export class ActorRepoManager {
    */
   private createMstStorageAdapter(transactor: StratosSqlRepoTransactor) {
     return {
-      get: async (cidStr: string) => {
+      get: async (cidStr: string): Promise<Uint8Array<ArrayBuffer> | null> => {
         try {
           const bytes = await transactor.getBytes(parseCid(cidStr))
           if (!bytes) return null
@@ -179,7 +178,12 @@ export class ActorRepoManager {
           return false
         }
       },
-      getMany: async (cidStrs: string[]) => {
+      getMany: async (
+        cidStrs: string[],
+      ): Promise<{
+        found: Map<string, Uint8Array<ArrayBuffer>>
+        missing: string[]
+      }> => {
         const result = await transactor.getBlocks(
           cidStrs.map((c) => parseCid(c)),
         )

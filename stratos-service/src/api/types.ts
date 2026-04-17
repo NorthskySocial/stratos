@@ -4,6 +4,7 @@ export interface HandlerAuth {
   credentials: {
     type: string
     did?: string
+    iss?: string
   }
 }
 

@@ -13,9 +13,9 @@ import {
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
-import { createSubscribeRecordsHandler } from '../src/subscription'
-import { createMockBlobStore, createTestConfig } from './utils'
+} from '../src/db/index.js'
+import { createSubscribeRecordsHandler } from '../src/subscription/index.js'
+import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
 describe('Subscription Handlers', () => {
   let dataDir: string
@@ -71,7 +71,7 @@ describe('Subscription Handlers', () => {
   describe('createSubscribeRecordsHandler', () => {
     it('should stream actor records for owner', async () => {
       await actorStore.create(testDid)
-      const handler = createSubscribeRecordsHandler(ctx)
+      const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
 
       // Add an event
@@ -85,7 +85,7 @@ describe('Subscription Handlers', () => {
           },
         ],
       })
-      await actorStore.transact(testDid, async (store) => {
+      await actorStore.transact(testDid, async (store: any) => {
         await store.sequence.appendEvent({
           did: testDid,
           eventType: 'append',
@@ -113,7 +113,7 @@ describe('Subscription Handlers', () => {
 
     it('should stream actor records for service', async () => {
       await actorStore.create(testDid)
-      const handler = createSubscribeRecordsHandler(ctx)
+      const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
 
       const generator = handler(
@@ -131,7 +131,7 @@ describe('Subscription Handlers', () => {
     })
 
     it('should throw AuthRequiredError for unauthorized actor access', async () => {
-      const handler = createSubscribeRecordsHandler(ctx)
+      const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
 
       const generator = handler(
@@ -146,7 +146,7 @@ describe('Subscription Handlers', () => {
     })
 
     it('should stream service enrollment events', async () => {
-      const handler = createSubscribeRecordsHandler(ctx)
+      const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
 
       // Enroll someone
@@ -176,7 +176,7 @@ describe('Subscription Handlers', () => {
     })
 
     it('should throw AuthRequiredError for unauthorized service access', async () => {
-      const handler = createSubscribeRecordsHandler(ctx)
+      const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
 
       const generator = handler(

@@ -12,21 +12,25 @@ import {
   DefaultLexiconProvider,
 } from '@northskysocial/stratos-core'
 import {
+  initBlob,
   initEnrollment,
   initHydration,
+  initMst,
   initRepo,
+  initSync,
   MigratingBoundaryResolver,
-} from './features/index.js'
+  EnrollmentBoundaryResolver,
+} from './features'
 
 import { getServiceDidWithFragment } from './config.js'
 import { createStorageContext } from './storage-context.js'
 import { createIdResolver } from './identity-resolver.js'
 import { createOAuthClientContext } from './oauth/client-factory.js'
-import { DpopVerifier } from './infra/auth/index.js'
+import { DpopVerifier } from './infra/auth'
 import {
   type OAuthSessionStoreBackend,
   type OAuthStateStoreBackend,
-} from './oauth/client.js'
+} from './oauth'
 import {
   buildUserAgent,
   createFetchWithUserAgent,
@@ -41,6 +45,7 @@ import {
 } from './context-types.js'
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
+import { RedisCache } from './infra/storage/redis-cache.js'
 
 export * from './context-types.js'
 export { SqliteSequenceOps } from './storage/sqlite/sequence-ops.js'
@@ -117,15 +122,40 @@ export async function createAppContext(
     idResolver,
     oauthClient,
     enrollmentStore,
+    enrollmentCtx.enrollmentValidator,
     allowListProvider,
     logger,
   )
 
-  const hydrationCtx = initHydration(enrollmentStore)
+  const cache = cfg.enrollment.valkeyUrl
+    ? new RedisCache(cfg.enrollment.valkeyUrl)
+    : undefined
+
+  const boundaryResolver = cfg.enrollment.valkeyUrl
+    ? new MigratingBoundaryResolver({
+        enrollmentStore,
+        serviceDid: getServiceDidWithFragment(cfg),
+        logger,
+      })
+    : new EnrollmentBoundaryResolver(enrollmentStore)
+
+  const blobCtx = initBlob(actorStore, boundaryResolver)
+
+  const hydrationCtx = initHydration(
+    actorStore,
+    enrollmentStore,
+    blobCtx.bloomManager,
+    cache,
+  )
+
+  const syncCtx = { syncService: hydrationCtx.syncService }
+
+  const mstCtx = initMst(signingKey)
 
   const repoCtx = initRepo(
     cfg,
     actorStore,
+    mstCtx,
     sequenceEvents,
     oauthClient,
     getServiceDidWithFragment(cfg),
@@ -139,7 +169,10 @@ export async function createAppContext(
     ...storage,
     ...enrollmentCtx,
     ...hydrationCtx,
+    ...syncCtx,
+    ...blobCtx,
     ...repoCtx,
+    cache,
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
     rateLimits: repoCtx.writeRateLimiter,
@@ -151,11 +184,23 @@ export async function createAppContext(
     logger,
     dpopVerifier,
 
+    /**
+     * Get the signing key for an actor by DID
+     * @param did - The DID of the actor
+     * @returns The signing key for the actor, or a new one if none exists
+     */
     async getActorSigningKey(did: string) {
       const keypair = await actorStore.loadSigningKey(did)
       return keypair ?? (await actorStore.createSigningKey(did))
     },
 
+    /**
+     * Create an attestation for an actor
+     * @param did - The DID of the actor
+     * @param boundaries - The boundaries of the attestation
+     * @param userDidKey - The DID key of the user
+     * @returns The attestation signature and signing key
+     */
     async createAttestation(
       did: string,
       boundaries: string[],
@@ -166,6 +211,10 @@ export async function createAppContext(
       return { sig, signingKey: signingKey.did() }
     },
 
+    /**
+     * Check the health of the application
+     * @returns Health status of the application
+     */
     async checkHealth() {
       const dbOk = await storage.db
         ?.run(sql`SELECT 1`)
@@ -180,6 +229,9 @@ export async function createAppContext(
       }
     },
 
+    /**
+     * Destroy the application context
+     */
     async destroy() {
       await storageDestroy()
       repoCtx.repoWriteLocks.destroy()
@@ -238,6 +290,7 @@ function initAuth(
   idResolver: AppContext['idResolver'],
   oauthClient: AppContext['oauthClient'],
   enrollmentStore: AppContext['enrollmentStore'],
+  enrollmentValidator: AppContext['enrollmentValidator'],
   allowListProvider?: ExternalAllowListProvider,
   logger?: AppContext['logger'],
 ) {

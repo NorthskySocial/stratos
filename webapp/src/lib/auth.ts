@@ -1,3 +1,4 @@
+import { buildStratosScopes } from '@northskysocial/stratos-client'
 import {
   BrowserOAuthClient,
   type OAuthSession,
@@ -38,9 +39,10 @@ function buildClientMetadata(): OAuthClientMetadataInput {
         ? `${import.meta.env.VITE_WEBAPP_URL}/`
         : `${origin}/`,
     ],
-    scope:
-      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
-    grant_types: ['authorization_code', 'refresh_token'],
+    scope: [
+      ...buildStratosScopes(),
+      'repo:app.bsky.feed.post?action=create',
+    ].join(' '),
     response_types: ['code'],
     token_endpoint_auth_method: 'none',
     application_type: 'web',
@@ -87,8 +89,12 @@ export async function init(): Promise<OAuthSession | null> {
       currentSession = result.session
     }
   } catch (err) {
-    console.warn('Session restore failed, clearing stale session:', err)
-    currentSession = null
+    if (err instanceof Error && err.name === 'AbortError') {
+      // ignore
+    } else {
+      console.warn('Session restore failed, clearing stale session:', err)
+      currentSession = null
+    }
   }
   return currentSession
 }
@@ -100,8 +106,10 @@ export async function init(): Promise<OAuthSession | null> {
 export async function signIn(handle: string): Promise<void> {
   const oauthClient = getClient()
   await oauthClient.signIn(handle, {
-    scope:
-      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
+    scope: [
+      ...buildStratosScopes(),
+      'repo:app.bsky.feed.post?action=create',
+    ].join(' '),
     signal: new AbortController().signal,
   })
 }

@@ -6,9 +6,6 @@ import { createRepoManager } from './util.js'
 import { type SequenceTrace, type WritePhases } from './types.js'
 import { withConcurrencyRetry } from './validation.js'
 
-/**
- * Input parameters for record deletion
- */
 export interface DeleteRecordInput {
   repo: string
   collection: string
@@ -71,7 +68,7 @@ export async function deleteRecord(
           phases.connAcquire = performance.now() - attemptT0
           return { rootCid: (await reader.repo.getRoot())?.toString() ?? null }
         },
-        async (prepared, store) => {
+        async (_prepared, store) => {
           const manager = createRepoManager(
             ctx.logger,
             store,

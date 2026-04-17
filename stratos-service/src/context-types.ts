@@ -5,24 +5,28 @@ import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
 import * as crypto from '@atproto/crypto'
 import {
+  type BlobAuthService,
   type BlobStoreCreator,
   type BoundaryResolver,
   type EnrollmentService,
   type EnrollmentStoreReader,
+  type EnrollmentValidator,
+  type HydrationService,
+  type LexiconProvider,
   type Logger,
   type StubWriterService,
-  type LexiconProvider,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
 import { BackgroundStubQueue } from './features/stub/internal/background-queue.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { type StratosServiceConfig } from './config.js'
-import { type EnrollmentStore } from './oauth/routes.js'
-import { type ServiceDb } from './db/index.js'
+import { type EnrollmentStore } from './oauth'
+import { type ServiceDb } from './db'
 import { AuthVerifiers } from './infra/auth/verifiers.js'
-import { DpopVerifier } from './infra/auth/index.js'
+import { DpopVerifier } from './infra/auth'
 import { WriteRateLimiter } from './shared/rate-limiter.js'
 import { RepoWriteLocks } from './shared/repo-write-lock.js'
+import { type MstContext } from './features'
 
 /**
  * Identity context for Stratos service
@@ -47,6 +51,7 @@ export interface IdentityContext {
 export interface StorageContext {
   db?: ServiceDb
   actorStore: ActorStore
+  blobAuth: BlobAuthService
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
   writeRateLimiter: WriteRateLimiter
   rateLimits: WriteRateLimiter // Added for compatibility
@@ -63,22 +68,39 @@ export interface StorageContext {
 export interface EnrollmentContext {
   enrollmentService: EnrollmentService
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
+  enrollmentValidator: EnrollmentValidator
   profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
   allowListProvider?: ExternalAllowListProvider
   enrollmentEvents: EnrollmentEventEmitter
 }
 
 /**
+ * Sync context for Stratos service
+ */
+export interface SyncContext {
+  syncService: import('./features/sync/adapter.js').SyncService
+}
+
+/**
  * Hydration context for Stratos service
  */
-export interface HydrationContext {
+export interface HydrationContext extends SyncContext {
   boundaryResolver: BoundaryResolver
+  hydrationService: HydrationService
+}
+
+/**
+ * Blob context for Stratos service
+ */
+export interface BlobContext {
+  blobAuth: BlobAuthService
+  bloomManager: import('./features/blob/bloom-manager.js').BloomManager
 }
 
 /**
  * Repository context for Stratos service
  */
-export interface RepoContext {
+export interface RepoContext extends MstContext {
   actorStore: ActorStore
   repoWriteLocks: RepoWriteLocks
   writeRateLimiter: WriteRateLimiter
@@ -96,6 +118,7 @@ export interface AppContext
     StorageContext,
     EnrollmentContext,
     HydrationContext,
+    BlobContext,
     RepoContext {
   cfg: StratosServiceConfig
   version: string
@@ -104,6 +127,7 @@ export interface AppContext
   lexiconProvider: LexiconProvider
   app: express.Application
   logger?: Logger
+  cache?: import('@northskysocial/stratos-core').Cache
   dpopVerifier: DpopVerifier
   oauthStores: {
     sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend

@@ -20,9 +20,9 @@
   let loading = $state(true)
   let result: InspectorResult | null = $state(null)
 
-  const parts = parseAtUri(uri)
-  const pdsRecordAddress = `at://${parts.did}/${parts.collection}/${parts.rkey}`
-  const stratosRecordAddress = `at://${parts.did}/${parts.collection}/${parts.rkey}`
+  const parts = $derived(parseAtUri(uri))
+  const pdsRecordAddress = $derived(`at://${parts.did}/${parts.collection}/${parts.rkey}`)
+  const stratosRecordAddress = $derived(`at://${parts.did}/${parts.collection}/${parts.rkey}`)
 
   async function load() {
     loading = true
@@ -61,8 +61,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-<div class="overlay" onclick={handleBackdropClick}>
+<div class="overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={handleBackdropClick} onkeydown={null}>
   <div class="modal">
     <div class="modal-header">
       <div>

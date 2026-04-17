@@ -84,3 +84,13 @@ export class MstError extends StratosError {
     this.name = 'MstError'
   }
 }
+
+/**
+ * Error thrown when a blob access is denied
+ */
+export class BlobAccessDeniedError extends StratosError {
+  constructor(cid: string, options?: { cause?: unknown }) {
+    super(`Access denied to blob: ${cid}`, 'BlobAccessDenied', options)
+    this.name = 'BlobAccessDeniedError'
+  }
+}

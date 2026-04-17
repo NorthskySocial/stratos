@@ -1,3 +1,6 @@
+import { CID } from 'multiformats/cid'
+import { sha256 } from 'multiformats/hashes/sha2'
+import type { BlobContentStore } from '@northskysocial/stratos-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
@@ -12,9 +15,9 @@ import {
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
-import { getRecord, updateRecord } from '../src/api'
-import { createMockBlobStore, createTestConfig } from './utils'
+} from '../src/db/index.js'
+import { getRecord, updateRecord } from '../src/api/index.js'
+import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
 describe('Record Update Handler', () => {
   let dataDir: string
@@ -45,7 +48,7 @@ describe('Record Update Handler', () => {
     enrollmentStore = new SqliteEnrollmentStore(db)
     actorStore = new StratosActorStore({
       dataDir,
-      blobstore: () => createMockBlobStore(),
+      blobstore: () => createMockBlobStore() as any,
       cborToRecord: (content) => decode(content) as Record<string, unknown>,
     })
 
@@ -124,7 +127,7 @@ describe('Record Update Handler', () => {
       },
     }
 
-    const result = await updateRecord(
+    const result = await (updateRecord as any)(
       ctx,
       {
         repo: testDid,
@@ -139,7 +142,7 @@ describe('Record Update Handler', () => {
     expect(result.cid).toBeDefined()
 
     // Verify it's updated in the database
-    const readResult = await getRecord(
+    const readResult = await (getRecord as any)(
       ctx,
       {
         repo: testDid,
@@ -156,7 +159,7 @@ describe('Record Update Handler', () => {
 
   it('should throw AuthRequiredError when updating another users record', async () => {
     await expect(
-      updateRecord(
+      (updateRecord as any)(
         ctx,
         {
           repo: testDid,
@@ -171,7 +174,7 @@ describe('Record Update Handler', () => {
 
   it('should throw InvalidRequestError for non-stratos collection', async () => {
     await expect(
-      updateRecord(
+      (updateRecord as any)(
         ctx,
         {
           repo: testDid,
@@ -195,7 +198,7 @@ describe('Record Update Handler', () => {
       },
     }
 
-    const result = await updateRecord(
+    const result = await (updateRecord as any)(
       ctx,
       {
         repo: testDid,
@@ -208,7 +211,7 @@ describe('Record Update Handler', () => {
 
     expect(result.uri).toContain(rkey)
 
-    const readResult = await getRecord(
+    const readResult = await (getRecord as any)(
       ctx,
       {
         repo: testDid,
@@ -220,7 +223,7 @@ describe('Record Update Handler', () => {
 
     // Boundary extraction from record.value
     const domains = (readResult.value as any).boundary.values.map(
-      (v) => v.value,
+      (v: any) => v.value,
     )
     expect(domains).toContain('did:web:nerv.tokyo.jp/design')
   })

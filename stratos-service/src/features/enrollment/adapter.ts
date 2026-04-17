@@ -1,4 +1,4 @@
-import type { DidDocument, IdResolver } from '@atproto/identity'
+import type { IdResolver } from '@atproto/identity'
 import type {
   BoundaryResolver,
   Enrollment,
@@ -11,12 +11,12 @@ import type {
 } from '@northskysocial/stratos-core'
 import {
   ensureQualifiedBoundaries,
-  extractPdsEndpoint,
   isQualifiedBoundary,
-  validateEnrollmentEligibility,
 } from '@northskysocial/stratos-core'
-import type { EnrollmentStore } from '../../oauth/routes.js'
+import type { EnrollmentStore } from '../../oauth'
 import type { EnrollmentEventEmitter } from '../../context-types.js'
+import { validateEnrollment } from './internal/validation.js'
+import { type AllowListProvider } from './internal/allow-list.js'
 
 export interface MigrationDeps {
   enrollmentStore: {
@@ -178,6 +178,7 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
   constructor(
     private config: EnrollmentConfig,
     private idResolver: IdResolver,
+    private allowListProvider?: AllowListProvider,
   ) {}
 
   /**
@@ -187,19 +188,19 @@ export class EnrollmentValidatorImpl implements EnrollmentValidator {
    * @returns The enrollment validation result.
    */
   async validate(did: string): Promise<EnrollmentValidationResult> {
-    let didDoc: DidDocument | null
-    try {
-      didDoc = await this.idResolver.did.resolve(did)
-    } catch {
-      return { allowed: false, reason: 'DidNotResolved' }
-    }
+    const result = await validateEnrollment(
+      this.config,
+      did,
+      this.idResolver,
+      this.allowListProvider,
+    )
 
-    if (!didDoc) {
-      return { allowed: false, reason: 'DidNotResolved' }
+    return {
+      allowed: result.allowed,
+      reason: result.reason,
+      pdsEndpoint: result.pdsEndpoint,
+      autoEnrollDomains: result.autoEnrollDomains,
     }
-
-    const pdsEndpoint = extractPdsEndpoint(didDoc)
-    return validateEnrollmentEligibility(this.config, did, pdsEndpoint)
   }
 }
 
@@ -218,6 +219,36 @@ export class EnrollmentBoundaryResolver implements BoundaryResolver {
    */
   async getBoundaries(did: string): Promise<string[]> {
     return this.enrollmentStore.getBoundaries(did)
+  }
+}
+
+/**
+ * Implementation of BoundaryResolver that caches results.
+ */
+export class CachedBoundaryResolver implements BoundaryResolver {
+  constructor(
+    private resolver: BoundaryResolver,
+    private cache: import('@northskysocial/stratos-core').Cache,
+    private ttlSeconds: number = 3600, // 1 hour default
+  ) {}
+
+  async getBoundaries(did: string): Promise<string[]> {
+    const cacheKey = `boundary:cache:${did}`
+    const cached = await this.cache.get(cacheKey)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed)) {
+          return parsed as string[]
+        }
+      } catch {
+        // Fall through on parse error
+      }
+    }
+
+    const boundaries = await this.resolver.getBoundaries(did)
+    await this.cache.set(cacheKey, JSON.stringify(boundaries), this.ttlSeconds)
+    return boundaries
   }
 }
 

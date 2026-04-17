@@ -1,13 +1,10 @@
 import { WriteOpAction } from '@atproto/repo'
 import { AtUri } from '@atproto/syntax'
+import { CID } from 'multiformats/cid'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import PQueue from 'p-queue'
 import type { EnrollmentCallback } from './pds/pds-firehose.js'
-import {
-  extractBoundaries,
-  jsonToLex,
-  parseCid,
-} from '@northskysocial/stratos-core'
+import { extractBoundaries, jsonToLex } from '@northskysocial/stratos-core'
 
 const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 
@@ -187,7 +184,7 @@ async function indexBackfilledRecord(
   try {
     await opts.indexingService.indexRecord(
       uri,
-      parseCid(record.cid),
+      CID.parse(record.cid),
       jsonToLex(record.value),
       WriteOpAction.Create,
       new Date().toISOString(),

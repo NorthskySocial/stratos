@@ -1,12 +1,14 @@
 import { vi } from 'vitest'
 import { randomBytes } from 'node:crypto'
 import { Cid } from '@atproto/lex-data'
-import { BlobStore } from '@northskysocial/stratos-core'
+import { BlobContentStore, BlobStore } from '@northskysocial/stratos-core'
 
 /**
  * Mock blob store for testing
+ *
+ * @returns BlobStore with mock methods
  */
-export function createMockBlobStore(): BlobStore {
+export function createMockBlobStore(): BlobStore & BlobContentStore {
   const storage = new Map<string, Uint8Array>()
   const tempStorage = new Map<string, Uint8Array>()
 
@@ -42,6 +44,9 @@ export function createMockBlobStore(): BlobStore {
         storage.delete(cid.toString())
       }
     }),
+    deleteContent: vi.fn().mockImplementation(async (cid: Cid) => {
+      storage.delete(cid.toString())
+    }),
     hasTemp: vi.fn().mockImplementation(async (key: string) => {
       return tempStorage.has(key)
     }),
@@ -50,16 +55,28 @@ export function createMockBlobStore(): BlobStore {
     }),
     getBytes: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
+      if (!bytes) return null
       return bytes
     }),
     getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
-      async function* generate() {
-        yield bytes!
-      }
-      return generate()
-    }),
+      if (!bytes) return null
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes)
+          controller.close()
+        },
+      })
+    }) as any,
+    getTempStream: vi.fn().mockImplementation(async (key: string) => {
+      const bytes = tempStorage.get(key)
+      if (!bytes) return null
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes)
+          controller.close()
+        },
+      })
+    }) as any,
   }
 }

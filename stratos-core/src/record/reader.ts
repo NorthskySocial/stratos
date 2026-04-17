@@ -1,8 +1,8 @@
 import type { Cid } from '@atproto/lex-data'
-import { parseCid } from '../atproto/index.js'
+import { parseCid } from '../atproto'
 import * as syntax from '@atproto/syntax'
 import { AtUri } from '@atproto/syntax'
-import { and, asc, desc, eq, gt, isNull, lt } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, isNull, lt, lte } from 'drizzle-orm'
 import {
   countAll,
   StratosBacklink,
@@ -11,7 +11,7 @@ import {
   StratosRecord,
   stratosRecord,
   stratosRepoBlock,
-} from '../db/index.js'
+} from '../db'
 import { Logger, StatusAttr } from '../types.js'
 
 /**
@@ -153,17 +153,28 @@ export class StratosRecordReader {
 
     // prioritize cursor but fall back to rkey start/end
     if (cursor !== undefined) {
+      let rkey = cursor
+      if (cursor.startsWith('at://')) {
+        try {
+          const atUri = new AtUri(cursor)
+          rkey = atUri.rkey
+        } catch (err) {
+          // Fall back to using the cursor as-is if it's not a valid AtUri
+          this.logger?.warn({ cursor, err }, 'failed to parse cursor as AtUri')
+        }
+      }
+
       if (reverse) {
-        conditions.push(gt(stratosRecord.rkey, cursor))
+        conditions.push(lt(stratosRecord.rkey, rkey))
       } else {
-        conditions.push(lt(stratosRecord.rkey, cursor))
+        conditions.push(gt(stratosRecord.rkey, rkey))
       }
     } else {
       if (rkeyStart !== undefined) {
-        conditions.push(gt(stratosRecord.rkey, rkeyStart))
+        conditions.push(gte(stratosRecord.rkey, rkeyStart))
       }
       if (rkeyEnd !== undefined) {
-        conditions.push(lt(stratosRecord.rkey, rkeyEnd))
+        conditions.push(lte(stratosRecord.rkey, rkeyEnd))
       }
     }
 
@@ -176,7 +187,7 @@ export class StratosRecordReader {
       .from(stratosRecord)
       .innerJoin(stratosRepoBlock, eq(stratosRepoBlock.cid, stratosRecord.cid))
       .where(and(...conditions))
-      .orderBy(reverse ? asc(stratosRecord.rkey) : desc(stratosRecord.rkey))
+      .orderBy(reverse ? desc(stratosRecord.rkey) : asc(stratosRecord.rkey))
       .limit(limit)
 
     return res.map((row: { uri: string; cid: string; content: Uint8Array }) => {
@@ -222,14 +233,14 @@ export class StratosRecordReader {
       .where(and(...conditions))
       .limit(1)
 
-    const record = res[0]
-    if (!record) return null
+    if (res.length === 0) return null
+    const row = res[0]
     return {
-      uri: record.uri,
-      cid: record.cid,
-      value: this.cborToRecord(record.content),
-      indexedAt: record.indexedAt,
-      takedownRef: record.takedownRef ? record.takedownRef.toString() : null,
+      uri: row.uri,
+      cid: row.cid,
+      value: this.cborToRecord(row.content),
+      indexedAt: row.indexedAt,
+      takedownRef: row.takedownRef,
     }
   }
 

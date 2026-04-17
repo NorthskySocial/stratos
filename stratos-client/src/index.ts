@@ -10,11 +10,7 @@ export type {
   VerifiedRecord,
 } from './types.js'
 
-export {
-  discoverEnrollment,
-  discoverEnrollments,
-  getEnrollmentByServiceDid,
-} from './discovery.js'
+export { getEnrollmentByServiceDid } from './discovery.js'
 export {
   createServiceFetchHandler,
   resolveServiceUrl,

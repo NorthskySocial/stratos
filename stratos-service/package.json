@@ -16,7 +16,7 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts .",
-    "codegen": "lex gen-server ../lexicons --out ./src/lexicon",
+    "codegen": "lex gen-server ./src/lexicon ../lexicons --yes",
     "generate:version": "tsx scripts/generate-version.ts"
   },
   "dependencies": {
@@ -25,6 +25,7 @@
     "@atcute/cbor": "^2.3.2",
     "@atcute/cid": "^2.4.1",
     "@atcute/client": "^4.2.1",
+    "@atcute/lexicons": "^1.2.9",
     "@atcute/mst": "^0.1.2",
     "@atcute/repo": "^0.1.2",
     "@atcute/uint8array": "^1.1.1",

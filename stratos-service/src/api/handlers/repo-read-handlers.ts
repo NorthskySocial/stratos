@@ -1,6 +1,6 @@
 import { AppContext } from '../../context-types.js'
 import { createXrpcHandler } from '../util.js'
-import { getRecord, listRecords } from '../records/index.js'
+import { getRecord, listRecords } from '../records'
 
 /**
  * Handler for retrieving a record from a repository.

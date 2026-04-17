@@ -67,6 +67,8 @@ Stratos supports both SQLite and PostgreSQL.
 - `zone.stratos.sync.getRepo`: Export a full repository as a CAR file.
 - `zone.stratos.repo.importRepo`: Import a repository from a CAR file.
 - `zone.stratos.sync.subscribeRecords`: Actor-scoped WebSocket stream for record updates.
+- `zone.stratos.sync.getBlob`: Retrieve a blob by CID with boundary filtering.
+- `zone.stratos.sync.uploadBlob`: Upload a blob with boundary filtering.
 
 ## Development
 

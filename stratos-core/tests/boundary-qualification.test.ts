@@ -7,7 +7,7 @@ import {
   parseQualifiedBoundary,
   qualifyBoundaries,
   qualifyBoundary,
-} from '../src/index.js'
+} from '../src'
 
 const NERV_SERVICE = 'did:web:nerv.tokyo.jp'
 const SEELE_SERVICE = 'did:web:seele.berlin.de'

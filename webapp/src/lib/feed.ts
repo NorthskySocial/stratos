@@ -34,6 +34,86 @@ export interface FeedPost {
   createdAt: string
   isPrivate: boolean
   reply: ReplyRef | null
+  embed?: {
+    $type: string
+    images?: Array<{
+      alt: string
+      image: {
+        ref?: { $link: string }
+        cid?: string
+        mimeType?: string
+        size?: number
+        url?: string
+        original?: {
+          ref: { $link: string }
+          mimeType: string
+          size: number
+          $type: string
+        }
+      }
+      aspectRatio?: { width: number; height: number }
+      fullsize?: string
+      thumb?: string
+    }>
+    media?: {
+      $type: string
+      images?: Array<{
+        alt: string
+        image: {
+          ref?: { $link: string }
+          cid?: string
+          mimeType?: string
+          size?: number
+          original?: {
+            ref: { $link: string }
+            mimeType: string
+            size: number
+            $type: string
+          }
+        }
+      }>
+      external?: {
+        uri: string
+        title: string
+        description: string
+        thumb?: {
+          ref?: { $link: string }
+          cid?: string
+          mimeType?: string
+          size?: number
+        }
+      }
+    }
+    external?: {
+      uri: string
+      title: string
+      description: string
+      thumb?: {
+        ref?: { $link: string }
+        cid?: string
+        mimeType?: string
+        size?: number
+      }
+    }
+    image?: {
+      ref?: { $link: string }
+      cid?: string
+      mimeType?: string
+      size?: number
+      url?: string
+      original?: {
+        ref: { $link: string }
+        mimeType: string
+        size: number
+        $type: string
+      }
+    }
+    fullsize?: string
+    thumb?: string
+    alt?: string
+    aspectRatio?: { width: number; height: number }
+    [key: string]: unknown
+  }
   author: string
   authorHandle: string
   boundaries: string[]
@@ -45,10 +125,20 @@ export interface ThreadNode {
   depth: number
 }
 
+/**
+ * Extracts the author DID from an At Protocol URI.
+ * @param uri - The At Protocol URI.
+ * @returns The author DID.
+ */
 function authorFromUri(uri: string): string {
   return uri.replace('at://', '').split('/')[0]
 }
 
+/**
+ * Parses a reply reference from a record.
+ * @param record - The record to parse.
+ * @returns The reply reference, or null if the record does not contain a valid reply reference.
+ */
 function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
   const reply = record.reply as
     | {
@@ -70,6 +160,11 @@ function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
   }
 }
 
+/**
+ * Extracts boundaries from a record.
+ * @param record - The record to extract boundaries from.
+ * @returns An array of boundary values, or an empty array if no valid boundaries are found.
+ */
 function boundariesFromRecord(record: Record<string, unknown>): string[] {
   const boundary = record.boundary as
     | { values?: Array<{ value?: string }> }
@@ -80,6 +175,12 @@ function boundariesFromRecord(record: Record<string, unknown>): string[] {
     .filter((v): v is string => typeof v === 'string')
 }
 
+/**
+ * Maps a FeedViewPost to a FeedPost.
+ * @param feed - The FeedViewPost to map.
+ * @param isPrivate - Whether the post is private.
+ * @returns The mapped FeedPost, or an empty array if the post is invalid.
+ */
 function mapFeedViewPosts(
   feed: FeedViewPost[],
   isPrivate: boolean,
@@ -99,6 +200,7 @@ function mapFeedViewPosts(
         createdAt: val.createdAt as string,
         isPrivate,
         reply: parseReplyRef(val),
+        embed: val.embed as FeedPost['embed'],
         author: did,
         authorHandle: handle !== did ? handle : '',
         boundaries: boundariesFromRecord(val),
@@ -132,6 +234,7 @@ export async function fetchRepoPublicPosts(
         createdAt: val.createdAt as string,
         isPrivate: false,
         reply: parseReplyRef(val),
+        embed: val.embed as FeedPost['embed'],
         author: did,
         authorHandle: '',
         boundaries: [],
@@ -142,6 +245,12 @@ export async function fetchRepoPublicPosts(
   }
 }
 
+/**
+ * Fetch public posts from the repo
+ * @param agent - Agent instance for interacting with the repo
+ * @param did - DID of the repository to fetch posts from
+ * @returns Array of FeedPost objects
+ */
 export async function fetchPublicPosts(
   agent: Agent,
   did: string,
@@ -183,6 +292,7 @@ export async function fetchStratosPosts(
         createdAt: val.createdAt as string,
         isPrivate: true,
         reply: parseReplyRef(val),
+        embed: val.embed as FeedPost['embed'],
         author: authorFromUri(r.uri),
         authorHandle: '',
         boundaries: boundariesFromRecord(val),
@@ -197,29 +307,35 @@ export async function fetchStratosPosts(
  * Fetch Stratos posts from an appview instance
  * @param session - OAuth session for the user
  * @param appviewUrl - URL of the appview instance
+ * @param cursor - Cursor for pagination, if any
  * @returns Array of FeedPost objects
  */
 export async function fetchAppviewStratosPosts(
   session: OAuthSession,
   appviewUrl: string,
-): Promise<FeedPost[]> {
+  cursor?: string,
+): Promise<{ posts: FeedPost[]; cursor?: string }> {
   try {
     const url = new URL('/xrpc/zone.stratos.feed.getTimeline', appviewUrl)
     url.searchParams.set('limit', '50')
+    if (cursor) url.searchParams.set('cursor', cursor)
 
     const res = await session.fetchHandler(url.href, { method: 'GET' })
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
       console.error(`[stratos] getTimeline failed: ${res.status} ${errText}`)
-      return []
+      return { posts: [] }
     }
 
     const body = (await res.json()) as StratosTimelineResponse
     console.log(`[stratos] getTimeline: ${body.feed?.length ?? 0} posts`)
-    return mapFeedViewPosts(body.feed ?? [], true)
+    return {
+      posts: mapFeedViewPosts(body.feed ?? [], true),
+      cursor: body.cursor,
+    }
   } catch (err) {
     console.error('[stratos] getTimeline error:', err)
-    return []
+    return { posts: [] }
   }
 }
 
@@ -238,6 +354,11 @@ export function buildUnifiedFeed(
   )
 }
 
+/**
+ * Collects unique domains from an array of FeedPost objects
+ * @param posts - Array of FeedPost objects
+ * @returns Array of unique domains sorted alphabetically
+ */
 export function collectDomains(posts: FeedPost[]): string[] {
   const domains = new Set<string>()
   for (const post of posts) {
@@ -320,6 +441,12 @@ export function groupIntoThreads(posts: FeedPost[]): ThreadNode[] {
     }
   }
 
+  /**
+   * Builds a tree structure from a post and its children.
+   * @param post - The post to build the tree from
+   * @param depth - Current depth in the tree
+   * @returns The constructed ThreadNode
+   */
   function buildTree(post: FeedPost, depth: number): ThreadNode {
     const replies = (childrenOf.get(post.uri) ?? [])
       .sort(

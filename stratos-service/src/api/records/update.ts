@@ -5,6 +5,7 @@ import {
   encodeRecord,
   parseCid,
   RepoWrite,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context-types.js'
@@ -222,6 +223,26 @@ async function performUpdate(
     'update',
     writeResult.rev,
   )
+
+  // Update blob associations and Bloom filter for getBlob access control
+  // Note: For simplicity, we add new associations.
+  // In a more complete implementation, we'd remove old ones first.
+  const blobs = StratosValidator.extractBlobs(record)
+  for (const blobCidStr of blobs) {
+    const blobCid = parseCid(blobCidStr)
+    await store.blob.associateBlobWithRecord(blobCid, uri.toString())
+
+    const boundaries = StratosValidator.extractBoundaryDomains(
+      record as Record<string, unknown>,
+    )
+    for (const boundary of boundaries) {
+      await store.blob.associateBlobWithBoundary(blobCid, boundary)
+    }
+    // Update Bloom filter for fast rejection
+    if (ctx.bloomManager) {
+      await ctx.bloomManager.updateBloom(blobCid, boundaries)
+    }
+  }
 
   return {
     uri: uri.toString(),

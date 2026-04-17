@@ -2,14 +2,17 @@ import express from 'express'
 import { Agent } from '@atproto/api'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import { IdResolver } from '@atproto/identity'
-import type { EnrollmentConfig, Logger } from '@northskysocial/stratos-core'
+import type {
+  EnrollmentConfig,
+  EnrollmentValidator,
+  Logger,
+} from '@northskysocial/stratos-core'
 import type { RequestHeaders } from '../infra/auth/index.js'
 
 import { handleAuthorize } from './handlers/authorize.js'
 import { handleCallback } from './handlers/callback.js'
 import { handleStatus } from './handlers/status.js'
 import { handleRevoke } from './handlers/revoke.js'
-import { AllowListProvider } from '../features/enrollment/internal/allow-list.js'
 
 /**
  * Converts a service DID to a valid AT Protocol record key.
@@ -58,13 +61,13 @@ export interface OAuthRoutesConfig {
   oauthClient: NodeOAuthClient
   enrollmentConfig: EnrollmentConfig
   enrollmentStore: EnrollmentStore
+  enrollmentValidator: EnrollmentValidator
   idResolver: IdResolver
   baseUrl: string
   serviceEndpoint: string
   serviceDid: string
   defaultBoundaries?: string[]
   autoEnrollDomains?: string[]
-  allowListProvider?: AllowListProvider
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../infra/auth/dpop-verifier.js').DpopVerifier

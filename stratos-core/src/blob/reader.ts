@@ -2,11 +2,12 @@ import { and, asc, eq, gt, isNull } from 'drizzle-orm'
 import type { Cid } from '@atproto/lex-data'
 import {
   stratosBlob,
+  stratosBlobBoundary,
   StratosDbOrTx,
   stratosRecord,
   stratosRecordBlob,
-} from '../db/index.js'
-import { BlobStore, Logger, StatusAttr } from '../types.js'
+} from '../db'
+import { BlobNotFoundError, BlobStore, Logger, StatusAttr } from '../types.js'
 
 /**
  * Blob metadata from the database
@@ -14,6 +15,7 @@ import { BlobStore, Logger, StatusAttr } from '../types.js'
 export interface BlobMetadata {
   size: number
   mimeType?: string
+  tempKey?: string | null
 }
 
 /**
@@ -48,6 +50,7 @@ export class StratosBlobReader {
     return {
       size: found[0].size,
       mimeType: found[0].mimeType,
+      tempKey: found[0].tempKey,
     }
   }
 
@@ -59,6 +62,7 @@ export class StratosBlobReader {
   async getBlob(cid: Cid): Promise<{
     size: number
     mimeType?: string
+    tempKey?: string | null
     stream: AsyncIterable<Uint8Array>
   } | null> {
     const metadata = await this.getBlobMetadata(cid)
@@ -66,7 +70,22 @@ export class StratosBlobReader {
       return null
     }
     try {
-      const stream = await this.blobstore.getStream(cid)
+      let stream: AsyncIterable<Uint8Array>
+      try {
+        stream = await this.blobstore.getStream(cid)
+      } catch (err) {
+        if (err instanceof BlobNotFoundError && metadata.tempKey) {
+          this.logger?.info(
+            `Blob ${cid.toString()} not found in permanent storage, falling back to temporary storage with key ${
+              metadata.tempKey
+            }`,
+          )
+          stream = await this.blobstore.getTempStream(metadata.tempKey)
+        } else {
+          throw err
+        }
+      }
+
       return {
         ...metadata,
         stream,
@@ -168,5 +187,18 @@ export class StratosBlobReader {
       .where(eq(stratosBlob.cid, cid.toString()))
       .limit(1)
     return res.length > 0
+  }
+
+  /**
+   * Retrieves the boundaries associated with a blob from the database.
+   * @param blobCid - CID of the blob to retrieve boundaries for.
+   * @returns A promise that resolves with an array of boundaries associated with the blob.
+   */
+  async getBoundariesForBlob(blobCid: Cid): Promise<string[]> {
+    const res = await this.db
+      .select({ boundary: stratosBlobBoundary.boundary })
+      .from(stratosBlobBoundary)
+      .where(eq(stratosBlobBoundary.blobCid, blobCid.toString()))
+    return res.map((row) => row.boundary)
   }
 }

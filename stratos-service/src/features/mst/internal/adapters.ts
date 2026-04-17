@@ -1,12 +1,8 @@
 import { Cid } from '@atproto/lex-data'
 import type { Keypair } from '@atproto/crypto'
-import type {
-  RepoWrite,
-  SequencingService,
-  SigningService,
-} from '@northskysocial/stratos-core'
+import type { RepoWrite, SequencingService, SigningService, } from '@northskysocial/stratos-core'
 import { ActorTransactor } from '../../../actor-store-types.js'
-import { SequenceTrace, sequenceChange } from '../../../api/records/types.js'
+import { sequenceChange, SequenceTrace } from '../../../api'
 
 /**
  * Adapter for commit signing using @atproto/identity Keypair

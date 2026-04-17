@@ -1,5 +1,7 @@
-import type { Selectable, Insertable, Updateable } from 'kysely'
-import type { DatabaseSchemaType } from '@atproto/bsky/dist/data-plane/server/db/database-schema'
+import type { Insertable, Kysely, Selectable, Updateable } from 'kysely'
+import type { DatabaseSchema } from '@atproto/bsky'
+
+type DatabaseSchemaType = DatabaseSchema extends Kysely<infer T> ? T : never
 
 export interface StratosSyncCursorTable {
   did: string
@@ -39,9 +41,16 @@ export interface PostTable {
   indexedAt: string
 }
 
-export interface StratosIndexerSchema extends DatabaseSchemaType {
+export interface StratosBoundaryTable {
+  did: string
+  boundary: string
+}
+
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export type StratosIndexerSchema = DatabaseSchemaType & {
   stratos_sync_cursor: StratosSyncCursorTable
   stratos_enrollment: StratosEnrollmentTable
+  stratos_boundary: StratosBoundaryTable
   stratos_record: StratosRecordTable
   stratos_record_boundary: StratosRecordBoundaryTable
   post: PostTable

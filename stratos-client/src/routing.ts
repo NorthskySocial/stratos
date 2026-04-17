@@ -1,8 +1,14 @@
 import type { FetchHandler, FetchHandlerObject } from '@atcute/client'
-import { serviceDIDToRkey } from '@northskysocial/stratos-core'
 import type { StratosEnrollment } from './types.js'
 
-export { serviceDIDToRkey }
+/**
+ * converts a service DID to a valid AT Protocol record key.
+ * replaces percent-encoded colons (%3A) with literal colons,
+ * which are valid rkey characters.
+ */
+export const serviceDIDToRkey = (serviceDid: string): string => {
+  return serviceDid.replace(/%3A/gi, ':')
+}
 
 /**
  * creates a fetch handler that routes XRPC calls to a specific service URL

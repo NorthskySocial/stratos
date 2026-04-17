@@ -9,7 +9,11 @@ import type {
   HydrationService,
   RecordResolver,
 } from '@northskysocial/stratos-core'
-import { canAccessRecord, StratosValidator } from '@northskysocial/stratos-core'
+import {
+  canAccessRecord,
+  hydrateRecordBlobs,
+  StratosValidator,
+} from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 
 /**
@@ -298,10 +302,15 @@ export class HydrationServiceImpl implements HydrationService {
       return
     }
 
+    let value = record.value as Record<string, unknown>
+    if (context.serviceUrl) {
+      value = hydrateRecordBlobs(value, ownerDid, context.serviceUrl)
+    }
+
     records.push({
       uri: record.uri,
       cid: record.cid,
-      value: record.value as Record<string, unknown>,
+      value,
     })
   }
 }

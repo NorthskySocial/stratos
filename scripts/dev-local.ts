@@ -9,6 +9,9 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const rootDir = path.resolve(__dirname, '..')
 
+const args = process.argv.slice(2)
+const isDebugService = args.includes('--debug-service')
+
 // Load .env from root if it exists
 const envPath = path.join(rootDir, '.env')
 if (fs.existsSync(envPath)) {
@@ -42,19 +45,74 @@ async function start() {
   console.log('Starting local development with ngrok...')
 
   try {
-    // 1. Start ngrok for service
-    const serviceListener = await ngrok.forward({
-      addr: 3100,
-      authtoken_from_env: true,
-    })
+    // 1. Connect a session
+    const session = await new ngrok.SessionBuilder()
+      .authtokenFromEnv()
+      .connect()
+
+    // 2. Start ngrok for service
+    const serviceDomain = process.env.NGROK_SERVICE_DOMAIN
+    const serviceEndpointBuilder = (session as any)
+      .httpEndpoint()
+      .metadata('stratos-service')
+      .forwardsTo('Stratos Service (API)')
+
+    if (serviceDomain) {
+      if (
+        serviceDomain.endsWith('ngrok-free.app') ||
+        serviceDomain.endsWith('ngrok.io')
+      ) {
+        serviceEndpointBuilder.domain(serviceDomain)
+      } else {
+        // Use hostname() for custom domains (paid plans)
+        // If hostname() is not available, we use domain() as fallback but it might fail with ERR_NGROK_314
+        if (typeof serviceEndpointBuilder.hostname === 'function') {
+          serviceEndpointBuilder.hostname(serviceDomain)
+        } else {
+          serviceEndpointBuilder.domain(serviceDomain)
+        }
+      }
+    }
+
+    const serviceListener = await serviceEndpointBuilder.listenAndForward(
+      'http://localhost:3100',
+    )
     const serviceUrl = serviceListener.url()!
     console.log(`Service Tunnel URL: ${serviceUrl}`)
 
-    // 2. Start ngrok for webapp
-    const webappListener = await ngrok.forward({
-      addr: 5173,
-      authtoken_from_env: true,
-    })
+    const derivedServiceDid = `did:web:${encodeURIComponent(new URL(serviceUrl).hostname)}`
+    console.log(`Derived Service DID: ${derivedServiceDid}`)
+
+    // 3. Start ngrok for webapp
+    // Wait a bit to avoid collision
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    const webappDomain = process.env.NGROK_WEBAPP_DOMAIN
+    const webappEndpointBuilder = (session as any)
+      .httpEndpoint()
+      .metadata('stratos-webapp')
+      .forwardsTo('Stratos WebApp (UI)')
+
+    if (webappDomain) {
+      if (
+        webappDomain.endsWith('ngrok-free.app') ||
+        webappDomain.endsWith('ngrok.io')
+      ) {
+        webappEndpointBuilder.domain(webappDomain)
+      } else {
+        // Use hostname() for custom domains (paid plans)
+        // If hostname() is not available, we use domain() as fallback but it might fail with ERR_NGROK_314
+        if (typeof webappEndpointBuilder.hostname === 'function') {
+          webappEndpointBuilder.hostname(webappDomain)
+        } else {
+          webappEndpointBuilder.domain(webappDomain)
+        }
+      }
+    }
+
+    const webappListener = await webappEndpointBuilder.listenAndForward(
+      'http://localhost:5173',
+    )
     const webappUrl = webappListener.url()!
     console.log(`Webapp Tunnel URL: ${webappUrl}`)
 
@@ -102,7 +160,9 @@ async function start() {
       ...process.env,
       STRATOS_PUBLIC_URL: serviceUrl,
       STRATOS_REPO_URL: webappUrl,
+      STRATOS_SERVICE_DID: derivedServiceDid,
       VITE_STRATOS_URL: serviceUrl,
+      VITE_STRATOS_SERVICE_DID: derivedServiceDid,
       VITE_WEBAPP_URL: webappUrl,
       // Default to bsky.app if not set
       VITE_APPVIEW_URL: process.env.VITE_APPVIEW_URL || 'https://api.bsky.app',
@@ -113,15 +173,23 @@ async function start() {
     console.log('Starting services...')
 
     // 4. Start services using concurrently JS API
+    const serviceCmd = isDebugService
+      ? `STRATOS_PUBLIC_URL=${serviceUrl} STRATOS_SERVICE_DID=${derivedServiceDid} VITE_STRATOS_URL=${serviceUrl} tsx watch --inspect=0.0.0.0:9229 src/index.ts`
+      : `STRATOS_PUBLIC_URL=${serviceUrl} STRATOS_SERVICE_DID=${derivedServiceDid} VITE_STRATOS_URL=${serviceUrl} pnpm --filter @northskysocial/stratos-service run dev`
+
+    const webappCmd = `VITE_STRATOS_URL=${serviceUrl} VITE_STRATOS_SERVICE_DID=${derivedServiceDid} VITE_WEBAPP_URL=${webappUrl} STRATOS_REPO_URL=${webappUrl} pnpm --filter @northskysocial/stratos-webapp run dev`
+
     const { result } = concurrently(
       [
         {
-          command: `STRATOS_PUBLIC_URL=${serviceUrl} VITE_STRATOS_URL=${serviceUrl} pnpm --filter @northskysocial/stratos-service run dev`,
+          command: serviceCmd,
           name: 'service',
+          cwd: path.join(rootDir, 'stratos-service'),
         },
         {
-          command: `VITE_STRATOS_URL=${serviceUrl} VITE_WEBAPP_URL=${webappUrl} STRATOS_REPO_URL=${webappUrl} pnpm --filter @northskysocial/stratos-webapp run dev`,
+          command: webappCmd,
           name: 'webapp',
+          cwd: path.join(rootDir, 'webapp'),
         },
       ],
       {
@@ -179,7 +247,14 @@ async function start() {
     const cleanup = () => {
       console.log('\nShutting down tunnels...')
       clearInterval(checkInterval)
-      ngrok.disconnect()
+      // Cleanup listeners if they exist
+      try {
+        serviceListener.close()
+        webappListener.close()
+      } catch {
+        // Ignore
+      }
+      session.close()
       process.exit()
     }
 

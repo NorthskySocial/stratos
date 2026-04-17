@@ -7,7 +7,11 @@
  */
 import { describe, expect, it } from 'vitest'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
-import { formatEvent, matchesDomain, type SeqEvent } from '../src/subscription'
+import {
+  formatEvent,
+  matchesDomain,
+  type SeqEvent,
+} from '../src/subscription/index.js'
 
 function createCborEvent(event: Record<string, unknown>): Uint8Array {
   return new Uint8Array(cborEncode(event as unknown as LexValue))

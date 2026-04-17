@@ -1,7 +1,5 @@
 import { config as dotenvConfig } from 'dotenv'
 import path from 'node:path'
-dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
-dotenvConfig({ override: false })
 import type http from 'node:http'
 import express from 'express'
 import './types.js'
@@ -19,16 +17,18 @@ import {
 } from './context.js'
 import { createLogger } from './logger.js'
 import { envToConfig, parseEnv, type StratosServiceConfig } from './config.js'
-import { registerHandlers } from './api/handlers.js'
-import { registerSubscribeRecords } from './subscription/index.js'
-import { createOAuthRoutes } from './oauth/routes.js'
-import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
+import { registerHandlers } from './api'
+import { registerSubscribeRecords } from './subscription'
+import { createOAuthRoutes } from './oauth'
+import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
 import {
   registerEnrollmentHandlers,
-  registerHydrationHandlers,
   signAndPersistCommit,
   StratosBlockStoreReader,
-} from './features/index.js'
+} from './features'
+
+dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
+dotenvConfig({ override: false })
 
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
@@ -94,7 +94,23 @@ export class StratosServer {
 
     app.use(
       cors({
+        origin: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+        allowedHeaders: [
+          'Authorization',
+          'Content-Type',
+          'DPoP',
+          'DPoP-Nonce',
+          'x-trace-id',
+          'atproto-accept-labelers',
+          'atproto-proxy-type',
+          'ngrok-skip-browser-warning',
+        ],
         exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate', 'x-trace-id'],
+        credentials: true,
+        maxAge: 86400,
+        preflightContinue: false,
+        optionsSuccessStatus: 204,
       }),
     )
     app.use(cookieParser())
@@ -148,6 +164,12 @@ export class StratosServer {
     this.registerErrorMiddleware(app, ctx, cfg)
   }
 
+  /**
+   * Register the home route for the Stratos service.
+   * @param app - Express application instance
+   * @param cfg - Stratos service configuration
+   * @private
+   */
   private static registerHomeRoute(
     app: express.Application,
     cfg: StratosServiceConfig,
@@ -189,6 +211,12 @@ export class StratosServer {
     })
   }
 
+  /**
+   * Register health-related routes for the Stratos service.
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @private
+   */
   private static registerHealthRoutes(
     app: express.Application,
     ctx: AppContext,
@@ -210,6 +238,13 @@ export class StratosServer {
     })
   }
 
+  /**
+   * Register well-known routes for the Stratos service.
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @param cfg - Stratos service configuration
+   * @private
+   */
   private static registerWellKnownRoutes(
     app: express.Application,
     ctx: AppContext,
@@ -259,6 +294,12 @@ export class StratosServer {
     app.get('/.well-known/oauth-client-metadata.json', metadataHandler)
   }
 
+  /**
+   * Register static routes for serving assets.
+   * @param app - Express application instance
+   * @param cfg - Stratos service configuration
+   * @private
+   */
   private static registerStaticRoutes(
     app: express.Application,
     cfg: StratosServiceConfig,
@@ -266,6 +307,13 @@ export class StratosServer {
     app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
   }
 
+  /**
+   * Register OAuth-related routes for the Stratos service.
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @param cfg - Stratos service configuration
+   * @private
+   */
   private static registerOAuthRoutes(
     app: express.Application,
     ctx: AppContext,
@@ -275,6 +323,7 @@ export class StratosServer {
       oauthClient: ctx.oauthClient,
       enrollmentConfig: cfg.enrollment,
       enrollmentStore: ctx.enrollmentStore,
+      enrollmentValidator: ctx.enrollmentValidator,
       idResolver: ctx.idResolver,
       baseUrl: cfg.service.publicUrl,
       serviceEndpoint: cfg.service.publicUrl,
@@ -305,17 +354,28 @@ export class StratosServer {
     app.use('/oauth', oauthRoutes)
   }
 
+  /**
+   * Register feature-related routes and handlers for the Stratos service.
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @private
+   */
   private static registerFeatureHandlers(
     app: express.Application,
     ctx: AppContext,
   ) {
     registerHandlers(ctx.xrpcServer, ctx)
-    registerEnrollmentHandlers(ctx.xrpcServer, ctx)
-    registerHydrationHandlers(ctx.xrpcServer, ctx)
     registerSubscribeRecords(ctx)
     app.use(ctx.xrpcServer.router)
   }
 
+  /**
+   * Register error handling middleware for the Stratos service.
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @param cfg - Stratos service configuration
+   * @private
+   */
   private static registerErrorMiddleware(
     app: express.Application,
     ctx: AppContext,

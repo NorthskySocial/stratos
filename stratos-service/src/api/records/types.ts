@@ -25,6 +25,27 @@ export interface SequenceTrace {
   queuedAtMs?: number
 }
 
+export interface BatchWriteResult {
+  uri?: string
+  cid?: string
+}
+
+export interface CommitResult {
+  results: BatchWriteResult[]
+  commit: { cid: string; rev: string }
+}
+
+export interface RecordResult {
+  uri: string
+  cid?: string
+  value: unknown
+}
+
+export interface ListRecordsResult {
+  records: RecordResult[]
+  cursor?: string
+}
+
 /**
  * Sequence a change for subscriptions
  * @param store - Actor transactor store

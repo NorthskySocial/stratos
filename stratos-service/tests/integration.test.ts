@@ -19,14 +19,17 @@ import {
 
 import { IdResolver } from '@atproto/identity'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
-import { EnrollmentServiceImpl, validateEnrollment } from '../src/features'
-import { type StratosServiceConfig } from '../src'
+import {
+  EnrollmentServiceImpl,
+  validateEnrollment,
+} from '../src/features/index.js'
+import { type StratosServiceConfig } from '../src/index.js'
 import {
   closeServiceDb,
   createServiceDb,
   migrateServiceDb,
   ServiceDb,
-} from '../src/db'
+} from '../src/db/index.js'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<Cid> => {
@@ -98,6 +101,14 @@ function createMockBlobStore(): BlobStore {
     }),
     getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
+      if (!bytes) throw new Error('Blob not found')
+      async function* generate() {
+        yield bytes!
+      }
+      return generate()
+    }),
+    getTempStream: vi.fn().mockImplementation(async (key: string) => {
+      const bytes = storage.get(key)
       if (!bytes) throw new Error('Blob not found')
       async function* generate() {
         yield bytes!

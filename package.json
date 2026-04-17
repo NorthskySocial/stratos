@@ -19,6 +19,7 @@
     "test:coverage": "vitest run --coverage",
     "codegen": "pnpm --filter stratos-service run codegen",
     "dev:local": "tsx scripts/dev-local.ts",
+    "dev:local:debug": "tsx scripts/dev-local.ts --debug-service",
     "e2etest": "deno run -A test/scripts/run-all.ts",
     "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct",
     "test:integration": "pnpm e2etest",

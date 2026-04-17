@@ -38,7 +38,7 @@ export interface DpopVerifierConfig {
   /** Optional DPoP manager for testing */
   dpopManager?: DpopManager
   /** DPoP secret for nonce generation (false to disable, undefined for random) */
-  dpopSecret?: Uint8Array | string | false
+  dpopSecret?: Uint8Array<ArrayBuffer> | string | false
   /** DPoP nonce rotation interval in ms */
   dpopRotationInterval?: number
   /** Logger for auth events */
@@ -61,6 +61,7 @@ export class DpopVerificationError extends Error {
       | 'not_enrolled'
       | 'not_allowed',
     public readonly wwwAuthenticate?: string,
+    public readonly nonce?: string,
   ) {
     super(message)
     this.name = 'DpopVerificationError'
@@ -113,10 +114,9 @@ export class DpopVerifier {
       config.dpopManager ??
       new DpopManager({
         dpopSecret: config.dpopSecret as
-          | Uint8Array<ArrayBuffer>
           | string
-          | false
-          | undefined,
+          | Uint8Array<ArrayBuffer>
+          | false,
         dpopRotationInterval: config.dpopRotationInterval,
       })
   }
@@ -247,10 +247,12 @@ export class DpopVerifier {
     } catch (err) {
       if (isUseDpopNonceError(err)) {
         this.config.logger?.debug('DPoP nonce required, sending use_dpop_nonce')
+        const nonce = this.nextNonce()
         throw new DpopVerificationError(
           'DPoP nonce required',
           'use_dpop_nonce',
           'DPoP error="use_dpop_nonce"',
+          nonce,
         )
       }
       const message = err instanceof Error ? err.message : 'Invalid DPoP proof'

@@ -10,6 +10,7 @@ import {
   hasIntersection,
   isLocalService,
   parseServiceEndpoint,
+  hydrateRecordBlobs,
 } from '../src/index.js'
 
 describe('Hydration Domain', () => {
@@ -216,6 +217,50 @@ describe('Hydration Domain', () => {
 
       expect(context.viewerDid).toBe(null)
       expect(context.viewerDomains).toEqual([])
+    })
+  })
+  describe('hydrateRecordBlobs', () => {
+    it('should hydrate blobs in zone.stratos.embed.images', () => {
+      const record = {
+        $type: 'zone.stratos.feed.post',
+        text: 'Hello world',
+        embed: {
+          $type: 'zone.stratos.embed.images',
+          images: [
+            {
+              image: {
+                $type: 'blob',
+                ref: { $link: 'cid123' },
+                mimeType: 'image/jpeg',
+                size: 1000,
+              },
+              alt: 'A beautiful sunset',
+            },
+          ],
+        },
+      }
+      const ownerDid = 'did:plc:user123'
+      const serviceUrl = 'https://stratos.example.com'
+
+      const hydrated = hydrateRecordBlobs(record, ownerDid, serviceUrl)
+      const images = (hydrated.embed as any).images
+      const expectedUrl =
+        'https://stratos.example.com/xrpc/zone.stratos.sync.getBlob?did=did%3Aplc%3Auser123&cid=cid123'
+      expect(images[0].image.url).toBe(expectedUrl)
+      expect(images[0].fullsize).toBe(expectedUrl)
+      expect(images[0].thumb).toBe(expectedUrl)
+    })
+
+    it('should not modify records of other types', () => {
+      const record = {
+        $type: 'app.bsky.feed.post',
+        text: 'Hello world',
+      }
+      const ownerDid = 'did:plc:user123'
+      const serviceUrl = 'https://stratos.example.com'
+
+      const hydrated = hydrateRecordBlobs(record, ownerDid, serviceUrl)
+      expect(hydrated).toEqual(record)
     })
   })
 })

@@ -13,17 +13,11 @@ export type * from './sequence-store.js'
 export type * from './cache.js'
 
 import type { RecordStoreReader, RecordStoreWriter } from './record-store.js'
-import type {
-  BlobContentStore,
-  BlobMetadataReader,
-  BlobMetadataWriter,
-} from './blob-store.js'
+import type { BlobMetadataReader, BlobMetadataWriter, } from './blob-store.js'
+import type { BlobStore } from '../types.js'
 import type { RepoStoreReader, RepoStoreWriter } from './repo-store.js'
 import type { EnrollmentStoreWriter } from './enrollment-store.js'
-import type {
-  SequenceStoreReader,
-  SequenceStoreWriter,
-} from './sequence-store.js'
+import type { SequenceStoreReader, SequenceStoreWriter, } from './sequence-store.js'
 
 /**
  * Combined reader interfaces for an actor's data
@@ -31,7 +25,7 @@ import type {
 export interface ActorStoreReaders {
   record: RecordStoreReader
   blobMetadata: BlobMetadataReader
-  blobContent: BlobContentStore
+  blobContent: BlobStore
   repo: RepoStoreReader
   sequence: SequenceStoreReader
 }
@@ -42,7 +36,7 @@ export interface ActorStoreReaders {
 export interface ActorStoreWriters {
   record: RecordStoreWriter
   blobMetadata: BlobMetadataWriter
-  blobContent: BlobContentStore
+  blobContent: BlobStore
   repo: RepoStoreWriter
   sequence: SequenceStoreWriter
 }

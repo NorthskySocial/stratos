@@ -11,7 +11,8 @@
     "checkJs": true,
     "isolatedModules": true,
     "moduleDetection": "force",
-    "strict": true
+    "strict": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom", "vitest-dom/extend-expect"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts", "tests/**/*.ts"]
 }

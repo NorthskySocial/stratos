@@ -204,4 +204,36 @@ describe('DpopVerifier', () => {
       code: 'not_enrolled',
     })
   })
+
+  it('should include nonce in error when DPoP nonce is required', async () => {
+    const claims = {
+      sub: 'did:plc:user1',
+      iss: 'https://pds.example.com',
+      exp: Math.floor(Date.now() / 1000) + 60,
+      cnf: { jkt: 'test-jkt' },
+    }
+    const accessToken = jwt.sign(claims, 'secret')
+
+    const req = {
+      method: 'GET',
+      url: '/xrpc/some.procedure',
+      headers: {
+        authorization: `DPoP ${accessToken}`,
+        dpop: 'test-proof',
+      },
+    }
+
+    mockDpopManager.checkProof.mockRejectedValue({ error: 'use_dpop_nonce' })
+    mockDpopManager.nextNonce.mockReturnValue('new-test-nonce')
+
+    try {
+      await verifier.verify(req as any)
+      expect.fail('Should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(DpopVerificationError)
+      const dpopErr = err as DpopVerificationError
+      expect(dpopErr.code).toBe('use_dpop_nonce')
+      expect(dpopErr.nonce).toBe('new-test-nonce')
+    }
+  })
 })

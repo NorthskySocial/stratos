@@ -1,7 +1,7 @@
 import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
-import { StratosServiceConfig } from '../../src'
 import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
+import { StratosServiceConfig } from '../../src/index.js'
 
 /**
  * Create a deterministic CID from data

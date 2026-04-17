@@ -174,7 +174,7 @@ export function createXrpcHandler<
     const start = Date.now()
     const { auth, input } = handlerCtx
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-    const params = handlerCtx.params || (handlerCtx as any).req?.query || {}
+    const params = (handlerCtx as any).params || (handlerCtx as any).req?.query || {}
     const did = extractDid(handlerCtx)
 
     if (options.requireAuth !== false && !did) {
@@ -205,11 +205,21 @@ export function createXrpcHandler<
         durationMs: Date.now() - start,
       })
 
+      if (
+        result &&
+        typeof result === 'object' &&
+        'encoding' in result &&
+        'body' in result
+      ) {
+        return result as HandlerResponse
+      }
+
       return {
         encoding: 'application/json',
         body: result,
       }
     } catch (err) {
+      console.error(`Error in XRPC handler ${methodName}:`, err)
       handleRequestError(err, ctx, {
         requestId,
         method: methodName,

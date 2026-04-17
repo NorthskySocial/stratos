@@ -1,11 +1,7 @@
 import { eq, inArray } from 'drizzle-orm'
 import type { Cid } from '@atproto/lex-data'
-import { parseCid } from '../atproto/index.js'
-import {
-  StratosDbOrTx,
-  stratosRepoBlock,
-  stratosRepoRoot,
-} from '../db/index.js'
+import { parseCid } from '../atproto'
+import { StratosDbOrTx, stratosRepoBlock, stratosRepoRoot } from '../db'
 import { Logger } from '../types.js'
 import { BlockMap, StratosSqlRepoReader } from './reader.js'
 

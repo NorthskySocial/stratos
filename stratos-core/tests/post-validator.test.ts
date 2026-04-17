@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PostValidator } from '../src/index.js'
-import { StratosConfig, StratosValidationError } from '../src/types.js'
+import { PostValidator, StratosConfig, StratosValidationError } from '../src'
 
 describe('PostValidator', () => {
   const config: StratosConfig = {

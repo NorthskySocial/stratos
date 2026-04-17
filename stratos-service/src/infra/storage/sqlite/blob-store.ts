@@ -11,6 +11,7 @@ import {
   BlobMetadataWriter,
   parseCid,
   stratosBlob,
+  stratosBlobBoundary,
   type StratosDb,
   stratosRecordBlob,
 } from '@northskysocial/stratos-core'
@@ -40,6 +41,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       cid,
       mimeType: row.mimeType,
       size: row.size,
+      tempKey: row.tempKey,
       width: row.width ?? undefined,
       height: row.height ?? undefined,
       createdAt: row.createdAt,
@@ -73,6 +75,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
         cid: stratosBlob.cid,
         mimeType: stratosBlob.mimeType,
         size: stratosBlob.size,
+        tempKey: stratosBlob.tempKey,
         width: stratosBlob.width,
         height: stratosBlob.height,
         createdAt: stratosBlob.createdAt,
@@ -86,6 +89,7 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       cid: parseCid(row.cid),
       mimeType: row.mimeType,
       size: row.size,
+      tempKey: row.tempKey,
       width: row.width ?? undefined,
       height: row.height ?? undefined,
       createdAt: row.createdAt,
@@ -103,6 +107,34 @@ export class SqliteBlobMetadataReader implements BlobMetadataReader {
       .from(stratosBlob)
 
     return rows.map((row) => parseCid(row.cid))
+  }
+
+  /**
+   * List record URIs associated with a blob CID.
+   * @param blobCid - CID of the blob.
+   * @returns Array of record URIs.
+   */
+  async listRecordsForBlob(blobCid: Cid): Promise<string[]> {
+    const rows = await this.db
+      .select({ recordUri: stratosRecordBlob.recordUri })
+      .from(stratosRecordBlob)
+      .where(eq(stratosRecordBlob.blobCid, blobCid.toString()))
+
+    return rows.map((row) => row.recordUri)
+  }
+
+  /**
+   * Get boundaries associated with a blob CID.
+   * @param blobCid - CID of the blob.
+   * @returns Array of boundary strings.
+   */
+  async getBoundariesForBlob(blobCid: Cid): Promise<string[]> {
+    const rows = await this.db
+      .select({ boundary: stratosBlobBoundary.boundary })
+      .from(stratosBlobBoundary)
+      .where(eq(stratosBlobBoundary.blobCid, blobCid.toString()))
+
+    return rows.map((row) => row.boundary)
   }
 }
 
@@ -197,5 +229,33 @@ export class SqliteBlobMetadataWriter
       .update(stratosBlob)
       .set({ takedownRef: null })
       .where(eq(stratosBlob.cid, cid.toString()))
+  }
+
+  /**
+   * Associate a blob with a boundary.
+   * @param blobCid - CID of the blob.
+   * @param boundary - Boundary string.
+   */
+  async associateBlobWithBoundary(
+    blobCid: Cid,
+    boundary: string,
+  ): Promise<void> {
+    await this.db
+      .insert(stratosBlobBoundary)
+      .values({
+        blobCid: blobCid.toString(),
+        boundary,
+      })
+      .onConflictDoNothing()
+  }
+
+  /**
+   * Remove all boundary associations for a blob CID.
+   * @param blobCid - CID of the blob.
+   */
+  async removeBlobBoundaryAssociations(blobCid: Cid): Promise<void> {
+    await this.db
+      .delete(stratosBlobBoundary)
+      .where(eq(stratosBlobBoundary.blobCid, blobCid.toString()))
   }
 }

@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdir, rm } from 'node:fs/promises'
-import { StratosServer } from '../../src'
 import { envToConfig, parseEnv } from '../../src/config.js'
 import { cborToRecord, createMockBlobStoreCreator } from './test-env.js'
 import { createLogger } from '../../src/logger.js'
+import { StratosServer } from '../../src/index.js'
 
 export class TestServer {
   constructor(

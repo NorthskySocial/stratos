@@ -1,11 +1,11 @@
 import { z } from 'zod'
 import {
-  ENROLLMENT_MODE,
-  qualifyBoundaries,
-  dbConfigSchema,
-  loggingConfigSchema,
-  redisConfigSchema,
   commaListSchema,
+  dbConfigSchema,
+  ENROLLMENT_MODE,
+  loggingConfigSchema,
+  qualifyBoundaries,
+  redisConfigSchema,
 } from '@northskysocial/stratos-core'
 
 /**
@@ -312,12 +312,7 @@ function buildPostgresUrl(env: Env): string | undefined {
   return url.toString()
 }
 
-/**
- * Translates environment variables into a StratosServiceConfig object.
- * @param env - Environment variables object
- * @returns - StratosServiceConfig
- */
-export function envToConfig(env: Env): StratosServiceConfig {
+function derivePublicUrl(env: Env): string {
   let publicUrl = env.STRATOS_PUBLIC_URL
   if (
     env.STRATOS_DEV_MODE &&
@@ -339,11 +334,46 @@ export function envToConfig(env: Env): StratosServiceConfig {
   }
 
   // Ensure publicUrl is a string, even if empty, to avoid 'undefined' string later
-  publicUrl = publicUrl ?? ''
+  return publicUrl ?? ''
+}
+
+/**
+ * Define Service DID based on environment variables.
+ * @param env - Environment variables object
+ * @param publicUrl - Public URL derived from environment variables
+ * @returns Service DID derived from environment variables
+ */
+function deriveServiceDid(env: Env, publicUrl: string): string {
+  let serviceDid = env.STRATOS_SERVICE_DID
+  if (
+    env.STRATOS_DEV_MODE &&
+    publicUrl.includes('ngrok') &&
+    (serviceDid === 'did:web:localhost' ||
+      serviceDid === 'did:web:stratos1.example.com' ||
+      !serviceDid)
+  ) {
+    try {
+      const url = new URL(publicUrl)
+      serviceDid = `did:web:${encodeURIComponent(url.hostname)}`
+    } catch {
+      // Fallback to original if URL parsing fails
+    }
+  }
+  return serviceDid
+}
+
+/**
+ * Translates environment variables into a StratosServiceConfig object.
+ * @param env - Environment variables object
+ * @returns - StratosServiceConfig
+ */
+export function envToConfig(env: Env): StratosServiceConfig {
+  const publicUrl = derivePublicUrl(env)
+  const serviceDid = deriveServiceDid(env, publicUrl)
 
   return {
     service: {
-      did: env.STRATOS_SERVICE_DID,
+      did: serviceDid,
       serviceFragment: env.STRATOS_SERVICE_FRAGMENT,
       port: env.STRATOS_PORT,
       publicUrl,
@@ -359,9 +389,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {
-      serviceDid: env.STRATOS_SERVICE_DID,
+      serviceDid,
       allowedDomains: qualifyBoundaries(
-        env.STRATOS_SERVICE_DID,
+        serviceDid,
         env.STRATOS_ALLOWED_DOMAINS,
       ),
       retentionDays: env.STRATOS_RETENTION_DAYS,
@@ -380,10 +410,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
       autoEnrollDomains:
         env.STRATOS_AUTO_ENROLL_DOMAINS.length > 0
-          ? qualifyBoundaries(
-              env.STRATOS_SERVICE_DID,
-              env.STRATOS_AUTO_ENROLL_DOMAINS,
-            )
+          ? qualifyBoundaries(serviceDid, env.STRATOS_AUTO_ENROLL_DOMAINS)
           : undefined,
       allowListUrl: env.STRATOS_ALLOW_LIST_URI,
       allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,

@@ -3,12 +3,8 @@ import {
   decodeCid as decodeLexCid,
   parseCid as parseLexCid,
 } from '@atproto/lex-data'
-import { InvalidIdentifierError } from '../shared/errors.js'
-import {
-  cidForLex,
-  encode as cborEncode,
-  type LexValue,
-} from '@atproto/lex-cbor'
+import { InvalidIdentifierError } from '../shared'
+import { cidForLex, encode as cborEncode, type LexValue, } from '@atproto/lex-cbor'
 import { fromUint8Array } from '@atcute/car'
 import { decode, fromBytes, toCidLink } from '@atcute/cbor'
 import { type CidLink, isCidLink } from '@atcute/cid'
@@ -57,9 +53,10 @@ export function decodeCommitOps(
     cid?: { $link: string } | string | null
   }>,
 ): DecodedOp[] {
-  if (!blocks.length) return []
+  const hasOnlyDeletes = ops.every((op) => op.action === 'delete')
+  if (!blocks.length && !hasOnlyDeletes) return []
 
-  const car = readCarBlocks(blocks)
+  const car = blocks.length ? readCarBlocks(blocks) : new Map<string, unknown>()
   const decoded: DecodedOp[] = []
 
   for (const op of ops) {
@@ -124,6 +121,11 @@ export function parseCid(
   throw new InvalidIdentifierError('invalid CID')
 }
 
+/**
+ * Convert a JSON-compatible value to an IPLD value
+ * @param val - The JSON-compatible value to convert
+ * @returns The IPLD value
+ */
 export function jsonToLex(val: Record<string, unknown>): unknown {
   return toIpld(val)
 }

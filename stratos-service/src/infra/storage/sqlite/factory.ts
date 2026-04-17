@@ -10,10 +10,10 @@ import * as crypto from '@atproto/crypto'
 import type {
   ActorStoreReaders,
   ActorStoreWriters,
-  BlobContentStore,
-  ServiceStores,
+  BlobStore,
   StorageBackend,
   StorageFactory,
+  ServiceStores,
 } from '@northskysocial/stratos-core'
 import {
   closeStratosDb,
@@ -60,7 +60,7 @@ export interface SqliteStorageFactoryConfig {
   /** CBOR decoder function */
   cborToRecord: (content: Uint8Array) => Record<string, unknown>
   /** Blob content store creator (for filesystem/S3 storage) */
-  blobContentStoreCreator: (did: string) => BlobContentStore
+  blobContentStoreCreator: (did: string) => BlobStore
 }
 
 /**
@@ -74,7 +74,7 @@ export class SqliteStorageFactory implements StorageFactory {
   private readonly cborToRecord: (
     content: Uint8Array,
   ) => Record<string, unknown>
-  private readonly blobContentStoreCreator: (did: string) => BlobContentStore
+  private readonly blobContentStoreCreator: (did: string) => BlobStore
 
   constructor(config: SqliteStorageFactoryConfig) {
     this.dataDir = config.dataDir
@@ -164,17 +164,20 @@ export class SqliteStorageFactory implements StorageFactory {
     const db = createStratosDb(dbLocation)
     await db._initialized
 
+    const blobContentStoreCreator = this.blobContentStoreCreator
+    const cborToRecord = this.cborToRecord
+
     try {
       return await db.transaction(async (tx) => {
         const stores: ActorStoreWriters = {
           record: new SqliteRecordStoreWriter(
             tx as unknown as StratosDb,
-            this.cborToRecord,
+            cborToRecord,
           ),
           blobMetadata: new SqliteBlobMetadataWriter(
             tx as unknown as StratosDb,
           ),
-          blobContent: this.blobContentStoreCreator(did),
+          blobContent: blobContentStoreCreator(did),
           repo: new SqliteRepoStoreWriter(tx as unknown as StratosDb),
           sequence: new SqliteSequenceStoreWriter(tx as unknown as StratosDb),
         }

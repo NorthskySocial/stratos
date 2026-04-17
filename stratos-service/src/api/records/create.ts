@@ -7,6 +7,7 @@ import {
   encodeRecord,
   parseCid,
   RepoWrite,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
@@ -39,7 +40,7 @@ export interface CreateRecordOutput {
 
 interface PrecomputedRecordData {
   uri: AtUri
-  recordBytes: Uint8Array<ArrayBufferLike>
+  recordBytes: Uint8Array
   cid: CID
 }
 
@@ -351,6 +352,25 @@ async function executeTransaction(
         'create',
         writeResult.rev,
       )
+
+      // Associate blobs with record and boundaries for access control
+      const blobs = StratosValidator.extractBlobs(record)
+      for (const blobCidStr of blobs) {
+        const blobCid = parseCid(blobCidStr)
+        await store.blob.associateBlobWithRecord(blobCid, uri.toString())
+
+        const boundaries = StratosValidator.extractBoundaryDomains(
+          record as Record<string, unknown>,
+        )
+        for (const boundary of boundaries) {
+          await store.blob.associateBlobWithBoundary(blobCid, boundary)
+        }
+        // Update Bloom filter for fast rejection
+        if (ctx.bloomManager) {
+          await ctx.bloomManager.updateBloom(blobCid, boundaries)
+        }
+      }
+
       phases.transactPersist = performance.now() - ti
 
       return {

@@ -5,7 +5,8 @@ import { type Enrollment } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
-import { serviceDIDToRkey } from '../../oauth/routes.js'
+import { serviceDIDToRkey } from '../../oauth'
+import { verifyEnrolled } from './internal/auth.js'
 
 /**
  * Register all enrollment-related XRPC handlers
@@ -34,6 +35,7 @@ function registerEnrollmentStatus(server: XrpcServer, ctx: AppContext): void {
   const { authVerifier } = ctx
 
   xrpc.method('zone.stratos.enrollment.status', {
+    type: 'query',
     auth: authVerifier.optionalStandard,
     handler: createXrpcHandler(ctx, 'zone.stratos.enrollment.status', {
       requireAuth: false,
@@ -48,7 +50,20 @@ function registerEnrollmentStatus(server: XrpcServer, ctx: AppContext): void {
 
         const enrollment = await ctx.enrollmentService.getEnrollment(did)
         if (!enrollment) {
-          return { did, enrolled: false }
+          // Check if user is eligible for auto-enrollment
+          try {
+            await verifyEnrolled(did, {
+              idResolver: ctx.idResolver,
+              enrollmentStore: ctx.enrollmentStore,
+              config: ctx.cfg.enrollment,
+              allowListProvider: ctx.allowListProvider,
+              logger: ctx.logger,
+            })
+            // If verifyEnrolled doesn't throw, they are eligible
+            return { did, enrolled: true, active: false }
+          } catch {
+            return { did, enrolled: false }
+          }
         }
 
         return buildEnrollmentStatusResponse(
@@ -137,6 +152,7 @@ function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
   const { authVerifier } = ctx
 
   xrpc.method('zone.stratos.enrollment.unenroll', {
+    type: 'procedure',
     auth: authVerifier.standard,
     handler: createXrpcHandler(ctx, 'zone.stratos.enrollment.unenroll', {
       handler: async ({ did }) => {

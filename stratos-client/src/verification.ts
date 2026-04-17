@@ -14,8 +14,7 @@ import type {
   VerificationLevel,
   VerifiedRecord,
 } from './types.js'
-import { discoverEnrollments } from './discovery.js'
-import { serviceDIDToRkey } from './routing.js'
+import { getEnrollmentByServiceDid } from './discovery.js'
 
 type DidString = `did:plc:${string}` | `did:web:${string}`
 
@@ -116,10 +115,7 @@ export const resolveUserSigningKey = async (
   did: string,
   serviceDid: string,
 ): Promise<PublicKey | null> => {
-  const enrollments = await discoverEnrollments(did, pdsUrl)
-
-  const targetRkey = serviceDIDToRkey(serviceDid)
-  const enrollment = enrollments.find((e) => e.rkey === targetRkey)
+  const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
   if (!enrollment?.signingKey) return null
 
   const didKey = enrollment.signingKey

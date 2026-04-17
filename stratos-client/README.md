@@ -86,60 +86,29 @@ at://did:plc:abc123/zone.stratos.actor.enrollment/did:web:service-b.example.com 
 ### Discovery functions
 
 ```typescript
-import {
-  discoverEnrollments,
-  discoverEnrollment,
-} from '@northskysocial/stratos-client'
+import { getEnrollmentByServiceDid } from '@northskysocial/stratos-client'
 import type { StratosEnrollment } from '@northskysocial/stratos-client'
 
-// Discover all enrollments (recommended for multi-service support)
-const enrollments: StratosEnrollment[] = await discoverEnrollments(did, pdsUrl)
-
-// Each enrollment includes its rkey for identification
-enrollments.forEach((e) => {
-  console.log(`Service: ${e.service}, rkey: ${e.rkey}`)
-})
-
-// Convenience: discover the first/only enrollment (backward-compatible)
-const enrollment: StratosEnrollment | null = await discoverEnrollment(
+// Direct lookup by service DID (recommended)
+const enrollment: StratosEnrollment | null = await getEnrollmentByServiceDid(
   did,
   pdsUrl,
+  'did:web:stratos.example.com',
 )
+
+if (enrollment) {
+  console.log(`Service: ${enrollment.service}, rkey: ${enrollment.rkey}`)
+}
 
 // With an existing FetchHandler (e.g. from an authenticated agent)
 import type { FetchHandler } from '@atcute/client'
 
-const all = await discoverEnrollments(did, agent.handle)
+const target = await getEnrollmentByServiceDid(did, agent.handle, serviceDid)
 ```
 
-`discoverEnrollments` uses `com.atproto.repo.listRecords` to fetch all enrollment records from the
-collection, validates each record's shape, and includes the rkey from the record URI.
-`discoverEnrollment` is a convenience wrapper that returns the first enrollment or null.
-
-### Direct lookup by service DID
-
-When you already know which Stratos service you're looking for, use `getEnrollmentByServiceDid` for
-a direct O(1) lookup instead of listing all records:
-
-```typescript
-import {
-  getEnrollmentByServiceDid,
-  serviceDIDToRkey,
-} from '@northskysocial/stratos-client'
-
-// Direct lookup — no need to list and filter
-const enrollment = await getEnrollmentByServiceDid(
-  'did:plc:test123',
-  'https://pds.example.com',
-  'did:web:stratos.example.com',
-)
-if (enrollment) {
-  console.log(`Enrolled in ${enrollment.service}`)
-}
-```
-
-This calls `com.atproto.repo.getRecord` with the service DID as the rkey, which is more efficient
-than `listRecords` when targeting a specific service.
+`getEnrollmentByServiceDid` uses `com.atproto.repo.getRecord` with the service DID as the rkey
+for a direct O(1) lookup. This is more efficient than listing all records when targeting a
+specific service.
 
 ### Service DID to rkey conversion
 
@@ -155,40 +124,12 @@ serviceDIDToRkey('did:web:localhost%3A3100') // => 'did:web:localhost:3100'
 
 ### Enrollment selection
 
-When a user has multiple enrollments, select the right one by service URL:
-
-```typescript
-import { findEnrollmentByService } from '@northskysocial/stratos-client'
-
-const enrollments = await discoverEnrollments(did, pdsUrl)
-const target = findEnrollmentByService(
-  enrollments,
-  'https://stratos.example.com',
-)
-if (target) {
-  // Route requests to this enrollment's service
-}
-```
-
-### Boundary addressability
+When a user has multiple enrollments, you can find the right one by iterating or using direct lookups if you have the service DIDs. `getEnrollmentByServiceDid` is the preferred way to retrieve a specific enrollment.
 
 Boundaries are service-DID-qualified: each boundary `value` is stored in `{serviceDid}/{domainName}`
 format (e.g., `did:web:stratos.example.com/animal-lovers`). This makes every boundary globally
 addressable — the same domain name on two different Stratos services produces two distinct boundary
 values, so cross-enrollment conflicts are impossible by design.
-
-```typescript
-const enrollments = await discoverEnrollments(did, pdsUrl)
-
-// Boundaries from different services are distinct by construction
-enrollments.forEach((e) => {
-  e.boundaries.forEach((b) => {
-    // e.g. 'did:web:service-a.example.com/animal-lovers'
-    //      'did:web:service-b.example.com/animal-lovers'
-    console.log(b.value)
-  })
-})
-```
 
 Discovery should happen at session establishment (login/resume) and the result cached for the
 session lifetime. Reset enrollment state on account switch or logout.
@@ -287,7 +228,7 @@ URL. Record creation/deletion always has the corresponding action to the PDS rec
 | `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)     |
 | `zone.stratos.repo.importRepo`       | Yes (import repo from CAR)        |
 | `zone.stratos.sync.subscribeRecords` | Yes (WebSocket firehose)          |
-| `com.atproto.sync.getBlob`           | No (not yet implemented)          |
+| `com.atproto.sync.getBlob`           | Yes (downloads blob content)      |
 
 ---
 
@@ -429,9 +370,8 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 
 ### Boundary gating: blobs
 
-Stratos supports blob listing via `com.atproto.sync.listBlobs`. Blob content retrieval via
-`com.atproto.sync.getBlob` is not yet implemented — gate blob download UI behind availability
-checks.
+Stratos supports blob listing via `com.atproto.sync.listBlobs` and blob content retrieval via
+`com.atproto.sync.getBlob`.
 
 ---
 
@@ -662,7 +602,7 @@ If enrollment discovery is fire-and-forget, account switches can cause stale enr
 ```typescript
 // Problem: if user switches accounts before discovery completes,
 // setEnrollment updates state for the wrong account
-discoverEnrollment(did, pds)
+getEnrollmentByServiceDid(did, pds, serviceDid)
   .then(setEnrollment)
   .catch(() => setEnrollment(null))
 ```
@@ -673,13 +613,13 @@ Key discovery to the active session and cancel on account change:
 // React pattern
 useEffect(() => {
   let cancelled = false
-  discoverEnrollment(did, pds).then((enrollment) => {
+  getEnrollmentByServiceDid(did, pds, serviceDid).then((enrollment) => {
     if (!cancelled) setEnrollment(enrollment)
   })
   return () => {
     cancelled = true
   }
-}, [did])
+}, [did, serviceDid])
 ```
 
 ### Global mode state leakage
@@ -718,9 +658,8 @@ from the URL it receives.
 
 ### Blob operations
 
-`com.atproto.sync.getBlob` is not yet implemented by Stratos. Blob listing via
-`com.atproto.sync.listBlobs` is available. Gate blob download/display UI behind availability checks
-until `getBlob` is supported.
+`com.atproto.sync.getBlob` is implemented by Stratos and follows boundary-based access control.
+Blob listing via `com.atproto.sync.listBlobs` is available.
 
 ---
 
@@ -730,12 +669,12 @@ For a React Native/Expo app like Bluesky's social-app:
 
 ### State layer
 
-| Concept            | social-app location           | Pattern                                                                                            |
-| ------------------ | ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`                                        |
-| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                                                          |
-| Discovery trigger  | `src/state/session/index.tsx` | Call `discoverEnrollment` from `@northskysocial/stratos-client` in `resumeSession` / `login` flows |
-| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler                                                |
+| Concept            | social-app location           | Pattern                                                                                                   |
+| ------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`                                               |
+| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                                                                 |
+| Discovery trigger  | `src/state/session/index.tsx` | Call `getEnrollmentByServiceDid` from `@northskysocial/stratos-client` in `resumeSession` / `login` flows |
+| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler                                                       |
 
 ### Query hooks
 
@@ -813,4 +752,4 @@ For apps that want to add basic Stratos support incrementally:
 
 1. Boundary-aware UI (show boundary chips, filter by boundary)
 2. AppView-side hydration for feed integration
-3. Blob support when available
+3. Blob support (implemented via `com.atproto.sync.getBlob`)

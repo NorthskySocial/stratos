@@ -1,3 +1,4 @@
+export type { Cid } from '@atproto/lex-data'
 export * from './types.js'
 export * from './shared/index.js'
 export type * from './storage/index.js'
@@ -8,7 +9,11 @@ export * from './record/index.js'
 export * from './mst/index.js'
 
 // Blob - export with renamed BlobMetadata to avoid conflict
-export { StratosBlobReader, StratosBlobTransactor } from './blob/index.js'
+export {
+  StratosBlobReader,
+  StratosBlobTransactor,
+  type BlobAuthService,
+} from './blob/index.js'
 export type { BlobMetadata as BlobInfo } from './blob/reader.js'
 
 // Features - Enrollment exports Enrollment type (domain)

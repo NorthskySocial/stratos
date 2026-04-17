@@ -7,6 +7,7 @@ import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 
 import {
+  BlobNotFoundError,
   BlobStore,
   closeStratosDb,
   createStratosDb,
@@ -17,7 +18,7 @@ import {
   StratosDb,
   stratosRecord,
   stratosRecordBlob,
-} from '../src/index.js'
+} from '../src'
 
 // Create a deterministic CID from data
 const createCid = async (data: string | Uint8Array): Promise<Cid> => {
@@ -89,9 +90,17 @@ function createMockBlobStore(): BlobStore {
     }),
     getStream: vi.fn().mockImplementation((cid: Cid) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
-      function* generate() {
-        yield bytes
+      if (!bytes) throw new BlobNotFoundError('Blob not found')
+      async function* generate() {
+        yield bytes!
+      }
+      return generate()
+    }),
+    getTempStream: vi.fn().mockImplementation((key: string) => {
+      const bytes = storage.get(key)
+      if (!bytes) throw new BlobNotFoundError('Blob not found')
+      async function* generate() {
+        yield bytes!
       }
       return generate()
     }),
@@ -285,6 +294,86 @@ describe('Blob Reader', () => {
 
       const result = await reader.listBlobs({ limit: 10 })
       expect(result).toHaveLength(2)
+    })
+  })
+
+  describe('getBlob', () => {
+    it('should return null for non-existent blob', async () => {
+      const cid = await createCid('nope')
+      const result = await reader.getBlob(cid)
+      expect(result).toBeNull()
+    })
+
+    it('should return blob from permanent storage', async () => {
+      const data = new TextEncoder().encode('permanent blob content')
+      const cid = await createCid(data)
+      await blobStore.putPermanent(cid, data)
+      await db.insert(stratosBlob).values({
+        cid: cid.toString(),
+        mimeType: 'text/plain',
+        size: data.length,
+        tempKey: null,
+        width: null,
+        height: null,
+        createdAt: new Date().toISOString(),
+        takedownRef: null,
+      })
+
+      const result = await reader.getBlob(cid)
+      expect(result).not.toBeNull()
+      expect(result?.size).toBe(data.length)
+      expect(result?.mimeType).toBe('text/plain')
+
+      const chunks: Uint8Array[] = []
+      for await (const chunk of result!.stream) {
+        chunks.push(chunk)
+      }
+      const combined = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0))
+      let offset = 0
+      for (const chunk of chunks) {
+        combined.set(chunk, offset)
+        offset += chunk.length
+      }
+      expect(combined).toEqual(data)
+    })
+
+    it('should fall back to temporary storage if missing from permanent', async () => {
+      const data = new TextEncoder().encode('temporary blob content')
+      const cid = await createCid(data)
+      const tempKey = await blobStore.putTemp(data)
+
+      await db.insert(stratosBlob).values({
+        cid: cid.toString(),
+        mimeType: 'text/plain',
+        size: data.length,
+        tempKey: tempKey, // Ensure this is not null
+        width: null,
+        height: null,
+        createdAt: new Date().toISOString(),
+        takedownRef: null,
+      })
+
+      // Blob exists in DB and temp storage, but NOT in permanent storage yet
+      // getBlobMetadata should return tempKey
+      const metadata = await reader.getBlobMetadata(cid)
+      expect(metadata?.tempKey).toBe(tempKey)
+
+      const result = await reader.getBlob(cid)
+      expect(result).not.toBeNull()
+      expect(result?.tempKey).toBe(tempKey)
+
+      const chunks: Uint8Array[] = []
+      for await (const chunk of result!.stream) {
+        chunks.push(chunk)
+      }
+      const combined = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0))
+      let offset = 0
+      for (const chunk of chunks) {
+        combined.set(chunk, offset)
+        offset += chunk.length
+      }
+      expect(combined).toEqual(data)
+      expect(blobStore.getTempStream).toHaveBeenCalledWith(tempKey)
     })
   })
 })
