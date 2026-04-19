@@ -179,8 +179,9 @@ export function createXrpcHandler<
     const requestId = makeRequestId(methodName.split('.').pop() || methodName)
     const start = Date.now()
     const { auth, input } = handlerCtx
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+
     const params =
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
       (handlerCtx as any).params || (handlerCtx as any).req?.query || {}
     const did = extractDid(handlerCtx)
 

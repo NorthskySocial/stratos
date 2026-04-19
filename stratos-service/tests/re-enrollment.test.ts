@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import express from 'express'
-import { createOAuthRoutes } from '../src/oauth/index.js'
-import { createMockEnrollment } from './utils/index.js'
+import { createOAuthRoutes } from '../src/oauth'
+import { createMockEnrollment } from './utils'
 // Extract mocks from the module
 import * as atproto from '@atproto/api'
 
@@ -75,12 +75,10 @@ describe('Re-enrollment', () => {
       }),
     }
     mockEnrollmentValidator = {
-      validate: vi
-        .fn()
-        .mockResolvedValue({
-          allowed: true,
-          pdsEndpoint: 'https://pds.example.com',
-        }),
+      validate: vi.fn().mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      }),
     }
   })
 

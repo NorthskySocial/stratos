@@ -8,10 +8,10 @@ import {
   EnrollmentBoundaryResolver,
 } from '../enrollment'
 import { type HydrationContext } from '../../context-types.js'
-import { SyncServiceImpl } from '../sync/adapter.js'
+import { SyncServiceImpl } from '../sync'
 import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'
 import { type ActorStore } from '../../actor-store-types.js'
-import { type BloomManager } from '../blob/bloom-manager.js'
+import { type BloomManager } from '../blob'
 
 /**
  * Initialize hydration context
