@@ -132,13 +132,15 @@ describe('PostCard.svelte', () => {
       call: ReturnType<typeof vi.fn>
       api: { com: { atproto: { sync: { getBlob: unknown } } } }
     }
-    
+
     // Mock URL.createObjectURL and Blob
     global.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-url')
 
     render(PostCard, {
       post: postWithImage,
-      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
+      stratosAgent: mockAgent as unknown as Parameters<
+        typeof render
+      >[1]['stratosAgent'],
       onreply: () => {},
     })
 
@@ -147,7 +149,7 @@ describe('PostCard.svelte', () => {
 
     expect(mockAgent.call).toHaveBeenCalledWith(
       'zone.stratos.sync.getBlob',
-      expect.objectContaining({ cid: 'cid-no-mime' })
+      expect.objectContaining({ cid: 'cid-no-mime' }),
     )
   })
 
@@ -193,19 +195,18 @@ describe('PostCard.svelte', () => {
 
     render(PostCard, {
       post: postWithSingularImage,
-      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
+      stratosAgent: mockAgent as unknown as Parameters<
+        typeof render
+      >[1]['stratosAgent'],
       onreply: () => {},
     })
 
     await new Promise((resolve) => setTimeout(resolve, 50))
 
-    expect(mockAgent.call).toHaveBeenCalledWith(
-      'zone.stratos.sync.getBlob',
-      {
-        did: mockPost.author,
-        cid: 'singular-cid',
-      }
-    )
+    expect(mockAgent.call).toHaveBeenCalledWith('zone.stratos.sync.getBlob', {
+      did: mockPost.author,
+      cid: 'singular-cid',
+    })
   })
 
   it('handles app.bsky.embed.recordWithMedia with images', async () => {
@@ -224,7 +225,10 @@ describe('PostCard.svelte', () => {
           ],
         },
         record: {
-          record: { uri: 'at://did:plc:foo/app.bsky.feed.post/bar', cid: 'baz' },
+          record: {
+            uri: 'at://did:plc:foo/app.bsky.feed.post/bar',
+            cid: 'baz',
+          },
         },
       },
     }
@@ -254,24 +258,23 @@ describe('PostCard.svelte', () => {
         }
       }
     }
-    
+
     global.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-url-media')
 
     render(PostCard, {
       post: postWithRecordWithMedia,
-      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
+      stratosAgent: mockAgent as unknown as Parameters<
+        typeof render
+      >[1]['stratosAgent'],
       onreply: () => {},
     })
 
     await new Promise((resolve) => setTimeout(resolve, 50))
 
-    expect(mockAgent.call).toHaveBeenCalledWith(
-      'zone.stratos.sync.getBlob',
-      {
-        did: mockPost.author,
-        cid: 'media-cid',
-      }
-    )
+    expect(mockAgent.call).toHaveBeenCalledWith('zone.stratos.sync.getBlob', {
+      did: mockPost.author,
+      cid: 'media-cid',
+    })
   })
 
   it('handles app.bsky.embed.external with thumbnails', async () => {
@@ -314,24 +317,23 @@ describe('PostCard.svelte', () => {
         }
       }
     }
-    
+
     global.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-url-thumb')
 
     render(PostCard, {
       post: postWithExternal,
-      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
+      stratosAgent: mockAgent as unknown as Parameters<
+        typeof render
+      >[1]['stratosAgent'],
       onreply: () => {},
     })
 
     await new Promise((resolve) => setTimeout(resolve, 50))
 
-    expect(mockAgent.call).toHaveBeenCalledWith(
-      'zone.stratos.sync.getBlob',
-      {
-        did: mockPost.author,
-        cid: 'thumb-cid',
-      }
-    )
+    expect(mockAgent.call).toHaveBeenCalledWith('zone.stratos.sync.getBlob', {
+      did: mockPost.author,
+      cid: 'thumb-cid',
+    })
   })
 
   it('triggers Stratos-specific blob loading for private posts', async () => {
@@ -362,9 +364,13 @@ describe('PostCard.svelte', () => {
             fetch: vi.fn().mockResolvedValue({
               ok: true,
               status: 200,
-              arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6]).buffer),
+              arrayBuffer: vi
+                .fn()
+                .mockResolvedValue(new Uint8Array([4, 5, 6]).buffer),
             }),
-            getHeaders: vi.fn().mockResolvedValue({ Authorization: 'Bearer mock-token' }),
+            getHeaders: vi
+              .fn()
+              .mockResolvedValue({ Authorization: 'Bearer mock-token' }),
           },
         },
         com: {
@@ -395,11 +401,15 @@ describe('PostCard.svelte', () => {
       }
     }
 
-    global.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-private-url')
+    global.URL.createObjectURL = vi
+      .fn()
+      .mockReturnValue('blob:mock-private-url')
 
     render(PostCard, {
       post: postWithImage,
-      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
+      stratosAgent: mockAgent as unknown as Parameters<
+        typeof render
+      >[1]['stratosAgent'],
       onreply: () => {},
     })
 
@@ -412,9 +422,9 @@ describe('PostCard.svelte', () => {
       expect.objectContaining({
         did: mockPost.author,
         cid: 'private-cid',
-      })
+      }),
     )
-    
+
     // Verify standard getBlob was NOT called because Stratos one succeeded
     expect(mockAgent.api.com.atproto.sync.getBlob).not.toHaveBeenCalled()
   })
@@ -445,7 +455,9 @@ describe('PostCard.svelte', () => {
         com: {
           atproto: {
             sync: {
-              getBlob: vi.fn().mockResolvedValue({ data: new Uint8Array([7, 8, 9]) }),
+              getBlob: vi
+                .fn()
+                .mockResolvedValue({ data: new Uint8Array([7, 8, 9]) }),
             },
           },
         },
@@ -472,7 +484,9 @@ describe('PostCard.svelte', () => {
 
     render(PostCard, {
       post: postWithImage,
-      stratosAgent: mockAgent as unknown as Parameters<typeof render>[1]['stratosAgent'],
+      stratosAgent: mockAgent as unknown as Parameters<
+        typeof render
+      >[1]['stratosAgent'],
       onreply: () => {},
     })
 

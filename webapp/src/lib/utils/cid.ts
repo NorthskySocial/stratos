@@ -1,16 +1,18 @@
 export interface StratosImage {
-  image: {
-    ref?: { $link: string }
-    cid?: string
-    mimeType?: string
-    url?: string
-    original?: {
-      ref: { $link: string } | string
-      mimeType: string
-    }
-    $link?: string
-    image?: unknown
-  } | string
+  image:
+    | {
+        ref?: { $link: string }
+        cid?: string
+        mimeType?: string
+        url?: string
+        original?: {
+          ref: { $link: string } | string
+          mimeType: string
+        }
+        $link?: string
+        image?: unknown
+      }
+    | string
   alt?: string
   fullsize?: string
   thumb?: string
@@ -37,7 +39,11 @@ export function getCid(image: StratosImage['image']): string | undefined {
     if (typeof record.toString === 'function') {
       const s = record.toString()
       // Ensure we don't return "[object Object]" as a CID
-      if (s && s !== '[object Object]' && (s.startsWith('baf') || s.length > 20)) {
+      if (
+        s &&
+        s !== '[object Object]' &&
+        (s.startsWith('baf') || s.length > 20)
+      ) {
         return s
       }
     }
@@ -60,9 +66,13 @@ export function getCid(image: StratosImage['image']): string | undefined {
   // Check nested image property
   if (img.image) {
     const nestedImage = img.image as Record<string, unknown>
-    cid = getStr(nestedImage.cid) || getStr(nestedImage.$link) || getStr(nestedImage.ref) || getStr(img.image)
+    cid =
+      getStr(nestedImage.cid) ||
+      getStr(nestedImage.$link) ||
+      getStr(nestedImage.ref) ||
+      getStr(img.image)
     if (cid) return cid
   }
-  
+
   return undefined
 }

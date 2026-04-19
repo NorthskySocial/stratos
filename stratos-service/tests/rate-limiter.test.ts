@@ -48,13 +48,13 @@ describe('WriteRateLimiter', () => {
       rateLimiter.assertWriteAllowed(did)
       vi.advanceTimersByTime(30000)
       rateLimiter.assertWriteAllowed(did)
-      
+
       // Still in window
       expect(rateLimiter.getSnapshot(did).inWindow).toBe(2)
 
       // Advance past first write
       vi.advanceTimersByTime(31000)
-      
+
       const now = Date.now()
       const snapshot = rateLimiter.getSnapshot(did)
       expect(snapshot.inWindow).toBe(1)
@@ -66,7 +66,7 @@ describe('WriteRateLimiter', () => {
       for (let i = 0; i < 5; i++) {
         rateLimiter.assertWriteAllowed(did)
       }
-      
+
       expect(rateLimiter.getSnapshot(did).inWindow).toBe(5)
       expect(rateLimiter.getSnapshot(did).cooldownUntil).toBe(0)
 

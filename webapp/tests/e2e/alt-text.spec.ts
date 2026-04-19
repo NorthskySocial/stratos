@@ -11,13 +11,19 @@ test.describe('Alt Text Support', () => {
         __MOCK_SESSION__?: {
           sub: string
           handle?: string
-          fetchHandler?: (url: string, init: Parameters<typeof fetch>[1]) => Promise<Response>
+          fetchHandler?: (
+            url: string,
+            init: Parameters<typeof fetch>[1],
+          ) => Promise<Response>
         }
       }
       ;(window as unknown as CustomWindow).__MOCK_SESSION__ = {
         sub: 'did:plc:mock',
         handle: 'mock.bsky.social',
-        fetchHandler: async (url: string, init: Parameters<typeof fetch>[1]) => {
+        fetchHandler: async (
+          url: string,
+          init: Parameters<typeof fetch>[1],
+        ) => {
           return await fetch(url, init)
         },
       }
@@ -62,32 +68,39 @@ test.describe('Alt Text Support', () => {
     )
 
     // Mock Stratos service status
-    await page.route('**/xrpc/zone.stratos.actor.getStatus**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ enrolled: true }),
-        headers: { 'Access-Control-Allow-Origin': '*' },
-      })
-    })
+    await page.route(
+      '**/xrpc/zone.stratos.actor.getStatus**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ enrolled: true }),
+          headers: { 'Access-Control-Allow-Origin': '*' },
+        })
+      },
+    )
 
     // Mock server domains
-    await page.route('**/xrpc/zone.stratos.server.getDomains', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ domains: ['example.com'] }),
-        headers: { 'Access-Control-Allow-Origin': '*' },
-      })
-    })
+    await page.route(
+      '**/xrpc/zone.stratos.server.getDomains',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ domains: ['example.com'] }),
+          headers: { 'Access-Control-Allow-Origin': '*' },
+        })
+      },
+    )
 
     // Catch-all for other Stratos/Appview calls to ensure they return 200
-    await page.route(url => 
-      (url.href.includes(STRATOS_URL) || url.href.includes(APPVIEW_URL)) && 
-      !url.href.includes('uploadBlob') && 
-      !url.href.includes('createRecord') &&
-      !url.href.includes('getStatus') &&
-      !url.href.includes('getDomains'), 
+    await page.route(
+      (url) =>
+        (url.href.includes(STRATOS_URL) || url.href.includes(APPVIEW_URL)) &&
+        !url.href.includes('uploadBlob') &&
+        !url.href.includes('createRecord') &&
+        !url.href.includes('getStatus') &&
+        !url.href.includes('getDomains'),
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -95,40 +108,55 @@ test.describe('Alt Text Support', () => {
           body: JSON.stringify({ feed: [], posts: [] }),
           headers: { 'Access-Control-Allow-Origin': '*' },
         })
-      }
+      },
     )
   })
 
-  test('should allow adding alt text to an uploaded image', async ({ page }) => {
-    let createdRecord: { record: { embed: { images: Array<{ alt: string }> } } } | null = null
+  test('should allow adding alt text to an uploaded image', async ({
+    page,
+  }) => {
+    let createdRecord: {
+      record: { embed: { images: Array<{ alt: string }> } }
+    } | null = null
 
     // Mock blob upload
-    await page.route(url => url.href.includes('uploadBlob'), async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify({
-          blob: {
-            $type: 'blob',
-            ref: { $link: 'bafkrei-mock-cid' },
-            mimeType: 'image/png',
-            size: 1234,
-          },
-        }),
-      })
-    })
+    await page.route(
+      (url) => url.href.includes('uploadBlob'),
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({
+            blob: {
+              $type: 'blob',
+              ref: { $link: 'bafkrei-mock-cid' },
+              mimeType: 'image/png',
+              size: 1234,
+            },
+          }),
+        })
+      },
+    )
 
     // Mock record creation
-    await page.route(url => url.href.includes('createRecord'), async (route) => {
-      createdRecord = route.request().postDataJSON() as { record: { embed: { images: Array<{ alt: string }> } } }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify({ uri: 'at://did:plc:mock/zone.stratos.feed.post/1', cid: 'cid1' }),
-      })
-    })
+    await page.route(
+      (url) => url.href.includes('createRecord'),
+      async (route) => {
+        createdRecord = route.request().postDataJSON() as {
+          record: { embed: { images: Array<{ alt: string }> } }
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({
+            uri: 'at://did:plc:mock/zone.stratos.feed.post/1',
+            cid: 'cid1',
+          }),
+        })
+      },
+    )
 
     await page.goto('/')
 
@@ -163,7 +191,11 @@ test.describe('Alt Text Support', () => {
     await page.locator('button:has-text("Post")').click()
 
     // Wait for record creation mock to be called
-    await page.waitForFunction(() => (window as unknown as { recordCreated?: boolean }).recordCreated || true) // Simple wait
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { recordCreated?: boolean }).recordCreated ||
+        true,
+    ) // Simple wait
 
     // Wait a bit for the async call to complete
     await expect.poll(() => createdRecord).toBeTruthy()

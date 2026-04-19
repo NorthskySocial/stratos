@@ -40,10 +40,19 @@ export default defineConfig(({ command, mode }) => {
     ],
     resolve: {
       alias: {
-        jose: path.resolve(__dirname, '../node_modules/.pnpm/jose@5.10.0/node_modules/jose/dist/browser/index.js'),
+        jose: path.resolve(
+          __dirname,
+          '../node_modules/.pnpm/jose@5.10.0/node_modules/jose/dist/browser/index.js',
+        ),
         perf_hooks: path.resolve(__dirname, './src/perf_hooks.ts'),
-        'vite-plugin-node-polyfills/shims/buffer': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/buffer/dist/index.js'),
-        'vite-plugin-node-polyfills/shims/global': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/global/dist/index.js'),
+        'vite-plugin-node-polyfills/shims/buffer': path.resolve(
+          __dirname,
+          'node_modules/vite-plugin-node-polyfills/shims/buffer/dist/index.js',
+        ),
+        'vite-plugin-node-polyfills/shims/global': path.resolve(
+          __dirname,
+          'node_modules/vite-plugin-node-polyfills/shims/global/dist/index.js',
+        ),
       },
       conditions: mode === 'test' ? ['browser'] : ['browser', 'import'],
     },
@@ -96,7 +105,10 @@ export default defineConfig(({ command, mode }) => {
               ) {
                 return 'vendor-polyfills'
               }
-              if (id.includes('@atproto/oauth-client-browser') || id.includes('@atproto/crypto')) {
+              if (
+                id.includes('@atproto/oauth-client-browser') ||
+                id.includes('@atproto/crypto')
+              ) {
                 return 'vendor-atproto-oauth'
               }
               return 'vendor'
@@ -115,8 +127,7 @@ export default defineConfig(({ command, mode }) => {
             (warning.code === 'PLUGIN_WARNING' &&
               warning.plugin === 'vite:resolve' &&
               warning.message.includes('node:async_hooks')) ||
-            (warning.code === 'EVAL' &&
-              warning.id?.includes('vm-browserify'))
+            (warning.code === 'EVAL' && warning.id?.includes('vm-browserify'))
           ) {
             return
           }
@@ -128,7 +139,14 @@ export default defineConfig(({ command, mode }) => {
       environment: 'jsdom',
       globals: true,
       setupFiles: ['./tests/setup.ts'],
-      exclude: ['node_modules', 'dist', '.idea', '.git', '.cache', 'tests/e2e/**'],
+      exclude: [
+        'node_modules',
+        'dist',
+        '.idea',
+        '.git',
+        '.cache',
+        'tests/e2e/**',
+      ],
     },
     server: {
       host: true,

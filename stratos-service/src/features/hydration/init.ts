@@ -3,7 +3,10 @@ import {
   type Cache,
   type EnrollmentStoreReader,
 } from '@northskysocial/stratos-core'
-import { CachedBoundaryResolver, EnrollmentBoundaryResolver, } from '../enrollment'
+import {
+  CachedBoundaryResolver,
+  EnrollmentBoundaryResolver,
+} from '../enrollment'
 import { type HydrationContext } from '../../context-types.js'
 import { SyncServiceImpl } from '../sync/adapter.js'
 import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'

@@ -1,4 +1,8 @@
-import { NodeOAuthClient, NodeSavedSession, ResolvedHandle, } from '@atproto/oauth-client-node'
+import {
+  NodeOAuthClient,
+  NodeSavedSession,
+  ResolvedHandle,
+} from '@atproto/oauth-client-node'
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
 import { eq } from 'drizzle-orm'

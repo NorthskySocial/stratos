@@ -128,16 +128,19 @@ async function uploadImage(
   stratosEndpoint: string,
   accessToken: string,
   imageData: Uint8Array,
-  mimeType: string
+  mimeType: string,
 ) {
-  const response = await fetch(`${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': mimeType,
+  const response = await fetch(
+    `${stratosEndpoint}/xrpc/com.atproto.repo.uploadBlob`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': mimeType,
+      },
+      body: imageData,
     },
-    body: imageData,
-  })
+  )
 
   if (!response.ok) {
     throw new Error('Failed to upload image')
@@ -158,7 +161,7 @@ async function createPostWithImage(
   text: string,
   domains: string[],
   blob: any, // BlobRef from uploadImage
-  altText: string = ''
+  altText: string = '',
 ) {
   const record: StratosPost = {
     $type: 'zone.stratos.feed.post',

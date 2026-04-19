@@ -1,7 +1,12 @@
 import { eq } from 'drizzle-orm'
 import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto'
-import { stratosBlob, stratosBlobBoundary, StratosDbOrTx, stratosRecordBlob, } from '../db'
+import {
+  stratosBlob,
+  stratosBlobBoundary,
+  StratosDbOrTx,
+  stratosRecordBlob,
+} from '../db'
 import { BlobStore, Logger, PreparedBlobRef } from '../types.js'
 import { StratosBlobReader } from './reader.js'
 

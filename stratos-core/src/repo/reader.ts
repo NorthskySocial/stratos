@@ -2,7 +2,12 @@ import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import type { Cid } from '@atproto/lex-data'
 import { parseCid } from '../atproto'
 import { type CidLink, decode as cborDecode } from '@atcute/cbor'
-import { countAll, StratosDbOrTx, stratosRepoBlock, stratosRepoRoot, } from '../db'
+import {
+  countAll,
+  StratosDbOrTx,
+  stratosRepoBlock,
+  stratosRepoRoot,
+} from '../db'
 import { Logger } from '../types.js'
 
 /**

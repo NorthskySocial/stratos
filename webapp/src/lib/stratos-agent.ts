@@ -81,11 +81,13 @@ export function createServiceFetch(
       // Actually, standard fetch doesn't consume Blobs.
     }
 
-    const isUploadBlob = fullUrl.pathname.endsWith('/com.atproto.repo.uploadBlob') || 
-                       fullUrl.pathname.endsWith('/zone.stratos.repo.uploadBlob')
-    const isGetBlob = fullUrl.pathname.endsWith('/zone.stratos.sync.getBlob') ||
-                    fullUrl.pathname.endsWith('/com.atproto.sync.getBlob')
-    
+    const isUploadBlob =
+      fullUrl.pathname.endsWith('/com.atproto.repo.uploadBlob') ||
+      fullUrl.pathname.endsWith('/zone.stratos.repo.uploadBlob')
+    const isGetBlob =
+      fullUrl.pathname.endsWith('/zone.stratos.sync.getBlob') ||
+      fullUrl.pathname.endsWith('/com.atproto.sync.getBlob')
+
     if (isUploadBlob || isGetBlob) {
       console.log(`[StratosAgent] Preparing request to ${fullUrl.href}`)
       console.log(`[StratosAgent] Session status:`, {

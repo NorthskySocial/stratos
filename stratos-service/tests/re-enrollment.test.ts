@@ -75,7 +75,12 @@ describe('Re-enrollment', () => {
       }),
     }
     mockEnrollmentValidator = {
-      validate: vi.fn().mockResolvedValue({ allowed: true, pdsEndpoint: 'https://pds.example.com' }),
+      validate: vi
+        .fn()
+        .mockResolvedValue({
+          allowed: true,
+          pdsEndpoint: 'https://pds.example.com',
+        }),
     }
   })
 

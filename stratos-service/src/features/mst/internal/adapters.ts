@@ -1,6 +1,10 @@
 import { Cid } from '@atproto/lex-data'
 import type { Keypair } from '@atproto/crypto'
-import type { RepoWrite, SequencingService, SigningService, } from '@northskysocial/stratos-core'
+import type {
+  RepoWrite,
+  SequencingService,
+  SigningService,
+} from '@northskysocial/stratos-core'
 import { ActorTransactor } from '../../../actor-store-types.js'
 import { sequenceChange, SequenceTrace } from '../../../api'
 

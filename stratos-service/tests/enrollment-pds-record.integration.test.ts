@@ -23,7 +23,9 @@ describe('handleCallback PDS Record', () => {
       setBoundaries: vi.fn(),
     }
     const mockEnrollmentValidator = {
-      validate: vi.fn().mockResolvedValue({ allowed: true, pdsEndpoint: 'https://pds.test' }),
+      validate: vi
+        .fn()
+        .mockResolvedValue({ allowed: true, pdsEndpoint: 'https://pds.test' }),
     }
     mockIdResolver = {
       did: {

@@ -53,16 +53,19 @@ describe('auth', () => {
     if (mockInstance) {
       ;(mockInstance as { init: unknown }).init = mockInit
     } else {
-      vi.mocked(BrowserOAuthClient).mockImplementationOnce(
-        function (this: { init: unknown; signIn: unknown; revoke: unknown }, options: { onDelete: (sub: string, cause: string) => void }) {
-          capturedOnDelete = options.onDelete
-          this.init = mockInit
-          this.signIn = vi.fn()
-          this.revoke = vi.fn()
-          // eslint-disable-next-line @typescript-eslint/no-this-alias
-          mockInstance = this
-        } as unknown as (options: { onDelete: (sub: string, cause: string) => void }) => void,
-      )
+      vi.mocked(BrowserOAuthClient).mockImplementationOnce(function (
+        this: { init: unknown; signIn: unknown; revoke: unknown },
+        options: { onDelete: (sub: string, cause: string) => void },
+      ) {
+        capturedOnDelete = options.onDelete
+        this.init = mockInit
+        this.signIn = vi.fn()
+        this.revoke = vi.fn()
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        mockInstance = this
+      } as unknown as (options: {
+        onDelete: (sub: string, cause: string) => void
+      }) => void)
     }
 
     const session = await init()

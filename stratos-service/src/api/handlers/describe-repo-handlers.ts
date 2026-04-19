@@ -46,6 +46,7 @@ export const describeRepoHandler = (ctx: AppContext) =>
         }
       } catch {
         // DID resolution is best-effort
+        ctx.logger?.warn({ repo }, 'Could not resolve DID')
       }
 
       if (handle) {

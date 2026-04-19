@@ -18,7 +18,7 @@ Stratos Core is organized into feature-sliced modules, each following specific d
 ### Core Domain Modules
 
 | Module        | Pattern           | Description                                                         |
-|:--------------|:------------------|:--------------------------------------------------------------------|
+| :------------ | :---------------- | :------------------------------------------------------------------ |
 | `enrollment`  | Port/Domain       | OAuth enrollment validation and registration business logic.        |
 | `hydration`   | Port/Domain       | Boundary-aware record hydration for AppViews and clients.           |
 | `stub`        | Port/Domain       | Stub record generation for public PDS dual-write operations.        |

@@ -5,6 +5,7 @@ The Stratos WebApp is a simple, single-page application (SPA) that demonstrates 
 ## Purpose
 
 The WebApp serves several roles in the Stratos ecosystem:
+
 1. **Reference Implementation**: Shows how to use `@atproto/oauth-client-browser` with Stratos.
 2. **User Interface**: Provides a way for users to enroll in a Stratos service and manage their private posts.
 3. **Developer Demo**: Demonstrates how to fetch and merge public and private feeds client-side.
@@ -20,6 +21,7 @@ The WebApp serves several roles in the Stratos ecosystem:
 ## Architecture
 
 The WebApp is structured as a standard Vite-based Svelte project. It uses the following libraries:
+
 - `atproto-api`: For interacting with standard ATProtocol endpoints.
 - `@atproto/oauth-client-browser`: For managing the OAuth flow.
 - `@northskysocial/stratos-client`: For Stratos-specific discovery, routing, and record verification.

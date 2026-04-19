@@ -180,7 +180,8 @@ export function createXrpcHandler<
     const start = Date.now()
     const { auth, input } = handlerCtx
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-    const params = (handlerCtx as any).params || (handlerCtx as any).req?.query || {}
+    const params =
+      (handlerCtx as any).params || (handlerCtx as any).req?.query || {}
     const did = extractDid(handlerCtx)
 
     if (options.requireAuth !== false && !did) {

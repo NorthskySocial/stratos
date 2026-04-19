@@ -8,7 +8,10 @@ import {
 } from '@atproto/xrpc-server'
 import { verifyServiceAuth } from './verifier.js'
 import { DpopVerificationError, DpopVerifier } from './index.js'
-import { EnrollmentDeniedError, type Logger, } from '@northskysocial/stratos-core'
+import {
+  EnrollmentDeniedError,
+  type Logger,
+} from '@northskysocial/stratos-core'
 import { StratosServiceConfig } from '../../config.js'
 import { ExternalAllowListProvider } from '../../features/enrollment/internal/allow-list.js'
 import { verifyEnrolled } from '../../features'
@@ -100,7 +103,11 @@ export function createAuthVerifiers(
       logger,
     }),
     admin: createAdminVerifier(adminPassword),
-    subscribeAuth: createSubscribeAuthVerifier(syncToken, idResolver, serviceDid),
+    subscribeAuth: createSubscribeAuthVerifier(
+      syncToken,
+      idResolver,
+      serviceDid,
+    ),
   }
 }
 

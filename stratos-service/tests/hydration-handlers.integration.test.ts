@@ -21,10 +21,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db'
-import {
-  initHydration,
-  registerHydrationHandlers,
-} from '../src/features'
+import { initHydration, registerHydrationHandlers } from '../src/features'
 import { createMockBlobStore, createTestConfig } from './utils'
 
 describe('Hydration Handlers', () => {

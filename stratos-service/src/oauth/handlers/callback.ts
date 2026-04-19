@@ -1,6 +1,9 @@
 import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
-import type { EnrollmentValidationResult, Logger } from '@northskysocial/stratos-core'
+import type {
+  EnrollmentValidationResult,
+  Logger,
+} from '@northskysocial/stratos-core'
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
 import {
   migrateEnrollmentRkey,

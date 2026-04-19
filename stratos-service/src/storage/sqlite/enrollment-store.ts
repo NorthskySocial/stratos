@@ -1,7 +1,15 @@
 import { eq } from 'drizzle-orm'
-import { type EnrollmentStoreReader, type StoredEnrollment, } from '@northskysocial/stratos-core'
-import { enrollment, type Enrollment, enrollmentBoundary, type ServiceDb, } from '../../db'
-import { type EnrollmentRecord, type EnrollmentStore, } from '../../oauth'
+import {
+  type EnrollmentStoreReader,
+  type StoredEnrollment,
+} from '@northskysocial/stratos-core'
+import {
+  enrollment,
+  type Enrollment,
+  enrollmentBoundary,
+  type ServiceDb,
+} from '../../db'
+import { type EnrollmentRecord, type EnrollmentStore } from '../../oauth'
 
 /**
  * SQLite enrollment store implements both OAuth EnrollmentStore

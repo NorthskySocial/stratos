@@ -21,10 +21,7 @@ import { registerHandlers } from './api'
 import { registerSubscribeRecords } from './subscription'
 import { createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
-import {
-  signAndPersistCommit,
-  StratosBlockStoreReader,
-} from './features'
+import { signAndPersistCommit, StratosBlockStoreReader } from './features'
 
 dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
 dotenvConfig({ override: false })

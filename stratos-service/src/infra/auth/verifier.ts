@@ -1,5 +1,9 @@
-import { InvalidRequestError, } from '@atproto/xrpc-server'
-import { type DidDocument, getDidKeyFromMultibase, IdResolver, } from '@atproto/identity'
+import { InvalidRequestError } from '@atproto/xrpc-server'
+import {
+  type DidDocument,
+  getDidKeyFromMultibase,
+  IdResolver,
+} from '@atproto/identity'
 import * as crypto from '@atproto/crypto'
 
 /**
