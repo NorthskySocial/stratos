@@ -2,6 +2,7 @@ import { AppContext } from '../../context-types.js'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { createXrpcHandler } from '../util.js'
 import { parseCid } from '@northskysocial/stratos-core'
+import { HANDLER_METHOD } from '../handlers'
 
 /**
  * Collects the contents of an async iterable into a single Uint8Array.
@@ -32,7 +33,7 @@ async function collectStream(
  * @returns XRPC handler for getting a blob
  */
 export const getBlobHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'zone.stratos.sync.getBlob', {
+  createXrpcHandler(ctx, HANDLER_METHOD.STRATOS_GET_BLOB, {
     requireAuth: false,
     handler: async ({ params, auth, did: tokenDid }) => {
       const did = params.did as string
@@ -98,7 +99,7 @@ export const getBlobHandler = (ctx: AppContext) =>
  * @throws InvalidRequestError if the DID is not found
  */
 export const listBlobsHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'com.atproto.sync.listBlobs', {
+  createXrpcHandler(ctx, HANDLER_METHOD.LIST_BLOBS, {
     requireAuth: false,
     handler: async ({ params }) => {
       const did = params.did as string

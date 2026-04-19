@@ -14,6 +14,7 @@ import {
   DeleteRecordInput,
 } from '../records'
 import { createXrpcHandler } from '../util.js'
+import { HANDLER_METHOD } from '../handlers'
 
 /**
  * Handler for creating a record in a repository.
@@ -21,7 +22,7 @@ import { createXrpcHandler } from '../util.js'
  * @returns XRPC handler for creating a record
  */
 export const createRecordHandler = (ctx: AppContext) =>
-  createXrpcHandler<CreateRecordInput>(ctx, 'com.atproto.repo.createRecord', {
+  createXrpcHandler<CreateRecordInput>(ctx, HANDLER_METHOD.CREATE_RECORD, {
     handler: async ({ input, did, requestId }) => {
       const start = Date.now()
       const body = input
@@ -65,7 +66,7 @@ export const createRecordHandler = (ctx: AppContext) =>
  * @returns XRPC handler for deleting a record
  */
 export const deleteRecordHandler = (ctx: AppContext) =>
-  createXrpcHandler<DeleteRecordInput>(ctx, 'com.atproto.repo.deleteRecord', {
+  createXrpcHandler<DeleteRecordInput>(ctx, HANDLER_METHOD.DELETE_RECORD, {
     handler: async ({ input, did, requestId }) => {
       const body = input
 
@@ -104,7 +105,7 @@ export const deleteRecordHandler = (ctx: AppContext) =>
  * @returns XRPC handler for uploading a blob
  */
 export const uploadBlobHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'com.atproto.repo.uploadBlob', {
+  createXrpcHandler(ctx, HANDLER_METHOD.UPLOAD_BLOB, {
     handler: async ({ input, did, requestId, fullInput }) => {
       const start = Date.now()
       const body = input
@@ -206,7 +207,7 @@ export const uploadBlobHandler = (ctx: AppContext) =>
  * @returns XRPC handler for uploading a blob
  */
 export const stratosUploadBlobHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'zone.stratos.repo.uploadBlob', {
+  createXrpcHandler(ctx, HANDLER_METHOD.STRATOS_UPLOAD_BLOB, {
     handler: async (args) => {
       // The xrpc-server calls the handler with { input, params, auth, req, requestId, did, fullInput }
       // We directly use the implementation of uploadBlobHandler to avoid double-wrapping
@@ -312,7 +313,7 @@ interface ApplyWritesInput {
  * @returns XRPC handler for applying writes
  */
 export const applyWritesHandler = (ctx: AppContext) =>
-  createXrpcHandler<ApplyWritesInput>(ctx, 'com.atproto.repo.applyWrites', {
+  createXrpcHandler<ApplyWritesInput>(ctx, HANDLER_METHOD.APPLY_WRITES, {
     handler: async ({ input, did, requestId }) => {
       const batchResult = await applyWritesBatch(
         ctx,

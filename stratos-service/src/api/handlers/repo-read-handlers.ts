@@ -1,6 +1,7 @@
 import { AppContext } from '../../context-types.js'
 import { createXrpcHandler } from '../util.js'
 import { getRecord, listRecords } from '../records'
+import { HANDLER_METHOD } from '../handlers'
 
 /**
  * Handler for retrieving a record from a repository.
@@ -8,7 +9,7 @@ import { getRecord, listRecords } from '../records'
  * @returns XRPC handler for getting a record
  */
 export const getRecordHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'com.atproto.repo.getRecord', {
+  createXrpcHandler(ctx, HANDLER_METHOD.GET_RECORD, {
     requireAuth: false,
     handler: async ({ params, auth }) => {
       let callerDid: string | undefined
@@ -39,7 +40,7 @@ export const getRecordHandler = (ctx: AppContext) =>
  * @returns XRPC handler for listing records
  */
 export const listRecordsHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'com.atproto.repo.listRecords', {
+  createXrpcHandler(ctx, HANDLER_METHOD.LIST_RECORDS, {
     requireAuth: false,
     handler: async ({ params, auth }) => {
       const callerDid = auth?.credentials?.did
