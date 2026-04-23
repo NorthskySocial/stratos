@@ -22,10 +22,111 @@ GET /xrpc/com.atproto.repo.getRecord?repo=<did>&collection=<collection>&rkey=<rk
 Authorization: Bearer <access_token>
 ```
 
+### Hydrate Record
+
+A single record hydration endpoint that applies boundary-aware filtering.
+
+```
+GET /xrpc/zone.stratos.repo.hydrateRecord?uri=<at-uri>[&cid=<cid>]
+Authorization: Bearer <access_token>
+```
+
+Returns the record if the viewer is authorized, otherwise throws `RecordNotFound` (404) or `RecordBlocked` (400).
+
+### Hydrate Records (Batch)
+
+Batch hydration for up to 100 records.
+
+```
+POST /xrpc/zone.stratos.repo.hydrateRecords
+Authorization: Bearer <access_token>
+
+{
+  "uris": ["at://did:plc:user1/collection/tid1", "at://did:plc:user1/collection/tid2"]
+}
+```
+
+Returns:
+
+```json
+{
+  "records": [{ "uri": "...", "cid": "...", "value": { ... } }],
+  "notFound": ["at://..."],
+  "blocked": ["at://..."]
+}
+```
+
+### Apply Writes (Batch)
+
+Batch create/update/delete operations.
+
+```
+POST /xrpc/com.atproto.repo.applyWrites
+Authorization: Bearer <access_token>
+
+{
+  "repo": "<user-did>",
+  "writes": [
+    {
+      "action": "create",
+      "collection": "zone.stratos.feed.post",
+      "record": { ... }
+    },
+    {
+      "action": "delete",
+      "collection": "zone.stratos.feed.post",
+      "rkey": "<tid>"
+    }
+  ]
+}
+```
+
 ### List Records
 
 ```
 GET /xrpc/com.atproto.repo.listRecords?repo=<did>&collection=<collection>&limit=50
+Authorization: Bearer <access_token>
+```
+
+### Upload Blob
+
+Upload a blob to the repository.
+
+```
+POST /xrpc/com.atproto.repo.uploadBlob
+Authorization: Bearer <access_token>
+Content-Type: * /* (binary)
+
+<blob-data>
+```
+
+Returns: `{ blob: BlobRef }`
+
+Stratos-specific alias (preferred for boundary filtering on some implementations):
+
+```
+POST /xrpc/zone.stratos.repo.uploadBlob
+Authorization: Bearer <access_token>
+Content-Type: * /* (binary)
+
+<blob-data>
+```
+
+### Get Blob
+
+Fetch a blob from an actor's repository. Requires the viewer to have access to at least one record referencing this blob.
+
+```
+GET /xrpc/com.atproto.sync.getBlob?did=<did>&cid=<cid>
+Authorization: Bearer <access_token>
+```
+
+Returns: `* /*` (binary content)
+
+Stratos-specific alias (guarantees boundary-aware access control):
+
+```
+GET /xrpc/zone.stratos.sync.getBlob?did=<did>&cid=<cid>
 Authorization: Bearer <access_token>
 ```
 
@@ -117,6 +218,8 @@ interface Domain {
 | `InvalidCollection` | Collection is not a valid stratos namespace       |
 | `InvalidRecord`     | Record failed validation (e.g., missing boundary) |
 | `RecordNotFound`    | Record doesn't exist or user doesn't have access  |
+| `RecordBlocked`     | Viewer blocked by boundary (for `hydrateRecord`)  |
 | `AuthRequired`      | Endpoint requires authentication                  |
 | `InvalidCar`        | CAR file is malformed or fails CID integrity      |
 | `RepoAlreadyExists` | Target repo already has a commit (import blocked) |
+| `TooManyUris`       | Too many URIs in batch request (max 100)          |

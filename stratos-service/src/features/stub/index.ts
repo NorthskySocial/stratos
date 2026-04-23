@@ -1,2 +1,2 @@
-export * from './adapter.js'
-export * from './background-queue.js'
+export { StubWriterServiceImpl } from './adapter.js'
+export { initRepo } from './init.js'

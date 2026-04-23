@@ -1,188 +1,155 @@
 import { z } from 'zod'
 import {
+  commaListSchema,
+  dbConfigSchema,
   ENROLLMENT_MODE,
+  loggingConfigSchema,
   qualifyBoundaries,
+  redisConfigSchema,
 } from '@northskysocial/stratos-core'
 
 /**
  * Environment variable schema for stratos service
  */
-const envSchema = z.object({
-  // Service identity
-  STRATOS_SERVICE_DID: z.string().min(1),
-  /** Fragment for service entry in DID document (e.g., 'atproto_pns') */
-  STRATOS_SERVICE_FRAGMENT: z.string().default('atproto_pns'),
-  STRATOS_PORT: z.coerce.number().int().positive().default(3100),
-  STRATOS_PUBLIC_URL: z.url(),
+const envSchema = z
+  .object({
+    // Service identity
+    STRATOS_SERVICE_DID: z.string().min(1),
+    /** Fragment for service entry in DID document (e.g., 'atproto_pns') */
+    STRATOS_SERVICE_FRAGMENT: z.string().default('atproto_pns'),
+    STRATOS_PORT: z.coerce.number().int().positive().default(3100),
+    STRATOS_PUBLIC_URL: z.string().url().default('http://localhost:3100'),
 
-  // Storage
-  STRATOS_DATA_DIR: z.string().default('./data'),
-  STORAGE_BACKEND: z.enum(['sqlite', 'postgres']).default('sqlite'),
-  STRATOS_POSTGRES_URL: z.string().optional(),
-  STRATOS_PG_HOST: z.string().optional(),
-  STRATOS_PG_PORT: z.coerce.number().int().positive().optional(),
-  STRATOS_PG_USERNAME: z.string().optional(),
-  STRATOS_PG_PASSWORD: z.string().optional(),
-  STRATOS_PG_DBNAME: z.string().optional(),
-  STRATOS_PG_SSLMODE: z
-    .enum(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])
-    .optional(),
-  STRATOS_PG_ACTOR_POOL_SIZE: z.coerce.number().int().positive().optional(),
-  STRATOS_PG_ADMIN_POOL_SIZE: z.coerce.number().int().positive().optional(),
-  STRATOS_BLOCK_CACHE_SIZE: z.coerce.number().int().positive().optional(),
-  STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
+    STRATOS_BLOCK_CACHE_SIZE: z.coerce.number().int().positive().optional(),
+    STRATOS_BLOB_STORAGE: z.enum(['local', 's3']).default('local'),
 
-  // S3 storage (optional)
-  STRATOS_S3_BUCKET: z.string().optional(),
-  STRATOS_S3_REGION: z.string().optional(),
-  STRATOS_S3_ENDPOINT: z.string().optional(),
-  STRATOS_S3_ACCESS_KEY: z.string().optional(),
-  STRATOS_S3_SECRET_KEY: z.string().optional(),
+    // S3 storage (optional)
+    STRATOS_S3_BUCKET: z.string().optional(),
+    STRATOS_S3_REGION: z.string().optional(),
+    STRATOS_S3_ENDPOINT: z.string().optional(),
+    STRATOS_S3_ACCESS_KEY: z.string().optional(),
+    STRATOS_S3_SECRET_KEY: z.string().optional(),
 
-  // Stratos namespace config
-  STRATOS_ALLOWED_DOMAINS: z.string().transform((s) =>
-    s
-      .split(',')
-      .map((d) => d.trim())
-      .filter((d) => d.length > 0),
-  ),
-  STRATOS_AUTO_ENROLL_DOMAINS: z
-    .string()
-    .default('')
-    .transform((s) =>
-      s
-        .split(',')
-        .map((d) => d.trim())
-        .filter((d) => d.length > 0),
-    ),
-  STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
-  STRATOS_WRITE_RATE_MAX_WRITES: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(300),
-  STRATOS_WRITE_RATE_WINDOW_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(60_000),
-  STRATOS_WRITE_RATE_COOLDOWN_MS: z.coerce
-    .number()
-    .int()
-    .nonnegative()
-    .default(10_000),
-  STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS: z.coerce
-    .number()
-    .int()
-    .nonnegative()
-    .default(1_000),
+    // Stratos namespace config
+    STRATOS_ALLOWED_DOMAINS: commaListSchema,
+    STRATOS_AUTO_ENROLL_DOMAINS: commaListSchema,
+    STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    STRATOS_WRITE_RATE_MAX_WRITES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(300),
+    STRATOS_WRITE_RATE_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(60_000),
+    STRATOS_WRITE_RATE_COOLDOWN_MS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .default(10_000),
+    STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .default(1_000),
 
-  // Enrollment
-  STRATOS_ENROLLMENT_MODE: z
-    .enum(ENROLLMENT_MODE)
-    .default(ENROLLMENT_MODE.ALLOWLIST),
-  STRATOS_ALLOWED_DIDS: z
-    .string()
-    .default('')
-    .transform((s) =>
-      s
-        .split(',')
-        .map((d) => d.trim())
-        .filter((d) => d.length > 0),
-    ),
-  STRATOS_ALLOWED_PDS_ENDPOINTS: z
-    .string()
-    .default('')
-    .transform((s) =>
-      s
-        .split(',')
-        .map((d) => d.trim())
-        .filter((d) => d.length > 0),
-    ),
+    // Enrollment
+    STRATOS_ENROLLMENT_MODE: z
+      .enum(ENROLLMENT_MODE)
+      .default(ENROLLMENT_MODE.ALLOWLIST),
+    STRATOS_ALLOWED_DIDS: commaListSchema,
+    STRATOS_ALLOWED_PDS_ENDPOINTS: commaListSchema,
 
-  // Repo import
-  STRATOS_IMPORT_MAX_BYTES: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(256 * 1024 * 1024),
+    // Repo import
+    STRATOS_IMPORT_MAX_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(256 * 1024 * 1024),
 
-  // Signing key
-  STRATOS_SIGNING_KEY_HEX: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
+    // Signing key
+    STRATOS_SIGNING_KEY_HEX: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
 
-  // OAuth
-  STRATOS_OAUTH_CLIENT_ID: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_CLIENT_SECRET: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_CLIENT_NAME: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_LOGO_URI: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_TOS_URI: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  STRATOS_OAUTH_POLICY_URI: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
+    // OAuth
+    STRATOS_OAUTH_CLIENT_ID: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_OAUTH_CLIENT_SECRET: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_OAUTH_CLIENT_NAME: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_OAUTH_LOGO_URI: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_OAUTH_TOS_URI: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_OAUTH_POLICY_URI: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
 
-  // PLC directory
-  STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
+    // PLC directory
+    STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
 
-  // Logging
-  LOG_LEVEL: z
-    .enum(['trace', 'debug', 'info', 'warn', 'error'])
-    .default('info'),
+    // Admin auth (optional)
+    STRATOS_ADMIN_PASSWORD: z.string().optional(),
+    // External allowlist (optional)
+    STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
+    STRATOS_VALKEY_URL: z.string().url().optional(),
+    STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),
 
-  // Admin auth (optional)
-  STRATOS_ADMIN_PASSWORD: z.string().optional(),
-  // External allow list (optional)
-  STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
-  STRATOS_VALKEY_URL: z.string().url().optional(),
-  STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),
+    // Dev mode (allows Bearer DID auth without DPoP for test scripts)
+    STRATOS_DEV_MODE: z.coerce.boolean().default(false),
 
-  // Dev mode (allows Bearer DID auth without DPoP for test scripts)
-  STRATOS_DEV_MODE: z.coerce.boolean().default(false),
+    // DPoP configuration
+    STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
 
-  // DPoP configuration
-  STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
+    // Sync token for subscription authentication
+    STRATOS_SYNC_TOKEN: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
 
-  // Sync token for subscription authentication
-  STRATOS_SYNC_TOKEN: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-
-  // User-Agent
-  STRATOS_REPO_URL: z
-    .string()
-    .default('https://github.com/NorthskySocial/stratos'),
-  STRATOS_OPERATOR_CONTACT: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-})
+    // User-Agent
+    STRATOS_REPO_URL: z.string().default('http://localhost:3100'),
+    STRATOS_OPERATOR_CONTACT: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+  })
+  .merge(dbConfigSchema)
+  .merge(loggingConfigSchema)
+  .merge(redisConfigSchema)
 
 export type Env = z.infer<typeof envSchema>
 
 /**
- * Parse and validate environment variables
+ * Parse and validate environment variables with clear error reporting
  */
 export function parseEnv(): Env {
-  return envSchema.parse(process.env)
+  const result = envSchema.safeParse(process.env)
+  if (!result.success) {
+    console.error('❌ Configuration error: Invalid environment variables')
+    result.error.issues.forEach((issue) => {
+      const path = issue.path.join('.')
+      console.error(`  - ${path}: ${issue.message}`)
+    })
+    process.exit(1)
+  }
+  return result.data
 }
 
 /**
@@ -317,6 +284,11 @@ function buildBlobstoreConfig(env: Env): BlobstoreConfig {
   }
 }
 
+/**
+ * Build Postgres URL from environment variables.
+ * @param env - Environment variables object
+ * @returns Postgres URL string or undefined if required environment variables are missing
+ */
 function buildPostgresUrl(env: Env): string | undefined {
   const {
     STRATOS_PG_HOST,
@@ -340,13 +312,71 @@ function buildPostgresUrl(env: Env): string | undefined {
   return url.toString()
 }
 
+function derivePublicUrl(env: Env): string {
+  let publicUrl = env.STRATOS_PUBLIC_URL
+  if (
+    env.STRATOS_DEV_MODE &&
+    (!publicUrl ||
+      publicUrl === 'https://stratos.example.com' ||
+      publicUrl === 'http://localhost:3100' ||
+      publicUrl === 'undefined')
+  ) {
+    // If we're in dev mode and using a default/placeholder URL,
+    // check if we can see an NGROK URL in the environment
+    if (
+      process.env.VITE_STRATOS_URL &&
+      process.env.VITE_STRATOS_URL !== 'undefined'
+    ) {
+      publicUrl = process.env.VITE_STRATOS_URL
+    } else if (env.STRATOS_REPO_URL && env.STRATOS_REPO_URL.includes('ngrok')) {
+      publicUrl = env.STRATOS_REPO_URL
+    }
+  }
+
+  // Ensure publicUrl is a string, even if empty, to avoid 'undefined' string later
+  return publicUrl ?? ''
+}
+
+/**
+ * Define Service DID based on environment variables.
+ * @param env - Environment variables object
+ * @param publicUrl - Public URL derived from environment variables
+ * @returns Service DID derived from environment variables
+ */
+function deriveServiceDid(env: Env, publicUrl: string): string {
+  let serviceDid = env.STRATOS_SERVICE_DID
+  if (
+    env.STRATOS_DEV_MODE &&
+    publicUrl.includes('ngrok') &&
+    (serviceDid === 'did:web:localhost' ||
+      serviceDid === 'did:web:stratos1.example.com' ||
+      !serviceDid)
+  ) {
+    try {
+      const url = new URL(publicUrl)
+      serviceDid = `did:web:${encodeURIComponent(url.hostname)}`
+    } catch {
+      // Fallback to original if URL parsing fails
+    }
+  }
+  return serviceDid
+}
+
+/**
+ * Translates environment variables into a StratosServiceConfig object.
+ * @param env - Environment variables object
+ * @returns - StratosServiceConfig
+ */
 export function envToConfig(env: Env): StratosServiceConfig {
+  const publicUrl = derivePublicUrl(env)
+  const serviceDid = deriveServiceDid(env, publicUrl)
+
   return {
     service: {
-      did: env.STRATOS_SERVICE_DID,
+      did: serviceDid,
       serviceFragment: env.STRATOS_SERVICE_FRAGMENT,
       port: env.STRATOS_PORT,
-      publicUrl: env.STRATOS_PUBLIC_URL,
+      publicUrl,
       repoUrl: env.STRATOS_REPO_URL,
     },
     storage: {
@@ -359,9 +389,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
     },
     blobstore: buildBlobstoreConfig(env),
     stratos: {
-      serviceDid: env.STRATOS_SERVICE_DID,
+      serviceDid,
       allowedDomains: qualifyBoundaries(
-        env.STRATOS_SERVICE_DID,
+        serviceDid,
         env.STRATOS_ALLOWED_DOMAINS,
       ),
       retentionDays: env.STRATOS_RETENTION_DAYS,
@@ -380,10 +410,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       allowedPdsEndpoints: env.STRATOS_ALLOWED_PDS_ENDPOINTS,
       autoEnrollDomains:
         env.STRATOS_AUTO_ENROLL_DOMAINS.length > 0
-          ? qualifyBoundaries(
-              env.STRATOS_SERVICE_DID,
-              env.STRATOS_AUTO_ENROLL_DOMAINS,
-            )
+          ? qualifyBoundaries(serviceDid, env.STRATOS_AUTO_ENROLL_DOMAINS)
           : undefined,
       allowListUrl: env.STRATOS_ALLOW_LIST_URI,
       allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
@@ -423,6 +450,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
 /**
  * Get the full service DID with fragment for use in source.service field
  * @example "did:plc:abc123#atproto_pns"
+ *
+ * @param config - StratosServiceConfig
+ * @returns - Full service DID with fragment
  */
 export function getServiceDidWithFragment(
   config: StratosServiceConfig,

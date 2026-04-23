@@ -1,11 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
+  ENROLLMENT_MODE,
+  EnrollmentConfig,
   extractPdsEndpoint,
   isDidAllowed,
   isPdsAllowed,
   validateEnrollmentEligibility,
-} from '../src'
-import type { EnrollmentConfig } from '../src'
+} from '../src/index.js'
 
 describe('Enrollment Domain Logic', () => {
   describe('extractPdsEndpoint', () => {
@@ -64,7 +65,7 @@ describe('Enrollment Domain Logic', () => {
   describe('isDidAllowed', () => {
     it('should allow any DID in open mode', () => {
       const config: EnrollmentConfig = {
-        mode: 'open',
+        mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
@@ -72,9 +73,9 @@ describe('Enrollment Domain Logic', () => {
       expect(isDidAllowed(config, 'did:plc:random')).toBe(true)
     })
 
-    it('should only allow listed DIDs in allowlist mode', () => {
+    it('should only allowlisted DIDs in allowlist mode', () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: ['did:plc:allowed1', 'did:plc:allowed2'],
         allowedPdsEndpoints: [],
       }
@@ -87,7 +88,7 @@ describe('Enrollment Domain Logic', () => {
   describe('isPdsAllowed', () => {
     it('should allow any PDS in open mode', () => {
       const config: EnrollmentConfig = {
-        mode: 'open',
+        mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
@@ -95,9 +96,9 @@ describe('Enrollment Domain Logic', () => {
       expect(isPdsAllowed(config, 'https://any.pds')).toBe(true)
     })
 
-    it('should only allow listed PDS endpoints in allowlist mode', () => {
+    it('should only allowlisted PDS endpoints in allowlist mode', () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: ['https://bsky.social', 'https://pds.example.com'],
       }
@@ -109,7 +110,7 @@ describe('Enrollment Domain Logic', () => {
 
     it('should normalize trailing slashes', () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: ['https://bsky.social/'],
       }
@@ -121,7 +122,7 @@ describe('Enrollment Domain Logic', () => {
   describe('validateEnrollmentEligibility', () => {
     it('should allow enrollment in open mode', () => {
       const config: EnrollmentConfig = {
-        mode: 'open',
+        mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
@@ -138,7 +139,7 @@ describe('Enrollment Domain Logic', () => {
 
     it('should allow in open mode even without PDS endpoint', () => {
       const config: EnrollmentConfig = {
-        mode: 'open',
+        mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
       }
@@ -151,7 +152,7 @@ describe('Enrollment Domain Logic', () => {
 
     it('should allow DID in allowlist', () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: ['did:plc:allowed'],
         allowedPdsEndpoints: [],
       }
@@ -167,7 +168,7 @@ describe('Enrollment Domain Logic', () => {
 
     it('should allow PDS endpoint in allowlist', () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: ['https://bsky.social'],
       }
@@ -183,7 +184,7 @@ describe('Enrollment Domain Logic', () => {
 
     it('should deny if neither DID nor PDS is in allowlist', () => {
       const config: EnrollmentConfig = {
-        mode: 'allowlist',
+        mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: ['did:plc:other'],
         allowedPdsEndpoints: ['https://other.pds'],
       }

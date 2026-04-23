@@ -1,13 +1,17 @@
 import { vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
-import type { BlobStore, BlobStoreCreator } from '@northskysocial/stratos-core'
+import type {
+  BlobContentStore,
+  BlobStore,
+  BlobStoreCreator,
+} from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../../src/context.js'
-import { PostgresActorStore } from '../../src/adapters'
+import { PostgresStorageFactory as PostgresActorStore } from '../../src/infra/storage/postgres/factory.js'
 import type { ActorStore } from '../../src/actor-store-types.js'
 import {
   PostgreSqlContainer,
@@ -41,13 +45,13 @@ export function cborToRecord(bytes: Uint8Array): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
-export async function createCid(data: string | Uint8Array): Promise<CID> {
+export async function createCid(data: string | Uint8Array): Promise<Cid> {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
 }
 
-export function createMockBlobStore(): BlobStore {
+export function createMockBlobStore(): BlobStore & BlobContentStore {
   const storage = new Map<string, Uint8Array>()
   return {
     putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
@@ -55,7 +59,7 @@ export function createMockBlobStore(): BlobStore {
       storage.set(key, bytes)
       return key
     }),
-    makePermanent: vi.fn().mockImplementation(async (key: string, cid: CID) => {
+    makePermanent: vi.fn().mockImplementation(async (key: string, cid: Cid) => {
       const bytes = storage.get(key)
       if (bytes) {
         storage.set(cid.toString(), bytes)
@@ -65,12 +69,12 @@ export function createMockBlobStore(): BlobStore {
     putPermanent: vi
       .fn()
       .mockImplementation(
-        async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-          if (bytes instanceof Uint8Array) {
-            storage.set(cid.toString(), bytes)
+        async (cid: Cid, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
+          if (!(Symbol.asyncIterator in bytes)) {
+            storage.set(cid.toString(), bytes as Uint8Array)
           } else {
             const chunks: Uint8Array[] = []
-            for await (const chunk of bytes) {
+            for await (const chunk of bytes as AsyncIterable<Uint8Array>) {
               chunks.push(chunk)
             }
             const total = new Uint8Array(
@@ -87,33 +91,49 @@ export function createMockBlobStore(): BlobStore {
       ),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockImplementation(async (cid: CID) => {
+    delete: vi.fn().mockImplementation(async (cid: Cid) => {
       storage.delete(cid.toString())
     }),
-    deleteMany: vi.fn().mockImplementation(async (cids: CID[]) => {
+    deleteMany: vi.fn().mockImplementation(async (cids: Cid[]) => {
       for (const cid of cids) {
         storage.delete(cid.toString())
       }
+    }),
+    deleteContent: vi.fn().mockImplementation(async (cid: Cid) => {
+      storage.delete(cid.toString())
     }),
     hasTemp: vi
       .fn()
       .mockImplementation(async (key: string) => storage.has(key)),
     hasStored: vi
       .fn()
-      .mockImplementation(async (cid: CID) => storage.has(cid.toString())),
-    getBytes: vi.fn().mockImplementation(async (cid: CID) => {
+      .mockImplementation(async (cid: Cid) => storage.has(cid.toString())),
+    getBytes: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
+      if (!bytes) return null
       return bytes
     }),
-    getStream: vi.fn().mockImplementation(async (cid: CID) => {
+    getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
-      if (!bytes) throw new Error('Blob not found')
-      async function* generate() {
-        yield bytes!
-      }
-      return generate()
-    }),
+      if (!bytes) return null
+      // Create a proper ReadableStream for BlobContentStore compatibility
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes)
+          controller.close()
+        },
+      })
+    }) as any,
+    getTempStream: vi.fn().mockImplementation(async (key: string) => {
+      const bytes = storage.get(key)
+      if (!bytes) return null
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes)
+          controller.close()
+        },
+      })
+    }) as any,
   }
 }
 
@@ -164,12 +184,13 @@ async function createSqliteBackend(): Promise<TestBackend> {
 async function createPostgresBackend(
   postgresUrl: string,
 ): Promise<TestBackend> {
-  const blobstore = createMockBlobStoreCreator()
+  const blobstore = createMockBlobStoreCreator() as any
   const actorStore = new PostgresActorStore({
     connectionString: postgresUrl,
-    blobstore,
+    serviceDb: {} as any,
+    blobContentStoreCreator: blobstore,
     cborToRecord,
-  })
+  }) as any
 
   return {
     actorStore,

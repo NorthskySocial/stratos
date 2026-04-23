@@ -1,0 +1,29 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.enrollment.unenroll",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Unenroll from the Stratos service, revoking the session and deleting the enrollment record from the user's PDS.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "errors": [{ "name": "NotEnrolled" }, { "name": "AuthRequired" }]
+    }
+  }
+}

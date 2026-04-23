@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { fileURLToPath } from 'url'
-import { dirname, resolve, relative } from 'path'
+import { dirname, resolve } from 'path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LEXICONS_DIR = resolve(__dirname, '../../lexicons')

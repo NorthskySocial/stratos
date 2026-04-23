@@ -1,10 +1,14 @@
 # Getting Started
 
-This guide explains how to integrate Stratos private namespace functionality into ATprotocol client applications. It is based on how Stratos was integrated with [pdsls](https://github.com/pdsls/pdsls) and maps patterns to the Bluesky [social-app](https://github.com/bluesky-social/social-app) codebase as a reference architecture.
+This guide explains how to integrate Stratos private namespace functionality into ATprotocol client
+applications. It is based on how Stratos was integrated with [pdsls](https://github.com/pdsls/pdsls)
+and maps patterns to the Bluesky [social-app](https://github.com/bluesky-social/social-app) codebase
+as a reference architecture.
 
 ## What is Stratos?
 
-Stratos enables private, domain-scoped content within ATprotocol. Users can create posts visible only to members of specific groups or communities.
+Stratos enables private, domain-scoped content within ATprotocol. Users can create posts visible
+only to members of specific groups or communities.
 
 | Concept         | Description                                                                                                                                   |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -15,11 +19,12 @@ Stratos enables private, domain-scoped content within ATprotocol. Users can crea
 
 ## The `stratos-client` Helper Library
 
-The `@northskysocial/stratos-client` package provides the building blocks for enrollment discovery, service routing, record verification, and OAuth scope management:
+The `@northskysocial/stratos-client` package provides the building blocks for enrollment discovery,
+service routing, record verification, and OAuth scope management:
 
 | Module       | What it provides                                                                                                                           |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| discovery    | `discoverEnrollments()`, `discoverEnrollment()`, `getEnrollmentByServiceDid()` — find enrollment records on a user's PDS                   |
+| discovery    | `getEnrollmentByServiceDid()` — find enrollment for a specific service                                                                     |
 | routing      | `createServiceFetchHandler()`, `resolveServiceUrl()`, `findEnrollmentByService()` — route XRPC calls to the correct Stratos service        |
 | verification | `fetchAndVerifyRecord()`, `verifyCidIntegrity()`, `resolveServiceSigningKey()`, `resolveUserSigningKey()` — three-tier record verification |
 | scopes       | `buildStratosScopes()`, `STRATOS_SCOPES` — build OAuth scope strings for Stratos collections                                               |
@@ -31,7 +36,9 @@ npm install @northskysocial/stratos-client
 ```
 
 ::: tip When to use stratos-client vs. raw XRPC
-The code examples in this guide show both approaches. Use `stratos-client` when you want concise, tested helpers — use raw XRPC when you need full control or are using a framework that doesn't fit the helper signatures.
+The code examples in this guide show both approaches. Use `stratos-client` when you want concise,
+tested helpers — use raw XRPC when you need full control or are using a framework that doesn't fit
+the helper signatures.
 :::
 
 ## Quick Start
@@ -59,11 +66,11 @@ Discover enrollment records from the user's PDS:
 
 ```typescript
 import {
-  discoverEnrollment,
+  getEnrollmentByServiceDid,
   resolveServiceUrl,
 } from '@northskysocial/stratos-client'
 
-const enrollment = await discoverEnrollment(did, pdsUrl)
+const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
 const serviceUrl = resolveServiceUrl(enrollment, pdsUrl)
 ```
 
@@ -73,14 +80,18 @@ Or discover the Stratos service endpoint from your app configuration:
 const STRATOS_ENDPOINT = 'https://stratos.example.com'
 ```
 
-See [User Enrollment](/client/enrollment) for the full enrollment record schema and all discovery variants.
+See [User Enrollment](/client/enrollment) for the full enrollment record schema and all discovery
+variants.
 
 ### 3. Create a Stratos Agent
 
-When using `@atproto/api` with an OAuth session, you **must** wrap the session's `fetchHandler` to route requests to the Stratos service URL.
+When using `@atproto/api` with an OAuth session, you **must** wrap the session's `fetchHandler` to
+route requests to the Stratos service URL.
 
 ::: warning Common mistake
-`new Agent(session)` followed by `agent.serviceUrl = new URL(stratosUrl)` will silently send requests to the PDS instead of Stratos. The `OAuthSession` always resolves URLs against the OAuth token's audience. Always use the wrapper pattern below.
+`new Agent(session)` followed by `agent.serviceUrl = new URL(stratosUrl)` will silently send
+requests to the PDS instead of Stratos. The `OAuthSession` always resolves URLs against the OAuth
+token's audience. Always use the wrapper pattern below.
 :::
 
 Using `stratos-client` (with `@atcute/client`):
@@ -133,9 +144,12 @@ await stratosAgent.com.atproto.repo.createRecord({
 
 ## Service Routing
 
-The core routing decision is: _when reading/writing Stratos data and enrollment exists, route XRPC calls to the Stratos service URL instead of the user's PDS._
+The core routing decision is: _when reading/writing Stratos data and enrollment exists, route XRPC
+calls to the Stratos service URL instead of the user's PDS._
 
-When a user has multiple enrollments, select the target enrollment first (see `findEnrollmentByService` in [User Enrollment](/client/enrollment)), then route using that enrollment's service URL.
+When a user has multiple enrollments, select the target enrollment first (see
+`findEnrollmentByService` in [User Enrollment](/client/enrollment)), then route using that
+enrollment's service URL.
 
 ### Routing logic
 
@@ -145,7 +159,8 @@ import { resolveServiceUrl } from '@northskysocial/stratos-client'
 const url = resolveServiceUrl(enrollment, pdsUrl)
 ```
 
-`resolveServiceUrl` returns the enrollment's service URL if enrolled, otherwise the fallback PDS URL.
+`resolveServiceUrl` returns the enrollment's service URL if enrolled, otherwise the fallback PDS
+URL.
 
 ### Which operations route to Stratos
 
@@ -166,9 +181,13 @@ const url = resolveServiceUrl(enrollment, pdsUrl)
 
 ## DPoP-Aware Transport
 
-Stratos endpoints require authenticated requests using the same DPoP credentials as the user's PDS session. The key insight: _pass an absolute URL to the OAuth agent's fetch handler to redirect requests to a different origin while keeping DPoP proof generation valid._
+Stratos endpoints require authenticated requests using the same DPoP credentials as the user's PDS
+session. The key insight: _pass an absolute URL to the OAuth agent's fetch handler to redirect
+requests to a different origin while keeping DPoP proof generation valid._
 
-The underlying DPoP implementation derives `htu` (the HTTP URI claim in the DPoP proof JWT) from the actual request URL. By passing an absolute URL with the Stratos origin, the proof is generated for that origin rather than the PDS.
+The underlying DPoP implementation derives `htu` (the HTTP URI claim in the DPoP proof JWT) from the
+actual request URL. By passing an absolute URL with the Stratos origin, the proof is generated for
+that origin rather than the PDS.
 
 ### Transport wrapper
 
@@ -179,7 +198,9 @@ import { createServiceFetchHandler } from '@northskysocial/stratos-client'
 const handler = createServiceFetchHandler(agent.handle, enrollment.service)
 ```
 
-`createServiceFetchHandler` accepts any `FetchHandler` from `@atcute/client` (a function `(pathname, init) => Promise<Response>`) and returns a `FetchHandlerObject` that resolves relative pathnames against the target service URL.
+`createServiceFetchHandler` accepts any `FetchHandler` from `@atcute/client` (a function
+`(pathname, init) => Promise<Response>`) and returns a `FetchHandlerObject` that resolves relative
+pathnames against the target service URL.
 
 ### Client construction
 
@@ -209,8 +230,10 @@ For apps that want to add basic Stratos support incrementally:
 1. Add enrollment discovery to session establishment
 2. Store enrollment state
 3. Add a Stratos mode toggle (settings or UI chrome)
-4. In record/thread views, when Stratos is active, route `getRecord` / `listRecords` through the service client
-5. Handle empty collections gracefully (enrolled users always have a valid repo, but it may have no records yet)
+4. In record/thread views, when Stratos is active, route `getRecord` / `listRecords` through the
+   service client
+5. Handle empty collections gracefully (enrolled users always have a valid repo, but it may have no
+   records yet)
 
 ### Step 2: Write routing
 
@@ -235,12 +258,12 @@ For a React Native/Expo app like Bluesky's social-app:
 
 ### State layer
 
-| Concept            | social-app location           | Pattern                                                      |
-| ------------------ | ----------------------------- | ------------------------------------------------------------ |
-| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`  |
-| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                    |
-| Discovery trigger  | `src/state/session/index.tsx` | Call `discoverEnrollment` in `resumeSession` / `login` flows |
-| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler          |
+| Concept            | social-app location           | Pattern                                                             |
+| ------------------ | ----------------------------- | ------------------------------------------------------------------- |
+| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`         |
+| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                           |
+| Discovery trigger  | `src/state/session/index.tsx` | Call `getEnrollmentByServiceDid` in `resumeSession` / `login` flows |
+| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler                 |
 
 ### Query hooks
 
@@ -252,7 +275,8 @@ For a React Native/Expo app like Bluesky's social-app:
 
 ### Agent/transport
 
-In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. For Stratos routing, create a parallel agent or intercept at the fetch handler level:
+In `src/state/session/agent.ts`, the `BskyAppAgent` wraps transport. For Stratos routing, create a
+parallel agent or intercept at the fetch handler level:
 
 ```typescript
 import { createServiceFetchHandler } from '@northskysocial/stratos-client'
@@ -287,8 +311,10 @@ const client = enrollment
 
 ## Next Steps
 
-- [User Enrollment](/client/enrollment) — enrollment record schema, discovery functions, attestation verification, OAuth scopes
+- [User Enrollment](/client/enrollment) — enrollment record schema, discovery functions, attestation
+  verification, OAuth scopes
 - [Creating Records](/client/creating-records) — posts with images, replies, rich text
-- [Reading Records](/client/reading-records) — direct access, read path integration, and verified reads
+- [Reading Records](/client/reading-records) — direct access, read path integration, and verified
+  reads
 - [Domain Boundaries](/client/boundaries) — understand visibility rules
 - [Attestation Verification](/client/attestation) — trust model, chained verification, signing keys

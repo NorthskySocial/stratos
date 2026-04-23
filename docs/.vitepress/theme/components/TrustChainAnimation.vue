@@ -1,83 +1,83 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="tc-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="tc-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- Row 1: left → right -->
         <path
           id="tc-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#tc-ml)"
           d="M 170 86 L 315 86"
+          marker-end="url(#tc-ml)"
+          stroke="#9145EC"
         />
         <path
           id="tc-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#tc-ml)"
           d="M 515 86 L 660 86"
+          marker-end="url(#tc-ml)"
+          stroke="#9145EC"
         />
         <!-- Connector: PDS Record down to AppView -->
         <path
           id="tc-a3"
           class="ar"
-          stroke="#7780DC"
-          marker-end="url(#tc-ml)"
           d="M 747 138 L 742 340"
+          marker-end="url(#tc-ml)"
+          stroke="#7780DC"
         />
         <!-- Row 2: right → left -->
         <path
           id="tc-a4"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#tc-ml)"
           d="M 660 391 L 510 391"
+          marker-end="url(#tc-ml)"
+          stroke="#9145EC"
         />
         <path
           id="tc-a5"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#tc-mg)"
           d="M 340 391 L 180 391"
+          marker-end="url(#tc-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Row 1 -->
-      <div class="node" id="tc-nk" style="left: 15px; top: 35px; width: 155px">
+      <div id="tc-nk" class="node" style="left: 15px; top: 35px; width: 155px">
         <div class="ni">🔑</div>
         <div class="nn">Service Key</div>
         <div class="ns">secp256k1</div>
       </div>
 
-      <div class="node" id="tc-ne" style="left: 315px; top: 35px; width: 200px">
+      <div id="tc-ne" class="node" style="left: 315px; top: 35px; width: 200px">
         <div class="ni">✍️</div>
         <div class="nn">Attestation</div>
         <div class="ns">boundaries · did · signingKey</div>
       </div>
 
-      <div class="node" id="tc-nr" style="left: 660px; top: 35px; width: 175px">
+      <div id="tc-nr" class="node" style="left: 660px; top: 35px; width: 175px">
         <div class="ni">🗄️</div>
         <div class="nn">PDS Record</div>
         <div class="ns">enrollment record</div>
@@ -85,8 +85,8 @@
 
       <!-- Row 2 (right → left) -->
       <div
-        class="node"
         id="tc-na"
+        class="node"
         style="left: 660px; top: 340px; width: 165px"
       >
         <div class="ni">📡</div>
@@ -95,8 +95,8 @@
       </div>
 
       <div
-        class="node"
         id="tc-nuk"
+        class="node"
         style="left: 340px; top: 340px; width: 170px"
       >
         <div class="ni">🔐</div>
@@ -105,8 +105,8 @@
       </div>
 
       <div
-        class="node"
         id="tc-nrc"
+        class="node"
         style="left: 15px; top: 340px; width: 165px"
       >
         <div class="ni">📄</div>
@@ -118,7 +118,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

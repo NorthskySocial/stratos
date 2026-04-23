@@ -1,6 +1,19 @@
 # Stratos
 
-Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream AppViews serve boundary-filtered content without inventing a separate identity model. The service is written in typescript with postgres and sqlite support.
+Stratos is a private, boundary-aware data layer for AT Protocol. It keeps private records off the
+user's PDS, publishes enrollment metadata back to the PDS for discovery, and lets downstream
+AppViews serve boundary-filtered content without inventing a separate identity model.
+
+## Documentation
+
+For full documentation, including architecture deep-dives, operator guides, and client integration, visit the [Stratos Homepage](https://stratos.zone/) (or browse the `docs/` directory).
+
+- [**Introduction**](./docs/guide/introduction.md) — What is Stratos and how does it work?
+- [**Quick Start (Docker)**](#quick-start-docker) — Get running in minutes.
+- [**Client Integration**](./docs/client/getting-started.md) — Add Stratos to your ATProtocol app.
+- [**Operator Guide**](./docs/operator/overview.md) — Deploy and manage a Stratos service.
+- [**Architecture**](./docs/architecture/hydration.md) — Technical details on repositories and hydration.
+- [**Glossary**](./docs/guide/glossary.md) — Key terms and concepts.
 
 ## What the Repository Contains
 
@@ -11,49 +24,78 @@ Stratos is a private, boundary-aware data layer for AT Protocol. It keeps privat
 | `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers for clients                   |
 | `stratos-indexer` | Standalone indexer that consumes PDS + Stratos streams and writes to AppView PostgreSQL |
 | `webapp`          | Svelte demo client for enrollment and private posting                                   |
-| `test`            | Deno end-to-end test suite                                                              |
-| `docs`            | Operator, client, and architecture documentation                                        |
+| `docs`            | Full project documentation                                                              |
 
-## Core Model
+## Quick Start (Docker)
 
-- Users enroll with a Stratos service via OAuth.
-- The service writes a `zone.stratos.actor.enrollment` record to the user's PDS.
-- Private records live in Stratos, not on the user's PDS.
-- Records can carry one or more boundary values such as `posters-madness` or `tech`.
-- A viewer can access a record only if they share at least one boundary with it.
-
-## Request Flow
-
-```text
-User -> OAuth enrollment -> Stratos service
-     -> enrollment record on PDS (`zone.stratos.actor.enrollment`)
-     -> private records stored in Stratos
-     -> standalone stratos-indexer writes boundary-aware rows into AppView Postgres
-     -> AppView serves `zone.stratos.feed.*` queries
-```
-
-## Local Development
-
-### Install and verify
-
-```bash
-pnpm install
-pnpm build
-pnpm test
-```
-
-### Start the service
+The easiest way to get the full stack running (Service + Indexer + Postgres) is using Docker Compose:
 
 ```bash
 cp .env.example .env
-pnpm --filter @northskysocial/stratos-service dev
+# Edit .env and set required variables:
+# STRATOS_SERVICE_DID=did:web:localhost
+# STRATOS_PUBLIC_URL=http://localhost:3100
+# STRATOS_ALLOWED_DOMAINS=example.com
+
+docker compose up --build
 ```
 
-For end-to-end coverage, run the integration suite from the repo root, see `test/` for details:
+### Manual Setup
 
-```bash
-pnpm e2etest
-```
+1. **Install dependencies and build packages:**
+
+   ```bash
+   pnpm install
+   pnpm build
+   ```
+
+2. **Configure the environment:**
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your local settings
+   ```
+
+3. **Start for Local Development (with localtunnel):**
+
+   This is the recommended way to develop locally, as it automatically sets up HTTPS tunnels required for ATProto OAuth.
+
+   ```bash
+   pnpm dev:local
+   ```
+
+   This will start both the Stratos Service and the Web UI, and provide you with public URLs.
+
+   > [!NOTE]
+   > This command runs in the foreground. Open a separate terminal for any other commands (like starting the indexer or running tests).
+
+4. **Start the Stratos Service (Direct):**
+
+   ```bash
+   pnpm --filter @northskysocial/stratos-service dev
+   ```
+
+5. **Start the Indexer (requires Deno):**
+
+   ```bash
+   # In a separate terminal
+   cd stratos-indexer
+   deno run --allow-all src/bin/main.ts
+   ```
+
+6. **Start the Web UI (Direct):**
+
+   ```bash
+   # In a separate terminal
+   pnpm --filter @northskysocial/stratos-webapp dev
+   ```
+
+### Running Tests
+
+| Scope               | Command        |
+| ------------------- | -------------- |
+| Unit tests (Vitest) | `pnpm test`    |
+| End-to-end (Deno)   | `pnpm e2etest` |
 
 ## Configuration Highlights
 
@@ -121,27 +163,22 @@ Blob content is stored separately through the configured blob provider (`local` 
 
 ## Indexing Model
 
-The AppView-facing indexing path is not embedded in `stratos-service` or the AppView fork. The standalone `stratos-indexer` package is responsible for:
+The AppView-facing indexing path is not embedded in `stratos-service` or the AppView fork. The
+standalone `stratos-indexer` package is responsible for:
 
 - reading PDS enrollment events,
 - connecting to `zone.stratos.sync.subscribeRecords`,
 - decoding commit payloads,
-- writing `stratos_post`, `stratos_post_boundary`, `stratos_enrollment`, and `stratos_sync_cursor` rows into the AppView database.
+- writing `stratos_post`, `stratos_post_boundary`, `stratos_enrollment`, and `stratos_sync_cursor`
+  rows into the AppView database.
 
-That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in `atproto-stratos`, while ingestion lives here in `stratos-indexer`.
-
-## Testing
-
-| Command        | Scope                  |
-| -------------- | ---------------------- |
-| `pnpm test`    | Vitest across packages |
-| `pnpm e2etest` | End-to-end suite       |
+That separation matters when updating docs or deployment plans: query-time Stratos behavior lives in
+`atproto-stratos`, while ingestion lives here in `stratos-indexer`.
 
 ## Related Docs
 
-- `docs/operator-guide.md`
-- `docs/client-guide.md`
-- `docs/hydration-architecture.md`
-- `docs/enrollment-signing.md`
-- `stratos-client/README.md`
-- `stratos-indexer/CONFIGURATION.md`
+- [Operator Overview](./docs/operator/overview.md)
+- [Client Getting Started](./docs/client/getting-started.md)
+- [Hydration Architecture](./docs/architecture/hydration.md)
+- [Enrollment Signing](./docs/architecture/enrollment-signing.md)
+- [Glossary](./docs/guide/glossary.md)

@@ -35,6 +35,7 @@
           "embed": {
             "type": "union",
             "refs": [
+              "zone.stratos.embed.images",
               "app.bsky.embed.images",
               "app.bsky.embed.video",
               "app.bsky.embed.external",

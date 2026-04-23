@@ -1,20 +1,27 @@
-import type { CID } from 'multiformats/cid'
 import type { AtUri } from '@atproto/syntax'
 import type {
   BlobStore,
-  StatusAttr,
+  BlockMap,
+  CarBlock,
+  CidSet,
+  GetBacklinksOpts,
   ListRecordsOpts,
   RecordWithContent,
   RecordWithMeta,
-  GetBacklinksOpts,
+  StatusAttr,
+  StratosDbOrTx,
+  StratosPgDbOrTx,
   StratosRecordDescript,
-  CarBlock,
-  BlockMap,
-  CidSet,
 } from '@northskysocial/stratos-core'
+import { Cid } from '@atproto/lex-data'
+
+export type ActorStoreDb = StratosDbOrTx | StratosPgDbOrTx
 
 // ─── Sequence Operations ────────────────────────────────────────────────────
 
+/**
+ * Interface for sequence operations in the actor store.
+ */
 export interface SequenceOperations {
   getLatestSeq(): Promise<number>
   getOldestSeq(): Promise<number>
@@ -48,17 +55,17 @@ export interface ActorRecordReader {
   listCollections(): Promise<string[]>
   listRecordsForCollection(opts: ListRecordsOpts): Promise<RecordWithContent[]>
   getRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted?: boolean,
   ): Promise<RecordWithMeta | null>
   hasRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted?: boolean,
   ): Promise<boolean>
-  getRecordTakedownStatus(uri: AtUri): Promise<StatusAttr | null>
-  getCurrentRecordCid(uri: AtUri): Promise<CID | null>
+  getRecordTakedownStatus(uri: string | AtUri): Promise<StatusAttr | null>
+  getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null>
   getRecordBacklinks(opts: GetBacklinksOpts): Promise<
     Array<{
       uri: string
@@ -71,27 +78,34 @@ export interface ActorRecordReader {
     }>
   >
   getBacklinkConflicts(
-    uri: AtUri,
+    uri: string,
     record: Record<string, unknown>,
   ): Promise<AtUri[]>
 }
 
 export interface ActorRecordTransactor extends ActorRecordReader {
+  putRecord(record: {
+    uri: string
+    cid: Cid
+    value: Record<string, unknown>
+    content: Uint8Array
+    indexedAt?: string
+  }): Promise<void>
   indexRecord(
-    uri: AtUri,
-    cid: CID,
+    uri: string | AtUri,
+    cid: Cid,
     record: Record<string, unknown> | null,
     action?: 'create' | 'update',
     repoRev?: string,
     timestamp?: string,
   ): Promise<void>
-  deleteRecord(uri: AtUri): Promise<void>
-  removeBacklinksByUri(uri: AtUri): Promise<void>
+  deleteRecord(uri: string | AtUri): Promise<void>
+  removeBacklinksByUri(uri: string | AtUri): Promise<void>
   addBacklinks(
-    backlinks: Array<{ uri: string; path: string; linkTo: string }>,
+    backlinks: Array<{ uri: string | AtUri; path: string; linkTo: string }>,
   ): Promise<void>
   updateRecordTakedown(
-    uri: AtUri,
+    uri: string | AtUri,
     takedown: { applied: boolean; ref?: string },
   ): Promise<void>
 }
@@ -99,15 +113,17 @@ export interface ActorRecordTransactor extends ActorRecordReader {
 // ─── Repo Store Interface ───────────────────────────────────────────────────
 
 export interface ActorRepoReader {
+  db: ActorStoreDb
   cache: BlockMap
+  readonly did?: string
   hasRoot(): Promise<boolean>
-  getRoot(): Promise<CID | null>
-  getRootDetailed(): Promise<{ cid: CID; rev: string } | null>
-  getBytes(cid: CID): Promise<Uint8Array | null>
-  has(cid: CID): Promise<boolean>
-  getBlocks(cids: CID[]): Promise<{ blocks: BlockMap; missing: CID[] }>
+  getRoot(): Promise<Cid | null>
+  getRootDetailed(): Promise<{ cid: Cid; rev: string } | null>
+  getBytes(cid: Cid): Promise<Uint8Array | null>
+  has(cid: Cid): Promise<boolean>
+  getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }>
   preloadBlocksForRev(rev: string): Promise<void>
-  preloadRootSpine(commitCid: CID): Promise<void>
+  preloadRootSpine(commitCid: Cid): Promise<void>
   iterateCarBlocks(since?: string): AsyncIterable<CarBlock>
   getBlockRange(
     since?: string,
@@ -118,12 +134,12 @@ export interface ActorRepoReader {
 }
 
 export interface ActorRepoTransactor extends ActorRepoReader {
-  lockRoot(): Promise<{ cid: CID; rev: string } | null>
-  updateRoot(cid: CID, rev: string, did: string): Promise<void>
-  putBlock(cid: CID, bytes: Uint8Array, rev: string): Promise<void>
+  updateRoot(cid: Cid, rev: string, did: string): Promise<void>
+  lockRoot(): Promise<{ cid: Cid; rev: string } | null>
+  putBlock(cid: Cid, bytes: Uint8Array, rev: string): Promise<void>
   putBlocks(blocks: BlockMap, rev: string): Promise<void>
-  deleteBlock(cid: CID): Promise<void>
-  deleteBlocks(cids: CID[]): Promise<void>
+  deleteBlock(cid: Cid): Promise<void>
+  deleteBlocks(cids: Cid[]): Promise<void>
   deleteBlocksForRev(rev: string): Promise<void>
   clearCache(): Promise<void>
 }
@@ -131,8 +147,8 @@ export interface ActorRepoTransactor extends ActorRepoReader {
 // ─── Blob Store Interface ───────────────────────────────────────────────────
 
 export interface ActorBlobReader {
-  getBlobMetadata(cid: CID): Promise<{ size: number; mimeType?: string } | null>
-  getBlob(cid: CID): Promise<{
+  getBlobMetadata(cid: Cid): Promise<{ size: number; mimeType?: string } | null>
+  getBlob(cid: Cid): Promise<{
     size: number
     mimeType?: string
     stream: AsyncIterable<Uint8Array>
@@ -142,31 +158,34 @@ export interface ActorBlobReader {
     cursor?: string
     limit: number
   }): Promise<string[]>
-  getBlobTakedownStatus(cid: CID): Promise<StatusAttr | null>
-  getRecordsForBlob(cid: CID): Promise<string[]>
-  hasBlob(cid: CID): Promise<boolean>
+  getBlobTakedownStatus(cid: Cid): Promise<StatusAttr | null>
+  getRecordsForBlob(cid: Cid): Promise<string[]>
+  getBoundariesForBlob(blobCid: Cid): Promise<string[]>
+  hasBlob(cid: Cid): Promise<boolean>
 }
 
 export interface ActorBlobTransactor extends ActorBlobReader {
   trackBlob(blob: {
-    cid: CID
+    cid: Cid
     mimeType: string
     size: number
     tempKey?: string | null
     width?: number | null
     height?: number | null
   }): Promise<void>
-  associateBlobWithRecord(blobCid: CID, recordUri: string): Promise<void>
+  associateBlobWithRecord(blobCid: Cid, recordUri: string): Promise<void>
+  associateBlobWithBoundary(blobCid: Cid, boundary: string): Promise<void>
+  removeBlobBoundaryAssociations(blobCid: Cid): Promise<void>
   processBlobs(
     recordUri: string,
-    blobs: Array<{ cid: CID; mimeType: string; tempKey?: string | null }>,
+    blobs: Array<{ cid: Cid; mimeType: string; tempKey?: string | null }>,
   ): Promise<void>
   removeRecordBlobAssociations(recordUri: string): Promise<void>
   updateBlobTakedown(
-    cid: CID,
+    cid: Cid,
     takedown: { applied: boolean; ref?: string },
   ): Promise<void>
-  deleteOrphanBlobs(): Promise<CID[]>
+  deleteOrphanBlobs(): Promise<Cid[]>
 }
 
 // ─── Actor Store Interfaces ─────────────────────────────────────────────────
@@ -187,6 +206,14 @@ export interface ActorTransactor {
   sequence: SequenceOperations
 }
 
+/**
+ * Interface for an actor store.
+ *
+ * Actor stores are responsible for managing the lifecycle of actors, including
+ * their creation, destruction, and persistence. They provide a consistent
+ * interface for accessing and manipulating actor-related data, including records,
+ * repositories, and blobs.
+ */
 export interface ActorStore {
   close?(): Promise<void>
   exists(did: string): Promise<boolean>

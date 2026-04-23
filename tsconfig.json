@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext", "DOM"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -15,5 +15,6 @@
   },
   "references": [{ "path": "./stratos-core" }, { "path": "./stratos-service" }],
   "files": [],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

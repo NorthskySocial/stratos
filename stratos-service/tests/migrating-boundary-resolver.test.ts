@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { MigratingBoundaryResolver } from '../src/features/enrollment/adapter.js'
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
+import { MigratingBoundaryResolver } from '../src/features/index.js'
 
 const BEBOP_SERVICE = 'did:web:bebop.cowboy.space'
 
 describe('MigratingBoundaryResolver', () => {
   let mockStore: {
-    getBoundaries: ReturnType<typeof vi.fn>
-    setBoundaries: ReturnType<typeof vi.fn>
+    getBoundaries: Mock<(did: string) => Promise<string[]>>
+    setBoundaries: Mock<(did: string, boundaries: string[]) => Promise<void>>
   }
   let resolver: MigratingBoundaryResolver
 
@@ -23,7 +23,7 @@ describe('MigratingBoundaryResolver', () => {
 
   it('returns empty array for unenrolled users', async () => {
     mockStore.getBoundaries.mockResolvedValue([])
-    const result = await resolver.getBoundaries('did:plc:spike')
+    const result = await resolver.getBoundaries('did:plc:spike' as any)
     expect(result).toEqual([])
     expect(mockStore.setBoundaries).not.toHaveBeenCalled()
   })
@@ -33,7 +33,7 @@ describe('MigratingBoundaryResolver', () => {
       'did:web:bebop.cowboy.space/bounty-hunters',
       'did:web:bebop.cowboy.space/red-dragon',
     ])
-    const result = await resolver.getBoundaries('did:plc:spike')
+    const result = await resolver.getBoundaries('did:plc:spike' as any)
     expect(result).toEqual([
       'did:web:bebop.cowboy.space/bounty-hunters',
       'did:web:bebop.cowboy.space/red-dragon',
@@ -45,15 +45,18 @@ describe('MigratingBoundaryResolver', () => {
     mockStore.getBoundaries.mockResolvedValue(['bounty-hunters', 'red-dragon'])
     mockStore.setBoundaries.mockResolvedValue(undefined)
 
-    const result = await resolver.getBoundaries('did:plc:spike')
+    const result = await resolver.getBoundaries('did:plc:spike' as any)
     expect(result).toEqual([
       'did:web:bebop.cowboy.space/bounty-hunters',
       'did:web:bebop.cowboy.space/red-dragon',
     ])
-    expect(mockStore.setBoundaries).toHaveBeenCalledWith('did:plc:spike', [
-      'did:web:bebop.cowboy.space/bounty-hunters',
-      'did:web:bebop.cowboy.space/red-dragon',
-    ])
+    expect(mockStore.setBoundaries).toHaveBeenCalledWith(
+      'did:plc:spike' as any,
+      [
+        'did:web:bebop.cowboy.space/bounty-hunters',
+        'did:web:bebop.cowboy.space/red-dragon',
+      ],
+    )
   })
 
   it('migrates mixed bare and qualified boundaries', async () => {
@@ -63,7 +66,7 @@ describe('MigratingBoundaryResolver', () => {
     ])
     mockStore.setBoundaries.mockResolvedValue(undefined)
 
-    const result = await resolver.getBoundaries('did:plc:spike')
+    const result = await resolver.getBoundaries('did:plc:spike' as any)
     expect(result).toEqual([
       'did:web:bebop.cowboy.space/bounty-hunters',
       'did:web:bebop.cowboy.space/red-dragon',
@@ -76,8 +79,8 @@ describe('MigratingBoundaryResolver', () => {
     const onMigrated = vi.fn()
     resolver.onMigrated = onMigrated
 
-    await resolver.getBoundaries('did:plc:faye')
-    expect(onMigrated).toHaveBeenCalledWith('did:plc:faye', [
+    await resolver.getBoundaries('did:plc:faye' as any)
+    expect(onMigrated).toHaveBeenCalledWith('did:plc:faye' as any, [
       'did:web:bebop.cowboy.space/bounty-hunters',
     ])
   })
@@ -86,7 +89,7 @@ describe('MigratingBoundaryResolver', () => {
     mockStore.getBoundaries.mockResolvedValue(['bounty-hunters'])
     mockStore.setBoundaries.mockRejectedValue(new Error('DB locked'))
 
-    const result = await resolver.getBoundaries('did:plc:jet')
+    const result = await resolver.getBoundaries('did:plc:jet' as any)
     expect(result).toEqual(['did:web:bebop.cowboy.space/bounty-hunters'])
   })
 
@@ -96,7 +99,7 @@ describe('MigratingBoundaryResolver', () => {
     const onMigrated = vi.fn()
     resolver.onMigrated = onMigrated
 
-    await resolver.getBoundaries('did:plc:jet')
+    await resolver.getBoundaries('did:plc:jet' as any)
     expect(onMigrated).not.toHaveBeenCalled()
   })
 })

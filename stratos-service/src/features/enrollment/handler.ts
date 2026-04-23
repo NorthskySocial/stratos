@@ -1,179 +1,215 @@
-import express, { type Router, type Request, type Response } from 'express'
-import type { BoundaryResolver } from '@northskysocial/stratos-core'
+import { type Request, type Response } from 'express'
 import { Agent } from '@atproto/api'
-import type { AppContext } from '../../context.js'
-import { serviceDIDToRkey } from '../../oauth/routes.js'
-
-const jsonBody = express.json({ limit: '100kb' })
-
-const BOUNDARY_CACHE_TTL_MS = 60_000
-
-interface CacheEntry {
-  boundaries: string[]
-  expiresAt: number
-}
-
-export class CachedBoundaryResolver {
-  private cache = new Map<string, CacheEntry>()
-
-  constructor(private resolver: BoundaryResolver) {}
-
-  async getBoundaries(did: string): Promise<string[]> {
-    const now = Date.now()
-    const cached = this.cache.get(did)
-    if (cached && cached.expiresAt > now) {
-      return cached.boundaries
-    }
-    const boundaries = await this.resolver.getBoundaries(did)
-    this.cache.set(did, { boundaries, expiresAt: now + BOUNDARY_CACHE_TTL_MS })
-    return boundaries
-  }
-}
+import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
+import { type Enrollment } from '@northskysocial/stratos-core'
+import type { AppContext } from '../../context-types.js'
+import { type XrpcServerInternal } from '../../api/types.js'
+import { createXrpcHandler } from '../../api/util.js'
+import { serviceDIDToRkey } from '../../oauth'
+import { verifyEnrolled } from './internal/auth.js'
 
 /**
- * Attempt optional authentication
- * Returns the authenticated DID if present and valid, null otherwise.
+ * Register all enrollment-related XRPC handlers
+ *
+ * @param server - XRPC server
+ * @param ctx - Application context
  */
-async function tryAuthenticate(
+export function registerEnrollmentHandlers(
+  server: XrpcServer,
   ctx: AppContext,
-  req: Request,
-  res: Response,
-): Promise<string | null> {
-  try {
-    const result = await ctx.authVerifier.optionalStandard({
-      req,
-      res,
-    } as Parameters<typeof ctx.authVerifier.optionalStandard>[0])
-    return result.credentials.did ?? null
-  } catch {
-    return null
-  }
+): void {
+  registerEnrollmentStatus(server, ctx)
+  registerEnrollmentUnenroll(server, ctx)
+  registerResolveEnrollmentsHandler(ctx)
+  registerAdminBoundaryHandlers(ctx)
+  registerListDomainsHandler(ctx)
 }
 
 /**
- * Register enrollment-related XRPC handlers
+ * Register handler for enrollment status
+ * @param server - XRPC server
+ * @param ctx - Application context
  */
-export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
-  // zone.stratos.enrollment.status - Check enrollment status
-  router.get(
-    '/xrpc/zone.stratos.enrollment.status',
-    async (req: Request, res: Response) => {
-      const start = Date.now()
-      try {
-        const { did } = req.query as { did: string }
+function registerEnrollmentStatus(server: XrpcServer, ctx: AppContext): void {
+  const xrpc = server as unknown as XrpcServerInternal
+  const { authVerifier } = ctx
 
+  xrpc.method('zone.stratos.enrollment.status', {
+    type: 'query',
+    auth: authVerifier.optionalStandard,
+    handler: createXrpcHandler(ctx, 'zone.stratos.enrollment.status', {
+      requireAuth: false,
+      handler: async ({ params, auth }) => {
+        const did = params.did as string
         if (!did) {
-          return res.status(400).json({
-            error: 'InvalidRequest',
-            message: 'did parameter required',
-          })
+          throw new InvalidRequestError(
+            'did parameter required',
+            'InvalidRequest',
+          )
         }
-
-        // Attempt optional authentication
-        const auth = await tryAuthenticate(ctx, req, res)
-
-        ctx.logger?.debug(
-          { method: 'enrollment.status', did, authenticated: !!auth },
-          'handling request',
-        )
 
         const enrollment = await ctx.enrollmentService.getEnrollment(did)
-
-        // This isn't a super great way to do it but hiding boundaries unless authenticated prevents abuse
-        if (enrollment) {
-          const response: {
-            did: string
-            enrolled: true
-            enrolledAt: string
-            active: boolean
-            signingKey: string
-            enrollmentRkey?: string
-            boundaries?: Array<{ value: string }>
-            attestation?: { sig: Uint8Array; signingKey: string }
-          } = {
-            did,
-            enrolled: true,
-            enrolledAt: enrollment.enrolledAt.toISOString(),
-            active: enrollment.active,
-            signingKey: enrollment.signingKeyDid,
-            enrollmentRkey: enrollment.enrollmentRkey,
+        if (!enrollment) {
+          // Check if user is eligible for auto-enrollment
+          try {
+            await verifyEnrolled(did, {
+              idResolver: ctx.idResolver,
+              enrollmentStore: ctx.enrollmentStore,
+              config: ctx.cfg.enrollment,
+              allowListProvider: ctx.allowListProvider,
+              logger: ctx.logger,
+            })
+            // If verifyEnrolled doesn't throw, they are eligible
+            return { did, enrolled: true, active: false }
+          } catch {
+            return { did, enrolled: false }
           }
-
-          // Always resolve boundaries to trigger lazy migration for legacy bare-name boundaries.
-          // Only include them in the response when authenticated to prevent enumeration abuse.
-          const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
-
-          if (auth) {
-            response.boundaries = boundaryValues.map((value: string) => ({
-              value,
-            }))
-
-            if (boundaryValues.length > 0) {
-              try {
-                response.attestation = await ctx.createAttestation(
-                  did,
-                  boundaryValues,
-                  enrollment.signingKeyDid,
-                )
-              } catch (err) {
-                ctx.logger?.warn(
-                  {
-                    err: err instanceof Error ? err.message : String(err),
-                    did,
-                  },
-                  'failed to generate attestation for status',
-                )
-              }
-            }
-          }
-
-          ctx.logger?.debug(
-            {
-              did,
-              enrolled: true,
-              authenticated: !!auth,
-              boundaryCount: response.boundaries?.length ?? 0,
-              durationMs: Date.now() - start,
-            },
-            'enrollment status checked',
-          )
-
-          res.json(response)
-        } else {
-          ctx.logger?.debug(
-            {
-              did,
-              enrolled: false,
-              durationMs: Date.now() - start,
-            },
-            'enrollment status checked',
-          )
-
-          res.json({
-            did,
-            enrolled: false,
-          })
         }
-      } catch (err) {
-        ctx.logger?.error(
-          {
-            err: err instanceof Error ? err.message : String(err),
-            did: req.query.did,
-          },
-          'enrollment.status failed',
+
+        return buildEnrollmentStatusResponse(
+          ctx,
+          did,
+          enrollment,
+          auth?.credentials?.did,
         )
-        res.status(500).json({
-          error: 'InternalError',
-          message: 'Failed to check enrollment status',
-        })
-      }
-    },
-  )
+      },
+    }),
+  })
+}
 
-  // zone.stratos.identity.resolveEnrollments — unauthenticated boundary lookup
-  const cachedResolver = new CachedBoundaryResolver(ctx.boundaryResolver)
+/**
+ * Build enrollment status response
+ * @param ctx - The application context
+ * @param did - The decentralized identifier (DID) of the enrollment
+ * @param enrollment - The enrollment record
+ * @param authenticatedDid - The authenticated DID, if available
+ * @returns The enrollment status response
+ */
+async function buildEnrollmentStatusResponse(
+  ctx: AppContext,
+  did: string,
+  enrollment: Enrollment,
+  authenticatedDid?: string,
+): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = {
+    did,
+    enrolled: true,
+    enrolledAt: enrollment.enrolledAt.toISOString(),
+    active: enrollment.active,
+    signingKey: enrollment.signingKeyDid,
+    enrollmentRkey: enrollment.enrollmentRkey,
+  }
 
-  router.get(
+  const boundaryValues = await ctx.boundaryResolver.getBoundaries(did)
+
+  if (authenticatedDid) {
+    body.boundaries = boundaryValues.map((value: string) => ({ value }))
+    if (boundaryValues.length > 0) {
+      body.attestation = await tryCreateAttestation(
+        ctx,
+        did,
+        boundaryValues,
+        enrollment.signingKeyDid,
+      )
+    }
+  }
+
+  return body
+}
+
+/**
+ * Try to create attestation for enrollment status
+ * @param ctx - The application context
+ * @param did - The decentralized identifier (DID) of the enrollment
+ * @param boundaries - The boundaries for attestation
+ * @param signingKeyDid - The signing key DID
+ * @returns The attestation result or undefined if failed
+ */
+async function tryCreateAttestation(
+  ctx: AppContext,
+  did: string,
+  boundaries: string[],
+  signingKeyDid: string,
+) {
+  try {
+    return await ctx.createAttestation(did, boundaries, signingKeyDid)
+  } catch (err) {
+    ctx.logger?.warn(
+      { err: err instanceof Error ? err.message : String(err), actorDid: did },
+      'failed to generate attestation for status',
+    )
+    return undefined
+  }
+}
+
+/**
+ * Register handler for unenrollment
+ * @param server - XRPC server
+ * @param ctx - Application context
+ */
+function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
+  const xrpc = server as unknown as XrpcServerInternal
+  const { authVerifier } = ctx
+
+  xrpc.method('zone.stratos.enrollment.unenroll', {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    handler: createXrpcHandler(ctx, 'zone.stratos.enrollment.unenroll', {
+      handler: async ({ did }) => {
+        // 1. Delete enrollment record from user's PDS (best-effort)
+        try {
+          const enrollment = await ctx.enrollmentStore.getEnrollment(did!)
+          if (enrollment?.enrollmentRkey) {
+            await ctx.profileRecordWriter.deleteEnrollmentRecord(
+              did!,
+              enrollment.enrollmentRkey,
+            )
+          }
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to delete PDS enrollment record during unenrollment',
+          )
+        }
+
+        // 2. Perform hard delete: local enrollment record and actor data
+        await ctx.enrollmentService.unenroll(did!)
+
+        // 3. Delete signing key (if it exists)
+        try {
+          await ctx.actorStore.deleteSigningKey(did!)
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to delete signing key during unenrollment',
+          )
+        }
+
+        // 4. Revoke OAuth sessions
+        try {
+          await ctx.oauthClient.revoke(did!)
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to revoke OAuth session during unenrollment',
+          )
+        }
+
+        return { success: true }
+      },
+    }),
+  })
+}
+
+/**
+ * Register handlers for enrollment-related operations
+ * @param ctx - Application context
+ */
+function registerResolveEnrollmentsHandler(ctx: AppContext): void {
+  const cache = new Map<string, { boundaries: string[]; timestamp: number }>()
+  const CACHE_TTL = 60 * 1000 // 1 minute
+
+  ctx.app.get(
     '/xrpc/zone.stratos.identity.resolveEnrollments',
     async (req: Request, res: Response) => {
       try {
@@ -185,12 +221,22 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
           })
         }
 
+        const cached = cache.get(did)
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+          return res.json({
+            did,
+            enrolled: true,
+            boundaries: cached.boundaries,
+          })
+        }
+
         const enrolled = await ctx.enrollmentService.isEnrolled(did)
         if (!enrolled) {
           return res.json({ did, enrolled: false, boundaries: [] })
         }
 
-        const boundaries = await cachedResolver.getBoundaries(did)
+        const boundaries = await ctx.boundaryResolver.getBoundaries(did)
+        cache.set(did, { boundaries, timestamp: Date.now() })
         res.json({ did, enrolled: true, boundaries })
       } catch (err) {
         ctx.logger?.error(
@@ -207,48 +253,25 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
       }
     },
   )
+}
 
-  // ── Admin boundary management ──────────────────────────────────────────
+/**
+ * Register handlers for admin boundary-related operations
+ * @param ctx - Application context
+ */
+function registerAdminBoundaryHandlers(ctx: AppContext): void {
+  registerAddBoundaryHandler(ctx)
+  registerRemoveBoundaryHandler(ctx)
+  registerSetBoundariesHandler(ctx)
+}
 
-  async function updatePdsEnrollmentRecord(
-    ctx: AppContext,
-    did: string,
-    boundaries: string[],
-  ): Promise<void> {
-    const enrollment = await ctx.enrollmentStore.getEnrollment(did)
-    if (!enrollment?.signingKeyDid) return
-
-    const attestation = await ctx.createAttestation(
-      did,
-      boundaries,
-      enrollment.signingKeyDid,
-    )
-
-    const rkey = serviceDIDToRkey(ctx.serviceDid)
-    const oauthSession = await ctx.oauthClient.restore(did)
-    const agent = new Agent(oauthSession)
-
-    await agent.com.atproto.repo.putRecord({
-      repo: did,
-      collection: 'zone.stratos.actor.enrollment',
-      rkey,
-      record: {
-        service: ctx.cfg.service.publicUrl,
-        boundaries: boundaries.map((value) => ({ value })),
-        signingKey: enrollment.signingKeyDid,
-        attestation: {
-          sig: attestation.sig,
-          signingKey: attestation.signingKey,
-        },
-        createdAt: new Date().toISOString(),
-      },
-    })
-  }
-
-  // POST /xrpc/zone.stratos.admin.addBoundary
-  router.post(
+/**
+ * Register handler for adding a boundary
+ * @param ctx - Application context
+ */
+function registerAddBoundaryHandler(ctx: AppContext): void {
+  ctx.app.post(
     '/xrpc/zone.stratos.admin.addBoundary',
-    jsonBody,
     async (req: Request, res: Response) => {
       try {
         await ctx.authVerifier.admin({ req, res } as Parameters<
@@ -315,11 +338,16 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
       }
     },
   )
+}
 
+/**
+ * Register remove boundary handler for admin
+ * @param ctx - The application context
+ */
+function registerRemoveBoundaryHandler(ctx: AppContext): void {
   // POST /xrpc/zone.stratos.admin.removeBoundary
-  router.post(
+  ctx.app.post(
     '/xrpc/zone.stratos.admin.removeBoundary',
-    jsonBody,
     async (req: Request, res: Response) => {
       try {
         await ctx.authVerifier.admin({ req, res } as Parameters<
@@ -378,11 +406,15 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
       }
     },
   )
+}
 
-  // POST /xrpc/zone.stratos.admin.setBoundaries
-  router.post(
+/**
+ * Register handler for setting boundaries
+ * @param ctx - Application context
+ */
+function registerSetBoundariesHandler(ctx: AppContext): void {
+  ctx.app.post(
     '/xrpc/zone.stratos.admin.setBoundaries',
-    jsonBody,
     async (req: Request, res: Response) => {
       try {
         await ctx.authVerifier.admin({ req, res } as Parameters<
@@ -452,11 +484,16 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
       }
     },
   )
+}
 
-  // zone.stratos.server.listDomains — public service information
-  router.get(
+/**
+ * Register handler for listing domains
+ * @param ctx - Application context
+ */
+function registerListDomainsHandler(ctx: AppContext): void {
+  ctx.app.get(
     '/xrpc/zone.stratos.server.listDomains',
-    async (_req: Request, res: Response) => {
+    (_req: Request, res: Response) => {
       try {
         res.json({ domains: ctx.cfg.stratos.allowedDomains })
       } catch (err) {
@@ -471,4 +508,45 @@ export function registerEnrollmentHandlers(router: Router, ctx: AppContext) {
       }
     },
   )
+}
+
+/**
+ * Update the PDS enrollment record with new boundaries
+ * @param ctx - Application context
+ * @param did - DID of the enrollment
+ * @param boundaries - New boundaries to set
+ */
+async function updatePdsEnrollmentRecord(
+  ctx: AppContext,
+  did: string,
+  boundaries: string[],
+): Promise<void> {
+  const enrollment = await ctx.enrollmentStore.getEnrollment(did)
+  if (!enrollment?.signingKeyDid) return
+
+  const attestation = await ctx.createAttestation(
+    did,
+    boundaries,
+    enrollment.signingKeyDid,
+  )
+
+  const rkey = serviceDIDToRkey(ctx.serviceDid)
+  const oauthSession = await ctx.oauthClient.restore(did)
+  const agent = new Agent(oauthSession)
+
+  await agent.com.atproto.repo.putRecord({
+    repo: did,
+    collection: 'zone.stratos.actor.enrollment',
+    rkey,
+    record: {
+      service: ctx.cfg.service.publicUrl,
+      boundaries: boundaries.map((value) => ({ value })),
+      signingKey: enrollment.signingKeyDid,
+      attestation: {
+        sig: attestation.sig,
+        signingKey: attestation.signingKey,
+      },
+      createdAt: new Date().toISOString(),
+    },
+  })
 }

@@ -1,94 +1,94 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="df-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="df-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- Row 1 horizontal -->
         <path
           id="df-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#df-ml)"
           d="M 165 86 L 310 86"
+          marker-end="url(#df-ml)"
+          stroke="#9145EC"
         />
         <path
           id="df-a2"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#df-mg)"
           d="M 510 86 L 680 86"
+          marker-end="url(#df-mg)"
+          stroke="#24cf6e"
         />
         <!-- Row 1 → Row 2 diagonals -->
         <path
           id="df-a3"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#df-ml)"
           d="M 410 138 L 450 215"
+          marker-end="url(#df-ml)"
+          stroke="#9145EC"
         />
         <path
           id="df-a4"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#df-ml)"
           d="M 757 138 L 535 266"
+          marker-end="url(#df-ml)"
+          stroke="#9145EC"
         />
         <!-- Row 2 → Row 3 diagonal -->
         <path
           id="df-a5"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#df-ml)"
           d="M 440 318 L 165 375"
+          marker-end="url(#df-ml)"
+          stroke="#9145EC"
         />
         <!-- Row 3 horizontal -->
         <path
           id="df-a6"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#df-ml)"
           d="M 225 426 L 365 426"
+          marker-end="url(#df-ml)"
+          stroke="#9145EC"
         />
         <path
           id="df-a7"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#df-mg)"
           d="M 535 426 L 685 426"
+          marker-end="url(#df-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Row 1 -->
-      <div class="node" id="df-nu" style="left: 20px; top: 35px; width: 145px">
+      <div id="df-nu" class="node" style="left: 20px; top: 35px; width: 145px">
         <div class="ni">🧑</div>
         <div class="nn">User</div>
         <div class="ns">alice.bsky.social</div>
       </div>
 
       <div
-        class="node"
         id="df-nst"
+        class="node"
         style="left: 310px; top: 35px; width: 200px"
       >
         <div class="ni">⚙️</div>
@@ -97,8 +97,8 @@
       </div>
 
       <div
-        class="node"
         id="df-npds"
+        class="node"
         style="left: 680px; top: 35px; width: 155px"
       >
         <div class="ni">🗄️</div>
@@ -108,8 +108,8 @@
 
       <!-- Row 2 -->
       <div
-        class="node"
         id="df-nix"
+        class="node"
         style="left: 365px; top: 215px; width: 170px"
       >
         <div class="ni">🔄</div>
@@ -119,8 +119,8 @@
 
       <!-- Row 3 -->
       <div
-        class="node"
         id="df-ndb"
+        class="node"
         style="left: 55px; top: 375px; width: 170px"
       >
         <div class="ni">🛢️</div>
@@ -129,8 +129,8 @@
       </div>
 
       <div
-        class="node"
         id="df-nav"
+        class="node"
         style="left: 365px; top: 375px; width: 170px"
       >
         <div class="ni">📡</div>
@@ -139,8 +139,8 @@
       </div>
 
       <div
-        class="node"
         id="df-nc"
+        class="node"
         style="left: 685px; top: 375px; width: 165px"
       >
         <div class="ni">💻</div>
@@ -152,7 +152,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

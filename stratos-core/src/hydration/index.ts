@@ -24,4 +24,5 @@ export {
   parseServiceEndpoint,
   isLocalService,
   createHydrationContext,
+  hydrateRecordBlobs,
 } from './domain.js'

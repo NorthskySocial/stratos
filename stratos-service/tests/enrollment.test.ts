@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { DidDocument, IdResolver } from '@atproto/identity'
 import {
-  assertEnrollment,
+  ENROLLMENT_MODE,
   EnrollmentConfig,
   EnrollmentDeniedError,
   extractPdsEndpoint,
-  validateEnrollment,
-} from '../src/auth'
-import type { DidDocument, IdResolver } from '@atproto/identity'
-import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
+} from '@northskysocial/stratos-core'
+import { assertEnrollment, validateEnrollment } from '../src/features/index.js'
 
 // Mock IdResolver
 function createMockIdResolver(didDoc: DidDocument | null): IdResolver {

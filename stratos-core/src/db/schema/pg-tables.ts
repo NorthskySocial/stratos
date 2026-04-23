@@ -1,11 +1,11 @@
 import {
-  pgTable,
-  text,
-  integer,
   bytea,
-  primaryKey,
   index,
+  integer,
+  pgTable,
+  primaryKey,
   serial,
+  text,
 } from 'drizzle-orm/pg-core'
 
 export const pgStratosRepoRoot = pgTable('stratos_repo_root', {
@@ -70,6 +70,18 @@ export const pgStratosRecordBlob = pgTable(
   (table) => [primaryKey({ columns: [table.blobCid, table.recordUri] })],
 )
 
+export const pgStratosBlobBoundary = pgTable(
+  'stratos_blob_boundary',
+  {
+    blobCid: text('blobCid').notNull(),
+    boundary: text('boundary').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.blobCid, table.boundary] }),
+    index('stratos_blob_boundary_blob_cid_idx').on(table.blobCid),
+  ],
+)
+
 export const pgStratosBacklink = pgTable(
   'stratos_backlink',
   {
@@ -118,6 +130,10 @@ export type PgStratosBlobInsert = typeof pgStratosBlob.$inferInsert
 
 export type PgStratosRecordBlob = typeof pgStratosRecordBlob.$inferSelect
 export type PgStratosRecordBlobInsert = typeof pgStratosRecordBlob.$inferInsert
+
+export type PgStratosBlobBoundary = typeof pgStratosBlobBoundary.$inferSelect
+export type PgStratosBlobBoundaryInsert =
+  typeof pgStratosBlobBoundary.$inferInsert
 
 export type PgStratosBacklink = typeof pgStratosBacklink.$inferSelect
 export type PgStratosBacklinkInsert = typeof pgStratosBacklink.$inferInsert

@@ -1,17 +1,18 @@
-import { AtUri } from '@atproto/syntax'
+import { AtUri as AtUriSyntax, AtUri } from '@atproto/syntax'
 import type {
-  HydrationService,
-  HydrationRequest,
-  HydrationContext,
-  HydrationResult,
   BatchHydrationResult,
-  HydratedRecord,
-  RecordResolver,
   BoundaryResolver,
+  HydratedRecord,
+  HydrationContext,
+  HydrationRequest,
+  HydrationResult,
+  HydrationService,
+  RecordResolver,
 } from '@northskysocial/stratos-core'
 import {
   canAccessRecord,
-  extractBoundaryDomains,
+  hydrateRecordBlobs,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
 
@@ -21,6 +22,12 @@ import type { ActorStore } from '../../actor-store-types.js'
 export class ActorStoreRecordResolver implements RecordResolver {
   constructor(private actorStore: ActorStore) {}
 
+  /**
+   * Retrieve a record from the actor store for a given owner DID and URI.
+   * @param ownerDid - The DID of the record owner.
+   * @param uri - The URI of the record to retrieve.
+   * @returns A Promise resolving to the hydrated record or null if not found.
+   */
   async getRecord(
     ownerDid: string,
     uri: string,
@@ -36,13 +43,13 @@ export class ActorStoreRecordResolver implements RecordResolver {
     }
 
     return this.actorStore.read(ownerDid, async (store) => {
-      const atUri = new AtUri(uri)
+      const atUri = new AtUriSyntax(uri)
       const record = await store.record.getRecord(atUri, null)
       if (!record) {
         return null
       }
 
-      const boundaries = extractBoundaryDomains(record.value)
+      const boundaries = StratosValidator.extractBoundaryDomains(record.value)
       return {
         uri: record.uri,
         cid: record.cid,
@@ -52,12 +59,18 @@ export class ActorStoreRecordResolver implements RecordResolver {
     })
   }
 
+  /**
+   * Get records from the actor store for a given owner DID and array of URIs.
+   * @param ownerDid - Decentralized identifier (DID) of the owner.
+   * @param uris - Array of AtUri instances representing the records to retrieve.
+   * @returns A Map of AtUri instances to record details, or null if the owner DID does not exist.
+   */
   async getRecords(
     ownerDid: string,
     uris: string[],
   ): Promise<
     Map<
-      string,
+      AtUri,
       {
         uri: string
         cid: string
@@ -67,7 +80,7 @@ export class ActorStoreRecordResolver implements RecordResolver {
     >
   > {
     const result = new Map<
-      string,
+      AtUri,
       {
         uri: string
         cid: string
@@ -82,12 +95,15 @@ export class ActorStoreRecordResolver implements RecordResolver {
     }
 
     await this.actorStore.read(ownerDid, async (store) => {
-      for (const uri of uris) {
-        const atUri = new AtUri(uri)
+      for (const uriStr of uris) {
+        const atUri = new AtUriSyntax(uriStr)
         const record = await store.record.getRecord(atUri, null)
         if (record) {
-          const boundaries = extractBoundaryDomains(record.value)
-          result.set(uri, {
+          const boundaries = StratosValidator.extractBoundaryDomains(
+            record.value,
+          )
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
+          result.set(atUri.toString() as any, {
             uri: record.uri,
             cid: record.cid,
             value: record.value,
@@ -110,6 +126,12 @@ export class HydrationServiceImpl implements HydrationService {
     private boundaryResolver: BoundaryResolver,
   ) {}
 
+  /**
+   * Hydrate a single record based on the provided request and context.
+   * @param request - The hydration request containing the URI to hydrate.
+   * @param context - The hydration context, which may include additional parameters.
+   * @returns A promise that resolves to the hydration result, which includes the status, URI, and optional message.
+   */
   async hydrateRecord(
     request: HydrationRequest,
     context: HydrationContext,
@@ -117,9 +139,9 @@ export class HydrationServiceImpl implements HydrationService {
     const { uri } = request
 
     // Parse the URI to get the owner DID
-    let atUri: AtUri
+    let atUri: AtUriSyntax
     try {
-      atUri = new AtUri(uri)
+      atUri = new AtUriSyntax(uri)
     } catch {
       return { status: 'error', uri, message: 'Invalid AT-URI' }
     }
@@ -166,6 +188,12 @@ export class HydrationServiceImpl implements HydrationService {
     }
   }
 
+  /**
+   * Hydrate multiple records based on the provided requests and context.
+   * @param requests - Array of hydration requests, each containing a URI to hydrate.
+   * @param context - The hydration context, which may include additional parameters.
+   * @returns A promise that resolves to the batch hydration result, which includes the status, URI, and optional message for each request.
+   */
   async hydrateRecords(
     requests: HydrationRequest[],
     context: HydrationContext,
@@ -184,20 +212,7 @@ export class HydrationServiceImpl implements HydrationService {
 
     const resolvedContext = { ...context, viewerDomains }
 
-    // Group requests by owner DID for efficient batching
-    const byOwner = new Map<string, HydrationRequest[]>()
-    for (const request of requests) {
-      try {
-        const atUri = new AtUri(request.uri)
-        const ownerDid = atUri.hostname
-        const existing = byOwner.get(ownerDid) ?? []
-        existing.push(request)
-        byOwner.set(ownerDid, existing)
-      } catch {
-        // Invalid URI - mark as not found
-        notFound.push(request.uri)
-      }
-    }
+    const byOwner = this.groupRequestsByOwner(requests)
 
     // Process each owner's records
     for (const [ownerDid, ownerRequests] of byOwner) {
@@ -205,39 +220,97 @@ export class HydrationServiceImpl implements HydrationService {
       const recordMap = await this.recordResolver.getRecords(ownerDid, uris)
 
       for (const request of ownerRequests) {
-        const record = recordMap.get(request.uri)
-
-        if (!record) {
-          notFound.push(request.uri)
-          continue
-        }
-
-        // Check CID if specified
-        if (request.cid && record.cid !== request.cid) {
-          notFound.push(request.uri)
-          continue
-        }
-
-        // Check access
-        const hasAccess = canAccessRecord({
-          recordBoundaries: record.boundaries,
+        this.processHydrationRequest(
+          request,
           ownerDid,
-          context: resolvedContext,
-        })
-
-        if (!hasAccess) {
-          blocked.push(request.uri)
-          continue
-        }
-
-        records.push({
-          uri: record.uri,
-          cid: record.cid,
-          value: record.value,
-        })
+          recordMap,
+          resolvedContext,
+          records,
+          notFound,
+          blocked,
+        )
       }
     }
 
     return { records, notFound, blocked }
+  }
+
+  /**
+   * Group hydration requests by owner DID
+   * @param requests - Array of hydration requests
+   * @returns Map of owner DIDs to arrays of hydration requests
+   * @private
+   */
+  private groupRequestsByOwner(
+    requests: HydrationRequest[],
+  ): Map<string, HydrationRequest[]> {
+    const byOwner = new Map<string, HydrationRequest[]>()
+    for (const request of requests) {
+      try {
+        const atUri = new AtUriSyntax(request.uri)
+        const ownerDid = atUri.hostname
+        const existing = byOwner.get(ownerDid) ?? []
+        existing.push(request)
+        byOwner.set(ownerDid, existing)
+      } catch {
+        // Invalid URI - mark as not found handled later or here
+      }
+    }
+    return byOwner
+  }
+
+  /**
+   * Process hydration request
+   * @param request - Hydration request
+   * @param ownerDid - DID of the owner
+   * @param recordMap - Map of records
+   * @param context - Hydration context
+   * @param records - Array of hydrated records
+   * @param notFound - Array of not found URIs
+   * @param blocked - Array of blocked URIs
+   * @private
+   */
+  private processHydrationRequest(
+    request: HydrationRequest,
+    ownerDid: string,
+    recordMap: Map<
+      AtUri,
+      { uri: string; cid: string; value: unknown; boundaries: string[] }
+    >,
+    context: HydrationContext,
+    records: HydratedRecord[],
+    notFound: string[],
+    blocked: string[],
+  ): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-argument
+    const record = recordMap.get(request.uri as any)
+
+    if (!record || (request.cid && record.cid !== request.cid)) {
+      notFound.push(request.uri)
+      return
+    }
+
+    // Check access
+    const hasAccess = canAccessRecord({
+      recordBoundaries: record.boundaries,
+      ownerDid,
+      context,
+    })
+
+    if (!hasAccess) {
+      blocked.push(request.uri)
+      return
+    }
+
+    let value = record.value as Record<string, unknown>
+    if (context.serviceUrl) {
+      value = hydrateRecordBlobs(value, ownerDid, context.serviceUrl)
+    }
+
+    records.push({
+      uri: record.uri,
+      cid: record.cid,
+      value,
+    })
   }
 }

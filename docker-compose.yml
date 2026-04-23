@@ -1,8 +1,52 @@
 services:
+  # Stratos indexer for AppViews
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: indexer
+    container_name: stratos-indexer
+    restart: unless-stopped
+    ports:
+      - '3002:3002'
+    environment:
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
+      STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL}
+      # Database (required) - Shared with AppView
+      BSKY_DB_POSTGRES_URL: ${BSKY_DB_POSTGRES_URL:-postgres://stratos:stratos@postgres:5432/bsky}
+      BSKY_DB_POSTGRES_SCHEMA: ${BSKY_DB_POSTGRES_SCHEMA:-bsky}
+      BSKY_DB_POOL_SIZE: ${BSKY_DB_POOL_SIZE:-20}
+
+      # PDS
+      BSKY_REPO_PROVIDER: ${BSKY_REPO_PROVIDER:-https://bsky.social}
+      BACKFILL_ENROLLED_ONLY: 'true'
+
+      # Stratos (Indexer connects TO the service)
+      STRATOS_SERVICE_URL: http://stratos:3100
+      STRATOS_SYNC_TOKEN: ${STRATOS_SYNC_TOKEN}
+
+      # Identity
+      BSKY_DID_PLC_URL: https://plc.directory
+
+      # Worker tuning
+      WORKER_CONCURRENCY: 4
+      ACTOR_SYNC_MAX_CONNECTIONS: 50
+    depends_on:
+      stratos:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', 'http://localhost:3002/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   stratos:
     build:
       context: .
       dockerfile: Dockerfile
+      target: stratos
     container_name: stratos
     restart: unless-stopped
     ports:
@@ -53,7 +97,7 @@ services:
 
       # OAuth consent screen branding (all optional)
       # Set STRATOS_OAUTH_LOGO_URI to ${STRATOS_PUBLIC_URL}/assets/<file> to self-host the logo
-      STRATOS_OAUTH_CLIENT_NAME: ${STRATOS_OAUTH_CLIENT_NAME:-}
+      STRATOS_OAUTH_CLIENT_NAME: ${STRATOS_OAUTH_CLIENT_NAME:-Stratos}
       STRATOS_OAUTH_LOGO_URI: ${STRATOS_OAUTH_LOGO_URI:-}
       STRATOS_OAUTH_TOS_URI: ${STRATOS_OAUTH_TOS_URI:-}
       STRATOS_OAUTH_POLICY_URI: ${STRATOS_OAUTH_POLICY_URI:-}
@@ -87,21 +131,22 @@ services:
   # Uncomment to use PostgreSQL instead of SQLite.
   # Also set STORAGE_BACKEND=postgres and configure STRATOS_POSTGRES_URL
   # or STRATOS_PG_* vars above.
-  # postgres:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     POSTGRES_USER: stratos
-  #     POSTGRES_PASSWORD: stratos
-  #     POSTGRES_DB: stratos
-  #   ports:
-  #     - '5432:5432'
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ['CMD-SHELL', 'pg_isready -U stratos']
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 5
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: stratos
+      POSTGRES_PASSWORD: stratos
+      POSTGRES_DB: bsky
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U stratos -d bsky']
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # Uncomment to use with S3-compatible storage (e.g., MinIO)
   # minio:
@@ -124,5 +169,5 @@ services:
 
 volumes:
   stratos-data:
-  # pgdata:
+  pgdata:
   # minio-data:

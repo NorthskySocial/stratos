@@ -5,19 +5,16 @@
  * allowing different backends (SQLite, PostgreSQL, etc.) to be swapped.
  */
 
-export * from './record-store.js'
-export * from './blob-store.js'
-export * from './repo-store.js'
-export * from './enrollment-store.js'
-export * from './sequence-store.js'
-export * from './cache.js'
+export type * from './record-store.js'
+export type * from './blob-store.js'
+export type * from './repo-store.js'
+export type * from './enrollment-store.js'
+export type * from './sequence-store.js'
+export type * from './cache.js'
 
 import type { RecordStoreReader, RecordStoreWriter } from './record-store.js'
-import type {
-  BlobMetadataReader,
-  BlobMetadataWriter,
-  BlobContentStore,
-} from './blob-store.js'
+import type { BlobMetadataReader, BlobMetadataWriter } from './blob-store.js'
+import type { BlobStore } from '../types.js'
 import type { RepoStoreReader, RepoStoreWriter } from './repo-store.js'
 import type { EnrollmentStoreWriter } from './enrollment-store.js'
 import type {
@@ -31,7 +28,7 @@ import type {
 export interface ActorStoreReaders {
   record: RecordStoreReader
   blobMetadata: BlobMetadataReader
-  blobContent: BlobContentStore
+  blobContent: BlobStore
   repo: RepoStoreReader
   sequence: SequenceStoreReader
 }
@@ -42,7 +39,7 @@ export interface ActorStoreReaders {
 export interface ActorStoreWriters {
   record: RecordStoreWriter
   blobMetadata: BlobMetadataWriter
-  blobContent: BlobContentStore
+  blobContent: BlobStore
   repo: RepoStoreWriter
   sequence: SequenceStoreWriter
 }
@@ -85,29 +82,29 @@ export interface StorageFactory {
   readonly backend: StorageBackend
 
   /** Initialize storage (run migrations, etc.) */
-  initialize(): Promise<void>
+  initialize: () => Promise<void>
 
   /** Check if an actor's storage exists */
-  actorExists(did: string): Promise<boolean>
+  actorExists: (did: string) => Promise<boolean>
 
   /** Create storage for a new actor */
-  createActor(did: string): Promise<void>
+  createActor: (did: string) => Promise<void>
 
   /** Delete an actor's storage */
-  deleteActor(did: string): Promise<void>
+  deleteActor: (did: string) => Promise<void>
 
   /** Get readers for an actor's data */
-  getActorReaders(did: string): Promise<ActorStoreReaders>
+  getActorReaders: (did: string) => Promise<ActorStoreReaders>
 
   /** Execute a function within a transaction for an actor */
-  transactActor<T>(
+  transactActor: <T>(
     did: string,
     fn: (stores: ActorStoreWriters) => Promise<T>,
-  ): Promise<T>
+  ) => Promise<T>
 
   /** Get service-level stores */
-  getServiceStores(): ServiceStores
+  getServiceStores: () => ServiceStores
 
   /** Close all connections */
-  close(): Promise<void>
+  close: () => Promise<void>
 }

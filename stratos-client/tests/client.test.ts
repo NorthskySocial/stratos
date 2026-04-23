@@ -1,16 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { discoverEnrollment, discoverEnrollments } from '../src/discovery.js'
-import {
-  createServiceFetchHandler,
-  resolveServiceUrl,
-  findEnrollmentByService,
-} from '../src/routing.js'
 import {
   buildCollectionScope,
   buildStratosScopes,
+  createServiceFetchHandler,
+  findEnrollmentByService,
+  getEnrollmentByServiceDid,
+  resolveServiceUrl,
   STRATOS_SCOPES,
-} from '../src/scopes.js'
+} from '../src'
 
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -39,10 +37,9 @@ const mockEnrollmentRecord = (valueOverrides?: Record<string, unknown>) => ({
   },
 })
 
-const mockListRecordsResponse = (
-  records: ReturnType<typeof mockEnrollmentRecord>[],
-) => ({
-  records,
+const mockGetRecordResponse = (value: unknown) => ({
+  uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
+  value,
 })
 
 describe('discovery', () => {
@@ -52,12 +49,13 @@ describe('discovery', () => {
 
   it('returns enrollment when record exists', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(mockListRecordsResponse([mockEnrollmentRecord()])),
+      jsonResponse(mockGetRecordResponse(mockEnrollmentRecord().value)),
     )
 
-    const result = await discoverEnrollment(
+    const result = await getEnrollmentByServiceDid(
       'did:plc:test123',
       'https://pds.example.com',
+      'did:web:stratos.example.com',
     )
 
     expect(result).toEqual({
@@ -69,39 +67,31 @@ describe('discovery', () => {
       rkey: 'did:web:stratos.example.com',
     })
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('com.atproto.repo.listRecords'),
+      expect.stringContaining('com.atproto.repo.getRecord'),
       expect.anything(),
     )
   })
 
-  it('returns null when no enrollment records exist', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(mockListRecordsResponse([])),
-    )
+  it('returns null when enrollment record does not exist', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({}, 404))
 
-    const result = await discoverEnrollment(
+    const result = await getEnrollmentByServiceDid(
       'did:plc:test123',
       'https://pds.example.com',
+      'did:web:stratos.example.com',
     )
     expect(result).toBeNull()
   })
 
   it('returns null when record has invalid shape', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(
-        mockListRecordsResponse([
-          {
-            uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
-            cid: 'bafytest',
-            value: { invalid: true },
-          },
-        ]),
-      ),
+      jsonResponse(mockGetRecordResponse({ invalid: true })),
     )
 
-    const result = await discoverEnrollment(
+    const result = await getEnrollmentByServiceDid(
       'did:plc:test123',
       'https://pds.example.com',
+      'did:web:stratos.example.com',
     )
     expect(result).toBeNull()
   })
@@ -109,74 +99,43 @@ describe('discovery', () => {
   it('normalizes missing boundaries to empty array', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse(
-        mockListRecordsResponse([
-          mockEnrollmentRecord({ boundaries: undefined }),
-        ]),
+        mockGetRecordResponse(
+          mockEnrollmentRecord({ boundaries: undefined }).value,
+        ),
       ),
     )
 
-    const result = await discoverEnrollment(
+    const result = await getEnrollmentByServiceDid(
       'did:plc:test123',
       'https://pds.example.com',
+      'did:web:stratos.example.com',
     )
     expect(result?.boundaries).toEqual([])
   })
 
   it('accepts a FetchHandler instead of a PDS URL', async () => {
     const mockHandler = vi.fn(async () =>
-      jsonResponse(
-        mockListRecordsResponse([mockEnrollmentRecord({ boundaries: [] })]),
-      ),
+      jsonResponse(mockGetRecordResponse(mockEnrollmentRecord().value)),
     )
 
-    const result = await discoverEnrollment('did:plc:test123', mockHandler)
+    const result = await getEnrollmentByServiceDid(
+      'did:plc:test123',
+      mockHandler,
+      'did:web:stratos.example.com',
+    )
 
     expect(result).toEqual({
       service: 'https://stratos.example.com',
-      boundaries: [],
+      boundaries: [{ value: 'cosplayers' }],
       signingKey: MOCK_USER_KEY,
       attestation: { sig: MOCK_SIG, signingKey: MOCK_SERVICE_KEY },
       createdAt: '2025-01-01T00:00:00Z',
       rkey: 'did:web:stratos.example.com',
     })
     expect(mockHandler).toHaveBeenCalledWith(
-      expect.stringContaining('com.atproto.repo.listRecords'),
+      expect.stringContaining('com.atproto.repo.getRecord'),
       expect.anything(),
     )
-  })
-
-  it('discovers multiple enrollments', async () => {
-    const record1 = mockEnrollmentRecord()
-    const record2 = {
-      ...mockEnrollmentRecord({ service: 'https://stratos2.example.com' }),
-      uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos2.example.com',
-    }
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(mockListRecordsResponse([record1, record2])),
-    )
-
-    const results = await discoverEnrollments(
-      'did:plc:test123',
-      'https://pds.example.com',
-    )
-
-    expect(results).toHaveLength(2)
-    expect(results[0].rkey).toBe('did:web:stratos.example.com')
-    expect(results[0].service).toBe('https://stratos.example.com')
-    expect(results[1].rkey).toBe('did:web:stratos2.example.com')
-    expect(results[1].service).toBe('https://stratos2.example.com')
-  })
-
-  it('returns empty array when no records exist', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(mockListRecordsResponse([])),
-    )
-
-    const results = await discoverEnrollments(
-      'did:plc:test123',
-      'https://pds.example.com',
-    )
-    expect(results).toEqual([])
   })
 })
 
@@ -189,7 +148,7 @@ describe('routing', () => {
         'https://stratos.example.com',
       )
 
-      await handler.handle('/xrpc/zone.stratos.feed.post')
+      await handler.handle('/xrpc/zone.stratos.feed.post', {})
 
       expect(mockHandler).toHaveBeenCalledWith(
         'https://stratos.example.com/xrpc/zone.stratos.feed.post',
@@ -222,6 +181,7 @@ describe('routing', () => {
 
       await handler.handle(
         '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
+        {},
       )
 
       expect(mockHandler).toHaveBeenCalledWith(

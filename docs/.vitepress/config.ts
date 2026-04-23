@@ -14,6 +14,7 @@ export default defineConfig({
     'architecture-diagram.md',
     'client-guide.md',
     'operator-guide.md',
+    'indexer-architecture.md',
     'animations/**',
   ],
 
@@ -54,6 +55,10 @@ export default defineConfig({
               link: '/guide/what-is-stratos',
             },
             { text: 'Core Concepts', link: '/guide/concepts' },
+            { text: 'Stratos WebApp', link: '/guide/webapp' },
+            { text: 'Your First Post', link: '/guide/first-post' },
+            { text: 'Glossary', link: '/guide/glossary' },
+            { text: 'Error Codes', link: '/guide/errors' },
           ],
         },
       ],
@@ -101,6 +106,7 @@ export default defineConfig({
           text: 'Architecture',
           items: [
             { text: 'Hydration Architecture', link: '/architecture/hydration' },
+            { text: 'Indexer Architecture', link: '/indexer-architecture' },
             {
               text: 'Enrollment Signing',
               link: '/architecture/enrollment-signing',

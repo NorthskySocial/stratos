@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { ServiceDb } from '../src/db/index.js'
 import {
-  createServiceDb,
-  migrateServiceDb,
   closeServiceDb,
+  createServiceDb,
   enrollmentBoundary,
-} from '../src/db'
-import type { ServiceDb } from '../src/db'
-import { SqliteEnrollmentStore } from '../src/context'
+  migrateServiceDb,
+} from '../src/db/index.js'
+import { SqliteEnrollmentStore } from '../src/context.js'
 import { eq } from 'drizzle-orm'
 
 let db: ServiceDb

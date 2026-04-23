@@ -1,4 +1,4 @@
-import { createClient, Client } from '@libsql/client'
+import { Client, createClient } from '@libsql/client'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schemaModule from './schema/index.js'
@@ -16,7 +16,11 @@ export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
 /**
  * Generic type for a Stratos database or transaction
  */
-export type StratosDbOrTx = LibSQLDatabase<typeof schemaModule.schema>
+export type StratosDbOrTx =
+  | LibSQLDatabase<typeof schemaModule.schema>
+  | (Omit<LibSQLDatabase<typeof schemaModule.schema>, 'batch'> & {
+      batch?: never
+    })
 
 /**
  * Default SQLite pragmas for stratos databases
@@ -27,6 +31,11 @@ const DEFAULT_PRAGMAS: Record<string, string> = {}
  * Creates a connection to a stratos SQLite database.
  * Note: The returned database has async initialization. Call `await db._initialized`
  * before using if you need WAL mode guaranteed, or it will be applied lazily.
+ *
+ * @param location - Path to the SQLite database file. Use ':memory:' for in-memory databases.
+ * @param opts - Optional configuration options
+ * @returns A drizzle database instance
+ * @throws {Error} If the database cannot be opened or initialized
  */
 export function createStratosDb(
   location: string,
@@ -60,7 +69,7 @@ export function createStratosDb(
         await db.run(stmt)
       } catch (err) {
         // Ignore SQLITE_BUSY errors for WAL pragma - another connection may have set it
-        const errCode = (err as { code?: string })?.code
+        const errCode = (err as { code?: string }).code
         if (errCode !== 'SQLITE_BUSY') {
           throw err
         }
@@ -76,6 +85,12 @@ export function createStratosDb(
  */
 export async function migrateStratosDb(db: StratosDb): Promise<void> {
   // Create tables using raw SQL since we're managing migrations manually
+  await migrateRepoTables(db)
+  await migrateRecordAndBlobTables(db)
+  await migrateMiscTables(db)
+}
+
+async function migrateRepoTables(db: StratosDb): Promise<void> {
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_repo_root (
       did TEXT PRIMARY KEY,
@@ -98,7 +113,9 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
     CREATE INDEX IF NOT EXISTS stratos_repo_block_repo_rev_idx 
     ON stratos_repo_block(repoRev, cid)
   `)
+}
 
+async function migrateRecordAndBlobTables(db: StratosDb): Promise<void> {
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_record (
       uri TEXT PRIMARY KEY,
@@ -147,6 +164,20 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
   `)
 
   await db.run(sql`
+    CREATE TABLE IF NOT EXISTS stratos_blob_boundary (
+      blobCid TEXT NOT NULL,
+      boundary TEXT NOT NULL,
+      PRIMARY KEY (blobCid, boundary)
+    )
+  `)
+
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_blob_boundary_blob_cid_idx ON stratos_blob_boundary(blobCid)`,
+  )
+}
+
+async function migrateMiscTables(db: StratosDb): Promise<void> {
+  await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_backlink (
       uri TEXT NOT NULL,
       path TEXT NOT NULL,
@@ -183,5 +214,6 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
  * Closes the stratos database connection
  */
 export async function closeStratosDb(db: StratosDb): Promise<void> {
-  db._client.close()
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+  await (db._client as any).close()
 }

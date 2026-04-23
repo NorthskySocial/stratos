@@ -48,6 +48,18 @@ jobs:
         working-directory: docs
         run: npm run docs:build
 
+      - name: Markdown Lint
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: '**/*.md'
+
+      - name: Check Broken Links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --verbose --no-progress './**/*.md'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:

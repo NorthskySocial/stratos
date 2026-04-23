@@ -14,12 +14,23 @@ export interface InspectorResult {
   recordError: string | null
 }
 
+/**
+ * Parses an AT URI into its constituent parts.
+ * @param uri - the AT URI to parse
+ * @returns the parsed AT URI parts
+ */
 export function parseAtUri(uri: string): AtUriParts {
   const stripped = uri.replace('at://', '')
   const [did, collection, rkey] = stripped.split('/')
-  return { did, collection, rkey }
+  return { did: did || '', collection: collection || '', rkey: rkey || '' }
 }
 
+/**
+ * Resolves a DID to a PDS endpoint URL.
+ * @param did - the DID to resolve
+ * @returns a promise that resolves to the PDS endpoint URL
+ * @throws an error if the resolution fails
+ */
 export async function resolvePdsEndpoint(did: string): Promise<string> {
   if (did.startsWith('did:plc:')) {
     const res = await fetch(`https://plc.directory/${encodeURIComponent(did)}`)
@@ -49,6 +60,14 @@ export async function resolvePdsEndpoint(did: string): Promise<string> {
   throw new Error(`Unsupported DID method: ${did}`)
 }
 
+/**
+ * Fetches a record stub from a PDS endpoint.
+ * @param pdsUrl - the PDS endpoint URL
+ * @param did - the DID of the record owner
+ * @param collection - the collection name of the record
+ * @param rkey - the record key
+ * @returns a promise that resolves to the record stub
+ */
 export async function fetchPdsStub(
   pdsUrl: string,
   did: string,
@@ -68,6 +87,13 @@ export async function fetchPdsStub(
   return res.json()
 }
 
+/**
+ * Fetches a hydrated record from a Stratos service.
+ * @param session - the OAuth session
+ * @param stratosUrl - the Stratos service URL
+ * @param uri - the AT URI of the record
+ * @returns a promise that resolves to the hydrated record
+ */
 export async function fetchHydratedRecord(
   session: OAuthSession,
   stratosUrl: string,
@@ -87,6 +113,13 @@ export async function fetchHydratedRecord(
   return res.json()
 }
 
+/**
+ * Fetches a record stub and hydrates it from a Stratos service.
+ * @param session - the OAuth session
+ * @param stratosUrl - the Stratos service URL
+ * @param uri - the AT URI of the record
+ * @returns a promise that resolves to the hydrated record
+ */
 export async function inspectRecord(
   session: OAuthSession,
   stratosUrl: string,
@@ -104,11 +137,10 @@ export async function inspectRecord(
 
   try {
     const pdsUrl = await resolvePdsEndpoint(did)
-    const stubResponse = await fetchPdsStub(pdsUrl, did, collection, rkey)
-    result.stub = stubResponse as Record<string, unknown>
+    result.stub = await fetchPdsStub(pdsUrl, did, collection, rkey)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes('RecordNotFound')) {
+    if (msg.includes('RecordNotFound') || msg.includes('404')) {
       result.stubNotFound = true
     } else {
       result.stubError = msg
@@ -116,8 +148,7 @@ export async function inspectRecord(
   }
 
   try {
-    const hydrateResponse = await fetchHydratedRecord(session, stratosUrl, uri)
-    result.record = hydrateResponse as Record<string, unknown>
+    result.record = await fetchHydratedRecord(session, stratosUrl, uri)
   } catch (err) {
     result.recordError = err instanceof Error ? err.message : String(err)
   }
@@ -125,6 +156,11 @@ export async function inspectRecord(
   return result
 }
 
+/**
+ * Escapes HTML special characters in a string.
+ * @param str - the string to escape
+ * @returns the escaped string
+ */
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -133,6 +169,12 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;')
 }
 
+/**
+ * Syntax highlights a JSON object.
+ * @param obj - the JSON object to highlight
+ * @param indent - the indentation level (default: 0)
+ * @returns the syntax-highlighted JSON string
+ */
 export function syntaxHighlightJson(obj: unknown, indent = 0): string {
   const pad = '  '.repeat(indent)
   const padInner = '  '.repeat(indent + 1)

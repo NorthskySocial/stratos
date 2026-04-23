@@ -12,11 +12,14 @@
   "scripts": {
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
-    "lint": "eslint test && pnpm -r run lint",
+    "lint": "pnpm -r run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest",
+    "test:coverage": "vitest run --coverage",
     "codegen": "pnpm --filter stratos-service run codegen",
+    "dev:local": "tsx scripts/dev-local.ts",
+    "dev:local:debug": "tsx scripts/dev-local.ts --debug-service",
     "e2etest": "deno run -A test/scripts/run-all.ts",
     "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct",
     "test:integration": "pnpm e2etest",
@@ -24,19 +27,23 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@ngrok/ngrok": "^1.7.0",
     "@types/deno": "^2.5.0",
     "@types/node": "^25.2.1",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
+    "concurrently": "^9.2.1",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.3.0",
     "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.54.0",
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@vitest/coverage-v8": "^4.0.18"
+    "@vitest/coverage-v8": "^4.0.18",
+    "dotenv": "^17.4.0"
   }
 }

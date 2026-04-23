@@ -14,14 +14,19 @@
     "@atcute/firehose": "^0.1.0",
     "@atproto/bsky": "^0.0.214",
     "@atproto/identity": "^0.4.8",
+    "@atproto/lex-data": "^0.0.9",
     "@atproto/lexicon": "^0.6.1",
     "@atproto/repo": "^0.8.1",
     "@atproto/syntax": "^0.4.0",
-    "multiformats": "9.9.0",
+    "@northskysocial/stratos-core": "workspace:*",
+    "kysely": "^0.28.14",
+    "multiformats": "^13.4.2",
     "p-queue": "^9.1.0",
-    "partysocket": "^1.1.4"
+    "partysocket": "^1.1.4",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }
 }

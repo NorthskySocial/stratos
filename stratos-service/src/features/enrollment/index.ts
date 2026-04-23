@@ -1,3 +1,10 @@
-export * from './adapter.js'
-export * from './handler.js'
-export * from './allow-list.js'
+export {
+  EnrollmentServiceImpl,
+  EnrollmentBoundaryResolver,
+  CachedBoundaryResolver,
+  MigratingBoundaryResolver,
+} from './adapter.js'
+export { registerEnrollmentHandlers } from './handler.js'
+export { initEnrollment } from './init.js'
+export { verifyEnrolled } from './internal/auth.js'
+export { validateEnrollment, assertEnrollment } from './internal/validation.js'

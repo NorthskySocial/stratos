@@ -1,9 +1,12 @@
-import type { GenerateStubInput, StubRecord, RecordSource } from './types.js'
+import type { GenerateStubInput, RecordSource, StubRecord } from './types.js'
 
 /**
  * Generate a stub record from a full record
  * The stub is written to the user's PDS and contains a source field
  * pointing to the hydration service where full content can be retrieved.
+ *
+ * @param input - Input for generating the stub
+ * @returns Stub record
  */
 export function generateStub(input: GenerateStubInput): StubRecord {
   const source: RecordSource = {
@@ -24,6 +27,9 @@ export function generateStub(input: GenerateStubInput): StubRecord {
 
 /**
  * Check if a record is a stub (has source field)
+ *
+ * @param record - Record to check
+ * @returns True if record is a stub
  */
 export function isStubRecord(record: unknown): record is StubRecord {
   if (typeof record !== 'object' || record === null) {
@@ -40,7 +46,10 @@ export function isStubRecord(record: unknown): record is StubRecord {
 }
 
 /**
- * Extract source field from a stub record
+ * Extract the source field from a stub record
+ *
+ * @param record - Stub record
+ * @returns Source field or null if not a stub record
  */
 export function extractSource(record: unknown): RecordSource | null {
   if (!isStubRecord(record)) {
@@ -51,6 +60,9 @@ export function extractSource(record: unknown): RecordSource | null {
 
 /**
  * Parse the service DID and fragment from a source.service field
+ *
+ * @param serviceDid - Source.service field
+ * @returns Object containing the service DID and fragment
  * @example "did:plc:abc123#atproto_pns" -> { did: "did:plc:abc123", fragment: "atproto_pns" }
  */
 export function parseServiceDid(serviceDid: string): {

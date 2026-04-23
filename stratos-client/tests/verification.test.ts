@@ -1,50 +1,32 @@
-import { describe, it, expect, vi } from 'vitest'
-import { Secp256k1Keypair, P256Keypair } from '@atproto/crypto'
+import { describe, expect, it, vi } from 'vitest'
+import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import {
   create as cidCreate,
-  toString as cidToString,
   fromString as cidFromString,
+  toString as cidToString,
 } from '@atcute/cid'
-import * as CAR from '@atcute/car'
 import {
-  MemoryBlockStore,
-  OverlayBlockStore,
-  NodeStore,
   buildInclusionProof,
+  MemoryBlockStore,
+  NodeStore,
+  OverlayBlockStore,
 } from '@atcute/mst'
-import { parseDidKey, Secp256k1PublicKey, P256PublicKey } from '@atcute/crypto'
+import { P256PublicKey, parseDidKey, Secp256k1PublicKey } from '@atcute/crypto'
 import { buildCommit } from '@northskysocial/stratos-core'
+import { collectCarStream } from '@northskysocial/stratos-core/tests'
 
 import {
-  verifyCidIntegrity,
+  fetchAndVerifyRecord,
   resolveServiceSigningKey,
   resolveUserSigningKey,
-  fetchAndVerifyRecord,
-} from '../src'
+  verifyCidIntegrity,
+} from '../src/index.js'
 
 const TEST_DID = 'did:plc:testverify' as const
 const TEST_COLLECTION = 'zone.stratos.feed.post'
 const TEST_RKEY = 'abc123'
-
-async function collectCarStream(
-  roots: CidLink[],
-  blocks: Array<{ cid: Uint8Array; data: Uint8Array }>,
-): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of CAR.writeCarStream(roots, blocks)) {
-    chunks.push(chunk)
-  }
-  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.length
-  }
-  return result
-}
 
 async function buildSignedRecordCar(
   keypair: Secp256k1Keypair,
@@ -428,7 +410,7 @@ describe('fetchAndVerifyRecord', () => {
       TEST_RKEY,
     )
 
-    const mockFetch = vi.fn(async () => new Response(carBytes))
+    const mockFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     await fetchAndVerifyRecord(
       'https://stratos.example.com',
@@ -446,7 +428,7 @@ describe('fetchAndVerifyRecord', () => {
   })
 
   it('throws on non-OK response', async () => {
-    const mockFetch = vi.fn(
+    const mockFetch = vi.fn<typeof fetch>(
       async () => new Response(null, { status: 404, statusText: 'Not Found' }),
     )
 
@@ -472,7 +454,7 @@ describe('fetchAndVerifyRecord', () => {
       TEST_RKEY,
     )
 
-    const didDocFetch = vi.fn(
+    const didDocFetch = vi.fn<typeof fetch>(
       async () =>
         new Response(
           JSON.stringify({
@@ -499,7 +481,7 @@ describe('fetchAndVerifyRecord', () => {
       { fetchFn: didDocFetch },
     )
 
-    const recordFetch = vi.fn(async () => new Response(carBytes))
+    const recordFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     const result = await fetchAndVerifyRecord(
       'https://stratos.example.com',
@@ -529,7 +511,7 @@ describe('user-signature verification', () => {
       TEST_RKEY,
     )
 
-    const mockFetch = vi.fn(async () => new Response(carBytes))
+    const mockFetch = vi.fn<typeof fetch>(async () => new Response(carBytes))
 
     const result = await fetchAndVerifyRecord(
       'https://stratos.example.com',
@@ -636,22 +618,18 @@ describe('resolveUserSigningKey', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
-          records: [
-            {
-              uri: 'at://did:plc:testuser/zone.stratos.actor.enrollment/did:web:stratos.example.com',
-              cid: 'bafytest',
-              value: {
-                service: 'https://stratos.example.com',
-                boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
-                signingKey: didKey,
-                attestation: {
-                  sig: { $bytes: sigB64 },
-                  signingKey: 'did:key:zServiceKey',
-                },
-                createdAt: '2025-01-01T00:00:00Z',
-              },
+          uri: 'at://did:plc:testuser/zone.stratos.actor.enrollment/did:web:stratos.example.com',
+          cid: 'bafytest',
+          value: {
+            service: 'https://stratos.example.com',
+            boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
+            signingKey: didKey,
+            attestation: {
+              sig: { $bytes: sigB64 },
+              signingKey: 'did:key:zServiceKey',
             },
-          ],
+            createdAt: '2025-01-01T00:00:00Z',
+          },
         }),
         { headers: { 'content-type': 'application/json' } },
       ),

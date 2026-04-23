@@ -46,6 +46,6 @@ docs/*-prompt.md
 .github/*-instructions.md
 
 # CDK
-infra/
-
 docs/.vitepress/cache
+/webapp/public/client-metadata.json
+/webapp/playwright-report

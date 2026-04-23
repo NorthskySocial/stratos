@@ -1,21 +1,20 @@
 import { verifyRecord as atcuteVerifyRecord } from '@atcute/repo'
 import {
   getPublicKeyFromDidController,
-  parseDidKey,
-  Secp256k1PublicKey,
   P256PublicKey,
+  parseDidKey,
   type PublicKey,
+  Secp256k1PublicKey,
 } from '@atcute/crypto'
 import { getAtprotoVerificationMaterial } from '@atcute/identity'
 import { WebDidDocumentResolver } from '@atcute/identity-resolver'
 import type {
-  VerificationLevel,
-  VerifiedRecord,
   FetchAndVerifyOptions,
   ResolveSigningKeyOptions,
+  VerificationLevel,
+  VerifiedRecord,
 } from './types.js'
-import { discoverEnrollments } from './discovery.js'
-import { serviceDIDToRkey } from './routing.js'
+import { getEnrollmentByServiceDid } from './discovery.js'
 
 type DidString = `did:plc:${string}` | `did:web:${string}`
 
@@ -116,10 +115,7 @@ export const resolveUserSigningKey = async (
   did: string,
   serviceDid: string,
 ): Promise<PublicKey | null> => {
-  const enrollments = await discoverEnrollments(did, pdsUrl)
-
-  const targetRkey = serviceDIDToRkey(serviceDid)
-  const enrollment = enrollments.find((e) => e.rkey === targetRkey)
+  const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
   if (!enrollment?.signingKey) return null
 
   const didKey = enrollment.signingKey
