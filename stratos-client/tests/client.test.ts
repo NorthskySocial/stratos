@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { discoverEnrollment, discoverEnrollments } from '../src/discovery.js'
+import { discoverEnrollment, discoverEnrollments } from '../src/index.js'
 import {
   createServiceFetchHandler,
-  resolveServiceUrl,
   findEnrollmentByService,
+  resolveServiceUrl,
 } from '../src/routing.js'
 import {
   buildCollectionScope,
@@ -93,7 +93,8 @@ describe('discovery', () => {
           {
             uri: 'at://did:plc:test123/zone.stratos.actor.enrollment/did:web:stratos.example.com',
             cid: 'bafytest',
-            value: { invalid: true },
+            /* eslint-disable @typescript-eslint/no-explicit-any */
+            value: { invalid: true } as any,
           },
         ]),
       ),
@@ -189,7 +190,7 @@ describe('routing', () => {
         'https://stratos.example.com',
       )
 
-      await handler.handle('/xrpc/zone.stratos.feed.post')
+      await handler.handle('/xrpc/zone.stratos.feed.post', {})
 
       expect(mockHandler).toHaveBeenCalledWith(
         'https://stratos.example.com/xrpc/zone.stratos.feed.post',
@@ -222,6 +223,7 @@ describe('routing', () => {
 
       await handler.handle(
         '/xrpc/com.atproto.repo.getRecord?repo=did:plc:test&collection=zone.stratos.feed.post&rkey=abc',
+        {},
       )
 
       expect(mockHandler).toHaveBeenCalledWith(

@@ -58,9 +58,9 @@ function parseReplyRef(record: Record<string, unknown>): ReplyRef | null {
     | undefined
   if (
     !reply?.root?.uri ||
-    !reply?.root?.cid ||
-    !reply?.parent?.uri ||
-    !reply?.parent?.cid
+    !reply.root.cid ||
+    !reply.parent?.uri ||
+    !reply.parent.cid
   ) {
     return null
   }
@@ -95,8 +95,8 @@ function mapFeedViewPosts(
       {
         uri: item.post.uri,
         cid: item.post.cid,
-        text: (val.text as string) ?? '',
-        createdAt: (val.createdAt as string) ?? item.post.indexedAt ?? '',
+        text: val.text as string,
+        createdAt: val.createdAt as string,
         isPrivate,
         reply: parseReplyRef(val),
         author: did,
@@ -107,6 +107,12 @@ function mapFeedViewPosts(
   })
 }
 
+/**
+ * Fetch public posts from the repo
+ * @param agent - Agent instance for interacting with the repo
+ * @param did - DID of the repository to fetch posts from
+ * @returns Array of FeedPost objects fetched from the repository
+ */
 export async function fetchRepoPublicPosts(
   agent: Agent,
   did: string,
@@ -122,8 +128,8 @@ export async function fetchRepoPublicPosts(
       return {
         uri: r.uri,
         cid: r.cid,
-        text: (val.text as string) ?? '',
-        createdAt: (val.createdAt as string) ?? '',
+        text: val.text as string,
+        createdAt: val.createdAt as string,
         isPrivate: false,
         reply: parseReplyRef(val),
         author: did,
@@ -152,6 +158,12 @@ export async function fetchPublicPosts(
   }
 }
 
+/**
+ * Fetch Stratos posts for a given DID
+ * @param stratosAgent - Stratos agent instance
+ * @param did - DID of the user to fetch posts for
+ * @returns Array of FeedPost objects
+ */
 export async function fetchStratosPosts(
   stratosAgent: Agent,
   did: string,
@@ -167,8 +179,8 @@ export async function fetchStratosPosts(
       return {
         uri: r.uri,
         cid: r.cid,
-        text: (val.text as string) ?? '',
-        createdAt: (val.createdAt as string) ?? '',
+        text: val.text as string,
+        createdAt: val.createdAt as string,
         isPrivate: true,
         reply: parseReplyRef(val),
         author: authorFromUri(r.uri),
@@ -181,6 +193,12 @@ export async function fetchStratosPosts(
   }
 }
 
+/**
+ * Fetch Stratos posts from an appview instance
+ * @param session - OAuth session for the user
+ * @param appviewUrl - URL of the appview instance
+ * @returns Array of FeedPost objects
+ */
 export async function fetchAppviewStratosPosts(
   session: OAuthSession,
   appviewUrl: string,
@@ -205,6 +223,12 @@ export async function fetchAppviewStratosPosts(
   }
 }
 
+/**
+ * Combine public and Stratos posts into a unified feed
+ * @param publicPosts - Public posts from other sources
+ * @param stratosPosts - Stratos posts from the user's Stratos instance
+ * @returns Array of FeedPost objects sorted by creation time
+ */
 export function buildUnifiedFeed(
   publicPosts: FeedPost[],
   stratosPosts: FeedPost[],
@@ -224,6 +248,12 @@ export function collectDomains(posts: FeedPost[]): string[] {
   return Array.from(domains).sort()
 }
 
+/**
+ * Filters posts by domain. If domain is null, returns all posts.
+ * @param posts - Posts to filter
+ * @param domain - Domain to filter by, or null to return all posts
+ * @returns Array of filtered posts
+ */
 export function filterByDomain(
   posts: FeedPost[],
   domain: string | null,
@@ -232,6 +262,11 @@ export function filterByDomain(
   return posts.filter((p) => !p.isPrivate || p.boundaries.includes(domain))
 }
 
+/**
+ * Calculates statistics for a feed of posts.
+ * @param posts - Posts to calculate stats for
+ * @returns Object with postCount and userCount properties
+ */
 export function feedStats(posts: FeedPost[]): {
   postCount: number
   userCount: number
@@ -241,6 +276,13 @@ export function feedStats(posts: FeedPost[]): {
   return { postCount: posts.length, userCount: authors.size }
 }
 
+/**
+ * Resolves author handles for posts, using current DID and handle if available.
+ * @param posts - Posts to resolve handles for
+ * @param currentDid - Current user's DID
+ * @param currentHandle - Current user's handle
+ * @returns Array of posts with resolved handles
+ */
 export function resolveHandles(
   posts: FeedPost[],
   currentDid: string,
@@ -255,6 +297,11 @@ export function resolveHandles(
   })
 }
 
+/**
+ * Groups posts into threads based on reply structure.
+ * @param posts - Posts to group
+ * @returns Array of ThreadNode objects
+ */
 export function groupIntoThreads(posts: FeedPost[]): ThreadNode[] {
   const byUri = new Map<string, FeedPost>()
   for (const p of posts) byUri.set(p.uri, p)
@@ -286,6 +333,12 @@ export function groupIntoThreads(posts: FeedPost[]): ThreadNode[] {
   return rootPosts.map((p) => buildTree(p, 0))
 }
 
+/**
+ * Finds a post by its URI.
+ * @param posts - Posts to search
+ * @param uri - URI to find
+ * @returns The post with the specified URI, or undefined if not found
+ */
 export function findPost(posts: FeedPost[], uri: string): FeedPost | undefined {
   return posts.find((p) => p.uri === uri)
 }

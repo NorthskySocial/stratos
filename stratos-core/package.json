@@ -10,6 +10,10 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
+    "./atproto": {
+      "types": "./src/atproto/index.ts",
+      "import": "./src/atproto/index.ts"
+    },
     "./validation": {
       "types": "./src/validation/index.ts",
       "import": "./src/validation/index.ts"
@@ -21,6 +25,10 @@
     "./db/pg": {
       "types": "./src/db/pg.ts",
       "import": "./src/db/pg.ts"
+    },
+    "./tests": {
+      "types": "./tests/utils/index.ts",
+      "import": "./tests/utils/index.ts"
     }
   },
   "scripts": {
@@ -28,14 +36,19 @@
     "clean": "rm -rf dist",
     "test": "vitest run",
     "format": "prettier --write .",
-    "lint": "eslint --ext .ts"
+    "lint": "eslint --ext .ts ."
   },
   "dependencies": {
+    "@atcute/atproto": "^3.1.10",
+    "@atcute/car": "^5.1.1",
     "@atcute/cbor": "^2.3.2",
     "@atcute/cid": "^2.4.1",
+    "@atcute/client": "^4.2.1",
     "@atcute/mst": "^0.1.2",
     "@atcute/uint8array": "^1.1.1",
     "@atproto/common-web": "^0.4.16",
+    "@atproto/lex-cbor": "^0.0.9",
+    "@atproto/lex-data": "^0.0.9",
     "@atproto/lexicon": "^0.6.1",
     "@atproto/syntax": "^0.4.3",
     "@libsql/client": "^0.17.0",

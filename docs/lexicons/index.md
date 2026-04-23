@@ -13,7 +13,8 @@ function ns(name) {
 
 # Lexicon Reference
 
-All AT Protocol lexicons defined by the Stratos service. Lexicons describe every XRPC method, record type, and shared definition available in this namespace (`zone.stratos.*`).
+All AT Protocol lexicons defined by the Stratos service. Lexicons describe every XRPC method, record
+type, and shared definition available in this namespace (`zone.stratos.*`).
 
 <div class="lex-badge-legend">
   <span class="badge-item"><span class="lb badge-query">GET</span> Query — read-only XRPC call</span>

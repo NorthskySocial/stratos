@@ -15,6 +15,7 @@
     userCount: number
     activeFeed: string | null
     onSelectFeed: (domain: string | null) => void
+    onSetServiceUrl?: (url: string) => void
   }
 
   let {
@@ -29,7 +30,14 @@
     userCount,
     activeFeed,
     onSelectFeed,
+    onSetServiceUrl,
   }: Props = $props()
+
+  let inputUrl = $state(serviceUrl)
+
+  $effect(() => {
+    inputUrl = serviceUrl
+  })
 </script>
 
 <nav class="sidebar-nav">
@@ -79,10 +87,28 @@
       {/if}
     </div>
 
-    {#if !enrollment && serviceUrl}
-      <button class="enroll-btn" onclick={() => enrollInStratos(serviceUrl, handle)}>
-        Enroll in Stratos
-      </button>
+    {#if !enrollment}
+      {#if serviceUrl}
+        <button class="enroll-btn" onclick={() => enrollInStratos(serviceUrl, handle)}>
+          Enroll in Stratos
+        </button>
+      {:else}
+        <div class="url-config">
+          <input
+            type="text"
+            placeholder="Stratos Service URL"
+            bind:value={inputUrl}
+            class="url-input"
+          />
+          <button
+            class="set-url-btn"
+            disabled={!inputUrl}
+            onclick={() => onSetServiceUrl?.(inputUrl)}
+          >
+            Set URL
+          </button>
+        </div>
+      {/if}
     {/if}
 
     {#if enrollment && stratosStatus && !stratosStatus.enrolled}
@@ -252,6 +278,47 @@
   }
 
   .enroll-btn:hover { background: #0052cc; }
+
+  .url-config {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+
+  .url-input {
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    outline: none;
+  }
+
+  .url-input:focus {
+    border-color: #0066ff;
+  }
+
+  .set-url-btn {
+    width: 100%;
+    padding: 0.4rem;
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .set-url-btn:hover:not(:disabled) {
+    background: #e5e7eb;
+  }
+
+  .set-url-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
   .section {
     padding: 0.75rem 1rem;

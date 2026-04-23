@@ -1,15 +1,22 @@
-import { describe, it, expect, vi } from 'vitest'
-import { CID } from 'multiformats/cid'
-import * as AtcuteCid from '@atcute/cid'
-import { decode as cborDecode, isBytes, fromBytes } from '@atcute/cbor'
+import { describe, expect, it, vi } from 'vitest'
+import type { Cid } from '@atproto/lex-data'
 import type { CidLink } from '@atcute/cid'
+import * as AtcuteCid from '@atcute/cid'
+import {
+  type Bytes,
+  decode as cborDecode,
+  fromBytes,
+  isBytes,
+} from '@atcute/cbor'
 import { MemoryBlockStore } from '@atcute/mst'
 import { signAndPersistCommit, signCommit } from '../src/features'
 import {
+  BlockMap,
   buildCommit,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
-import { BlockMap } from '@northskysocial/stratos-core'
+
+import type { ActorRepoTransactor } from '../src/actor-store-types.js'
 
 const DID = 'did:plc:testsigner'
 
@@ -35,25 +42,25 @@ function createMockKeypair() {
   }
 }
 
-function createMockRepoTransactor() {
+function createMockRepoTransactor(): ActorRepoTransactor {
   const blocks = new Map<string, Uint8Array>()
-  let rootCid: CID | null = null
+  let rootCid: Cid | null = null
   let rootRev: string | null = null
 
   return {
-    putBlock: vi.fn(async (cid: CID, bytes: Uint8Array, _rev: string) => {
+    putBlock: vi.fn(async (cid: Cid, bytes: Uint8Array, _rev: string) => {
       blocks.set(cid.toString(), bytes)
     }),
-    deleteBlocks: vi.fn(async (_cids: CID[]) => {}),
-    updateRoot: vi.fn(async (cid: CID, rev: string, _did: string) => {
+    deleteBlocks: vi.fn(async (_cids: Cid[]) => {}),
+    updateRoot: vi.fn(async (cid: Cid, rev: string, _did: string) => {
       rootCid = cid
       rootRev = rev
     }),
-    getBytes: vi.fn(async (cid: CID) => blocks.get(cid.toString()) ?? null),
-    has: vi.fn(async (cid: CID) => blocks.has(cid.toString())),
-    getBlocks: vi.fn(async (cids: CID[]) => {
+    getBytes: vi.fn(async (cid: Cid) => blocks.get(cid.toString()) ?? null),
+    has: vi.fn(async (cid: Cid) => blocks.has(cid.toString())),
+    getBlocks: vi.fn(async (cids: Cid[]) => {
       const found = new BlockMap()
-      const missing: CID[] = []
+      const missing: Cid[] = []
       for (const cid of cids) {
         const b = blocks.get(cid.toString())
         if (b) found.set(cid, b)
@@ -67,15 +74,18 @@ function createMockRepoTransactor() {
     ),
     hasRoot: vi.fn(async () => rootCid !== null),
     putBlocks: vi.fn(),
+    deleteBlock: vi.fn(),
     deleteBlocksForRev: vi.fn(),
+    clearCache: vi.fn(),
     cache: new BlockMap(),
     iterateCarBlocks: vi.fn(async function* () {}),
     countBlocks: vi.fn(async () => blocks.size),
     listExistingBlocks: vi.fn(),
     getBlockRange: vi.fn(),
-    _blocks: blocks,
+    // Internal access for tests
+    _blocks: blocks as unknown,
     _getRootCid: () => rootCid,
-  }
+  } as unknown as ActorRepoTransactor
 }
 
 describe('signAndPersistCommit', () => {
@@ -98,13 +108,9 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
-    expect(result.commitCid).toBeInstanceOf(CID)
+    expect(result.commitCid.toString()).toMatch(/^bafy/)
     expect(result.commitBytes).toBeInstanceOf(Uint8Array)
     expect(result.commitBytes.length).toBeGreaterThan(0)
     expect(result.rev).toBe(unsigned.rev)
@@ -129,7 +135,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsigned)
+    await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(keypair.sign).toHaveBeenCalledOnce()
     const signedBytes = keypair.sign.mock.calls[0][0]
@@ -164,11 +170,11 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsigned)
+    await signAndPersistCommit(transactor, keypair, unsigned)
 
     // All blocks persisted in a single batch call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()
-    const [blockMap, rev] = transactor.putBlocks.mock.calls[0] as [
+    const [blockMap, rev] = vi.mocked(transactor.putBlocks).mock.calls[0] as [
       BlockMap,
       string,
     ]
@@ -204,11 +210,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(transactor.updateRoot).toHaveBeenCalledOnce()
     expect(transactor.updateRoot).toHaveBeenCalledWith(
@@ -237,11 +239,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     // dag-cbor codec = 0x71
     expect(result.commitCid.code).toBe(0x71)
@@ -268,11 +266,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     const decoded = cborDecode(result.commitBytes) as Record<string, unknown>
     expect(decoded.did).toBe(DID)
@@ -280,7 +274,7 @@ describe('signAndPersistCommit', () => {
     expect((decoded.data as CidLink).$link).toBe(unsigned.data)
     expect(decoded.rev).toBe(unsigned.rev)
     expect(isBytes(decoded.sig)).toBe(true)
-    expect(fromBytes(decoded.sig as any).length).toBe(64)
+    expect(fromBytes(decoded.sig as Bytes).length).toBe(64)
   })
 
   it('should delete removed CIDs when present', async () => {
@@ -316,10 +310,10 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsignedWithRemovals)
+    await signAndPersistCommit(transactor, keypair, unsignedWithRemovals)
 
     expect(transactor.deleteBlocks).toHaveBeenCalledOnce()
-    expect(transactor.deleteBlocks.mock.calls[0][0]).toHaveLength(1)
+    expect(vi.mocked(transactor.deleteBlocks).mock.calls[0][0]).toHaveLength(1)
   })
 
   it('should not call deleteBlocks when removedCids is empty', async () => {
@@ -341,7 +335,7 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    await signAndPersistCommit(transactor as any, keypair, unsigned)
+    await signAndPersistCommit(transactor, keypair, unsigned)
 
     expect(transactor.deleteBlocks).not.toHaveBeenCalled()
   })
@@ -365,15 +359,14 @@ describe('signAndPersistCommit', () => {
     const keypair = createMockKeypair()
     const transactor = createMockRepoTransactor()
 
-    const result = await signAndPersistCommit(
-      transactor as any,
-      keypair,
-      unsigned,
-    )
+    const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
     // The commit block should be included in the batch putBlocks call
     expect(transactor.putBlocks).toHaveBeenCalledOnce()
-    const [blockMap] = transactor.putBlocks.mock.calls[0] as [BlockMap]
+    const [blockMap] = vi.mocked(transactor.putBlocks).mock.calls[0] as [
+      BlockMap,
+      string,
+    ]
     const commitEntry = [...blockMap.entries()].find(
       ([key]) => key === result.commitCid.toString(),
     )
@@ -405,7 +398,7 @@ describe('signCommit with real P256 keypair', () => {
 
     const result = await signCommit(keypair, unsigned)
 
-    expect(result.commitCid).toBeInstanceOf(CID)
+    expect(result.commitCid.toString()).toMatch(/^bafy/)
     expect(result.commitBytes.length).toBeGreaterThan(0)
 
     const decoded = cborDecode(result.commitBytes) as Record<string, unknown>

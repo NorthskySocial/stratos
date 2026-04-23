@@ -1,4 +1,4 @@
-import { createClient, Client } from '@libsql/client'
+import { Client, createClient } from '@libsql/client'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
 import { sql } from 'drizzle-orm'
 import * as schemaModule from './schema/index.js'
@@ -16,7 +16,11 @@ export type StratosDb = LibSQLDatabase<typeof schemaModule.schema> & {
 /**
  * Generic type for a Stratos database or transaction
  */
-export type StratosDbOrTx = LibSQLDatabase<typeof schemaModule.schema>
+export type StratosDbOrTx =
+  | LibSQLDatabase<typeof schemaModule.schema>
+  | (Omit<LibSQLDatabase<typeof schemaModule.schema>, 'batch'> & {
+      batch?: never
+    })
 
 /**
  * Default SQLite pragmas for stratos databases
@@ -27,6 +31,11 @@ const DEFAULT_PRAGMAS: Record<string, string> = {}
  * Creates a connection to a stratos SQLite database.
  * Note: The returned database has async initialization. Call `await db._initialized`
  * before using if you need WAL mode guaranteed, or it will be applied lazily.
+ *
+ * @param location - Path to the SQLite database file. Use ':memory:' for in-memory databases.
+ * @param opts - Optional configuration options
+ * @returns A drizzle database instance
+ * @throws {Error} If the database cannot be opened or initialized
  */
 export function createStratosDb(
   location: string,
@@ -60,7 +69,7 @@ export function createStratosDb(
         await db.run(stmt)
       } catch (err) {
         // Ignore SQLITE_BUSY errors for WAL pragma - another connection may have set it
-        const errCode = (err as { code?: string })?.code
+        const errCode = (err as { code?: string }).code
         if (errCode !== 'SQLITE_BUSY') {
           throw err
         }
@@ -183,5 +192,6 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
  * Closes the stratos database connection
  */
 export async function closeStratosDb(db: StratosDb): Promise<void> {
-  db._client.close()
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+  await (db._client as any).close()
 }

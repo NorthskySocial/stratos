@@ -4,7 +4,10 @@ Before users can create Stratos records they must enroll with the Stratos servic
 
 ## Enrollment Record Schema
 
-A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS, created during the enrollment process. Each enrollment record represents a connection to a different Stratos service — _a user can be enrolled in multiple Stratos services simultaneously_, with each enrollment stored as a separate record using the service's DID as the record key.
+A user's Stratos enrollments are published as `zone.stratos.actor.enrollment` records on their PDS,
+created during the enrollment process. Each enrollment record represents a connection to a different
+Stratos service — _a user can be enrolled in multiple Stratos services simultaneously_, with each
+enrollment stored as a separate record using the service's DID as the record key.
 
 Each enrollment record is stored at `at://<did>/zone.stratos.actor.enrollment/<service-did>`:
 
@@ -41,13 +44,19 @@ at://did:plc:abc123/zone.stratos.actor.enrollment/did:web:service-b.example.com 
 | `attestation.signingKey` | `string` (did:key)         | The Stratos service's public key used to verify the attestation                                      |
 | `createdAt`              | `string` (datetime)        | When the enrollment was created                                                                      |
 
-The enrollment process initializes the user's Stratos repository with an empty signed commit, so the repo is immediately valid for reads and writes. A P-256 signing key is generated and stored by the Stratos service — this key signs record commits, making them verifiable against the `signingKey` published in the enrollment record. If the per-user key is unavailable, the service falls back to its own Secp256k1 key.
+The enrollment process initializes the user's Stratos repository with an empty signed commit, so the
+repo is immediately valid for reads and writes. A P-256 signing key is generated and stored by the
+Stratos service — this key signs record commits, making them verifiable against the `signingKey`
+published in the enrollment record. If the per-user key is unavailable, the service falls back to
+its own Secp256k1 key.
 
 ## Checking Enrollment Status
 
 ### Discovery functions
 
-`discoverEnrollments` uses `com.atproto.repo.listRecords` to fetch all enrollment records from the collection, validates each record's shape, and includes the rkey from the record URI. `discoverEnrollment` is a convenience wrapper that returns the first enrollment or null.
+`discoverEnrollments` uses `com.atproto.repo.listRecords` to fetch all enrollment records from the
+collection, validates each record's shape, and includes the rkey from the record URI.
+`discoverEnrollment` is a convenience wrapper that returns the first enrollment or null.
 
 ```typescript
 import {
@@ -71,12 +80,14 @@ const enrollment: StratosEnrollment | null = await discoverEnrollment(
 
 // With an existing FetchHandler (e.g. from an authenticated agent)
 import type { FetchHandler } from '@atcute/client'
+
 const all = await discoverEnrollments(did, agent.handle)
 ```
 
 ### Direct lookup by service DID
 
-When you already know which Stratos service you're looking for, use `getEnrollmentByServiceDid` for a direct O(1) lookup instead of listing all records:
+When you already know which Stratos service you're looking for, use `getEnrollmentByServiceDid` for
+a direct O(1) lookup instead of listing all records:
 
 ```typescript
 import {
@@ -94,11 +105,13 @@ if (enrollment) {
 }
 ```
 
-This calls `com.atproto.repo.getRecord` with the service DID as the rkey, which is more efficient than `listRecords` when targeting a specific service.
+This calls `com.atproto.repo.getRecord` with the service DID as the rkey, which is more efficient
+than `listRecords` when targeting a specific service.
 
 ### Service DID to rkey conversion
 
-AT Protocol rkeys cannot contain `%` characters, but `did:web` DIDs with ports use `%3A` encoding (e.g., `did:web:localhost%3A3100`). The `serviceDIDToRkey` helper handles this:
+AT Protocol rkeys cannot contain `%` characters, but `did:web` DIDs with ports use `%3A` encoding (
+e.g., `did:web:localhost%3A3100`). The `serviceDIDToRkey` helper handles this:
 
 ```typescript
 import { serviceDIDToRkey } from '@northskysocial/stratos-client'
@@ -143,7 +156,10 @@ async function isUserEnrolled(
 
 ## Boundary Addressability
 
-Boundaries are service-DID-qualified: each boundary `value` is stored in `{serviceDid}/{domainName}` format (e.g., `did:web:stratos.example.com/animal-lovers`). This makes every boundary globally addressable — the same domain name on two different Stratos services produces two distinct boundary values, so cross-enrollment conflicts are impossible by design.
+Boundaries are service-DID-qualified: each boundary `value` is stored in `{serviceDid}/{domainName}`
+format (e.g., `did:web:stratos.example.com/animal-lovers`). This makes every boundary globally
+addressable — the same domain name on two different Stratos services produces two distinct boundary
+values, so cross-enrollment conflicts are impossible by design.
 
 ```typescript
 const enrollments = await discoverEnrollments(did, pdsUrl)
@@ -158,11 +174,14 @@ enrollments.forEach((e) => {
 })
 ```
 
-Discovery should happen at session establishment (login/resume) and the result cached for the session lifetime. Reset enrollment state on account switch or logout.
+Discovery should happen at session establishment (login/resume) and the result cached for the
+session lifetime. Reset enrollment state on account switch or logout.
 
 ## Verifying the Attestation
 
-The enrollment record's `attestation` field is signed by the Stratos service's private key. To verify the enrollment is authentic, resolve the service's public key from its DID document and check the signature over the DAG-CBOR encoded payload:
+The enrollment record's `attestation` field is signed by the Stratos service's private key. To
+verify the enrollment is authentic, resolve the service's public key from its DID document and check
+the signature over the DAG-CBOR encoded payload:
 
 ```typescript
 import { encode as cborEncode } from '@atcute/cbor'
@@ -212,9 +231,12 @@ async function verifyEnrollmentAttestation(
 }
 ```
 
-This confirms the Stratos service vouches for the user's DID, boundaries, and signing key binding. The service's `did:web` DID document is the root of trust — cache the resolved key to avoid repeated lookups.
+This confirms the Stratos service vouches for the user's DID, boundaries, and signing key binding.
+The service's `did:web` DID document is the root of trust — cache the resolved key to avoid repeated
+lookups.
 
-See [Attestation Verification](/client/attestation) for the full trust model and chained verification.
+See [Attestation Verification](/client/attestation) for the full trust model and chained
+verification.
 
 ## Initiating Enrollment
 
@@ -262,7 +284,8 @@ async function handleEnrollmentCallback() {
 
 ## OAuth Scopes
 
-Stratos records use AT Protocol auth scopes. Clients should declare the scopes they need in their OAuth metadata and scope selector UI.
+Stratos records use AT Protocol auth scopes. Clients should declare the scopes they need in their
+OAuth metadata and scope selector UI.
 
 ### Required scopes
 
@@ -303,6 +326,8 @@ Add scopes to your `oauth-client-metadata.json`:
 
 ## Troubleshooting
 
-_"NotEnrolled" after completing OAuth_ — The service may have an allowlist. Contact the operator to request access.
+_"NotEnrolled" after completing OAuth_ — The service may have an allowlist. Contact the operator to
+request access.
 
-_OAuth redirect fails_ — Verify your app's callback URL matches the Stratos configuration and check for CORS issues in the browser console.
+_OAuth redirect fails_ — Verify your app's callback URL matches the Stratos configuration and check
+for CORS issues in the browser console.

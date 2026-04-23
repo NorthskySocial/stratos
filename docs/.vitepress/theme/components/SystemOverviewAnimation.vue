@@ -1,75 +1,75 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="so-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="so-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- PDS ↔ Stratos -->
         <path
           id="so-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#so-ml)"
           d="M 170 248 L 325 248"
+          marker-end="url(#so-ml)"
+          stroke="#9145EC"
         />
         <!-- Stratos → AppView -->
         <path
           id="so-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#so-ml)"
           d="M 530 248 L 690 248"
+          marker-end="url(#so-ml)"
+          stroke="#9145EC"
         />
         <!-- PDS → DID Resolver (upward) -->
         <path
           id="so-a3"
           class="ar"
-          stroke="#7780DC"
-          marker-end="url(#so-ml)"
           d="M 92 195 L 97 133"
+          marker-end="url(#so-ml)"
+          stroke="#7780DC"
         />
         <!-- Stratos → Blob Storage -->
         <path
           id="so-a4"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#so-ml)"
           d="M 430 298 L 355 375"
+          marker-end="url(#so-ml)"
+          stroke="#9145EC"
         />
         <!-- AppView → PostgreSQL -->
         <path
           id="so-a5"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#so-mg)"
           d="M 755 298 L 640 375"
+          marker-end="url(#so-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Center row -->
       <div
-        class="node"
         id="so-npds"
+        class="node"
         style="left: 15px; top: 195px; width: 155px"
       >
         <div class="ni">🗄️</div>
@@ -78,8 +78,8 @@
       </div>
 
       <div
-        class="node"
         id="so-nst"
+        class="node"
         style="left: 325px; top: 195px; width: 205px"
       >
         <div class="ni">⚙️</div>
@@ -88,8 +88,8 @@
       </div>
 
       <div
-        class="node"
         id="so-nav"
+        class="node"
         style="left: 690px; top: 195px; width: 165px"
       >
         <div class="ni">📡</div>
@@ -99,8 +99,8 @@
 
       <!-- Top: DID Resolver (above PDS) -->
       <div
-        class="node"
         id="so-ndid"
+        class="node"
         style="left: 15px; top: 30px; width: 165px"
       >
         <div class="ni">🔍</div>
@@ -110,8 +110,8 @@
 
       <!-- Bottom row -->
       <div
-        class="node"
         id="so-nblob"
+        class="node"
         style="left: 240px; top: 375px; width: 175px"
       >
         <div class="ni">📦</div>
@@ -120,8 +120,8 @@
       </div>
 
       <div
-        class="node"
         id="so-ndb"
+        class="node"
         style="left: 525px; top: 375px; width: 175px"
       >
         <div class="ni">🛢️</div>
@@ -133,7 +133,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

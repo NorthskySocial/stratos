@@ -1,8 +1,8 @@
 // PDS admin API helpers — account creation via pds.atverkackt.de
 
-import { PDS_URL, PDS_ADMIN_PASSWORD } from './config.ts'
+import { PDS_ADMIN_PASSWORD, PDS_URL } from './config.ts'
 
-const adminAuth = `Basic ${btoa(`admin:${PDS_ADMIN_PASSWORD}`)}`
+const adminAuth = 'Basic ' + btoa('admin:' + PDS_ADMIN_PASSWORD)
 
 interface CreateAccountResponse {
   handle: string
@@ -115,4 +115,32 @@ export async function deleteAccount(did: string): Promise<void> {
     const body = await res.text()
     throw new Error(`Failed to delete account ${did}: ${res.status} ${body}`)
   }
+}
+
+/** Check for enrollment record on PDS */
+export async function getEnrollmentRecord(
+  did: string,
+  accessJwt: string,
+): Promise<{ exists: boolean; value?: Record<string, unknown> }> {
+  const collection = 'zone.stratos.actor.enrollment'
+  const res = await fetch(
+    `${PDS_URL}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=${collection}&rkey=self`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessJwt}`,
+      },
+    },
+  )
+
+  if (res.status === 404) {
+    return { exists: false }
+  }
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to get enrollment record: ${res.status} ${body}`)
+  }
+
+  const data = await res.json()
+  return { exists: true, value: data.value }
 }

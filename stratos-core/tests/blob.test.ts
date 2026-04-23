@@ -1,25 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 
-import { StratosBlobReader, StratosBlobTransactor } from '../src'
 import {
+  BlobStore,
+  closeStratosDb,
   createStratosDb,
   migrateStratosDb,
-  closeStratosDb,
-  StratosDb,
   stratosBlob,
-  stratosRecordBlob,
+  StratosBlobReader,
+  StratosBlobTransactor,
+  StratosDb,
   stratosRecord,
-} from '../src'
-import { BlobStore } from '../src'
+  stratosRecordBlob,
+} from '../src/index.js'
 
 // Create a deterministic CID from data
-const createCid = async (data: string | Uint8Array): Promise<CID> => {
+const createCid = async (data: string | Uint8Array): Promise<Cid> => {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash)
@@ -30,12 +31,12 @@ function createMockBlobStore(): BlobStore {
   const storage = new Map<string, Uint8Array>()
 
   return {
-    putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
+    putTemp: vi.fn().mockImplementation((bytes: Uint8Array) => {
       const key = `temp-${randomBytes(8).toString('hex')}`
       storage.set(key, bytes)
       return key
     }),
-    makePermanent: vi.fn().mockImplementation(async (key: string, cid: CID) => {
+    makePermanent: vi.fn().mockImplementation((key: string, cid: Cid) => {
       const bytes = storage.get(key)
       if (bytes) {
         storage.set(cid.toString(), bytes)
@@ -45,8 +46,8 @@ function createMockBlobStore(): BlobStore {
     putPermanent: vi
       .fn()
       .mockImplementation(
-        async (cid: CID, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
-          if (bytes instanceof Uint8Array) {
+        async (cid: Cid, bytes: Uint8Array | AsyncIterable<Uint8Array>) => {
+          if (!(Symbol.asyncIterator in bytes)) {
             storage.set(cid.toString(), bytes)
           } else {
             const chunks: Uint8Array[] = []
@@ -67,29 +68,29 @@ function createMockBlobStore(): BlobStore {
       ),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockImplementation(async (cid: CID) => {
+    delete: vi.fn().mockImplementation((cid: Cid) => {
       storage.delete(cid.toString())
     }),
-    deleteMany: vi.fn().mockImplementation(async (cids: CID[]) => {
+    deleteMany: vi.fn().mockImplementation((cids: Cid[]) => {
       for (const cid of cids) {
         storage.delete(cid.toString())
       }
     }),
-    hasTemp: vi.fn().mockImplementation(async (key: string) => {
+    hasTemp: vi.fn().mockImplementation((key: string) => {
       return storage.has(key)
     }),
-    hasStored: vi.fn().mockImplementation(async (cid: CID) => {
+    hasStored: vi.fn().mockImplementation((cid: Cid) => {
       return storage.has(cid.toString())
     }),
-    getBytes: vi.fn().mockImplementation(async (cid: CID) => {
+    getBytes: vi.fn().mockImplementation((cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       return bytes
     }),
-    getStream: vi.fn().mockImplementation(async (cid: CID) => {
+    getStream: vi.fn().mockImplementation((cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
-      async function* generate() {
+      function* generate() {
         yield bytes
       }
       return generate()

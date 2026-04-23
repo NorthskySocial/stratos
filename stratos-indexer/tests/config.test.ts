@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { loadConfig } from '../src/config.ts'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { loadConfig } from '../src'
 
 describe('loadConfig', () => {
   const originalEnv = process.env
@@ -72,7 +72,7 @@ describe('loadConfig', () => {
     delete process.env.STRATOS_SERVICE_URL
     delete process.env.STRATOS_SYNC_TOKEN
 
-    expect(() => loadConfig()).toThrow('required environment variable')
+    expect(() => loadConfig()).toThrow('Invalid environment variables')
   })
 
   it('throws on non-integer numeric values', () => {
@@ -82,6 +82,6 @@ describe('loadConfig', () => {
     process.env.STRATOS_SYNC_TOKEN = 'token'
     process.env.HEALTH_PORT = 'not-a-number'
 
-    expect(() => loadConfig()).toThrow('must be an integer')
+    expect(() => loadConfig()).toThrow('Invalid environment variables')
   })
 })

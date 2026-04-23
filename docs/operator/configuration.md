@@ -31,7 +31,8 @@ Restrict which domain names can appear in record boundaries:
 STRATOS_ALLOWED_DOMAINS="general,fanart"
 ```
 
-These are bare domain names. At startup the service qualifies them with its own DID, so `"fanart"` becomes `"did:web:stratos.example.com/fanart"`. Clients must send the fully-qualified form.
+These are bare domain names. At startup the service qualifies them with its own DID, so `"fanart"`
+becomes `"did:web:stratos.example.com/fanart"`. Clients must send the fully-qualified form.
 
 ## Write Rate Limiter
 
@@ -59,13 +60,16 @@ STRATOS_IMPORT_MAX_BYTES=268435456
 STRATOS_SIGNING_KEY_HEX="<hex-encoded-secp256k1-private-key>"
 ```
 
-**User keys** — each enrolled user receives a P-256 keypair generated at enrollment time. Private keys are stored at `{dataDir}/actors/{prefix}/{did}/signing_key`. The public key and a service attestation are published in the enrollment record on the user's PDS.
+**User keys** — each enrolled user receives a P-256 keypair generated at enrollment time. Private
+keys are stored at `{dataDir}/actors/{prefix}/{did}/signing_key`. The public key and a service
+attestation are published in the enrollment record on the user's PDS.
 
 Attestation lifecycle:
 
 - Generated at enrollment with the user's initial boundaries.
 - Regenerated when boundaries change.
-- Deleted on unenrollment.
+- Deleted on unenrollment. The enrollment record and all associated actor data (records, blobs) are
+  permanently deleted from the service (hard delete).
 
 ## Database Storage Backend
 
@@ -178,9 +182,8 @@ Stratos validates DPoP tokens using JWKS-based signature verification (not token
 | `STRATOS_PLC_URL`               |          | `https://plc.directory` | DID PLC resolver URL                   |
 | `STRATOS_OAUTH_CLIENT_ID`       |          | —                       | OAuth client metadata URL              |
 | `STRATOS_OAUTH_REDIRECT_URI`    |          | —                       | OAuth callback URI                     |
-| `STRATOS_ALLOWED_APPVIEWS`      |          | —                       | Comma-separated AppView DIDs           |
 | `STRATOS_SIGNING_KEY_HEX`       |          | auto-generated          | Service secp256k1 key                  |
 | `STRATOS_IMPORT_MAX_BYTES`      |          | `268435456`             | Max CAR import size                    |
 | `STRATOS_WRITE_RATE_MAX_WRITES` |          | `300`                   | Per-DID write limit                    |
 | `STRATOS_WRITE_RATE_WINDOW_MS`  |          | `60000`                 | Rate limit window                      |
-| `STRATOS_LOG_LEVEL`             |          | `info`                  | `debug`, `info`, `warn`, `error`       |
+| `LOG_LEVEL`                     |          | `info`                  | `debug`, `info`, `warn`, `error`       |

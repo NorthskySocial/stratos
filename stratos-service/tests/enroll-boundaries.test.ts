@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { selectEnrollBoundaries } from '../src/oauth/routes.js'
+import { describe, expect, it } from 'vitest'
+import { selectEnrollBoundaries } from '../src/oauth'
 
 describe('selectEnrollBoundaries', () => {
   const allDomains = [

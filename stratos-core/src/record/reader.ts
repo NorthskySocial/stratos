@@ -1,16 +1,18 @@
-import { CID } from 'multiformats/cid'
-import { AtUri } from '@atproto/syntax'
+import type { Cid } from '@atproto/lex-data'
+import { parseCid } from '../atproto/index.js'
 import * as syntax from '@atproto/syntax'
-import { eq, and, gt, lt, asc, desc, isNull } from 'drizzle-orm'
+import { AtUri } from '@atproto/syntax'
+import { and, asc, desc, eq, gt, isNull, lt } from 'drizzle-orm'
 import {
-  StratosDbOrTx,
-  StratosBacklink,
   countAll,
+  StratosBacklink,
+  stratosBacklink,
+  StratosDbOrTx,
+  StratosRecord,
   stratosRecord,
   stratosRepoBlock,
-  stratosBacklink,
 } from '../db/index.js'
-import { StatusAttr, Logger } from '../types.js'
+import { Logger, StatusAttr } from '../types.js'
 
 /**
  * Descriptor for a stratos record
@@ -18,7 +20,7 @@ import { StatusAttr, Logger } from '../types.js'
 export interface StratosRecordDescript {
   uri: string
   path: string
-  cid: CID
+  cid: Cid
 }
 
 /**
@@ -73,6 +75,10 @@ export class StratosRecordReader {
     protected logger?: Logger,
   ) {}
 
+  /**
+   * Counts the total number of records in the database.
+   * @returns The total number of records.
+   */
   async recordCount(): Promise<number> {
     const res = await this.db
       .select({ count: countAll })
@@ -81,6 +87,10 @@ export class StratosRecordReader {
     return res[0]?.count ?? 0
   }
 
+  /**
+   * Lists all records in the database.
+   * @returns An array of StratosRecordDescript objects representing all records.
+   */
   async listAll(): Promise<StratosRecordDescript[]> {
     const records: StratosRecordDescript[] = []
     let cursor: string | undefined = ''
@@ -96,7 +106,7 @@ export class StratosRecordReader {
         records.push({
           uri: row.uri,
           path: `${parsed.collection}/${parsed.rkey}`,
-          cid: CID.parse(row.cid),
+          cid: parseCid(row.cid),
         })
       }
       cursor = res.at(-1)?.uri
@@ -104,15 +114,24 @@ export class StratosRecordReader {
     return records
   }
 
+  /**
+   * Lists all unique collections in the database.
+   * @returns An array of collection names.
+   */
   async listCollections(): Promise<string[]> {
     const collections = await this.db
       .select({ collection: stratosRecord.collection })
       .from(stratosRecord)
       .groupBy(stratosRecord.collection)
 
-    return collections.map((row) => row.collection)
+    return collections.map((row: { collection: string }) => row.collection)
   }
 
+  /**
+   * Lists all records for a specific collection in the database.
+   * @param opts - Options for listing records.
+   * @returns An array of RecordWithContent objects representing records in the collection.
+   */
   async listRecordsForCollection(
     opts: ListRecordsOpts,
   ): Promise<RecordWithContent[]> {
@@ -160,7 +179,7 @@ export class StratosRecordReader {
       .orderBy(reverse ? asc(stratosRecord.rkey) : desc(stratosRecord.rkey))
       .limit(limit)
 
-    return res.map((row) => {
+    return res.map((row: { uri: string; cid: string; content: Uint8Array }) => {
       return {
         uri: row.uri,
         cid: row.cid,
@@ -169,8 +188,15 @@ export class StratosRecordReader {
     })
   }
 
+  /**
+   * Retrieves a specific record from the database by URI and optional CID.
+   * @param uri - The URI of the record to retrieve.
+   * @param cid - The CID of the record to retrieve (optional).
+   * @param includeSoftDeleted - Whether to include soft-deleted records (default: false).
+   * @returns The record with metadata, or null if not found.
+   */
   async getRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted = false,
   ): Promise<RecordWithMeta | null> {
@@ -196,8 +222,8 @@ export class StratosRecordReader {
       .where(and(...conditions))
       .limit(1)
 
+    if (res.length === 0) return null
     const record = res[0]
-    if (!record) return null
     return {
       uri: record.uri,
       cid: record.cid,
@@ -207,8 +233,15 @@ export class StratosRecordReader {
     }
   }
 
+  /**
+   * Checks if a record exists in the database by URI and optional CID.
+   * @param uri - The URI of the record to check.
+   * @param cid - The CID of the record to check (optional).
+   * @param includeSoftDeleted - Whether to include soft-deleted records (default: false).
+   * @returns True if the record exists, false otherwise.
+   */
   async hasRecord(
-    uri: AtUri,
+    uri: string | AtUri,
     cid: string | null,
     includeSoftDeleted = false,
   ): Promise<boolean> {
@@ -230,7 +263,14 @@ export class StratosRecordReader {
     return res.length > 0
   }
 
-  async getRecordTakedownStatus(uri: AtUri): Promise<StatusAttr | null> {
+  /**
+   * Retrieves the takedown status of a record by URI.
+   * @param uri - The URI of the record to check.
+   * @returns The takedown status of the record, or null if not found.
+   */
+  async getRecordTakedownStatus(
+    uri: string | AtUri,
+  ): Promise<StatusAttr | null> {
     const res = await this.db
       .select({ takedownRef: stratosRecord.takedownRef })
       .from(stratosRecord)
@@ -243,19 +283,29 @@ export class StratosRecordReader {
       : { applied: false }
   }
 
-  async getCurrentRecordCid(uri: AtUri): Promise<CID | null> {
+  /**
+   * Retrieves the CID of the current version of a record by URI.
+   * @param uri - The URI of the record to retrieve the CID for.
+   * @returns The CID of the current version of the record, or null if not found.
+   */
+  async getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null> {
     const res = await this.db
       .select({ cid: stratosRecord.cid })
       .from(stratosRecord)
       .where(eq(stratosRecord.uri, uri.toString()))
       .limit(1)
 
-    return res.length > 0 ? CID.parse(res[0].cid) : null
+    return res.length > 0 ? parseCid(res[0].cid) : null
   }
 
-  async getRecordBacklinks(opts: GetBacklinksOpts) {
+  /**
+   * Retrieves backlinks for a record based on the provided options.
+   * @param opts - Options for retrieving backlinks.
+   * @returns An array of backlinks for the specified record.
+   */
+  async getRecordBacklinks(opts: GetBacklinksOpts): Promise<StratosRecord[]> {
     const { collection, path, linkTo } = opts
-    return await this.db
+    return this.db
       .select({
         uri: stratosRecord.uri,
         cid: stratosRecord.cid,
@@ -276,21 +326,28 @@ export class StratosRecordReader {
       )
   }
 
+  /**
+   * Retrieves conflicts for a record based on backlinks.
+   * @param uri - The URI of the record to check for conflicts.
+   * @param record - The record object to analyze for backlinks.
+   * @returns An array of conflicting URIs.
+   */
   async getBacklinkConflicts(
-    uri: AtUri,
+    uri: AtUri | string,
     record: Record<string, unknown>,
   ): Promise<AtUri[]> {
     const conflicts: AtUri[] = []
+    const atUri = typeof uri === 'string' ? new AtUri(uri) : uri
 
-    for (const backlink of getStratosBacklinks(uri, record)) {
+    for (const backlink of getStratosBacklinks(atUri, record)) {
       const backlinks = await this.getRecordBacklinks({
-        collection: uri.collection,
+        collection: atUri.collection,
         path: backlink.path,
         linkTo: backlink.linkTo,
       })
 
-      for (const { rkey } of backlinks) {
-        conflicts.push(AtUri.make(uri.hostname, uri.collection, rkey))
+      for (const row of backlinks) {
+        conflicts.push(AtUri.make(atUri.hostname, atUri.collection, row.rkey))
       }
     }
 
@@ -300,15 +357,19 @@ export class StratosRecordReader {
 
 /**
  * Extracts backlinks from a stratos record
+ *
+ * @param uri - The URI of the record to extract backlinks from.
+ * @param record - The record object to analyze for backlinks.
+ * @returns An array of backlinks found in the record.
  */
 export function getStratosBacklinks(
-  uri: AtUri,
+  uri: AtUri | string,
   record: Record<string, unknown>,
 ): StratosBacklink[] {
   const backlinks: StratosBacklink[] = []
 
   // Extract subject references
-  const subject = record?.['subject']
+  const subject = record['subject']
   if (typeof subject === 'string') {
     try {
       syntax.ensureValidDid(subject)

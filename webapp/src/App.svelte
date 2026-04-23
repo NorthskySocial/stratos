@@ -100,8 +100,15 @@
       serviceUrl = url
       stratosAgent = createStratosAgent(session, url)
 
-      stratosStatus = await checkStratosServiceStatus(url, session.sub)
-      serverDomains = await fetchServerDomains(url)
+      try {
+        stratosStatus = await checkStratosServiceStatus(url, session.sub)
+        serverDomains = await fetchServerDomains(url)
+      } catch (err) {
+        console.error('Failed to check service status:', err)
+        stratosStatus = { enrolled: false }
+      }
+    } else {
+      stratosStatus = { enrolled: false }
     }
 
     if (enrollment) {
@@ -136,6 +143,11 @@
 
   function handleSelectFeed(domain: string | null) {
     activeFeed = domain
+  }
+
+  function handleSetServiceUrl(url: string) {
+    serviceUrl = url
+    discoverAndLoad()
   }
 
   function handleReply(post: FeedPost) {
@@ -196,6 +208,7 @@
         userCount={stats.userCount}
         {activeFeed}
         onSelectFeed={handleSelectFeed}
+        onSetServiceUrl={handleSetServiceUrl}
       />
     </aside>
 

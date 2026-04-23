@@ -4,7 +4,6 @@
 import SystemOverviewAnimation from '../.vitepress/theme/components/SystemOverviewAnimation.vue'
 import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
 import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreationAnimation.vue'
-import IndexerSyncAnimation from '../.vitepress/theme/components/IndexerSyncAnimation.vue'
 </script>
 
 ## System Components
@@ -27,7 +26,9 @@ import IndexerSyncAnimation from '../.vitepress/theme/components/IndexerSyncAnim
 
 ## Repository & MST Architecture
 
-Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit chain** compatible with the ATProto repo format. Every record write produces a signed commit that updates the MST root, enabling cryptographic verification of repository contents.
+Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit chain** compatible
+with the ATProto repo format. Every record write produces a signed commit that updates the MST root,
+enabling cryptographic verification of repository contents.
 
 | Layer                  | Contents                                                                         |
 | ---------------------- | -------------------------------------------------------------------------------- |
@@ -42,7 +43,8 @@ Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit ch
 
 ## Storage Architecture
 
-Each enrolled user gets either an isolated SQLite database (default) or an isolated PostgreSQL schema.
+Each enrolled user gets either an isolated SQLite database (default) or an isolated PostgreSQL
+schema.
 
 **SQLite layout:**
 

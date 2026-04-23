@@ -2,7 +2,9 @@
 
 ## Understanding Boundaries
 
-Every Stratos record must include a `boundary` specifying which domains can access it. Boundary values are addressable as `{serviceDid}/{name}`. The service DID is the `did:web` identity of the Stratos instance — retrieve it from the service's `/.well-known/did.json`.
+Every Stratos record must include a `boundary` specifying which domains can access it. Boundary
+values are addressable as `{serviceDid}/{name}`. The service DID is the `did:web` identity of the
+Stratos instance — retrieve it from the service's `/.well-known/did.json`.
 
 ```typescript
 {
