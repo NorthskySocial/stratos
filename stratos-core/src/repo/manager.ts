@@ -111,9 +111,7 @@ export class ActorRepoManager {
     // transaction open longer, exhausting the connection pool under load.
     await Promise.all([
       transactor.putBlocks(allBlocks, unsigned.rev),
-      removedCids.length > 0
-        ? transactor.deleteBlocks(removedCids)
-        : undefined,
+      removedCids.length > 0 ? transactor.deleteBlocks(removedCids) : undefined,
       transactor.updateRoot(commitCid, unsigned.rev, did),
       this.sequencingService.sequenceChange(
         did,

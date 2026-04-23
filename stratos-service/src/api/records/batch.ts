@@ -15,10 +15,7 @@ import {
   signAndPersistCommit,
   StratosBlockStoreReader,
 } from '../../features/index.js'
-import {
-  validateWritableRecord,
-  withConcurrencyRetry,
-} from './validation.js'
+import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
 import { sequenceChange, type SequenceTrace } from './types.js'
 import { ensureActorStoreExists } from './util.js'
 
@@ -188,64 +185,60 @@ async function buildCommitWithRetry(
       // provides the root and row lock in one query; a separate read phase doubles
       // the root query and loses the lock. See create.ts for full rationale.
       return ctx.actorStore.transact(callerDid, async (store) => {
-          const currentRoot = await store.repo.lockRoot()
-          const rootCid = currentRoot?.cid
-            ? parseCid(currentRoot.cid).toString()
-            : null
-          const storage = new StratosBlockStoreReader(store.repo)
-          const unsigned = await buildCommit(storage, rootCid, {
-            did: callerDid,
-            writes: mstOps,
-          })
+        const currentRoot = await store.repo.lockRoot()
+        const rootCid = currentRoot?.cid
+          ? parseCid(currentRoot.cid).toString()
+          : null
+        const storage = new StratosBlockStoreReader(store.repo)
+        const unsigned = await buildCommit(storage, rootCid, {
+          did: callerDid,
+          writes: mstOps,
+        })
 
-          await persistBatchBlocks(store, precomputed)
+        await persistBatchBlocks(store, precomputed)
 
-          const commitResult = await signAndPersistCommit(
-            store.repo,
-            actorSigningKey,
-            unsigned,
-          )
+        const commitResult = await signAndPersistCommit(
+          store.repo,
+          actorSigningKey,
+          unsigned,
+        )
 
-          const results = await prepareWriteResults(
-            store,
-            precomputed,
-            commitResult.rev,
-          )
+        const results = await prepareWriteResults(
+          store,
+          precomputed,
+          commitResult.rev,
+        )
 
-          await sequenceBatchChanges(
-            store,
-            precomputed,
-            commitResult.commitCid.toString(),
-            commitResult.rev,
-            sequenceTrace,
-          )
+        await sequenceBatchChanges(
+          store,
+          precomputed,
+          commitResult.commitCid.toString(),
+          commitResult.rev,
+          sequenceTrace,
+        )
 
-          for (const pre of precomputed) {
-            if (pre.action === 'delete') {
-              ctx.stubQueue.enqueueDelete(
-                callerDid,
-                pre.op.collection,
-                pre.rkey,
-              )
-            } else {
-              ctx.stubQueue.enqueueWrite(
-                callerDid,
-                pre.op.collection,
-                pre.rkey,
-                pre.op.collection,
-                pre.cid!.toString(),
-                commitResult.rev,
-              )
-            }
+        for (const pre of precomputed) {
+          if (pre.action === 'delete') {
+            ctx.stubQueue.enqueueDelete(callerDid, pre.op.collection, pre.rkey)
+          } else {
+            ctx.stubQueue.enqueueWrite(
+              callerDid,
+              pre.op.collection,
+              pre.rkey,
+              pre.op.collection,
+              pre.cid!.toString(),
+              commitResult.rev,
+            )
           }
+        }
 
-          return {
-            results,
-            commit: {
-              cid: commitResult.commitCid.toString(),
-              rev: commitResult.rev,
-            },
-          }
+        return {
+          results,
+          commit: {
+            cid: commitResult.commitCid.toString(),
+            rev: commitResult.rev,
+          },
+        }
       })
     }, ctx.logger)
     result = retry.result
