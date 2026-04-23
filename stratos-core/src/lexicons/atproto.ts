@@ -7,6 +7,8 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: 'application/json' },
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -16,6 +18,8 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: 'application/json' },
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -25,6 +29,8 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: '*/*' },
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -34,6 +40,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'query',
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -43,6 +50,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'query',
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -52,6 +60,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'query',
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -61,6 +70,8 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'procedure',
+        input: { encoding: 'application/json' },
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -70,6 +81,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'query',
+        output: { encoding: 'application/json' },
       },
     },
   },
@@ -79,6 +91,7 @@ export const atprotoLexicons: LexiconDoc[] = [
     defs: {
       main: {
         type: 'query',
+        output: { encoding: 'application/vnd.ipld.car' },
       },
     },
   },

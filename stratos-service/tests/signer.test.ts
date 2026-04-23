@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CID, Cid } from '@atproto/lex-data'
+import type { Cid } from '@atproto/lex-data'
 import type { CidLink } from '@atcute/cid'
 import * as AtcuteCid from '@atcute/cid'
 import {
@@ -110,7 +110,7 @@ describe('signAndPersistCommit', () => {
 
     const result = await signAndPersistCommit(transactor, keypair, unsigned)
 
-    expect(result.commitCid).toBeInstanceOf(CID)
+    expect(result.commitCid.toString()).toMatch(/^bafy/)
     expect(result.commitBytes).toBeInstanceOf(Uint8Array)
     expect(result.commitBytes.length).toBeGreaterThan(0)
     expect(result.rev).toBe(unsigned.rev)
@@ -398,7 +398,7 @@ describe('signCommit with real P256 keypair', () => {
 
     const result = await signCommit(keypair, unsigned)
 
-    expect(result.commitCid).toBeInstanceOf(CID)
+    expect(result.commitCid.toString()).toMatch(/^bafy/)
     expect(result.commitBytes.length).toBeGreaterThan(0)
 
     const decoded = cborDecode(result.commitBytes) as Record<string, unknown>
