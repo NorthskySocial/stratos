@@ -6,7 +6,6 @@ import * as crypto from '@atproto/crypto'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
 import { fileExists } from '@atproto/common'
 
-import { sql } from 'drizzle-orm'
 import {
   createAttestationPayload,
   DefaultLexiconProvider,
@@ -74,7 +73,6 @@ async function loadSigningKey(
  * @param opts - Configuration options for the application context.
  * @returns Initialized application context.
  */
-// eslint-disable-next-line max-lines-per-function
 export async function createAppContext(
   opts: AppContextOptions,
 ): Promise<AppContext> {
@@ -132,6 +130,12 @@ export async function createAppContext(
     logger,
   )
 
+  const SIGNING_KEY_TTL_MS = 5 * 60 * 1000
+  const signingKeyCache = new Map<
+    string,
+    { key: crypto.Keypair; expiresAt: number }
+  >()
+
   const ctx: AppContext = {
     cfg,
     version: VERSION,
@@ -151,9 +155,26 @@ export async function createAppContext(
     logger,
     dpopVerifier,
 
+    /**
+     * Returns the actor's signing keypair, using a TTL cache to avoid
+     * redundant DB lookups and P256 key imports on every write.
+     *
+     * @param did - DID of the actor
+     */
     async getActorSigningKey(did: string) {
-      const keypair = await actorStore.loadSigningKey(did)
-      return keypair ?? (await actorStore.createSigningKey(did))
+      const now = Date.now()
+      const cached = signingKeyCache.get(did)
+      if (cached && cached.expiresAt > now) {
+        return cached.key
+      }
+      const keypair =
+        (await actorStore.loadSigningKey(did)) ??
+        (await actorStore.createSigningKey(did))
+      signingKeyCache.set(did, {
+        key: keypair,
+        expiresAt: now + SIGNING_KEY_TTL_MS,
+      })
+      return keypair
     },
 
     async createAttestation(
@@ -167,14 +188,11 @@ export async function createAppContext(
     },
 
     async checkHealth() {
-      const dbOk = await storage.db
-        ?.run(sql`SELECT 1`)
-        .then(() => 'ok' as const)
-        .catch(() => 'error' as const)
+      const dbOk = await storage.checkDbHealth()
       return {
         status: dbOk === 'ok' ? 'ok' : 'error',
         components: {
-          db: dbOk ?? 'error',
+          db: dbOk,
           blobstore: 'ok',
         },
       }

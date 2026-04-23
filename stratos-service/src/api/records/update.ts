@@ -125,28 +125,20 @@ export async function updateRecord(
   try {
     const retry = await withConcurrencyRetry(async () => {
       const attemptT0 = performance.now()
-      return ctx.actorStore.readThenTransact(
-        callerDid,
-        async (reader) => {
-          phases.connAcquire = performance.now() - attemptT0
-          const root = await reader.repo.getRoot()
-          return {
-            rootCid: root ? parseCid(root).toString() : null,
-          }
-        },
-        async (_prepared, store) => {
-          const result = await performUpdate(
-            ctx,
-            store,
-            callerDid,
-            input,
-            recordBytes,
-            cid,
-            sequenceTrace,
-          )
-          return { ...result, uri: result.uri.toString() }
-        },
-      )
+      // See create.ts for why we use transact() and pass store.repo directly.
+      return ctx.actorStore.transact(callerDid, async (store) => {
+        phases.connAcquire = performance.now() - attemptT0
+        const result = await performUpdate(
+          ctx,
+          store,
+          callerDid,
+          input,
+          recordBytes,
+          cid,
+          sequenceTrace,
+        )
+        return { ...result, uri: result.uri.toString() }
+      })
     }, ctx.logger)
     updateResult = retry.result
     retries = retry.retries
@@ -209,7 +201,7 @@ async function performUpdate(
     { action: 'update', collection, rkey, record, cid },
   ]
 
-  const writeResult = await manager.applyWrites(callerDid, repoWrites, [
+  const writeResult = await manager.applyWrites(callerDid, repoWrites, store.repo, [
     { cid, bytes: recordBytes },
   ])
 
