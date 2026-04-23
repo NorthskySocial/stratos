@@ -13,7 +13,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db'
-import { getRecord, listRecords } from '../src/api'
+import { getRecord, listRecords } from '../src/api/records/index.js'
 import { createMockBlobStore, createTestConfig } from './utils'
 
 describe('Record Read Handlers', () => {

@@ -16,7 +16,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db/index.js'
-import { getRecord, updateRecord } from '../src/api/index.js'
+import { getRecord, updateRecord } from '../src/api/records/index.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
 describe('Record Update Handler', () => {
