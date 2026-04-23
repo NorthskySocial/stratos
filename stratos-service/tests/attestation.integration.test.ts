@@ -6,12 +6,12 @@
  * attestation can be verified using @atproto/crypto — exactly as an
  * AppView or client would verify an enrollment record.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
-import { encode as cborEncode, decode as cborDecode } from '@atcute/cbor'
+import { decode as cborDecode, encode as cborEncode } from '@atcute/cbor'
 import {
-  createAttestationPayload,
   type Attestation,
+  createAttestationPayload,
 } from '@northskysocial/stratos-core'
 
 const TEST_DID = 'did:plc:testattestation'

@@ -8,13 +8,15 @@
     "dev:northsky": "vite --mode northsky",
     "build": "vite build",
     "build:northsky": "vite build --mode northsky",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@atcute/cbor": "^2.3.2",
     "@atproto/api": "^0.15.8",
     "@atproto/crypto": "^0.4.0",
     "@atproto/oauth-client-browser": "^0.3.17",
+    "@atproto/oauth-types": "^0.6.3",
     "@atproto/syntax": "^0.3.0"
   },
   "devDependencies": {

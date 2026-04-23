@@ -4,19 +4,23 @@
 import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
 import VerificationFlowAnimation from '../.vitepress/theme/components/VerificationFlowAnimation.vue'
 import TrustChainAnimation from '../.vitepress/theme/components/TrustChainAnimation.vue'
-import BoundaryChangeAnimation from '../.vitepress/theme/components/BoundaryChangeAnimation.vue'
 </script>
 
-During enrollment, Stratos establishes a trust chain for public verification of enrollment. This lets apps confirm that a user is enrolled with a specific Stratos service — and verify the user's authorship of individual records — without querying the live service on every request.
+During enrollment, Stratos establishes a trust chain for public verification of enrollment. This
+lets apps confirm that a user is enrolled with a specific Stratos service — and verify the user's
+authorship of individual records — without querying the live service on every request.
 
-Access control itself is always enforced internally by Stratos. When a client requests content, Stratos validates the caller's current boundary membership before returning anything.
+Access control itself is always enforced internally by Stratos. When a client requests content,
+Stratos validates the caller's current boundary membership before returning anything.
 
 ## What Gets Signed
 
 At enrollment time Stratos generates:
 
-- A per-user P-256 keypair — private key stored on the service, public key is embedded in the enrollment record.
-- A service attestation — a DAG-CBOR signature binding the user's DID, boundaries, and signing key together.
+- A per-user P-256 keypair — private key stored on the service, public key is embedded in the
+  enrollment record.
+- A service attestation — a DAG-CBOR signature binding the user's DID, boundaries, and signing key
+  together.
 
 The attestation payload is:
 
@@ -83,7 +87,8 @@ function buildAttestationPayload(options: {
 
 <TrustChainAnimation />
 
-A verifier can chain trust: enrollment record → verify service attestation → extract user `signingKey` → verify commit signature. This proves both service endorsement and user authorship.
+A verifier can chain trust: enrollment record → verify service attestation → extract user
+`signingKey` → verify commit signature. This proves both service endorsement and user authorship.
 
 ## What the Attestation Does Not Prove
 
@@ -96,10 +101,13 @@ For freshness guarantees, query the live status endpoint:
 GET /xrpc/zone.stratos.enrollment.status?did=<did>
 ```
 
-Authenticated callers receive current boundaries, signing key, and a fresh attestation. Unauthenticated will receive details confirming if they are enrolled, their time of enrollment, and the DIDs signing key.
+Authenticated callers receive current boundaries, signing key, and a fresh attestation.
+Unauthenticated will receive details confirming if they are enrolled, their time of enrollment, and
+the DIDs signing key.
 
 ## Boundary Changes
 
-When a user's boundaries change, the service re-signs a new attestation and rewrites the PDS record. AppViews learn of the change via the sync stream and must invalidate their cache.
+When a user's boundaries change, the service re-signs a new attestation and rewrites the PDS record.
+AppViews learn of the change via the sync stream and must invalidate their cache.
 
 <BoundaryChangeAnimation />

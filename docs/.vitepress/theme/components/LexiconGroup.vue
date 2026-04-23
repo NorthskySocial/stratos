@@ -2,8 +2,8 @@
   <template v-for="lex in lexicons" :key="lex.id">
     <LexiconEntry
       :id="lex.id"
-      :main-def="lex.mainDef"
       :all-defs="lex.allDefs"
+      :main-def="lex.mainDef"
     />
   </template>
 </template>

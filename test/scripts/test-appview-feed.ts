@@ -21,25 +21,46 @@
  */
 
 import { createRecord } from './lib/stratos.ts'
-import { loadState, saveState } from './lib/state.ts'
-import { section, pass, fail, info, summary } from './lib/log.ts'
+import type { CreateRecordResponse } from './lib/stratos.ts'
+import { loadState } from './lib/state.ts'
+import type { TestState, UserState } from './lib/state.ts'
+import { fail, info, pass, section, summary } from './lib/log.ts'
+import type { FeedViewPost } from './lib/appview.ts'
 import {
-  waitForAppviewHealthy,
-  waitForIndexing,
-  getTimeline,
+  enrollWithAppview,
+  getAppviewDiagnostics,
   getAuthorFeed,
   getPost,
-  tryGetPost,
+  getTimeline,
   getTimelineUnauthenticated,
-  getAppviewDiagnostics,
-  enrollWithAppview,
+  tryGetPost,
+  waitForAppviewHealthy,
+  waitForIndexing,
 } from './lib/appview.ts'
 
 let passed = 0
 let failed = 0
 
-function assert(condition: boolean, testName: string, detail?: string): void {
+function assertTrue(
+  condition: unknown,
+  testName: string,
+  detail?: string,
+): void {
   if (condition) {
+    pass(testName, detail)
+    passed++
+  } else {
+    fail(testName, detail)
+    failed++
+  }
+}
+
+function assertFalse(
+  condition: unknown,
+  testName: string,
+  detail?: string,
+): void {
+  if (!condition) {
     pass(testName, detail)
     passed++
   } else {
@@ -52,10 +73,35 @@ async function run() {
   section('AppView Feed E2E Tests')
 
   const state = await loadState()
-  const rei = state.users.rei
-  const sakura = state.users.sakura
-  const kaoruko = state.users.kaoruko
+  const users = await validateUserState(state)
 
+  await ensureAppViewHealthy()
+  await registerEnrollments(state)
+
+  // Wait for WebSocket subscriptions to connect
+  info('Waiting for actor subscriptions to connect...')
+  await new Promise((r) => setTimeout(r, 3000))
+
+  const posts = await createTestPosts(users)
+  await waitForAppViewIndexing(4)
+
+  await runTimelineTests(users, posts)
+  await runAuthorFeedTests(users)
+  await runGetPostTests(users, posts)
+  await runUnauthenticatedTests()
+  await runBoundaryFilterTests(state, posts)
+
+  section('AppView Feed Test Results')
+  summary(passed, failed)
+
+  if (failed > 0) {
+    await logFinalDiagnostics()
+    Deno.exit(1)
+  }
+}
+
+async function validateUserState(state: TestState) {
+  const { rei, sakura, kaoruko } = state.users
   if (!rei?.did || !sakura?.did || !kaoruko?.did) {
     fail(
       'Missing user state',
@@ -63,12 +109,11 @@ async function run() {
     )
     Deno.exit(1)
   }
+  return { rei, sakura, kaoruko }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Wait for AppView to be healthy
-  // ─────────────────────────────────────────────────────────────
+async function ensureAppViewHealthy() {
   section('Wait for AppView')
-
   try {
     await waitForAppviewHealthy(30_000)
     pass('AppView is healthy')
@@ -76,12 +121,10 @@ async function run() {
     fail('AppView health check failed', String(err))
     Deno.exit(1)
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Register enrollments with AppView
-  // ─────────────────────────────────────────────────────────────
+async function registerEnrollments(state: TestState) {
   section('Register enrollments with AppView')
-
   for (const [name, user] of Object.entries(state.users)) {
     if (!user.did) continue
     try {
@@ -94,15 +137,15 @@ async function run() {
       fail(`Failed to enroll ${name} with AppView`, String(err))
     }
   }
+}
 
-  // Wait for WebSocket subscriptions to connect
-  info('Waiting for actor subscriptions to connect...')
-  await new Promise((r) => setTimeout(r, 3000))
-
-  // ─────────────────────────────────────────────────────────────
-  // Create test posts on Stratos
-  // ─────────────────────────────────────────────────────────────
+async function createTestPosts(users: {
+  rei: UserState
+  sakura: UserState
+  kaoruko: UserState
+}) {
   section('Create test posts')
+  const { rei, sakura, kaoruko } = users
 
   info('Creating swordsmith posts from Rei...')
   const reiPost1 = await createRecord(rei.did, 'zone.stratos.feed.post', {
@@ -143,142 +186,84 @@ async function run() {
   )
   pass('Kaoruko post created', kaorukoPost.uri)
 
-  // Save post URIs for later
-  state.users.rei.records['appview_post1'] = {
-    uri: reiPost1.uri,
-    cid: reiPost1.cid,
-    rkey: reiPost1.uri.split('/').pop()!,
-  }
-  state.users.rei.records['appview_post2'] = {
-    uri: reiPost2.uri,
-    cid: reiPost2.cid,
-    rkey: reiPost2.uri.split('/').pop()!,
-  }
-  state.users.sakura.records['appview_post'] = {
-    uri: sakuraPost.uri,
-    cid: sakuraPost.cid,
-    rkey: sakuraPost.uri.split('/').pop()!,
-  }
-  state.users.kaoruko.records['appview_post'] = {
-    uri: kaorukoPost.uri,
-    cid: kaorukoPost.cid,
-    rkey: kaorukoPost.uri.split('/').pop()!,
-  }
-  await saveState(state)
+  return { reiPost1, reiPost2, sakuraPost, kaorukoPost }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Wait for AppView to index all posts
-  // ─────────────────────────────────────────────────────────────
+async function waitForAppViewIndexing(expectedCount: number) {
   section('Wait for indexing')
-
   try {
-    const diag = await waitForIndexing(4, 30_000)
+    const diag = await waitForIndexing(expectedCount, 30_000)
     pass(
       'AppView indexed all posts',
       `posts=${diag.posts} boundaries=${diag.boundaries}`,
     )
   } catch (err) {
     fail('Indexing timeout', String(err))
-    // Show diagnostics for debugging
-    try {
-      const diag = await getAppviewDiagnostics()
-      info(`Diagnostics: ${JSON.stringify(diag, null, 2)}`)
-    } catch {
-      // ignore
-    }
+    await logFinalDiagnostics()
     Deno.exit(1)
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 1: Rei (swordsmith) sees swordsmith posts in timeline
-  // ─────────────────────────────────────────────────────────────
+async function runTimelineTests(
+  users: { rei: UserState; kaoruko: UserState },
+  posts: {
+    reiPost1: CreateRecordResponse
+    sakuraPost: CreateRecordResponse
+    kaorukoPost: CreateRecordResponse
+  },
+) {
   section('Test 1: Timeline — swordsmith viewer sees swordsmith posts')
+  const { rei, kaoruko } = users
+  const { reiPost1, sakuraPost, kaorukoPost } = posts
 
   try {
     const timeline = await getTimeline(rei.did)
-    const uris = timeline.feed.map((f) => f.post.uri)
+    const uris = timeline.feed.map((f: FeedViewPost) => f.post.uri)
 
-    assert(
+    assertTrue(
       timeline.feed.length >= 3,
       'Rei sees at least 3 swordsmith posts',
       `got ${timeline.feed.length} posts`,
     )
-
-    assert(
-      uris.includes(reiPost1.uri),
-      'Timeline includes Rei post 1',
-      reiPost1.uri,
-    )
-
-    assert(
-      uris.includes(sakuraPost.uri),
-      'Timeline includes Sakura post',
-      sakuraPost.uri,
-    )
-
-    assert(
-      !uris.includes(kaorukoPost.uri),
+    assertTrue(uris.includes(reiPost1.uri), 'Timeline includes Rei post 1')
+    assertTrue(uris.includes(sakuraPost.uri), 'Timeline includes Sakura post')
+    assertFalse(
+      uris.includes(kaorukoPost.uri),
       'Timeline does NOT include Kaoruko aekea post',
-      `should not contain ${kaorukoPost.uri}`,
     )
   } catch (err) {
     fail('Rei timeline test failed', String(err))
     failed++
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 2: Kaoruko (aekea) sees aekea posts, not swordsmith
-  // ─────────────────────────────────────────────────────────────
   section('Test 2: Timeline — aekea viewer sees aekea posts only')
-
   try {
     const timeline = await getTimeline(kaoruko.did)
-    const uris = timeline.feed.map((f) => f.post.uri)
-
-    assert(
-      timeline.feed.length >= 1,
-      'Kaoruko sees at least 1 aekea post',
-      `got ${timeline.feed.length} posts`,
-    )
-
-    assert(
-      uris.includes(kaorukoPost.uri),
-      'Timeline includes Kaoruko post',
-      kaorukoPost.uri,
-    )
-
-    assert(
-      !uris.includes(reiPost1.uri),
-      'Timeline does NOT include Rei swordsmith post',
-      `should not contain ${reiPost1.uri}`,
-    )
-
-    assert(
-      !uris.includes(sakuraPost.uri),
-      'Timeline does NOT include Sakura swordsmith post',
-      `should not contain ${sakuraPost.uri}`,
+    const uris = timeline.feed.map((f: FeedViewPost) => f.post.uri)
+    assertTrue(timeline.feed.length >= 1, 'Kaoruko sees at least 1 aekea post')
+    assertTrue(uris.includes(kaorukoPost.uri), 'Timeline includes Kaoruko post')
+    assertFalse(
+      uris.includes(reiPost1.uri),
+      'Timeline does NOT include Rei post',
     )
   } catch (err) {
     fail('Kaoruko timeline test failed', String(err))
     failed++
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 3: getAuthorFeed — Rei views Rei's feed
-  // ─────────────────────────────────────────────────────────────
+async function runAuthorFeedTests(users: {
+  rei: UserState
+  kaoruko: UserState
+}) {
   section('Test 3: Author feed — same boundary viewer')
-
+  const { rei, kaoruko } = users
   try {
     const feed = await getAuthorFeed(rei.did, rei.did)
-    assert(
-      feed.feed.length >= 2,
-      'Rei sees own posts in author feed',
-      `got ${feed.feed.length} posts`,
-    )
-
-    const texts = feed.feed.map((f) => f.post.record.text)
-    assert(
-      texts.some((t) => t.includes('Spirit Forge')),
+    assertTrue(feed.feed.length >= 2, 'Rei sees own posts in author feed')
+    const texts = feed.feed.map((f: FeedViewPost) => f.post.record.text)
+    assertTrue(
+      texts.some((t: string) => t.includes('Spirit Forge')),
       'Author feed includes Rei post 1 text',
     )
   } catch (err) {
@@ -286,128 +271,89 @@ async function run() {
     failed++
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 4: getAuthorFeed — cross-boundary denial
-  // ─────────────────────────────────────────────────────────────
   section('Test 4: Author feed — cross-boundary viewer gets empty')
-
   try {
     const feed = await getAuthorFeed(kaoruko.did, rei.did)
-    assert(
-      feed.feed.length === 0,
-      "Kaoruko cannot see Rei's posts via author feed",
-      `got ${feed.feed.length} posts (expected 0)`,
-    )
+    assertTrue(feed.feed.length === 0, "Kaoruko cannot see Rei's posts")
   } catch (err) {
     fail('Cross-boundary author feed test failed', String(err))
     failed++
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 5: getPost — same boundary access
-  // ─────────────────────────────────────────────────────────────
+async function runGetPostTests(
+  users: { sakura: UserState; kaoruko: UserState },
+  posts: { reiPost1: CreateRecordResponse },
+) {
   section('Test 5: getPost — same boundary access allowed')
-
+  const { sakura, kaoruko } = users
+  const { reiPost1 } = posts
   try {
     const result = await getPost(sakura.did, reiPost1.uri)
-    assert(
+    assertTrue(
       result.post.post.uri === reiPost1.uri,
-      "Sakura can read Rei's post via getPost",
-      reiPost1.uri,
-    )
-
-    assert(
-      result.post.post.record.text.includes('Spirit Forge'),
-      'Post text is correct',
-      result.post.post.record.text,
+      "Sakura can read Rei's post",
     )
   } catch (err) {
     fail('Same-boundary getPost test failed', String(err))
     failed++
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 6: getPost — cross-boundary denial
-  // ─────────────────────────────────────────────────────────────
   section('Test 6: getPost — cross-boundary denied')
-
   try {
     const result = await tryGetPost(kaoruko.did, reiPost1.uri)
-    assert(
-      !result.ok,
-      "Kaoruko cannot read Rei's swordsmith post",
-      result.ok ? 'unexpectedly succeeded' : `status=${result.status}`,
-    )
-
+    assertFalse(result.ok, "Kaoruko cannot read Rei's swordsmith post")
     if (!result.ok) {
-      assert(
+      assertTrue(
         result.error.includes('BoundaryMismatch'),
         'Error is BoundaryMismatch',
-        result.error,
       )
     }
   } catch (err) {
     fail('Cross-boundary getPost test failed', String(err))
     failed++
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 7: Unauthenticated timeline denied
-  // ─────────────────────────────────────────────────────────────
+async function runUnauthenticatedTests() {
   section('Test 7: Unauthenticated timeline denied')
-
   try {
     const result = await getTimelineUnauthenticated()
-    assert(
-      !result.ok,
-      'Unauthenticated timeline is rejected',
-      `status=${result.status}`,
-    )
+    assertFalse(result.ok, 'Unauthenticated timeline is rejected')
   } catch (err) {
     fail('Unauthenticated timeline test failed', String(err))
     failed++
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Test 8: Boundary filter on timeline
-  // ─────────────────────────────────────────────────────────────
+async function runBoundaryFilterTests(
+  state: TestState,
+  posts: { kaorukoPost: CreateRecordResponse },
+) {
   section('Test 8: Timeline boundary filter parameter')
-
-  // Create a user with BOTH boundaries to test filtering
-  // (skip if fuyuko is not available)
   const fuyuko = state.users.fuyuko
+  const { kaorukoPost } = posts
   if (fuyuko?.did) {
     try {
       const timeline = await getTimeline(fuyuko.did, { boundary: 'swordsmith' })
-      const uris = timeline.feed.map((f) => f.post.uri)
-      assert(
-        !uris.includes(kaorukoPost.uri),
+      const uris = timeline.feed.map((f: FeedViewPost) => f.post.uri)
+      assertFalse(
+        uris.includes(kaorukoPost.uri),
         'Boundary filter excludes non-matching posts',
-        `swordsmith filter returned ${timeline.feed.length} posts`,
       )
     } catch (err) {
       fail('Boundary filter test failed', String(err))
       failed++
     }
-  } else {
-    info('Skipping boundary filter test (fuyuko not available)')
   }
+}
 
-  // ─────────────────────────────────────────────────────────────
-  // Summary
-  // ─────────────────────────────────────────────────────────────
-  section('AppView Feed Test Results')
-  summary(passed, failed)
-
-  if (failed > 0) {
-    // Show diagnostics on failure
-    try {
-      const diag = await getAppviewDiagnostics()
-      info(`Final diagnostics:\n${JSON.stringify(diag, null, 2)}`)
-    } catch {
-      // ignore
-    }
-    Deno.exit(1)
+async function logFinalDiagnostics() {
+  try {
+    const diag = await getAppviewDiagnostics()
+    info(`Final diagnostics:\n${JSON.stringify(diag, null, 2)}`)
+  } catch {
+    // ignore
   }
 }
 

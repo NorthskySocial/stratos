@@ -137,67 +137,87 @@ function extractBoundaries(record: Record<string, unknown>): string[] {
     .filter((v): v is string => typeof v === 'string')
 }
 
+function extractPostMetadata(uri: string, record: Record<string, unknown>) {
+  const parts = uri.replace('at://', '').split('/')
+  return {
+    creator: parts[0],
+    rkey: parts[2],
+    text: typeof record.text === 'string' ? record.text : '',
+    createdAt:
+      typeof record.createdAt === 'string'
+        ? record.createdAt
+        : new Date().toISOString(),
+    replyRef: record.reply as
+      | {
+          root?: { uri?: string; cid?: string }
+          parent?: { uri?: string; cid?: string }
+        }
+      | undefined,
+    embed: record.embed ? JSON.stringify(record.embed) : null,
+    facets: record.facets ? JSON.stringify(record.facets) : null,
+    labels: record.labels ? JSON.stringify(record.labels) : null,
+    langs: Array.isArray(record.langs)
+      ? (record.langs as string[]).join(',')
+      : null,
+    tags: Array.isArray(record.tags)
+      ? (record.tags as string[]).join(',')
+      : null,
+    boundaries: extractBoundaries(record),
+  }
+}
+
 async function indexRecord(
   uri: string,
   cid: string,
   record: Record<string, unknown>,
   timestamp: string,
 ) {
-  const parts = uri.replace('at://', '').split('/')
-  const creator = parts[0]
-  const rkey = parts[2]
-  const text = typeof record.text === 'string' ? record.text : ''
-  const createdAt =
-    typeof record.createdAt === 'string'
-      ? record.createdAt
-      : new Date().toISOString()
-
-  const replyRef = record.reply as
-    | {
-        root?: { uri?: string; cid?: string }
-        parent?: { uri?: string; cid?: string }
-      }
-    | undefined
-
-  const embed = record.embed ? JSON.stringify(record.embed) : null
-  const facets = record.facets ? JSON.stringify(record.facets) : null
-  const labels = record.labels ? JSON.stringify(record.labels) : null
-  const langs = Array.isArray(record.langs)
-    ? (record.langs as string[]).join(',')
-    : null
-  const tags = Array.isArray(record.tags)
-    ? (record.tags as string[]).join(',')
-    : null
-
-  const boundaries = extractBoundaries(record)
+  const meta = extractPostMetadata(uri, record)
 
   await sql.begin(async (tx) => {
-    await tx`
-      INSERT INTO stratos_post (uri, cid, rkey, creator, text,
-        "replyRoot", "replyRootCid", "replyParent", "replyParentCid",
-        embed, facets, langs, labels, tags, "createdAt", "indexedAt")
-      VALUES (${uri}, ${cid}, ${rkey}, ${creator}, ${text},
-        ${replyRef?.root?.uri ?? null}, ${replyRef?.root?.cid ?? null},
-        ${replyRef?.parent?.uri ?? null}, ${replyRef?.parent?.cid ?? null},
-        ${embed}, ${facets}, ${langs}, ${labels}, ${tags}, ${createdAt}, ${timestamp})
-      ON CONFLICT (uri) DO UPDATE SET
-        cid = ${cid}, text = ${text},
-        "replyRoot" = ${replyRef?.root?.uri ?? null},
-        "replyRootCid" = ${replyRef?.root?.cid ?? null},
-        "replyParent" = ${replyRef?.parent?.uri ?? null},
-        "replyParentCid" = ${replyRef?.parent?.cid ?? null},
-        embed = ${embed}, facets = ${facets}, langs = ${langs},
-        labels = ${labels}, tags = ${tags}, "indexedAt" = ${timestamp}
-    `
+    await insertOrUpdatePost(tx, uri, cid, timestamp, meta)
 
     await tx`DELETE FROM stratos_post_boundary WHERE uri = ${uri}`
 
-    for (const b of boundaries) {
+    for (const b of meta.boundaries) {
       await tx`INSERT INTO stratos_post_boundary (uri, boundary) VALUES (${uri}, ${b})`
     }
   })
 
-  console.log(`[indexer] indexed ${uri} boundaries=[${boundaries.join(',')}]`)
+  console.log(
+    `[indexer] indexed ${uri} boundaries=[${meta.boundaries.join(',')}]`,
+  )
+}
+
+async function insertOrUpdatePost(
+  tx: postgres.TransactionSql<Record<string, unknown>>,
+  uri: string,
+  cid: string,
+  timestamp: string,
+  meta: ReturnType<typeof extractPostMetadata>,
+) {
+  const replyRoot = meta.replyRef?.root?.uri ?? null
+  const replyRootCid = meta.replyRef?.root?.cid ?? null
+  const replyParent = meta.replyRef?.parent?.uri ?? null
+  const replyParentCid = meta.replyRef?.parent?.cid ?? null
+
+  await tx`
+      INSERT INTO stratos_post (uri, cid, rkey, creator, text,
+        "replyRoot", "replyRootCid", "replyParent", "replyParentCid",
+        embed, facets, langs, labels, tags, "createdAt", "indexedAt")
+      VALUES (${uri}, ${cid}, ${meta.rkey}, ${meta.creator}, ${meta.text},
+        ${replyRoot}, ${replyRootCid},
+        ${replyParent}, ${replyParentCid},
+        ${meta.embed}, ${meta.facets}, ${meta.langs}, ${meta.labels}, ${meta.tags}, ${meta.createdAt}, ${timestamp})
+      ON CONFLICT (uri) DO UPDATE SET
+        cid = ${cid}, text = ${meta.text},
+        "replyRoot" = ${replyRoot},
+        "replyRootCid" = ${replyRootCid},
+        "replyParent" = ${replyParent},
+        "replyParentCid" = ${replyParentCid},
+        embed = ${meta.embed}, facets = ${meta.facets}, langs = ${meta.langs},
+        labels = ${meta.labels}, tags = ${meta.tags}, "indexedAt" = ${timestamp}
+    `
 }
 
 async function deleteRecord(uri: string) {
@@ -405,44 +425,7 @@ async function subscribeActor(did: string, attempt = 0) {
       const msg = decodeXrpcFrame(data)
       if (!msg) return
 
-      const type = msg.$type ?? ''
-
-      if (type.endsWith('#info')) {
-        const name = (msg as Record<string, unknown>).name as string | undefined
-        if (name === 'OutdatedCursor') {
-          console.log(`[sync] outdated cursor for ${did}`)
-        }
-        return
-      }
-
-      if (type.endsWith('#commit')) {
-        const commit = msg as unknown as {
-          seq: number
-          did: string
-          time: string
-          ops: Array<{
-            action: 'create' | 'update' | 'delete'
-            path: string
-            cid?: string
-            record?: Record<string, unknown>
-          }>
-        }
-
-        for (const op of commit.ops) {
-          const trimmedPath = op.path.replace(/^\//, '')
-          const collection = trimmedPath.split('/')[0]
-          if (collection !== STRATOS_POST_COLLECTION) continue
-
-          const uri = `at://${did}/${trimmedPath}`
-          if ((op.action === 'create' || op.action === 'update') && op.record) {
-            await indexRecord(uri, op.cid ?? '', op.record, commit.time)
-          } else if (op.action === 'delete') {
-            await deleteRecord(uri)
-          }
-        }
-
-        await updateSyncCursor(did, commit.seq)
-      }
+      await handleActorMessage(did, msg)
     } catch (err) {
       console.error(`[sync] actor message error (${did}):`, err)
     }
@@ -462,6 +445,51 @@ async function subscribeActor(did: string, attempt = 0) {
   ws.onerror = (err) => {
     console.warn(`[sync] actor stream error (${did}):`, err)
   }
+}
+
+async function handleActorMessage(did: string, msg: Record<string, unknown>) {
+  const type = msg.$type ?? ''
+
+  if (type.endsWith('#info')) {
+    const name = (msg as Record<string, unknown>).name as string | undefined
+    if (name === 'OutdatedCursor') {
+      console.log(`[sync] outdated cursor for ${did}`)
+    }
+    return
+  }
+
+  if (type.endsWith('#commit')) {
+    await handleActorCommit(did, msg)
+  }
+}
+
+async function handleActorCommit(
+  did: string,
+  commit: {
+    seq: number
+    time: string
+    ops: Array<{
+      action: 'create' | 'update' | 'delete'
+      path: string
+      cid?: string
+      record?: Record<string, unknown>
+    }>
+  },
+) {
+  for (const op of commit.ops) {
+    const trimmedPath = (op.path as string).replace(/^\//, '')
+    const collection = trimmedPath.split('/')[0]
+    if (collection !== STRATOS_POST_COLLECTION) continue
+
+    const uri = `at://${did}/${trimmedPath}`
+    if ((op.action === 'create' || op.action === 'update') && op.record) {
+      await indexRecord(uri, op.cid ?? '', op.record, commit.time)
+    } else if (op.action === 'delete') {
+      await deleteRecord(uri)
+    }
+  }
+
+  await updateSyncCursor(did, commit.seq)
 }
 
 async function startSync() {

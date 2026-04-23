@@ -1,17 +1,14 @@
 #!/usr/bin/env -S deno run -A
 // Setup script — creates PDS accounts, starts Stratos via Docker Compose, waits for health.
 
-import { TEST_USERS, TEST_ROOT, TEST_DATA_DIR } from './lib/config.ts'
-import { createInviteCode, createAccount, accountExists } from './lib/pds.ts'
+import { TEST_DATA_DIR, TEST_ROOT, TEST_USERS } from './lib/config.ts'
+import { accountExists, createAccount, createInviteCode } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
-import { saveState, loadState, type TestState } from './lib/state.ts'
-import { section, info, pass, fail, warn, error } from './lib/log.ts'
+import { loadState, saveState, type TestState } from './lib/state.ts'
+import { error, fail, info, pass, section, warn } from './lib/log.ts'
 import { isPostgres } from './lib/backend.ts'
 
-async function run() {
-  section('Phase 1: Setup')
-
-  // 1. Ensure the test-data directory exists and is writable by the container (uid 1000)
+async function prepareTestDataDir() {
   info('Preparing test-data directory...')
   try {
     await Deno.remove(TEST_DATA_DIR, { recursive: true })
@@ -28,15 +25,13 @@ async function run() {
 
   const chmod = new Deno.Command('chmod', { args: ['777', TEST_DATA_DIR] })
   await chmod.output()
+}
 
-  // 2. Create PDS accounts
+async function createPdsAccounts(state: TestState) {
   section('Creating PDS accounts')
-  const state: TestState = await loadState()
-
   for (const [key, user] of Object.entries(TEST_USERS)) {
     info(`Checking account: ${user.handle}`)
 
-    // Check if the account already exists
     const existing = await accountExists(user.handle, user.password)
     if (existing.exists && existing.did) {
       warn(`Account ${user.handle} already exists (${existing.did})`)
@@ -50,7 +45,6 @@ async function run() {
       continue
     }
 
-    // Create invite code then account
     try {
       info(`Creating invite code for ${user.handle}...`)
       const inviteCode = await createInviteCode()
@@ -74,18 +68,9 @@ async function run() {
       throw err
     }
   }
+}
 
-  await saveState(state)
-  info(
-    `State saved — DIDs: ${Object.values(state.users)
-      .map((u) => `${u.handle}=${u.did}`)
-      .join(', ')}`,
-  )
-
-  // 3. Start Stratos via Docker Compose
-  section('Starting Stratos')
-  info('Building and starting container...')
-
+function getEnvVars(state: TestState): Record<string, string> {
   const envVars: Record<string, string> = {}
   if (state.ngrokUrl) {
     info(`Using ngrok URL: ${state.ngrokUrl}`)
@@ -99,13 +84,6 @@ async function run() {
   } else if (Deno.env.get('USE_NGROK') === 'true') {
     throw new Error('No ngrok URL found in state, but USE_NGROK=true')
   } else {
-    // When not using ngrok, we must satisfy strict OAuth library requirements (RFC 8252):
-    // 1. redirect_uris must use loopback IP (127.0.0.1) instead of 'localhost'
-    // 2. client_id must be a valid URL. If it's http, some libraries (atproto)
-    //    forbid using an IP address in the hostname.
-    // 3. For local testing, using 'localhost' for client_id and '127.0.0.1' for redirect_uri
-    //    is the standard way to bypass these restrictions.
-
     envVars['STRATOS_PUBLIC_URL'] = 'http://127.0.0.1:3100'
     envVars['STRATOS_SERVICE_DID'] = 'did:web:127.0.0.1%3A3100'
     envVars['STRATOS_OAUTH_CLIENT_ID'] =
@@ -114,6 +92,12 @@ async function run() {
     envVars['STRATOS_OAUTH_REDIRECT_URI'] =
       'http://127.0.0.1:3100/oauth/callback'
   }
+  return envVars
+}
+
+async function startStratos(envVars: Record<string, string>) {
+  section('Starting Stratos')
+  info('Building and starting container...')
 
   const composeArgs = ['-f', 'docker-compose.test.yml']
   if (isPostgres()) {
@@ -139,21 +123,37 @@ async function run() {
   })
 
   const composeResult = await compose.output()
-
   if (!composeResult.success) {
     const stderr = new TextDecoder().decode(composeResult.stderr)
     fail('Docker compose failed', stderr)
     throw new Error('Docker compose failed')
   }
   pass('Container started')
+}
 
-  // 4. Wait for health
+async function run() {
+  section('Phase 1: Setup')
+
+  await prepareTestDataDir()
+
+  const state: TestState = await loadState()
+  await createPdsAccounts(state)
+
+  await saveState(state)
+  info(
+    `State saved — DIDs: ${Object.values(state.users)
+      .map((u) => `${u.handle}=${u.did}`)
+      .join(', ')}`,
+  )
+
+  const envVars = getEnvVars(state)
+  await startStratos(envVars)
+
   info('Waiting for Stratos to become healthy...')
   try {
     await waitForHealthy(60_000)
     pass('Stratos is healthy')
   } catch (err) {
-    // Show container logs on failure
     const logArgs = ['compose', '-f', 'docker-compose.test.yml']
     if (isPostgres()) logArgs.push('-f', 'docker-compose.postgres.yml')
     logArgs.push('logs', '--tail=50')

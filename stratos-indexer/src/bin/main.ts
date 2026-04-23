@@ -17,7 +17,7 @@ const main = async (): Promise<void> => {
   process.on('SIGINT', () => void shutdown())
 }
 
-void main().catch((err) => {
+main().catch((err) => {
   console.error('fatal error', err)
   Deno.exit(1)
 })

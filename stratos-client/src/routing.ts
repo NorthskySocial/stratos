@@ -1,16 +1,8 @@
 import type { FetchHandler, FetchHandlerObject } from '@atcute/client'
+import { serviceDIDToRkey } from '@northskysocial/stratos-core'
+import type { StratosEnrollment } from './types.js'
 
-/**
- * converts a service DID to a valid AT Protocol record key.
- * replaces percent-encoded colons (%3A) with literal colons,
- * which are valid rkey characters.
- *
- * @param serviceDid the service's DID (e.g., 'did:web:stratos.example.com')
- * @returns a valid AT Protocol record key
- */
-export const serviceDIDToRkey = (serviceDid: string): string => {
-  return serviceDid.replace(/%3A/gi, ':')
-}
+export { serviceDIDToRkey }
 
 /**
  * creates a fetch handler that routes XRPC calls to a specific service URL
@@ -45,7 +37,7 @@ export const createServiceFetchHandler = (
  * @returns the resolved service URL
  */
 export const resolveServiceUrl = (
-  enrollment: { service: string } | null,
+  enrollment: StratosEnrollment | { service: string } | null,
   fallbackUrl: string,
 ): string => {
   return enrollment?.service ?? fallbackUrl
@@ -58,10 +50,10 @@ export const resolveServiceUrl = (
  * @param serviceUrl the service URL to match
  * @returns the matching enrollment, or null if not found
  */
-export const findEnrollmentByService = (
-  enrollments: Array<{ service: string }>,
+export const findEnrollmentByService = <T extends { service: string }>(
+  enrollments: Array<T>,
   serviceUrl: string,
-): (typeof enrollments)[number] | null => {
+): T | null => {
   const normalized = serviceUrl.replace(/\/$/, '')
   return (
     enrollments.find((e) => e.service.replace(/\/$/, '') === normalized) ?? null

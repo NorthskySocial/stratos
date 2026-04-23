@@ -3,12 +3,14 @@ import { sql, SQL } from 'drizzle-orm'
 /**
  * Reference type for dynamic SQL
  */
-export type DbRef = SQL<unknown>
+export type DbRef = SQL
 
 /**
  * Check if a record is soft-deleted
  */
-export const softDeleted = (record: { takedownRef: string | null }) => {
+export const softDeleted = (record: {
+  takedownRef: string | null
+}): boolean => {
   return record.takedownRef !== null
 }
 
@@ -20,4 +22,5 @@ export const countAll = sql<number>`count(*)`
 /**
  * SQL count(distinct ref) expression
  */
-export const countDistinct = (ref: DbRef) => sql<number>`count(distinct ${ref})`
+export const countDistinct = (ref: DbRef): SQL<number> =>
+  sql<number>`count(distinct ${ref})`

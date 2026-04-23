@@ -1,32 +1,38 @@
-import type http from 'node:http'
+import { config as dotenvConfig } from 'dotenv'
 import path from 'node:path'
+dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
+dotenvConfig({ override: false })
+import type http from 'node:http'
 import express from 'express'
+import './types.js'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
+import { randomBytes } from 'node:crypto'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
-import { buildCommit } from '@northskysocial/stratos-core'
-
+import { buildCommit, StratosError } from '@northskysocial/stratos-core'
 import {
   type AppContext,
   createAppContext,
   destroyAppContext,
 } from './context.js'
 import { createLogger } from './logger.js'
-import { type StratosServiceConfig, envToConfig, parseEnv } from './config.js'
+import { envToConfig, parseEnv, type StratosServiceConfig } from './config.js'
 import { registerHandlers } from './api/handlers.js'
 import { registerSubscribeRecords } from './subscription/index.js'
 import { createOAuthRoutes } from './oauth/routes.js'
-import { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
-import { registerEnrollmentHandlers } from './features/index.js'
+import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
 import {
-  StratosBlockStoreReader,
+  registerEnrollmentHandlers,
+  registerHydrationHandlers,
   signAndPersistCommit,
+  StratosBlockStoreReader,
 } from './features/index.js'
 
 export { type StratosServiceConfig, type AppContext }
-export { DiskBlobStore, S3BlobStoreAdapter } from './blobstore/index.js'
+export { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
+export * from './shared/user-agent.js'
 
 /**
  * Stratos service server
@@ -43,6 +49,12 @@ export class StratosServer {
 
   /**
    * Create and start the Stratos server
+   *
+   * @param cfg - Stratos service configuration
+   * @param blobstore - Blob store creator
+   * @param cborToRecord - CBOR to record conversion function
+   * @param logger - Optional logger instance
+   * @returns Promise resolving to StratosServer instance
    */
   static async create(
     cfg: StratosServiceConfig,
@@ -58,8 +70,54 @@ export class StratosServer {
     })
 
     const app = ctx.app
-    app.use(cors({ exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate'] }))
+    this.setupMiddleware(app, ctx)
+    this.registerRoutes(app, ctx, cfg)
+
+    return new StratosServer(ctx, app)
+  }
+
+  /**
+   * Setup middleware for the Stratos server
+   *
+   * @param app - Express application instance
+   * @param ctx - Application context
+   */
+  private static setupMiddleware(app: express.Application, ctx: AppContext) {
+    // Trace ID middleware
+    app.use((req, res, next) => {
+      const traceId =
+        (req.headers['x-trace-id'] as string) || randomBytes(8).toString('hex')
+      req.traceId = traceId
+      res.setHeader('x-trace-id', traceId)
+      next()
+    })
+
+    app.use(
+      cors({
+        exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate', 'x-trace-id'],
+      }),
+    )
     app.use(cookieParser())
+
+    // Logging middleware with traceId
+    app.use((req, res, next) => {
+      const start = Date.now()
+      res.on('finish', () => {
+        const durationMs = Date.now() - start
+        ctx.logger?.info(
+          {
+            method: req.method,
+            path: req.path,
+            status: res.statusCode,
+            durationMs,
+            traceId: req.traceId,
+          },
+          'http request completed',
+        )
+      })
+      next()
+    })
+
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {
       if (req.path.startsWith('/xrpc/')) {
@@ -67,7 +125,33 @@ export class StratosServer {
       }
       express.json({ limit: '100kb' })(req, res, next)
     })
+  }
 
+  /**
+   * Register routes for the Stratos server
+   *
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @param cfg - Stratos service configuration
+   */
+  private static registerRoutes(
+    app: express.Application,
+    ctx: AppContext,
+    cfg: StratosServiceConfig,
+  ) {
+    this.registerHomeRoute(app, cfg)
+    this.registerHealthRoutes(app, ctx)
+    this.registerWellKnownRoutes(app, ctx, cfg)
+    this.registerStaticRoutes(app, cfg)
+    this.registerOAuthRoutes(app, ctx, cfg)
+    this.registerFeatureHandlers(app, ctx)
+    this.registerErrorMiddleware(app, ctx, cfg)
+  }
+
+  private static registerHomeRoute(
+    app: express.Application,
+    cfg: StratosServiceConfig,
+  ) {
     app.get('/', (_req, res) => {
       res.type('text/plain')
       res.send(
@@ -103,7 +187,34 @@ export class StratosServer {
         ].join('\n'),
       )
     })
+  }
 
+  private static registerHealthRoutes(
+    app: express.Application,
+    ctx: AppContext,
+  ) {
+    app.get('/health', async (_req, res) => {
+      const health = await ctx.checkHealth()
+      res.status(health.status === 'ok' ? 200 : 503).json({
+        ...health,
+        version: ctx.version,
+      })
+    })
+
+    app.get('/ready', async (_req, res) => {
+      const health = await ctx.checkHealth()
+      res.status(health.status === 'ok' ? 200 : 503).json({
+        ...health,
+        version: ctx.version,
+      })
+    })
+  }
+
+  private static registerWellKnownRoutes(
+    app: express.Application,
+    ctx: AppContext,
+    cfg: StratosServiceConfig,
+  ) {
     app.get('/robots.txt', (_req, res) => {
       res.type('text/plain')
       res.send(
@@ -111,16 +222,9 @@ export class StratosServer {
       )
     })
 
-    app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', version: ctx.version })
-    })
-
-    app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
-
     app.get('/.well-known/did.json', (_req, res) => {
       const serviceDid = ctx.serviceDid
       const serviceEndpoint = cfg.service.publicUrl
-      // publicKeyMultibase is the z-prefixed base58btc fragment from the did:key
       const publicKeyMultibase = ctx.signingDidKey.slice('did:key:'.length)
 
       res.json({
@@ -153,7 +257,20 @@ export class StratosServer {
 
     app.get('/client-metadata.json', metadataHandler)
     app.get('/.well-known/oauth-client-metadata.json', metadataHandler)
+  }
 
+  private static registerStaticRoutes(
+    app: express.Application,
+    cfg: StratosServiceConfig,
+  ) {
+    app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
+  }
+
+  private static registerOAuthRoutes(
+    app: express.Application,
+    ctx: AppContext,
+    cfg: StratosServiceConfig,
+  ) {
     const oauthRoutes = createOAuthRoutes({
       oauthClient: ctx.oauthClient,
       enrollmentConfig: cfg.enrollment,
@@ -167,6 +284,7 @@ export class StratosServer {
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
+      profileRecordWriter: ctx.profileRecordWriter,
       initRepo: async (did: string) => {
         await ctx.actorStore.create(did)
         await ctx.actorStore.transact(did, async (store) => {
@@ -185,20 +303,47 @@ export class StratosServer {
       createAttestation: ctx.createAttestation,
     })
     app.use('/oauth', oauthRoutes)
+  }
 
+  private static registerFeatureHandlers(
+    app: express.Application,
+    ctx: AppContext,
+  ) {
     registerHandlers(ctx.xrpcServer, ctx)
-    registerEnrollmentHandlers(app, ctx)
+    registerEnrollmentHandlers(ctx.xrpcServer, ctx)
+    registerHydrationHandlers(ctx.xrpcServer, ctx)
     registerSubscribeRecords(ctx)
     app.use(ctx.xrpcServer.router)
+  }
 
+  private static registerErrorMiddleware(
+    app: express.Application,
+    ctx: AppContext,
+    cfg: StratosServiceConfig,
+  ) {
     app.use(
       (
         err: Error,
         _req: express.Request,
         res: express.Response,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
         _next: express.NextFunction,
       ) => {
+        if (err instanceof StratosError) {
+          ctx.logger?.warn(
+            {
+              code: err.code,
+              err: err.message,
+              cause: err.cause,
+            },
+            'domain error',
+          )
+          res.status(400).json({
+            error: err.code,
+            message: err.message,
+          })
+          return
+        }
         if (
           'retryAfter' in err &&
           typeof (err as Record<string, unknown>).retryAfter === 'number'
@@ -227,8 +372,6 @@ export class StratosServer {
         })
       },
     )
-
-    return new StratosServer(ctx, app)
   }
 
   /**
@@ -253,30 +396,38 @@ export class StratosServer {
    * Gracefully stop the server
    */
   async stop(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (!this.server) {
-        destroyAppContext(this.ctx).then(resolve, reject)
-        return
-      }
-      this.server.close(async (err) => {
-        if (err) {
-          reject(err)
-          return
-        }
-
-        try {
-          await destroyAppContext(this.ctx)
-          resolve()
-        } catch (cleanupErr) {
-          reject(cleanupErr)
-        }
+    this.ctx.logger?.info('stopping stratos server...')
+    if (this.server) {
+      // 1. Stop accepting new connections
+      await new Promise<void>((resolve, reject) => {
+        this.server?.close((err) => {
+          if (err) {
+            this.ctx.logger?.error({ err }, 'error closing http server')
+            reject(err)
+          } else {
+            this.ctx.logger?.info('http server closed')
+            resolve()
+          }
+        })
       })
-    })
+    }
+
+    // 2. Destroy application context (DBs, stores, etc.)
+    try {
+      await destroyAppContext(this.ctx)
+      this.ctx.logger?.info('application context destroyed')
+    } catch (err) {
+      this.ctx.logger?.error({ err }, 'error destroying application context')
+      throw err
+    }
   }
 }
 
 /**
- * Create blobstore factory from config
+ * Create a blobstore factory from config
+ *
+ * @param cfg - Stratos service configuration
+ * @returns Blob store creator function
  */
 function createBlobstore(cfg: StratosServiceConfig): BlobStoreCreator {
   if (cfg.blobstore.provider === 's3') {
@@ -321,13 +472,23 @@ export async function main(): Promise<void> {
     logger,
   )
   await server.start()
+  server.ctx.logger?.info(
+    {
+      publicUrl: cfg.service.publicUrl,
+      did: cfg.service.did,
+      devMode: cfg.stratos.devMode,
+    },
+    'Stratos configuration',
+  )
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   process.on('SIGTERM', async () => {
     server.ctx.logger?.info('SIGTERM received, shutting down...')
     await server.stop()
     process.exit(0)
   })
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   process.on('SIGINT', async () => {
     server.ctx.logger?.info('SIGINT received, shutting down...')
     await server.stop()

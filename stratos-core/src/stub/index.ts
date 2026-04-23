@@ -1,3 +1,3 @@
-export * from './types.js'
+export type * from './types.js'
 export * from './domain.js'
-export * from './port.js'
+export type * from './port.js'

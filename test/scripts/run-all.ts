@@ -13,7 +13,7 @@
 //   4. posts — post CRUD + boundary access control
 //   5. teardown — stop Stratos, clean up
 
-import { section, info, pass, fail, summary } from './lib/log.ts'
+import { fail, info, pass, section, summary } from './lib/log.ts'
 
 const SCRIPTS_DIR = new URL('.', import.meta.url).pathname
 
@@ -43,6 +43,7 @@ const phases: Phase[] = [
   { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
   { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
   { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
+  { name: 'Unenrollment', script: 'test-unenrollment.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },
 ]
 

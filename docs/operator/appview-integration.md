@@ -1,10 +1,13 @@
 # AppView Integration
 
-AppViews index Stratos content by subscribing to the `zone.stratos.sync.subscribeRecords` WebSocket endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
+AppViews index Stratos content by subscribing to the `zone.stratos.sync.subscribeRecords` WebSocket
+endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-user.
 
 ## Step 1: Service Authentication
 
-AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query parameter. The token must be a query param because `Authorization` headers are stripped by many WebSocket proxies and aren't supported in browser WebSocket APIs.
+AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query
+parameter. The token must be a query param because `Authorization` headers are stripped by many
+WebSocket proxies and aren't supported in browser WebSocket APIs.
 
 ```typescript
 import { createServiceJwt } from '@atproto/xrpc-server'
@@ -102,24 +105,91 @@ async function indexRecord(did: string, path: string, record: unknown) {
 
 ## Step 4: Query with Boundary Filtering
 
-When serving content, filter by the viewer's domain membership:
+When serving content, filter by the viewer's domain membership. The AppView should only return records where at least one of the record's boundaries matches one of the viewer's enrolled boundaries.
+
+### SQL Implementation (PostgreSQL)
+
+Using the `stratos_posts` table indexed in Step 3, you can perform boundary-aware filtering using PostgreSQL's JSONB operators or a separate join table.
+
+#### Option A: JSONB Overlap
+
+If you stored boundaries as a JSONB array:
+
+```sql
+SELECT * FROM stratos_posts
+WHERE did = $1 -- author DID
+  AND (
+    -- Viewer shares at least one boundary
+    boundary_domains ?| $2 -- array of viewer's enrolled domains
+  )
+ORDER BY created_at DESC;
+```
+
+#### Option B: Join Table (Recommended for Performance)
+
+For better performance at scale, use a separate `stratos_post_boundaries` table:
+
+```sql
+-- Schema
+CREATE TABLE stratos_post_boundaries (
+  uri TEXT NOT NULL,
+  boundary TEXT NOT NULL,
+  PRIMARY KEY (uri, boundary)
+);
+
+-- Query
+SELECT p.* FROM stratos_posts p
+JOIN stratos_post_boundaries b ON p.uri = b.uri
+WHERE p.did = $1
+  AND b.boundary = ANY($2) -- array of viewer's enrolled domains
+ORDER BY p.created_at DESC;
+```
+
+### Feed Integration
+
+When building a unified feed (e.g., `app.bsky.feed.getTimeline`), you can mix public PDS records with private Stratos records:
 
 ```typescript
-async function getAuthorFeed(authorDid: string, viewerDomains: string[]) {
-  return db
-    .selectFrom('stratos_posts')
-    .where('did', '=', authorDid)
+async function getUnifiedFeed(viewerDid: string, viewerDomains: string[]) {
+  const posts = await db
+    .selectFrom('posts')
+    .leftJoin('stratos_posts', 'posts.uri', 'stratos_posts.uri')
     .where((eb) =>
       eb.or([
-        eb('did', '=', viewerDid),
-        ...viewerDomains.map((domain) =>
-          eb.raw('boundary_domains LIKE ?', [`%"${domain}"%`]),
-        ),
+        // Public posts (not in Stratos)
+        eb('stratos_posts.uri', 'is', null),
+        // Private posts with boundary overlap
+        eb('stratos_posts.boundary_domains', '?|', viewerDomains),
       ]),
     )
-    .orderBy('created_at', 'desc')
+    .orderBy('posts.createdAt', 'desc')
     .limit(50)
     .execute()
+
+  return posts
+}
+```
+
+## Step 5: Hydration
+
+AppViews should verify the integrity of Stratos records during hydration.
+
+```typescript
+async function hydrateRecord(stub: RecordStub, viewerDomains: string[]) {
+  // 1. Fetch from Stratos
+  const record = await stratosClient.com.atproto.repo.getRecord({
+    repo: stub.did,
+    collection: stub.collection,
+    rkey: stub.rkey,
+  })
+
+  // 2. Verify CID integrity
+  if (record.cid !== stub.source.subject.cid) {
+    throw new Error('Record integrity verification failed.')
+  }
+
+  // 3. (Optional) Verify service attestation
+  // See architecture/attestation.md
 }
 ```
 

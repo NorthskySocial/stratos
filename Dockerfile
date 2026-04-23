@@ -1,7 +1,8 @@
 # Stratos Private Namespace Service - Docker Image
 #
 # Multi-stage build: compiles TypeScript at build time for fast startup.
-# Stage 1 builds both packages; Stage 2 runs compiled JS directly with node.
+# Target 1 (stratos): Node.js service for storage and XRPC.
+# Target 2 (indexer): Deno-based standalone indexer.
 
 # --- Build stage ---
 FROM node:24-alpine AS builder
@@ -14,6 +15,9 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
+COPY stratos-indexer/package.json ./stratos-indexer/
+COPY stratos-client/package.json ./stratos-client/
+COPY webapp/package.json ./webapp/
 
 # Install all dependencies (including devDependencies for tsc)
 RUN pnpm install --frozen-lockfile
@@ -22,12 +26,13 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.json ./
 COPY stratos-core/ ./stratos-core/
 COPY stratos-service/ ./stratos-service/
+COPY stratos-indexer/ ./stratos-indexer/
 COPY lexicons/ ./lexicons/
 
 # Re-link workspace node_modules (COPY can disrupt pnpm symlinks)
 RUN pnpm install --frozen-lockfile
 
-# Generate version module, then compile both packages
+# Generate version module, then compile packages
 RUN pnpm run --filter stratos-service generate:version \
     && pnpm run --filter stratos-core build \
     && pnpm run --filter stratos-service build
@@ -46,8 +51,8 @@ RUN node -e " \
   fs.writeFileSync('stratos-core/package.json', JSON.stringify(pkg, null, 2) + '\n'); \
 "
 
-# --- Production stage ---
-FROM node:24-alpine
+# --- Production stage for Stratos Service ---
+FROM node:24-alpine AS stratos
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -69,7 +74,6 @@ COPY --from=builder /app/stratos-service/dist/ ./stratos-service/dist/
 COPY lexicons/ ./lexicons/
 
 # Create data directory structure
-# /app/data/assets/ - optional static files served at /assets (e.g. OAuth consent screen logo)
 RUN mkdir -p /app/data/assets && chown -R node:node /app/data
 
 # Switch to non-root user
@@ -87,6 +91,44 @@ ENV NODE_ENV=production
 ENV STRATOS_PORT=3100
 ENV STRATOS_DATA_DIR=/app/data
 
-# Run compiled JS directly — no tsx transpilation at startup
+# Run compiled JS directly
 WORKDIR /app/stratos-service
 CMD ["node", "dist/bin/stratos.js"]
+
+# --- Production stage for Stratos Indexer ---
+FROM denoland/deno:alpine AS indexer
+
+# Install dependencies for sharp (libstdc++ and libc symlink are required for the native binary)
+RUN apk add --no-cache libstdc++ && \
+    ln -s /lib/libc.musl-$(uname -m).so.1 /lib/libc.so
+
+WORKDIR /app
+
+# Copy built stratos-core from builder (Deno uses its package.json and dist)
+COPY --from=builder /app/stratos-core/ ./stratos-core/
+
+# Copy indexer source files and package.json
+COPY --from=builder /app/stratos-indexer/ ./stratos-indexer/
+
+# Copy package.json for other workspace members to satisfy Deno workspace requirements
+COPY --from=builder /app/stratos-service/package.json ./stratos-service/
+COPY --from=builder /app/stratos-client/package.json ./stratos-client/
+COPY --from=builder /app/webapp/package.json ./webapp/
+
+# Copy workspace files for Deno to resolve dependencies correctly
+COPY deno.json package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy lexicons (needed at runtime by stratos-core)
+COPY lexicons/ ./lexicons/
+
+# Deno needs wget for health checks in this setup (alpine base has it or we add it)
+# The official deno:alpine image comes with wget.
+
+# Expose default port for health server
+EXPOSE 3002
+
+# Set default environment
+ENV BSKY_DB_POOL_SIZE=20
+
+# Command to run the indexer main script
+CMD ["run", "--allow-all", "--sloppy-imports", "/app/stratos-indexer/src/bin/main.ts"]

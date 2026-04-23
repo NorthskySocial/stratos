@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run -A
 import { startNgrok } from './lib/ngrok.ts'
-import { section, info } from './lib/log.ts'
+import { info, section } from './lib/log.ts'
 
 async function run() {
   section('Phase: Ngrok Setup')

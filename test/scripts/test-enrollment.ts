@@ -1,11 +1,16 @@
 #!/usr/bin/env -S deno run -A
 // Enrollment test — drives the PDS OAuth flow via Playwright to enroll each user.
 
-import { chromium, type Page, type Browser } from 'npm:playwright@1.58.2'
-import { TEST_USERS, STRATOS_URL } from './lib/config.ts'
+import {
+  type Browser,
+  type BrowserContext,
+  chromium,
+  type Page,
+} from 'npm:playwright@1.58.2'
+import { STRATOS_URL, TEST_USERS } from './lib/config.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
-import { section, info, pass, fail, warn, dim, error } from './lib/log.ts'
+import { dim, error, fail, info, pass, section, warn } from './lib/log.ts'
 
 const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
   .pathname
@@ -54,198 +59,11 @@ async function enrollUser(
   const page = await context.newPage()
 
   try {
-    // Step 1: Navigate to Stratos OAuth entry point
-    info(`${label}: Navigating to OAuth authorize...`)
-    const authorizeUrl = await getAuthorizeUrl(handle)
-
-    // Set a custom header to skip ngrok browser warning
-    await context.setExtraHTTPHeaders({
-      'ngrok-skip-browser-warning': 'true',
-    })
-
-    // Stratos will redirect to the PDS OAuth page — may take a moment
-    await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
-
-    dim(`${label}: Current URL: ${page.url()}`)
-    await screenshotOnFailure(page, `${label}-01-after-redirect`)
-
-    const content = await page.content()
-    if (content.toLowerCase().includes('failed to resolve identity')) {
-      error(`${label}: Page contains 'Failed to resolve identity' error`)
-      throw new Error('Failed to resolve identity')
-    }
-
-    // Handle ngrok interstitial if it exists
-    // The button might have an aria-label or specific text
-    const ngrokButton = await page.$(
-      'button:has-text("Visit Site"), button:has-text("Visit the site")',
-    )
-    if (ngrokButton || page.url().includes('ngrok-free.app')) {
-      const body = await page.textContent('body')
-      if (
-        body?.includes('ngrok') &&
-        (body?.includes('browser') ||
-          body?.includes('Visit') ||
-          body?.includes('visit'))
-      ) {
-        dim(
-          `${label}: Ngrok interstitial detected, searching for Visit button...`,
-        )
-        if (ngrokButton) {
-          await ngrokButton.click()
-        } else {
-          // Fallback click on any button that looks like it
-          const buttons = await page.$$('button')
-          if (buttons.length > 0) {
-            // Sometimes it's the first button, sometimes not.
-            // Usually ngrok interstitial has only one prominent button.
-            await buttons[0].click()
-          } else {
-            // Try clicking by role or text if it's not a standard button
-            await page.click('text=/Visit Site/i').catch(() => {})
-          }
-        }
-        // Use a longer timeout and wait for network idle to be sure we redirected to PDS
-        try {
-          await page.waitForNavigation({
-            waitUntil: 'networkidle',
-            timeout: 30_000,
-          })
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (e) {
-          dim(
-            `${label}: Navigation after ngrok click timed out or didn't happen, continuing...`,
-          )
-        }
-        dim(`${label}: After ngrok interstitial URL: ${page.url()}`)
-        await screenshotOnFailure(page, `${label}-01b-after-ngrok`)
-      }
-    }
-
-    // Step 2: We should now be on the PDS sign-in page
-    // The PDS OAuth UI may use either the old or new frontend.
-    // Handle pre-fills the username via loginHint — we just need to enter the password.
-
-    // Wait for any form to appear
-    await page.waitForSelector(
-      'input[name="password"], input[type="password"]',
-      { timeout: 15_000 },
-    )
-
-    dim(`${label}: Sign-in form detected`)
-
-    // If a username IS required (not pre-filled), fill it
-    const usernameInput =
-      (await page.$(
-        'input[name="username"]:not([readonly]):not([disabled])',
-      )) ??
-      (await page.$('input[name="identifier"]:not([readonly]):not([disabled])'))
-    if (usernameInput) {
-      info(`${label}: Username field found, filling handle...`)
-      await usernameInput.fill(handle)
-    }
-
-    // Fill password
-    const passwordInput =
-      (await page.$('input[name="password"]')) ??
-      (await page.$('input[type="password"]'))
-    if (!passwordInput) {
-      throw new Error('Could not find password input on sign-in page')
-    }
-    await passwordInput.fill(password)
-
-    dim(`${label}: Credentials entered, submitting...`)
-    await screenshotOnFailure(page, `${label}-02-credentials-filled`)
-
-    // Submit the sign-in form — try multiple strategies
-    const signInButton =
-      (await page.$('button[type="submit"]')) ??
-      (await page.$('button:has-text("Sign in")'))
-
-    if (signInButton) {
-      await signInButton.click()
-    } else {
-      // Fall back to pressing Enter on the password field
-      await passwordInput.press('Enter')
-    }
-
-    // Step 3: Wait for navigation — either to consent page or directly to callback
-    await page.waitForURL(
-      (url: URL) => {
-        const s = url.toString()
-        return (
-          s.includes('/oauth/callback') ||
-          s.includes('authorize') ||
-          s.includes('consent')
-        )
-      },
-      { timeout: 15_000 },
-    )
-
-    dim(`${label}: After sign-in URL: ${page.url()}`)
-    await screenshotOnFailure(page, `${label}-03-after-signin`)
-
-    // Step 4: If we're on a consent/authorize page, click the authorize button
-    if (!page.url().includes('/oauth/callback')) {
-      // Look for an accept/authorize button
-      // Wait a moment for the consent page to render
-      await page.waitForTimeout(1_000)
-
-      const acceptButton =
-        (await page.$('button:has-text("Accept")')) ??
-        (await page.$('button:has-text("Authorize")')) ??
-        (await page.$('button:has-text("Allow")')) ??
-        (await page.$('button[type="submit"]'))
-
-      if (acceptButton) {
-        dim(`${label}: Clicking authorize/accept button...`)
-        await acceptButton.click()
-      } else {
-        warn(`${label}: No authorize button found, trying submit...`)
-        await page.keyboard.press('Enter')
-      }
-
-      // Wait for final redirect to callback
-      const state = await loadState()
-      const baseUrl = state.ngrokUrl || STRATOS_URL
-      await page.waitForURL((url: URL) => url.toString().includes(baseUrl), {
-        timeout: 15_000,
-      })
-    }
-
-    dim(`${label}: Final URL: ${page.url()}`)
-    await screenshotOnFailure(page, `${label}-04-final`)
-
-    // Step 5: Read the response — Stratos returns JSON on the callback page
-    // Wait for the page to settle
-    await page.waitForTimeout(1_000)
-
-    // Try to extract JSON from the page body
-    const bodyText = await page.textContent('body')
-    // DEBUG LOG
-    if (bodyText?.includes('ngrok')) {
-      console.log(
-        `[DEBUG_LOG] ${label} detected ngrok in final body: ${bodyText.substring(0, 500)}`,
-      )
-    }
-    dim(`${label}: Response body: ${bodyText?.substring(0, 200)}`)
-
-    if (
-      bodyText?.includes('"success":true') ||
-      bodyText?.includes('"enrolled"')
-    ) {
-      try {
-        // Try to parse JSON from <pre> or body
-        const preText = (await page.textContent('pre')) ?? bodyText
-        const json = JSON.parse(preText!)
-        return { success: true, did: json.did }
-      } catch {
-        return { success: true }
-      }
-    }
-
-    // Even if we can't parse the response, check enrollment via API
-    return { success: true }
+    await navigateToOAuth(page, context, handle, label)
+    await handleNgrokInterstitial(page, label)
+    await fillSignInForm(page, handle, password, label)
+    await submitSignInAndConsent(page, label)
+    return await verifyEnrollmentResponse(page, label)
   } catch (err) {
     await screenshotOnFailure(page, `${label}-error`)
     return {
@@ -254,6 +72,197 @@ async function enrollUser(
     }
   } finally {
     await context.close()
+  }
+}
+
+async function navigateToOAuth(
+  page: Page,
+  context: BrowserContext,
+  handle: string,
+  label: string,
+) {
+  info(`${label}: Navigating to OAuth authorize...`)
+  const authorizeUrl = await getAuthorizeUrl(handle)
+
+  // Set a custom header to skip ngrok browser warning
+  await context.setExtraHTTPHeaders({
+    'ngrok-skip-browser-warning': 'true',
+  })
+
+  // Stratos will redirect to the PDS OAuth page — may take a moment
+  await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
+
+  dim(`${label}: Current URL: ${page.url()}`)
+  await screenshotOnFailure(page, `${label}-01-after-redirect`)
+
+  const content = await page.content()
+  if (content.toLowerCase().includes('failed to resolve identity')) {
+    error(`${label}: Page contains 'Failed to resolve identity' error`)
+    throw new Error('Failed to resolve identity')
+  }
+}
+
+async function handleNgrokInterstitial(page: Page, label: string) {
+  const ngrokButton = await page.$(
+    'button:has-text("Visit Site"), button:has-text("Visit the site")',
+  )
+  if (!ngrokButton && !page.url().includes('ngrok-free.app')) {
+    return
+  }
+
+  const body = await page.textContent('body')
+  const isNgrokPage =
+    body?.includes('ngrok') &&
+    (body?.includes('browser') ||
+      body?.includes('Visit') ||
+      body?.includes('visit'))
+
+  if (!isNgrokPage) {
+    return
+  }
+
+  dim(`${label}: Ngrok interstitial detected, searching for Visit button...`)
+  if (ngrokButton) {
+    await ngrokButton.click()
+  } else {
+    const buttons = await page.$$('button')
+    if (buttons.length > 0) {
+      await buttons[0].click()
+    } else {
+      await page.click('text=/Visit Site/i').catch(() => {})
+    }
+  }
+
+  try {
+    await page.waitForNavigation({
+      waitUntil: 'networkidle',
+      timeout: 30_000,
+    })
+  } catch {
+    dim(
+      `${label}: Navigation after ngrok click timed out or didn't happen, continuing...`,
+    )
+  }
+  dim(`${label}: After ngrok interstitial URL: ${page.url()}`)
+  await screenshotOnFailure(page, `${label}-01b-after-ngrok`)
+}
+
+async function fillSignInForm(
+  page: Page,
+  handle: string,
+  password: string,
+  label: string,
+) {
+  await page.waitForSelector('input[name="password"], input[type="password"]', {
+    timeout: 15_000,
+  })
+
+  dim(`${label}: Sign-in form detected`)
+
+  const usernameInput =
+    (await page.$('input[name="username"]:not([readonly]):not([disabled])')) ??
+    (await page.$('input[name="identifier"]:not([readonly]):not([disabled])'))
+  if (usernameInput) {
+    info(`${label}: Username field found, filling handle...`)
+    await usernameInput.fill(handle)
+  }
+
+  const passwordInput =
+    (await page.$('input[name="password"]')) ??
+    (await page.$('input[type="password"]'))
+  if (!passwordInput) {
+    throw new Error('Could not find password input on sign-in page')
+  }
+  await passwordInput.fill(password)
+}
+
+async function submitSignInAndConsent(page: Page, label: string) {
+  dim(`${label}: Credentials entered, submitting...`)
+  await screenshotOnFailure(page, `${label}-02-credentials-filled`)
+
+  const signInButton =
+    (await page.$('button[type="submit"]')) ??
+    (await page.$('button:has-text("Sign in")'))
+
+  if (signInButton) {
+    await signInButton.click()
+  } else {
+    await page.keyboard.press('Enter')
+  }
+
+  await page.waitForURL(
+    (url: URL) => {
+      const s = url.toString()
+      return (
+        s.includes('/oauth/callback') ||
+        s.includes('authorize') ||
+        s.includes('consent')
+      )
+    },
+    { timeout: 15_000 },
+  )
+
+  dim(`${label}: After sign-in URL: ${page.url()}`)
+  await screenshotOnFailure(page, `${label}-03-after-signin`)
+
+  if (!page.url().includes('/oauth/callback')) {
+    await page.waitForTimeout(1_000)
+
+    const acceptButton =
+      (await page.$('button:has-text("Accept")')) ??
+      (await page.$('button:has-text("Authorize")')) ??
+      (await page.$('button:has-text("Allow")')) ??
+      (await page.$('button[type="submit"]'))
+
+    if (acceptButton) {
+      dim(`${label}: Clicking authorize/accept button...`)
+      await acceptButton.click()
+    } else {
+      warn(`${label}: No authorize button found, trying submit...`)
+      await page.keyboard.press('Enter')
+    }
+
+    const state = await loadState()
+    const baseUrl = state.ngrokUrl || STRATOS_URL
+    await page.waitForURL((url: URL) => url.toString().includes(baseUrl), {
+      timeout: 15_000,
+    })
+  }
+
+  dim(`${label}: Final URL: ${page.url()}`)
+  await screenshotOnFailure(page, `${label}-04-final`)
+}
+
+async function verifyEnrollmentResponse(
+  page: Page,
+  label: string,
+): Promise<{ success: boolean; did?: string }> {
+  await page.waitForTimeout(1_000)
+
+  const bodyText = await page.textContent('body')
+  dim(`${label}: Response body: ${bodyText?.substring(0, 200)}`)
+
+  if (
+    bodyText?.includes('"success":true') ||
+    bodyText?.includes('"enrolled"')
+  ) {
+    try {
+      const preText = (await page.textContent('pre')) ?? bodyText
+      const json = JSON.parse(preText!)
+      return { success: true, did: json.did }
+    } catch {
+      return { success: true }
+    }
+  }
+
+  return { success: true }
+}
+
+async function checkEnrollmentStatus(did: string) {
+  try {
+    return await enrollmentStatus(did)
+  } catch {
+    return null
   }
 }
 
@@ -284,17 +293,12 @@ async function run() {
         continue
       }
 
-      // Check if already enrolled
-      try {
-        const status = await enrollmentStatus(userState.did)
-        if (status.enrolled) {
-          warn(`${userDef.name} (${userState.did}) already enrolled — skipping`)
-          userState.enrolled = true
-          passed++
-          continue
-        }
-      } catch {
-        // enrollment status check failed, try enrolling anyway
+      const status = await checkEnrollmentStatus(userState.did)
+      if (status?.enrolled) {
+        warn(`${userDef.name} (${userState.did}) already enrolled — skipping`)
+        userState.enrolled = true
+        passed++
+        continue
       }
 
       info(`Enrolling ${userDef.name} (${userState.handle})...`)
@@ -305,26 +309,21 @@ async function run() {
         key,
       )
 
-      if (result.success) {
-        // Verify enrollment via status API
-        try {
-          const status = await enrollmentStatus(userState.did)
-          if (status.enrolled) {
-            userState.enrolled = true
-            pass(`${userDef.name} enrolled successfully`, userState.did)
-            passed++
-          } else {
-            fail(
-              `${userDef.name} enrollment — OAuth succeeded but status shows not enrolled`,
-            )
-            failed++
-          }
-        } catch (err) {
-          fail(`${userDef.name} enrollment — status check failed: ${err}`)
-          failed++
-        }
-      } else {
+      if (!result.success) {
         fail(`${userDef.name} enrollment failed`, result.error)
+        failed++
+        continue
+      }
+
+      const finalStatus = await checkEnrollmentStatus(userState.did)
+      if (finalStatus?.enrolled) {
+        userState.enrolled = true
+        pass(`${userDef.name} enrolled successfully`, userState.did)
+        passed++
+      } else {
+        fail(
+          `${userDef.name} enrollment — OAuth succeeded but status shows not enrolled`,
+        )
         failed++
       }
     }

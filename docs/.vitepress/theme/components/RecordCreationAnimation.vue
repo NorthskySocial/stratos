@@ -1,57 +1,57 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="rc-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="rc-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- Client → Stratos -->
         <path
           id="rc-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#rc-ml)"
           d="M 170 248 L 310 248"
+          marker-end="url(#rc-ml)"
+          stroke="#9145EC"
         />
         <!-- Stratos → Actor Store (up-right) -->
         <path
           id="rc-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#rc-ml)"
           d="M 510 222 L 650 128"
+          marker-end="url(#rc-ml)"
+          stroke="#9145EC"
         />
         <!-- Stratos → PDS (down-right) -->
         <path
           id="rc-a3"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#rc-mg)"
           d="M 510 272 L 650 360"
+          marker-end="url(#rc-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Left: Client -->
-      <div class="node" id="rc-nc" style="left: 20px; top: 195px; width: 150px">
+      <div id="rc-nc" class="node" style="left: 20px; top: 195px; width: 150px">
         <div class="ni">💻</div>
         <div class="nn">Client App</div>
         <div class="ns">createRecord</div>
@@ -59,8 +59,8 @@
 
       <!-- Center: Stratos -->
       <div
-        class="node"
         id="rc-nst"
+        class="node"
         style="left: 310px; top: 195px; width: 200px"
       >
         <div class="ni">⚙️</div>
@@ -70,8 +70,8 @@
 
       <!-- Top-right: Actor Store -->
       <div
-        class="node"
         id="rc-nas"
+        class="node"
         style="left: 650px; top: 50px; width: 185px"
       >
         <div class="ni">🗄️</div>
@@ -81,8 +81,8 @@
 
       <!-- Bottom-right: PDS -->
       <div
-        class="node"
         id="rc-npds"
+        class="node"
         style="left: 650px; top: 335px; width: 155px"
       >
         <div class="ni">📌</div>
@@ -94,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

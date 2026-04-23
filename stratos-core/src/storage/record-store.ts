@@ -1,11 +1,11 @@
-import { CID } from 'multiformats/cid'
+import { Cid } from '@atproto/lex-data'
 
 /**
  * Descriptor for a stratos record
  */
 export interface RecordDescript {
   uri: string
-  cid: CID
+  cid: Cid
   collection: string
   rkey: string
 }
@@ -47,22 +47,22 @@ export interface GetRecordOptions {
  */
 export interface RecordStoreReader {
   /** Get total record count */
-  recordCount(): Promise<number>
+  recordCount: () => Promise<number>
 
   /** List all records */
-  listAll(): Promise<RecordDescript[]>
+  listAll: () => Promise<RecordDescript[]>
 
   /** List records in a collection */
-  listRecords(options: ListRecordsOptions): Promise<RecordValue[]>
+  listRecords: (options: ListRecordsOptions) => Promise<RecordValue[]>
 
   /** Get a single record by URI */
-  getRecord(options: GetRecordOptions): Promise<RecordValue | null>
+  getRecord: (options: GetRecordOptions) => Promise<RecordValue | null>
 
   /** Check if a record exists */
-  hasRecord(uri: string): Promise<boolean>
+  hasRecord: (uri: string) => Promise<boolean>
 
   /** Get record content bytes by CID */
-  getRecordContent(cid: CID): Promise<Uint8Array | null>
+  getRecordContent: (cid: Cid) => Promise<Uint8Array | null>
 }
 
 /**
@@ -70,20 +70,20 @@ export interface RecordStoreReader {
  */
 export interface RecordStoreWriter extends RecordStoreReader {
   /** Create or update a record */
-  putRecord(record: {
+  putRecord: (record: {
     uri: string
-    cid: CID
+    cid: Cid
     value: Record<string, unknown>
     content: Uint8Array
     indexedAt?: string
-  }): Promise<void>
+  }) => Promise<void>
 
   /** Delete a record */
-  deleteRecord(uri: string): Promise<void>
+  deleteRecord: (uri: string) => Promise<void>
 
   /** Soft delete (takedown) a record */
-  takedownRecord(uri: string, takedownRef: string): Promise<void>
+  takedownRecord: (uri: string, takedownRef: string) => Promise<void>
 
   /** Restore a soft-deleted record */
-  restoreRecord(uri: string): Promise<void>
+  restoreRecord: (uri: string) => Promise<void>
 }

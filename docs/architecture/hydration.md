@@ -1,6 +1,8 @@
 # Hydration Architecture
 
-Stratos uses the _source field pattern_ to separate data storage from presentation. Full records with boundary content are stored in Stratos; lightweight stub records on the user's PDS point back to the full record.
+Stratos uses the _source field pattern_ to separate data storage from presentation. Full records
+with boundary content are stored in Stratos; lightweight stub records on the user's PDS point back
+to the full record.
 
 ## Source Field Pattern
 
@@ -55,21 +57,22 @@ interface RecordSource {
 ## Hydration Flow
 
 <script setup>
-import AppviewHydration from '../.vitepress/theme/components/AppviewHydration.vue'
 </script>
 
 <AppviewHydration />
 
 ## Endpoint Discovery
 
-AppViews and clients discover the Stratos service URL through the user's `zone.stratos.actor.enrollment` record on their PDS:
+AppViews and clients discover the Stratos service URL through the user's
+`zone.stratos.actor.enrollment` record on their PDS:
 
 > 1. Fetch enrollment record from users PDS repo
 > 2. Each record has: { service: "https://stratos.example.com", ... }
 > 3. Resolve service DID from: https://stratos.example.com/.well-known/did.json
 > 4. Use service DID to hydrate records (validates source.service field matches)
 
-The `source.service` field in stubs is a DID+fragment string, not a URL — the AppView resolves the full URL by looking up the DID document.
+The `source.service` field in stubs is a DID+fragment string, not a URL — the AppView resolves the
+full URL by looking up the DID document.
 
 ## Hydration Model
 
@@ -82,7 +85,16 @@ Stratos `com.atproto.repo.getRecord` applies boundary access control:
 | Caller not enrolled                    | 404                  |
 | Unauthenticated (stub only)            | 404                  |
 
-The 404 response for denied access is deliberate — it avoids leaking the existence of records to unauthorized viewers.
+### Batch Hydration (`hydrateRecords`)
+
+AppViews typically use `zone.stratos.repo.hydrateRecords` to hydrate multiple stubs for a feed.
+
+- Returns a list of successfully hydrated records.
+- Records the viewer cannot access are listed in `blocked`.
+- Missing records are listed in `notFound`.
+
+The 404 response for denied access is deliberate — it avoids leaking the existence of records to
+unauthorized viewers.
 
 ## Trust Model
 
@@ -95,7 +107,9 @@ if (hydratedRecord.cid !== stub.source.subject.cid) {
 }
 ```
 
-Combined with the enrollment attestation system ([Enrollment Signing](/architecture/enrollment-signing)), this gives AppViews a complete verification chain:
+Combined with the enrollment attestation
+system ([Enrollment Signing](/architecture/enrollment-signing)), this gives AppViews a complete
+verification chain:
 
 1. Stub CID on PDS matches hydrated record
 2. Service attestation verifies user's boundary memberships were endorsed by the service

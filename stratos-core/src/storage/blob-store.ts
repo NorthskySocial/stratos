@@ -1,10 +1,10 @@
-import { CID } from 'multiformats/cid'
+import { Cid } from '@atproto/lex-data'
 
 /**
  * Blob metadata stored in the database
  */
 export interface BlobMetadata {
-  cid: CID
+  cid: Cid
   mimeType: string
   size: number
   width?: number
@@ -18,16 +18,16 @@ export interface BlobMetadata {
  */
 export interface BlobMetadataReader {
   /** Get blob metadata */
-  getBlobMetadata(cid: CID): Promise<BlobMetadata | null>
+  getBlobMetadata: (cid: Cid) => Promise<BlobMetadata | null>
 
   /** Check if blob exists */
-  hasBlob(cid: CID): Promise<boolean>
+  hasBlob: (cid: Cid) => Promise<boolean>
 
   /** List blobs for a record */
-  listBlobsForRecord(recordUri: string): Promise<BlobMetadata[]>
+  listBlobsForRecord: (recordUri: string) => Promise<BlobMetadata[]>
 
   /** List all blob CIDs */
-  listAllBlobCids(): Promise<CID[]>
+  listAllBlobCids: () => Promise<Cid[]>
 }
 
 /**
@@ -35,29 +35,29 @@ export interface BlobMetadataReader {
  */
 export interface BlobMetadataWriter extends BlobMetadataReader {
   /** Track a new blob in the database */
-  trackBlob(blob: {
-    cid: CID
+  trackBlob: (blob: {
+    cid: Cid
     mimeType: string
     size: number
     tempKey?: string | null
     width?: number | null
     height?: number | null
-  }): Promise<void>
+  }) => Promise<void>
 
   /** Associate blob with a record */
-  associateBlobWithRecord(blobCid: CID, recordUri: string): Promise<void>
+  associateBlobWithRecord: (blobCid: Cid, recordUri: string) => Promise<void>
 
   /** Remove record associations for a blob */
-  removeRecordBlobAssociations(recordUri: string): Promise<void>
+  removeRecordBlobAssociations: (recordUri: string) => Promise<void>
 
   /** Delete blob metadata */
-  deleteBlob(cid: CID): Promise<void>
+  deleteBlob: (cid: Cid) => Promise<void>
 
   /** Takedown blob */
-  takedownBlob(cid: CID, takedownRef: string): Promise<void>
+  takedownBlob: (cid: Cid, takedownRef: string) => Promise<void>
 
   /** Restore a taken-down blob */
-  restoreBlob(cid: CID): Promise<void>
+  restoreBlob: (cid: Cid) => Promise<void>
 }
 
 /**
@@ -66,20 +66,20 @@ export interface BlobMetadataWriter extends BlobMetadataReader {
  */
 export interface BlobContentStore {
   /** Store blob bytes temporarily */
-  putTemp(bytes: Uint8Array): Promise<string>
+  putTemp: (bytes: Uint8Array) => Promise<string>
 
   /** Make a temporary blob permanent */
-  makePermanent(tempKey: string, cid: CID): Promise<void>
+  makePermanent: (tempKey: string, cid: Cid) => Promise<void>
 
   /** Get blob bytes by CID */
-  getBytes(cid: CID): Promise<Uint8Array | null>
+  getBytes: (cid: Cid) => Promise<Uint8Array | null>
 
   /** Check if blob content exists */
-  hasStored(cid: CID): Promise<boolean>
+  hasStored: (cid: Cid) => Promise<boolean>
 
   /** Delete blob content */
-  deleteContent(cid: CID): Promise<void>
+  deleteContent: (cid: Cid) => Promise<void>
 
   /** Get blob content as a stream */
-  getStream(cid: CID): Promise<ReadableStream<Uint8Array> | null>
+  getStream: (cid: Cid) => Promise<ReadableStream<Uint8Array> | null>
 }

@@ -1,4 +1,4 @@
-import { CID } from 'multiformats/cid'
+import { Cid } from '@atproto/lex-data'
 import type {
   StubWriterService,
   WriteStubResult,
@@ -13,17 +13,27 @@ export interface PdsAgent {
     com: {
       atproto: {
         repo: {
-          createRecord: (params: {
-            repo: string
-            collection: string
-            rkey: string
-            record: unknown
-          }) => Promise<{ data: { uri: string; cid: string } }>
-          deleteRecord: (params: {
-            repo: string
-            collection: string
-            rkey: string
-          }) => Promise<void>
+          createRecord: (
+            params: {
+              repo: string
+              collection: string
+              rkey?: string
+              record: Record<string, unknown>
+              swapRecord?: string | null
+              swapCommit?: string | null
+            },
+            opts?: Record<string, unknown>,
+          ) => Promise<{ data: { uri: string; cid: string } }>
+          deleteRecord: (
+            params: {
+              repo: string
+              collection: string
+              rkey: string
+              swapRecord?: string | null
+              swapCommit?: string | null
+            },
+            opts?: Record<string, unknown>,
+          ) => Promise<void>
         }
       }
     }
@@ -40,12 +50,22 @@ export class StubWriterServiceImpl implements StubWriterService {
     private serviceDid: string,
   ) {}
 
+  /**
+   * Write a stub record to the user's PDS'
+   * @param did - The user's DID.
+   * @param collection - The collection name for the stub record.
+   * @param rkey - The record key for the stub record.
+   * @param recordType - The type of the stub record.
+   * @param fullRecordCid - The CID of the full record.
+   * @param createdAt - The creation timestamp of the stub record.
+   * @returns A WriteStubResult indicating success or failure.
+   */
   async writeStub(
     did: string,
     collection: string,
     rkey: string,
     recordType: string,
-    fullRecordCid: CID,
+    fullRecordCid: Cid,
     createdAt: string,
   ): Promise<WriteStubResult> {
     const agent = await this.getAgent(did)
@@ -66,7 +86,7 @@ export class StubWriterServiceImpl implements StubWriterService {
       repo: did,
       collection,
       rkey,
-      record: stub,
+      record: stub as unknown as Record<string, unknown>,
     })
 
     return {
@@ -75,6 +95,12 @@ export class StubWriterServiceImpl implements StubWriterService {
     }
   }
 
+  /**
+   * Delete a stub record from the user's PDS.
+   * @param did - The user's DID.
+   * @param collection - The collection name for the stub record.
+   * @param rkey - The record key for the stub record.
+   */
   async deleteStub(
     did: string,
     collection: string,

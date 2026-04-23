@@ -69,7 +69,7 @@ export async function setBoundaries(
 export async function getBoundaries(did: string): Promise<string[]> {
   if (isPostgres()) {
     const pg = await loadPgDb()
-    return await pg.getBoundaries(did)
+    return pg.getBoundaries(did)
   } else {
     return sqliteDb.getBoundaries(did)
   }
@@ -78,7 +78,7 @@ export async function getBoundaries(did: string): Promise<string[]> {
 export async function isEnrolled(did: string): Promise<boolean> {
   if (isPostgres()) {
     const pg = await loadPgDb()
-    return await pg.isEnrolled(did)
+    return pg.isEnrolled(did)
   } else {
     return sqliteDb.isEnrolled(did)
   }

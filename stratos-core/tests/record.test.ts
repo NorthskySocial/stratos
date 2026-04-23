@@ -1,22 +1,24 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
-import { CID } from 'multiformats/cid'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { eq } from 'drizzle-orm'
 
-import { StratosRecordReader, StratosRecordTransactor } from '../src'
 import {
+  closeStratosDb,
   createStratosDb,
   migrateStratosDb,
-  closeStratosDb,
+  stratosBacklink,
   StratosDb,
   stratosRecord,
-  stratosBacklink,
-} from '../src'
+  StratosRecordReader,
+  StratosRecordTransactor,
+  stratosRepoBlock,
+} from '../src/index.js'
 
 // Simple encoding for tests (just use JSON for simplicity)
 const encodeRecord = (data: unknown): Uint8Array => {
@@ -24,11 +26,14 @@ const encodeRecord = (data: unknown): Uint8Array => {
 }
 
 const decodeRecord = (content: Uint8Array): Record<string, unknown> => {
-  return JSON.parse(new TextDecoder().decode(content))
+  return JSON.parse(new TextDecoder().decode(content)) as Record<
+    string,
+    unknown
+  >
 }
 
 // Create a deterministic CID from data
-const createCid = async (data: unknown): Promise<CID> => {
+const createCid = async (data: unknown): Promise<Cid> => {
   const bytes = encodeRecord(data)
   const hash = await sha256.digest(bytes)
   return CID.createV1(0x55, hash) // 0x55 = raw codec
@@ -282,7 +287,7 @@ describe('Record Transactor', () => {
         'rev1',
       )
 
-      await transactor.updateRecordTakedown(uri, {
+      await transactor.updateRecordTakedown(uri.toString(), {
         applied: true,
         ref: 'TAKEDOWN-123',
       })
@@ -308,13 +313,13 @@ describe('Record Transactor', () => {
         'create',
         'rev1',
       )
-      await transactor.updateRecordTakedown(uri, {
+      await transactor.updateRecordTakedown(uri.toString(), {
         applied: true,
         ref: 'TD-456',
       })
 
       // Now remove takedown
-      await transactor.updateRecordTakedown(uri, { applied: false })
+      await transactor.updateRecordTakedown(uri.toString(), { applied: false })
 
       const records = await db
         .select()
@@ -375,6 +380,36 @@ describe('Record Transactor', () => {
       const backlinks = await db.select().from(stratosBacklink)
 
       expect(backlinks).toHaveLength(1)
+    })
+  })
+
+  describe('putRecord', () => {
+    it('should put a record and its block content', async () => {
+      const uri = 'at://did:plc:test/zone.stratos.feed.post/3jqfcqzm3fv2p'
+      const record = { text: 'Hello', createdAt: new Date().toISOString() }
+      const content = encodeRecord(record)
+      const cid = await createCid(record)
+
+      await transactor.putRecord({
+        uri,
+        cid,
+        value: record,
+        content,
+      })
+
+      // Verify record is indexed
+      const records = await transactor.listAll()
+      expect(records).toHaveLength(1)
+      expect(records[0].uri).toBe(uri)
+
+      // Verify block content is stored
+      const blocks = await db
+        .select()
+        .from(stratosRepoBlock)
+        .where(eq(stratosRepoBlock.cid, cid.toString()))
+        .limit(1)
+      expect(blocks).toHaveLength(1)
+      expect(Buffer.from(blocks[0].content)).toEqual(Buffer.from(content))
     })
   })
 })

@@ -26,6 +26,9 @@ export type ServiceDb = LibSQLDatabase<typeof schema> & {
 
 /**
  * Create a service database connection
+ *
+ * @param location - Path to the database file
+ * @returns Service database connection
  */
 export function createServiceDb(location: string): ServiceDb {
   const client = createClient({
@@ -38,6 +41,8 @@ export function createServiceDb(location: string): ServiceDb {
 
 /**
  * Run migrations on the service database
+ *
+ * @param db - Service database connection
  */
 export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   // Create tables if not exist
@@ -93,6 +98,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
 
 /**
  * Close the service database connection
+ *
+ * @param db - Service database connection
  */
 export async function closeServiceDb(db: ServiceDb): Promise<void> {
   db._client.close()

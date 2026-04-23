@@ -5,13 +5,13 @@
  * - describeRepo: handleIsCorrect now actually resolves handle → DID
  * - getBlobStore: new method on StratosActorStore
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { Readable } from 'node:stream'
-import { CID } from 'multiformats/cid'
+import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { AtUri } from '@atproto/syntax'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
@@ -19,6 +19,7 @@ import * as dagCbor from '@ipld/dag-cbor'
 
 import { BlobStore } from '@northskysocial/stratos-core'
 import { StratosActorStore } from '../src/context.js'
+import { decodeVarint, encodeVarint } from '../src/api/varint.js'
 
 const RAW_CODEC = 0x55
 const DAG_CBOR_CODEC = 0x71
@@ -30,12 +31,12 @@ function createMockBlobStore(): BlobStore {
   return {
     putTemp: vi.fn().mockImplementation(async (bytes: Uint8Array) => {
       const key = `temp-${randomBytes(8).toString('hex')}`
-      if (bytes instanceof Uint8Array) {
+      if (Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) {
         tempStorage.set(key, bytes)
       }
       return key
     }),
-    makePermanent: vi.fn().mockImplementation(async (key: string, cid: CID) => {
+    makePermanent: vi.fn().mockImplementation(async (key: string, cid: Cid) => {
       const bytes = tempStorage.get(key)
       if (bytes) {
         storage.set(cid.toString(), bytes)
@@ -44,17 +45,17 @@ function createMockBlobStore(): BlobStore {
     }),
     putPermanent: vi
       .fn()
-      .mockImplementation(async (cid: CID, bytes: Uint8Array) => {
-        if (bytes instanceof Uint8Array) {
+      .mockImplementation(async (cid: Cid, bytes: Uint8Array) => {
+        if (Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) {
           storage.set(cid.toString(), bytes)
         }
       }),
     quarantine: vi.fn().mockResolvedValue(undefined),
     unquarantine: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockImplementation(async (cid: CID) => {
+    delete: vi.fn().mockImplementation(async (cid: Cid) => {
       storage.delete(cid.toString())
     }),
-    deleteMany: vi.fn().mockImplementation(async (cids: CID[]) => {
+    deleteMany: vi.fn().mockImplementation(async (cids: Cid[]) => {
       for (const cid of cids) {
         storage.delete(cid.toString())
       }
@@ -62,15 +63,15 @@ function createMockBlobStore(): BlobStore {
     hasTemp: vi.fn().mockImplementation(async (key: string) => {
       return tempStorage.has(key)
     }),
-    hasStored: vi.fn().mockImplementation(async (cid: CID) => {
+    hasStored: vi.fn().mockImplementation(async (cid: Cid) => {
       return storage.has(cid.toString())
     }),
-    getBytes: vi.fn().mockImplementation(async (cid: CID) => {
+    getBytes: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       return bytes
     }),
-    getStream: vi.fn().mockImplementation(async (cid: CID) => {
+    getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) throw new Error('Blob not found')
       async function* generate() {
@@ -304,8 +305,7 @@ describe('sync.getRecord CAR building', () => {
 
     // Read back and verify we get the exact same bytes
     const result = await actorStore.read(testDid, async (store) => {
-      const storedBytes = await store.repo.getBytes(recordCid)
-      return storedBytes
+      return await store.repo.getBytes(recordCid)
     })
 
     expect(result).not.toBeNull()
@@ -370,7 +370,7 @@ describe('sync.getRecord CAR building', () => {
     const headerSlice = car.slice(bytesRead, bytesRead + headerLen)
     const decodedHeader = dagCbor.decode(headerSlice) as {
       version: number
-      roots: CID[]
+      roots: Cid[]
     }
     expect(decodedHeader.version).toBe(1)
     expect(decodedHeader.roots).toHaveLength(1)
@@ -446,13 +446,11 @@ describe('describeRepo handleIsCorrect', () => {
     }
 
     // Simulate the handler logic
-    let didDoc: unknown
     let resolvedHandle: string | undefined
     let handleIsCorrect = false
 
     const resolved = await mockIdResolver.did.resolve(repo)
     if (resolved) {
-      didDoc = resolved
       const alsoKnownAs = (resolved as { alsoKnownAs?: string[] }).alsoKnownAs
       if (alsoKnownAs) {
         const atHandle = alsoKnownAs.find((aka: string) =>
@@ -655,7 +653,7 @@ describe('describeRepo handleIsCorrect', () => {
       },
     }
 
-    let handleIsCorrect = false
+    const handleIsCorrect = false
     try {
       await mockIdResolver.did.resolve(repo)
     } catch {
@@ -666,32 +664,3 @@ describe('describeRepo handleIsCorrect', () => {
     expect(mockIdResolver.handle.resolve).not.toHaveBeenCalled()
   })
 })
-
-// Helper: encode unsigned varint (unsigned LEB128)
-function encodeVarint(value: number): Uint8Array {
-  const bytes: number[] = []
-  while (value > 0x7f) {
-    bytes.push((value & 0x7f) | 0x80)
-    value >>>= 7
-  }
-  bytes.push(value & 0x7f)
-  return new Uint8Array(bytes)
-}
-
-// Helper: decode unsigned varint
-function decodeVarint(
-  buf: Uint8Array,
-  offset: number,
-): { value: number; bytesRead: number } {
-  let value = 0
-  let shift = 0
-  let bytesRead = 0
-  while (true) {
-    const byte = buf[offset + bytesRead]
-    value |= (byte & 0x7f) << shift
-    bytesRead++
-    if ((byte & 0x80) === 0) break
-    shift += 7
-  }
-  return { value, bytesRead }
-}

@@ -15,5 +15,6 @@
   },
   "references": [{ "path": "./stratos-core" }, { "path": "./stratos-service" }],
   "files": [],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

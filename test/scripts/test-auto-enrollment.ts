@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run -A
-import { chromium, type Browser } from 'npm:playwright@1.58.2'
-import { STRATOS_URL, PDS_URL } from './lib/config.ts'
+import { type Browser, chromium } from 'npm:playwright@1.58.2'
+import { PDS_URL, STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { section, info, pass, fail, error } from './lib/log.ts'
+import { error, fail, info, pass, section } from './lib/log.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { createSession } from './lib/pds.ts'
 
@@ -14,7 +14,7 @@ async function restartStratosWithAutoEnroll(domains: string) {
   const state = await loadState()
   const envVars: Record<string, string> = {
     STRATOS_AUTO_ENROLL_DOMAINS: domains,
-    STRATOS_ENROLLMENT_MODE: 'open', // Ensure we can enroll
+    STRATOS_ENROLLMENT_mode: ENROLLMENT_MODE.OPEN, // Ensure we can enroll
   }
 
   if (state.ngrokUrl) {
@@ -194,7 +194,6 @@ async function verifyPdsRecord(
   info(`PDS record: ${JSON.stringify(data.value)}`)
 
   const recordBoundaries = data.value.boundaries.map(
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
     (b: { value: any }) => b.value,
   )
   const match =

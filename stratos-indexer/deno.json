@@ -7,10 +7,8 @@
     "start": "deno run --allow-all src/bin/main.ts",
     "test": "npx vitest run"
   },
-  "nodeModulesDir": "auto",
   "fmt": {
     "useTabs": true,
     "lineWidth": 100
-  },
-  "unstable": ["net"]
+  }
 }

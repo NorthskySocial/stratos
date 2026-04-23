@@ -1,14 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  backfillRepos,
   backfillActors,
+  BackfillOptions,
+  backfillRepos,
   backfillSingleActor,
-  type BackfillOptions,
-} from '../src/backfill.ts'
+} from '../src/backfill'
 
 function makeOpts(overrides?: Partial<BackfillOptions>): BackfillOptions {
   return {
-    repoProvider: 'http://pds.tokyo-3.nerv.jp',
+    repoProvider: 'https://pds.tokyo-3.nerv.jp',
     indexingService: {
       indexRecord: vi.fn().mockResolvedValue(undefined),
     } as never,
@@ -35,12 +35,14 @@ describe('backfillActors', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input: string | URL | Request) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url
+        let url: string
+        if (typeof input === 'string') {
+          url = input
+        } else if (input instanceof URL) {
+          url = input.toString()
+        } else {
+          url = input.url
+        }
         if (url.includes('listRecords')) {
           return new Response(JSON.stringify({ records: [] }), { status: 200 })
         }
@@ -53,13 +55,25 @@ describe('backfillActors', () => {
     expect(count).toBe(3)
     expect(opts.onProgress).toHaveBeenCalledTimes(3)
 
-    const listRecordsCalls = fetchSpy.mock.calls.filter(([url]) =>
-      String(url).includes('listRecords'),
-    )
+    const listRecordsCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      return urlString.includes('listRecords')
+    })
     expect(listRecordsCalls).toHaveLength(3)
 
-    const repos = listRecordsCalls.map(([url]) => {
-      const parsed = new URL(String(url))
+    const repos = listRecordsCalls.map(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      const parsed = new URL(urlString)
       return parsed.searchParams.get('repo')
     })
     expect(repos).toContain(shinji)
@@ -78,9 +92,15 @@ describe('backfillActors', () => {
     const opts = makeOpts()
     await backfillActors(opts, ['did:plc:misato-katsuragi'])
 
-    const listReposCalls = fetchSpy.mock.calls.filter(([url]) =>
-      String(url).includes('listRepos'),
-    )
+    const listReposCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      return urlString.includes('listRepos')
+    })
     expect(listReposCalls).toHaveLength(0)
   })
 
@@ -155,7 +175,14 @@ describe('backfillSingleActor', () => {
     await backfillSingleActor(opts, 'did:plc:toji-suzuhara')
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const url = new URL(String(fetchSpy.mock.calls[0][0]))
+    const firstCallInput = fetchSpy.mock.calls[0][0]
+    const urlString =
+      typeof firstCallInput === 'string'
+        ? firstCallInput
+        : firstCallInput instanceof URL
+          ? firstCallInput.toString()
+          : firstCallInput.url
+    const url = new URL(urlString)
     expect(url.searchParams.get('repo')).toBe('did:plc:toji-suzuhara')
   })
 })
@@ -169,12 +196,14 @@ describe('backfillRepos', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input: string | URL | Request) => {
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url
+        let url: string
+        if (typeof input === 'string') {
+          url = input
+        } else if (input instanceof URL) {
+          url = input.toString()
+        } else {
+          url = input.url
+        }
         if (url.includes('listRepos')) {
           return new Response(
             JSON.stringify({
@@ -194,9 +223,15 @@ describe('backfillRepos', () => {
 
     expect(count).toBe(2)
 
-    const listReposCalls = fetchSpy.mock.calls.filter(([url]) =>
-      String(url).includes('listRepos'),
-    )
+    const listReposCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const urlString =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      return urlString.includes('listRepos')
+    })
     expect(listReposCalls.length).toBeGreaterThan(0)
   })
 })

@@ -4,10 +4,10 @@
 // Useful for populating data for manual testing (e.g. pdsls browsing).
 
 import { createRecord } from './lib/stratos.ts'
-import { loadState, saveState } from './lib/state.ts'
 import type { UserState } from './lib/state.ts'
+import { loadState, saveState } from './lib/state.ts'
 import { DOMAINS } from './lib/config.ts'
-import { section, pass, fail, info, summary } from './lib/log.ts'
+import { fail, info, pass, section, summary } from './lib/log.ts'
 
 // Standalone posts per domain
 

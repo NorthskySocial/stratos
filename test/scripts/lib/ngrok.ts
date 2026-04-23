@@ -1,8 +1,7 @@
 import { TEST_ROOT } from './config.ts'
-import { info, pass, fail, warn } from './log.ts'
+import { fail, info, pass, warn } from './log.ts'
 import { loadState, saveState } from './state.ts'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function startNgrok(_port: number): Promise<string> {
   info('Starting ngrok via Docker Compose...')
 
@@ -29,8 +28,7 @@ export async function startNgrok(_port: number): Promise<string> {
         url = data.tunnels[0].public_url
         break
       }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (_err) {
+    } catch {
       // Ignore and retry
     }
     await new Promise((resolve) => setTimeout(resolve, 2000))

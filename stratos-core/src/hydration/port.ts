@@ -1,3 +1,4 @@
+import type { AtUri } from '../shared/index.js'
 import type {
   BatchHydrationResult,
   HydrationContext,
@@ -23,10 +24,10 @@ export interface HydrationService {
    * @param context - Viewer context for access control
    * @returns The hydrated record or null if not found/not accessible
    */
-  hydrateRecord(
+  hydrateRecord: (
     request: HydrationRequest,
     context: HydrationContext,
-  ): Promise<HydrationResult>
+  ) => Promise<HydrationResult>
 
   /**
    * Hydrate multiple records in a batch
@@ -35,10 +36,10 @@ export interface HydrationService {
    * @param context - Viewer context for access control
    * @returns Batch result with records, not found URIs, and blocked URIs
    */
-  hydrateRecords(
+  hydrateRecords: (
     requests: HydrationRequest[],
     context: HydrationContext,
-  ): Promise<BatchHydrationResult>
+  ) => Promise<BatchHydrationResult>
 }
 
 /**
@@ -52,10 +53,10 @@ export interface RecordResolver {
    * @param uri - AT-URI of the record
    * @returns Record with boundaries, or null if not found
    */
-  getRecord(
+  getRecord: (
     ownerDid: string,
     uri: string,
-  ): Promise<{
+  ) => Promise<{
     uri: string
     cid: string
     value: Record<string, unknown>
@@ -69,12 +70,12 @@ export interface RecordResolver {
    * @param uris - AT-URIs of the records
    * @returns Map of URI to record with boundaries
    */
-  getRecords(
+  getRecords: (
     ownerDid: string,
     uris: string[],
-  ): Promise<
+  ) => Promise<
     Map<
-      string,
+      AtUri,
       {
         uri: string
         cid: string

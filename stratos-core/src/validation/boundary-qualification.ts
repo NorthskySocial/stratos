@@ -1,8 +1,29 @@
-const QUALIFIED_BOUNDARY_SEPARATOR = '/'
+/**
+ * Error thrown when a boundary does not belong to the expected service.
+ */
+export class BoundaryServiceMismatchError extends Error {
+  public readonly code = 'ServiceMismatch'
+
+  constructor(
+    public readonly boundary: string,
+    public readonly expectedServiceDid: string,
+    public readonly actualServiceDid: string,
+  ) {
+    super(
+      `Boundary "${boundary}" belongs to service ${actualServiceDid}, not ${expectedServiceDid}`,
+    )
+    this.name = 'BoundaryServiceMismatchError'
+  }
+}
+
+export const QUALIFIED_BOUNDARY_SEPARATOR = '/'
 
 /**
  * Qualify a bare boundary name with a service DID.
  *
+ * @param serviceDid - The service DID to qualify the boundary for.
+ * @param name - The bare boundary name to qualify.
+ * @returns The qualified boundary string.
  * @example qualifyBoundary('did:web:stratos.example.com', 'engineering')
  *          // => 'did:web:stratos.example.com/engineering'
  */
@@ -12,6 +33,10 @@ export function qualifyBoundary(serviceDid: string, name: string): string {
 
 /**
  * Qualify an array of bare boundary names with a service DID.
+ *
+ * @param serviceDid - The service DID to qualify the boundaries for.
+ * @param names - The array of bare boundary names to qualify.
+ * @returns The array of qualified boundary strings.
  */
 export function qualifyBoundaries(
   serviceDid: string,
@@ -22,6 +47,9 @@ export function qualifyBoundaries(
 
 /**
  * Check whether a boundary value is already in qualified form (contains a DID prefix).
+ *
+ * @param value - The boundary value to check.
+ * @returns True if the value is already qualified, false otherwise.
  */
 export function isQualifiedBoundary(value: string): boolean {
   return (
@@ -32,6 +60,9 @@ export function isQualifiedBoundary(value: string): boolean {
 /**
  * Parse a qualified boundary into its service DID and bare name.
  * Returns null if the value is not in qualified form.
+ *
+ * @param qualified - The qualified boundary value to parse.
+ * @returns An object containing the service DID and bare name, or null if parsing fails.
  */
 export function parseQualifiedBoundary(
   qualified: string,
@@ -61,6 +92,10 @@ export function parseQualifiedBoundary(
 /**
  * Assert that a qualified boundary belongs to the given service DID.
  * Throws if the boundary's DID prefix does not match.
+ *
+ * @param boundary - The qualified boundary to check.
+ * @param serviceDid - The service DID to check against.
+ * @throws BoundaryServiceMismatchError if the boundary does not belong to the service.
  */
 export function assertBoundaryMatchesService(
   boundary: string,
@@ -77,6 +112,10 @@ export function assertBoundaryMatchesService(
 /**
  * Ensure all boundaries in the array are qualified for the given service.
  * Bare names are auto-qualified; already-qualified boundaries are validated.
+ *
+ * @param serviceDid - The service DID to qualify boundaries for.
+ * @param boundaries - The array of boundaries to ensure are qualified.
+ * @returns The array of qualified boundaries.
  */
 export function ensureQualifiedBoundaries(
   serviceDid: string,
@@ -89,19 +128,4 @@ export function ensureQualifiedBoundaries(
     }
     return qualifyBoundary(serviceDid, b)
   })
-}
-
-export class BoundaryServiceMismatchError extends Error {
-  public readonly code = 'ServiceMismatch'
-
-  constructor(
-    public readonly boundary: string,
-    public readonly expectedServiceDid: string,
-    public readonly actualServiceDid: string,
-  ) {
-    super(
-      `Boundary "${boundary}" belongs to service ${actualServiceDid}, not ${expectedServiceDid}`,
-    )
-    this.name = 'BoundaryServiceMismatchError'
-  }
 }

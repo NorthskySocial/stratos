@@ -3,6 +3,8 @@ import type { EnrollmentValidationResult } from './types.js'
 
 /**
  * Extract PDS endpoint from a DID document
+ * @param didDoc - The DID document to extract the PDS endpoint from.
+ * @returns The PDS endpoint if found, otherwise null.
  */
 export function extractPdsEndpoint(didDoc: {
   service?: unknown[]
@@ -29,6 +31,9 @@ export function extractPdsEndpoint(didDoc: {
 
 /**
  * Check if a DID is in the allowlist
+ * @param config - Enrollment configuration
+ * @param did - The DID to check
+ * @returns True if the DID is allowed, false otherwise
  */
 export function isDidAllowed(config: EnrollmentConfig, did: string): boolean {
   if (config.mode === ENROLLMENT_MODE.OPEN) {
@@ -39,6 +44,9 @@ export function isDidAllowed(config: EnrollmentConfig, did: string): boolean {
 
 /**
  * Check if a PDS endpoint is in the allowlist
+ * @param config - Enrollment configuration
+ * @param pdsEndpoint - The PDS endpoint to check
+ * @returns True if the PDS endpoint is allowed, false otherwise
  */
 export function isPdsAllowed(
   config: EnrollmentConfig,

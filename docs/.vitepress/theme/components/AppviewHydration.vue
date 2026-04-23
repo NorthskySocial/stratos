@@ -1,73 +1,73 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="ah-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="ah-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <path
           id="ah-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ah-ml)"
           d="M 208 256 L 654 152"
+          marker-end="url(#ah-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ah-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ah-ml)"
           d="M 654 164 L 208 264"
+          marker-end="url(#ah-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ah-a3"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#ah-ml)"
           d="M 208 266 L 654 370"
+          marker-end="url(#ah-ml)"
+          stroke="#9145EC"
         />
         <path
           id="ah-a4"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#ah-mg)"
           d="M 654 382 L 208 272"
+          marker-end="url(#ah-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <div
-        class="node"
         id="ah-nav"
+        class="node"
         style="left: 38px; top: 215px; width: 170px"
       >
         <div class="ni">📱</div>
         <div class="nn">AppView</div>
         <div class="ns">appview.example.com</div>
-        <div class="av-content" id="ah-av-record">full record ✓</div>
+        <div id="ah-av-record" class="av-content">full record ✓</div>
       </div>
 
       <div
-        class="node"
         id="ah-npds"
+        class="node"
         style="left: 654px; top: 100px; width: 190px"
       >
         <div class="ni">🗄️</div>
@@ -77,8 +77,8 @@
       </div>
 
       <div
-        class="node"
         id="ah-nst"
+        class="node"
         style="left: 654px; top: 318px; width: 190px"
       >
         <div class="ni">⚙️</div>
@@ -87,7 +87,7 @@
         <div class="tag tp">holds full records</div>
       </div>
 
-      <div class="pill" id="ah-stub-pill" style="left: 330px; top: 152px">
+      <div id="ah-stub-pill" class="pill" style="left: 330px; top: 152px">
         <div class="pill-row">
           <span class="icon">📋</span><span class="c-blu">stub record</span>
         </div>
@@ -97,7 +97,7 @@
         </div>
       </div>
 
-      <div class="pill" id="ah-auth-pill" style="left: 210px; top: 248px">
+      <div id="ah-auth-pill" class="pill" style="left: 210px; top: 248px">
         <div class="pill-row">
           <span class="icon">🔐</span><span class="c-pur">DPoP token</span>
         </div>
@@ -105,8 +105,8 @@
       </div>
 
       <div
-        class="pill"
         id="ah-proc-pill"
+        class="pill"
         style="left: 654px; top: 428px; width: 188px"
       >
         <div class="pill-row">
@@ -118,7 +118,7 @@
         </div>
       </div>
 
-      <div class="pill" id="ah-rec-pill" style="left: 340px; top: 330px">
+      <div id="ah-rec-pill" class="pill" style="left: 340px; top: 330px">
         <div class="pill-row">
           <span class="icon">📦</span><span class="c-grn">hydrated record</span>
         </div>
@@ -131,7 +131,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)

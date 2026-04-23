@@ -1,6 +1,7 @@
 # Repo Export & Import
 
-Stratos repos are Merkle Search Trees which provides "feature parity" with the PDS. You can export a full repo as a CAR file and import it into another service.
+Stratos repos are Merkle Search Trees which provides "feature parity" with the PDS. You can export a
+full repo as a CAR file and import it into another service.
 
 ::: warning Note: Not yet implemented
 :::
@@ -9,7 +10,8 @@ Stratos repos are Merkle Search Trees which provides "feature parity" with the P
 
 ### Using `stratos-client` (recommended)
 
-The `fetchAndVerifyRecord()` helper handles fetching, CAR parsing, and signature verification in a single call:
+The `fetchAndVerifyRecord()` helper handles fetching, CAR parsing, and signature verification in a
+single call:
 
 ```typescript
 import {
@@ -81,7 +83,8 @@ async function exportRepo(
 
 ## Importing a Repository
 
-Import a previously exported CAR file. The caller must be enrolled and the CAR's commit DID must match the authenticated user:
+Import a previously exported CAR file. The caller must be enrolled and the CAR's commit DID must
+match the authenticated user:
 
 ```typescript
 async function importRepo(
@@ -117,4 +120,5 @@ async function importRepo(
 | Target repo   | Must not already have an existing commit |
 | PDS stubs     | Not created on import                    |
 
-The import validates that the commit DID matches the authenticated user, then indexes all records from the MST.
+The import validates that the commit DID matches the authenticated user, then indexes all records
+from the MST.

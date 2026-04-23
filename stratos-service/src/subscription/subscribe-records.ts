@@ -76,6 +76,9 @@ type SubscriptionMessage = CommitMessage | InfoMessage | EnrollmentMessage
 /**
  * Create the per-actor subscribeRecords stream handler.
  * Subscribes to record commits for a specific actor.
+ *
+ * @param ctx - Application context
+ * @returns Actor subscription handler function
  */
 function createActorSubscriptionHandler(ctx: AppContext) {
   return async function* subscribeActorRecords(
@@ -113,18 +116,37 @@ function createActorSubscriptionHandler(ctx: AppContext) {
       lastSeq = event.seq
     }
 
-    // Event-driven: wait for sequenceEvents notification or 30s fallback
-    while (!signal.aborted) {
-      await waitForSequenceEvent(ctx, did, signal, 30_000)
-      if (signal.aborted) return
+    yield* streamNewEvents(ctx, did, lastSeq, domain, signal)
+  }
+}
 
-      const newEvents = await getEventsSince(ctx, did, lastSeq)
-      for (const event of newEvents) {
-        if (signal.aborted) return
-        if (domain && !matchesDomain(event, domain)) continue
-        yield formatEvent(event)
-        lastSeq = event.seq
-      }
+/**
+ * Stream new events from the actor store for a given DID.
+ * @param ctx - The application context.
+ * @param did - The DID to subscribe to.
+ * @param startSeq - The sequence number to start from.
+ * @param domain - The domain to filter events by.
+ * @param signal - The abort signal to stop the stream.
+ * @returns An async generator that yields commit messages for new events.
+ */
+async function* streamNewEvents(
+  ctx: AppContext,
+  did: string,
+  startSeq: number,
+  domain: string | undefined,
+  signal: AbortSignal,
+): AsyncGenerator<SubscriptionMessage> {
+  let lastSeq = startSeq
+  while (!signal.aborted) {
+    await waitForSequenceEvent(ctx, did, signal, 30_000)
+    if (signal.aborted) return
+
+    const newEvents = await getEventsSince(ctx, did, lastSeq)
+    for (const event of newEvents) {
+      if (signal.aborted) return
+      if (domain && !matchesDomain(event, domain)) continue
+      yield formatEvent(event)
+      lastSeq = event.seq
     }
   }
 }
@@ -132,6 +154,9 @@ function createActorSubscriptionHandler(ctx: AppContext) {
 /**
  * Create the service-level subscription handler.
  * Replays all current enrollments on connection, then streams new events.
+ *
+ * @param ctx - Application context
+ * @returns Service subscription handler function
  */
 function createServiceSubscriptionHandler(ctx: AppContext) {
   return async function* subscribeServiceEvents(
@@ -147,7 +172,6 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
     ctx.enrollmentEvents.on('enrollment', onEnrollment)
 
     try {
-      // Replay all current enrollments so subscribers discover existing actors
       const store = ctx.enrollmentStore as unknown as EnrollmentStoreReader
       const replayedDids = new Set<string>()
       let cursor: string | undefined
@@ -159,7 +183,7 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
         if (page.length === 0) break
 
         for (const enrollment of page) {
-          if (signal.aborted) return
+          if (signal.aborted) break
           replayedDids.add(enrollment.did)
           const boundaries = await store.getBoundaries(enrollment.did)
           yield {
@@ -204,6 +228,9 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
  * Create the subscribeRecords stream handler.
  * - With `did`: per-actor record commit stream (existing behavior)
  * - Without `did`: service-level enrollment event stream
+ *
+ * @param ctx - Application context
+ * @returns SubscribeRecords stream handler function
  */
 export function createSubscribeRecordsHandler(ctx: AppContext) {
   const actorHandler = createActorSubscriptionHandler(ctx)
@@ -246,6 +273,12 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 
 // Helper functions
 
+/**
+ * Get latest sequence number for a DID
+ * @param ctx - Application context
+ * @param did - Decentralized Identifier (DID) for which to get the latest sequence number
+ * @returns Latest sequence number for the DID
+ */
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
@@ -257,6 +290,12 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   }
 }
 
+/**
+ * Get oldest sequence number for a DID
+ * @param ctx - Application context
+ * @param did - Decentralized Identifier (DID) for which to get the oldest sequence number
+ * @returns Oldest sequence number for the DID
+ */
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   try {
     return await ctx.actorStore.read(did, async (store) => {
@@ -268,6 +307,13 @@ async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   }
 }
 
+/**
+ * Get events since a given sequence number for a DID
+ * @param ctx - Application context
+ * @param did - Decentralized Identifier (DID) for which to get events
+ * @param cursor - Sequence number to start from
+ * @returns Array of sequence events since the cursor
+ */
 async function getEventsSince(
   ctx: AppContext,
   did: string,
@@ -300,6 +346,11 @@ async function getEventsSince(
   }
 }
 
+/**
+ * Format a sequence event into a commit message
+ * @param event - Sequence event to format
+ * @returns Commit message representation of the sequence event
+ */
 export function formatEvent(event: SeqEvent): CommitMessage {
   let ops: RecordOp[]
 
@@ -322,6 +373,12 @@ export function formatEvent(event: SeqEvent): CommitMessage {
   }
 }
 
+/**
+ * Check if a sequence event matches a domain
+ * @param event - Sequence event to check
+ * @param domain - Domain to match against
+ * @returns True if the event matches the domain, false otherwise
+ */
 export function matchesDomain(event: SeqEvent, domain: string): boolean {
   try {
     const decoded = cborDecode(event.event) as Record<string, unknown>
@@ -345,6 +402,10 @@ export function matchesDomain(event: SeqEvent, domain: string): boolean {
   }
 }
 
+/**
+ * Sleep for the given number of milliseconds
+ * @param ms - Milliseconds to sleep
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -353,6 +414,11 @@ function sleep(ms: number): Promise<void> {
  * Wait for a sequence event for the given DID, or until the timeout/abort fires.
  * Returns immediately if the DID emits a sequence event.
  * Falls back after timeoutMs to catch any missed events.
+ *
+ * @param ctx - Application context
+ * @param did - Decentralized Identifier (DID) for which to wait for sequence events
+ * @param signal - Abort signal to cancel the wait operation
+ * @param timeoutMs - Timeout in milliseconds to wait for sequence events
  */
 function waitForSequenceEvent(
   ctx: AppContext,
@@ -379,7 +445,9 @@ function waitForSequenceEvent(
 }
 
 /**
- * Register the subscribeRecords handler with XRPC server
+ * Register the subscribeRecords handler with the XRPC server
+ *
+ * @param ctx - Application context
  */
 export function registerSubscribeRecords(ctx: AppContext): void {
   const handler = createSubscribeRecordsHandler(ctx)

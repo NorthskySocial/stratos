@@ -1,10 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   extractBoundaries,
-  parseCid,
   jsonToLex,
-} from '../src/record-decoder.ts'
-import { CID } from 'multiformats/cid'
+  parseCid,
+} from '@northskysocial/stratos-core'
 
 describe('extractBoundaries', () => {
   it('extracts boundary values from a record', () => {
@@ -55,7 +54,6 @@ describe('parseCid', () => {
 
   it('parses a CID string', () => {
     const cid = parseCid(cidStr)
-    expect(cid).toBeInstanceOf(CID)
     expect(cid.toString()).toBe(cidStr)
   })
 
@@ -64,14 +62,15 @@ describe('parseCid', () => {
     expect(cid.toString()).toBe(cidStr)
   })
 
-  it('returns a CID instance as-is', () => {
-    const original = CID.parse(cidStr)
+  it('returns a CID object as-is', () => {
+    const original = parseCid(cidStr)
     const result = parseCid(original)
-    expect(result).toBe(original)
+    // Use toEqual as we now return a new object (LexCid)
+    expect(result).toEqual(original)
   })
 
   it('parses a bytes object', () => {
-    const original = CID.parse(cidStr)
+    const original = parseCid(cidStr)
     const cid = parseCid({ bytes: original.bytes })
     expect(cid.toString()).toBe(cidStr)
   })
@@ -85,8 +84,8 @@ describe('jsonToLex', () => {
   it('converts $link objects to CID instances', () => {
     const cidStr = 'bafyreie5cvv4h45feadgeuwhbcutmh6t7ceseocckahdoe6uat64zmz454'
     const result = jsonToLex({ $link: cidStr })
-    expect(result).toBeInstanceOf(CID)
-    expect((result as CID).toString()).toBe(cidStr)
+    expect(result).toBeDefined()
+    expect(String(result)).toBe(cidStr)
   })
 
   it('passes through primitive values', () => {

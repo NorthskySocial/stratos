@@ -1,72 +1,72 @@
 <template>
-  <div class="anim-outer" ref="containerRef">
-    <div class="stage" ref="stageRef">
+  <div ref="containerRef" class="anim-outer">
+    <div ref="stageRef" class="stage">
       <svg class="arsvg" viewBox="0 0 900 520">
         <defs>
           <marker
             id="bc-ml"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#9145EC" />
+            <polygon fill="#9145EC" points="0 0,7 2.5,0 5" />
           </marker>
           <marker
             id="bc-mg"
-            markerWidth="7"
             markerHeight="5"
+            markerWidth="7"
+            orient="auto"
             refX="7"
             refY="2.5"
-            orient="auto"
           >
-            <polygon points="0 0,7 2.5,0 5" fill="#24cf6e" />
+            <polygon fill="#24cf6e" points="0 0,7 2.5,0 5" />
           </marker>
         </defs>
         <!-- Top row: Operator → Stratos → DB -->
         <path
           id="bc-a1"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#bc-ml)"
           d="M 170 133 L 305 133"
+          marker-end="url(#bc-ml)"
+          stroke="#9145EC"
         />
         <path
           id="bc-a2"
           class="ar"
-          stroke="#9145EC"
-          marker-end="url(#bc-ml)"
           d="M 505 133 L 685 133"
+          marker-end="url(#bc-ml)"
+          stroke="#9145EC"
         />
         <!-- DB → PDS (vertical) -->
         <path
           id="bc-a3"
           class="ar"
-          stroke="#7780DC"
-          marker-end="url(#bc-ml)"
           d="M 762 183 L 762 320"
+          marker-end="url(#bc-ml)"
+          stroke="#7780DC"
         />
         <!-- PDS → AppView (← left) -->
         <path
           id="bc-a4"
           class="ar"
-          stroke="#24cf6e"
-          marker-end="url(#bc-mg)"
           d="M 685 373 L 470 373"
+          marker-end="url(#bc-mg)"
+          stroke="#24cf6e"
         />
       </svg>
 
       <!-- Top row -->
-      <div class="node" id="bc-nop" style="left: 20px; top: 80px; width: 150px">
+      <div id="bc-nop" class="node" style="left: 20px; top: 80px; width: 150px">
         <div class="ni">👤</div>
         <div class="nn">Operator</div>
         <div class="ns">admin update</div>
       </div>
 
       <div
-        class="node"
         id="bc-nst"
+        class="node"
         style="left: 305px; top: 80px; width: 200px"
       >
         <div class="ni">⚙️</div>
@@ -75,8 +75,8 @@
       </div>
 
       <div
-        class="node"
         id="bc-ndb"
+        class="node"
         style="left: 685px; top: 80px; width: 155px"
       >
         <div class="ni">🛢️</div>
@@ -86,8 +86,8 @@
 
       <!-- Bottom row -->
       <div
-        class="node"
         id="bc-npds"
+        class="node"
         style="left: 685px; top: 320px; width: 155px"
       >
         <div class="ni">🗄️</div>
@@ -96,8 +96,8 @@
       </div>
 
       <div
-        class="node"
         id="bc-nav"
+        class="node"
         style="left: 305px; top: 320px; width: 165px"
       >
         <div class="ni">📡</div>
@@ -109,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const containerRef = ref(null)
 const stageRef = ref(null)
