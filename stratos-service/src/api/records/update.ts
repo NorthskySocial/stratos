@@ -201,9 +201,12 @@ async function performUpdate(
     { action: 'update', collection, rkey, record, cid },
   ]
 
-  const writeResult = await manager.applyWrites(callerDid, repoWrites, store.repo, [
-    { cid, bytes: recordBytes },
-  ])
+  const writeResult = await manager.applyWrites(
+    callerDid,
+    repoWrites,
+    store.repo,
+    [{ cid, bytes: recordBytes }],
+  )
 
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUriSyntax(uriStr)

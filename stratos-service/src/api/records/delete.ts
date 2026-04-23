@@ -75,9 +75,7 @@ export async function deleteRecord(
           sequenceTrace,
         )
 
-        const repoWrites: RepoWrite[] = [
-          { action: 'delete', collection, rkey },
-        ]
+        const repoWrites: RepoWrite[] = [{ action: 'delete', collection, rkey }]
 
         const writeResult = await manager.applyWrites(
           callerDid,

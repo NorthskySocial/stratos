@@ -219,9 +219,7 @@ describe('applyWritesBatch PDS Stubs', () => {
     ]
 
     // Force failure by making actorStore.transact throw
-    vi.spyOn(actorStore, 'transact').mockRejectedValue(
-      new Error('DB failure'),
-    )
+    vi.spyOn(actorStore, 'transact').mockRejectedValue(new Error('DB failure'))
 
     await expect(
       applyWritesBatch(ctx as AppContext, testDid, ops),

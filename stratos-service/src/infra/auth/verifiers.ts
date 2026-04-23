@@ -151,7 +151,10 @@ async function verifyDpopAuth(
       {
         method: ctx.req.method || 'GET',
         url: ctx.req.url || '/',
-        headers: ctx.req.headers as Record<string, string | string[] | undefined>,
+        headers: ctx.req.headers as Record<
+          string,
+          string | string[] | undefined
+        >,
       },
       { setHeader: (name, value) => ctx.res?.setHeader(name, value) },
     )

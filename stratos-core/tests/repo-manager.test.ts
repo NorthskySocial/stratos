@@ -62,10 +62,7 @@ describe('ActorRepoManager', () => {
     }
 
     transactor = new StratosSqlRepoTransactor(db)
-    manager = new ActorRepoManager(
-      mockSigningService,
-      mockSequencingService,
-    )
+    manager = new ActorRepoManager(mockSigningService, mockSequencingService)
   })
 
   afterEach(async () => {
