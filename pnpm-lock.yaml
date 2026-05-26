@@ -192,6 +192,31 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
 
+  stratos-feedgen:
+    dependencies:
+      '@atproto/crypto':
+        specifier: ^0.4.5
+        version: 0.4.5
+      '@atproto/lexicon':
+        specifier: ^0.6.1
+        version: 0.6.2
+      '@atproto/xrpc-server':
+        specifier: ^0.10.12
+        version: 0.10.15
+      '@northskysocial/stratos-core':
+        specifier: workspace:*
+        version: link:../stratos-core
+    devDependencies:
+      '@types/node':
+        specifier: ^25.2.1
+        version: 25.2.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
+
   stratos-indexer:
     dependencies:
       '@atcute/atproto':
@@ -4399,6 +4424,7 @@ packages:
 
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   varint@6.0.0:
@@ -4421,46 +4447,6 @@ packages:
       sass-embedded: '*'
       stylus: '*'
       sugarss: '*'
-      terser: ^5.16.0
-      tsx: ^4.8.1
-      yaml: ^2.4.2
-    peerDependenciesMeta:
-      '@types/node':
-        optional: true
-      jiti:
-        optional: true
-      less:
-        optional: true
-      lightningcss:
-        optional: true
-      sass:
-        optional: true
-      sass-embedded:
-        optional: true
-      stylus:
-        optional: true
-      sugarss:
-        optional: true
-      terser:
-        optional: true
-      tsx:
-        optional: true
-      yaml:
-        optional: true
-
-  vite@7.3.1:
-    resolution: {integrity: sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    hasBin: true
-    peerDependencies:
-      '@types/node': ^20.19.0 || >=22.12.0
-      jiti: '>=1.21.0'
-      less: ^4.0.0
-      lightningcss: ^1.21.0
-      sass: ^1.70.0
-      sass-embedded: ^1.70.0
-      stylus: '>=0.54.8'
-      sugarss: ^5.0.0
       terser: ^5.16.0
       tsx: ^4.8.1
       yaml: ^2.4.2
@@ -4777,7 +4763,7 @@ snapshots:
   '@atproto-labs/xrpc-utils@0.0.24':
     dependencies:
       '@atproto/xrpc': 0.7.7
-      '@atproto/xrpc-server': 0.10.12
+      '@atproto/xrpc-server': 0.10.15
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -4797,7 +4783,7 @@ snapshots:
   '@atproto/api@0.18.20':
     dependencies:
       '@atproto/common-web': 0.4.16
-      '@atproto/lexicon': 0.6.1
+      '@atproto/lexicon': 0.6.2
       '@atproto/syntax': 0.4.3
       '@atproto/xrpc': 0.7.7
       await-lock: 2.2.2
@@ -4831,11 +4817,11 @@ snapshots:
       '@atproto/crypto': 0.4.5
       '@atproto/did': 0.3.0
       '@atproto/identity': 0.4.11
-      '@atproto/lexicon': 0.6.1
+      '@atproto/lexicon': 0.6.2
       '@atproto/repo': 0.8.12
       '@atproto/sync': 0.1.40
       '@atproto/syntax': 0.4.3
-      '@atproto/xrpc-server': 0.10.12
+      '@atproto/xrpc-server': 0.10.15
       '@bufbuild/protobuf': 1.10.1
       '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.1)
       '@connectrpc/connect-express': 1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect-node@1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1)))(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))
@@ -4974,7 +4960,7 @@ snapshots:
 
   '@atproto/lex-cli@0.9.8':
     dependencies:
-      '@atproto/lexicon': 0.6.1
+      '@atproto/lexicon': 0.6.2
       '@atproto/syntax': 0.4.3
       chalk: 4.1.2
       commander: 9.5.0
@@ -5206,7 +5192,7 @@ snapshots:
       '@atproto/common': 0.5.11
       '@atproto/common-web': 0.4.16
       '@atproto/crypto': 0.4.5
-      '@atproto/lexicon': 0.6.1
+      '@atproto/lexicon': 0.6.2
       '@ipld/dag-cbor': 7.0.3
       multiformats: 9.9.0
       uint8arrays: 3.0.0
@@ -5253,7 +5239,7 @@ snapshots:
       '@atproto/crypto': 0.4.5
       '@atproto/lex-cbor': 0.0.11
       '@atproto/lex-data': 0.0.11
-      '@atproto/lexicon': 0.6.1
+      '@atproto/lexicon': 0.6.2
       '@atproto/ws-client': 0.0.4
       '@atproto/xrpc': 0.7.7
       express: 4.22.1
@@ -5291,7 +5277,7 @@ snapshots:
 
   '@atproto/xrpc@0.7.7':
     dependencies:
-      '@atproto/lexicon': 0.6.1
+      '@atproto/lexicon': 0.6.2
       zod: 3.25.76
 
   '@aws-crypto/crc32@5.2.0':
@@ -7327,13 +7313,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.18(vite@7.3.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2))':
+  '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
       '@vitest/spy': 4.0.18
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
+      vite: 6.4.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
 
   '@vitest/pretty-format@4.0.18':
     dependencies:
@@ -9515,20 +9501,6 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.2
 
-  vite@7.3.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2):
-    dependencies:
-      esbuild: 0.27.3
-      fdir: 6.5.0(picomatch@4.0.3)
-      picomatch: 4.0.3
-      postcss: 8.5.6
-      rollup: 4.57.1
-      tinyglobby: 0.2.15
-    optionalDependencies:
-      '@types/node': 25.2.1
-      fsevents: 2.3.3
-      tsx: 4.21.0
-      yaml: 2.8.2
-
   vitefu@1.1.2(vite@6.4.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)):
     optionalDependencies:
       vite: 6.4.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
@@ -9536,7 +9508,7 @@ snapshots:
   vitest@4.0.18(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(vite@7.3.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2))
+      '@vitest/mocker': 4.0.18(vite@6.4.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18
@@ -9553,7 +9525,7 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 7.3.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
+      vite: 6.4.1(@types/node@25.2.1)(tsx@4.21.0)(yaml@2.8.2)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.2.1

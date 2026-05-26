@@ -6,6 +6,8 @@ import zoneStratosDefs from '../../../lexicons/zone/stratos/defs.json' with { ty
 import zoneStratosEnrollmentStatus from '../../../lexicons/zone/stratos/enrollment/status.json' with { type: 'json' }
 import zoneStratosEnrollmentUnenroll from '../../../lexicons/zone/stratos/enrollment/unenroll.json' with { type: 'json' }
 import zoneStratosFeedPost from '../../../lexicons/zone/stratos/feed/post.json' with { type: 'json' }
+import zoneStratosFeedgenDescribeFeed from '../../../lexicons/zone/stratos/feedgen/describeFeed.json' with { type: 'json' }
+import zoneStratosFeedgenGetFeed from '../../../lexicons/zone/stratos/feedgen/getFeed.json' with { type: 'json' }
 import zoneStratosIdentityResolveEnrollments from '../../../lexicons/zone/stratos/identity/resolveEnrollments.json' with { type: 'json' }
 import zoneStratosRepoHydrateRecord from '../../../lexicons/zone/stratos/repo/hydrateRecord.json' with { type: 'json' }
 import zoneStratosRepoHydrateRecords from '../../../lexicons/zone/stratos/repo/hydrateRecords.json' with { type: 'json' }
@@ -22,6 +24,8 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosEnrollmentStatus as LexiconDoc,
   zoneStratosEnrollmentUnenroll as LexiconDoc,
   zoneStratosFeedPost as LexiconDoc,
+  zoneStratosFeedgenDescribeFeed as LexiconDoc,
+  zoneStratosFeedgenGetFeed as LexiconDoc,
   zoneStratosIdentityResolveEnrollments as LexiconDoc,
   zoneStratosRepoHydrateRecord as LexiconDoc,
   zoneStratosRepoHydrateRecords as LexiconDoc,

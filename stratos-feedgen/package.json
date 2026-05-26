@@ -1,0 +1,27 @@
+{
+  "name": "@northskysocial/stratos-feedgen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Stratos feed generator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "lint": "eslint --ext .ts ."
+  },
+  "dependencies": {
+    "@atproto/crypto": "^0.4.5",
+    "@atproto/lexicon": "^0.6.1",
+    "@atproto/xrpc-server": "^0.10.12",
+    "@northskysocial/stratos-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
