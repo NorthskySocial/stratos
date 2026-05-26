@@ -3,6 +3,7 @@ packages:
   - 'stratos-service'
   - 'stratos-client'
   - 'stratos-indexer'
+  - 'stratos-feedgen'
   - 'webapp'
 allowBuilds:
   ngrok: true
