@@ -7,7 +7,7 @@ import type {
 import { decodeCursor, encodeCursor } from '../../src/db/index.js'
 
 export interface StoreFactory {
-  build(): Promise<FeedgenStore>
+  build: () => Promise<FeedgenStore>
 }
 
 const SPIKE_DID = 'did:plc:spikespiegel'
