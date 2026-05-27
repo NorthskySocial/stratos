@@ -23,11 +23,17 @@ export interface FeedgenConfig {
   postgresUrl?: string
   /** Optional Postgres schema name. Defaults to `public` when omitted. */
   postgresSchema?: string
+  /** TTL (ms) for cached viewer boundary memberships. */
+  boundaryCacheTtlMs: number
+  /** Max number of viewer DIDs to cache. */
+  boundaryCacheMax: number
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
 
 export const DEFAULT_STORAGE_BACKEND: StorageBackend = 'sqlite'
+export const DEFAULT_BOUNDARY_CACHE_TTL_MS = 300_000
+export const DEFAULT_BOUNDARY_CACHE_MAX = 10_000
 
 /** Lxms accepted on inbound service-auth JWTs. WP9 will append `getBlob`. */
 export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
@@ -72,7 +78,30 @@ export function loadFeedgenConfig(
     sqlitePath,
     postgresUrl,
     postgresSchema,
+    boundaryCacheTtlMs: parsePositiveInt(
+      env['FEEDGEN_BOUNDARY_CACHE_TTL_MS'],
+      'FEEDGEN_BOUNDARY_CACHE_TTL_MS',
+      DEFAULT_BOUNDARY_CACHE_TTL_MS,
+    ),
+    boundaryCacheMax: parsePositiveInt(
+      env['FEEDGEN_BOUNDARY_CACHE_MAX'],
+      'FEEDGEN_BOUNDARY_CACHE_MAX',
+      DEFAULT_BOUNDARY_CACHE_MAX,
+    ),
   }
+}
+
+function parsePositiveInt(
+  value: string | undefined,
+  name: string,
+  fallback: number,
+): number {
+  if (value === undefined || value === '') return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${name}: ${value} (expected positive integer)`)
+  }
+  return parsed
 }
 
 function parseStorageBackend(value: string | undefined): StorageBackend {
