@@ -52,7 +52,11 @@ describe('SQLite-specific behavior', () => {
     await migrateSqliteDb(db)
     await migrateSqliteDb(db)
     const store = new SqliteFeedgenStore(db)
-    await store.upsertCursor('did:plc:idempotent', 1, '2024-01-01T00:00:00.000Z')
+    await store.upsertCursor(
+      'did:plc:idempotent',
+      1,
+      '2024-01-01T00:00:00.000Z',
+    )
     expect(await store.getCursor('did:plc:idempotent')).toBe(1)
     await store.close()
   })

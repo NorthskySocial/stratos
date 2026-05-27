@@ -104,10 +104,7 @@ function extractBearerToken(headers: RequestHeaders): string {
   const raw = headers.authorization
   const value = Array.isArray(raw) ? raw[0] : raw
   if (!value) {
-    throw new AuthRequiredError(
-      'missing authorization header',
-      'AuthMissing',
-    )
+    throw new AuthRequiredError('missing authorization header', 'AuthMissing')
   }
   const [scheme, token, ...rest] = value.split(' ')
   if (scheme?.toLowerCase() !== 'bearer' || !token || rest.length > 0) {
