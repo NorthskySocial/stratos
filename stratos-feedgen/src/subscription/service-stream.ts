@@ -36,8 +36,8 @@ interface ErrorEventLike extends Event {
 interface WebSocketLike {
   readyState: number
   binaryType: string
-  close(): void
-  addEventListener(type: 'open', cb: () => void): void
+  close: () => void
+  addEventListener: (type: 'open', cb: () => void) => void
   onmessage: ((e: MessageEventLike) => void) | null
   onerror: ((e: ErrorEventLike) => void) | null
   onclose: (() => void) | null
@@ -140,8 +140,7 @@ export class ServiceStream {
     })
 
     ws.onmessage = (e: MessageEventLike) => {
-      const buf =
-        e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
+      const buf = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
       void this.handleMessage(buf)
     }
 
@@ -192,10 +191,7 @@ export class ServiceStream {
         Uint8Array,
       ]
       if (header['t'] !== '#enrollment') return
-      const [body] = decodeFirst(rest) as [
-        Record<string, unknown>,
-        Uint8Array,
-      ]
+      const [body] = decodeFirst(rest) as [Record<string, unknown>, Uint8Array]
       const enrollment = body as unknown as EnrollmentMessage
       if (enrollment.action === 'enroll') {
         await this.callbacks.onEnroll(

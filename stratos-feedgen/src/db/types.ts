@@ -52,22 +52,22 @@ export interface ListPostsResult {
 
 export interface FeedgenStore {
   // posts
-  upsertPost(input: PostUpsert): Promise<void>
-  deletePost(uri: string): Promise<void>
-  getPost(uri: string): Promise<IndexedPost | null>
-  listPostsByBoundary(opts: ListPostsOpts): Promise<ListPostsResult>
+  upsertPost: (input: PostUpsert) => Promise<void>
+  deletePost: (uri: string) => Promise<void>
+  getPost: (uri: string) => Promise<IndexedPost | null>
+  listPostsByBoundary: (opts: ListPostsOpts) => Promise<ListPostsResult>
 
   // sync cursor
-  upsertCursor(did: string, seq: number, updatedAt: string): Promise<void>
-  getCursor(did: string): Promise<number | null>
+  upsertCursor: (did: string, seq: number, updatedAt: string) => Promise<void>
+  getCursor: (did: string) => Promise<number | null>
 
   // enrolled actor
-  upsertEnrolledActor(input: EnrolledActorUpsert): Promise<void>
-  getEnrolledActor(did: string): Promise<EnrolledActor | null>
-  listEnrolledActors(): Promise<EnrolledActor[]>
-  deleteEnrolledActor(did: string): Promise<void>
+  upsertEnrolledActor: (input: EnrolledActorUpsert) => Promise<void>
+  getEnrolledActor: (did: string) => Promise<EnrolledActor | null>
+  listEnrolledActors: () => Promise<EnrolledActor[]>
+  deleteEnrolledActor: (did: string) => Promise<void>
 
-  close(): Promise<void>
+  close: () => Promise<void>
 }
 
 const CURSOR_SEPARATOR = '::'
