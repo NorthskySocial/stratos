@@ -11,7 +11,18 @@ export interface FeedgenConfig {
   stratosServiceUrl: string
   /** DID of the upstream Stratos service. */
   stratosServiceDid: string
+  /** PLC directory URL used to resolve `did:plc:` issuers. */
+  feedgenPlcUrl: string
+  /** Allow-list of `lxm` values accepted on inbound service-auth JWTs. */
+  feedgenAllowedLxms: readonly string[]
 }
+
+/** Lxms accepted on inbound service-auth JWTs. WP9 will append `getBlob`. */
+export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
+  'zone.stratos.feedgen.getFeed',
+]
+
+export const DEFAULT_PLC_URL = 'https://plc.directory'
 
 export interface FeedgenEnv {
   [key: string]: string | undefined
@@ -27,6 +38,8 @@ export function loadFeedgenConfig(
       requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
+    feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
+    feedgenAllowedLxms: DEFAULT_ALLOWED_LXMS,
   }
 }
 
