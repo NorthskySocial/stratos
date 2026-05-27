@@ -197,16 +197,31 @@ importers:
       '@atproto/crypto':
         specifier: ^0.4.5
         version: 0.4.5
+      '@atproto/identity':
+        specifier: ^0.4.11
+        version: 0.4.12
       '@atproto/lexicon':
         specifier: ^0.6.1
         version: 0.6.2
       '@atproto/xrpc-server':
         specifier: ^0.10.12
         version: 0.10.15
+      '@libsql/client':
+        specifier: ^0.17.0
+        version: 0.17.0
       '@northskysocial/stratos-core':
         specifier: workspace:*
         version: link:../stratos-core
+      drizzle-orm:
+        specifier: 1.0.0-beta.18-7eb39f0
+        version: 1.0.0-beta.18-7eb39f0(@libsql/client@0.17.0)(@types/mssql@9.1.9(@azure/core-client@1.10.1))(mssql@11.0.1(@azure/core-client@1.10.1))(pg@8.20.0)(postgres@3.4.8)(zod@4.3.6)
+      postgres:
+        specifier: ^3.4.8
+        version: 3.4.8
     devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^11.12.0
+        version: 11.12.0
       '@types/node':
         specifier: ^25.2.1
         version: 25.2.1
@@ -4816,7 +4831,7 @@ snapshots:
       '@atproto/common': 0.5.11
       '@atproto/crypto': 0.4.5
       '@atproto/did': 0.3.0
-      '@atproto/identity': 0.4.11
+      '@atproto/identity': 0.4.12
       '@atproto/lexicon': 0.6.2
       '@atproto/repo': 0.8.12
       '@atproto/sync': 0.1.40

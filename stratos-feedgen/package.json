@@ -18,9 +18,13 @@
     "@atproto/identity": "^0.4.11",
     "@atproto/lexicon": "^0.6.1",
     "@atproto/xrpc-server": "^0.10.12",
-    "@northskysocial/stratos-core": "workspace:*"
+    "@libsql/client": "^0.17.0",
+    "@northskysocial/stratos-core": "workspace:*",
+    "drizzle-orm": "1.0.0-beta.18-7eb39f0",
+    "postgres": "^3.4.8"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.12.0",
     "@types/node": "^25.2.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
