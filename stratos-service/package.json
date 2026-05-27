@@ -16,7 +16,7 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts .",
-    "codegen": "lex gen-server ../lexicons --out ./src/lexicon",
+    "codegen": "lex gen-server ./src/lexicon ../lexicons",
     "generate:version": "tsx scripts/generate-version.ts"
   },
   "dependencies": {

@@ -10,7 +10,6 @@ export interface StoreFactory {
   build(): Promise<FeedgenStore>
 }
 
-
 const SPIKE_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
 const VASH_DID = 'did:plc:vashstampede'
@@ -174,9 +173,7 @@ export function describeStoreContract(
           boundary: 'alpha',
           limit: 10,
         })
-        expect(alpha.posts.map((p) => p.uri)).toEqual([
-          `at://${SPIKE_DID}/p/1`,
-        ])
+        expect(alpha.posts.map((p) => p.uri)).toEqual([`at://${SPIKE_DID}/p/1`])
       })
 
       it('paginates using cursor format <sortAt>::<uri>', async () => {

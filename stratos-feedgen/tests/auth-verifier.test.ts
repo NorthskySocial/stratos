@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  type Keypair,
-  P256Keypair,
-  Secp256k1Keypair,
-} from '@atproto/crypto'
+import { type Keypair, P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { createServiceJwt, AuthRequiredError } from '@atproto/xrpc-server'
 
 import {
@@ -17,10 +13,7 @@ const ALLOWED_LXM = 'zone.stratos.feedgen.getFeed'
 
 interface StubResolver {
   did: {
-    resolveAtprotoKey: (
-      iss: string,
-      forceRefresh: boolean,
-    ) => Promise<string>
+    resolveAtprotoKey: (iss: string, forceRefresh: boolean) => Promise<string>
   }
   calls: Array<{ iss: string; forceRefresh: boolean }>
 }
@@ -77,10 +70,7 @@ async function mintJwt(
  * Mint a JWT with a custom `typ` header. `createServiceJwt` always sets
  * `typ: 'JWT'`, so we sign manually to exercise the typ block-list.
  */
-async function mintJwtWithTyp(
-  keypair: Keypair,
-  typ: string,
-): Promise<string> {
+async function mintJwtWithTyp(keypair: Keypair, typ: string): Promise<string> {
   const header = { typ, alg: keypair.jwtAlg }
   const payload = {
     iat: Math.floor(Date.now() / 1000),

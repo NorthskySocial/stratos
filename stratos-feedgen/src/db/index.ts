@@ -1,6 +1,10 @@
 import type { FeedgenConfig } from '../config.js'
 import { createPgDb, migratePgDb, PgFeedgenStore } from './postgres.js'
-import { createSqliteDb, migrateSqliteDb, SqliteFeedgenStore } from './sqlite.js'
+import {
+  createSqliteDb,
+  migrateSqliteDb,
+  SqliteFeedgenStore,
+} from './sqlite.js'
 import type { FeedgenStore } from './types.js'
 
 export * from './types.js'

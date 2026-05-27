@@ -143,7 +143,10 @@ export class SqliteFeedgenStore implements FeedgenStore {
       .select({ boundary: postBoundaryTbl.boundary })
       .from(postBoundaryTbl)
       .where(eq(postBoundaryTbl.uri, uri))
-    return rowToPost(rows[0], boundaries.map((b) => b.boundary))
+    return rowToPost(
+      rows[0],
+      boundaries.map((b) => b.boundary),
+    )
   }
 
   async listPostsByBoundary(opts: ListPostsOpts): Promise<ListPostsResult> {
