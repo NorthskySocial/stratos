@@ -7,6 +7,7 @@ import { createFeedgenStore } from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
 import { loadFeedRegistry } from '../feeds/index.js'
 import { createFeedgenServer } from '../server.js'
+import { ServiceStream } from '../subscription/index.js'
 import { UpstreamStratosClient } from '../upstream/index.js'
 
 async function main(): Promise<void> {
@@ -49,8 +50,41 @@ async function main(): Promise<void> {
   const httpServer = await server.listen(port)
   console.log(`stratos-feedgen listening on :${port}`)
 
+  const subscribeEnrollments =
+    process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
+  let serviceStream: ServiceStream | null = null
+  if (subscribeEnrollments) {
+    serviceStream = new ServiceStream(
+      {
+        stratosServiceUrl: cfg.stratosServiceUrl,
+        mintToken: () => upstream.mintSyncToken(),
+      },
+      {
+        onEnroll: async (did, boundaries) => {
+          const now = new Date().toISOString()
+          const existing = await store.getEnrolledActor(did)
+          await store.upsertEnrolledActor({
+            did,
+            boundaries,
+            enrolledAt: existing?.enrolledAt ?? now,
+            lastSeenAt: now,
+          })
+        },
+        onUnenroll: async (did) => {
+          await store.deleteEnrolledActor(did)
+        },
+      },
+      (err) => {
+        console.error('service stream error:', err)
+      },
+    )
+    serviceStream.start()
+    console.log('service enrollment subscription started')
+  }
+
   const shutdown = (signal: NodeJS.Signals): void => {
     console.log(`received ${signal}, shutting down`)
+    serviceStream?.stop()
     httpServer.close()
     store.close().then(
       () => process.exit(0),
