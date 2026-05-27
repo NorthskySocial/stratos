@@ -104,10 +104,7 @@ describe('loadFeedRegistry', () => {
   it('loads YAML from FEEDGEN_FEEDS_FILE by extension', () => {
     const dir = mkdtempSync(join(tmpdir(), 'feedgen-feeds-'))
     const path = join(dir, 'feeds.yaml')
-    writeFileSync(
-      path,
-      'feeds:\n  - id: eng\n    boundary: engineering\n',
-    )
+    writeFileSync(path, 'feeds:\n  - id: eng\n    boundary: engineering\n')
     const registry = loadFeedRegistry({ FEEDGEN_FEEDS_FILE: path })
     expect(registry.get('eng')?.boundary).toBe('engineering')
   })

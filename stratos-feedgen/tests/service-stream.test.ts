@@ -122,9 +122,7 @@ describe('ServiceStream', () => {
         boundaries: ['fukuoka', 'tokyo'],
       }),
     )
-    ws.send(
-      encodeEnrollmentFrame({ did: 'did:plc:bulma', action: 'enroll' }),
-    )
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:bulma', action: 'enroll' }))
     ws.send(
       encodeEnrollmentFrame({
         did: 'did:plc:goku',
@@ -176,9 +174,7 @@ describe('ServiceStream', () => {
         boundaries: ['ohtori'],
       }),
     )
-    ws.send(
-      encodeEnrollmentFrame({ did: 'did:plc:utena', action: 'unenroll' }),
-    )
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:utena', action: 'unenroll' }))
 
     await vi.waitFor(() => {
       expect(enrolls).toEqual(['did:plc:utena'])
