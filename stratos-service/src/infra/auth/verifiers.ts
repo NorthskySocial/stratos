@@ -33,9 +33,10 @@ export interface AuthVerifiers {
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did?: string } }>
   /** Admin auth (basic auth or bearer token with admin password) */
-  admin: (
-    ctx: import('@atproto/xrpc-server').MethodAuthContext,
-  ) => Promise<{ credentials: { type: string } }>
+  admin: (ctx: {
+    req: import('node:http').IncomingMessage
+    res: import('node:http').ServerResponse
+  }) => Promise<{ credentials: { type: string } }>
   /** Stream auth for zone.stratos.sync.subscribeRecords */
   subscribeAuth: StreamAuthVerifier
 }

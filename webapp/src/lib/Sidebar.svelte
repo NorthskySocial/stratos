@@ -33,9 +33,9 @@
     onSetServiceUrl,
   }: Props = $props()
 
-  let inputUrl = $state(serviceUrl)
+  let inputUrl = $state('')
 
-  $effect(() => {
+  $effect.pre(() => {
     inputUrl = serviceUrl
   })
 </script>
