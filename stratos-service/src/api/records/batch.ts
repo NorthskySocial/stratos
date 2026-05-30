@@ -12,11 +12,7 @@ import {
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
-import {
-  assertRootUnchanged,
-  validateWritableRecord,
-  withConcurrencyRetry,
-} from './validation.js'
+import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
 import {
   type BatchWriteResult,
   type CommitResult,
@@ -173,77 +169,65 @@ async function buildCommitWithRetry(
     await ensureActorStoreExists(ctx.actorStore, callerDid)
 
     const retry = await withConcurrencyRetry(async () => {
-      return ctx.actorStore.readThenTransact(
-        callerDid,
-        async (reader) => {
-          const rootDetails = await reader.repo.getRootDetailed()
-          const rootCid = rootDetails?.cid
-            ? parseCid(rootDetails.cid).toString()
-            : null
-          const storage = new StratosBlockStoreReader(reader.repo)
-          const unsigned = await buildCommit(storage, rootCid, {
-            did: callerDid,
-            writes: mstOps,
-          })
-          return { rootCid, unsigned }
-        },
-        async ({ rootCid, unsigned }, store) => {
-          const currentRoot = await store.repo.lockRoot()
-          assertRootUnchanged(
-            currentRoot?.cid ? parseCid(currentRoot.cid).toString() : null,
-            rootCid,
-          )
+      // WARNING: Use transact() — not readThenTransact(). lockRoot() (FOR UPDATE)
+      // provides the root and row lock in one query; a separate read phase doubles
+      // the root query and loses the lock. See create.ts for full rationale.
+      return ctx.actorStore.transact(callerDid, async (store) => {
+        const currentRoot = await store.repo.lockRoot()
+        const rootCid = currentRoot?.cid
+          ? parseCid(currentRoot.cid).toString()
+          : null
+        const storage = new StratosBlockStoreReader(store.repo)
+        const unsigned = await buildCommit(storage, rootCid, {
+          did: callerDid,
+          writes: mstOps,
+        })
 
-          await persistBatchBlocks(store, precomputed)
+        await persistBatchBlocks(store, precomputed)
 
-          const commitResult = await signAndPersistCommit(
-            store.repo,
-            actorSigningKey,
-            unsigned,
-          )
+        const commitResult = await signAndPersistCommit(
+          store.repo,
+          actorSigningKey,
+          unsigned,
+        )
 
-          const results = await prepareWriteResults(
-            store,
-            precomputed,
-            commitResult.rev,
-          )
+        const results = await prepareWriteResults(
+          store,
+          precomputed,
+          commitResult.rev,
+        )
 
-          await sequenceBatchChanges(
-            store,
-            precomputed,
-            commitResult.commitCid.toString(),
-            commitResult.rev,
-            sequenceTrace,
-          )
+        await sequenceBatchChanges(
+          store,
+          precomputed,
+          commitResult.commitCid.toString(),
+          commitResult.rev,
+          sequenceTrace,
+        )
 
-          for (const pre of precomputed) {
-            if (pre.action === 'delete') {
-              ctx.stubQueue.enqueueDelete(
-                callerDid,
-                pre.op.collection,
-                pre.rkey,
-              )
-            } else {
-              ctx.stubQueue.enqueueWrite(
-                callerDid,
-                pre.op.collection,
-                pre.rkey,
-                pre.op.collection,
-                pre.cid!.toString(),
-                commitResult.rev,
-              )
-            }
+        for (const pre of precomputed) {
+          if (pre.action === 'delete') {
+            ctx.stubQueue.enqueueDelete(callerDid, pre.op.collection, pre.rkey)
+          } else {
+            ctx.stubQueue.enqueueWrite(
+              callerDid,
+              pre.op.collection,
+              pre.rkey,
+              pre.op.collection,
+              pre.cid!.toString(),
+              commitResult.rev,
+            )
           }
+        }
 
-          return {
-            results,
-            commit: {
-              cid: commitResult.commitCid.toString(),
-              rev: commitResult.rev,
-            },
-          }
-        },
-      )
+        return {
+          results,
+          commit: {
+            cid: commitResult.commitCid.toString(),
+            rev: commitResult.rev,
+          },
+        }
+      })
     }, ctx.logger)
     result = retry.result
   } finally {

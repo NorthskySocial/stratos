@@ -15,6 +15,7 @@ import {
   SequencingService,
   SigningService,
   StratosDb,
+  StratosSqlRepoTransactor,
   stratosRepoBlock,
   stratosRepoRoot,
 } from '../src/index.js'
@@ -34,6 +35,7 @@ const createCid = async (data: unknown): Promise<Cid> => {
 describe('ActorRepoManager', () => {
   let db: StratosDb
   let manager: ActorRepoManager
+  let transactor: StratosSqlRepoTransactor
   let testDir: string
   let dbPath: string
   let mockSigningService: SigningService
@@ -59,11 +61,8 @@ describe('ActorRepoManager', () => {
       sequenceChange: vi.fn().mockResolvedValue(undefined),
     }
 
-    manager = new ActorRepoManager(
-      db,
-      mockSigningService,
-      mockSequencingService,
-    )
+    transactor = new StratosSqlRepoTransactor(db)
+    manager = new ActorRepoManager(mockSigningService, mockSequencingService)
   })
 
   afterEach(async () => {
@@ -84,7 +83,7 @@ describe('ActorRepoManager', () => {
       },
     ]
 
-    const result = await manager.applyWrites(did, writes, [
+    const result = await manager.applyWrites(did, writes, transactor, [
       { cid, bytes: encodeRecord(record) },
     ])
 
@@ -131,6 +130,7 @@ describe('ActorRepoManager', () => {
           cid: cid1,
         },
       ],
+      transactor,
       [{ cid: cid1, bytes: encodeRecord(record1) }],
     )
 
@@ -147,7 +147,7 @@ describe('ActorRepoManager', () => {
       },
     ]
 
-    const result = await manager.applyWrites(did, writes, [
+    const result = await manager.applyWrites(did, writes, transactor, [
       { cid: cid2, bytes: encodeRecord(record2) },
     ])
 

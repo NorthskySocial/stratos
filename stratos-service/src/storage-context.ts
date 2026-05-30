@@ -1,5 +1,6 @@
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
+import { sql } from 'drizzle-orm'
 import {
   closeServiceDb,
   createServiceDb,
@@ -38,6 +39,7 @@ export interface StorageContext {
     sessionStore: OAuthSessionStoreBackend
     stateStore: OAuthStateStoreBackend
   }
+  checkDbHealth: () => Promise<'ok' | 'error'>
   destroy: () => Promise<void>
 }
 
@@ -62,6 +64,7 @@ export async function createStorageContext(
     stateStore: OAuthStateStoreBackend
   }
   let actorStore: ActorStore
+  let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
 
   if (cfg.storage.backend === 'postgres') {
@@ -101,6 +104,11 @@ export async function createStorageContext(
       adminPoolSize: cfg.storage.pgAdminPoolSize,
       blockCacheSize: cfg.storage.blockCacheSize,
     })
+    checkDbHealth = () =>
+      pgDb.execute(sql`SELECT 1`).then(
+        () => 'ok' as const,
+        () => 'error' as const,
+      )
     destroy = async () => {
       await closeServicePgDb(pgDb)
     }
@@ -115,6 +123,11 @@ export async function createStorageContext(
       cborToRecord,
       logger,
     })
+    checkDbHealth = () =>
+      db!.run(sql`SELECT 1`).then(
+        () => 'ok' as const,
+        () => 'error' as const,
+      )
     destroy = async () => {
       await closeServiceDb(db!)
     }
@@ -125,6 +138,7 @@ export async function createStorageContext(
     enrollmentStore,
     oauthStores,
     actorStore,
+    checkDbHealth,
     destroy,
   }
 }
