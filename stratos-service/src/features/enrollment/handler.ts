@@ -274,9 +274,7 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
     '/xrpc/zone.stratos.admin.addBoundary',
     async (req: Request, res: Response) => {
       try {
-        await ctx.authVerifier.admin({ req, res } as Parameters<
-          typeof ctx.authVerifier.admin
-        >[0])
+        await ctx.authVerifier.admin({ req, res })
       } catch {
         return res
           .status(401)
@@ -350,9 +348,7 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
     '/xrpc/zone.stratos.admin.removeBoundary',
     async (req: Request, res: Response) => {
       try {
-        await ctx.authVerifier.admin({ req, res } as Parameters<
-          typeof ctx.authVerifier.admin
-        >[0])
+        await ctx.authVerifier.admin({ req, res })
       } catch {
         return res
           .status(401)
@@ -417,9 +413,7 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
     '/xrpc/zone.stratos.admin.setBoundaries',
     async (req: Request, res: Response) => {
       try {
-        await ctx.authVerifier.admin({ req, res } as Parameters<
-          typeof ctx.authVerifier.admin
-        >[0])
+        await ctx.authVerifier.admin({ req, res })
       } catch {
         return res
           .status(401)
