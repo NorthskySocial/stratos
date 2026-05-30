@@ -59,6 +59,7 @@ export function initRepo(
     actorStore,
     repoWriteLocks,
     writeRateLimiter,
+    rateLimits: writeRateLimiter,
     stubWriter,
     stubQueue,
     sequenceEvents,

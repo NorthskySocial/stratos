@@ -9,6 +9,7 @@ import { fileExists } from '@atproto/common'
 import {
   createAttestationPayload,
   DefaultLexiconProvider,
+  type Logger,
 } from '@northskysocial/stratos-core'
 import {
   initBlob,
@@ -40,6 +41,7 @@ import {
   type EnrollmentEventEmitter,
   type SequenceEventEmitter,
   StorageContext,
+  type IdentityContext,
 } from './context-types.js'
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
@@ -90,7 +92,7 @@ export async function createAppContext(
   const fetchWithUserAgent = createFetchWithUserAgent(userAgent)
 
   const storage = await createStorageContext(opts)
-  const { enrollmentStore, actorStore, destroy: storageDestroy } = storage
+  const { actorStore, destroy: storageDestroy } = storage
 
   const identity = await initIdentity(
     cfg,
@@ -98,64 +100,16 @@ export async function createAppContext(
     fetchWithUserAgent,
     logger,
   )
-  const { idResolver, signingKey, oauthClient } = identity
+  const { signingKey } = identity
 
   const { enrollmentEvents, sequenceEvents } = initEventEmitters()
 
-  const enrollmentCtx = await initEnrollment(
+  const services = await initCoreServices(
     cfg,
-    enrollmentStore,
-    actorStore,
+    storage,
+    identity,
     enrollmentEvents,
-    idResolver,
-    oauthClient,
-    logger,
-  )
-
-  const allowListProvider = enrollmentCtx.allowListProvider
-
-  const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
-    cfg,
-    idResolver,
-    oauthClient,
-    enrollmentStore,
-    enrollmentCtx.enrollmentValidator,
-    allowListProvider,
-    logger,
-  )
-
-  const cache = cfg.enrollment.valkeyUrl
-    ? new RedisCache(cfg.enrollment.valkeyUrl)
-    : undefined
-
-  const boundaryResolver = cfg.enrollment.valkeyUrl
-    ? new MigratingBoundaryResolver({
-        enrollmentStore,
-        serviceDid: getServiceDidWithFragment(cfg),
-        logger,
-      })
-    : new EnrollmentBoundaryResolver(enrollmentStore)
-
-  const blobCtx = initBlob(actorStore, boundaryResolver)
-
-  const hydrationCtx = initHydration(
-    actorStore,
-    enrollmentStore,
-    blobCtx.bloomManager,
-    cache,
-  )
-
-  const syncCtx = { syncService: hydrationCtx.syncService }
-
-  const mstCtx = initMst(signingKey)
-
-  const repoCtx = initRepo(
-    cfg,
-    actorStore,
-    mstCtx,
     sequenceEvents,
-    oauthClient,
-    getServiceDidWithFragment(cfg),
     logger,
   )
 
@@ -170,22 +124,15 @@ export async function createAppContext(
     version: VERSION,
     ...identity,
     ...storage,
-    ...enrollmentCtx,
-    ...hydrationCtx,
-    ...syncCtx,
-    ...blobCtx,
-    ...repoCtx,
-    cache,
+    ...services.enrollmentCtx,
+    ...services.hydrationCtx,
+    ...services.blobCtx,
+    ...services.repoCtx,
+    ...services,
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
-    rateLimits: repoCtx.writeRateLimiter,
-    authVerifier,
-    xrpcServer,
-    lexiconProvider,
-    oauthStores: storage.oauthStores,
     app: initExpressApp(),
     logger,
-    dpopVerifier,
 
     /**
      * Returns the actor's signing keypair, using a TTL cache to avoid
@@ -247,10 +194,10 @@ export async function createAppContext(
      */
     async destroy() {
       await storageDestroy()
-      repoCtx.repoWriteLocks.destroy()
-      repoCtx.stubQueue.stop()
-      if (enrollmentCtx.allowListProvider) {
-        await enrollmentCtx.allowListProvider.stop()
+      services.repoCtx.repoWriteLocks.destroy()
+      services.repoCtx.stubQueue.stop()
+      if (services.enrollmentCtx.allowListProvider) {
+        await services.enrollmentCtx.allowListProvider.stop()
       }
     },
   }
@@ -258,6 +205,88 @@ export async function createAppContext(
   setupMigrationCallback(ctx)
 
   return ctx
+}
+
+/**
+ * Initializes core services for the application context.
+ */
+async function initCoreServices(
+  cfg: AppContextOptions['cfg'],
+  storage: StorageContext,
+  identity: Pick<IdentityContext, 'idResolver' | 'signingKey' | 'oauthClient'>,
+  enrollmentEvents: EnrollmentEventEmitter,
+  sequenceEvents: SequenceEventEmitter,
+  logger?: Logger,
+) {
+  const { enrollmentStore, actorStore } = storage
+  const { idResolver, signingKey, oauthClient } = identity
+
+  const enrollmentCtx = await initEnrollment(
+    cfg,
+    enrollmentStore,
+    actorStore,
+    enrollmentEvents,
+    idResolver,
+    oauthClient,
+    logger,
+  )
+
+  const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
+    cfg,
+    idResolver,
+    oauthClient,
+    enrollmentStore,
+    enrollmentCtx.enrollmentValidator,
+    enrollmentCtx.allowListProvider,
+    logger,
+  )
+
+  const cache = cfg.enrollment.valkeyUrl
+    ? new RedisCache(cfg.enrollment.valkeyUrl)
+    : undefined
+
+  const boundaryResolver = cfg.enrollment.valkeyUrl
+    ? new MigratingBoundaryResolver({
+        enrollmentStore,
+        serviceDid: getServiceDidWithFragment(cfg),
+        logger,
+      })
+    : new EnrollmentBoundaryResolver(enrollmentStore)
+
+  const blobCtx = initBlob(actorStore, boundaryResolver)
+
+  const hydrationCtx = initHydration(
+    actorStore,
+    enrollmentStore,
+    blobCtx.bloomManager,
+    cache,
+  )
+
+  const mstCtx = initMst(signingKey)
+
+  const repoCtx = initRepo(
+    cfg,
+    actorStore,
+    mstCtx,
+    sequenceEvents,
+    oauthClient,
+    getServiceDidWithFragment(cfg),
+    logger,
+  )
+
+  return {
+    enrollmentCtx,
+    dpopVerifier,
+    authVerifier,
+    lexiconProvider,
+    xrpcServer,
+    cache,
+    boundaryResolver,
+    blobCtx,
+    hydrationCtx,
+    syncService: hydrationCtx.syncService,
+    repoCtx,
+  }
 }
 
 /**

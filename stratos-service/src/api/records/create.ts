@@ -345,35 +345,35 @@ async function executeTransaction(
       [{ cid, bytes: recordBytes }],
     )
 
-      const uri = AtUri.make(callerDid, collection, rkey)
-      const ti = performance.now()
-      await store.record.indexRecord(
-        uri.toString(),
-        cid,
+    const uri = AtUri.make(callerDid, collection, rkey)
+    const ti = performance.now()
+    await store.record.indexRecord(
+      uri.toString(),
+      cid,
+      record as Record<string, unknown>,
+      'create',
+      writeResult.rev,
+    )
+
+    // Associate blobs with record and boundaries for access control
+    const blobs = StratosValidator.extractBlobs(record)
+    for (const blobCidStr of blobs) {
+      const blobCid = parseCid(blobCidStr)
+      await store.blob.associateBlobWithRecord(blobCid, uri.toString())
+
+      const boundaries = StratosValidator.extractBoundaryDomains(
         record as Record<string, unknown>,
-        'create',
-        writeResult.rev,
       )
-
-      // Associate blobs with record and boundaries for access control
-      const blobs = StratosValidator.extractBlobs(record)
-      for (const blobCidStr of blobs) {
-        const blobCid = parseCid(blobCidStr)
-        await store.blob.associateBlobWithRecord(blobCid, uri.toString())
-
-        const boundaries = StratosValidator.extractBoundaryDomains(
-          record as Record<string, unknown>,
-        )
-        for (const boundary of boundaries) {
-          await store.blob.associateBlobWithBoundary(blobCid, boundary)
-        }
-        // Update Bloom filter for fast rejection
-        if (ctx.bloomManager) {
-          await ctx.bloomManager.updateBloom(blobCid, boundaries)
-        }
+      for (const boundary of boundaries) {
+        await store.blob.associateBlobWithBoundary(blobCid, boundary)
       }
+      // Update Bloom filter for fast rejection
+      if (ctx.bloomManager) {
+        await ctx.bloomManager.updateBloom(blobCid, boundaries)
+      }
+    }
 
-      phases.transactPersist = performance.now() - ti
+    phases.transactPersist = performance.now() - ti
 
     return {
       uri,

@@ -236,11 +236,11 @@ export class StratosRecordReader {
     if (res.length === 0) return null
     const record = res[0]
     return {
-      uri: row.uri,
-      cid: row.cid,
-      value: this.cborToRecord(row.content),
-      indexedAt: row.indexedAt,
-      takedownRef: row.takedownRef,
+      uri: record.uri,
+      cid: record.cid,
+      value: this.cborToRecord(record.content),
+      indexedAt: record.indexedAt,
+      takedownRef: record.takedownRef,
     }
   }
 

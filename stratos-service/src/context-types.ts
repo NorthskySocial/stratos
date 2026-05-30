@@ -51,11 +51,7 @@ export interface IdentityContext {
 export interface StorageContext {
   db?: ServiceDb
   actorStore: ActorStore
-  blobAuth: BlobAuthService
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
-  writeRateLimiter: WriteRateLimiter
-  rateLimits: WriteRateLimiter // Added for compatibility
-  repoWriteLocks: RepoWriteLocks
   oauthStores: {
     sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
     stateStore: import('./oauth/client.js').OAuthStateStoreBackend
@@ -104,6 +100,7 @@ export interface RepoContext extends MstContext {
   actorStore: ActorStore
   repoWriteLocks: RepoWriteLocks
   writeRateLimiter: WriteRateLimiter
+  rateLimits: WriteRateLimiter // Added for compatibility
   stubWriter: StubWriterService
   stubQueue: BackgroundStubQueue
   sequenceEvents: SequenceEventEmitter

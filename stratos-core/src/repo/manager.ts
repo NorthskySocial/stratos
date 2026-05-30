@@ -8,8 +8,6 @@ import { parseCid } from '../atproto'
 import { BlockMap } from './reader.js'
 import { buildCommit, type UnsignedCommitData } from '../mst'
 import { Logger } from '../types.js'
-import { StratosDbOrTx } from '../db/index.js'
-import { StratosPgDbOrTx } from '../db/pg.js'
 
 /** Result of a repository write operation. */
 export interface ApplyWritesResult {
@@ -46,14 +44,14 @@ export interface SequencingService {
  * StratosSqlRepoTransactor (SQLite) and PgActorRepoTransactor (Postgres).
  */
 export interface RepoTransactor {
-  lockRoot(): Promise<{ cid: Cid; rev: string } | null>
-  updateRoot(cid: Cid, rev: string, did: string): Promise<void>
-  getBytes(cid: Cid): Promise<Uint8Array | null>
-  has(cid: Cid): Promise<boolean>
-  getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }>
-  putBlocks(blocks: BlockMap, rev: string): Promise<void>
-  deleteBlocks(cids: Cid[]): Promise<void>
-  preloadRootSpine?(commitCid: Cid): Promise<void>
+  lockRoot: () => Promise<{ cid: Cid; rev: string } | null>
+  updateRoot: (cid: Cid, rev: string, did: string) => Promise<void>
+  getBytes: (cid: Cid) => Promise<Uint8Array | null>
+  has: (cid: Cid) => Promise<boolean>
+  getBlocks: (cids: Cid[]) => Promise<{ blocks: BlockMap; missing: Cid[] }>
+  putBlocks: (blocks: BlockMap, rev: string) => Promise<void>
+  deleteBlocks: (cids: Cid[]) => Promise<void>
+  preloadRootSpine?: (commitCid: Cid) => Promise<void>
 }
 
 // WARNING: This class is performance-critical. Refactoring/restructuring has

@@ -504,7 +504,6 @@ function handleDpopError(
       throw new AuthRequiredError(err.message, 'AuthenticationRequired')
     }
   }
-  }
 
   if (
     (err instanceof DpopVerificationError && err.code === 'not_enrolled') ||
