@@ -35,10 +35,10 @@ describe('CORS and 404 Verification', () => {
     )
 
     await server.start()
-    const port = cfg.service.port
-    url = `http://localhost:${port}`
     // @ts-ignore - accessing private property for testing
     httpServer = server.server
+    const port = (httpServer.address() as { port: number }).port
+    url = `http://localhost:${port}`
   })
 
   afterEach(async () => {

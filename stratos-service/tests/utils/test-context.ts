@@ -27,7 +27,7 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
     service: {
       did: 'did:web:stratos.test',
       serviceFragment: 'atproto_pns',
-      port: 3100,
+      port: 0,
       publicUrl: 'https://stratos.test',
       repoUrl: 'https://github.com/NorthskySocial/stratos',
     },

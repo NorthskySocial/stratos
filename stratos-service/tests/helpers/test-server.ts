@@ -46,6 +46,9 @@ export class TestServer {
 
     try {
       const cfg = envToConfig(parseEnv())
+      // Bind an ephemeral port to avoid collisions between parallel test files;
+      // the actual bound port is read back via `url`.
+      cfg.service.port = 0
       const blobstore = createMockBlobStoreCreator()
       const logger = createLogger('error') // Quiet logs for tests
 
