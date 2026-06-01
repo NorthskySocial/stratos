@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdir, rm } from 'node:fs/promises'
-import { StratosServer } from '../../src'
 import { envToConfig, parseEnv } from '../../src/config.js'
 import { cborToRecord, createMockBlobStoreCreator } from './test-env.js'
 import { createLogger } from '../../src/logger.js'
+import { StratosServer } from '../../src/index.js'
 
 export class TestServer {
   constructor(
@@ -46,6 +46,9 @@ export class TestServer {
 
     try {
       const cfg = envToConfig(parseEnv())
+      // Bind an ephemeral port to avoid collisions between parallel test files;
+      // the actual bound port is read back via `url`.
+      cfg.service.port = 0
       const blobstore = createMockBlobStoreCreator()
       const logger = createLogger('error') // Quiet logs for tests
 

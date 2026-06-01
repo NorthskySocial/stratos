@@ -1,6 +1,6 @@
 import { AtUri } from '@atproto/syntax'
 import { Lexicons } from '@atproto/lexicon'
-import { stratosLexicons } from '../lexicons/index.js'
+import { stratosLexicons } from '../lexicons'
 import { StratosConfig, StratosValidationError } from '../types.js'
 import { PostValidator } from './post-validator.js'
 import { EnrollmentRecordValidator } from './enrollment-record-validator.js'
@@ -108,6 +108,46 @@ export class StratosValidator {
       | { $type?: string; values?: Array<{ value: string }> }
       | undefined
     return boundary?.values?.map((d) => d.value) ?? []
+  }
+
+  /**
+   * Recursively extracts all blob CIDs from a record.
+   *
+   * @param record - The record to extract blobs from
+   * @returns An array of blob CIDs found in the record
+   */
+  static extractBlobs(record: unknown): string[] {
+    const blobs: string[] = []
+    const traverse = (val: unknown) => {
+      if (!val || typeof val !== 'object') return
+      if (val instanceof Uint8Array) return
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          traverse(item)
+        }
+        return
+      }
+
+      // Check if it's a blob object
+      if (
+        '$type' in val &&
+        val.$type === 'blob' &&
+        'ref' in val &&
+        typeof val.ref === 'object' &&
+        val.ref !== null &&
+        '$link' in val.ref &&
+        typeof val.ref.$link === 'string'
+      ) {
+        blobs.push(val.ref.$link)
+      } else {
+        // Otherwise recurse
+        for (const key in val) {
+          traverse((val as Record<string, unknown>)[key])
+        }
+      }
+    }
+    traverse(record)
+    return blobs
   }
 
   /**

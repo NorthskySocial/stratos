@@ -14,7 +14,7 @@ import {
 } from '@northskysocial/stratos-core'
 import { StratosServiceConfig } from '../../config.js'
 import { ExternalAllowListProvider } from '../../features/enrollment/internal/allow-list.js'
-import { verifyEnrolled } from '../../features/index.js'
+import { verifyEnrolled } from '../../features'
 
 /**
  * Auth verifier collection for different auth scenarios
@@ -103,7 +103,11 @@ export function createAuthVerifiers(
       logger,
     }),
     admin: createAdminVerifier(adminPassword),
-    subscribeAuth: createSubscribeAuthVerifier(syncToken),
+    subscribeAuth: createSubscribeAuthVerifier(
+      syncToken,
+      idResolver,
+      serviceDid,
+    ),
   }
 }
 
@@ -360,8 +364,13 @@ async function verifyDpop(
       credentials: { type: 'user', did: result.did },
     }
   } catch (err) {
-    if (err instanceof DpopVerificationError && err.wwwAuthenticate) {
-      ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+    if (err instanceof DpopVerificationError) {
+      if (err.nonce) {
+        ctx.res?.setHeader('DPoP-Nonce', err.nonce)
+      }
+      if (err.wwwAuthenticate) {
+        ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+      }
     }
     return { credentials: { type: 'anonymous' } }
   }
@@ -406,26 +415,47 @@ function createAdminVerifier(
  * Creates the stream auth verifier for sync subscriptions
  *
  * @param syncToken - Sync token for authenticated subscriptions
+ * @param idResolver - Identity resolver
+ * @param ourDid - Our service DID
  * @returns Auth verifier function
  * @throws AuthRequiredError if sync token is invalid
  */
 function createSubscribeAuthVerifier(
   syncToken: string | undefined,
+  idResolver: IdResolver,
+  ourDid: string,
 ): AuthVerifiers['subscribeAuth'] {
   return async (ctx) => {
     const authHeader = ctx.req?.headers?.authorization
     const query = (ctx.req as { query?: Record<string, unknown> }).query
     const queryToken = query?.token
 
-    if (syncToken) {
-      let attempt: string | undefined
-      if (authHeader?.startsWith('Bearer ')) {
-        attempt = authHeader.slice(7).trim()
-      } else if (typeof queryToken === 'string') {
-        attempt = queryToken
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7).trim()
+
+      // 1. Check if it's the master sync token
+      if (syncToken && safeEqual(token, syncToken)) {
+        return { credentials: { type: 'sync' } }
       }
 
-      if (attempt && safeEqual(attempt, syncToken)) {
+      // 2. Check if it's a service auth JWT
+      try {
+        const result = await verifyServiceAuth(
+          authHeader,
+          ourDid,
+          'zone.stratos.sync.subscribeRecords',
+          idResolver,
+        )
+        return {
+          credentials: { type: 'service', did: result.iss, iss: result.iss },
+        }
+      } catch {
+        // Fall through
+      }
+    }
+
+    if (typeof queryToken === 'string' && syncToken) {
+      if (safeEqual(queryToken, syncToken)) {
         return { credentials: { type: 'sync' } }
       }
     }
@@ -434,7 +464,7 @@ function createSubscribeAuthVerifier(
     // Actually, standard subscribeRecords allows anyone to connect
     // and we just filter based on what they ask for if needed.
     // But Stratos sync typically requires a token for full access.
-    if (syncToken) {
+    if (syncToken && (authHeader || queryToken)) {
       throw new AuthRequiredError('Invalid sync token')
     }
 
@@ -464,8 +494,14 @@ function handleDpopError(
       },
       `auth rejected: DPoP verification failed (${err.code})`,
     )
+    if (err.nonce) {
+      ctx.res?.setHeader('DPoP-Nonce', err.nonce)
+    }
     if (err.wwwAuthenticate) {
       ctx.res?.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+    }
+    if (err.code === 'use_dpop_nonce') {
+      throw new AuthRequiredError(err.message, 'AuthenticationRequired')
     }
   }
 

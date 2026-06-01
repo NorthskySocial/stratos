@@ -36,4 +36,32 @@ describe('stratos-agent', () => {
       undefined,
     )
   })
+
+  it('handles DPoP nonce retry', async () => {
+    const mockFetchHandler = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: 'AuthenticationRequired',
+            message: 'DPoP nonce required',
+          }),
+          { status: 401, headers: { 'dpop-nonce': 'new-nonce' } },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true })))
+
+    const mockSession = {
+      fetchHandler: mockFetchHandler,
+    } as unknown as OAuthSession
+
+    const serviceUrl = 'https://stratos.example.com'
+    const fetchFn = createServiceFetch(mockSession, serviceUrl)
+
+    const res = await fetchFn('/xrpc/some.method')
+    const data = await res.json()
+
+    expect(data.success).toBe(true)
+    expect(mockFetchHandler).toHaveBeenCalledTimes(2)
+  })
 })

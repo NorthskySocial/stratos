@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ExternalAllowListProvider } from '../src/features/enrollment/internal/allow-list'
 import { type Logger } from '@northskysocial/stratos-core'
+import { ExternalAllowListProvider } from '../src/features/enrollment/internal/allow-list.js'
 
 describe('ExternalAllowListProvider', () => {
   const mockUrl = 'https://example.com/allowlist.txt'

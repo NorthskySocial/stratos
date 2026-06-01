@@ -1,6 +1,7 @@
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { createXrpcHandler } from '../util.js'
 import { AppContext } from '../../context-types.js'
+import { HANDLER_METHOD } from '../handlers'
 
 /**
  * Handler for describing a repository.
@@ -9,7 +10,7 @@ import { AppContext } from '../../context-types.js'
  * @throws InvalidRequestError if the repository does not exist
  */
 export const describeRepoHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'com.atproto.repo.describeRepo', {
+  createXrpcHandler(ctx, HANDLER_METHOD.DESCRIBE_REPO, {
     requireAuth: false,
     handler: async ({ params }) => {
       const repo = params.repo as string
@@ -46,6 +47,7 @@ export const describeRepoHandler = (ctx: AppContext) =>
         }
       } catch {
         // DID resolution is best-effort
+        ctx.logger?.warn({ repo }, 'Could not resolve DID')
       }
 
       if (handle) {

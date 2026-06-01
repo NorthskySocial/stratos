@@ -7,7 +7,7 @@ routing, verification, and OAuth scopes. Prefer these over hand-rolling the same
 
 ```typescript
 import {
-  discoverEnrollment,
+  getEnrollmentByServiceDid,
   createServiceFetchHandler,
   resolveServiceUrl,
   fetchAndVerifyRecord,
@@ -23,9 +23,9 @@ step.
 Before showing Stratos UI, verify the user is enrolled:
 
 ```typescript
-import { discoverEnrollment } from '@northskysocial/stratos-client'
+import { getEnrollmentByServiceDid } from '@northskysocial/stratos-client'
 
-const enrollment = await discoverEnrollment(did, pdsUrl)
+const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
 if (!enrollment) {
   showEnrollmentPrompt()
 }

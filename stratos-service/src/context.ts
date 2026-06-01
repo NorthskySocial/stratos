@@ -9,23 +9,27 @@ import { fileExists } from '@atproto/common'
 import {
   createAttestationPayload,
   DefaultLexiconProvider,
+  type Logger,
 } from '@northskysocial/stratos-core'
 import {
+  initBlob,
   initEnrollment,
   initHydration,
+  initMst,
   initRepo,
   MigratingBoundaryResolver,
-} from './features/index.js'
+  EnrollmentBoundaryResolver,
+} from './features'
 
 import { getServiceDidWithFragment } from './config.js'
 import { createStorageContext } from './storage-context.js'
 import { createIdResolver } from './identity-resolver.js'
 import { createOAuthClientContext } from './oauth/client-factory.js'
-import { DpopVerifier } from './infra/auth/index.js'
+import { DpopVerifier } from './infra/auth'
 import {
   type OAuthSessionStoreBackend,
   type OAuthStateStoreBackend,
-} from './oauth/client.js'
+} from './oauth'
 import {
   buildUserAgent,
   createFetchWithUserAgent,
@@ -37,9 +41,11 @@ import {
   type EnrollmentEventEmitter,
   type SequenceEventEmitter,
   StorageContext,
+  type IdentityContext,
 } from './context-types.js'
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
+import { RedisCache } from './infra/storage/redis-cache.js'
 
 export * from './context-types.js'
 export { SqliteSequenceOps } from './storage/sqlite/sequence-ops.js'
@@ -86,7 +92,7 @@ export async function createAppContext(
   const fetchWithUserAgent = createFetchWithUserAgent(userAgent)
 
   const storage = await createStorageContext(opts)
-  const { enrollmentStore, actorStore, destroy: storageDestroy } = storage
+  const { actorStore, destroy: storageDestroy } = storage
 
   const identity = await initIdentity(
     cfg,
@@ -94,39 +100,16 @@ export async function createAppContext(
     fetchWithUserAgent,
     logger,
   )
-  const { idResolver, signingKey, oauthClient } = identity
+  const { signingKey } = identity
 
   const { enrollmentEvents, sequenceEvents } = initEventEmitters()
 
-  const enrollmentCtx = await initEnrollment(
+  const services = await initCoreServices(
     cfg,
-    enrollmentStore,
-    actorStore,
+    storage,
+    identity,
     enrollmentEvents,
-    idResolver,
-    oauthClient,
-    logger,
-  )
-
-  const allowListProvider = enrollmentCtx.allowListProvider
-
-  const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
-    cfg,
-    idResolver,
-    oauthClient,
-    enrollmentStore,
-    allowListProvider,
-    logger,
-  )
-
-  const hydrationCtx = initHydration(enrollmentStore)
-
-  const repoCtx = initRepo(
-    cfg,
-    actorStore,
     sequenceEvents,
-    oauthClient,
-    getServiceDidWithFragment(cfg),
     logger,
   )
 
@@ -141,25 +124,22 @@ export async function createAppContext(
     version: VERSION,
     ...identity,
     ...storage,
-    ...enrollmentCtx,
-    ...hydrationCtx,
-    ...repoCtx,
+    ...services.enrollmentCtx,
+    ...services.hydrationCtx,
+    ...services.blobCtx,
+    ...services.repoCtx,
+    ...services,
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
-    rateLimits: repoCtx.writeRateLimiter,
-    authVerifier,
-    xrpcServer,
-    lexiconProvider,
-    oauthStores: storage.oauthStores,
     app: initExpressApp(),
     logger,
-    dpopVerifier,
 
     /**
      * Returns the actor's signing keypair, using a TTL cache to avoid
      * redundant DB lookups and P256 key imports on every write.
      *
-     * @param did - DID of the actor
+     * @param did - The DID of the actor
+     * @returns The signing key for the actor, or a new one if none exists
      */
     async getActorSigningKey(did: string) {
       const now = Date.now()
@@ -177,6 +157,13 @@ export async function createAppContext(
       return keypair
     },
 
+    /**
+     * Create an attestation for an actor
+     * @param did - The DID of the actor
+     * @param boundaries - The boundaries of the attestation
+     * @param userDidKey - The DID key of the user
+     * @returns The attestation signature and signing key
+     */
     async createAttestation(
       did: string,
       boundaries: string[],
@@ -187,6 +174,10 @@ export async function createAppContext(
       return { sig, signingKey: signingKey.did() }
     },
 
+    /**
+     * Check the health of the application
+     * @returns Health status of the application
+     */
     async checkHealth() {
       const dbOk = await storage.checkDbHealth()
       return {
@@ -198,12 +189,15 @@ export async function createAppContext(
       }
     },
 
+    /**
+     * Destroy the application context
+     */
     async destroy() {
       await storageDestroy()
-      repoCtx.repoWriteLocks.destroy()
-      repoCtx.stubQueue.stop()
-      if (enrollmentCtx.allowListProvider) {
-        await enrollmentCtx.allowListProvider.stop()
+      services.repoCtx.repoWriteLocks.destroy()
+      services.repoCtx.stubQueue.stop()
+      if (services.enrollmentCtx.allowListProvider) {
+        await services.enrollmentCtx.allowListProvider.stop()
       }
     },
   }
@@ -211,6 +205,88 @@ export async function createAppContext(
   setupMigrationCallback(ctx)
 
   return ctx
+}
+
+/**
+ * Initializes core services for the application context.
+ */
+async function initCoreServices(
+  cfg: AppContextOptions['cfg'],
+  storage: StorageContext,
+  identity: Pick<IdentityContext, 'idResolver' | 'signingKey' | 'oauthClient'>,
+  enrollmentEvents: EnrollmentEventEmitter,
+  sequenceEvents: SequenceEventEmitter,
+  logger?: Logger,
+) {
+  const { enrollmentStore, actorStore } = storage
+  const { idResolver, signingKey, oauthClient } = identity
+
+  const enrollmentCtx = await initEnrollment(
+    cfg,
+    enrollmentStore,
+    actorStore,
+    enrollmentEvents,
+    idResolver,
+    oauthClient,
+    logger,
+  )
+
+  const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
+    cfg,
+    idResolver,
+    oauthClient,
+    enrollmentStore,
+    enrollmentCtx.enrollmentValidator,
+    enrollmentCtx.allowListProvider,
+    logger,
+  )
+
+  const cache = cfg.enrollment.valkeyUrl
+    ? new RedisCache(cfg.enrollment.valkeyUrl)
+    : undefined
+
+  const boundaryResolver = cfg.enrollment.valkeyUrl
+    ? new MigratingBoundaryResolver({
+        enrollmentStore,
+        serviceDid: getServiceDidWithFragment(cfg),
+        logger,
+      })
+    : new EnrollmentBoundaryResolver(enrollmentStore)
+
+  const blobCtx = initBlob(actorStore, boundaryResolver)
+
+  const hydrationCtx = initHydration(
+    actorStore,
+    enrollmentStore,
+    blobCtx.bloomManager,
+    cache,
+  )
+
+  const mstCtx = initMst(signingKey)
+
+  const repoCtx = initRepo(
+    cfg,
+    actorStore,
+    mstCtx,
+    sequenceEvents,
+    oauthClient,
+    getServiceDidWithFragment(cfg),
+    logger,
+  )
+
+  return {
+    enrollmentCtx,
+    dpopVerifier,
+    authVerifier,
+    lexiconProvider,
+    xrpcServer,
+    cache,
+    boundaryResolver,
+    blobCtx,
+    hydrationCtx,
+    syncService: hydrationCtx.syncService,
+    repoCtx,
+  }
 }
 
 /**
@@ -256,6 +332,7 @@ function initAuth(
   idResolver: AppContext['idResolver'],
   oauthClient: AppContext['oauthClient'],
   enrollmentStore: AppContext['enrollmentStore'],
+  enrollmentValidator: AppContext['enrollmentValidator'],
   allowListProvider?: ExternalAllowListProvider,
   logger?: AppContext['logger'],
 ) {

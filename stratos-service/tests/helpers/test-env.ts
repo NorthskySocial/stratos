@@ -116,12 +116,24 @@ export function createMockBlobStore(): BlobStore & BlobContentStore {
     getStream: vi.fn().mockImplementation(async (cid: Cid) => {
       const bytes = storage.get(cid.toString())
       if (!bytes) return null
-      async function* generate() {
-        yield bytes!
-      }
-      // @ts-ignore - simplified stream for mock
-      return generate()
-    }),
+      // Create a proper ReadableStream for BlobContentStore compatibility
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes)
+          controller.close()
+        },
+      })
+    }) as any,
+    getTempStream: vi.fn().mockImplementation(async (key: string) => {
+      const bytes = storage.get(key)
+      if (!bytes) return null
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes)
+          controller.close()
+        },
+      })
+    }) as any,
   }
 }
 
@@ -172,15 +184,13 @@ async function createSqliteBackend(): Promise<TestBackend> {
 async function createPostgresBackend(
   postgresUrl: string,
 ): Promise<TestBackend> {
-  const blobstore = createMockBlobStoreCreator() as unknown as (
-    did: string,
-  ) => BlobContentStore
+  const blobstore = createMockBlobStoreCreator() as any
   const actorStore = new PostgresActorStore({
     connectionString: postgresUrl,
     serviceDb: {} as any,
     blobContentStoreCreator: blobstore,
     cborToRecord,
-  }) as unknown as ActorStore
+  }) as any
 
   return {
     actorStore,

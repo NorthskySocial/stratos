@@ -79,6 +79,14 @@ function createMockBlobStore(): BlobStore {
       }
       return generate()
     }),
+    getTempStream: vi.fn().mockImplementation(async (key: string) => {
+      const bytes = tempStorage.get(key)
+      if (!bytes) throw new Error('Blob not found')
+      async function* generate() {
+        yield bytes!
+      }
+      return generate()
+    }),
   }
 }
 

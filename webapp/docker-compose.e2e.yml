@@ -1,0 +1,41 @@
+# Spins up the webapp vite dev server for Playwright e2e runs.
+#
+# The whole stratos monorepo (the parent of this directory) is mounted so the
+# workspace dependencies resolve, and the Playwright container (launched
+# separately by scripts/e2e-docker.sh) joins the `stratos-webapp-e2e` network
+# and reaches this service at http://webapp:5173.
+services:
+  webapp:
+    image: node:24-bookworm-slim
+    working_dir: /workspace/webapp
+    environment:
+      # Lets pnpm proceed non-interactively if it ever needs to touch the
+      # mounted node_modules.
+      CI: 'true'
+    volumes:
+      - ..:/workspace
+    command: >
+      sh -c "corepack enable &&
+             corepack prepare pnpm@10.28.2 --activate &&
+             pnpm install --frozen-lockfile &&
+             pnpm run dev"
+    ports:
+      - '5173:5173'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:5173').then(()=>process.exit(0)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      - e2e
+
+networks:
+  e2e:
+    name: stratos-webapp-e2e

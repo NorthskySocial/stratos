@@ -112,6 +112,19 @@ async function createBlobTables(db: StratosPgDb) {
       PRIMARY KEY ("blobCid", "recordUri")
     )
   `)
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS stratos_blob_boundary
+    (
+      "blobCid" TEXT NOT NULL,
+      boundary  TEXT NOT NULL,
+      PRIMARY KEY ("blobCid", boundary)
+    )
+  `)
+
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS stratos_blob_boundary_blob_cid_idx ON stratos_blob_boundary("blobCid")
+  `)
 }
 
 async function createBacklinkTables(db: StratosPgDb) {

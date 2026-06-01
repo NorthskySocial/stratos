@@ -10,7 +10,7 @@ import {
 } from '../../context-types.js'
 import { type StratosServiceConfig } from '../../config.js'
 import { type EnrollmentStore } from '../../oauth/routes.js'
-import { EnrollmentServiceImpl } from './adapter.js'
+import { EnrollmentServiceImpl, EnrollmentValidatorImpl } from './adapter.js'
 import { ProfileRecordWriterImpl } from './internal/profile-record-writer.js'
 import { ExternalAllowListProvider } from './internal/allow-list.js'
 import { type ActorStore } from '../../actor-store-types.js'
@@ -49,18 +49,25 @@ export async function initEnrollment(
     cfg.service.publicUrl,
   )
 
+  const enrollmentValidator = new EnrollmentValidatorImpl(
+    cfg.enrollment,
+    idResolver,
+    allowListProvider,
+  )
+
   const profileRecordWriter = new ProfileRecordWriterImpl(async (did) => {
     try {
       const session = await oauthClient.restore(did)
-      return { handler: session.fetchHandler }
+      return { handler: session.fetchHandler.bind(session) }
     } catch {
       return null
     }
-  })
+  }, logger)
 
   return {
     enrollmentService,
     enrollmentStore,
+    enrollmentValidator,
     profileRecordWriter,
     allowListProvider,
     enrollmentEvents,

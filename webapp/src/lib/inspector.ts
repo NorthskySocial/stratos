@@ -140,7 +140,7 @@ export async function inspectRecord(
     result.stub = await fetchPdsStub(pdsUrl, did, collection, rkey)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes('RecordNotFound')) {
+    if (msg.includes('RecordNotFound') || msg.includes('404')) {
       result.stubNotFound = true
     } else {
       result.stubError = msg

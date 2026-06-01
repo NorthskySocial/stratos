@@ -12,8 +12,9 @@ import {
   CreateRecordInput,
   deleteRecord,
   DeleteRecordInput,
-} from '../records/index.js'
+} from '../records'
 import { createXrpcHandler } from '../util.js'
+import { HANDLER_METHOD } from '../handlers'
 
 /**
  * Handler for creating a record in a repository.
@@ -21,7 +22,7 @@ import { createXrpcHandler } from '../util.js'
  * @returns XRPC handler for creating a record
  */
 export const createRecordHandler = (ctx: AppContext) =>
-  createXrpcHandler<CreateRecordInput>(ctx, 'com.atproto.repo.createRecord', {
+  createXrpcHandler<CreateRecordInput>(ctx, HANDLER_METHOD.CREATE_RECORD, {
     handler: async ({ input, did, requestId }) => {
       const start = Date.now()
       const body = input
@@ -65,7 +66,7 @@ export const createRecordHandler = (ctx: AppContext) =>
  * @returns XRPC handler for deleting a record
  */
 export const deleteRecordHandler = (ctx: AppContext) =>
-  createXrpcHandler<DeleteRecordInput>(ctx, 'com.atproto.repo.deleteRecord', {
+  createXrpcHandler<DeleteRecordInput>(ctx, HANDLER_METHOD.DELETE_RECORD, {
     handler: async ({ input, did, requestId }) => {
       const body = input
 
@@ -104,7 +105,7 @@ export const deleteRecordHandler = (ctx: AppContext) =>
  * @returns XRPC handler for uploading a blob
  */
 export const uploadBlobHandler = (ctx: AppContext) =>
-  createXrpcHandler(ctx, 'com.atproto.repo.uploadBlob', {
+  createXrpcHandler(ctx, HANDLER_METHOD.UPLOAD_BLOB, {
     handler: async ({ input, did, requestId, fullInput }) => {
       const start = Date.now()
       const body = input
@@ -143,7 +144,132 @@ export const uploadBlobHandler = (ctx: AppContext) =>
       const blobstore = ctx.actorStore.getBlobStore(did!)
       const tempKey = await blobstore.putTemp(bytes)
 
+      const ensureActorStoreExists = async (did: string) => {
+        const exists = await ctx.actorStore.exists(did)
+        if (!exists) {
+          await ctx.actorStore.create(did)
+        }
+      }
+
+      await ensureActorStoreExists(did!)
+
       // Phase 2: track the untethered blob in the database
+      try {
+        await ctx.actorStore.transact(did!, async (store) => {
+          await store.blob.trackBlob({
+            cid,
+            mimeType: contentType,
+            size: bytes.length,
+            tempKey,
+          })
+        })
+      } catch (err) {
+        ctx.logger?.error(
+          {
+            requestId,
+            did,
+            cid: cid.toString(),
+            err:
+              err instanceof Error
+                ? { message: err.message, stack: err.stack }
+                : err,
+          },
+          'failed to track blob',
+        )
+        throw err
+      }
+
+      ctx.logger?.info(
+        {
+          requestId,
+          did,
+          cid: cid.toString(),
+          size: bytes.length,
+          durationMs: Date.now() - start,
+        },
+        'blob uploaded',
+      )
+
+      return {
+        blob: {
+          $type: 'blob',
+          ref: { $link: cid.toString() },
+          mimeType: contentType,
+          size: bytes.length,
+        },
+      }
+    },
+  })
+
+/**
+ * Handler for uploading a blob to the Stratos service.
+ * @param ctx - Application Context
+ * @returns XRPC handler for uploading a blob
+ */
+export const stratosUploadBlobHandler = (ctx: AppContext) =>
+  createXrpcHandler(ctx, HANDLER_METHOD.STRATOS_UPLOAD_BLOB, {
+    handler: async (args) => {
+      // The xrpc-server calls the handler with { input, params, auth, req, requestId, did, fullInput }
+      // We directly use the implementation of uploadBlobHandler to avoid double-wrapping
+      // or trying to call the function returned by createXrpcHandler manually.
+      const start = Date.now()
+      const { input, fullInput, did, requestId } = args
+
+      ctx.logger?.debug(
+        {
+          requestId,
+          did,
+          encoding: fullInput?.encoding,
+        },
+        'uploading blob (stratos endpoint)',
+      )
+
+      const body = input
+
+      const contentType =
+        (fullInput?.encoding as string) || 'application/octet-stream'
+
+      // Collect the body into bytes
+      let bytes: Uint8Array
+      if (body instanceof Readable) {
+        const chunks: Buffer[] = []
+        for await (const chunk of body) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        }
+        bytes = new Uint8Array(Buffer.concat(chunks))
+      } else if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+        bytes = new Uint8Array(body)
+      } else {
+        throw new InvalidRequestError('Expected binary body')
+      }
+
+      if (bytes.length === 0) {
+        throw new InvalidRequestError('Blob content is empty')
+      }
+
+      // Blob CIDs use raw codec (0x55) + SHA-256
+      const hash = await sha256.digest(bytes)
+      const cid = CID.createV1(0x55, hash) as unknown as Cid
+
+      ctx.logger?.debug(
+        {
+          requestId,
+          did,
+          cid: cid.toString(),
+          size: bytes.length,
+        },
+        'blob hashed',
+      )
+
+      const blobstore = ctx.actorStore.getBlobStore(did!)
+      const tempKey = await blobstore.putTemp(bytes)
+
+      const exists = await ctx.actorStore.exists(did!)
+      if (!exists) {
+        await ctx.actorStore.create(did!)
+      }
+
       await ctx.actorStore.transact(did!, async (store) => {
         await store.blob.trackBlob({
           cid,
@@ -161,7 +287,7 @@ export const uploadBlobHandler = (ctx: AppContext) =>
           size: bytes.length,
           durationMs: Date.now() - start,
         },
-        'blob uploaded',
+        'blob uploaded (stratos endpoint)',
       )
 
       return {
@@ -187,7 +313,7 @@ interface ApplyWritesInput {
  * @returns XRPC handler for applying writes
  */
 export const applyWritesHandler = (ctx: AppContext) =>
-  createXrpcHandler<ApplyWritesInput>(ctx, 'com.atproto.repo.applyWrites', {
+  createXrpcHandler<ApplyWritesInput>(ctx, HANDLER_METHOD.APPLY_WRITES, {
     handler: async ({ input, did, requestId }) => {
       const batchResult = await applyWritesBatch(
         ctx,

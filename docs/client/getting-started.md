@@ -24,7 +24,7 @@ service routing, record verification, and OAuth scope management:
 
 | Module       | What it provides                                                                                                                           |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| discovery    | `discoverEnrollments()`, `discoverEnrollment()`, `getEnrollmentByServiceDid()` — find enrollment records on a user's PDS                   |
+| discovery    | `getEnrollmentByServiceDid()` — find enrollment for a specific service                                                                     |
 | routing      | `createServiceFetchHandler()`, `resolveServiceUrl()`, `findEnrollmentByService()` — route XRPC calls to the correct Stratos service        |
 | verification | `fetchAndVerifyRecord()`, `verifyCidIntegrity()`, `resolveServiceSigningKey()`, `resolveUserSigningKey()` — three-tier record verification |
 | scopes       | `buildStratosScopes()`, `STRATOS_SCOPES` — build OAuth scope strings for Stratos collections                                               |
@@ -66,11 +66,11 @@ Discover enrollment records from the user's PDS:
 
 ```typescript
 import {
-  discoverEnrollment,
+  getEnrollmentByServiceDid,
   resolveServiceUrl,
 } from '@northskysocial/stratos-client'
 
-const enrollment = await discoverEnrollment(did, pdsUrl)
+const enrollment = await getEnrollmentByServiceDid(did, pdsUrl, serviceDid)
 const serviceUrl = resolveServiceUrl(enrollment, pdsUrl)
 ```
 
@@ -258,12 +258,12 @@ For a React Native/Expo app like Bluesky's social-app:
 
 ### State layer
 
-| Concept            | social-app location           | Pattern                                                      |
-| ------------------ | ----------------------------- | ------------------------------------------------------------ |
-| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`  |
-| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                    |
-| Discovery trigger  | `src/state/session/index.tsx` | Call `discoverEnrollment` in `resumeSession` / `login` flows |
-| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler          |
+| Concept            | social-app location           | Pattern                                                             |
+| ------------------ | ----------------------------- | ------------------------------------------------------------------- |
+| Enrollment state   | `src/state/stratos.tsx` (new) | React Context with `StratosEnrollment \| null \| undefined`         |
+| Active mode toggle | `src/state/stratos.tsx` (new) | Boolean state with setter                                           |
+| Discovery trigger  | `src/state/session/index.tsx` | Call `getEnrollmentByServiceDid` in `resumeSession` / `login` flows |
+| Cleanup on logout  | `src/state/session/index.tsx` | Reset enrollment and active state in logout handler                 |
 
 ### Query hooks
 

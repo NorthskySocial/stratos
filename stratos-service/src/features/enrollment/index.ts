@@ -1,6 +1,7 @@
 export {
   EnrollmentServiceImpl,
   EnrollmentBoundaryResolver,
+  CachedBoundaryResolver,
   MigratingBoundaryResolver,
 } from './adapter.js'
 export { registerEnrollmentHandlers } from './handler.js'

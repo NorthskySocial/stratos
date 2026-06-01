@@ -618,22 +618,18 @@ describe('resolveUserSigningKey', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
-          records: [
-            {
-              uri: 'at://did:plc:testuser/zone.stratos.actor.enrollment/did:web:stratos.example.com',
-              cid: 'bafytest',
-              value: {
-                service: 'https://stratos.example.com',
-                boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
-                signingKey: didKey,
-                attestation: {
-                  sig: { $bytes: sigB64 },
-                  signingKey: 'did:key:zServiceKey',
-                },
-                createdAt: '2025-01-01T00:00:00Z',
-              },
+          uri: 'at://did:plc:testuser/zone.stratos.actor.enrollment/did:web:stratos.example.com',
+          cid: 'bafytest',
+          value: {
+            service: 'https://stratos.example.com',
+            boundaries: [{ value: 'did:web:nerv.tokyo.jp/engineering' }],
+            signingKey: didKey,
+            attestation: {
+              sig: { $bytes: sigB64 },
+              signingKey: 'did:key:zServiceKey',
             },
-          ],
+            createdAt: '2025-01-01T00:00:00Z',
+          },
         }),
         { headers: { 'content-type': 'application/json' } },
       ),

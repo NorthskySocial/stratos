@@ -6,9 +6,6 @@ import { createRepoManager } from './util.js'
 import { type SequenceTrace, type WritePhases } from './types.js'
 import { withConcurrencyRetry } from './validation.js'
 
-/**
- * Input parameters for record deletion
- */
 export interface DeleteRecordInput {
   repo: string
   collection: string

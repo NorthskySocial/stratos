@@ -2,6 +2,7 @@ import { FirehoseSubscription } from '@atcute/firehose'
 import { fromBytes } from '@atcute/cbor'
 import { ComAtprotoSyncSubscribeRepos } from '@atcute/atproto'
 import { AtUri } from '@atproto/syntax'
+import { CID } from 'multiformats/cid'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import type { HandleDedup } from '../util/handle-dedup.js'
 import {
@@ -332,7 +333,11 @@ async function processCommit(
   }
 
   console.log({ did, traceId }, 'processing firehose commit')
-  await indexingService.setCommitLastSeen(did, parseCid(commitCid), rev)
+  await indexingService.setCommitLastSeen(
+    did,
+    CID.parse(parseCid(commitCid).toString()),
+    rev,
+  )
 
   const blocks = fromBytes(rawBlocks)
   const ops = decodeCommitOps(blocks, rawOps)
@@ -350,7 +355,7 @@ async function processCommit(
 
     await indexingService.indexRecord(
       uri,
-      parseCid(op.cid),
+      CID.parse(parseCid(op.cid).toString()),
       jsonToLex(op.record),
       op.action === 'create' ? WriteOpAction.Create : WriteOpAction.Update,
       message.time,
@@ -427,9 +432,11 @@ async function processSync(
 ): Promise<void> {
   const { did, rev, time: timestamp, blocks: rawBlocks } = message
   const blocks = fromBytes(rawBlocks)
-  const cid = parseCid(fromUint8Array(blocks).header.data.roots[0])
+  const cidStr = parseCid(
+    fromUint8Array(blocks).header.data.roots[0],
+  ).toString()
   await Promise.all([
-    indexingService.setCommitLastSeen(did, cid, rev),
+    indexingService.setCommitLastSeen(did, CID.parse(cidStr), rev),
     indexingService.indexHandle(did, timestamp),
   ])
 }

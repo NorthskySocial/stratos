@@ -2,6 +2,8 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.pnpm-store
+test-results
 
 .env
 .env.local
@@ -47,3 +49,5 @@ docs/*-prompt.md
 
 # CDK
 docs/.vitepress/cache
+/webapp/public/client-metadata.json
+/webapp/playwright-report

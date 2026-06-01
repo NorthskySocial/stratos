@@ -6,7 +6,7 @@ import {
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
 import { eq } from 'drizzle-orm'
-import { oauthSession, oauthState, type ServiceDb } from '../db/index.js'
+import { oauthSession, oauthState, type ServiceDb } from '../db'
 import { pgOauthSession, pgOauthState } from '../db/pg-schema.js'
 import type { ServicePgDb } from '../db/pg.js'
 
@@ -17,7 +17,7 @@ import type { ServicePgDb } from '../db/pg.js'
 export const OAUTH_SCOPE = [
   'atproto',
   'repo:zone.stratos.actor.enrollment',
-  'repo:zone.stratos.feed.post',
+  'repo:zone.stratos.feed.post?action=create&action=delete',
 ].join(' ')
 
 /**

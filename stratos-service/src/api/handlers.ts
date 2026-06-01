@@ -1,6 +1,10 @@
 import { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../context-types.js'
-import { registerHydrationHandlers } from '../features/index.js'
+import {
+  registerEnrollmentHandlers,
+  registerHydrationHandlers,
+  registerSyncHandlers,
+} from '../features/index.js'
 import { type XrpcServerInternal } from './types.js'
 
 import {
@@ -9,11 +13,8 @@ import {
   deleteRecordHandler,
   describeRepoHandler,
   getRecordHandler,
-  importRepoHandler,
-  listBlobsHandler,
   listRecordsHandler,
-  syncGetRecordHandler,
-  syncGetRepoHandler,
+  stratosUploadBlobHandler,
   uploadBlobHandler,
 } from './handlers/index.js'
 
@@ -27,7 +28,9 @@ export enum HANDLER_METHOD {
   APPLY_WRITES = 'com.atproto.repo.applyWrites',
   LIST_BLOBS = 'com.atproto.sync.listBlobs',
   SYNC_GET_RECORD = 'com.atproto.sync.getRecord',
+  STRATOS_GET_BLOB = 'zone.stratos.sync.getBlob',
   SYNC_GET_REPO = 'zone.stratos.sync.getRepo',
+  STRATOS_UPLOAD_BLOB = 'zone.stratos.repo.uploadBlob',
   IMPORT_REPO = 'zone.stratos.repo.importRepo',
 }
 
@@ -41,55 +44,53 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   const { authVerifier } = ctx
 
   xrpc.method(HANDLER_METHOD.CREATE_RECORD, {
+    type: 'procedure',
     auth: authVerifier.standard,
     handler: createRecordHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.DELETE_RECORD, {
+    type: 'procedure',
     auth: authVerifier.standard,
     handler: deleteRecordHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.UPLOAD_BLOB, {
+    type: 'procedure',
     auth: authVerifier.standard,
     handler: uploadBlobHandler(ctx),
   })
 
+  xrpc.method(HANDLER_METHOD.STRATOS_UPLOAD_BLOB, {
+    type: 'procedure',
+    auth: authVerifier.standard,
+    handler: stratosUploadBlobHandler(ctx),
+  })
+
   xrpc.method(HANDLER_METHOD.GET_RECORD, {
+    type: 'query',
     auth: authVerifier.optionalStandard,
     handler: getRecordHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.LIST_RECORDS, {
+    type: 'query',
     auth: authVerifier.optionalStandard,
     handler: listRecordsHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.DESCRIBE_REPO, {
+    type: 'query',
     handler: describeRepoHandler(ctx),
   })
 
   xrpc.method(HANDLER_METHOD.APPLY_WRITES, {
+    type: 'procedure',
     auth: authVerifier.standard,
     handler: applyWritesHandler(ctx),
   })
 
-  xrpc.method(HANDLER_METHOD.LIST_BLOBS, {
-    handler: listBlobsHandler(ctx),
-  })
-
-  xrpc.method(HANDLER_METHOD.SYNC_GET_RECORD, {
-    handler: syncGetRecordHandler(ctx),
-  })
-
-  xrpc.method(HANDLER_METHOD.SYNC_GET_REPO, {
-    handler: syncGetRepoHandler(ctx),
-  })
-
-  xrpc.method(HANDLER_METHOD.IMPORT_REPO, {
-    auth: authVerifier.standard,
-    handler: importRepoHandler(ctx),
-  })
-
+  registerEnrollmentHandlers(server, ctx)
   registerHydrationHandlers(server, ctx)
+  registerSyncHandlers(server, ctx)
 }

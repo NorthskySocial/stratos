@@ -8,11 +8,8 @@ import {
   type Enrollment,
   enrollmentBoundary,
   type ServiceDb,
-} from '../../db/index.js'
-import {
-  type EnrollmentRecord,
-  type EnrollmentStore,
-} from '../../oauth/routes.js'
+} from '../../db'
+import { type EnrollmentRecord, type EnrollmentStore } from '../../oauth'
 
 /**
  * SQLite enrollment store implements both OAuth EnrollmentStore

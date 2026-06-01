@@ -17,7 +17,7 @@ import {
   SqliteEnrollmentStore,
   StratosActorStore,
 } from '../src/context.js'
-import { createRecord } from '../src/api'
+import { createRecord } from '../src/api/records/index.js'
 import { WriteRateLimiter } from '../src/shared/rate-limiter.js'
 import { Did } from '@atproto/api'
 
