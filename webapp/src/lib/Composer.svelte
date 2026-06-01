@@ -157,7 +157,7 @@
       } else {
         console.log('Creating public post with Atproto')
         const agent = configureAgent(new Agent(session))
-        await agent.call('com.atproto.repo.createRecord', {
+        await agent.com.atproto.repo.createRecord({
           repo: session.sub,
           collection: 'app.bsky.feed.post',
           record: {

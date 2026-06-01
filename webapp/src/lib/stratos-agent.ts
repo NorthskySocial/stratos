@@ -9,15 +9,28 @@ import { stratosLexicons } from '@northskysocial/stratos-core'
  * @returns the configured Agent
  */
 export function configureAgent(agent: Agent): Agent {
-  const lex = new Lexicons(stratosLexicons)
-  if (agent.api) {
-    agent.api.lex = lex
+  if (agent.api?.lex) {
+    // Add Stratos schemas onto the agent's existing lexicon set so the
+    // standard com.atproto.* / app.bsky.* method definitions are preserved.
+    // Ignore docs that are already registered (the bundle may include some
+    // shared com.atproto.* schemas that the base agent already provides).
+    for (const doc of stratosLexicons) {
+      try {
+        agent.api.lex.add(doc)
+      } catch {
+        // already registered — keep the existing definition
+      }
+    }
   } else {
-    // If agent.api is not yet initialized (e.g., in some test environments),
-    // we can try to set it via the private property or just ignore it if it's a mock.
-    // In newer versions of @atproto/api, it might be initialized lazily.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(agent as any).api = { lex }
+    const lex = new Lexicons(stratosLexicons)
+    if (agent.api) {
+      agent.api.lex = lex
+    } else {
+      // If agent.api is not yet initialized (e.g., in some test environments),
+      // set it via the private property so callers still get a usable lex.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(agent as any).api = { lex }
+    }
   }
   return agent
 }

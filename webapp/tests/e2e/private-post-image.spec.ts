@@ -39,6 +39,9 @@ test.describe('Private Post with Image', () => {
           body: JSON.stringify({
             handle: 'mock.bsky.social',
             did: 'did:plc:mock',
+            didDoc: {},
+            collections: [],
+            handleIsCorrect: true,
           }),
         })
       },
@@ -46,7 +49,7 @@ test.describe('Private Post with Image', () => {
 
     // Mock Stratos enrollment
     await page.route(
-      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=zone.stratos.actor.enrollment',
+      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=zone.stratos.actor.enrollment**',
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -55,9 +58,16 @@ test.describe('Private Post with Image', () => {
             records: [
               {
                 uri: 'at://did:plc:mock/zone.stratos.actor.enrollment/1',
+                cid: 'bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
                 value: {
+                  $type: 'zone.stratos.actor.enrollment',
                   service: 'https://stratos.example.com',
                   boundaries: [{ value: 'example.com' }],
+                  signingKey: 'did:key:zMockUserSigningKey',
+                  attestation: {
+                    sig: { $bytes: 'AAAA' },
+                    signingKey: 'did:key:zMockServiceSigningKey',
+                  },
                   createdAt: new Date().toISOString(),
                 },
               },
@@ -69,7 +79,7 @@ test.describe('Private Post with Image', () => {
 
     // Mock Stratos service status
     await page.route(
-      '**/xrpc/zone.stratos.actor.getStatus**',
+      '**/xrpc/zone.stratos.enrollment.status**',
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -99,8 +109,8 @@ test.describe('Private Post with Image', () => {
         (url.href.includes(STRATOS_URL) || url.href.includes(APPVIEW_URL)) &&
         !url.href.includes('uploadBlob') &&
         !url.href.includes('createRecord') &&
-        !url.href.includes('getStatus') &&
-        !url.href.includes('getDomains'),
+        !url.href.includes('enrollment.status') &&
+        !url.href.includes('listDomains'),
       async (route) => {
         if (route.request().method() === 'OPTIONS') {
           await route.fulfill({
@@ -136,7 +146,7 @@ test.describe('Private Post with Image', () => {
 
     // Mock server domains
     await page.route(
-      '**/xrpc/zone.stratos.server.getDomains',
+      '**/xrpc/zone.stratos.server.listDomains',
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -173,7 +183,8 @@ test.describe('Private Post with Image', () => {
 
     // Mock blob upload
     await page.route(
-      (url) => url.href.includes('uploadBlob'),
+      (url) =>
+        url.pathname.includes('/xrpc/') && url.pathname.includes('uploadBlob'),
       async (route) => {
         blobUploaded = true
         await page.evaluate(() => {
@@ -186,7 +197,10 @@ test.describe('Private Post with Image', () => {
           body: JSON.stringify({
             blob: {
               $type: 'blob',
-              ref: { $link: 'bafkrei-mock-cid' },
+              ref: {
+                $link:
+                  'bafkreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a',
+              },
               mimeType: 'image/png',
               size: 1234,
             },
@@ -197,14 +211,16 @@ test.describe('Private Post with Image', () => {
 
     // Mock record creation
     await page.route(
-      (url) => url.href.includes('createRecord'),
+      (url) =>
+        url.pathname.includes('/xrpc/') &&
+        url.pathname.includes('createRecord'),
       async (route) => {
         const body = route.request().postDataJSON()
         expect(body.collection).toBe('zone.stratos.feed.post')
         expect(body.record.text).toBe('Private post with image')
         expect(body.record.embed.$type).toBe('zone.stratos.embed.images')
         expect(body.record.embed.images[0].image.ref.$link).toBe(
-          'bafkrei-mock-cid',
+          'bafkreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a',
         )
 
         recordCreated = true
@@ -218,7 +234,7 @@ test.describe('Private Post with Image', () => {
           headers: { 'Access-Control-Allow-Origin': '*' },
           body: JSON.stringify({
             uri: 'at://did:plc:mock/zone.stratos.feed.post/1',
-            cid: 'cid1',
+            cid: 'bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
           }),
         })
       },
@@ -229,7 +245,7 @@ test.describe('Private Post with Image', () => {
 
     // Wait for composer to be ready
     const composer = page.locator('.composer')
-    await expect(composer).toBeVisible()
+    await expect(composer).toBeVisible({ timeout: 20000 })
 
     // Type text
     await composer.locator('textarea').fill('Private post with image')
