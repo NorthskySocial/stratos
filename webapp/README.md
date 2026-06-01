@@ -68,3 +68,41 @@ src/
     ├── Feed.svelte            # Post list
     └── PostCard.svelte        # Single post card
 ```
+
+## Testing
+
+Unit tests run with vitest:
+
+```bash
+pnpm test
+```
+
+### End-to-End (Playwright)
+
+The e2e tests are fully mocked (no backend required) and run against the vite dev server.
+
+Run them directly on your host (Playwright auto-starts the dev server):
+
+```bash
+pnpm run test:e2e
+```
+
+#### Run in the Playwright container
+
+To avoid installing browsers and system dependencies locally — and to match CI exactly — run the
+suite inside the official Playwright image. This starts the dev server as a separate
+docker-compose service and points Playwright at it:
+
+```bash
+pnpm run test:e2e:docker
+```
+
+Forward arguments to `playwright test` after `--`, for example to run a single browser project:
+
+```bash
+pnpm run test:e2e:docker -- --project=chromium
+```
+
+The container tag in [scripts/e2e-docker.sh](scripts/e2e-docker.sh) must stay in sync with the
+`@playwright/test` version in [package.json](package.json); Playwright requires the package and the
+container browsers to be the same version. CI runs this same script with `--project=chromium`.

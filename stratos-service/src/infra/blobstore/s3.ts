@@ -93,6 +93,27 @@ export class S3BlobStoreAdapter implements BlobStore {
   }
 
   /**
+   * Get temporary data as a stream from S3 storage
+   *
+   * @param key - Key for temporary storage
+   * @returns Stream of data from the temporary S3 object
+   */
+  async getTempStream(key: string): Promise<AsyncIterable<Uint8Array>> {
+    try {
+      const inner = this.inner as unknown as {
+        getTempStream(key: string): Promise<import('node:stream').Readable>
+      }
+      const stream = await inner.getTempStream(key)
+      return readableToAsyncIterable(stream)
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('not found')) {
+        throw new BlobNotFoundError()
+      }
+      throw err
+    }
+  }
+
+  /**
    * Make temporary bytes permanent
    *
    * @param key - Key for the temporary data

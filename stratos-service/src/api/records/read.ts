@@ -2,12 +2,21 @@ import { InvalidRequestError } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import { StratosValidator } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
+import type { ListRecordsResult, RecordResult } from './types.js'
 
 export interface GetRecordInput {
   repo: string
   collection: string
   rkey: string
   cid?: string
+}
+
+export interface ListRecordsInput {
+  repo: string
+  collection: string
+  limit?: number
+  cursor?: string
+  reverse?: boolean
 }
 
 /**
@@ -24,11 +33,7 @@ export async function getRecord(
   input: GetRecordInput,
   callerDid?: string,
   callerDomains?: string[],
-): Promise<{
-  uri: string
-  cid?: string
-  value: unknown
-}> {
+): Promise<RecordResult> {
   const { repo, collection, rkey, cid } = input
   const uri = `at://${repo}/${collection}/${rkey}`
 
@@ -68,14 +73,6 @@ export async function getRecord(
   })
 }
 
-export interface ListRecordsInput {
-  repo: string
-  collection: string
-  limit?: number
-  cursor?: string
-  reverse?: boolean
-}
-
 /**
  * List records from the stratos store
  *
@@ -90,10 +87,7 @@ export async function listRecords(
   input: ListRecordsInput,
   callerDid?: string,
   callerDomains?: string[],
-): Promise<{
-  records: Array<{ uri: string; cid: string; value: unknown }>
-  cursor?: string
-}> {
+): Promise<ListRecordsResult> {
   const { repo, collection, limit = 50, cursor, reverse = false } = input
 
   // Check if actor store exists

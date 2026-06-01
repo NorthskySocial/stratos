@@ -1,10 +1,18 @@
 import { defineConfig } from 'vitest/config'
 
+const nodeProject = (name: string) => ({
+  extends: true,
+  test: {
+    name,
+    root: `./${name}`,
+    environment: 'node' as const,
+    globals: true,
+    include: ['tests/**/*.test.ts'],
+  },
+})
+
 export default defineConfig({
   test: {
-    globals: true,
-    environment: 'node',
-    include: ['**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -23,5 +31,12 @@ export default defineConfig({
         'webapp/src/main.ts',
       ],
     },
+    projects: [
+      nodeProject('stratos-core'),
+      nodeProject('stratos-service'),
+      nodeProject('stratos-client'),
+      nodeProject('stratos-indexer'),
+      './webapp/vite.config.ts',
+    ],
   },
 })

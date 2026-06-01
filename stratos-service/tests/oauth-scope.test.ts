@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { OAUTH_SCOPE } from '../src/oauth'
+import { OAUTH_SCOPE } from '../src/oauth/index.js'
 import { IdResolver } from '@atproto/identity'
-import { PdsTokenVerifier } from '../src/infra/auth'
+import { PdsTokenVerifier } from '../src/infra/auth/index.js'
 
 describe('OAUTH_SCOPE', () => {
   it('should contain the atproto base scope', () => {
@@ -16,12 +16,14 @@ describe('OAUTH_SCOPE', () => {
 
   it('should contain post record scope', () => {
     const scopes = OAUTH_SCOPE.split(' ')
-    expect(scopes).toContain('repo:zone.stratos.feed.post')
+    expect(scopes).toContain(
+      'repo:zone.stratos.feed.post?action=create&action=delete',
+    )
   })
 
   it('should match the expected full value', () => {
     expect(OAUTH_SCOPE).toBe(
-      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post',
+      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
     )
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { decode as cborDecode } from '@atcute/cbor'
-import { createAttestationPayload } from '../src/index.js'
+import { createAttestationPayload } from '../src'
 
 describe('Attestation Domain', () => {
   describe('createAttestationPayload', () => {

@@ -1,7 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import express from 'express'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleAuthorize } from '../src/oauth/handlers/authorize.js'
-import { OAUTH_SCOPE } from '../src/oauth/client.js'
+import { OAUTH_SCOPE } from '../src/oauth'
 
 describe('handleAuthorize', () => {
   let mockOauthClient: any

@@ -6,7 +6,7 @@ import {
   EnrollmentDeniedError,
   extractPdsEndpoint,
 } from '@northskysocial/stratos-core'
-import { assertEnrollment, validateEnrollment } from '../src/features'
+import { assertEnrollment, validateEnrollment } from '../src/features/index.js'
 
 // Mock IdResolver
 function createMockIdResolver(didDoc: DidDocument | null): IdResolver {

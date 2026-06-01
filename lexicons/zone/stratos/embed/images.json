@@ -1,0 +1,38 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.embed.images",
+  "defs": {
+    "main": {
+      "type": "object",
+      "description": "A set of images embedded in a Stratos post. Similar to app.bsky.embed.images but for private data.",
+      "required": ["images"],
+      "properties": {
+        "images": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "#image" },
+          "maxLength": 4
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["image", "alt"],
+      "properties": {
+        "image": { "type": "blob", "description": "The image blob." },
+        "alt": {
+          "type": "string",
+          "description": "Alternative text for the image, for accessibility."
+        },
+        "aspectRatio": { "type": "ref", "ref": "#aspectRatio" }
+      }
+    },
+    "aspectRatio": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      }
+    }
+  }
+}

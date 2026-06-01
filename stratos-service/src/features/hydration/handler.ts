@@ -5,7 +5,6 @@ import {
   type HydrationResult,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
-import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'
 
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
@@ -42,14 +41,10 @@ export function registerHydrationHandlers(
   ctx: AppContext,
 ): void {
   const xrpc = server as unknown as XrpcServerInternal
-
-  const recordResolver = new ActorStoreRecordResolver(ctx.actorStore)
-  const hydrationService = new HydrationServiceImpl(
-    recordResolver,
-    ctx.boundaryResolver,
-  )
+  const { hydrationService } = ctx
 
   xrpc.method('zone.stratos.repo.hydrateRecords', {
+    type: 'procedure',
     handler: createXrpcHandler(ctx, 'zone.stratos.repo.hydrateRecords', {
       requireAuth: false,
       handler: async (args) => {
@@ -68,11 +63,12 @@ export function registerHydrationHandlers(
           } satisfies HydrateRecordsOutput
         }
 
+        const requests = body!.uris.map((uri) => ({ uri }))
         const context = await getHydrationContext(
           ctx,
           did ?? auth?.credentials?.did ?? null,
+          ctx.cfg?.service?.publicUrl,
         )
-        const requests = body!.uris.map((uri) => ({ uri }))
         const result = await hydrationService.hydrateRecords(requests, context)
 
         return {
@@ -85,6 +81,7 @@ export function registerHydrationHandlers(
   })
 
   xrpc.method('zone.stratos.repo.hydrateRecord', {
+    type: 'query',
     handler: createXrpcHandler(ctx, 'zone.stratos.repo.hydrateRecord', {
       requireAuth: false,
       handler: async ({ params, auth, did }) => {
@@ -98,6 +95,7 @@ export function registerHydrationHandlers(
         const context = await getHydrationContext(
           ctx,
           did ?? auth?.credentials?.did ?? null,
+          ctx.cfg?.service?.publicUrl,
         )
         const result = await hydrationService.hydrateRecord(
           { uri: uri, cid },
@@ -140,12 +138,16 @@ function validateHydrateRecordsInput(body: HydrateRecordsInput | undefined) {
  * @param viewerDid - DID of the viewer
  * @returns Hydration context
  */
-async function getHydrationContext(ctx: AppContext, viewerDid: string | null) {
+async function getHydrationContext(
+  ctx: AppContext,
+  viewerDid: string | null,
+  serviceUrl: string | undefined,
+) {
   let viewerDomains: string[] = []
   if (viewerDid) {
     viewerDomains = await ctx.boundaryResolver.getBoundaries(viewerDid)
   }
-  return createHydrationContext(viewerDid, viewerDomains)
+  return createHydrationContext(viewerDid, viewerDomains, serviceUrl ?? '')
 }
 
 /**

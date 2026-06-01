@@ -6,7 +6,7 @@ import type {
   SigningService,
 } from '@northskysocial/stratos-core'
 import { ActorTransactor } from '../../../actor-store-types.js'
-import { SequenceTrace, sequenceChange } from '../../../api/records/types.js'
+import { sequenceChange, SequenceTrace } from '../../../api'
 
 /**
  * Adapter for commit signing using @atproto/identity Keypair

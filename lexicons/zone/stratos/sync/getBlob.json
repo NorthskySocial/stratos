@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.getBlob",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Get a blob by CID with boundary-based access control.",
+      "parameters": {
+        "type": "params",
+        "required": ["did", "cid"],
+        "properties": {
+          "did": { "type": "string", "format": "did" },
+          "cid": { "type": "string", "format": "cid" }
+        }
+      },
+      "output": {
+        "encoding": "*/*"
+      },
+      "errors": [{ "name": "BlobNotFound" }, { "name": "Forbidden" }]
+    }
+  }
+}

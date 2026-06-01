@@ -1,9 +1,10 @@
-import { StratosError } from './shared/errors.js'
+import { StratosError } from './shared'
 import type { Cid as LexCid } from '@atproto/lex-data'
 
 export enum ENROLLMENT_MODE {
   OPEN = 'open',
   ALLOWLIST = 'allowlist',
+  CLOSED = 'closed',
 }
 
 /**
@@ -101,6 +102,8 @@ export interface BlobStore {
   getBytes: (cid: LexCid) => Promise<Uint8Array>
   /** Get blob contents as a stream */
   getStream: (cid: LexCid) => Promise<AsyncIterable<Uint8Array>>
+  /** Get temporary blob contents as a stream */
+  getTempStream: (key: string) => Promise<AsyncIterable<Uint8Array>>
 }
 
 /**

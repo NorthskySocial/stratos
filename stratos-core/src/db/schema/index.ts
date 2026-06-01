@@ -4,6 +4,7 @@ export * from './tables.js'
 import {
   stratosBacklink,
   stratosBlob,
+  stratosBlobBoundary,
   stratosRecord,
   stratosRecordBlob,
   stratosRepoBlock,
@@ -19,6 +20,7 @@ export const schema = {
   stratosRepoBlock,
   stratosRecord,
   stratosBlob,
+  stratosBlobBoundary,
   stratosRecordBlob,
   stratosBacklink,
   stratosSeq,

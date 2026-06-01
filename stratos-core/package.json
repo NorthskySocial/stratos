@@ -26,6 +26,10 @@
       "types": "./src/db/pg.ts",
       "import": "./src/db/pg.ts"
     },
+    "./enrollment": {
+      "types": "./src/enrollment/index.ts",
+      "import": "./src/enrollment/index.ts"
+    },
     "./tests": {
       "types": "./tests/utils/index.ts",
       "import": "./tests/utils/index.ts"

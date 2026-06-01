@@ -118,7 +118,7 @@ If enrollment discovery is fire-and-forget, account switches can cause stale enr
 ```typescript
 // Problem: if user switches accounts before discovery completes,
 // setEnrollment updates state for the wrong account
-discoverEnrollment(did, pds)
+getEnrollmentByServiceDid(did, pds, serviceDid)
   .then(setEnrollment)
   .catch(() => setEnrollment(null))
 ```
@@ -129,7 +129,7 @@ Key discovery to the active session and cancel on account change:
 // React pattern
 useEffect(() => {
   let cancelled = false
-  discoverEnrollment(did, pds).then((enrollment) => {
+  getEnrollmentByServiceDid(did, pds, serviceDid).then((enrollment) => {
     if (!cancelled) setEnrollment(enrollment)
   })
   return () => {

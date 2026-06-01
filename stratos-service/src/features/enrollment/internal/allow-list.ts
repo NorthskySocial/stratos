@@ -1,5 +1,7 @@
 import { type Cache, type Logger } from '@northskysocial/stratos-core'
 
+const TEN_MINUTES = 600000
+
 export interface AllowListProvider {
   isAllowed(did: string): Promise<boolean>
   refresh(): Promise<void>
@@ -17,7 +19,7 @@ export class ExternalAllowListProvider implements AllowListProvider {
     private cache?: Cache,
     private bootstrapName?: string,
     private logger?: Logger,
-    private refreshMs: number = 600000, // 10 minutes default
+    private refreshMs: number = TEN_MINUTES,
   ) {}
 
   /**

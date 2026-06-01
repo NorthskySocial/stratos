@@ -1,4 +1,4 @@
-import type { RecordSource } from '../stub/types.js'
+import type { RecordSource } from '../stub'
 
 /**
  * Context for hydration requests - contains viewer information
@@ -8,6 +8,8 @@ export interface HydrationContext {
   viewerDid: string | null
   /** Boundary domains the viewer has access to */
   viewerDomains: string[]
+  /** Base URL of the Stratos service for blob hydration */
+  serviceUrl?: string
 }
 
 /**

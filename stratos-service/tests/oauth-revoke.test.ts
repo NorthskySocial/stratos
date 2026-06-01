@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { handleRevoke } from '../src/oauth/handlers/revoke.ts'
+import { handleRevoke } from '../src/oauth/handlers/revoke.js'
 
 describe('OAuth Revoke Handler', () => {
   const mockEnrollmentStore = {
@@ -23,10 +23,13 @@ describe('OAuth Revoke Handler', () => {
     enrollmentStore: mockEnrollmentStore as any,
     serviceDid: 'did:web:stratos.actor',
     logger: mockLogger as any,
+    initRepo: vi.fn(),
+    createSigningKey: vi.fn(),
+    createAttestation: vi.fn(),
   }
 
   const authenticateRequest = vi.fn()
-  const handler = handleRevoke(config, authenticateRequest)
+  const handler = handleRevoke(config as any, authenticateRequest)
 
   beforeEach(() => {
     vi.clearAllMocks()

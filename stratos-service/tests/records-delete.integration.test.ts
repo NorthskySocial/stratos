@@ -13,7 +13,7 @@ import {
   migrateServiceDb,
   ServiceDb,
 } from '../src/db'
-import { deleteRecord, getRecord } from '../src/api'
+import { deleteRecord, getRecord } from '../src/api/records'
 import { createMockBlobStore, createTestConfig } from './utils'
 
 describe('Record Delete Handler', () => {

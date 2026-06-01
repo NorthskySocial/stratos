@@ -9,7 +9,7 @@ import {
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
 import { ActorRepoTransactor } from '../../../actor-store-types.js'
-import { WritePhases } from '../../../api/index.js'
+import { WritePhases } from '../../../api'
 
 export interface SignedCommitResult {
   commitCid: Cid

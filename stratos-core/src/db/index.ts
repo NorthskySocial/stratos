@@ -85,6 +85,12 @@ export function createStratosDb(
  */
 export async function migrateStratosDb(db: StratosDb): Promise<void> {
   // Create tables using raw SQL since we're managing migrations manually
+  await migrateRepoTables(db)
+  await migrateRecordAndBlobTables(db)
+  await migrateMiscTables(db)
+}
+
+async function migrateRepoTables(db: StratosDb): Promise<void> {
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_repo_root (
       did TEXT PRIMARY KEY,
@@ -107,7 +113,9 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
     CREATE INDEX IF NOT EXISTS stratos_repo_block_repo_rev_idx 
     ON stratos_repo_block(repoRev, cid)
   `)
+}
 
+async function migrateRecordAndBlobTables(db: StratosDb): Promise<void> {
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_record (
       uri TEXT PRIMARY KEY,
@@ -155,6 +163,20 @@ export async function migrateStratosDb(db: StratosDb): Promise<void> {
     )
   `)
 
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS stratos_blob_boundary (
+      blobCid TEXT NOT NULL,
+      boundary TEXT NOT NULL,
+      PRIMARY KEY (blobCid, boundary)
+    )
+  `)
+
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_blob_boundary_blob_cid_idx ON stratos_blob_boundary(blobCid)`,
+  )
+}
+
+async function migrateMiscTables(db: StratosDb): Promise<void> {
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS stratos_backlink (
       uri TEXT NOT NULL,

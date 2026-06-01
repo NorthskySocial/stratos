@@ -1,7 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import express from 'express'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleCallback } from '../src/oauth/handlers/callback.js'
-import { EnrollmentDeniedError } from '@northskysocial/stratos-core'
 
 describe('handleCallback', () => {
   let mockOauthClient: any
@@ -10,6 +8,7 @@ describe('handleCallback', () => {
   let mockProfileRecordWriter: any
   let mockLogger: any
   let mockEnrollmentConfig: any
+  let mockEnrollmentValidator: any
   let config: any
 
   beforeEach(() => {
@@ -27,8 +26,12 @@ describe('handleCallback', () => {
         resolve: vi.fn(),
       },
     }
+    mockEnrollmentValidator = {
+      validate: vi.fn().mockResolvedValue({ allowed: true }),
+    }
     mockProfileRecordWriter = {
-      write: vi.fn(),
+      putEnrollmentRecord: vi.fn().mockResolvedValue(undefined),
+      deleteEnrollmentRecord: vi.fn().mockResolvedValue(undefined),
     }
     mockLogger = {
       info: vi.fn(),
@@ -44,6 +47,7 @@ describe('handleCallback', () => {
       enrollmentStore: mockEnrollmentStore,
       idResolver: mockIdResolver,
       enrollmentConfig: mockEnrollmentConfig,
+      enrollmentValidator: mockEnrollmentValidator,
       profileRecordWriter: mockProfileRecordWriter,
       logger: mockLogger,
       baseUrl: 'http://localhost:3100',
@@ -122,12 +126,10 @@ describe('handleCallback', () => {
   it('denies enrollment if not allowed', async () => {
     const session = { sub: 'did:plc:malice' }
     mockOauthClient.callback.mockResolvedValue({ session })
-
-    // Configure to only allow a specific DID
-    config.enrollmentConfig = {
-      mode: 'closed',
-      allowedDids: ['did:plc:alice'],
-    }
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: false,
+      reason: 'NotInAllowlist',
+    })
 
     const handler = handleCallback(config)
     const req: any = {
@@ -176,12 +178,10 @@ describe('handleCallback', () => {
   it('handles DID resolution failure when checking PDS allowlist', async () => {
     const session = { sub: 'did:plc:alice' }
     mockOauthClient.callback.mockResolvedValue({ session })
-
-    config.enrollmentConfig = {
-      mode: 'closed',
-      allowedPdsEndpoints: ['https://pds.example.com'],
-    }
-    mockIdResolver.did.resolve.mockRejectedValue(new Error('Resolution failed'))
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: false,
+      reason: 'DidNotResolved',
+    })
 
     const handler = handleCallback(config)
     const req: any = {

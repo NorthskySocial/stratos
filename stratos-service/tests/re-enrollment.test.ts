@@ -34,6 +34,7 @@ describe('Re-enrollment', () => {
   let mockOauthClient: any
   let mockLogger: any
   let mockIdResolver: any
+  let mockEnrollmentValidator: any
 
   const serviceDid = 'did:web:stratos.example.com'
   const serviceEndpoint = 'https://stratos.example.com'
@@ -47,6 +48,7 @@ describe('Re-enrollment', () => {
       getEnrollment: vi.fn(),
       getBoundaries: vi.fn(),
       updateEnrollment: vi.fn(),
+      setBoundaries: vi.fn(),
     }
     mockOauthClient = {
       callback: vi.fn().mockResolvedValue({ session: { sub: userDid } }),
@@ -72,6 +74,12 @@ describe('Re-enrollment', () => {
         },
       }),
     }
+    mockEnrollmentValidator = {
+      validate: vi.fn().mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      }),
+    }
   })
 
   it('restores PDS record for an active user who deleted it', async () => {
@@ -90,6 +98,7 @@ describe('Re-enrollment', () => {
       oauthClient: mockOauthClient,
       enrollmentConfig: { mode: 'open' },
       enrollmentStore: mockEnrollmentStore,
+      enrollmentValidator: mockEnrollmentValidator,
       idResolver: mockIdResolver,
       baseUrl: 'https://stratos.example.com',
       serviceEndpoint: serviceEndpoint,
@@ -158,6 +167,7 @@ describe('Re-enrollment', () => {
       oauthClient: mockOauthClient,
       enrollmentConfig: { mode: 'open' },
       enrollmentStore: mockEnrollmentStore,
+      enrollmentValidator: mockEnrollmentValidator,
       idResolver: mockIdResolver,
       baseUrl: 'https://stratos.example.com',
       serviceEndpoint: serviceEndpoint,

@@ -21,6 +21,7 @@ export interface EnrollmentAuthDeps {
  *
  * @param did - DID to verify
  * @param deps - Dependencies for enrollment verification
+ * @throws EnrollmentDeniedError if the DID is not enrolled
  */
 export async function verifyEnrolled(
   did: string,
@@ -40,6 +41,7 @@ export async function verifyEnrolled(
       deps.allowListProvider,
     )
   } catch (err) {
+    // DID is not allowed, or enrollment is closed
     if (err instanceof EnrollmentDeniedError) {
       throw err
     }

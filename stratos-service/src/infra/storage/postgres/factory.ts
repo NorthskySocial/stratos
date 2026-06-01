@@ -8,7 +8,7 @@ import type {
   ActorStoreReaders,
   ActorStoreWriters,
   ServiceStores,
-  BlobContentStore,
+  BlobStore,
 } from '@northskysocial/stratos-core'
 import {
   type StratosPgDb,
@@ -29,7 +29,7 @@ export interface PostgresStorageFactoryConfig {
   connectionString: string
   serviceDb: ServicePgDb
   cborToRecord: (content: Uint8Array) => Record<string, unknown>
-  blobContentStoreCreator: (did: string) => BlobContentStore
+  blobContentStoreCreator: (did: string) => BlobStore
   actorPoolSize?: number
 }
 
@@ -44,7 +44,7 @@ export class PostgresStorageFactory implements StorageFactory {
   private readonly cborToRecord: (
     content: Uint8Array,
   ) => Record<string, unknown>
-  private readonly blobContentStoreCreator: (did: string) => BlobContentStore
+  private readonly blobContentStoreCreator: (did: string) => BlobStore
   private readonly pool: postgres.Sql
   private readonly actorPool: postgres.Sql
   private readonly actorDb: StratosPgDb

@@ -7,6 +7,7 @@ export interface BlobMetadata {
   cid: Cid
   mimeType: string
   size: number
+  tempKey?: string | null
   width?: number
   height?: number
   createdAt: string
@@ -28,6 +29,12 @@ export interface BlobMetadataReader {
 
   /** List all blob CIDs */
   listAllBlobCids: () => Promise<Cid[]>
+
+  /** List records associated with a blob */
+  listRecordsForBlob: (blobCid: Cid) => Promise<string[]>
+
+  /** Get boundaries associated with a blob */
+  getBoundariesForBlob: (blobCid: Cid) => Promise<string[]>
 }
 
 /**
@@ -58,6 +65,12 @@ export interface BlobMetadataWriter extends BlobMetadataReader {
 
   /** Restore a taken-down blob */
   restoreBlob: (cid: Cid) => Promise<void>
+
+  /** Associate blob with a boundary */
+  associateBlobWithBoundary: (blobCid: Cid, boundary: string) => Promise<void>
+
+  /** Remove boundary associations for a blob */
+  removeBlobBoundaryAssociations: (blobCid: Cid) => Promise<void>
 }
 
 /**

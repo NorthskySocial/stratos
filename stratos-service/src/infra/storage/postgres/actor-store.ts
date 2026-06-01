@@ -7,6 +7,7 @@ import * as crypto from '@atproto/crypto'
 import { type CidLink, decode as cborDecode } from '@atcute/cbor'
 
 import {
+  BlobNotFoundError,
   type BlobStore,
   type BlobStoreCreator,
   BlockMap,
@@ -23,6 +24,7 @@ import {
   pgSchema as pgActorSchema,
   pgStratosBacklink,
   pgStratosBlob,
+  pgStratosBlobBoundary,
   pgStratosRecord,
   pgStratosRecordBlob,
   pgStratosRepoBlock,
@@ -69,6 +71,11 @@ export class PgActorRecordReader {
     return Number(res[0]?.count ?? 0)
   }
 
+  /**
+   * List all actor records in the database.
+   *
+   * @returns An array of actor records with URI, path, and CID.
+   */
   async listAll(): Promise<StratosRecordDescript[]> {
     const records: StratosRecordDescript[] = []
     let cursor: string | undefined = ''
@@ -92,6 +99,11 @@ export class PgActorRecordReader {
     return records
   }
 
+  /**
+   * List all collections in the database.
+   *
+   * @returns An array of collection names.
+   */
   async listCollections(): Promise<string[]> {
     const collections = await this.db
       .select({ collection: pgStratosRecord.collection })
@@ -100,6 +112,12 @@ export class PgActorRecordReader {
     return collections.map((row) => row.collection)
   }
 
+  /**
+   * List all records in the database.
+   *
+   * @param opts - Options for listing records.
+   * @returns An array of records with URI, path, and CID.
+   */
   async listRecordsForCollection(
     opts: ListRecordsOpts,
   ): Promise<RecordWithContent[]> {
@@ -156,6 +174,14 @@ export class PgActorRecordReader {
     }))
   }
 
+  /**
+   * Retrieve a record by URI and CID, optionally including soft-deleted records.
+   *
+   * @param uri - The URI of the record.
+   * @param cid - The CID of the record.
+   * @param includeSoftDeleted - Whether to include soft-deleted records (default: false).
+   * @returns The record with metadata or null if not found.
+   */
   async getRecord(
     uri: string | AtUri,
     cid: string | null,
@@ -197,6 +223,14 @@ export class PgActorRecordReader {
     }
   }
 
+  /**
+   * Check if a record exists by URI and CID, optionally including soft-deleted records.
+   *
+   * @param uri - The URI of the record.
+   * @param cid - The CID of the record.
+   * @param includeSoftDeleted - Whether to include soft-deleted records (default: false).
+   * @returns True if the record exists, false otherwise.
+   */
   async hasRecord(
     uri: string | AtUri,
     cid: string | null,
@@ -220,6 +254,12 @@ export class PgActorRecordReader {
     return res.length > 0
   }
 
+  /**
+   * Retrieve the takedown status of a record by URI.
+   *
+   * @param uri - The URI of the record.
+   * @returns The takedown status (applied or not applied) or null if not found.
+   */
   async getRecordTakedownStatus(
     uri: string | AtUri,
   ): Promise<StatusAttr | null> {
@@ -235,6 +275,12 @@ export class PgActorRecordReader {
       : { applied: false }
   }
 
+  /**
+   * Retrieve the current CID of a record by URI.
+   *
+   * @param uri - The URI of the record.
+   * @returns The current CID or null if not found.
+   */
   async getCurrentRecordCid(uri: string | AtUri): Promise<Cid | null> {
     const res = await this.db
       .select({ cid: pgStratosRecord.cid })
@@ -245,6 +291,12 @@ export class PgActorRecordReader {
     return res.length > 0 ? parseCid(res[0].cid) : null
   }
 
+  /**
+   * Retrieve backlinks for a record based on the provided options.
+   *
+   * @param opts - Options for retrieving backlinks.
+   * @returns An array of backlink records.
+   */
   async getRecordBacklinks(opts: GetBacklinksOpts) {
     const { collection, path, linkTo } = opts
     return this.db
@@ -271,6 +323,13 @@ export class PgActorRecordReader {
       )
   }
 
+  /**
+   * Retrieve backlink conflicts for a record.
+   *
+   * @param uri - The URI of the record.
+   * @param record - The record object.
+   * @returns An array of conflicting backlink URIs.
+   */
   async getBacklinkConflicts(
     uri: string | AtUri,
     record: Record<string, unknown>,
@@ -308,6 +367,11 @@ export class PgActorRecordTransactor
     super(db, cborToRecord, logger)
   }
 
+  /**
+   * Persist a record to the database.
+   *
+   * @param record - The record to be persisted.
+   */
   async putRecord(record: {
     uri: string
     cid: Cid
@@ -335,6 +399,16 @@ export class PgActorRecordTransactor
     )
   }
 
+  /**
+   * Index a record in the database.
+   *
+   * @param uri - The URI of the record.
+   * @param cid - The CID of the record.
+   * @param record - The record object.
+   * @param action - The action type ('create' or 'update') (default: 'create').
+   * @param repoRev - The repository revision.
+   * @param timestamp - The timestamp for indexing (default: current time).
+   */
   async indexRecord(
     uri: string | AtUri,
     cid: Cid,
@@ -378,6 +452,11 @@ export class PgActorRecordTransactor
     this.logger?.info({ uri: uriObj.toString() }, 'indexed stratos record')
   }
 
+  /**
+   * Delete a record from the database by URI.
+   *
+   * @param uri - The URI of the record to be deleted.
+   */
   async deleteRecord(uri: string | AtUri): Promise<void> {
     const uriStr = uri.toString()
     this.logger?.debug({ uri: uriStr }, 'deleting indexed stratos record')
@@ -392,12 +471,22 @@ export class PgActorRecordTransactor
     this.logger?.info({ uri: uriStr }, 'deleted indexed stratos record')
   }
 
+  /**
+   * Remove backlinks associated with a record by URI.
+   *
+   * @param uri - The URI of the record whose backlinks are to be removed.
+   */
   async removeBacklinksByUri(uri: string | AtUri): Promise<void> {
     await this.db
       .delete(pgStratosBacklink)
       .where(eq(pgStratosBacklink.uri, uri.toString()))
   }
 
+  /**
+   * Add backlinks to the database.
+   *
+   * @param backlinks - An array of backlink objects to be added.
+   */
   async addBacklinks(
     backlinks: Array<{ uri: string | AtUri; path: string; linkTo: string }>,
   ): Promise<void> {
@@ -409,6 +498,12 @@ export class PgActorRecordTransactor
     await this.db.insert(pgStratosBacklink).values(mapped).onConflictDoNothing()
   }
 
+  /**
+   * Update the takedown status of a record in the database.
+   *
+   * @param uri - The URI of the record to be updated.
+   * @param takedown - The takedown object containing applied status and reference.
+   */
   async updateRecordTakedown(
     uri: string | AtUri,
     takedown: { applied: boolean; ref?: string },
@@ -433,6 +528,11 @@ export class PgActorRepoReader {
     protected lru?: LruBlockCache,
   ) {}
 
+  /**
+   * Check if the actor has a root repository.
+   *
+   * @returns {Promise<boolean>} - True if the actor has a root repository, false otherwise.
+   */
   async hasRoot(): Promise<boolean> {
     const res = await this.db
       .select({ cid: pgStratosRepoRoot.cid })
@@ -441,11 +541,21 @@ export class PgActorRepoReader {
     return res.length > 0
   }
 
+  /**
+   * Retrieve the root repository CID for the actor.
+   *
+   * @returns {Promise<Cid | null>} - The root repository CID, or null if not found.
+   */
   async getRoot(): Promise<Cid | null> {
     const root = await this.getRootDetailed()
     return root?.cid ?? null
   }
 
+  /**
+   * Retrieve detailed information about the root repository CID and revision for the actor.
+   *
+   * @returns {Promise<{ cid: Cid; rev: string } | null>} - Detailed root repository information, or null if not found.
+   */
   async getRootDetailed(): Promise<{ cid: Cid; rev: string } | null> {
     const res = (await this.db.execute(
       sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1`,
@@ -457,6 +567,12 @@ export class PgActorRepoReader {
     }
   }
 
+  /**
+   * Retrieve the raw bytes associated with the given CID.
+   *
+   * @param cid - The CID to retrieve bytes for.
+   * @returns {Promise<Uint8Array | null>} - The raw bytes, or null if not found.
+   */
   async getBytes(cid: Cid): Promise<Uint8Array | null> {
     const cached = this.cache.get(cid)
     if (cached) return cached
@@ -476,11 +592,23 @@ export class PgActorRepoReader {
     return content
   }
 
+  /**
+   * Check if the given CID exists in the storage.
+   *
+   * @param cid - The CID to check for existence.
+   * @returns {Promise<boolean>} - True if the CID exists, false otherwise.
+   */
   async has(cid: Cid): Promise<boolean> {
     const got = await this.getBytes(cid)
     return !!got
   }
 
+  /**
+   * Retrieve multiple blocks from storage.
+   *
+   * @param cids - The CIDs to retrieve blocks for.
+   * @returns {Promise<{ blocks: BlockMap; missing: Cid[] }>} - A map of blocks and a list of missing CIDs.
+   */
   async getBlocks(cids: Cid[]): Promise<{ blocks: BlockMap; missing: Cid[] }> {
     const cached = this.cache.getMany(cids)
     if (cached.missing.length < 1) return cached
@@ -529,6 +657,12 @@ export class PgActorRepoReader {
     return { blocks, missing: missing.toList() }
   }
 
+  /**
+   * Iterate over blocks in the storage, yielding them in CAR format.
+   *
+   * @param since - Optional starting point for iteration.
+   * @returns {AsyncIterable<CarBlock>} - An async iterable of blocks in CAR format.
+   */
   async *iterateCarBlocks(since?: string): AsyncIterable<CarBlock> {
     let cursor: RevCursor | undefined = undefined
     do {
@@ -549,6 +683,13 @@ export class PgActorRepoReader {
     } while (cursor)
   }
 
+  /**
+   * Retrieve a range of blocks from storage.
+   *
+   * @param since - Optional starting point for iteration.
+   * @param cursor - Optional cursor for pagination.
+   * @returns {Promise<{ cid: string; repoRev: string; content: Uint8Array }[]>} - A list of block data.
+   */
   async getBlockRange(
     since?: string,
     cursor?: RevCursor,
@@ -588,6 +729,11 @@ export class PgActorRepoReader {
     })
   }
 
+  /**
+   * Count the total number of blocks stored in the repository.
+   *
+   * @returns {Promise<number>} - The total number of blocks.
+   */
   async countBlocks(): Promise<number> {
     const res = await this.db
       .select({ count: countAll })
@@ -595,6 +741,11 @@ export class PgActorRepoReader {
     return Number(res[0]?.count ?? 0)
   }
 
+  /**
+   * Preload blocks for a specific repository revision into the cache.
+   *
+   * @param rev - The repository revision to preload blocks for.
+   */
   async preloadBlocksForRev(rev: string): Promise<void> {
     const res = (await this.db.execute(
       sql`SELECT cid, content FROM stratos_repo_block WHERE "repoRev" = ${rev} LIMIT 15`,
@@ -609,6 +760,11 @@ export class PgActorRepoReader {
     }
   }
 
+  /**
+   * Preload blocks for a specific repository revision into the cache.
+   *
+   * @param commitCid
+   */
   async preloadRootSpine(commitCid: Cid): Promise<void> {
     const commitBytes = await this.getBytes(commitCid)
     if (!commitBytes) return
@@ -639,6 +795,11 @@ export class PgActorRepoReader {
     }
   }
 
+  /**
+   * List all existing blocks in the repository.
+   *
+   * @returns {Promise<CidSet>} - A set of CIDs representing existing blocks.
+   */
   async listExistingBlocks(): Promise<CidSet> {
     const cids = new CidSet()
     let lastCid: string | undefined = ''
@@ -665,6 +826,11 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     super(db, logger, lru)
   }
 
+  /**
+   * Lock the root repository revision for exclusive access.
+   *
+   * @returns {Promise<{ cid: Cid; rev: string } | null>} - The locked root revision or null if not available.
+   */
   async lockRoot(): Promise<{ cid: Cid; rev: string } | null> {
     const res = (await this.db.execute(
       sql`SELECT cid, rev FROM stratos_repo_root LIMIT 1 FOR UPDATE NOWAIT`,
@@ -676,6 +842,13 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     }
   }
 
+  /**
+   * Update the root repository revision with a new CID and revision.
+   *
+   * @param cid - The new CID for the root repository.
+   * @param rev - The new revision for the root repository.
+   * @param did - The DID associated with the root repository.
+   */
   async updateRoot(cid: Cid, rev: string, did: string): Promise<void> {
     const cidStr = cid.toString()
     const indexedAt = new Date().toISOString()
@@ -684,6 +857,13 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     )
   }
 
+  /**
+   * Put a block into the repository with the given CID, bytes, and revision.
+   *
+   * @param cid - The CID of the block.
+   * @param bytes - The content bytes of the block.
+   * @param rev - The revision associated with the block.
+   */
   async putBlock(cid: Cid, bytes: Uint8Array, rev: string): Promise<void> {
     const cidStr = cid.toString()
     const content = Buffer.from(bytes)
@@ -695,6 +875,11 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     this.lru?.set(cidStr, bytes)
   }
 
+  /**
+   * Put blocks into the repository with a revision.
+   * @param blocks - The map of blocks to put.
+   * @param rev - The revision associated with the blocks.
+   */
   async putBlocks(blocks: BlockMap, rev: string): Promise<void> {
     const values: Array<{
       cid: string
@@ -725,6 +910,10 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     }
   }
 
+  /**
+   * Delete a block from the repository by CID.
+   * @param cid - The CID of the block to delete.
+   */
   async deleteBlock(cid: Cid): Promise<void> {
     await this.db
       .delete(pgStratosRepoBlock)
@@ -733,6 +922,10 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     this.lru?.delete(cid.toString())
   }
 
+  /**
+   * Delete multiple blocks from the repository by CID.
+   * @param cids - The CIDs of the blocks to delete.
+   */
   async deleteBlocks(cids: Cid[]): Promise<void> {
     if (cids.length === 0) return
     const cidStrs = cids.map((c) => c.toString())
@@ -748,12 +941,19 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
     }
   }
 
+  /**
+   * Delete all blocks associated with a specific revision.
+   * @param rev - The revision for which to delete blocks.
+   */
   async deleteBlocksForRev(rev: string): Promise<void> {
     await this.db
       .delete(pgStratosRepoBlock)
       .where(eq(pgStratosRepoBlock.repoRev, rev))
   }
 
+  /**
+   * Clear the cache of block data.
+   */
   async clearCache(): Promise<void> {
     this.cache = new BlockMap()
   }
@@ -764,6 +964,7 @@ export class PgActorRepoTransactor extends PgActorRepoReader {
 export interface BlobMetadata {
   size: number
   mimeType?: string
+  tempKey?: string | null
 }
 
 export class PgActorBlobReader {
@@ -773,6 +974,11 @@ export class PgActorBlobReader {
     protected logger?: Logger,
   ) {}
 
+  /**
+   * Retrieve metadata for a blob by CID.
+   * @param cid - The CID of the blob.
+   * @returns BlobMetadata if found, otherwise null.
+   */
   async getBlobMetadata(cid: Cid): Promise<BlobMetadata | null> {
     const found = await this.db
       .select()
@@ -785,24 +991,53 @@ export class PgActorBlobReader {
       )
       .limit(1)
     if (found.length === 0) return null
-    return { size: found[0].size, mimeType: found[0].mimeType }
+    return {
+      size: found[0].size,
+      mimeType: found[0].mimeType,
+      tempKey: found[0].tempKey,
+    }
   }
 
+  /**
+   * Retrieve a blob by CID, including its metadata and stream.
+   * @param cid - The CID of the blob to retrieve.
+   * @returns Blob metadata and stream if found, otherwise null.
+   */
   async getBlob(cid: Cid): Promise<{
     size: number
     mimeType?: string
+    tempKey?: string | null
     stream: AsyncIterable<Uint8Array>
   } | null> {
     const metadata = await this.getBlobMetadata(cid)
     if (!metadata) return null
     try {
-      const stream = await this.blobstore.getStream(cid)
+      let stream: AsyncIterable<Uint8Array>
+      try {
+        stream = await this.blobstore.getStream(cid)
+      } catch (err) {
+        if (err instanceof BlobNotFoundError && metadata.tempKey) {
+          this.logger?.info(
+            `Blob ${cid.toString()} not found in permanent storage, falling back to temporary storage with key ${
+              metadata.tempKey
+            }`,
+          )
+          stream = await this.blobstore.getTempStream(metadata.tempKey)
+        } else {
+          throw err
+        }
+      }
       return { ...metadata, stream }
     } catch {
       return null
     }
   }
 
+  /**
+   * List blobs based on provided options.
+   * @param opts - Options for listing blobs.
+   * @returns Array of blob CIDs.
+   */
   async listBlobs(opts: {
     since?: string
     cursor?: string
@@ -843,6 +1078,11 @@ export class PgActorBlobReader {
     return res.map((row) => row.blobCid)
   }
 
+  /**
+   * Retrieve the takedown status for a blob by CID.
+   * @param cid - The CID of the blob.
+   * @returns Takedown status if found, otherwise null.
+   */
   async getBlobTakedownStatus(cid: Cid): Promise<StatusAttr | null> {
     const res = await this.db
       .select({ takedownRef: pgStratosBlob.takedownRef })
@@ -855,6 +1095,11 @@ export class PgActorBlobReader {
       : { applied: false }
   }
 
+  /**
+   * Retrieve the URIs of records associated with a blob by CID.
+   * @param cid - The CID of the blob.
+   * @returns Array of record URIs.
+   */
   async getRecordsForBlob(cid: Cid): Promise<string[]> {
     const res = await this.db
       .select()
@@ -863,6 +1108,24 @@ export class PgActorBlobReader {
     return res.map((row) => row.recordUri)
   }
 
+  /**
+   * Retrieve the boundaries associated with a blob by CID.
+   * @param blobCid - The CID of the blob.
+   * @returns Array of boundary strings.
+   */
+  async getBoundariesForBlob(blobCid: Cid): Promise<string[]> {
+    const res = await this.db
+      .select({ boundary: pgStratosBlobBoundary.boundary })
+      .from(pgStratosBlobBoundary)
+      .where(eq(pgStratosBlobBoundary.blobCid, blobCid.toString()))
+    return res.map((row) => row.boundary)
+  }
+
+  /**
+   * Check if a blob exists by CID.
+   * @param cid - The CID of the blob.
+   * @returns True if the blob exists, otherwise false.
+   */
   async hasBlob(cid: Cid): Promise<boolean> {
     const res = await this.db
       .select({ cid: pgStratosBlob.cid })
@@ -880,6 +1143,10 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
     super(db, blobstore, logger)
   }
 
+  /**
+   * Track a blob for storage and association with records.
+   * @param blob - Blob metadata to track.
+   */
   async trackBlob(blob: {
     cid: Cid
     mimeType: string
@@ -903,6 +1170,11 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
       .onConflictDoNothing()
   }
 
+  /**
+   * Associate a blob with a record by CID and record URI.
+   * @param blobCid - The CID of the blob.
+   * @param recordUri - The URI of the record.
+   */
   async associateBlobWithRecord(
     blobCid: Cid,
     recordUri: string,
@@ -913,6 +1185,11 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
       .onConflictDoNothing()
   }
 
+  /**
+   * Process a list of blobs for storage and association with a record.
+   * @param recordUri - The URI of the record.
+   * @param blobs - Array of blob metadata to process.
+   */
   async processBlobs(
     recordUri: string,
     blobs: Array<{ cid: Cid; mimeType: string; tempKey?: string | null }>,
@@ -931,12 +1208,49 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
     }
   }
 
+  /**
+   * Remove all blob associations for a given record URI.
+   * @param recordUri - The URI of the record.
+   */
   async removeRecordBlobAssociations(recordUri: string): Promise<void> {
     await this.db
       .delete(pgStratosRecordBlob)
       .where(eq(pgStratosRecordBlob.recordUri, recordUri))
   }
 
+  /**
+   * Associate a blob with a boundary by CID and boundary string.
+   * @param blobCid - The CID of the blob.
+   * @param boundary - The boundary string.
+   */
+  async associateBlobWithBoundary(
+    blobCid: Cid,
+    boundary: string,
+  ): Promise<void> {
+    await this.db
+      .insert(pgStratosBlobBoundary)
+      .values({
+        blobCid: blobCid.toString(),
+        boundary: boundary,
+      })
+      .onConflictDoNothing()
+  }
+
+  /**
+   * Remove all blob boundary associations for a given CID.
+   * @param blobCid - The CID of the blob.
+   */
+  async removeBlobBoundaryAssociations(blobCid: Cid): Promise<void> {
+    await this.db
+      .delete(pgStratosBlobBoundary)
+      .where(eq(pgStratosBlobBoundary.blobCid, blobCid.toString()))
+  }
+
+  /**
+   * Update the takedown status of a blob.
+   * @param cid - The CID of the blob.
+   * @param takedown - The takedown status and reference.
+   */
   async updateBlobTakedown(
     cid: Cid,
     takedown: { applied: boolean; ref?: string },
@@ -947,6 +1261,10 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
       .where(eq(pgStratosBlob.cid, cid.toString()))
   }
 
+  /**
+   * Delete blobs that are not associated with any records.
+   * @returns Array of CIDs of deleted blobs.
+   */
   async deleteOrphanBlobs(): Promise<Cid[]> {
     const allBlobs = await this.db
       .select({ cid: pgStratosBlob.cid })
@@ -977,6 +1295,10 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
 export class PgSequenceOps implements SequenceOperations {
   constructor(private db: StratosPgDbOrTx) {}
 
+  /**
+   * Retrieve the latest sequence number from the database.
+   * @returns The latest sequence number or 0 if none found.
+   */
   async getLatestSeq(): Promise<number> {
     const rows = await this.db
       .select({ seq: pgStratosSeq.seq })
@@ -986,6 +1308,10 @@ export class PgSequenceOps implements SequenceOperations {
     return rows[0]?.seq ?? 0
   }
 
+  /**
+   * Retrieve the oldest sequence number from the database.
+   * @returns The oldest sequence number or 0 if none found.
+   */
   async getOldestSeq(): Promise<number> {
     const rows = await this.db
       .select({ seq: pgStratosSeq.seq })
@@ -995,6 +1321,12 @@ export class PgSequenceOps implements SequenceOperations {
     return rows[0]?.seq ?? 0
   }
 
+  /**
+   * Retrieve events from the database since a given sequence number.
+   * @param cursor - The sequence number to start from.
+   * @param limit - The maximum number of events to retrieve (default: 100).
+   * @returns An array of events with sequence number, DID, event type, event data, invalidation status, and sequenced timestamp.
+   */
   async getEventsSince(
     cursor: number,
     limit = 100,
@@ -1024,6 +1356,10 @@ export class PgSequenceOps implements SequenceOperations {
     }))
   }
 
+  /**
+   * Append an event to the database.
+   * @param event - The event to append.
+   */
   async appendEvent(event: {
     did: string
     eventType: string
@@ -1086,11 +1422,19 @@ export class PostgresActorStore implements ActorStore {
     this.actorDb = drizzle({ client: this.actorClient, schema: pgActorSchema })
   }
 
+  /**
+   * Close the database connections.
+   */
   async close(): Promise<void> {
     await this.adminClient.end()
     await this.actorClient.end()
   }
 
+  /**
+   * Check if a DID exists in the database.
+   * @param did - The DID to check.
+   * @returns True if the DID exists, false otherwise.
+   */
   async exists(did: string): Promise<boolean> {
     if (this.existsCache.has(did)) return true
     const schemaName = await this.getSchemaName(did)
@@ -1104,6 +1448,10 @@ export class PostgresActorStore implements ActorStore {
     return false
   }
 
+  /**
+   * Create a new actor schema in the database.
+   * @param did - The DID for which to create the schema.
+   */
   async create(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
     await this.adminDb.execute(
@@ -1116,6 +1464,10 @@ export class PostgresActorStore implements ActorStore {
     this.existsCache.add(did)
   }
 
+  /**
+   * Delete an actor schema from the database.
+   * @param did - The DID for which to delete the schema.
+   */
   async destroy(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
     await this.adminDb.execute(
@@ -1124,6 +1476,12 @@ export class PostgresActorStore implements ActorStore {
     this.existsCache.delete(did)
   }
 
+  /**
+   * Execute a read operation within a transaction for a specific actor schema.
+   * @param did - The DID for which to perform the read operation.
+   * @param fn - The function to execute within the transaction.
+   * @returns The result of the read operation.
+   */
   async read<T>(
     did: string,
     fn: (store: ActorReader) => T | PromiseLike<T>,
@@ -1145,6 +1503,12 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  /**
+   * Execute a transactional operation within a specific actor schema.
+   * @param did - The DID for which to perform the transactional operation.
+   * @param fn - The function to execute within the transaction.
+   * @returns The result of the transactional operation.
+   */
   async transact<T>(
     did: string,
     fn: (store: ActorTransactor) => T | PromiseLike<T>,
@@ -1170,6 +1534,13 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  /**
+   * Execute a read operation followed by a transactional operation within a specific actor schema.
+   * @param did - The DID for which to perform the operations.
+   * @param readFn - The function to execute for the read operation.
+   * @param transactFn - The function to execute within the transaction.
+   * @returns The result of the transactional operation.
+   */
   async readThenTransact<R, T>(
     did: string,
     readFn: (store: ActorReader) => R | PromiseLike<R>,
@@ -1209,10 +1580,20 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  /**
+   * Get the BlobStore instance for a specific actor schema.
+   * @param did - The DID for which to retrieve the BlobStore.
+   * @returns The BlobStore instance for the specified actor schema.
+   */
   getBlobStore(did: string): BlobStore {
     return this.blobstore(did)
   }
 
+  /**
+   * Create a signing key for a specific actor schema.
+   * @param did - The DID for which to create the signing key.
+   * @returns The created P256Keypair.
+   */
   async createSigningKey(did: string): Promise<crypto.P256Keypair> {
     const schemaName = await this.getSchemaName(did)
     return this.actorDb.transaction(async (tx) => {
@@ -1231,6 +1612,11 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  /**
+   * Load the signing key for a specific actor schema.
+   * @param did - The DID for which to load the signing key.
+   * @returns The loaded P256Keypair or null if not found.
+   */
   async loadSigningKey(did: string): Promise<crypto.P256Keypair | null> {
     const schemaName = await this.getSchemaName(did)
     return this.actorDb.transaction(async (tx) => {
@@ -1248,6 +1634,10 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  /**
+   * Delete the signing key for a specific actor schema.
+   * @param did - The DID for which to delete the signing key.
+   */
   async deleteSigningKey(did: string): Promise<void> {
     const schemaName = await this.getSchemaName(did)
     await this.actorDb.transaction(async (tx) => {
@@ -1259,6 +1649,12 @@ export class PostgresActorStore implements ActorStore {
     })
   }
 
+  /**
+   * Get the schema name for a specific actor DID.
+   * @param did - The DID for which to retrieve the schema name.
+   * @returns The schema name for the specified actor DID.
+   * @private
+   */
   private async getSchemaName(did: string): Promise<string> {
     const cached = this.schemaNameCache.get(did)
     if (cached !== undefined) return cached
