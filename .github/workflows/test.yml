@@ -57,12 +57,8 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps
-        working-directory: webapp
-
-      - name: Run E2E tests
-        run: pnpm run test:e2e
+      - name: Run E2E tests (Playwright container)
+        run: pnpm run test:e2e:docker -- --project=chromium
         working-directory: webapp
 
       - name: Upload Playwright report
