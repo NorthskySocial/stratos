@@ -203,6 +203,23 @@ Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests
 `stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run:
 `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
 
+### Mutation testing (validating AI-generated code)
+
+Mutation testing (StrykerJS, via `pnpm --filter <package> mutation`) exists to validate that tests
+actually catch regressions — it is the primary gate for trusting AI-generated code and the tests that
+accompany it. It is **not** CI-enforced; it is a local verification step the agent is responsible for
+running.
+
+When a change requires adding or running tests to validate behaviour, you MUST:
+
+- Run mutation testing on the modules you changed and confirm surviving mutants are addressed (or
+  explicitly justified) before considering the work done. A green test suite alone is insufficient.
+- Extend the mutation `mutate` globs in the relevant `stryker.config.json` to cover any new
+  source files/modules you introduced, so the new code is actually under mutation analysis.
+- Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests or review the code and improve it
+  rather than weakening the thresholds.
+
+
 ---
 
 ## Database

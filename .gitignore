@@ -52,3 +52,7 @@ docs/*-prompt.md
 docs/.vitepress/cache
 /webapp/public/client-metadata.json
 /webapp/playwright-report
+# StrykerJS mutation testing
+.stryker-tmp/
+**/reports/mutation/
+**/stryker.log

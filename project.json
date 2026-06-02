@@ -44,6 +44,13 @@
         "command": "pnpm test"
       }
     },
+    "mutation": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos",
+        "command": "pnpm mutation"
+      }
+    },
     "test-integration": {
       "executor": "nx:run-commands",
       "options": {
