@@ -36,7 +36,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "mutation": "stryker run",
@@ -71,6 +71,7 @@
     "eslint-config-prettier": "^10.1.8",
     "fast-check": "^4.5.0",
     "globals": "^17.3.0",
+    "tsc-alias": "^1.8.17",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.54.0",
     "vitest": "^4.0.18"

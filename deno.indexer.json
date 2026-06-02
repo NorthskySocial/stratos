@@ -6,5 +6,5 @@
     "./stratos-client",
     "./webapp"
   ],
-  "nodeModulesDir": "none"
+  "nodeModulesDir": "auto"
 }
