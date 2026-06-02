@@ -49,6 +49,7 @@ export class SqliteEnrollmentStore
         signingKeyDid: record.signingKeyDid,
         active: record.active ? 'true' : 'false',
         enrollmentRkey: record.enrollmentRkey ?? null,
+        isService: record.isService ?? false,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -58,6 +59,7 @@ export class SqliteEnrollmentStore
           signingKeyDid: record.signingKeyDid,
           active: record.active ? 'true' : 'false',
           enrollmentRkey: record.enrollmentRkey ?? null,
+          isService: record.isService ?? false,
         },
       })
 

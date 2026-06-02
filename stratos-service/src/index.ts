@@ -22,6 +22,7 @@ import { registerSubscribeRecords } from './subscription'
 import { createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
 import { signAndPersistCommit, StratosBlockStoreReader } from './features'
+import { reconcileServiceEnrollments } from './features/enrollment'
 
 dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
 dotenvConfig({ override: false })
@@ -68,6 +69,12 @@ export class StratosServer {
     const app = ctx.app
     this.setupMiddleware(app, ctx)
     this.registerRoutes(app, ctx, cfg)
+
+    await reconcileServiceEnrollments(cfg.enrollment.serviceEnrollments, {
+      store: ctx.enrollmentStore,
+      signingKeyDid: ctx.signingDidKey,
+      logger: ctx.logger,
+    })
 
     return new StratosServer(ctx, app)
   }

@@ -3,10 +3,15 @@ import {
   commaListSchema,
   dbConfigSchema,
   ENROLLMENT_MODE,
+  InvalidServiceEnrollmentError,
   loggingConfigSchema,
   qualifyBoundaries,
   redisConfigSchema,
+  validateServiceEnrollments,
+  type RawServiceEnrollment,
+  type ServiceEnrollment,
 } from '@northskysocial/stratos-core'
+import { readFileSync } from 'node:fs'
 
 /**
  * Environment variable schema for stratos service
@@ -61,6 +66,16 @@ const envSchema = z
       .default(ENROLLMENT_MODE.ALLOWLIST),
     STRATOS_ALLOWED_DIDS: commaListSchema,
     STRATOS_ALLOWED_PDS_ENDPOINTS: commaListSchema,
+
+    // Service enrollments (config-driven, reconciled on startup)
+    STRATOS_SERVICE_ENROLLMENTS_FILE: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_SERVICE_ENROLLMENTS: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
 
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
@@ -224,6 +239,7 @@ export interface StratosServiceConfig {
     allowListUrl?: string
     allowListBootstrapName?: string
     valkeyUrl?: string
+    serviceEnrollments: ServiceEnrollment[]
   }
   identity: {
     plcUrl: string
@@ -363,13 +379,83 @@ function deriveServiceDid(env: Env, publicUrl: string): string {
 }
 
 /**
- * Translates environment variables into a StratosServiceConfig object.
- * @param env - Environment variables object
- * @returns - StratosServiceConfig
+ * Parse raw service-enrollment entries from a JSON source.
+ * @param raw - JSON string expected to encode an array of entries.
+ * @param source - Human-readable origin used in error messages.
+ * @returns The parsed raw entries.
  */
+function parseServiceEnrollmentJson(
+  raw: string,
+  source: string,
+): RawServiceEnrollment[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new InvalidServiceEnrollmentError(
+      `service enrollments from ${source} is not valid JSON`,
+      { cause: err },
+    )
+  }
+  if (!Array.isArray(parsed)) {
+    throw new InvalidServiceEnrollmentError(
+      `service enrollments from ${source} must be a JSON array`,
+    )
+  }
+  return parsed as RawServiceEnrollment[]
+}
+
+/**
+ * Load, merge and validate config-driven service enrollments.
+ * Combines file and inline sources; duplicate DIDs across sources fail fast.
+ * @param env - Environment variables object.
+ * @param serviceDid - Bare service DID used to qualify boundaries.
+ * @param allowedDomains - Qualified boundaries the service may grant.
+ * @returns The validated service enrollments.
+ */
+function loadServiceEnrollments(
+  env: Env,
+  serviceDid: string,
+  allowedDomains: string[],
+): ServiceEnrollment[] {
+  const raw: RawServiceEnrollment[] = []
+
+  if (env.STRATOS_SERVICE_ENROLLMENTS_FILE) {
+    let contents: string
+    try {
+      contents = readFileSync(env.STRATOS_SERVICE_ENROLLMENTS_FILE, 'utf8')
+    } catch (err) {
+      throw new InvalidServiceEnrollmentError(
+        `failed to read service enrollments file "${env.STRATOS_SERVICE_ENROLLMENTS_FILE}"`,
+        { cause: err },
+      )
+    }
+    raw.push(
+      ...parseServiceEnrollmentJson(
+        contents,
+        `file "${env.STRATOS_SERVICE_ENROLLMENTS_FILE}"`,
+      ),
+    )
+  }
+
+  if (env.STRATOS_SERVICE_ENROLLMENTS) {
+    raw.push(
+      ...parseServiceEnrollmentJson(
+        env.STRATOS_SERVICE_ENROLLMENTS,
+        'STRATOS_SERVICE_ENROLLMENTS',
+      ),
+    )
+  }
+
+  return validateServiceEnrollments(raw, { serviceDid, allowedDomains })
+}
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
+  const allowedDomains = qualifyBoundaries(
+    serviceDid,
+    env.STRATOS_ALLOWED_DOMAINS,
+  )
 
   return {
     service: {
@@ -390,10 +476,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     blobstore: buildBlobstoreConfig(env),
     stratos: {
       serviceDid,
-      allowedDomains: qualifyBoundaries(
-        serviceDid,
-        env.STRATOS_ALLOWED_DOMAINS,
-      ),
+      allowedDomains,
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
@@ -415,6 +498,11 @@ export function envToConfig(env: Env): StratosServiceConfig {
       allowListUrl: env.STRATOS_ALLOW_LIST_URI,
       allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
       valkeyUrl: env.STRATOS_VALKEY_URL,
+      serviceEnrollments: loadServiceEnrollments(
+        env,
+        serviceDid,
+        allowedDomains,
+      ),
     },
     identity: {
       plcUrl: env.STRATOS_PLC_URL,

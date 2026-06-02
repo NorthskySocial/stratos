@@ -9,6 +9,7 @@
   "inPlace": true,
   "reporters": ["html", "clear-text", "progress"],
   "mutate": [
+    "src/config.ts",
     "src/features/enrollment/**/*.ts",
     "src/features/hydration/**/*.ts",
     "src/features/sync/**/*.ts",

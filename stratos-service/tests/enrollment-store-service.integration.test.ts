@@ -66,6 +66,38 @@ describe('SqliteEnrollmentStore isService support', () => {
     expect(boundaries).toEqual(['leadership'])
   })
 
+  it('distinguishes a service row from a user row by isService alone, not pdsEndpoint', async () => {
+    // User row with an *empty* pdsEndpoint.
+    await store.enroll({
+      did: USER_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      pdsEndpoint: '',
+      signingKeyDid: 'did:key:zDnaeUserKey',
+      active: true,
+      boundaries: ['pilot'],
+    })
+    // Service row with a NULL pdsEndpoint.
+    await store.enroll({
+      did: SERVICE_DID,
+      enrolledAt: '2025-01-02T00:00:00Z',
+      signingKeyDid: SERVICE_DID,
+      active: true,
+      boundaries: ['leadership'],
+    })
+    await store.updateEnrollment(SERVICE_DID, { isService: true })
+
+    const user = await store.getEnrollment(USER_DID)
+    const service = await store.getEnrollment(SERVICE_DID)
+
+    // Neither carries a meaningful pdsEndpoint, so the flag is the only
+    // discriminator between a user and a service enrollment.
+    expect(user?.isService).toBe(false)
+    expect(service?.isService).toBe(true)
+
+    const services = await store.listServiceEnrollments()
+    expect(services.map((e) => e.did)).toEqual([SERVICE_DID])
+  })
+
   it('listServiceEnrollments returns only service rows', async () => {
     await store.enroll({
       did: USER_DID,
