@@ -14,6 +14,10 @@
     "src/features/sync/**/*.ts",
     "src/infra/auth/**/*.ts",
     "src/subscription/**/*.ts",
+    "src/storage/sqlite/enrollment-store.ts",
+    "src/infra/storage/sqlite/enrollment-store.ts",
+    "src/infra/storage/postgres/enrollment-store.ts",
+    "src/infra/storage/cached-enrollment-store.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],

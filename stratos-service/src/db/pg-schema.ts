@@ -1,4 +1,10 @@
-import { pgTable, text, index, primaryKey } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  text,
+  boolean,
+  index,
+  primaryKey,
+} from 'drizzle-orm/pg-core'
 
 export const pgOauthSession = pgTable('oauth_session', {
   key: text('key').primaryKey(),
@@ -20,6 +26,7 @@ export const pgEnrollment = pgTable('enrollment', {
   signingKeyDid: text('signingKeyDid').notNull(),
   active: text('active').notNull().default('true'),
   enrollmentRkey: text('enrollmentRkey'),
+  isService: boolean('isService').notNull().default(false),
 })
 
 export const pgEnrollmentBoundary = pgTable(

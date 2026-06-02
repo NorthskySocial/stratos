@@ -118,3 +118,19 @@ await enrollmentStore.addBoundary(did, 'plants')
 ```
 
 A dedicated admin API for boundary management is planned as future work.
+
+## Service Enrollments
+
+Alongside user enrollments, the `enrollment` table carries an `isService` boolean marker
+(default `false`). Service rows represent non-user actors (e.g. feed generators or other
+backend services) that hold domain boundaries but do not own a PDS:
+
+- `isService = true`
+- `pdsEndpoint = NULL` and `enrollmentRkey = NULL`
+- `signingKeyDid` populated with the service DID
+
+Service rows are distinguished **only** by the `isService` flag — never by the presence or
+emptiness of `pdsEndpoint`. Use `enrollmentStore.listServiceEnrollments()` to enumerate them.
+The column is added by the idempotent `ALTER TABLE enrollment ADD COLUMN isService` migration on
+both the sqlite and Postgres backends, so existing user rows default to `isService = false`
+without data loss.

@@ -108,6 +108,7 @@ export class SqliteEnrollmentStore
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }
   }
 
@@ -130,6 +131,7 @@ export class SqliteEnrollmentStore
       set.active = updates.active ? 'true' : 'false'
     if (updates.enrollmentRkey !== undefined)
       set.enrollmentRkey = updates.enrollmentRkey ?? null
+    if (updates.isService !== undefined) set.isService = updates.isService
 
     if (Object.keys(set).length > 0) {
       await this.db.update(enrollment).set(set).where(eq(enrollment.did, did))
@@ -163,6 +165,35 @@ export class SqliteEnrollmentStore
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
+    }))
+  }
+
+  /**
+   * List only service enrollments with optional pagination
+   * @param options - Pagination options
+   * @returns List of service enrollments
+   */
+  async listServiceEnrollments(options?: {
+    limit?: number
+    cursor?: string
+  }): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 50
+
+    const rows = await this.db
+      .select()
+      .from(enrollment)
+      .where(eq(enrollment.isService, true))
+      .limit(limit)
+
+    return rows.map((row) => ({
+      did: row.did,
+      enrolledAt: row.enrolledAt,
+      pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }))
   }
 

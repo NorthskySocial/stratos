@@ -56,6 +56,7 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }
   }
 
@@ -85,6 +86,40 @@ export class SqliteEnrollmentStoreReader implements EnrollmentStoreReader {
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
+    }))
+  }
+
+  /**
+   * List only service enrollments with optional pagination.
+   * @param options - Pagination options including limit and cursor.
+   * @returns Array of service enrollment details.
+   */
+  async listServiceEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 100
+    const cursor = options?.cursor
+
+    const condition = cursor
+      ? and(eq(enrollment.isService, true), gt(enrollment.did, cursor))
+      : eq(enrollment.isService, true)
+
+    const rows = await this.db
+      .select()
+      .from(enrollment)
+      .where(condition)
+      .orderBy(asc(enrollment.did))
+      .limit(limit)
+
+    return rows.map((row) => ({
+      did: row.did,
+      enrolledAt: row.enrolledAt,
+      pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }))
   }
 
@@ -136,6 +171,7 @@ export class SqliteEnrollmentStoreWriter
         signingKeyDid: data.signingKeyDid,
         active: data.active ? 'true' : 'false',
         enrollmentRkey: data.enrollmentRkey ?? null,
+        isService: data.isService ?? false,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -145,6 +181,7 @@ export class SqliteEnrollmentStoreWriter
           signingKeyDid: data.signingKeyDid,
           active: data.active ? 'true' : 'false',
           enrollmentRkey: data.enrollmentRkey ?? null,
+          isService: data.isService ?? false,
         },
       })
 
@@ -190,6 +227,9 @@ export class SqliteEnrollmentStoreWriter
     }
     if (updates.enrollmentRkey !== undefined) {
       setValues.enrollmentRkey = updates.enrollmentRkey
+    }
+    if (updates.isService !== undefined) {
+      setValues.isService = updates.isService
     }
 
     if (Object.keys(setValues).length > 0) {

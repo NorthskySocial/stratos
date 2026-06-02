@@ -70,7 +70,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       pdsEndpoint TEXT,
       signingKeyDid TEXT NOT NULL,
       active TEXT NOT NULL DEFAULT 'true',
-      enrollmentRkey TEXT
+      enrollmentRkey TEXT,
+      isService INTEGER NOT NULL DEFAULT 0
     )
   `)
 
@@ -79,6 +80,15 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
     .run(
       sql`
     ALTER TABLE enrollment ADD COLUMN enrollmentRkey TEXT
+  `,
+    )
+    .catch(() => {})
+
+  // Migration: add isService column if missing (for existing databases)
+  await db
+    .run(
+      sql`
+    ALTER TABLE enrollment ADD COLUMN isService INTEGER NOT NULL DEFAULT 0
   `,
     )
     .catch(() => {})
