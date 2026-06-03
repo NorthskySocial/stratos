@@ -25,10 +25,6 @@ Access-denied responses are returned as 404 to avoid leaking record existence. T
 always taken from the authenticated credential — hydration and read endpoints never accept a
 client-supplied viewer DID.
 
-`sync.getRepo` exports a full repo without boundary filtering, so it is owner-only: the handler
-compares the authenticated caller DID against the requested `did` and rejects mismatches with
-`RepoNotFound` (the same error as a missing repo), preventing both spoofing and existence probing.
-
 ## Service Identities
 
 Enrollments are classified by an `isService` flag, not by inspecting endpoint fields such as

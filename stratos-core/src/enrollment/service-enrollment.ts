@@ -14,6 +14,13 @@ export interface ServiceEnrollment {
   did: string
   /** Qualified boundaries granted to the service. */
   boundaries: string[]
+  /**
+   * Optional `did:key` public signing key for the service. When present, the
+   * Stratos service can verify the service's inter-service JWTs without a
+   * network DID resolution (e.g. for non-resolvable `did:web` DIDs in tests or
+   * local development).
+   */
+  signingKey?: string
 }
 
 /**
@@ -22,6 +29,7 @@ export interface ServiceEnrollment {
 export interface RawServiceEnrollment {
   did?: unknown
   boundaries?: unknown
+  signingKey?: unknown
 }
 
 /**
@@ -104,8 +112,32 @@ export function validateServiceEnrollments(
       }
     }
 
-    result.push({ did, boundaries: qualified })
+    const signingKey = validateSigningKey(did, entry.signingKey)
+
+    result.push(
+      signingKey
+        ? { did, boundaries: qualified, signingKey }
+        : { did, boundaries: qualified },
+    )
   }
 
   return result
+}
+
+/**
+ * Validate an optional `signingKey` field on a service-enrollment entry.
+ *
+ * When provided it must be a non-empty `did:key` string. Returns the validated
+ * key, or `undefined` when the field is absent.
+ */
+function validateSigningKey(did: string, value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (typeof value !== 'string' || !value.startsWith('did:key:')) {
+    throw new InvalidServiceEnrollmentError(
+      `service enrollment "${did}" has an invalid "signingKey" (must be a did:key)`,
+    )
+  }
+  return value
 }

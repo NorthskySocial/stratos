@@ -24,8 +24,10 @@
     "dev:local:debug": "tsx scripts/dev-local.ts --debug-service",
     "e2etest": "deno run -A test/scripts/run-all.ts",
     "e2etestdirect": "deno run -A test/scripts/run-all.ts --direct",
+    "e2etestappview": "deno run -A test/scripts/run-all.ts --appview",
     "test:integration": "pnpm e2etest",
-    "test:integration:direct": "pnpm e2etestdirect"
+    "test:integration:direct": "pnpm e2etestdirect",
+    "test:integration:appview": "pnpm e2etestappview"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

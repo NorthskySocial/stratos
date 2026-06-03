@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "subscription",
-      "description": "Subscribe to stratos events. When 'did' is provided, subscribes to record updates for that account. When omitted, subscribes to service-level events (enrollments). AppViews must provide a signed service JWT via syncToken.",
+      "description": "Subscribe to stratos events. When 'did' is provided, subscribes to record updates for that account. When omitted, subscribes to service-level events (enrollments). Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
       "parameters": {
         "type": "params",
         "properties": {
@@ -21,10 +21,6 @@
             "type": "string",
             "maxLength": 253,
             "description": "Optional domain filter. Only events for records with this domain in their boundary will be emitted."
-          },
-          "syncToken": {
-            "type": "string",
-            "description": "Signed service JWT for AppView authentication. Must include iss, aud, exp, and lxm claims. Required for service callers; owner callers may use the Authorization header instead."
           }
         }
       },

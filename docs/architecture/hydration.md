@@ -105,15 +105,6 @@ that DID, and only records sharing at least one of those boundaries are returned
 uniformly to user and service callers — a service identity reads only within its own enrolled
 boundaries.
 
-### Repo Export Ownership
-
-`zone.stratos.sync.getRepo` exports a full repository as a CAR file and bypasses boundary filtering,
-so it is restricted to the repo owner. The handler compares the authenticated caller DID
-(`auth.credentials.did`) against the requested `did` parameter and rejects any mismatch with
-`RepoNotFound` — the same opaque error used for a non-existent repo, so a caller cannot probe for
-the existence of repos they do not own. The `did` parameter is never trusted as an identity; it only
-selects which repo to read once ownership has been proven.
-
 ## Trust Model
 
 The `source.cid` in the stub allows AppViews to verify the hydrated record hasn't changed:
