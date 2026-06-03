@@ -13,6 +13,7 @@
     "src/hydration/**/*.ts",
     "src/validation/**/*.ts",
     "src/storage/enrollment-store.ts",
+    "src/repo/export.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],

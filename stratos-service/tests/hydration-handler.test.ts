@@ -122,6 +122,63 @@ describe('hydration-handler', () => {
       )
       expect(result.body).toEqual(mockResult)
     })
+
+    it('derives viewer from credential, ignoring client-supplied did', async () => {
+      const uris = ['at://did:example:alice/coll/123']
+      mockCtx.hydrationService.hydrateRecords.mockResolvedValue({
+        records: [],
+        notFound: [],
+        blocked: [],
+      })
+      const handler = handlers['zone.stratos.repo.hydrateRecords']
+
+      await handler({
+        input: { body: { uris, did: 'did:example:attacker' } },
+        params: { did: 'did:example:attacker' } as any,
+        auth: { credentials: { did: 'did:example:bob' } } as any,
+        req: {} as any,
+        res: {} as any,
+      })
+
+      expect(mockCtx.boundaryResolver.getBoundaries).toHaveBeenCalledTimes(1)
+      expect(mockCtx.boundaryResolver.getBoundaries).toHaveBeenCalledWith(
+        'did:example:bob',
+      )
+      expect(mockCtx.boundaryResolver.getBoundaries).not.toHaveBeenCalledWith(
+        'did:example:attacker',
+      )
+      expect(mockCtx.hydrationService.hydrateRecords).toHaveBeenCalledWith(
+        [{ uri: uris[0] }],
+        expect.objectContaining({ viewerDid: 'did:example:bob' }),
+      )
+    })
+
+    it('scopes results to the viewer boundary set', async () => {
+      const uris = ['at://did:example:alice/coll/123']
+      mockCtx.boundaryResolver.getBoundaries.mockResolvedValue(['leadership'])
+      mockCtx.hydrationService.hydrateRecords.mockResolvedValue({
+        records: [],
+        notFound: [],
+        blocked: [],
+      })
+      const handler = handlers['zone.stratos.repo.hydrateRecords']
+
+      await handler({
+        input: { body: { uris } },
+        params: {} as any,
+        auth: { credentials: { did: 'did:example:service' } } as any,
+        req: {} as any,
+        res: {} as any,
+      })
+
+      expect(mockCtx.hydrationService.hydrateRecords).toHaveBeenCalledWith(
+        [{ uri: uris[0] }],
+        expect.objectContaining({
+          viewerDid: 'did:example:service',
+          viewerDomains: ['leadership'],
+        }),
+      )
+    })
   })
 
   describe('zone.stratos.repo.hydrateRecord', () => {

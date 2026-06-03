@@ -41,6 +41,19 @@ describe('Hydration Domain', () => {
       expect(canAccessRecord(input)).toBe(false)
     })
 
+    it('should deny unauthenticated viewer even when record has no boundaries', () => {
+      const input: AccessCheckInput = {
+        recordBoundaries: [],
+        ownerDid: 'did:plc:owner123',
+        context: {
+          viewerDid: null,
+          viewerDomains: [],
+        },
+      }
+
+      expect(canAccessRecord(input)).toBe(false)
+    })
+
     it('should grant access when record has no boundaries (public to enrolled)', () => {
       const input: AccessCheckInput = {
         recordBoundaries: [],

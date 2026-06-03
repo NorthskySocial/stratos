@@ -19,6 +19,7 @@
     "src/infra/storage/sqlite/enrollment-store.ts",
     "src/infra/storage/postgres/enrollment-store.ts",
     "src/infra/storage/cached-enrollment-store.ts",
+    "src/api/handlers/repo-read-handlers.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],
