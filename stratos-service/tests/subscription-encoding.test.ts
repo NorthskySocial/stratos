@@ -8,8 +8,10 @@
 import { describe, expect, it } from 'vitest'
 import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import {
+  decodeEvent,
+  eventInScope,
   formatEvent,
-  matchesDomain,
+  hasBoundaryIntersection,
   type SeqEvent,
 } from '../src/subscription/index.js'
 
@@ -105,8 +107,67 @@ describe('Subscription CBOR encoding roundtrip', () => {
     })
   })
 
-  describe('matchesDomain', () => {
-    it('matches event with matching boundary domain', () => {
+  describe('decodeEvent', () => {
+    it('decodes ops and the union of boundary values', () => {
+      const eventData = {
+        ops: [
+          {
+            action: 'create',
+            path: 'zone.stratos.feed.post/a',
+            record: { boundary: { values: [{ value: 'nerv' }] } },
+          },
+          {
+            action: 'create',
+            path: 'zone.stratos.feed.post/b',
+            record: { boundary: { values: [{ value: 'seele' }] } },
+          },
+        ],
+      }
+
+      const decoded = decodeEvent(createSeqEvent(eventData))
+      expect(decoded.decodeOk).toBe(true)
+      expect(decoded.ops).toHaveLength(2)
+      expect([...decoded.boundaries].sort()).toEqual(['nerv', 'seele'])
+    })
+
+    it('decodes a bare record payload that has no ops wrapper', () => {
+      // Some events are stored as a single record object rather than an
+      // { ops: [...] } envelope; decodeEvent must treat the payload as one op.
+      const bareRecord = {
+        action: 'create',
+        path: 'zone.stratos.feed.post/solo',
+        record: { boundary: { values: [{ value: 'nerv' }] } },
+      }
+
+      const decoded = decodeEvent(createSeqEvent(bareRecord))
+      expect(decoded.decodeOk).toBe(true)
+      expect(decoded.ops).toHaveLength(1)
+      expect(decoded.boundaries).toEqual(['nerv'])
+    })
+
+    it('fails closed with empty ops and boundaries on invalid CBOR', () => {
+      const decoded = decodeEvent(
+        createSeqEvent({}, { event: new Uint8Array([0xff, 0xfe, 0xfd]) }),
+      )
+      expect(decoded.decodeOk).toBe(false)
+      expect(decoded.ops).toEqual([])
+      expect(decoded.boundaries).toEqual([])
+    })
+  })
+
+  describe('eventInScope (boundary-set filtering)', () => {
+    it('denies a decode-failed event even if boundaries are populated', () => {
+      // Defence in depth: decodeOk === false must deny regardless of any
+      // boundary values that might be present on the decoded shape.
+      const decoded = {
+        ops: [],
+        boundaries: ['nerv'],
+        decodeOk: false,
+      }
+      expect(eventInScope(decoded, new Set(['nerv']))).toBe(false)
+    })
+
+    it('matches event with a shared boundary', () => {
       const eventData = {
         ops: [
           {
@@ -120,10 +181,11 @@ describe('Subscription CBOR encoding roundtrip', () => {
       }
 
       const seqEvent = createSeqEvent(eventData)
-      expect(matchesDomain(seqEvent, 'swordsmith')).toBe(true)
+      const decoded = decodeEvent(seqEvent)
+      expect(eventInScope(decoded, new Set(['swordsmith']))).toBe(true)
     })
 
-    it('does not match event with different boundary domain', () => {
+    it('does not match event with no shared boundary', () => {
       const eventData = {
         ops: [
           {
@@ -137,10 +199,11 @@ describe('Subscription CBOR encoding roundtrip', () => {
       }
 
       const seqEvent = createSeqEvent(eventData)
-      expect(matchesDomain(seqEvent, 'aekea')).toBe(false)
+      const decoded = decodeEvent(seqEvent)
+      expect(eventInScope(decoded, new Set(['aekea']))).toBe(false)
     })
 
-    it('matches when any op has the requested domain', () => {
+    it('matches when any op shares a boundary with the caller', () => {
       const eventData = {
         ops: [
           {
@@ -157,7 +220,8 @@ describe('Subscription CBOR encoding roundtrip', () => {
       }
 
       const seqEvent = createSeqEvent(eventData)
-      expect(matchesDomain(seqEvent, 'seele')).toBe(true)
+      const decoded = decodeEvent(seqEvent)
+      expect(eventInScope(decoded, new Set(['seele']))).toBe(true)
     })
 
     it('matches with multiple boundary values on a single record', () => {
@@ -176,18 +240,43 @@ describe('Subscription CBOR encoding roundtrip', () => {
       }
 
       const seqEvent = createSeqEvent(eventData)
-      expect(matchesDomain(seqEvent, 'aekea')).toBe(true)
-      expect(matchesDomain(seqEvent, 'swordsmith')).toBe(true)
+      const decoded = decodeEvent(seqEvent)
+      expect(eventInScope(decoded, new Set(['aekea']))).toBe(true)
+      expect(eventInScope(decoded, new Set(['swordsmith']))).toBe(true)
     })
 
-    it('returns true for undecable data (fail-open)', () => {
+    it('narrows by the optional domain within the shared set', () => {
+      const eventData = {
+        ops: [
+          {
+            action: 'create',
+            path: 'zone.stratos.feed.post/abc',
+            record: {
+              boundary: {
+                values: [{ value: 'nerv' }, { value: 'seele' }],
+              },
+            },
+          },
+        ],
+      }
+
+      const seqEvent = createSeqEvent(eventData)
+      const decoded = decodeEvent(seqEvent)
+      const caller = new Set(['nerv', 'seele'])
+      expect(eventInScope(decoded, caller, 'nerv')).toBe(true)
+      expect(eventInScope(decoded, caller, 'aekea')).toBe(false)
+    })
+
+    it('drops undecodable data (fail closed)', () => {
       const seqEvent = createSeqEvent(
         {},
         {
           event: new Uint8Array([0xff, 0xfe, 0xfd]),
         },
       )
-      expect(matchesDomain(seqEvent, 'anything')).toBe(true)
+      const decoded = decodeEvent(seqEvent)
+      expect(decoded.decodeOk).toBe(false)
+      expect(eventInScope(decoded, new Set(['anything']))).toBe(false)
     })
 
     it('returns false when ops have no boundary', () => {
@@ -201,7 +290,28 @@ describe('Subscription CBOR encoding roundtrip', () => {
       }
 
       const seqEvent = createSeqEvent(eventData)
-      expect(matchesDomain(seqEvent, 'swordsmith')).toBe(false)
+      const decoded = decodeEvent(seqEvent)
+      expect(eventInScope(decoded, new Set(['swordsmith']))).toBe(false)
+    })
+  })
+
+  describe('hasBoundaryIntersection', () => {
+    it('is true when sets intersect', () => {
+      expect(
+        hasBoundaryIntersection(new Set(['nerv', 'seele']), ['seele']),
+      ).toBe(true)
+    })
+
+    it('is false when sets are disjoint', () => {
+      expect(hasBoundaryIntersection(new Set(['nerv']), ['seele'])).toBe(false)
+    })
+
+    it('is false for undefined boundaries', () => {
+      expect(hasBoundaryIntersection(new Set(['nerv']), undefined)).toBe(false)
+    })
+
+    it('is false for empty boundaries', () => {
+      expect(hasBoundaryIntersection(new Set(['nerv']), [])).toBe(false)
     })
   })
 })

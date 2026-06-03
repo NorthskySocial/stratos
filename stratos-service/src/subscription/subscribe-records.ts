@@ -68,7 +68,6 @@ export interface SubscribeRecordsParams {
   did?: string
   cursor?: number
   domain?: string
-  syncToken?: string
 }
 
 type SubscriptionMessage = CommitMessage | InfoMessage | EnrollmentMessage
@@ -85,6 +84,7 @@ function createActorSubscriptionHandler(ctx: AppContext) {
     did: string,
     cursor: number | undefined,
     domain: string | undefined,
+    callerBoundaries: ReadonlySet<string>,
     signal: AbortSignal,
   ): AsyncGenerator<SubscriptionMessage> {
     const exists = await ctx.actorStore.exists(did)
@@ -111,13 +111,41 @@ function createActorSubscriptionHandler(ctx: AppContext) {
 
     for (const event of catchUp) {
       if (signal.aborted) return
-      if (domain && !matchesDomain(event, domain)) continue
-      yield formatEvent(event)
+      const message = emitEvent(ctx, event, callerBoundaries, domain)
+      if (message) yield message
       lastSeq = event.seq
     }
 
-    yield* streamNewEvents(ctx, did, lastSeq, domain, signal)
+    yield* streamNewEvents(ctx, did, lastSeq, domain, callerBoundaries, signal)
   }
+}
+
+/**
+ * Decode an event once and return its commit message if the event is in scope
+ * for the caller's boundaries, otherwise `undefined`. Undecodable events are
+ * dropped (fail closed) and logged.
+ * @param ctx - Application context
+ * @param event - Sequence event to evaluate
+ * @param callerBoundaries - Boundaries the subscribing service is enrolled in
+ * @param domain - Optional single-boundary narrowing within the shared set
+ * @returns The commit message to emit, or undefined to skip the event
+ */
+function emitEvent(
+  ctx: AppContext,
+  event: SeqEvent,
+  callerBoundaries: ReadonlySet<string>,
+  domain: string | undefined,
+): CommitMessage | undefined {
+  const decoded = decodeEvent(event)
+  if (!decoded.decodeOk) {
+    ctx.logger?.warn(
+      { did: event.did, seq: event.seq },
+      'subscribeRecords: dropping undecodable event (fail closed)',
+    )
+    return undefined
+  }
+  if (!eventInScope(decoded, callerBoundaries, domain)) return undefined
+  return formatEvent(event, decoded.ops)
 }
 
 /**
@@ -126,6 +154,7 @@ function createActorSubscriptionHandler(ctx: AppContext) {
  * @param did - The DID to subscribe to.
  * @param startSeq - The sequence number to start from.
  * @param domain - The domain to filter events by.
+ * @param callerBoundaries - Boundaries the subscribing service is enrolled in.
  * @param signal - The abort signal to stop the stream.
  * @returns An async generator that yields commit messages for new events.
  */
@@ -134,6 +163,7 @@ async function* streamNewEvents(
   did: string,
   startSeq: number,
   domain: string | undefined,
+  callerBoundaries: ReadonlySet<string>,
   signal: AbortSignal,
 ): AsyncGenerator<SubscriptionMessage> {
   let lastSeq = startSeq
@@ -144,8 +174,8 @@ async function* streamNewEvents(
     const newEvents = await getEventsSince(ctx, did, lastSeq)
     for (const event of newEvents) {
       if (signal.aborted) return
-      if (domain && !matchesDomain(event, domain)) continue
-      yield formatEvent(event)
+      const message = emitEvent(ctx, event, callerBoundaries, domain)
+      if (message) yield message
       lastSeq = event.seq
     }
   }
@@ -160,6 +190,7 @@ async function* streamNewEvents(
  */
 function createServiceSubscriptionHandler(ctx: AppContext) {
   return async function* subscribeServiceEvents(
+    callerBoundaries: ReadonlySet<string>,
     signal: AbortSignal,
   ): AsyncGenerator<SubscriptionMessage> {
     const eventQueue: EnrollmentEvent[] = []
@@ -184,8 +215,11 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
 
         for (const enrollment of page) {
           if (signal.aborted) break
-          replayedDids.add(enrollment.did)
+          // Peer services discover users, not each other.
+          if (enrollment.isService) continue
           const boundaries = await store.getBoundaries(enrollment.did)
+          if (!hasBoundaryIntersection(callerBoundaries, boundaries)) continue
+          replayedDids.add(enrollment.did)
           yield {
             $type: 'zone.stratos.sync.subscribeRecords#enrollment',
             did: enrollment.did,
@@ -202,6 +236,9 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
         while (eventQueue.length > 0) {
           if (signal.aborted) return
           const event = eventQueue.shift()!
+          if (!hasBoundaryIntersection(callerBoundaries, event.boundaries)) {
+            continue
+          }
           if (event.action === 'enroll' && replayedDids.has(event.did)) {
             continue
           }
@@ -226,8 +263,11 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
 
 /**
  * Create the subscribeRecords stream handler.
- * - With `did`: per-actor record commit stream (existing behavior)
- * - Without `did`: service-level enrollment event stream
+ *
+ * All access requires inter-service auth and is scoped to the calling service's
+ * enrolled boundaries:
+ * - With `did`: per-actor record commit stream, filtered to the caller's boundaries.
+ * - Without `did`: service-level enrollment event stream over shared-boundary users.
  *
  * @param ctx - Application context
  * @returns SubscribeRecords stream handler function
@@ -249,24 +289,28 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
     signal: AbortSignal,
   ): AsyncGenerator<SubscriptionMessage> {
     const { did, cursor, domain } = params
-    const isServiceAuth = auth?.credentials?.type === 'service'
+
+    if (auth?.credentials?.type !== 'service') {
+      throw new AuthRequiredError('Service auth required')
+    }
+
+    const callerDid = auth.credentials.iss ?? auth.credentials.did
+    if (!callerDid) {
+      throw new AuthRequiredError('Service auth required')
+    }
+
+    const boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
+    if (boundaries.length === 0) {
+      throw new AuthRequiredError(
+        'Service is not enrolled in any boundary',
+      )
+    }
+    const callerBoundaries = new Set(boundaries)
 
     if (did) {
-      const callerDid = auth?.credentials?.did
-      const isOwnerAuth = callerDid === did
-      if (!isOwnerAuth && !isServiceAuth) {
-        throw new AuthRequiredError(
-          'Service auth or owner authentication required',
-        )
-      }
-      yield* actorHandler(did, cursor, domain, signal)
+      yield* actorHandler(did, cursor, domain, callerBoundaries, signal)
     } else {
-      if (!isServiceAuth) {
-        throw new AuthRequiredError(
-          'Service auth required for service-level subscription',
-        )
-      }
-      yield* serviceHandler(signal)
+      yield* serviceHandler(callerBoundaries, signal)
     }
   }
 }
@@ -347,59 +391,104 @@ async function getEventsSince(
 }
 
 /**
- * Format a sequence event into a commit message
- * @param event - Sequence event to format
- * @returns Commit message representation of the sequence event
+ * An event decoded from its CBOR payload exactly once.
+ * `decodeOk` is false when the payload could not be decoded — callers treating
+ * boundaries as an access-control gate MUST fail closed in that case.
  */
-export function formatEvent(event: SeqEvent): CommitMessage {
-  let ops: RecordOp[]
+export interface DecodedEvent {
+  ops: RecordOp[]
+  boundaries: string[]
+  decodeOk: boolean
+}
 
+/**
+ * Decode a sequence event's CBOR payload a single time, extracting both the
+ * record ops and the union of boundary values across those ops.
+ * @param event - Sequence event to decode
+ * @returns Decoded ops + boundaries, with `decodeOk = false` on failure
+ */
+export function decodeEvent(event: SeqEvent): DecodedEvent {
   try {
     const decoded = cborDecode(event.event) as Record<string, unknown>
-    ops = Array.isArray(decoded.ops)
-      ? (decoded.ops as RecordOp[])
-      : [decoded as unknown as RecordOp]
-  } catch {
-    ops = []
-  }
+    const rawOps = Array.isArray(decoded.ops)
+      ? (decoded.ops as Record<string, unknown>[])
+      : [decoded as Record<string, unknown>]
 
+    const boundaries = new Set<string>()
+    for (const op of rawOps) {
+      const record = op.record as Record<string, unknown> | undefined
+      const boundary = record?.boundary as Record<string, unknown> | undefined
+      const values = boundary?.values as Array<{ value: string }> | undefined
+      if (values) {
+        for (const v of values) boundaries.add(v.value)
+      }
+    }
+
+    return {
+      ops: rawOps as unknown as RecordOp[],
+      boundaries: [...boundaries],
+      decodeOk: true,
+    }
+  } catch {
+    return { ops: [], boundaries: [], decodeOk: false }
+  }
+}
+
+/**
+ * Format a sequence event into a commit message.
+ * @param event - Sequence event to format
+ * @param ops - Pre-decoded ops (avoids re-decoding on the hot path). When
+ *   omitted, the event is decoded internally.
+ * @returns Commit message representation of the sequence event
+ */
+export function formatEvent(event: SeqEvent, ops?: RecordOp[]): CommitMessage {
   return {
     $type: 'zone.stratos.sync.subscribeRecords#commit',
     seq: event.seq,
     did: event.did,
     time: event.time,
     rev: event.rev,
-    ops,
+    ops: ops ?? decodeEvent(event).ops,
   }
 }
 
 /**
- * Check if a sequence event matches a domain
- * @param event - Sequence event to check
- * @param domain - Domain to match against
- * @returns True if the event matches the domain, false otherwise
+ * Whether a decoded event is in scope for a viewer holding `callerBoundaries`.
+ *
+ * This is an access-control gate, so it FAILS CLOSED: an event whose payload
+ * could not be decoded has unverifiable boundaries and is denied. An event is
+ * in scope only if at least one of its boundaries is in the caller's set; an
+ * optional `domain` narrows further within that shared set.
+ *
+ * @param decoded - Event decoded via {@link decodeEvent}
+ * @param callerBoundaries - Boundaries the subscribing service is enrolled in
+ * @param domain - Optional single-boundary narrowing within the shared set
+ * @returns True if the event may be emitted to the caller
  */
-export function matchesDomain(event: SeqEvent, domain: string): boolean {
-  try {
-    const decoded = cborDecode(event.event) as Record<string, unknown>
-    const ops = Array.isArray(decoded.ops) ? decoded.ops : [decoded]
+export function eventInScope(
+  decoded: DecodedEvent,
+  callerBoundaries: ReadonlySet<string>,
+  domain?: string,
+): boolean {
+  if (!decoded.decodeOk) return false
+  const shared = decoded.boundaries.filter((b) => callerBoundaries.has(b))
+  if (shared.length === 0) return false
+  if (domain) return shared.includes(domain)
+  return true
+}
 
-    for (const op of ops as Record<string, unknown>[]) {
-      const record = op.record as Record<string, unknown> | undefined
-      const boundary = record?.boundary as Record<string, unknown> | undefined
-      const values = boundary?.values as Array<{ value: string }> | undefined
-      if (values) {
-        const domains = values.map((d) => d.value)
-        if (domains.includes(domain)) {
-          return true
-        }
-      }
-    }
-
-    return false
-  } catch {
-    return true // Include it if we can't decode
-  }
+/**
+ * Whether any of `boundaries` is present in `callerBoundaries`.
+ * @param callerBoundaries - Boundaries the subscribing service is enrolled in
+ * @param boundaries - Boundaries to test for intersection
+ * @returns True if the two sets intersect
+ */
+export function hasBoundaryIntersection(
+  callerBoundaries: ReadonlySet<string>,
+  boundaries: string[] | undefined,
+): boolean {
+  if (!boundaries) return false
+  return boundaries.some((b) => callerBoundaries.has(b))
 }
 
 /**

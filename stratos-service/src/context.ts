@@ -356,7 +356,6 @@ function initAuth(
     dpopVerifier,
     allowListProvider,
     cfg.stratos.devMode === true,
-    cfg.syncToken,
     logger,
   )
 

@@ -69,35 +69,71 @@ describe('Subscription Handlers', () => {
   })
 
   describe('createSubscribeRecordsHandler', () => {
-    it('should stream actor records for owner', async () => {
-      await actorStore.create(testDid)
-      const handler = createSubscribeRecordsHandler(ctx) as any
-      const abortController = new AbortController()
+    const serviceCreds = {
+      credentials: { type: 'service', iss: serviceDid, did: serviceDid },
+    }
 
-      // Add an event
+    async function enrollService(boundaries: string[]) {
+      await enrollmentStore.enroll({
+        did: serviceDid,
+        enrolledAt: new Date().toISOString(),
+        active: true,
+        signingKeyDid: serviceDid,
+        isService: true,
+      })
+      await enrollmentStore.setBoundaries(serviceDid, boundaries)
+    }
+
+    async function enrollUser(did: string, boundaries: string[]) {
+      await enrollmentStore.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        active: true,
+        signingKeyDid: 'did:key:zDnae',
+      })
+      await enrollmentStore.setBoundaries(did, boundaries)
+    }
+
+    async function appendPost(
+      did: string,
+      path: string,
+      boundary: string,
+      text: string,
+    ) {
       const eventData = encodeRecord({
         rev: 'rev1',
         ops: [
           {
             action: 'create',
-            path: 'zone.stratos.feed.post/1',
-            record: { text: 'Hello' },
+            path,
+            record: {
+              text,
+              boundary: { values: [{ value: boundary }] },
+            },
           },
         ],
       })
-      await actorStore.transact(testDid, async (store: any) => {
+      await actorStore.transact(did, async (store: any) => {
         await store.sequence.appendEvent({
-          did: testDid,
+          did,
           eventType: 'append',
           event: eventData,
           invalidated: 0,
           sequencedAt: new Date().toISOString(),
         })
       })
+    }
 
+    it('streams in-boundary actor records to an enrolled service', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+      await appendPost(testDid, 'zone.stratos.feed.post/1', 'nerv', 'Hello')
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
       const generator = handler(
         { did: testDid },
-        { credentials: { type: 'owner', did: testDid } },
+        serviceCreds,
         abortController.signal,
       )
 
@@ -111,58 +147,109 @@ describe('Subscription Handlers', () => {
       abortController.abort()
     })
 
-    it('should stream actor records for service', async () => {
+    it('drops actor records outside the service boundaries', async () => {
+      await enrollService(['nerv'])
       await actorStore.create(testDid)
+      await appendPost(testDid, 'zone.stratos.feed.post/1', 'seele', 'secret')
+
       const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
-
       const generator = handler(
         { did: testDid },
-        { credentials: { type: 'service' } },
+        serviceCreds,
         abortController.signal,
       )
 
-      // Should not throw AuthRequiredError
-      const promise = generator.next()
-
-      // Clean up
+      const nextPromise = generator.next()
       abortController.abort()
-      await promise.catch(() => {})
+      const result = await nextPromise
+      expect(result.done).toBe(true)
     })
 
-    it('should throw AuthRequiredError for unauthorized actor access', async () => {
+    it('narrows actor records by domain within shared boundaries', async () => {
+      await enrollService(['nerv', 'seele'])
+      await actorStore.create(testDid)
+      await appendPost(testDid, 'zone.stratos.feed.post/1', 'seele', 'secret')
+
       const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
-
       const generator = handler(
-        { did: testDid },
-        { credentials: { type: 'owner', did: 'did:plc:other' } },
+        { did: testDid, domain: 'nerv' },
+        serviceCreds,
         abortController.signal,
       )
 
-      await expect(generator.next()).rejects.toThrow(
-        'Service auth or owner authentication required',
-      )
+      const nextPromise = generator.next()
+      abortController.abort()
+      const result = await nextPromise
+      expect(result.done).toBe(true)
     })
 
-    it('should stream service enrollment events', async () => {
-      const handler = createSubscribeRecordsHandler(ctx) as any
-      const abortController = new AbortController()
-
-      // Enroll someone
-      const enrollmentTime = new Date().toISOString()
-      await enrollmentStore.enroll({
-        did: testDid,
-        enrolledAt: enrollmentTime,
-        active: true,
-        signingKeyDid: 'did:key:zDnae',
+    it('drops undecodable actor events (fail closed)', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+      await actorStore.transact(testDid, async (store: any) => {
+        await store.sequence.appendEvent({
+          did: testDid,
+          eventType: 'append',
+          event: new Uint8Array([0xff, 0xfe, 0xfd]),
+          invalidated: 0,
+          sequencedAt: new Date().toISOString(),
+        })
       })
 
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
       const generator = handler(
-        {},
-        { credentials: { type: 'service' } },
+        { did: testDid },
+        serviceCreds,
         abortController.signal,
       )
+
+      const nextPromise = generator.next()
+      abortController.abort()
+      const result = await nextPromise
+      expect(result.done).toBe(true)
+    })
+
+    it('rejects non-service credentials', async () => {
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+
+      const generator = handler(
+        { did: testDid },
+        { credentials: { type: 'user', did: testDid } },
+        abortController.signal,
+      )
+
+      await expect(generator.next()).rejects.toThrow('Service auth required')
+    })
+
+    it('rejects a service enrolled in no boundaries', async () => {
+      await enrollmentStore.enroll({
+        did: serviceDid,
+        enrolledAt: new Date().toISOString(),
+        active: true,
+        signingKeyDid: serviceDid,
+        isService: true,
+      })
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler({}, serviceCreds, abortController.signal)
+
+      await expect(generator.next()).rejects.toThrow(
+        'not enrolled in any boundary',
+      )
+    })
+
+    it('replays shared-boundary users to a service', async () => {
+      await enrollService(['nerv'])
+      await enrollUser(testDid, ['nerv'])
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler({}, serviceCreds, abortController.signal)
 
       const first = await generator.next()
       expect(first.done).toBe(false)
@@ -175,19 +262,40 @@ describe('Subscription Handlers', () => {
       abortController.abort()
     })
 
-    it('should throw AuthRequiredError for unauthorized service access', async () => {
+    it('excludes non-shared-boundary users from service replay', async () => {
+      await enrollService(['nerv'])
+      await enrollUser('did:plc:kaworu-nagisa', ['seele'])
+
       const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()
+      const generator = handler({}, serviceCreds, abortController.signal)
 
-      const generator = handler(
-        {},
-        { credentials: { type: 'owner', did: testDid } },
-        abortController.signal,
-      )
+      const nextPromise = generator.next()
+      abortController.abort()
+      const result = await nextPromise
+      expect(result.done).toBe(true)
+    })
 
-      await expect(generator.next()).rejects.toThrow(
-        'Service auth required for service-level subscription',
-      )
+    it('excludes peer service rows from service replay', async () => {
+      await enrollService(['nerv'])
+      // A peer service sharing the boundary must still be excluded.
+      await enrollmentStore.enroll({
+        did: 'did:web:seele.peer',
+        enrolledAt: new Date().toISOString(),
+        active: true,
+        signingKeyDid: 'did:web:seele.peer',
+        isService: true,
+      })
+      await enrollmentStore.setBoundaries('did:web:seele.peer', ['nerv'])
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler({}, serviceCreds, abortController.signal)
+
+      const nextPromise = generator.next()
+      abortController.abort()
+      const result = await nextPromise
+      expect(result.done).toBe(true)
     })
   })
 })

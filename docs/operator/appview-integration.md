@@ -5,9 +5,14 @@ endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-
 
 ## Step 1: Service Authentication
 
-AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query
-parameter. The token must be a query param because `Authorization` headers are stripped by many
-WebSocket proxies and aren't supported in browser WebSocket APIs.
+AppViews authenticate using **service auth** — a signed JWT passed in the `Authorization: Bearer`
+header of the WebSocket upgrade request. Server-side WebSocket clients (such as the `ws` library)
+can set request headers, so no query-parameter fallback is needed or accepted.
+
+The subscription stream is **boundary-scoped**: the service is only sent records whose boundaries
+intersect the boundaries the service itself is enrolled in. A service that is not enrolled in any
+boundary is rejected. Mint the JWT with the `zone.stratos.sync.subscribeRecords` lexicon method as
+its audience-bound `lxm`.
 
 ```typescript
 import { createServiceJwt } from '@atproto/xrpc-server'
@@ -49,10 +54,11 @@ async function subscribeToUser(
     'wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords',
   )
   url.searchParams.set('did', did)
-  url.searchParams.set('syncToken', syncToken)
   if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
 
-  const ws = new WebSocket(url.toString())
+  const ws = new WebSocket(url.toString(), {
+    headers: { Authorization: `Bearer ${syncToken}` },
+  })
 
   ws.on('message', async (data) => {
     const frame = decodeFrame(data)
@@ -253,10 +259,11 @@ class StratosIndexer {
       `${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`,
     )
     url.searchParams.set('did', did)
-    url.searchParams.set('syncToken', syncToken)
     if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
 
-    const ws = new WebSocket(url.toString())
+    const ws = new WebSocket(url.toString(), {
+      headers: { Authorization: `Bearer ${syncToken}` },
+    })
 
     ws.on('message', async (data) => {
       const event = this.decodeEvent(data)

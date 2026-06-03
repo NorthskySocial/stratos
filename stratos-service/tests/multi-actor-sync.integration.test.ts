@@ -65,7 +65,22 @@ describe('Multi-Actor Sync Integration', () => {
         warn: vi.fn(),
       },
     }
+
+    // The subscribing service must be enrolled in a boundary; streams are
+    // scoped to that boundary.
+    await enrollmentStore.enroll({
+      did: serviceDid,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: serviceDid,
+      isService: true,
+    })
+    await enrollmentStore.setBoundaries(serviceDid, ['nerv'])
   })
+
+  const serviceCreds = {
+    credentials: { type: 'service', iss: serviceDid, did: serviceDid },
+  }
 
   afterEach(async () => {
     await closeServiceDb(db)
@@ -85,7 +100,10 @@ describe('Multi-Actor Sync Integration', () => {
         {
           action: 'create',
           path: 'zone.stratos.feed.post/1',
-          record: { text: 'Alice post' },
+          record: {
+            text: 'Alice post',
+            boundary: { values: [{ value: 'nerv' }] },
+          },
         },
       ],
     })
@@ -106,7 +124,10 @@ describe('Multi-Actor Sync Integration', () => {
         {
           action: 'create',
           path: 'zone.stratos.feed.post/1',
-          record: { text: 'Bob post' },
+          record: {
+            text: 'Bob post',
+            boundary: { values: [{ value: 'nerv' }] },
+          },
         },
       ],
     })
@@ -124,7 +145,7 @@ describe('Multi-Actor Sync Integration', () => {
     const aliceAbort = new AbortController()
     const aliceGen = handler(
       { did: aliceDid },
-      { credentials: { type: 'owner', did: aliceDid } },
+      serviceCreds,
       aliceAbort.signal,
     )
 
@@ -137,7 +158,7 @@ describe('Multi-Actor Sync Integration', () => {
     const bobAbort = new AbortController()
     const bobGen = handler(
       { did: bobDid },
-      { credentials: { type: 'owner', did: bobDid } },
+      serviceCreds,
       bobAbort.signal,
     )
 
@@ -155,11 +176,7 @@ describe('Multi-Actor Sync Integration', () => {
     const abort = new AbortController()
 
     // Service-level subscription requires service auth
-    const gen = handler(
-      {},
-      { credentials: { type: 'service', did: serviceDid } },
-      abort.signal,
-    )
+    const gen = handler({}, serviceCreds, abort.signal)
 
     // Initially, there should be no enrollments
     // Let's create an enrollment and see if it's replayed/streamed
@@ -173,6 +190,7 @@ describe('Multi-Actor Sync Integration', () => {
       enrollmentRkey: 'abc-123',
     }
     await enrollmentStore.enroll(aliceEnrollment)
+    await enrollmentStore.setBoundaries(aliceDid, ['nerv'])
 
     const first = await gen.next()
     expect(first.done).toBe(false)
@@ -201,7 +219,7 @@ describe('Multi-Actor Sync Integration', () => {
               {
                 action: 'create',
                 path: 'zone.stratos.feed.post/a1',
-                record: {},
+                record: { boundary: { values: [{ value: 'nerv' }] } },
               },
             ],
             rev: 'a1',
@@ -222,7 +240,7 @@ describe('Multi-Actor Sync Integration', () => {
               {
                 action: 'create',
                 path: 'zone.stratos.feed.post/a2',
-                record: {},
+                record: { boundary: { values: [{ value: 'nerv' }] } },
               },
             ],
             rev: 'a2',
@@ -244,7 +262,7 @@ describe('Multi-Actor Sync Integration', () => {
               {
                 action: 'create',
                 path: 'zone.stratos.feed.post/b1',
-                record: {},
+                record: { boundary: { values: [{ value: 'nerv' }] } },
               },
             ],
             rev: 'b1',
@@ -259,7 +277,7 @@ describe('Multi-Actor Sync Integration', () => {
     const aliceAbort = new AbortController()
     const aliceGen = handler(
       { did: aliceDid, cursor: 0 },
-      { credentials: { type: 'owner', did: aliceDid } },
+      serviceCreds,
       aliceAbort.signal,
     )
 
@@ -279,7 +297,7 @@ describe('Multi-Actor Sync Integration', () => {
     const bobAbort = new AbortController()
     const bobGen = handler(
       { did: bobDid, cursor: 0 },
-      { credentials: { type: 'owner', did: bobDid } },
+      serviceCreds,
       bobAbort.signal,
     )
 
