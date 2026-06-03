@@ -2,6 +2,7 @@
 // Todo: extract a shared stratos-sync library used by both the indexer and feedgen
 import { decodeFirst } from '@atcute/cbor'
 import { StratosError } from '@northskysocial/stratos-core'
+import { WebSocket as NodeWebSocket } from 'ws'
 
 export interface ServiceStreamCallbacks {
   onEnroll: (did: string, boundaries: string[]) => void | Promise<void>
@@ -43,7 +44,14 @@ interface WebSocketLike {
   onclose: (() => void) | null
 }
 
-type WebSocketCtor = new (url: string) => WebSocketLike
+interface WebSocketConnectOptions {
+  headers?: Record<string, string>
+}
+
+type WebSocketCtor = new (
+  url: string,
+  options?: WebSocketConnectOptions,
+) => WebSocketLike
 
 const DEFAULT_BASE_DELAY_MS = 5_000
 const DEFAULT_MAX_DELAY_MS = 60_000
@@ -54,8 +62,9 @@ const WS_OPEN = 1
  * Maintains a WebSocket subscription to the Stratos service-level
  * `zone.stratos.sync.subscribeRecords` stream, dispatching enrollment and
  * unenrollment events to the supplied callbacks. Reconnects with exponential
- * backoff (5s base, 60s cap, ±20% jitter) and mints a fresh sync token on
- * every (re)connect.
+ * backoff (5s base, 60s cap, ±20% jitter) and mints a fresh service-auth JWT
+ * (sent as an `Authorization: Bearer` header on the upgrade) on every
+ * (re)connect.
  */
 export class ServiceStream {
   private ws: WebSocketLike | null = null
@@ -78,7 +87,7 @@ export class ServiceStream {
     this.maxDelayMs = config.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
     this.wsCtor =
-      deps?.wsCtor ?? (globalThis.WebSocket as unknown as WebSocketCtor)
+      deps?.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
     this.rng = deps?.rng ?? Math.random
   }
 
@@ -120,13 +129,13 @@ export class ServiceStream {
     }
     if (!this.running) return
 
-    const wsUrl = buildWsUrl(this.config.stratosServiceUrl, {
-      syncToken: token,
-    })
+    const wsUrl = buildWsUrl(this.config.stratosServiceUrl)
 
     let ws: WebSocketLike
     try {
-      ws = new this.wsCtor(wsUrl)
+      ws = new this.wsCtor(wsUrl, {
+        headers: { authorization: `Bearer ${token}` },
+      })
     } catch (err) {
       this.onError?.(err as Error)
       this.scheduleReconnect()
@@ -207,14 +216,8 @@ export class ServiceStream {
   }
 }
 
-function buildWsUrl(
-  serviceUrl: string,
-  params: Record<string, string>,
-): string {
+function buildWsUrl(serviceUrl: string): string {
   const url = new URL(serviceUrl.replace(/^http/, 'ws'))
   url.pathname = '/xrpc/zone.stratos.sync.subscribeRecords'
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value)
-  }
   return url.toString()
 }

@@ -13,13 +13,15 @@ class FakeWebSocket {
   readyState: number = WS_CONNECTING
   binaryType = ''
   url: string
+  authHeader: string | undefined
   onmessage: ((e: { data: Uint8Array | ArrayBuffer }) => void) | null = null
   onerror: ((e: Event & { error?: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   private openListeners: Array<() => void> = []
 
-  constructor(url: string) {
+  constructor(url: string, options?: { headers?: Record<string, string> }) {
     this.url = url
+    this.authHeader = options?.headers?.authorization
     FakeWebSocket.instances.push(this)
   }
 
@@ -250,17 +252,17 @@ describe('ServiceStream', () => {
 
     stream.start()
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
-    expect(FakeWebSocket.instances[0].url).toContain('syncToken=token-1')
+    expect(FakeWebSocket.instances[0].authHeader).toBe('Bearer token-1')
 
     FakeWebSocket.instances[0].close()
     await vi.advanceTimersByTimeAsync(1000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
-    expect(FakeWebSocket.instances[1].url).toContain('syncToken=token-2')
+    expect(FakeWebSocket.instances[1].authHeader).toBe('Bearer token-2')
 
     FakeWebSocket.instances[1].close()
     await vi.advanceTimersByTimeAsync(1000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
-    expect(FakeWebSocket.instances[2].url).toContain('syncToken=token-3')
+    expect(FakeWebSocket.instances[2].authHeader).toBe('Bearer token-3')
     expect(mint.calls).toBe(3)
     stream.stop()
   })

@@ -240,6 +240,12 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.2.1)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.2.1))(vitest@4.0.18(@types/node@25.2.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(tsx@4.21.0)(yaml@2.9.0))
       '@testcontainers/postgresql':
         specifier: ^11.12.0
         version: 11.12.0

@@ -2,6 +2,7 @@
 // Todo: extract a shared stratos-sync library used by both the indexer and feedgen
 import { decodeFirst } from '@atcute/cbor'
 import { StratosError } from '@northskysocial/stratos-core'
+import { WebSocket as NodeWebSocket } from 'ws'
 import type { FeedgenStore } from '../db/index.js'
 import type { CommitOp, SubscriptionIndexer } from './indexer.js'
 
@@ -24,7 +25,14 @@ interface WebSocketLike {
   onclose: (() => void) | null
 }
 
-type WebSocketCtor = new (url: string) => WebSocketLike
+interface WebSocketConnectOptions {
+  headers?: Record<string, string>
+}
+
+type WebSocketCtor = new (
+  url: string,
+  options?: WebSocketConnectOptions,
+) => WebSocketLike
 
 export interface ActorSyncerConfig {
   did: string
@@ -60,7 +68,8 @@ const WS_OPEN = 1
  * Maintains a single per-actor WebSocket subscription to
  * `zone.stratos.sync.subscribeRecords?did=<did>` and feeds decoded commit
  * frames to the `SubscriptionIndexer`. Reconnects with the saved cursor on
- * drop; mints a fresh sync token on each (re)connect.
+ * drop; mints a fresh service-auth JWT (sent as an `Authorization: Bearer`
+ * header on the upgrade) on each (re)connect.
  */
 export class ActorSyncer {
   private ws: WebSocketLike | null = null
@@ -88,7 +97,7 @@ export class ActorSyncer {
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
     this.maxQueueSize = config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
     this.wsCtor =
-      deps.wsCtor ?? (globalThis.WebSocket as unknown as WebSocketCtor)
+      deps.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
     this.rng = deps.rng ?? Math.random
   }
 
@@ -169,13 +178,14 @@ export class ActorSyncer {
     const wsUrl = buildWsUrl(this.config.stratosServiceUrl, {
       did: this.config.did,
       cursor: cursor ?? undefined,
-      syncToken: token,
     })
     this.lastConnectUrl = wsUrl
 
     let ws: WebSocketLike
     try {
-      ws = new this.wsCtor(wsUrl)
+      ws = new this.wsCtor(wsUrl, {
+        headers: { authorization: `Bearer ${token}` },
+      })
     } catch (err) {
       this.deps.onError?.(err as Error)
       this.scheduleReconnect()
@@ -307,7 +317,7 @@ export class ActorSyncer {
 
 function buildWsUrl(
   serviceUrl: string,
-  params: { did: string; cursor?: number; syncToken: string },
+  params: { did: string; cursor?: number },
 ): string {
   const url = new URL(serviceUrl.replace(/^http/, 'ws'))
   url.pathname = '/xrpc/zone.stratos.sync.subscribeRecords'
@@ -315,6 +325,5 @@ function buildWsUrl(
   if (params.cursor !== undefined) {
     url.searchParams.set('cursor', String(params.cursor))
   }
-  url.searchParams.set('syncToken', params.syncToken)
   return url.toString()
 }

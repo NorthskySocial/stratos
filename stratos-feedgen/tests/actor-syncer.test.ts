@@ -22,13 +22,15 @@ class FakeWebSocket {
   readyState: number = WS_CONNECTING
   binaryType = ''
   url: string
+  authHeader: string | undefined
   onmessage: ((e: { data: Uint8Array | ArrayBuffer }) => void) | null = null
   onerror: ((e: Event & { error?: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   private openListeners: Array<() => void> = []
 
-  constructor(url: string) {
+  constructor(url: string, options?: { headers?: Record<string, string> }) {
     this.url = url
+    this.authHeader = options?.headers?.authorization
     FakeWebSocket.instances.push(this)
   }
 
@@ -196,7 +198,8 @@ describe('ActorSyncer', () => {
     const second = FakeWebSocket.instances[1]
     expect(second.url).toContain('cursor=42')
     expect(second.url).toContain(`did=${encodeURIComponent(DID)}`)
-    expect(second.url).toContain('syncToken=tok-1')
+    expect(second.url).not.toContain('syncToken=')
+    expect(second.authHeader).toBe('Bearer tok-1')
     syncer.stop()
   })
 
@@ -261,11 +264,11 @@ describe('ActorSyncer', () => {
     )
     syncer.start()
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
-    expect(FakeWebSocket.instances[0].url).toContain('syncToken=tok-1')
+    expect(FakeWebSocket.instances[0].authHeader).toBe('Bearer tok-1')
     FakeWebSocket.instances[0].close()
     await vi.advanceTimersByTimeAsync(1_500)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
-    expect(FakeWebSocket.instances[1].url).toContain('syncToken=tok-2')
+    expect(FakeWebSocket.instances[1].authHeader).toBe('Bearer tok-2')
     syncer.stop()
   })
 

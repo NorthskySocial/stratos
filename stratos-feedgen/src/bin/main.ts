@@ -66,7 +66,7 @@ async function main(): Promise<void> {
     actorPool = new ActorPool(
       {
         stratosServiceUrl: cfg.stratosServiceUrl,
-        mintToken: () => upstream.mintSyncToken(),
+        mintToken: () => upstream.mintServiceAuthToken(),
         maxConnections: parseIntEnv(
           process.env['FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS'],
         ),
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     serviceStream = new ServiceStream(
       {
         stratosServiceUrl: cfg.stratosServiceUrl,
-        mintToken: () => upstream.mintSyncToken(),
+        mintToken: () => upstream.mintServiceAuthToken(),
       },
       {
         onEnroll: async (did, boundaries) => {
