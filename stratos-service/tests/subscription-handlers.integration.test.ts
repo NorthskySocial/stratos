@@ -212,6 +212,86 @@ describe('Subscription Handlers', () => {
       expect(result.done).toBe(true)
     })
 
+    it('holds the stream open for an actor without a store', async () => {
+      await enrollService(['nerv'])
+      await enrollUser(testDid, ['nerv'])
+      // Note: no actorStore.create(testDid) — the actor has enrolled but has
+      // not written a record yet, so it has no per-actor store.
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      const nextPromise = generator.next()
+      abortController.abort()
+      const result = await nextPromise
+      // Previously this threw NotFound; now it stays open and returns cleanly
+      // when aborted.
+      expect(result.done).toBe(true)
+    })
+
+    it('streams the first record once a previously-absent store is created', async () => {
+      await enrollService(['nerv'])
+      await enrollUser(testDid, ['nerv'])
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      // Enters the hold-open path and waits for the store to appear.
+      const firstPromise = generator.next()
+
+      // The actor's first write creates the store and appends an event.
+      await actorStore.create(testDid)
+      await appendPost(testDid, 'zone.stratos.feed.post/1', 'nerv', 'Hello')
+
+      // Wake the waiting stream; poll to avoid a listener-registration race.
+      const wake = setInterval(() => sequenceEvents.emit(testDid), 5)
+      const first = await firstPromise
+      clearInterval(wake)
+
+      expect(first.done).toBe(false)
+      expect(first.value.$type).toBe(
+        'zone.stratos.sync.subscribeRecords#commit',
+      )
+      expect((first.value as any).ops[0].path).toBe('zone.stratos.feed.post/1')
+
+      abortController.abort()
+    })
+
+    it('resumes from latest instead of rejecting a future cursor', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+      await appendPost(testDid, 'zone.stratos.feed.post/1', 'nerv', 'first')
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid, cursor: 999 },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      const nextPromise = generator.next()
+      abortController.abort()
+      const result = await nextPromise
+
+      // Previously this threw FutureCursor; now it clamps to latest and waits.
+      expect(result.done).toBe(true)
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ did: testDid, cursor: 999, latestSeq: 1 }),
+        expect.stringContaining('cursor ahead of latest'),
+      )
+    })
+
     it('rejects non-service credentials', async () => {
       const handler = createSubscribeRecordsHandler(ctx) as any
       const abortController = new AbortController()

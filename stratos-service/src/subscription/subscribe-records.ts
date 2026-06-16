@@ -1,4 +1,4 @@
-import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
+import { AuthRequiredError } from '@atproto/xrpc-server'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import type { WebSocket } from 'ws'
 
@@ -87,33 +87,53 @@ function createActorSubscriptionHandler(ctx: AppContext) {
     callerBoundaries: ReadonlySet<string>,
     signal: AbortSignal,
   ): AsyncGenerator<SubscriptionMessage> {
-    const exists = await ctx.actorStore.exists(did)
-    if (!exists) {
-      throw new InvalidRequestError('Account not found', 'NotFound')
+    // The actor store is created lazily on the actor's first write. An enrolled
+    // actor that hasn't posted yet (or whose enrollment event raced ahead of
+    // repo initialization) has no store. Rather than closing the stream — which
+    // pushes the client into a reconnect loop — hold the connection open and
+    // begin streaming once the store appears on first write.
+    if (!(await ctx.actorStore.exists(did))) {
+      yield* streamNewEvents(
+        ctx,
+        did,
+        cursor ?? 0,
+        domain,
+        callerBoundaries,
+        signal,
+      )
+      return
     }
 
     const latestSeq = await getLatestSeq(ctx, did)
-    if (cursor !== undefined && cursor > latestSeq) {
-      throw new InvalidRequestError('Cursor is in the future', 'FutureCursor')
-    }
-
-    const oldestSeq = await getOldestSeq(ctx, did)
-    if (cursor !== undefined && cursor < oldestSeq) {
-      yield {
-        $type: 'zone.stratos.sync.subscribeRecords#info',
-        name: 'OutdatedCursor',
-        message: `Cursor ${cursor} is too old, some events may be missed`,
-      }
-    }
 
     let lastSeq = cursor ?? 0
-    const catchUp = await getEventsSince(ctx, did, lastSeq)
+    if (cursor !== undefined && cursor > latestSeq) {
+      // The client's cursor is ahead of our newest event, which happens when
+      // the actor store was reset while the client retained its old cursor.
+      // Resume from the latest sequence instead of rejecting the connection,
+      // which the client would otherwise retry indefinitely.
+      ctx.logger?.warn(
+        { did, cursor, latestSeq },
+        'subscribeRecords: cursor ahead of latest, resuming from latest',
+      )
+      lastSeq = latestSeq
+    } else {
+      const oldestSeq = await getOldestSeq(ctx, did)
+      if (cursor !== undefined && cursor < oldestSeq) {
+        yield {
+          $type: 'zone.stratos.sync.subscribeRecords#info',
+          name: 'OutdatedCursor',
+          message: `Cursor ${cursor} is too old, some events may be missed`,
+        }
+      }
 
-    for (const event of catchUp) {
-      if (signal.aborted) return
-      const message = emitEvent(ctx, event, callerBoundaries, domain)
-      if (message) yield message
-      lastSeq = event.seq
+      const catchUp = await getEventsSince(ctx, did, lastSeq)
+      for (const event of catchUp) {
+        if (signal.aborted) return
+        const message = emitEvent(ctx, event, callerBoundaries, domain)
+        if (message) yield message
+        lastSeq = event.seq
+      }
     }
 
     yield* streamNewEvents(ctx, did, lastSeq, domain, callerBoundaries, signal)
@@ -175,7 +195,9 @@ async function* streamNewEvents(
     for (const event of newEvents) {
       if (signal.aborted) return
       const message = emitEvent(ctx, event, callerBoundaries, domain)
-      if (message) yield message
+      if (message) {
+        yield message
+      }
       lastSeq = event.seq
     }
   }
@@ -324,6 +346,9 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
  * @returns Latest sequence number for the DID
  */
 async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
+  // Reading opens (and therefore creates) the actor SQLite file. Skip the read
+  // for actors without a store so we never materialize an empty database.
+  if (!(await ctx.actorStore.exists(did))) return 0
   try {
     return await ctx.actorStore.read(did, async (store) => {
       return store.sequence.getLatestSeq()
@@ -341,6 +366,7 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
  * @returns Oldest sequence number for the DID
  */
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
+  if (!(await ctx.actorStore.exists(did))) return 0
   try {
     return await ctx.actorStore.read(did, async (store) => {
       return store.sequence.getOldestSeq()
@@ -363,6 +389,9 @@ async function getEventsSince(
   did: string,
   cursor: number,
 ): Promise<SeqEvent[]> {
+  // Avoid opening (and creating) a SQLite file for actors that have not written
+  // yet; the streaming loop polls this until the store appears on first write.
+  if (!(await ctx.actorStore.exists(did))) return []
   try {
     return await ctx.actorStore.read(did, async (store) => {
       const rows = await store.sequence.getEventsSince(cursor, 100)
@@ -544,11 +573,13 @@ export function registerSubscribeRecords(ctx: AppContext): void {
   ctx.xrpcServer.streamMethod('zone.stratos.sync.subscribeRecords', {
     auth: ctx.authVerifier.subscribeAuth,
     handler: async function* ({ params, auth, signal }) {
+      const connDid = (params as Record<string, unknown>).did
+      const authType = (auth as { credentials: { type: string } }).credentials
+        .type
       ctx.logger?.info(
         {
-          did: (params as Record<string, unknown>).did,
-          authType: (auth as { credentials: { type: string } }).credentials
-            .type,
+          did: connDid,
+          authType,
         },
         'subscribeRecords connected',
       )
@@ -562,9 +593,7 @@ export function registerSubscribeRecords(ctx: AppContext): void {
         }
       }
 
-      for await (const event of handler(typedParams, typedAuth, signal)) {
-        yield event
-      }
+      yield* handler(typedParams, typedAuth, signal)
     },
   })
 
@@ -592,7 +621,9 @@ export function registerSubscribeRecords(ctx: AppContext): void {
         alive = false
         ws.ping()
       }, WS_PING_INTERVAL_MS)
-      ws.on('close', () => clearInterval(interval))
+      ws.on('close', () => {
+        clearInterval(interval)
+      })
     })
     ctx.logger?.info('WebSocket ping/pong configured (interval: 30s)')
   }
