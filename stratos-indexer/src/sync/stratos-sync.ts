@@ -51,6 +51,10 @@ const DEFAULT_ACTOR_SYNC_OPTIONS: StratosActorSyncOptions = {
   reconnectMaxAttempts: 10,
 }
 
+const SERVICE_RECONNECT_BASE_DELAY_MS = 1000
+const SERVICE_RECONNECT_MAX_DELAY_MS = 30000
+const SERVICE_STABILITY_RESET_MS = 30000
+
 // --- Service-level enrollment stream ---
 
 /**
@@ -60,6 +64,8 @@ export class StratosServiceSubscription {
   private ws: WebSocket | null = null
   private running = false
   private reconnectAttempt = 0
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private stabilityTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private config: StratosSyncConfig,
@@ -88,6 +94,11 @@ export class StratosServiceSubscription {
    */
   stop(): void {
     this.running = false
+    this.clearStabilityTimer()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     if (this.ws) {
       this.ws.close()
       this.ws = null
@@ -109,7 +120,7 @@ export class StratosServiceSubscription {
     this.ws.binaryType = 'arraybuffer'
 
     this.ws.addEventListener('open', () => {
-      this.reconnectAttempt = 0
+      this.armStabilityReset()
     })
 
     this.ws.onmessage = (e: MessageEvent) => {
@@ -133,6 +144,7 @@ export class StratosServiceSubscription {
 
     this.ws.onclose = () => {
       this.ws = null
+      this.clearStabilityTimer()
       if (this.running) {
         this.scheduleReconnect()
       }
@@ -144,9 +156,42 @@ export class StratosServiceSubscription {
    * @private
    */
   private scheduleReconnect(): void {
+    if (!this.running || this.reconnectTimer) return
     this.reconnectAttempt++
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000)
-    setTimeout(() => this.connect(), delay)
+    const delay = Math.min(
+      SERVICE_RECONNECT_BASE_DELAY_MS * Math.pow(2, this.reconnectAttempt),
+      SERVICE_RECONNECT_MAX_DELAY_MS,
+    )
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.connect()
+    }, delay)
+  }
+
+  /**
+   * Reset the backoff counter only after the connection has stayed open for
+   * the stability window, so an accept-then-immediately-close loop escalates
+   * its delay instead of reconnecting forever at the base delay.
+   * @private
+   */
+  private armStabilityReset(): void {
+    this.clearStabilityTimer()
+    this.stabilityTimer = setTimeout(() => {
+      this.stabilityTimer = null
+      this.reconnectAttempt = 0
+    }, SERVICE_STABILITY_RESET_MS)
+    this.stabilityTimer.unref?.()
+  }
+
+  /**
+   * Clear any pending stability-reset timer.
+   * @private
+   */
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer)
+      this.stabilityTimer = null
+    }
   }
 
   /**
