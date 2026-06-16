@@ -133,7 +133,9 @@ export class ActorPool {
       return
     }
     const idx = this.waiting.indexOf(did)
-    if (idx >= 0) this.waiting.splice(idx, 1)
+    if (idx >= 0) {
+      this.waiting.splice(idx, 1)
+    }
   }
 
   getActiveActors(): string[] {

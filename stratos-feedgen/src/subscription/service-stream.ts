@@ -15,6 +15,12 @@ export interface ServiceStreamConfig {
   baseDelayMs?: number
   maxDelayMs?: number
   jitterRatio?: number
+  /**
+   * How long a connection must stay open before its backoff counter is reset.
+   * Prevents an accept-then-immediately-close loop from reconnecting forever at
+   * the base delay without ever escalating.
+   */
+  stabilityResetMs?: number
 }
 
 interface EnrollmentMessage {
@@ -56,6 +62,7 @@ type WebSocketCtor = new (
 const DEFAULT_BASE_DELAY_MS = 5_000
 const DEFAULT_MAX_DELAY_MS = 60_000
 const DEFAULT_JITTER_RATIO = 0.2
+const DEFAULT_STABILITY_RESET_MS = 30_000
 const WS_OPEN = 1
 
 /**
@@ -71,9 +78,11 @@ export class ServiceStream {
   private running = false
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
+  private readonly stabilityResetMs: number
   private readonly wsCtor: WebSocketCtor
   private readonly rng: () => number
 
@@ -86,6 +95,8 @@ export class ServiceStream {
     this.baseDelayMs = config.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
     this.maxDelayMs = config.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
+    this.stabilityResetMs =
+      config.stabilityResetMs ?? DEFAULT_STABILITY_RESET_MS
     this.wsCtor =
       deps?.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
     this.rng = deps?.rng ?? Math.random
@@ -103,6 +114,7 @@ export class ServiceStream {
 
   stop(): void {
     this.running = false
+    this.clearStabilityTimer()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -145,7 +157,7 @@ export class ServiceStream {
     this.ws = ws
 
     ws.addEventListener('open', () => {
-      this.reconnectAttempt = 0
+      this.armStabilityReset()
     })
 
     ws.onmessage = (e: MessageEventLike) => {
@@ -172,14 +184,36 @@ export class ServiceStream {
 
     ws.onclose = () => {
       this.ws = null
+      this.clearStabilityTimer()
       if (this.running) {
         this.scheduleReconnect()
       }
     }
   }
 
+  /**
+   * Reset the backoff counter only after the connection has stayed open for
+   * `stabilityResetMs`. A connection that drops before then keeps its elevated
+   * attempt count so repeated early failures escalate the delay.
+   */
+  private armStabilityReset(): void {
+    this.clearStabilityTimer()
+    this.stabilityTimer = setTimeout(() => {
+      this.stabilityTimer = null
+      this.reconnectAttempt = 0
+    }, this.stabilityResetMs)
+    this.stabilityTimer.unref?.()
+  }
+
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer)
+      this.stabilityTimer = null
+    }
+  }
+
   private scheduleReconnect(): void {
-    if (!this.running) return
+    if (!this.running || this.reconnectTimer) return
     this.reconnectAttempt++
     const exp = this.baseDelayMs * Math.pow(2, this.reconnectAttempt - 1)
     const capped = Math.min(exp, this.maxDelayMs)

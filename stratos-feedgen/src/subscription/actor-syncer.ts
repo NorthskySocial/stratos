@@ -42,6 +42,12 @@ export interface ActorSyncerConfig {
   maxDelayMs?: number
   jitterRatio?: number
   maxQueueSize?: number
+  /**
+   * How long a connection must stay open before its backoff counter is reset.
+   * Prevents an accept-then-immediately-close loop from reconnecting forever at
+   * the base delay without ever escalating.
+   */
+  stabilityResetMs?: number
 }
 
 export interface ActorSyncerDeps {
@@ -62,6 +68,7 @@ const DEFAULT_BASE_DELAY_MS = 5_000
 const DEFAULT_MAX_DELAY_MS = 60_000
 const DEFAULT_JITTER_RATIO = 0.2
 const DEFAULT_MAX_QUEUE_SIZE = 1_000
+const DEFAULT_STABILITY_RESET_MS = 30_000
 const WS_OPEN = 1
 
 /**
@@ -76,12 +83,14 @@ export class ActorSyncer {
   private running = false
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private queue: Uint8Array[] = []
   private draining = false
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
   private readonly maxQueueSize: number
+  private readonly stabilityResetMs: number
   private readonly wsCtor: WebSocketCtor
   private readonly rng: () => number
   private connectGate: (() => Promise<void>) | null = null
@@ -96,6 +105,8 @@ export class ActorSyncer {
     this.maxDelayMs = config.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
     this.maxQueueSize = config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
+    this.stabilityResetMs =
+      config.stabilityResetMs ?? DEFAULT_STABILITY_RESET_MS
     this.wsCtor =
       deps.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
     this.rng = deps.rng ?? Math.random
@@ -134,6 +145,7 @@ export class ActorSyncer {
 
   stop(): void {
     this.running = false
+    this.clearStabilityTimer()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -195,8 +207,8 @@ export class ActorSyncer {
     this.ws = ws
 
     ws.addEventListener('open', () => {
-      this.reconnectAttempt = 0
       this.lastMessageAt = Date.now()
+      this.armStabilityReset()
     })
 
     ws.onmessage = (e: MessageEventLike) => {
@@ -224,9 +236,31 @@ export class ActorSyncer {
 
     ws.onclose = () => {
       this.ws = null
+      this.clearStabilityTimer()
       if (this.running) {
         this.scheduleReconnect()
       }
+    }
+  }
+
+  /**
+   * Reset the backoff counter only after the connection has stayed open for
+   * `stabilityResetMs`. A connection that drops before then keeps its elevated
+   * attempt count so repeated early failures escalate the delay.
+   */
+  private armStabilityReset(): void {
+    this.clearStabilityTimer()
+    this.stabilityTimer = setTimeout(() => {
+      this.stabilityTimer = null
+      this.reconnectAttempt = 0
+    }, this.stabilityResetMs)
+    this.stabilityTimer.unref?.()
+  }
+
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer)
+      this.stabilityTimer = null
     }
   }
 
