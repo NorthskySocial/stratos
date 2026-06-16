@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { asc, eq, gt, and } from 'drizzle-orm'
 import {
   type EnrollmentStoreReader,
   type StoredEnrollment,
@@ -152,14 +152,13 @@ export class SqliteEnrollmentStore
     const limit = options?.limit ?? 50
     const cursor = options?.cursor
 
-    const query = this.db.select().from(enrollment).limit(limit)
-    // Basic cursor implementation based on DID
-    if (cursor) {
-      // For simplicity, using alphabetical DID as cursor
-      // In a real app, maybe use a primary key or timestamp
-    }
+    const rows = await this.db
+      .select()
+      .from(enrollment)
+      .where(cursor ? gt(enrollment.did, cursor) : undefined)
+      .orderBy(asc(enrollment.did))
+      .limit(limit)
 
-    const rows = await query
     return rows.map((row) => ({
       did: row.did,
       enrolledAt: row.enrolledAt,
@@ -181,11 +180,17 @@ export class SqliteEnrollmentStore
     cursor?: string
   }): Promise<StoredEnrollment[]> {
     const limit = options?.limit ?? 50
+    const cursor = options?.cursor
+
+    const condition = cursor
+      ? and(eq(enrollment.isService, true), gt(enrollment.did, cursor))
+      : eq(enrollment.isService, true)
 
     const rows = await this.db
       .select()
       .from(enrollment)
-      .where(eq(enrollment.isService, true))
+      .where(condition)
+      .orderBy(asc(enrollment.did))
       .limit(limit)
 
     return rows.map((row) => ({
