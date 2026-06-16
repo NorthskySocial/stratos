@@ -5,6 +5,8 @@
 export interface FeedgenConfig {
   /** DID of this feed generator service (e.g. `did:web:feedgen.example.com`). */
   feedgenServiceDid: string
+  /** Public base URL of this feed generator (used as the DID document service endpoint). */
+  feedgenPublicUrl: string
   /** Private signing key for this feed generator's service identity. */
   feedgenSigningKey: string
   /** Base URL of the upstream Stratos service. */
@@ -65,8 +67,13 @@ export function loadFeedgenConfig(
     )
   }
 
+  const feedgenServiceDid = requireEnv(env, 'FEEDGEN_SERVICE_DID')
+
   return {
-    feedgenServiceDid: requireEnv(env, 'FEEDGEN_SERVICE_DID'),
+    feedgenServiceDid,
+    feedgenPublicUrl: trimTrailingSlash(
+      env['FEEDGEN_PUBLIC_URL'] ?? didWebToUrl(feedgenServiceDid),
+    ),
     feedgenSigningKey: requireEnv(env, 'FEEDGEN_SIGNING_KEY'),
     stratosServiceUrl: trimTrailingSlash(
       requireEnv(env, 'STRATOS_SERVICE_URL'),
@@ -122,4 +129,17 @@ function requireEnv(env: FeedgenEnv, key: string): string {
 
 function trimTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url
+}
+
+function didWebToUrl(did: string): string {
+  const prefix = 'did:web:'
+  if (!did.startsWith(prefix)) {
+    throw new Error(
+      `Cannot derive public URL from non-did:web DID: ${did} (set FEEDGEN_PUBLIC_URL)`,
+    )
+  }
+  const [host, ...segments] = did.slice(prefix.length).split(':')
+  const authority = decodeURIComponent(host)
+  const path = segments.map(decodeURIComponent).join('/')
+  return path ? `https://${authority}/${path}` : `https://${authority}`
 }

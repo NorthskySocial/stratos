@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   const port = parsePort(process.env['FEEDGEN_PORT']) ?? 3000
 
   const keypair = await Secp256k1Keypair.import(cfg.feedgenSigningKey)
+  const publicKeyMultibase = keypair.did().slice('did:key:'.length)
   const idResolver = new IdResolver({ plcUrl: cfg.feedgenPlcUrl })
 
   const upstream = new UpstreamStratosClient({
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
 
   const server = createFeedgenServer({
     feedgenServiceDid: cfg.feedgenServiceDid,
+    feedgenPublicUrl: cfg.feedgenPublicUrl,
+    publicKeyMultibase,
     feeds,
     store,
     enrollmentManager,
