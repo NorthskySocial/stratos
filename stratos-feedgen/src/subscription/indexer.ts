@@ -33,14 +33,17 @@ export class SubscriptionIndexer {
   async applyCommit(args: IndexCommitArgs): Promise<void> {
     const { did, seq, time, ops } = args
     for (const op of ops) {
-      if (!isPostPath(op.path)) continue
+      // Accept both `${collection}/${rkey}` and `/${collection}/${rkey}`:
+      // older sequence events were written with a leading slash.
+      const path = op.path.startsWith('/') ? op.path.slice(1) : op.path
+      if (!isPostPath(path)) continue
       if (op.action === 'delete') {
-        await this.store.deletePost(`at://${did}/${op.path}`)
+        await this.store.deletePost(`at://${did}/${path}`)
         continue
       }
       if (!op.cid || !op.record) continue
       if (op.record['$type'] !== STRATOS_POST_COLLECTION) continue
-      const uri = `at://${did}/${op.path}`
+      const uri = `at://${did}/${path}`
       const sortAt = pickSortAt(op.record, time)
       const boundaries = extractBoundaries(op.record)
       const blobRefs = extractBlobRefs(op.record)
