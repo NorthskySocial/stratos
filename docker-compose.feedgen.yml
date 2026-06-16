@@ -1,0 +1,77 @@
+# Local feedgen overlay — compose ON TOP of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.feedgen.yml up -d
+#
+# Easiest path: let ../ops/scripts/feedgen-start.sh orchestrate this. It brings
+# up the tunnel, extracts the public host, generates the signing key, renders
+# did.json, then starts feedgen + caddy in the right order.
+#
+# If driving compose by hand, these must be set first:
+#   1. FEEDGEN_HOST=<public-host>      (no scheme — e.g. abc-def.trycloudflare.com)
+#   2. FEEDGEN_SIGNING_KEY=<privHex>   (from stratos-feedgen/local/gen-key.mjs)
+#   3. did.json rendered from did.template.json into stratos-feedgen/local/did.json
+#      with FEEDGEN_HOST + multibase substituted
+#
+# Caddy serves did:web and reverse-proxies XRPC so the feedgen service code is
+# untouched. The tunnel must point at caddy (8080), giving the did doc and XRPC
+# a single public origin.
+
+services:
+  # Ephemeral HTTPS tunnel to the caddy sidecar, mirroring the load-test setup.
+  # trycloudflare prints its URL to the logs; feedgen-start.sh greps it out.
+  # Swap for ngrok manually if you prefer — point it at localhost:${FEEDGEN_CADDY_PORT}.
+  feedgen-cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: stratos-feedgen-tunnel
+    restart: unless-stopped
+    # No depends_on: the start script brings this up FIRST to learn the public
+    # host, since caddy can't bind-mount did.json until that host is known.
+    # cloudflared tolerates the upstream being absent and retries.
+    command: tunnel --no-autoupdate --url http://feedgen-caddy:8080
+
+
+  feedgen:
+    build:
+      context: .
+      dockerfile: stratos-feedgen/Dockerfile
+      target: feedgen
+    container_name: stratos-feedgen
+    restart: unless-stopped
+    environment:
+      FEEDGEN_PORT: 3000
+      FEEDGEN_SERVICE_DID: did:web:${FEEDGEN_HOST}
+      FEEDGEN_SIGNING_KEY: ${FEEDGEN_SIGNING_KEY}
+      STRATOS_SERVICE_URL: http://stratos:3100
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
+      FEEDGEN_STORAGE_BACKEND: sqlite
+      FEEDGEN_SQLITE_PATH: /app/data/feedgen.sqlite
+      FEEDGEN_FEEDS_FILE: /app/config/feeds.yaml
+      FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true'
+      FEEDGEN_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+    volumes:
+      - feedgen-data:/app/data
+      - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
+    depends_on:
+      stratos:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  feedgen-caddy:
+    image: caddy:2-alpine
+    container_name: stratos-feedgen-caddy
+    restart: unless-stopped
+    ports:
+      - '${FEEDGEN_CADDY_PORT:-8080}:8080'
+    volumes:
+      - ./stratos-feedgen/local/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./stratos-feedgen/local/did.json:/srv/did.json:ro
+    depends_on:
+      - feedgen
+
+volumes:
+  feedgen-data:

@@ -1,0 +1,22 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1"
+  ],
+  "id": "did:web:__FEEDGEN_HOST__",
+  "verificationMethod": [
+    {
+      "id": "did:web:__FEEDGEN_HOST__#atproto",
+      "type": "Multikey",
+      "controller": "did:web:__FEEDGEN_HOST__",
+      "publicKeyMultibase": "__FEEDGEN_PUBLIC_KEY_MULTIBASE__"
+    }
+  ],
+  "service": [
+    {
+      "id": "#stratos_feedgen",
+      "type": "NorthskyStratosFeedGen",
+      "serviceEndpoint": "https://__FEEDGEN_HOST__"
+    }
+  ]
+}
