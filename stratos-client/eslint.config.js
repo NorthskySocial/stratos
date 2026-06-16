@@ -5,7 +5,13 @@ import prettierConfig from 'eslint-config-prettier'
 
 export default tseslint.config(
   {
-    ignores: ['dist/', 'node_modules/', 'tests/**'],
+    ignores: [
+      'dist/',
+      'node_modules/',
+      'tests/**',
+      'scripts/**',
+      'src/lexicons.gen.ts',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({

@@ -90,6 +90,9 @@ importers:
       '@atcute/repo':
         specifier: ^0.1.2
         version: 0.1.2
+      '@northskysocial/stratos-core':
+        specifier: workspace:*
+        version: link:../stratos-core
     devDependencies:
       '@atcute/cbor':
         specifier: ^2.3.2
@@ -100,9 +103,9 @@ importers:
       '@atproto/crypto':
         specifier: ^0.4.5
         version: 0.4.5
-      '@northskysocial/stratos-core':
-        specifier: workspace:*
-        version: link:../stratos-core
+      '@atproto/lexicon':
+        specifier: ^0.6.1
+        version: 0.6.2
       '@types/node':
         specifier: ^25.2.1
         version: 25.2.1
@@ -548,9 +551,6 @@ importers:
       '@atproto/syntax':
         specifier: ^0.3.0
         version: 0.3.4
-      '@northskysocial/stratos-core':
-        specifier: workspace:*
-        version: link:../stratos-core
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1

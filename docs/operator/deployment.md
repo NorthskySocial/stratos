@@ -92,7 +92,7 @@ Host this JSON at `https://stratos.example.com/client-metadata.json`:
   "client_name": "Stratos Private Namespace Service",
   "client_uri": "https://stratos.example.com",
   "redirect_uris": ["https://stratos.example.com/oauth/callback"],
-  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post",
+  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post rpc:zone.stratos.feedgen.getFeed?aud=*",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",

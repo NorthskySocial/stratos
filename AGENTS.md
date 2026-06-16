@@ -135,6 +135,8 @@ stratos-service/src/features/{feature}/
 | `verification.ts` | Record verification with inclusion proofs and user/service key signature checks |
 | `scopes.ts`       | OAuth scope declarations                                                        |
 | `types.ts`        | Client type definitions                                                         |
+| `lexicons.ts`     | Stable entry re-exporting the generated `zone.stratos.*` bundle (`./lexicons`)  |
+| `lexicons.gen.ts` | Auto-generated LexiconDoc bundle; regenerate with `pnpm lexgen`                 |
 
 **Indexer** (`stratos-indexer/src/`):
 
@@ -218,7 +220,6 @@ When a change requires adding or running tests to validate behaviour, you MUST:
   source files/modules you introduced, so the new code is actually under mutation analysis.
 - Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests or review the code and improve it
   rather than weakening the thresholds.
-
 
 ---
 
