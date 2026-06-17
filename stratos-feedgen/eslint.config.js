@@ -12,6 +12,7 @@ export default tseslint.config(
       'tests/**',
       '.stryker-tmp/',
       '**/.stryker-tmp/**',
+      'local/gen-key.mjs',
     ],
   },
   js.configs.recommended,
@@ -27,7 +28,7 @@ export default tseslint.config(
   {
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
-      globals: globals.browser,
+      globals: { ...globals.browser, ...globals.node },
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,

@@ -46,8 +46,7 @@ export function registerGetFeedHandler(
   server.method(NSID.getFeed, {
     auth: toXrpcAuthVerifier(deps.verifier),
     handler: async ({ params, auth }) => {
-      const { viewerDid } = (auth as { credentials: XrpcAuthCredentials })
-        .credentials
+      const { viewerDid } = auth.credentials
       const feedId = params['feed'] as string
       const limit = clampLimit(params['limit'])
       const cursor = params['cursor'] as string | undefined

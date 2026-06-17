@@ -500,7 +500,7 @@ function buildWsUrl(
       if (typeof value === 'object' && value !== null) {
         url.searchParams.set(key, JSON.stringify(value))
       } else {
-        url.searchParams.set(key, String(value as string))
+        url.searchParams.set(key, String(value))
       }
     }
   }

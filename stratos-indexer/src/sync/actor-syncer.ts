@@ -504,8 +504,8 @@ async function batchIndexStratosRecords(
           .onConflict((oc) =>
             oc.column('uri').doUpdateSet({
               cid: postRow.cid,
-              content: (postRow as unknown as PostTable).content,
-              indexedAt: (postRow as unknown as PostTable).indexedAt,
+              content: postRow.content,
+              indexedAt: postRow.indexedAt,
             }),
           )
           .execute()

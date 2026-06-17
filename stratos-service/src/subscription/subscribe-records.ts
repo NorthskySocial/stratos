@@ -439,7 +439,7 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
     const decoded = cborDecode(event.event) as Record<string, unknown>
     const rawOps = Array.isArray(decoded.ops)
       ? (decoded.ops as Record<string, unknown>[])
-      : [decoded as Record<string, unknown>]
+      : [decoded]
 
     const boundaries = new Set<string>()
     for (const op of rawOps) {

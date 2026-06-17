@@ -15,7 +15,7 @@ export function toXrpcAuthVerifier(
   verifier: FeedRequestVerifier,
 ): MethodAuthVerifier<{ credentials: XrpcAuthCredentials }> {
   return async ({ req }) => {
-    const result = await verifier({ headers: req.headers as RequestHeaders })
+    const result = await verifier({ headers: req.headers })
     return {
       credentials: { viewerDid: result.viewerDid, lxm: result.lxm },
     }

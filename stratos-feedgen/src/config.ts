@@ -49,7 +49,7 @@ export interface FeedgenEnv {
 }
 
 export function loadFeedgenConfig(
-  env: FeedgenEnv = process.env as FeedgenEnv,
+  env: FeedgenEnv = process.env,
 ): FeedgenConfig {
   const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
   const sqlitePath = env['FEEDGEN_SQLITE_PATH']

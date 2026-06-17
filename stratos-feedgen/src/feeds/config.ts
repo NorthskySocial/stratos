@@ -36,10 +36,7 @@ interface FeedsFileShape {
  *       description: Internal posts     # optional
  */
 export function loadFeedRegistry(
-  env: Record<string, string | undefined> = process.env as Record<
-    string,
-    string | undefined
-  >,
+  env: Record<string, string | undefined> = process.env,
 ): FeedRegistry {
   const filePath = env['FEEDGEN_FEEDS_FILE']
   const inlineJson = env['FEEDGEN_FEEDS_JSON']

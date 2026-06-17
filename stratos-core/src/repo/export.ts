@@ -7,8 +7,8 @@ import { type CarBlock, StratosRepoRootNotFoundError } from './reader.js'
  * Minimal repo source required to export a CAR file.
  */
 export interface RepoCarSource {
-  getRootDetailed(): Promise<{ cid: Cid; rev: string } | null>
-  iterateCarBlocks(since?: string): AsyncIterable<CarBlock>
+  getRootDetailed: () => Promise<{ cid: Cid; rev: string } | null>
+  iterateCarBlocks: (since?: string) => AsyncIterable<CarBlock>
 }
 
 /**
