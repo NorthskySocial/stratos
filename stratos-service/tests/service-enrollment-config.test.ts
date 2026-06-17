@@ -94,7 +94,9 @@ describe('service enrollment config parsing', () => {
       ]),
     })
 
-    expect(() => envToConfig(parseEnv())).toThrow(/duplicate service enrollment/)
+    expect(() => envToConfig(parseEnv())).toThrow(
+      /duplicate service enrollment/,
+    )
   })
 
   it('rejects boundaries outside allowedDomains', () => {

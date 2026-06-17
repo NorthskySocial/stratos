@@ -107,8 +107,7 @@ export class ActorSyncer {
     this.maxQueueSize = config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
     this.stabilityResetMs =
       config.stabilityResetMs ?? DEFAULT_STABILITY_RESET_MS
-    this.wsCtor =
-      deps.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
+    this.wsCtor = deps.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
     this.rng = deps.rng ?? Math.random
   }
 

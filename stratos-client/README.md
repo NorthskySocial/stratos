@@ -523,11 +523,11 @@ OAuth metadata and scope selector UI.
 
 ### Required scopes
 
-| Scope                                | Description                   | Dependency                                    |
-| ------------------------------------ | ----------------------------- | --------------------------------------------- |
-| `repo:zone.stratos.actor.enrollment` | Read/write enrollment records | None                                          |
-| `repo:zone.stratos.feed.post`        | Read/write Stratos posts      | Requires `repo:zone.stratos.actor.enrollment` |
-| `rpc:zone.stratos.feedgen.getFeed?aud=*` | Call any feed generator's `getFeed` | None                                      |
+| Scope                                    | Description                         | Dependency                                    |
+| ---------------------------------------- | ----------------------------------- | --------------------------------------------- |
+| `repo:zone.stratos.actor.enrollment`     | Read/write enrollment records       | None                                          |
+| `repo:zone.stratos.feed.post`            | Read/write Stratos posts            | Requires `repo:zone.stratos.actor.enrollment` |
+| `rpc:zone.stratos.feedgen.getFeed?aud=*` | Call any feed generator's `getFeed` | None                                          |
 
 ### Scope utilities
 

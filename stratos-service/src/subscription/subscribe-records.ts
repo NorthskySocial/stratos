@@ -323,9 +323,7 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 
     const boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
     if (boundaries.length === 0) {
-      throw new AuthRequiredError(
-        'Service is not enrolled in any boundary',
-      )
+      throw new AuthRequiredError('Service is not enrolled in any boundary')
     }
     const callerBoundaries = new Set(boundaries)
 

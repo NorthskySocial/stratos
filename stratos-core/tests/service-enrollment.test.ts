@@ -7,10 +7,7 @@ import {
 const SERVICE_DID = 'did:web:stratos.actor'
 const OPTIONS = {
   serviceDid: SERVICE_DID,
-  allowedDomains: [
-    `${SERVICE_DID}/engineering`,
-    `${SERVICE_DID}/leadership`,
-  ],
+  allowedDomains: [`${SERVICE_DID}/engineering`, `${SERVICE_DID}/leadership`],
 }
 
 describe('validateServiceEnrollments', () => {

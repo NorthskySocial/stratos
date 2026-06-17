@@ -97,8 +97,7 @@ export class ServiceStream {
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
     this.stabilityResetMs =
       config.stabilityResetMs ?? DEFAULT_STABILITY_RESET_MS
-    this.wsCtor =
-      deps?.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
+    this.wsCtor = deps?.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
     this.rng = deps?.rng ?? Math.random
   }
 

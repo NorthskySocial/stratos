@@ -1,8 +1,5 @@
 import { type DidDocument, IdResolver } from '@atproto/identity'
-import type {
-  Logger,
-  ServiceEnrollment,
-} from '@northskysocial/stratos-core'
+import type { Logger, ServiceEnrollment } from '@northskysocial/stratos-core'
 import type { StratosServiceConfig } from './config.js'
 
 /**
@@ -21,7 +18,11 @@ export function createIdResolver(
     plcUrl: cfg.identity.plcUrl,
   })
 
-  installServiceKeyShortcut(idResolver, cfg.enrollment.serviceEnrollments, logger)
+  installServiceKeyShortcut(
+    idResolver,
+    cfg.enrollment.serviceEnrollments,
+    logger,
+  )
 
   const originalResolve = idResolver.handle.resolve.bind(idResolver.handle)
   idResolver.handle.resolve = async (handle: string) => {

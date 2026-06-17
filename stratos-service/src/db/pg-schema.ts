@@ -1,10 +1,4 @@
-import {
-  pgTable,
-  text,
-  boolean,
-  index,
-  primaryKey,
-} from 'drizzle-orm/pg-core'
+import { pgTable, text, boolean, index, primaryKey } from 'drizzle-orm/pg-core'
 
 export const pgOauthSession = pgTable('oauth_session', {
   key: text('key').primaryKey(),

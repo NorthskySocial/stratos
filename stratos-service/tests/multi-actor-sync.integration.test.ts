@@ -143,11 +143,7 @@ describe('Multi-Actor Sync Integration', () => {
 
     // Subscribe to Alice's stream
     const aliceAbort = new AbortController()
-    const aliceGen = handler(
-      { did: aliceDid },
-      serviceCreds,
-      aliceAbort.signal,
-    )
+    const aliceGen = handler({ did: aliceDid }, serviceCreds, aliceAbort.signal)
 
     const aliceFirst = await aliceGen.next()
     expect(aliceFirst.done).toBe(false)
@@ -156,11 +152,7 @@ describe('Multi-Actor Sync Integration', () => {
 
     // Subscribe to Bob's stream
     const bobAbort = new AbortController()
-    const bobGen = handler(
-      { did: bobDid },
-      serviceCreds,
-      bobAbort.signal,
-    )
+    const bobGen = handler({ did: bobDid }, serviceCreds, bobAbort.signal)
 
     const bobFirst = await bobGen.next()
     expect(bobFirst.done).toBe(false)

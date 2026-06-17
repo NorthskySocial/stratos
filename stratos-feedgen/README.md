@@ -60,11 +60,11 @@ flowchart TD
 
 ### Auth flow
 
-| Direction                    | Mechanism                                                                              | Verification                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Client → PDS                 | OAuth + DPoP                                                                           | PDS validates DPoP-bound token                                                 |
-| PDS → Feed Gen               | Bearer service-auth JWT (`iss=userDID`, `aud=feedgenDID`, `lxm=<endpoint>`, `exp<60s`) | Feed gen resolves user DID, verifies signature via atproto verification method |
-| Feed Gen → Stratos           | Bearer service-auth JWT (`iss=feedgenDID`, `aud=stratosDID`, `lxm=<endpoint>`)         | Stratos `service` verifier resolves feed gen DID                               |
+| Direction                    | Mechanism                                                                                 | Verification                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Client → PDS                 | OAuth + DPoP                                                                              | PDS validates DPoP-bound token                                                 |
+| PDS → Feed Gen               | Bearer service-auth JWT (`iss=userDID`, `aud=feedgenDID`, `lxm=<endpoint>`, `exp<60s`)    | Feed gen resolves user DID, verifies signature via atproto verification method |
+| Feed Gen → Stratos           | Bearer service-auth JWT (`iss=feedgenDID`, `aud=stratosDID`, `lxm=<endpoint>`)            | Stratos `service` verifier resolves feed gen DID                               |
 | Feed Gen → Stratos (sync WS) | `Authorization: Bearer` header = same JWT shape, `lxm=zone.stratos.sync.subscribeRecords` | Stratos `subscribeAuth` verifier                                               |
 
 ### Identity

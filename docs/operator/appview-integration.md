@@ -50,7 +50,10 @@ subset of the service's `allowedDomains`.
 
 ```json
 [
-  { "did": "did:web:bsky.example.com", "boundaries": ["engineering", "leadership"] },
+  {
+    "did": "did:web:bsky.example.com",
+    "boundaries": ["engineering", "leadership"]
+  },
   { "did": "did:web:indexer.example.com", "boundaries": ["engineering"] }
 ]
 ```

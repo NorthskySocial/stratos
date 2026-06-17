@@ -203,9 +203,7 @@ describe('repo-read-handlers', () => {
 
       expect(mockActorStore.exists).toHaveBeenCalledWith('did:example:kusanagi')
       expect(result.encoding).toBe('application/vnd.ipld.car')
-      expect(Buffer.from(result.body)).toEqual(
-        Buffer.from([1, 2, 3, 4, 5]),
-      )
+      expect(Buffer.from(result.body)).toEqual(Buffer.from([1, 2, 3, 4, 5]))
     })
 
     it('forwards the since cursor to the export stream', async () => {
