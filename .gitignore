@@ -5,13 +5,13 @@ dist-bundle/
 *.tsbuildinfo
 .pnpm-store
 test-results
+reports/
 
 .env
 .env.local
 .env.*.local
 
-# Local feedgen testing: host-specific rendered did doc + generated key material
-stratos-feedgen/local/did.json
+# Local feedgen testing: generated key material
 stratos-feedgen/local/.env.feedgen
 
 *.sqlite
