@@ -45,7 +45,7 @@ docker run --rm --init --ipc=host \
   --network "container:${WEBAPP_CID}" \
   -v "${REPO_ROOT}:/workspace" \
   -w /workspace/webapp \
-  -u 1000:1000 \
+  -u "$(id -u):$(id -g)"  \
   -e E2E_BASE_URL="http://localhost:5173" \
   -e CI="${CI:-}" \
   "${PLAYWRIGHT_IMAGE}" \
