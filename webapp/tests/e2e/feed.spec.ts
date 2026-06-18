@@ -28,6 +28,54 @@ test.describe('Feed Rendering', () => {
         })
       },
     )
+
+    // Mock AppView author feed (called during startup)
+    await page.route('**/xrpc/app.bsky.feed.getAuthorFeed**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
+      })
+    })
+
+    // Mock Stratos enrollment status
+    await page.route(
+      '**/xrpc/zone.stratos.enrollment.status**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            enrolled: true,
+            enrolledAt: new Date().toISOString(),
+          }),
+        })
+      },
+    )
+
+    // Mock Stratos server listDomains
+    await page.route(
+      '**/xrpc/zone.stratos.server.listDomains**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ domains: ['example.com'] }),
+        })
+      },
+    )
+
+    // Mock feedgen getFeed (proxied through PDS)
+    await page.route(
+      '**/xrpc/zone.stratos.feedgen.getFeed**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
+        })
+      },
+    )
   })
 
   test('should render posts correctly', async ({ page }) => {
