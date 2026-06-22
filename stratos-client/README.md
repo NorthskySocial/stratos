@@ -20,10 +20,11 @@ into your app.
 6. [Blob support](#6-blob-support)
 7. [Record verification](#7-record-verification)
 8. [OAuth scope declarations](#8-oauth-scope-declarations)
-9. [CORS and header requirements](#9-cors-and-header-requirements)
-10. [Known pitfalls](#10-known-pitfalls)
-11. [social-app mapping](#11-social-app-mapping)
-12. [Minimum viable adoption path](#12-minimum-viable-adoption-path)
+9. [Lexicon registration](#9-lexicon-registration)
+10. [CORS and header requirements](#10-cors-and-header-requirements)
+11. [Known pitfalls](#11-known-pitfalls)
+12. [social-app mapping](#12-social-app-mapping)
+13. [Minimum viable adoption path](#13-minimum-viable-adoption-path)
 
 ---
 
@@ -522,10 +523,11 @@ OAuth metadata and scope selector UI.
 
 ### Required scopes
 
-| Scope                                | Description                   | Dependency                                    |
-| ------------------------------------ | ----------------------------- | --------------------------------------------- |
-| `repo:zone.stratos.actor.enrollment` | Read/write enrollment records | None                                          |
-| `repo:zone.stratos.feed.post`        | Read/write Stratos posts      | Requires `repo:zone.stratos.actor.enrollment` |
+| Scope                                    | Description                         | Dependency                                    |
+| ---------------------------------------- | ----------------------------------- | --------------------------------------------- |
+| `repo:zone.stratos.actor.enrollment`     | Read/write enrollment records       | None                                          |
+| `repo:zone.stratos.feed.post`            | Read/write Stratos posts            | Requires `repo:zone.stratos.actor.enrollment` |
+| `rpc:zone.stratos.feedgen.getFeed?aud=*` | Call any feed generator's `getFeed` | None                                          |
 
 ### Scope utilities
 
@@ -533,6 +535,7 @@ OAuth metadata and scope selector UI.
 import {
   STRATOS_SCOPES,
   buildCollectionScope,
+  buildRpcScope,
   buildStratosScopes,
 } from '@northskysocial/stratos-client'
 
@@ -540,11 +543,16 @@ import {
 const enrollmentScope = buildCollectionScope(STRATOS_SCOPES.enrollment)
 // => 'repo:zone.stratos.actor.enrollment'
 
+// RPC scope construction (aud defaults to '*', any service)
+const getFeedScope = buildRpcScope(STRATOS_SCOPES.getFeed)
+// => 'rpc:zone.stratos.feedgen.getFeed?aud=*'
+
 // Full scope set for OAuth metadata
 const scopes = buildStratosScopes()
 // => ['atproto',
 //     'repo:zone.stratos.actor.enrollment',
-//     'repo:zone.stratos.feed.post']
+//     'repo:zone.stratos.feed.post?action=create&action=delete',
+//     'rpc:zone.stratos.feedgen.getFeed?aud=*']
 ```
 
 ### OAuth client metadata
@@ -553,13 +561,50 @@ Add scopes to your `oauth-client-metadata.json`:
 
 ```json
 {
-  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post"
+  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post rpc:zone.stratos.feedgen.getFeed?aud=*"
 }
 ```
 
 ---
 
-## 9. CORS and Header Requirements
+## 9. Lexicon Registration
+
+If you use `@atcute/client` (as this guide assumes), you do **not** need to register lexicon schemas
+— atcute issues schema-less typed RPC calls, so Stratos NSIDs like `zone.stratos.feed.post` resolve
+without any setup.
+
+If instead you use `@atproto/api`, its `Agent` validates requests and responses against a registered
+`Lexicons` set. The base agent only knows the `com.atproto.*` and `app.bsky.*` schemas, so calls to
+`zone.stratos.*` endpoints throw until you register the Stratos lexicons. The client ships a
+browser-safe, dependency-free bundle for exactly this, exported from the `./lexicons` subpath:
+
+```typescript
+import { Agent } from '@atproto/api'
+import { stratosLexicons } from '@northskysocial/stratos-client/lexicons'
+
+export function configureAgent(agent: Agent): Agent {
+  for (const doc of stratosLexicons) {
+    try {
+      agent.lex.add(doc)
+    } catch {
+      // already registered — keep the existing definition
+    }
+  }
+  return agent
+}
+
+const agent = configureAgent(new Agent(session))
+// zone.stratos.* records now validate against the registered schemas
+```
+
+The bundle contains only the `zone.stratos.*` lexicons — the standard `com.atproto.*` and
+`app.bsky.*` definitions are already provided by the base `Agent`, so the `try/catch` simply skips
+any overlap. The bundle is generated from the canonical lexicon JSON at build time (`pnpm lexgen`)
+and exported from the `./lexicons` subpath to keep the package root lightweight for atcute consumers.
+
+---
+
+## 10. CORS and Header Requirements
 
 Browser clients making cross-origin requests to a Stratos service depend on correct CORS
 configuration. This is especially critical because the Stratos service is a different origin from
@@ -628,7 +673,7 @@ app.use((req, res, next) => {
 
 ---
 
-## 9. Known Pitfalls
+## 11. Known Pitfalls
 
 ### Async discovery race condition
 
@@ -699,7 +744,7 @@ Blob listing via `com.atproto.sync.listBlobs` is available. For more details, se
 
 ---
 
-## 11. social-app Mapping
+## 12. social-app Mapping
 
 For a React Native/Expo app like Bluesky's social-app:
 
@@ -759,7 +804,7 @@ const client = enrollment
 
 ---
 
-## 12. Minimum Viable Adoption Path
+## 13. Minimum Viable Adoption Path
 
 For apps that want to add basic Stratos support incrementally:
 

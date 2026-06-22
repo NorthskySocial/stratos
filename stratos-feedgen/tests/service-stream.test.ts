@@ -13,13 +13,15 @@ class FakeWebSocket {
   readyState: number = WS_CONNECTING
   binaryType = ''
   url: string
+  authHeader: string | undefined
   onmessage: ((e: { data: Uint8Array | ArrayBuffer }) => void) | null = null
   onerror: ((e: Event & { error?: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   private openListeners: Array<() => void> = []
 
-  constructor(url: string) {
+  constructor(url: string, options?: { headers?: Record<string, string> }) {
     this.url = url
+    this.authHeader = options?.headers?.authorization
     FakeWebSocket.instances.push(this)
   }
 
@@ -45,6 +47,13 @@ class FakeWebSocket {
 
   fail(err: Error): void {
     this.onerror?.(Object.assign(new Event('error'), { error: err }))
+  }
+
+  // Simulate the underlying socket emitting 'close' more than once (some ws
+  // stacks fire error+close). Bypasses the idempotency guard in close().
+  fireClose(): void {
+    this.readyState = WS_CLOSED
+    this.onclose?.()
   }
 }
 
@@ -250,17 +259,17 @@ describe('ServiceStream', () => {
 
     stream.start()
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
-    expect(FakeWebSocket.instances[0].url).toContain('syncToken=token-1')
+    expect(FakeWebSocket.instances[0].authHeader).toBe('Bearer token-1')
 
     FakeWebSocket.instances[0].close()
     await vi.advanceTimersByTimeAsync(1000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
-    expect(FakeWebSocket.instances[1].url).toContain('syncToken=token-2')
+    expect(FakeWebSocket.instances[1].authHeader).toBe('Bearer token-2')
 
     FakeWebSocket.instances[1].close()
     await vi.advanceTimersByTimeAsync(1000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
-    expect(FakeWebSocket.instances[2].url).toContain('syncToken=token-3')
+    expect(FakeWebSocket.instances[2].authHeader).toBe('Bearer token-3')
     expect(mint.calls).toBe(3)
     stream.stop()
   })
@@ -350,5 +359,115 @@ describe('ServiceStream', () => {
     stream.stop()
     await vi.advanceTimersByTimeAsync(5000)
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('does not reset backoff when a connection drops before the stability window', async () => {
+    const mint = makeMintToken()
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 60000,
+        jitterRatio: 0,
+        stabilityResetMs: 10000,
+      },
+      { onEnroll: () => {}, onUnenroll: () => {} },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+
+    // Open, then drop before the 10s window → attempt 1, reconnect at 1000ms.
+    FakeWebSocket.instances[0].open()
+    await vi.advanceTimersByTimeAsync(5000)
+    FakeWebSocket.instances[0].close()
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    // Open then drop again → attempt must escalate to 2 (2000ms), proving the
+    // `open` event alone did not reset the backoff counter.
+    FakeWebSocket.instances[1].open()
+    await vi.advanceTimersByTimeAsync(5000)
+    FakeWebSocket.instances[1].close()
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+
+    stream.stop()
+  })
+
+  it('resets backoff after a connection stays open past the stability window', async () => {
+    const mint = makeMintToken()
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 60000,
+        jitterRatio: 0,
+        stabilityResetMs: 5000,
+      },
+      { onEnroll: () => {}, onUnenroll: () => {} },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+
+    // Two quick drops escalate the delay to 2000ms (attempt 2).
+    FakeWebSocket.instances[0].close()
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    FakeWebSocket.instances[1].close()
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+
+    // Stay open past the 5s window → backoff resets, next drop is 1000ms again.
+    FakeWebSocket.instances[2].open()
+    await vi.advanceTimersByTimeAsync(5000)
+    FakeWebSocket.instances[2].close()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(4))
+
+    stream.stop()
+  })
+
+  it('schedules only one reconnect when close fires more than once', async () => {
+    const mint = makeMintToken()
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 60000,
+        jitterRatio: 0,
+      },
+      { onEnroll: () => {}, onUnenroll: () => {} },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+
+    // A socket that emits close twice must not double-schedule reconnects.
+    FakeWebSocket.instances[0].fireClose()
+    FakeWebSocket.instances[0].fireClose()
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    // A second (overlapping) reconnect at attempt 2 would fire at 2000ms and
+    // create a third socket; the guard must prevent that.
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    stream.stop()
   })
 })

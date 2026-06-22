@@ -9,6 +9,7 @@ const ALL_ACTIONS = ['create', 'update', 'delete']
 export const STRATOS_SCOPES: StratosScopes = {
   enrollment: 'zone.stratos.actor.enrollment',
   post: 'zone.stratos.feed.post',
+  getFeed: 'zone.stratos.feedgen.getFeed',
 }
 
 /**
@@ -37,6 +38,20 @@ export const buildCollectionScope = (
 }
 
 /**
+ * builds an atproto `rpc:` scope string for an XRPC method.
+ * follows the ATProto permissions spec. The `aud` (audience) defaults to
+ * `*`, granting the method against any service so the scope is not pinned
+ * to a single service DID.
+ *
+ * @param lxm the XRPC method NSID
+ * @param aud the audience; defaults to `*` (any service)
+ * @returns the formatted scope string
+ */
+export const buildRpcScope = (lxm: string, aud = '*'): string => {
+  return `rpc:${lxm}?aud=${aud}`
+}
+
+/**
  * builds the standard set of OAuth scopes needed for Stratos operations.
  * includes the `atproto` base scope plus granular repo scopes for
  * enrollment and post collections.
@@ -48,5 +63,6 @@ export const buildStratosScopes = (): string[] => {
     'atproto',
     buildCollectionScope(STRATOS_SCOPES.enrollment),
     buildCollectionScope(STRATOS_SCOPES.post, ['create', 'delete']),
+    buildRpcScope(STRATOS_SCOPES.getFeed),
   ]
 }

@@ -39,11 +39,20 @@ if [ -z "${WEBAPP_CID}" ]; then
 fi
 
 echo "Running Playwright e2e tests..."
+# Run tests as host user (UID 1000) to avoid permission issues
+set +e
 docker run --rm --init --ipc=host \
   --network "container:${WEBAPP_CID}" \
   -v "${REPO_ROOT}:/workspace" \
   -w /workspace/webapp \
+  -u "$(id -u):$(id -g)"  \
   -e E2E_BASE_URL="http://localhost:5173" \
   -e CI="${CI:-}" \
   "${PLAYWRIGHT_IMAGE}" \
   npx playwright test "$@"
+exit_code=$?
+set -e
+if [ $exit_code -ne 0 ]; then
+  echo "Playwright tests failed with exit code $exit_code" >&2
+  exit $exit_code
+fi

@@ -12,6 +12,7 @@ export interface Enrollment {
   signingKeyDid: string
   active: boolean
   enrollmentRkey?: string
+  isService?: boolean
 }
 
 /**

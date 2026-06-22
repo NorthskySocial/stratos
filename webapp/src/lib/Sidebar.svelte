@@ -33,11 +33,7 @@
     onSetServiceUrl,
   }: Props = $props()
 
-  let inputUrl = $state('')
-
-  $effect.pre(() => {
-    inputUrl = serviceUrl
-  })
+  let inputUrl = $state(serviceUrl)
 </script>
 
 <nav class="sidebar-nav">

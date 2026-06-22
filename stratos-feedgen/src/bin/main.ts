@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   const port = parsePort(process.env['FEEDGEN_PORT']) ?? 3000
 
   const keypair = await Secp256k1Keypair.import(cfg.feedgenSigningKey)
+  const publicKeyMultibase = keypair.did().slice('did:key:'.length)
   const idResolver = new IdResolver({ plcUrl: cfg.feedgenPlcUrl })
 
   const upstream = new UpstreamStratosClient({
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
 
   const server = createFeedgenServer({
     feedgenServiceDid: cfg.feedgenServiceDid,
+    feedgenPublicUrl: cfg.feedgenPublicUrl,
+    publicKeyMultibase,
     feeds,
     store,
     enrollmentManager,
@@ -66,7 +69,7 @@ async function main(): Promise<void> {
     actorPool = new ActorPool(
       {
         stratosServiceUrl: cfg.stratosServiceUrl,
-        mintToken: () => upstream.mintSyncToken(),
+        mintToken: () => upstream.mintServiceAuthToken(),
         maxConnections: parseIntEnv(
           process.env['FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS'],
         ),
@@ -90,7 +93,7 @@ async function main(): Promise<void> {
     serviceStream = new ServiceStream(
       {
         stratosServiceUrl: cfg.stratosServiceUrl,
-        mintToken: () => upstream.mintSyncToken(),
+        mintToken: () => upstream.mintServiceAuthToken(),
       },
       {
         onEnroll: async (did, boundaries) => {

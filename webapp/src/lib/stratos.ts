@@ -25,6 +25,12 @@ export function setStratosUrl(url: string | undefined) {
 
 export const APPVIEW_URL = import.meta.env.VITE_APPVIEW_URL
 
+// When set, the webapp sources its private feed from a Stratos feed generator
+// (proxied through the user's PDS) instead of the AppView. FEEDGEN_DID is the
+// generator's did:web; FEEDGEN_FEED is the configured feed id to request.
+export const FEEDGEN_DID = import.meta.env.VITE_FEEDGEN_DID
+export const FEEDGEN_FEED = import.meta.env.VITE_FEEDGEN_FEED ?? 'engineering'
+
 export interface ServiceAttestation {
   sig: Uint8Array
   signingKey: string

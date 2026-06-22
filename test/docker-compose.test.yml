@@ -48,6 +48,7 @@ services:
     build:
       context: ..
       dockerfile: ./Dockerfile
+      target: stratos
     container_name: stratos-test
     restart: 'no'
     ports:

@@ -34,6 +34,40 @@ STRATOS_ALLOWED_DOMAINS="general,fanart"
 These are bare domain names. At startup the service qualifies them with its own DID, so `"fanart"`
 becomes `"did:web:stratos.example.com/fanart"`. Clients must send the fully-qualified form.
 
+## Service Enrollments
+
+Grant downstream services (AppViews, indexers) access to a set of boundaries without an OAuth flow.
+Service enrollments are declared in configuration, which is treated as the source of truth: on every
+startup the service reconciles the declared entries into the enrollment store (upserting them with
+`isService = true`) and prunes any service rows that are no longer declared. User enrollments are
+never affected.
+
+Provide the enrollments either inline or via a JSON file:
+
+```bash
+# Inline JSON
+STRATOS_SERVICE_ENROLLMENTS='[{"did":"did:web:appview.example.com","boundaries":["engineering"]}]'
+
+# Or a path to a JSON file (takes precedence when both are set)
+STRATOS_SERVICE_ENROLLMENTS_FILE="/etc/stratos/service-enrollments.json"
+```
+
+The file (or inline value) is a JSON array of entries:
+
+```json
+[
+  {
+    "did": "did:web:appview.example.com",
+    "boundaries": ["engineering", "leadership"]
+  }
+]
+```
+
+Each entry requires a non-empty, unique `did` and at least one boundary. Boundaries may be supplied
+as bare domain names (qualified at startup against the service DID, exactly like
+`STRATOS_ALLOWED_DOMAINS`) or in fully-qualified form. Every boundary must be a member of
+`STRATOS_ALLOWED_DOMAINS`; otherwise startup fails fast with a validation error.
+
 ## Write Rate Limiter
 
 Per-DID write throttling to protect MST commit performance under burst traffic:

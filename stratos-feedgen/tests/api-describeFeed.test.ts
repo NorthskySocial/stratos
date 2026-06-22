@@ -31,6 +31,8 @@ async function startServer(): Promise<{
 
   const server = createFeedgenServer({
     feedgenServiceDid: FEEDGEN_DID,
+    feedgenPublicUrl: 'https://feedgen.spiegelcorp.test',
+    publicKeyMultibase: 'zQ3shFakeMultibaseForTests',
     feeds,
     store: {
       listPostsByBoundary: async () => ({ posts: [] }),

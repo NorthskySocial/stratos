@@ -5,10 +5,14 @@ dist-bundle/
 *.tsbuildinfo
 .pnpm-store
 test-results
+reports/
 
 .env
 .env.local
 .env.*.local
+
+# Local feedgen testing: generated key material
+stratos-feedgen/local/.env.feedgen
 
 *.sqlite
 *.sqlite-journal
@@ -52,3 +56,7 @@ docs/*-prompt.md
 docs/.vitepress/cache
 /webapp/public/client-metadata.json
 /webapp/playwright-report
+# StrykerJS mutation testing
+.stryker-tmp/
+**/reports/mutation/
+**/stryker.log

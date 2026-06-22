@@ -20,7 +20,7 @@ COPY stratos-client/package.json ./stratos-client/
 COPY webapp/package.json ./webapp/
 
 # Install all dependencies (including devDependencies for tsc)
-RUN pnpm install --frozen-lockfile
+RUN pnpm config set minimumReleaseAge 0 && pnpm config set strictDepBuilds false && pnpm install --frozen-lockfile
 
 # Copy source files
 COPY tsconfig.json ./
@@ -64,7 +64,7 @@ COPY --from=builder /app/stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
 
 # Install production dependencies only (no devDependencies)
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm config set minimumReleaseAge 0 && pnpm config set strictDepBuilds false && pnpm install --frozen-lockfile --prod
 
 # Copy compiled output from builder
 COPY --from=builder /app/stratos-core/dist/ ./stratos-core/dist/
@@ -115,8 +115,12 @@ COPY --from=builder /app/stratos-service/package.json ./stratos-service/
 COPY --from=builder /app/stratos-client/package.json ./stratos-client/
 COPY --from=builder /app/webapp/package.json ./webapp/
 
-# Copy workspace files for Deno to resolve dependencies correctly
-COPY deno.json package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+# Copy workspace files for Deno to resolve dependencies correctly.
+# The indexer runs in its own container without pnpm-managed node_modules, so it
+# uses a dedicated Deno config with `nodeModulesDir: auto` (the root deno.json
+# uses `none` to coexist with pnpm on the host / in the test e2e scripts).
+COPY deno.indexer.json ./deno.json
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 # Copy lexicons (needed at runtime by stratos-core)
 COPY lexicons/ ./lexicons/

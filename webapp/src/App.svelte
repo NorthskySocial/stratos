@@ -7,6 +7,8 @@
     APPVIEW_URL,
     checkStratosServiceStatus,
     discoverStratosEnrollment,
+    FEEDGEN_DID,
+    FEEDGEN_FEED,
     fetchServerDomains,
     STRATOS_URL,
     type StratosEnrollment,
@@ -19,6 +21,7 @@
     type FeedPost,
     feedStats,
     fetchAppviewStratosPosts,
+    fetchFeedgenPosts,
     fetchPublicPosts,
     fetchRepoPublicPosts,
     fetchStratosPosts,
@@ -196,7 +199,10 @@
         : await fetchRepoPublicPosts(configureAgent(new Agent(session)), session.sub)
 
       let stratosPosts: FeedPost[] = []
-      if (APPVIEW_URL) {
+      if (FEEDGEN_DID) {
+        const res = await fetchFeedgenPosts(session, FEEDGEN_DID, FEEDGEN_FEED)
+        stratosPosts = res.posts
+      } else if (APPVIEW_URL) {
         const res = await fetchAppviewStratosPosts(
           session,
           APPVIEW_URL,

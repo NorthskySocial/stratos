@@ -13,6 +13,7 @@ import {
   deleteRecordHandler,
   describeRepoHandler,
   getRecordHandler,
+  getRepoHandler,
   listRecordsHandler,
   stratosUploadBlobHandler,
   uploadBlobHandler,
@@ -88,6 +89,12 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
     type: 'procedure',
     auth: authVerifier.standard,
     handler: applyWritesHandler(ctx),
+  })
+
+  xrpc.method(HANDLER_METHOD.SYNC_GET_REPO, {
+    type: 'query',
+    auth: authVerifier.standard,
+    handler: getRepoHandler(ctx),
   })
 
   registerEnrollmentHandlers(server, ctx)

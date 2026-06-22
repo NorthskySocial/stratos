@@ -535,5 +535,64 @@ describe('PostgreSQL Backend Integration', () => {
       expect(result?.pdsEndpoint).toBe('https://new.pds.com')
       expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
     })
+
+    it('should default isService to false for user enrollments', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zUserKeyBebop1',
+        active: true,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.isService).toBe(false)
+    })
+
+    it('should round-trip a service enrollment with NULL pdsEndpoint', async () => {
+      const serviceDid = 'did:web:nerv.example.com'
+      await enrollmentStore.enroll({
+        did: serviceDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: serviceDid,
+        active: true,
+        boundaries: ['leadership'],
+      })
+      await enrollmentStore.updateEnrollment(serviceDid, { isService: true })
+
+      const result = await enrollmentStore.getEnrollment(serviceDid)
+      expect(result?.isService).toBe(true)
+      expect(result?.pdsEndpoint).toBeUndefined()
+      expect(result?.signingKeyDid).toBe(serviceDid)
+      expect(await enrollmentStore.getBoundaries(serviceDid)).toContain(
+        'leadership',
+      )
+
+      await enrollmentStore.unenroll(serviceDid)
+    })
+
+    it('should list only service enrollments via listServiceEnrollments', async () => {
+      const serviceDid = 'did:web:nerv.example.com'
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        pdsEndpoint: 'https://pds.example.com',
+        signingKeyDid: 'did:key:zUserKeyBebop2',
+        active: true,
+      })
+      await enrollmentStore.enroll({
+        did: serviceDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: serviceDid,
+        active: true,
+      })
+      await enrollmentStore.updateEnrollment(serviceDid, { isService: true })
+
+      const services = await enrollmentStore.listServiceEnrollments()
+      expect(services.map((e) => e.did)).toEqual([serviceDid])
+      expect(services[0].isService).toBe(true)
+
+      await enrollmentStore.unenroll(serviceDid)
+    })
   })
 })

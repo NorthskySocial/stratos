@@ -13,6 +13,10 @@ import { FEEDGEN_LEXICONS } from './lexicon/index.js'
 
 export interface FeedgenServerDeps {
   feedgenServiceDid: string
+  /** Public base URL of this feed gen, used as the DID document service endpoint. */
+  feedgenPublicUrl: string
+  /** Multibase-encoded public signing key (the `did:key:` suffix). */
+  publicKeyMultibase: string
   feeds: FeedRegistry
   store: FeedgenStore
   enrollmentManager: EnrollmentManager
@@ -55,6 +59,31 @@ export function createFeedgenServer(
   const version = deps.version ?? DEFAULT_VERSION
   app.get('/health', (_req, res) => {
     res.json({ ok: true, version })
+  })
+
+  app.get('/.well-known/did.json', (_req, res) => {
+    res.json({
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/multikey/v1',
+      ],
+      id: deps.feedgenServiceDid,
+      verificationMethod: [
+        {
+          id: `${deps.feedgenServiceDid}#atproto`,
+          type: 'Multikey',
+          controller: deps.feedgenServiceDid,
+          publicKeyMultibase: deps.publicKeyMultibase,
+        },
+      ],
+      service: [
+        {
+          id: '#stratos_feedgen',
+          type: 'NorthskyStratosFeedGen',
+          serviceEndpoint: deps.feedgenPublicUrl,
+        },
+      ],
+    })
   })
 
   app.use(xrpc.router)

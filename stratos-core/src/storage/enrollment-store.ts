@@ -11,6 +11,7 @@ export interface StoredEnrollment {
   signingKeyDid: string
   active: boolean
   enrollmentRkey?: string
+  isService?: boolean
 }
 
 /**
@@ -34,6 +35,11 @@ export interface EnrollmentStoreReader {
 
   /** List all enrollments */
   listEnrollments: (
+    options?: ListEnrollmentsOptions,
+  ) => Promise<StoredEnrollment[]>
+
+  /** List only service enrollments */
+  listServiceEnrollments: (
     options?: ListEnrollmentsOptions,
   ) => Promise<StoredEnrollment[]>
 

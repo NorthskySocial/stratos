@@ -60,12 +60,12 @@ flowchart TD
 
 ### Auth flow
 
-| Direction                    | Mechanism                                                                              | Verification                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Client → PDS                 | OAuth + DPoP                                                                           | PDS validates DPoP-bound token                                                 |
-| PDS → Feed Gen               | Bearer service-auth JWT (`iss=userDID`, `aud=feedgenDID`, `lxm=<endpoint>`, `exp<60s`) | Feed gen resolves user DID, verifies signature via atproto verification method |
-| Feed Gen → Stratos           | Bearer service-auth JWT (`iss=feedgenDID`, `aud=stratosDID`, `lxm=<endpoint>`)         | Stratos `service` verifier resolves feed gen DID                               |
-| Feed Gen → Stratos (sync WS) | `syncToken` query param = same JWT shape, `lxm=zone.stratos.sync.subscribeRecords`     | Stratos `subscribeAuth` verifier                                               |
+| Direction                    | Mechanism                                                                                 | Verification                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Client → PDS                 | OAuth + DPoP                                                                              | PDS validates DPoP-bound token                                                 |
+| PDS → Feed Gen               | Bearer service-auth JWT (`iss=userDID`, `aud=feedgenDID`, `lxm=<endpoint>`, `exp<60s`)    | Feed gen resolves user DID, verifies signature via atproto verification method |
+| Feed Gen → Stratos           | Bearer service-auth JWT (`iss=feedgenDID`, `aud=stratosDID`, `lxm=<endpoint>`)            | Stratos `service` verifier resolves feed gen DID                               |
+| Feed Gen → Stratos (sync WS) | `Authorization: Bearer` header = same JWT shape, `lxm=zone.stratos.sync.subscribeRecords` | Stratos `subscribeAuth` verifier                                               |
 
 ### Identity
 
@@ -104,7 +104,7 @@ src/
   config.ts              Env-driven config loader
   upstream/              Typed RPC client for the single upstream Stratos
     client.ts            UpstreamStratosClient (resolveEnrollments,
-                         hydrateRecords, getBlob, mintSyncToken)
+                         hydrateRecords, getBlob, mintServiceAuthToken)
     jwt.ts               mintServiceJwt — per-call 60 s service-auth JWTs
     errors.ts            StratosClientError (status, body, url, lxm)
     index.ts             Barrel

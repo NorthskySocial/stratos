@@ -12,6 +12,17 @@ let sessionDeletedCallback: (() => void) | null = null
 const HANDLE_RESOLVER =
   import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER ?? 'https://bsky.social'
 
+// The single OAuth scope string for this app. Both the authorization request
+// (signIn) and the declared client metadata must use the exact same value, and
+// it must match the served /client-metadata.json (webapp/Dockerfile and
+// webapp/public/client-metadata.json.template) or the AS rejects with
+// invalid_scope. The app.bsky.feed.post write scope is required because the
+// composer creates public posts on the user's PDS (see Composer.svelte).
+const OAUTH_SCOPE = [
+  ...buildStratosScopes(),
+  'repo:app.bsky.feed.post?action=create',
+].join(' ')
+
 function isLoopback(): boolean {
   const h = window.location.hostname
   return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
@@ -39,10 +50,7 @@ function buildClientMetadata(): OAuthClientMetadataInput {
         ? `${import.meta.env.VITE_WEBAPP_URL}/`
         : `${origin}/`,
     ],
-    scope: [
-      ...buildStratosScopes(),
-      'repo:app.bsky.feed.post?action=create',
-    ].join(' '),
+    scope: OAUTH_SCOPE,
     response_types: ['code'],
     token_endpoint_auth_method: 'none',
     application_type: 'web',
@@ -106,10 +114,7 @@ export async function init(): Promise<OAuthSession | null> {
 export async function signIn(handle: string): Promise<void> {
   const oauthClient = getClient()
   await oauthClient.signIn(handle, {
-    scope: [
-      ...buildStratosScopes(),
-      'repo:app.bsky.feed.post?action=create',
-    ].join(' '),
+    scope: OAUTH_SCOPE,
     signal: new AbortController().signal,
   })
 }

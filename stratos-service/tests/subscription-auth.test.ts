@@ -1,17 +1,18 @@
 /**
  * Tests for zone.stratos.sync.subscribeRecords authentication.
  *
- * The syncToken parameter carries a service JWT that AppViews use to
- * authenticate. This tests the verifyServiceAuth function that validates
- * those tokens, covering the acceptance and rejection paths an AppView
- * indexer will encounter — including the expiry case that triggers on
- * reconnect when a stale token is reused.
+ * The subscription stream is service-auth-only: AppViews authenticate with a
+ * service JWT in the Authorization header. This tests the verifyServiceAuth
+ * function that validates those tokens, covering the acceptance and rejection
+ * paths an AppView indexer will encounter — including the expiry case that
+ * triggers on reconnect when a stale token is reused.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { createServiceJwt } from '@atproto/xrpc-server'
 import type { IdResolver } from '@atproto/identity'
 import { verifyServiceAuth } from '../src/infra/auth/index.js'
+import { createSubscribeAuthVerifier } from '../src/infra/auth/verifiers.js'
 
 const OUR_DID = 'did:web:stratos.test'
 const LXM = 'zone.stratos.sync.subscribeRecords'
@@ -41,7 +42,7 @@ function createMockIdResolver(keypair: Secp256k1Keypair): IdResolver {
   } as unknown as IdResolver
 }
 
-describe('verifyServiceAuth (syncToken validation)', () => {
+describe('verifyServiceAuth (service JWT validation)', () => {
   it('accepts a valid service JWT', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const idResolver = createMockIdResolver(keypair)
@@ -184,5 +185,126 @@ describe('verifyServiceAuth (syncToken validation)', () => {
       )
       expect(result.iss).toBe(keypair.did())
     })
+  })
+})
+
+describe('createSubscribeAuthVerifier (stream auth gate)', () => {
+  function makeCtx(authHeader: string | undefined) {
+    return {
+      req: { headers: authHeader ? { authorization: authHeader } : {} },
+    } as unknown as Parameters<
+      ReturnType<typeof createSubscribeAuthVerifier>
+    >[0]
+  }
+
+  it('accepts a valid service JWT and returns service credentials', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    const token = await createServiceJwt({
+      iss: keypair.did(),
+      aud: OUR_DID,
+      lxm: LXM,
+      keypair,
+    })
+
+    const result = await verifier(makeCtx(`Bearer ${token}`))
+
+    expect(result.credentials.type).toBe('service')
+    expect(result.credentials.did).toBe(keypair.did())
+    expect(result.credentials.iss).toBe(keypair.did())
+  })
+
+  it('rejects a request with no authorization header', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    await expect(verifier(makeCtx(undefined))).rejects.toThrow(
+      'Service authorization required',
+    )
+  })
+
+  it('rejects a non-Bearer authorization header', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    await expect(verifier(makeCtx('Basic abc123'))).rejects.toThrow(
+      'Service authorization required',
+    )
+  })
+
+  it('rejects and surfaces the underlying error for an invalid JWT', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    await expect(verifier(makeCtx('Bearer notajwtatall'))).rejects.toThrow(
+      'Invalid JWT format',
+    )
+  })
+
+  it('rejects a token minted for a different audience', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    const token = await createServiceJwt({
+      iss: keypair.did(),
+      aud: 'did:web:wrong.service',
+      lxm: LXM,
+      keypair,
+    })
+
+    await expect(verifier(makeCtx(`Bearer ${token}`))).rejects.toThrow(
+      'Invalid aud claim',
+    )
+  })
+
+  it('rejects a token minted for a different lexicon method', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    const token = await createServiceJwt({
+      iss: keypair.did(),
+      aud: OUR_DID,
+      lxm: 'zone.stratos.sync.somethingElse',
+      keypair,
+    })
+
+    await expect(verifier(makeCtx(`Bearer ${token}`))).rejects.toThrow(
+      'Invalid lxm claim',
+    )
+  })
+
+  it('rejects a request whose context has no req object', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    const ctx = {} as unknown as Parameters<
+      ReturnType<typeof createSubscribeAuthVerifier>
+    >[0]
+
+    await expect(verifier(ctx)).rejects.toThrow(
+      'Service authorization required',
+    )
+  })
+
+  it('rejects a request whose req has no headers object', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const idResolver = createMockIdResolver(keypair)
+    const verifier = createSubscribeAuthVerifier(idResolver, OUR_DID)
+
+    const ctx = { req: {} } as unknown as Parameters<
+      ReturnType<typeof createSubscribeAuthVerifier>
+    >[0]
+
+    await expect(verifier(ctx)).rejects.toThrow(
+      'Service authorization required',
+    )
   })
 })

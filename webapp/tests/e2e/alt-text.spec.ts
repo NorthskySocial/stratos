@@ -103,6 +103,39 @@ test.describe('Alt Text Support', () => {
       },
     )
 
+    // Mock AppView author feed (called during startup)
+    await page.route('**/xrpc/app.bsky.feed.getAuthorFeed**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      })
+    })
+
+    // Mock feedgen getFeed (proxied through PDS)
+    await page.route(
+      '**/xrpc/zone.stratos.feedgen.getFeed**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
+          headers: { 'Access-Control-Allow-Origin': '*' },
+        })
+      },
+    )
+
+    // Mock AppView timeline (called during startup)
+    await page.route('**/xrpc/app.bsky.feed.getTimeline**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      })
+    })
+
     // Catch-all for other Stratos/Appview calls to ensure they return 200
     await page.route(
       (url) =>

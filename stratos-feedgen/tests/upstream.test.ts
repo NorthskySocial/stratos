@@ -243,9 +243,9 @@ describe('UpstreamStratosClient', () => {
     })
   })
 
-  describe('mintSyncToken', () => {
+  describe('mintServiceAuthToken', () => {
     it('returns a JWT for the subscribeRecords lxm', async () => {
-      const token = await client.mintSyncToken()
+      const token = await client.mintServiceAuthToken()
       const { payload } = decodeJwt(token)
       expect(payload.iss).toBe(FEEDGEN_DID)
       expect(payload.aud).toBe(STRATOS_DID)

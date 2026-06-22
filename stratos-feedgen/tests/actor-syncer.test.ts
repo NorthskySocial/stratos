@@ -22,13 +22,15 @@ class FakeWebSocket {
   readyState: number = WS_CONNECTING
   binaryType = ''
   url: string
+  authHeader: string | undefined
   onmessage: ((e: { data: Uint8Array | ArrayBuffer }) => void) | null = null
   onerror: ((e: Event & { error?: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   private openListeners: Array<() => void> = []
 
-  constructor(url: string) {
+  constructor(url: string, options?: { headers?: Record<string, string> }) {
     this.url = url
+    this.authHeader = options?.headers?.authorization
     FakeWebSocket.instances.push(this)
   }
 
@@ -196,7 +198,8 @@ describe('ActorSyncer', () => {
     const second = FakeWebSocket.instances[1]
     expect(second.url).toContain('cursor=42')
     expect(second.url).toContain(`did=${encodeURIComponent(DID)}`)
-    expect(second.url).toContain('syncToken=tok-1')
+    expect(second.url).not.toContain('syncToken=')
+    expect(second.authHeader).toBe('Bearer tok-1')
     syncer.stop()
   })
 
@@ -261,11 +264,11 @@ describe('ActorSyncer', () => {
     )
     syncer.start()
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
-    expect(FakeWebSocket.instances[0].url).toContain('syncToken=tok-1')
+    expect(FakeWebSocket.instances[0].authHeader).toBe('Bearer tok-1')
     FakeWebSocket.instances[0].close()
     await vi.advanceTimersByTimeAsync(1_500)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
-    expect(FakeWebSocket.instances[1].url).toContain('syncToken=tok-2')
+    expect(FakeWebSocket.instances[1].authHeader).toBe('Bearer tok-2')
     syncer.stop()
   })
 
@@ -286,5 +289,77 @@ describe('ActorSyncer', () => {
     syncer.stop()
     await vi.advanceTimersByTimeAsync(10_000)
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('does not reset backoff when a connection drops before the stability window', async () => {
+    const syncer = new ActorSyncer(
+      {
+        did: DID,
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        baseDelayMs: 1_000,
+        maxDelayMs: 60_000,
+        jitterRatio: 0,
+        stabilityResetMs: 10_000,
+      },
+      { store, indexer, wsCtor: FakeWebSocket as never, rng: () => 0 },
+    )
+    syncer.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+
+    // Open, then drop before the 10s window → attempt 1, reconnect at 1_000ms.
+    FakeWebSocket.instances[0].open()
+    await vi.advanceTimersByTimeAsync(5_000)
+    FakeWebSocket.instances[0].close()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    // Open then drop again → attempt must escalate to 2 (2_000ms), proving the
+    // `open` event alone did not reset the backoff counter.
+    FakeWebSocket.instances[1].open()
+    await vi.advanceTimersByTimeAsync(5_000)
+    FakeWebSocket.instances[1].close()
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+
+    syncer.stop()
+  })
+
+  it('resets backoff after a connection stays open past the stability window', async () => {
+    const syncer = new ActorSyncer(
+      {
+        did: DID,
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        baseDelayMs: 1_000,
+        maxDelayMs: 60_000,
+        jitterRatio: 0,
+        stabilityResetMs: 5_000,
+      },
+      { store, indexer, wsCtor: FakeWebSocket as never, rng: () => 0 },
+    )
+    syncer.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+
+    // Two quick drops escalate the delay to 2_000ms (attempt 2).
+    FakeWebSocket.instances[0].close()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    FakeWebSocket.instances[1].close()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+
+    // Stay open past the 5s window → backoff resets, next drop is 1_000ms again.
+    FakeWebSocket.instances[2].open()
+    await vi.advanceTimersByTimeAsync(5_000)
+    FakeWebSocket.instances[2].close()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(4))
+
+    syncer.stop()
   })
 })

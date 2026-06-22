@@ -132,7 +132,7 @@ export class UpstreamStratosClient {
     }
   }
 
-  async mintSyncToken(): Promise<string> {
+  async mintServiceAuthToken(): Promise<string> {
     return this.mintFor(LXM.subscribeRecords)
   }
 

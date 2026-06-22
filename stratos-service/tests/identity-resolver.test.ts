@@ -3,11 +3,15 @@ import { createIdResolver } from '../src/identity-resolver.js'
 
 // Mock the @atproto/identity module
 const mockHandleResolve = vi.fn()
+const mockDidResolve = vi.fn()
 vi.mock('@atproto/identity', () => {
   return {
     IdResolver: class {
       handle = {
         resolve: mockHandleResolve,
+      }
+      did = {
+        resolve: mockDidResolve,
       }
     },
   }
@@ -17,6 +21,9 @@ describe('identity-resolver', () => {
   const mockCfg = {
     identity: {
       plcUrl: 'https://plc.directory',
+    },
+    enrollment: {
+      serviceEnrollments: [],
     },
   } as any
 
@@ -153,5 +160,72 @@ describe('identity-resolver', () => {
     const result = await idResolver.handle.resolve(handle)
 
     expect(result).toBeUndefined()
+  })
+})
+
+describe('identity-resolver service-key shortcut', () => {
+  const serviceDid = 'did:web:appview.test'
+  const signingKey = 'did:key:zQ3shqu5PGsBcRm7NU1uXcmLsfuNV4LvTTuChtYJbiXnjQaE5'
+
+  const cfgWithServiceKey = {
+    identity: { plcUrl: 'https://plc.directory' },
+    enrollment: {
+      serviceEnrollments: [
+        { did: serviceDid, boundaries: ['swordsmith'], signingKey },
+      ],
+    },
+  } as any
+
+  const mockFetch = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('resolves an enrolled service DID from the configured signing key without network resolution', async () => {
+    const idResolver = createIdResolver(cfgWithServiceKey, mockFetch)
+    const doc = await idResolver.did.resolve(serviceDid)
+
+    expect(mockDidResolve).not.toHaveBeenCalled()
+    expect(doc).toEqual({
+      id: serviceDid,
+      verificationMethod: [
+        {
+          id: `${serviceDid}#atproto`,
+          type: 'Multikey',
+          controller: serviceDid,
+          publicKeyMultibase: signingKey.slice('did:key:'.length),
+        },
+      ],
+    })
+  })
+
+  it('delegates non-enrolled DIDs to the underlying resolver', async () => {
+    const otherDid = 'did:plc:shinji-ikari'
+    const otherDoc = { id: otherDid }
+    mockDidResolve.mockResolvedValue(otherDoc)
+
+    const idResolver = createIdResolver(cfgWithServiceKey, mockFetch)
+    const doc = await idResolver.did.resolve(otherDid)
+
+    expect(mockDidResolve).toHaveBeenCalledWith(otherDid, undefined)
+    expect(doc).toBe(otherDoc)
+  })
+
+  it('does not install a shortcut for service enrollments without a signing key', async () => {
+    const cfg = {
+      identity: { plcUrl: 'https://plc.directory' },
+      enrollment: {
+        serviceEnrollments: [{ did: serviceDid, boundaries: ['swordsmith'] }],
+      },
+    } as any
+    const resolved = { id: serviceDid }
+    mockDidResolve.mockResolvedValue(resolved)
+
+    const idResolver = createIdResolver(cfg, mockFetch)
+    const doc = await idResolver.did.resolve(serviceDid)
+
+    expect(mockDidResolve).toHaveBeenCalledWith(serviceDid)
+    expect(doc).toBe(resolved)
   })
 })
