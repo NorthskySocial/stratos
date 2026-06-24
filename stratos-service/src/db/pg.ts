@@ -226,6 +226,19 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
 
   await executeMigrationStep(
     db,
+    'admin_session',
+    sql`
+      CREATE TABLE IF NOT EXISTS "admin_session" (
+        "key" TEXT PRIMARY KEY,
+        "did" TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL,
+        "expiresAt" TEXT NOT NULL
+      )
+    `,
+  )
+
+  await executeMigrationStep(
+    db,
     'enrollment',
     sql`
       CREATE TABLE IF NOT EXISTS "enrollment" (

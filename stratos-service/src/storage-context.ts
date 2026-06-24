@@ -17,6 +17,9 @@ import { CachedEnrollmentStore } from './infra/storage/cached-enrollment-store.j
 import {
   createPgOAuthStores,
   createSqliteOAuthStores,
+  PgAdminSessionStore,
+  SqliteAdminSessionStore,
+  type AdminSessionStore,
   type EnrollmentStore,
   type OAuthSessionStoreBackend,
   type OAuthStateStoreBackend,
@@ -39,6 +42,7 @@ export interface StorageContext {
     sessionStore: OAuthSessionStoreBackend
     stateStore: OAuthStateStoreBackend
   }
+  adminSessionStore: AdminSessionStore
   checkDbHealth: () => Promise<'ok' | 'error'>
   destroy: () => Promise<void>
 }
@@ -63,6 +67,7 @@ export async function createStorageContext(
     sessionStore: OAuthSessionStoreBackend
     stateStore: OAuthStateStoreBackend
   }
+  let adminSessionStore: AdminSessionStore
   let actorStore: ActorStore
   let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
@@ -95,6 +100,7 @@ export async function createStorageContext(
     await cachedEnrollmentStore.warm()
     enrollmentStore = cachedEnrollmentStore
     oauthStores = createPgOAuthStores(pgDb)
+    adminSessionStore = new PgAdminSessionStore(pgDb)
     actorStore = new PostgresActorStore({
       connectionString: cfg.storage.postgresUrl,
       blobstore,
@@ -117,6 +123,7 @@ export async function createStorageContext(
     await migrateServiceDb(db)
     enrollmentStore = new SqliteEnrollmentStore(db)
     oauthStores = createSqliteOAuthStores(db)
+    adminSessionStore = new SqliteAdminSessionStore(db)
     actorStore = new StratosActorStore({
       dataDir: path.join(cfg.storage.dataDir, 'actors'),
       blobstore,
@@ -137,6 +144,7 @@ export async function createStorageContext(
     db,
     enrollmentStore,
     oauthStores,
+    adminSessionStore,
     actorStore,
     checkDbHealth,
     destroy,

@@ -32,6 +32,7 @@ export async function createOAuthClientContext(
         cfg.oauth.clientId ?? `${cfg.service.publicUrl}/client-metadata.json`,
       clientUri: cfg.service.publicUrl,
       redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
+      adminRedirectUri: `${cfg.service.publicUrl}/admin/oauth/callback`,
       privateKeyPem: cfg.oauth.clientSecret,
       scope: OAUTH_SCOPE,
       clientName: cfg.oauth.clientName,

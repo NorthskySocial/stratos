@@ -21,6 +21,12 @@ export const OAUTH_SCOPE = [
 ].join(' ')
 
 /**
+ * OAuth scope for admin login. Admins only prove identity; they get no repo
+ * write grants. Identity-only `atproto` scope is deliberate.
+ */
+export const OAUTH_ADMIN_SCOPE = 'atproto'
+
+/**
  * Database schema for OAuth session storage
  */
 export interface OAuthSessionTable {
@@ -175,6 +181,7 @@ export interface OAuthClientConfig {
   clientId: string
   clientUri: string
   redirectUri: string
+  adminRedirectUri?: string
   privateKeyPem?: string
   scope?: string
   clientName?: string
@@ -329,7 +336,9 @@ export async function createOAuthClient(
       ...(config.logoUri && { logo_uri: config.logoUri }),
       ...(config.tosUri && { tos_uri: config.tosUri }),
       ...(config.policyUri && { policy_uri: config.policyUri }),
-      redirect_uris: [config.redirectUri],
+      redirect_uris: (config.adminRedirectUri
+        ? [config.redirectUri, config.adminRedirectUri]
+        : [config.redirectUri]) as [string, ...string[]],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       scope: config.scope ?? OAUTH_SCOPE,

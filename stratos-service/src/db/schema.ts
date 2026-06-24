@@ -26,6 +26,17 @@ export const oauthState = sqliteTable('oauth_state', {
 })
 
 /**
+ * Admin session storage - server-side sessions for OAuth-authorized admins.
+ * The cookie holds only the opaque `key`; the OAuth token never leaves the DB.
+ */
+export const adminSession = sqliteTable('admin_session', {
+  key: text('key').primaryKey(),
+  did: text('did').notNull(),
+  createdAt: text('createdAt').notNull(),
+  expiresAt: text('expiresAt').notNull(),
+})
+
+/**
  * Enrollment storage - tracks enrolled users
  */
 export const enrollment = sqliteTable('enrollment', {
@@ -57,6 +68,8 @@ export type OAuthSession = typeof oauthSession.$inferSelect
 export type NewOAuthSession = typeof oauthSession.$inferInsert
 export type OAuthState = typeof oauthState.$inferSelect
 export type NewOAuthState = typeof oauthState.$inferInsert
+export type AdminSession = typeof adminSession.$inferSelect
+export type NewAdminSession = typeof adminSession.$inferInsert
 export type Enrollment = typeof enrollment.$inferSelect
 export type NewEnrollment = typeof enrollment.$inferInsert
 export type EnrollmentBoundary = typeof enrollmentBoundary.$inferSelect
