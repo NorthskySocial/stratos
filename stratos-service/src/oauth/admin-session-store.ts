@@ -54,7 +54,9 @@ export class SqliteAdminSessionStore implements AdminSessionStore {
   async create(did: string, ttlMs: number): Promise<string> {
     const key = newSessionKey()
     const { createdAt, expiresAt } = sessionTimestamps(ttlMs)
-    await this.db.insert(adminSession).values({ key, did, createdAt, expiresAt })
+    await this.db
+      .insert(adminSession)
+      .values({ key, did, createdAt, expiresAt })
     return key
   }
 
