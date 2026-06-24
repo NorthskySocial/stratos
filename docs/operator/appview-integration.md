@@ -5,14 +5,19 @@ endpoint — similar to how AppViews subscribe to PDS firehoses, but scoped per-
 
 ## Step 1: Service Authentication
 
-AppViews authenticate using **service auth** — a signed JWT passed as the `syncToken` query
-parameter. The token must be a query param because `Authorization` headers are stripped by many
-WebSocket proxies and aren't supported in browser WebSocket APIs.
+AppViews authenticate using **service auth** — a signed JWT passed in the `Authorization: Bearer`
+header of the WebSocket upgrade request. Server-side WebSocket clients (such as the `ws` library)
+can set request headers, so no query-parameter fallback is needed or accepted.
+
+The subscription stream is **boundary-scoped**: the service is only sent records whose boundaries
+intersect the boundaries the service itself is enrolled in. A service that is not enrolled in any
+boundary is rejected. Mint the JWT with the `zone.stratos.sync.subscribeRecords` lexicon method as
+its audience-bound `lxm`.
 
 ```typescript
 import { createServiceJwt } from '@atproto/xrpc-server'
 
-async function mintSyncToken(
+async function mintServiceJwt(
   appviewDid: string,
   stratosServiceDid: string,
   signingKey: Keypair,
@@ -27,6 +32,36 @@ async function mintSyncToken(
 }
 ```
 
+> The service DID and signing key must be registered with the Stratos service as a
+> service enrollment before the subscription will be accepted. See
+> [Service Enrollment Setup](#service-enrollment-setup) below.
+
+## Service Enrollment Setup
+
+Before a service can subscribe, the Stratos operator must register its DID and grant it
+boundaries. Service enrollments are config-driven and reconciled into the store on every
+Stratos boot. A service is only streamed records whose boundaries intersect the boundaries
+granted here; a service with no boundaries is rejected.
+
+Provide enrollments either inline via `STRATOS_SERVICE_ENROLLMENTS` (a JSON array) or via a
+file path with `STRATOS_SERVICE_ENROLLMENTS_FILE`. Each entry is `{ did, boundaries }`, where
+`boundaries` are bare boundary names (auto-qualified against the service DID) and must be a
+subset of the service's `allowedDomains`.
+
+```json
+[
+  {
+    "did": "did:web:bsky.example.com",
+    "boundaries": ["engineering", "leadership"]
+  },
+  { "did": "did:web:indexer.example.com", "boundaries": ["engineering"] }
+]
+```
+
+The reconciler upserts these rows as service enrollments (`isService = true`), updates their
+boundaries, and prunes any service row no longer present in the config. The service must use
+the matching signing key (resolvable from its `did`) to mint the JWT in Step 1.
+
 ## Step 2: Subscribe to User Records
 
 ```typescript
@@ -39,7 +74,7 @@ async function subscribeToUser(
   did: string,
   cursor?: number,
 ) {
-  const syncToken = await mintSyncToken(
+  const serviceJwt = await mintServiceJwt(
     appviewDid,
     stratosServiceDid,
     signingKey,
@@ -49,10 +84,11 @@ async function subscribeToUser(
     'wss://stratos.example.com/xrpc/zone.stratos.sync.subscribeRecords',
   )
   url.searchParams.set('did', did)
-  url.searchParams.set('syncToken', syncToken)
   if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
 
-  const ws = new WebSocket(url.toString())
+  const ws = new WebSocket(url.toString(), {
+    headers: { Authorization: `Bearer ${serviceJwt}` },
+  })
 
   ws.on('message', async (data) => {
     const frame = decodeFrame(data)
@@ -242,7 +278,7 @@ class StratosIndexer {
 
   private async subscribeToUser(did: string, cursor?: number) {
     // Mint a fresh JWT on every connection.
-    const syncToken = await createServiceJwt({
+    const serviceJwt = await createServiceJwt({
       iss: this.appviewDid,
       aud: this.stratosServiceDid,
       lxm: 'zone.stratos.sync.subscribeRecords',
@@ -253,10 +289,11 @@ class StratosIndexer {
       `${this.stratosEndpoint}/xrpc/zone.stratos.sync.subscribeRecords`,
     )
     url.searchParams.set('did', did)
-    url.searchParams.set('syncToken', syncToken)
     if (cursor !== undefined) url.searchParams.set('cursor', cursor.toString())
 
-    const ws = new WebSocket(url.toString())
+    const ws = new WebSocket(url.toString(), {
+      headers: { Authorization: `Bearer ${serviceJwt}` },
+    })
 
     ws.on('message', async (data) => {
       const event = this.decodeEvent(data)

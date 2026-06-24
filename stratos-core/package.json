@@ -36,9 +36,10 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "test": "vitest run",
+    "mutation": "stryker run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts ."
   },
@@ -63,11 +64,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^25.2.1",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "fast-check": "^4.5.0",
     "globals": "^17.3.0",
+    "tsc-alias": "^1.8.17",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.54.0",
     "vitest": "^4.0.18"

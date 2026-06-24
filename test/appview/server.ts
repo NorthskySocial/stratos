@@ -13,6 +13,9 @@
 
 import postgres from 'npm:postgres@3.4.5'
 import { decodeFirst } from 'npm:@atcute/cbor@1.0.0'
+import WebSocket from 'npm:ws@8.18.0'
+import { Secp256k1Keypair } from 'npm:@atproto/crypto@^0.4.5'
+import { createServiceJwt } from 'npm:@atproto/xrpc-server@^0.10.12'
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -23,13 +26,51 @@ const STRATOS_URL = Deno.env.get('STRATOS_URL') ?? 'http://localhost:3100'
 const PG_URL =
   Deno.env.get('APPVIEW_PG_URL') ??
   'postgres://stratos:stratos@localhost:5432/appview'
-const SYNC_TOKEN = Deno.env.get('APPVIEW_SYNC_TOKEN') ?? 'test-sync-token'
+
+// Service-auth identity. The appview mints a fresh service JWT per WS
+// connection, signed with its secp256k1 key and bound to the
+// subscribeRecords lexicon. The Stratos service must have this DID enrolled
+// as a service (via STRATOS_SERVICE_ENROLLMENTS) for the stream to be accepted.
+const APPVIEW_SERVICE_DID =
+  Deno.env.get('APPVIEW_SERVICE_DID') ?? 'did:web:appview.test'
+const APPVIEW_SIGNING_KEY = Deno.env.get('APPVIEW_SIGNING_KEY') ?? ''
+const STRATOS_SERVICE_DID =
+  Deno.env.get('STRATOS_SERVICE_DID') ?? 'did:web:stratos.test'
+
+const SUBSCRIBE_LXM = 'zone.stratos.sync.subscribeRecords'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 
 console.log(
-  `[appview] config: port=${PORT} stratos=${STRATOS_URL} pg=${PG_URL}`,
+  `[appview] config: port=${PORT} stratos=${STRATOS_URL} pg=${PG_URL} serviceDid=${APPVIEW_SERVICE_DID}`,
 )
+
+// ---------------------------------------------------------------------------
+// Service auth
+// ---------------------------------------------------------------------------
+
+let signingKeypair: Secp256k1Keypair | null = null
+
+async function getSigningKeypair(): Promise<Secp256k1Keypair> {
+  if (signingKeypair) return signingKeypair
+  if (!APPVIEW_SIGNING_KEY) {
+    throw new Error(
+      'APPVIEW_SIGNING_KEY is required to mint subscription service JWTs',
+    )
+  }
+  signingKeypair = await Secp256k1Keypair.import(APPVIEW_SIGNING_KEY)
+  return signingKeypair
+}
+
+async function mintServiceJwt(): Promise<string> {
+  const keypair = await getSigningKeypair()
+  return createServiceJwt({
+    iss: APPVIEW_SERVICE_DID,
+    aud: STRATOS_SERVICE_DID,
+    lxm: SUBSCRIBE_LXM,
+    keypair,
+  })
+}
 
 // ---------------------------------------------------------------------------
 // PostgreSQL
@@ -332,24 +373,27 @@ function buildWsUrl(params: Record<string, string>): string {
   return url.toString()
 }
 
-function connectServiceSubscription(attempt = 0) {
+async function connectServiceSubscription(attempt = 0) {
   if (!running) return
 
-  const wsUrl = buildWsUrl({ syncToken: SYNC_TOKEN })
+  const wsUrl = buildWsUrl({})
   console.log(`[sync] connecting to service stream: ${wsUrl}`)
 
-  const ws = new WebSocket(wsUrl)
+  const jwt = await mintServiceJwt()
+  const ws = new WebSocket(wsUrl, {
+    headers: { authorization: `Bearer ${jwt}` },
+  })
   ws.binaryType = 'arraybuffer'
   serviceWs = ws
 
-  ws.onopen = () => {
+  ws.on('open', () => {
     console.log('[sync] service enrollment stream connected')
-  }
+  })
 
-  ws.onmessage = async (event: MessageEvent) => {
+  ws.on('message', async (data: ArrayBuffer) => {
     try {
-      const data = new Uint8Array(event.data as ArrayBuffer)
-      const msg = decodeXrpcFrame(data)
+      const bytes = new Uint8Array(data)
+      const msg = decodeXrpcFrame(bytes)
       if (!msg) return
 
       const type = msg.$type ?? ''
@@ -377,22 +421,22 @@ function connectServiceSubscription(attempt = 0) {
     } catch (err) {
       console.error('[sync] service message error:', err)
     }
-  }
+  })
 
-  ws.onclose = () => {
+  ws.on('close', () => {
     serviceWs = null
     if (!running) return
     const delay = Math.min(1000 * Math.pow(2, attempt), 60_000)
     console.log(`[sync] service stream closed, reconnecting in ${delay}ms`)
     serviceReconnectTimer = setTimeout(
-      () => connectServiceSubscription(attempt + 1),
+      () => void connectServiceSubscription(attempt + 1),
       delay,
     ) as unknown as number
-  }
+  })
 
-  ws.onerror = (err) => {
+  ws.on('error', (err: unknown) => {
     console.warn('[sync] service stream error:', err)
-  }
+  })
 }
 
 async function subscribeActor(did: string, attempt = 0) {
@@ -404,34 +448,36 @@ async function subscribeActor(did: string, attempt = 0) {
   const cursorValue = cursor ?? 0
   const params: Record<string, string> = {
     did,
-    syncToken: SYNC_TOKEN,
     cursor: String(cursorValue),
   }
 
   const wsUrl = buildWsUrl(params)
   console.log(`[sync] subscribing to actor ${did} cursor=${cursorValue}`)
 
-  const ws = new WebSocket(wsUrl)
+  const jwt = await mintServiceJwt()
+  const ws = new WebSocket(wsUrl, {
+    headers: { authorization: `Bearer ${jwt}` },
+  })
   ws.binaryType = 'arraybuffer'
   actorSubscriptions.set(did, ws)
 
-  ws.onopen = () => {
+  ws.on('open', () => {
     console.log(`[sync] actor stream connected: ${did}`)
-  }
+  })
 
-  ws.onmessage = async (event: MessageEvent) => {
+  ws.on('message', async (data: ArrayBuffer) => {
     try {
-      const data = new Uint8Array(event.data as ArrayBuffer)
-      const msg = decodeXrpcFrame(data)
+      const bytes = new Uint8Array(data)
+      const msg = decodeXrpcFrame(bytes)
       if (!msg) return
 
       await handleActorMessage(did, msg)
     } catch (err) {
       console.error(`[sync] actor message error (${did}):`, err)
     }
-  }
+  })
 
-  ws.onclose = () => {
+  ws.on('close', () => {
     actorSubscriptions.delete(did)
     if (!running) return
     const delay = Math.min(1000 * Math.pow(2, attempt), 60_000)
@@ -440,11 +486,11 @@ async function subscribeActor(did: string, attempt = 0) {
       void subscribeActor(did, attempt + 1)
     }, delay) as unknown as number
     actorReconnectTimers.set(did, timer)
-  }
+  })
 
-  ws.onerror = (err) => {
+  ws.on('error', (err: unknown) => {
     console.warn(`[sync] actor stream error (${did}):`, err)
-  }
+  })
 }
 
 async function handleActorMessage(did: string, msg: Record<string, unknown>) {
@@ -495,7 +541,7 @@ async function handleActorCommit(
 async function startSync() {
   running = true
 
-  connectServiceSubscription()
+  await connectServiceSubscription()
 
   const enrollments = await sql`SELECT did FROM stratos_enrollment`
   for (const row of enrollments) {

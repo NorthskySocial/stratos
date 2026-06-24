@@ -6,6 +6,7 @@ import type { PostTable, StratosIndexerSchema } from '../storage/schema.ts'
 
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 const INDEX_TRACE_WARN_LAG_MS = 5_000
+const DEFAULT_STABILITY_RESET_MS = 30_000
 
 export interface ActorQueue {
   pending: Uint8Array[]
@@ -76,6 +77,7 @@ interface StratosSyncParams {
 export class ActorSyncer {
   private ws: WebSocket | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private intentionallyClosed = false
   private queue: ActorQueue = { pending: [], draining: false }
@@ -130,6 +132,7 @@ export class ActorSyncer {
    */
   public stop(): void {
     this.intentionallyClosed = true
+    this.clearStabilityTimer()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -158,7 +161,7 @@ export class ActorSyncer {
     this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
-      this.reconnectAttempts = 0
+      this.armStabilityReset()
       this.options.onConnectionStatusChange?.(this.did, true)
       this.lastMessageAt = Date.now()
     }
@@ -184,6 +187,7 @@ export class ActorSyncer {
 
     this.ws.onclose = () => {
       this.ws = null
+      this.clearStabilityTimer()
       this.options.onConnectionStatusChange?.(this.did, false)
       if (!this.intentionallyClosed) {
         this.scheduleReconnect()
@@ -219,6 +223,32 @@ export class ActorSyncer {
       this.reconnectTimer = null
       this.connect()
     }, finalDelay)
+  }
+
+  /**
+   * Reset the backoff counter only after the connection has stayed open for
+   * the stability window. A connection that drops before then keeps its
+   * elevated attempt count so repeated early failures escalate the delay.
+   * @private
+   */
+  private armStabilityReset(): void {
+    this.clearStabilityTimer()
+    this.stabilityTimer = setTimeout(() => {
+      this.stabilityTimer = null
+      this.reconnectAttempts = 0
+    }, DEFAULT_STABILITY_RESET_MS)
+    this.stabilityTimer.unref?.()
+  }
+
+  /**
+   * Clear any pending stability-reset timer.
+   * @private
+   */
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer)
+      this.stabilityTimer = null
+    }
   }
 
   /**
@@ -318,7 +348,10 @@ export class ActorSyncer {
     upsert?: RecordUpsert
     delete?: string
   } {
-    const uri = `at://${this.did}/${op.path}`
+    // Tolerate both `${collection}/${rkey}` and `/${collection}/${rkey}`:
+    // older stratos-service builds emitted sequence events with a leading slash.
+    const path = op.path.startsWith('/') ? op.path.slice(1) : op.path
+    const uri = `at://${this.did}/${path}`
     if (op.action === 'create' || op.action === 'update') {
       if (op.record && op.cid) {
         const upsert = {
@@ -332,7 +365,7 @@ export class ActorSyncer {
         for (const ref of referenced) {
           this.options.onReferencedActor?.(ref)
         }
-        if (op.path.startsWith('zone.stratos.actor.enrollment/')) {
+        if (path.startsWith('zone.stratos.actor.enrollment/')) {
           this.options.onHandleNeeded?.(this.did)
         }
         return { upsert }
@@ -471,8 +504,8 @@ async function batchIndexStratosRecords(
           .onConflict((oc) =>
             oc.column('uri').doUpdateSet({
               cid: postRow.cid,
-              content: (postRow as unknown as PostTable).content,
-              indexedAt: (postRow as unknown as PostTable).indexedAt,
+              content: postRow.content,
+              indexedAt: postRow.indexedAt,
             }),
           )
           .execute()

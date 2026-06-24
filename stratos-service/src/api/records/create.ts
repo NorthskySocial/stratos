@@ -77,12 +77,21 @@ export async function createRecord(
 
   // Check if enrolled
   let performanceTimer = performance.now()
-  const isEnrolled = await ctx.enrollmentStore.isEnrolled(callerDid)
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   phases.enrollment = performance.now() - performanceTimer
-  if (!isEnrolled) {
+  if (!enrollment || !enrollment.active) {
     throw new InvalidRequestError(
       'User is not enrolled in this Stratos service',
       'NotEnrolled',
+    )
+  }
+  // Service enrollments are read-only: they may subscribe and hydrate within
+  // their boundaries but must not create records. Classification uses the
+  // explicit `isService` flag, never `pdsEndpoint` emptiness.
+  if (enrollment.isService) {
+    throw new InvalidRequestError(
+      'Service identities cannot create records',
+      'ServiceWriteForbidden',
     )
   }
 

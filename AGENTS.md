@@ -11,13 +11,13 @@ through `zone.stratos.actor.enrollment` records.
 
 ### Key Concepts
 
-| Concept            | Description                                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| **Boundary**       | Access control scope (e.g., "engineering", "leadership"). Records have boundaries; viewers must share at least one. |
-| **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                           |
-| **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                   |
-| **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.       |
-| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped stream consumed by the standalone `stratos-indexer`.            |
+| Concept            | Description                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Boundary**       | Access control scope (e.g., "engineering", "leadership"). Records have boundaries; viewers must share at least one.                                     |
+| **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                                                               |
+| **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                                                       |
+| **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.                                           |
+| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped WebSocket stream consumed by sync clients (the standalone `stratos-indexer` and `stratos-feedgen`). |
 
 ### Packages
 
@@ -26,7 +26,8 @@ stratos/
 ├── stratos-core/       # Domain logic, ports (interfaces)
 ├── stratos-service/    # HTTP service, adapters (implementations)
 ├── stratos-client/     # Client library (discovery, routing, verification, scopes)
-├── stratos-indexer/    # Standalone indexer for AppViews
+├── stratos-indexer/    # Standalone indexer that writes Stratos data into an AppView database
+├── stratos-feedgen/    # Standalone feed generator; serves boundary-scoped hydrated feeds to clients
 ├── lexicons/           # ATProto lexicon definitions
 └── docs/               # Technical documentation
 ```
@@ -135,6 +136,8 @@ stratos-service/src/features/{feature}/
 | `verification.ts` | Record verification with inclusion proofs and user/service key signature checks |
 | `scopes.ts`       | OAuth scope declarations                                                        |
 | `types.ts`        | Client type definitions                                                         |
+| `lexicons.ts`     | Stable entry re-exporting the generated `zone.stratos.*` bundle (`./lexicons`)  |
+| `lexicons.gen.ts` | Auto-generated LexiconDoc bundle; regenerate with `pnpm lexgen`                 |
 
 **Indexer** (`stratos-indexer/src/`):
 
@@ -148,6 +151,33 @@ stratos-service/src/features/{feature}/
 | `cursor-manager.ts` | Manages PDS and Stratos sync cursors with periodic flush      |
 | `worker-pool.ts`    | Thread pool for concurrent processing                         |
 | `backfill.ts`       | Backfill existing repos on startup                            |
+
+**Feed generator** (`stratos-feedgen/src/`):
+
+Standalone service that subscribes to a single upstream Stratos, indexes posts
+into a local SQLite (WAL) store, and serves boundary-scoped, hydrated feeds to
+clients. Inbound requests carry a user service-auth JWT (`iss=userDID`,
+`aud=feedgenDID`); the feedgen resolves the user DID, looks up the viewer's
+boundaries, and returns only posts the viewer may see. Outbound calls to the
+upstream Stratos (including the sync WebSocket) use a feedgen-minted service-auth
+JWT (`iss=feedgenDID`, `aud=stratosDID`).
+
+| File / dir      | Description                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `server.ts`     | Express app: XRPC handlers, `/health`, `/.well-known/did.json` DID document                    |
+| `api/feed/`     | `getFeed.ts`, `describeFeed.ts` XRPC handlers                                                  |
+| `auth/`         | Inbound service-auth JWT verifier (`verifier.ts`, `identity.ts`)                               |
+| `subscription/` | Background sync workers: `service-stream.ts`, `actor-syncer.ts`, `actor-pool.ts`, `indexer.ts` |
+| `upstream/`     | `UpstreamStratosClient` (`client.ts`) + `mintServiceJwt` (`jwt.ts`) to the upstream Stratos    |
+| `enrollment/`   | Viewer-boundary cache (`manager.ts` + TTL/LRU in `lru.ts`)                                     |
+| `db/`           | Local post/boundary/cursor index (`sqlite.ts`, `postgres.ts`, `schema/`)                       |
+| `feeds/`        | Feed registry and static feed config (`config.ts`, `index.ts`)                                 |
+
+**Feed generator lexicons** (`lexicons/zone/stratos/feedgen/`): `getFeed`
+(authenticated), `describeFeed` (unauthenticated). Required env vars:
+`FEEDGEN_SERVICE_DID`, `FEEDGEN_SIGNING_KEY`, `STRATOS_SERVICE_URL`,
+`STRATOS_SERVICE_DID`. See `stratos-feedgen/README.md` for the full architecture
+diagram and auth-flow table.
 
 ### Storage Architecture
 
@@ -203,6 +233,22 @@ Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests
 `stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run:
 `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
 
+### Mutation testing (validating AI-generated code)
+
+Mutation testing (StrykerJS, via `pnpm --filter <package> mutation`) exists to validate that tests
+actually catch regressions — it is the primary gate for trusting AI-generated code and the tests that
+accompany it. It is **not** CI-enforced; it is a local verification step the agent is responsible for
+running.
+
+When a change requires adding or running tests to validate behaviour, you MUST:
+
+- Run mutation testing on the modules you changed and confirm surviving mutants are addressed (or
+  explicitly justified) before considering the work done. A green test suite alone is insufficient.
+- Extend the mutation `mutate` globs in the relevant `stryker.config.json` to cover any new
+  source files/modules you introduced, so the new code is actually under mutation analysis.
+- Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests or review the code and improve it
+  rather than weakening the thresholds.
+
 ---
 
 ## Database
@@ -229,16 +275,18 @@ inter-service JWT), `.admin` (basic/bearer).
 
 Lexicon files live in `lexicons/zone/stratos/`. Key lexicons:
 
-| Lexicon                              | Type         | Description                                  |
-| ------------------------------------ | ------------ | -------------------------------------------- |
-| `zone.stratos.actor.enrollment`      | record       | User's Stratos service enrollments           |
-| `zone.stratos.boundary.defs`         | defs         | Domain/Domains type definitions              |
-| `zone.stratos.feed.post`             | record       | Post with boundary                           |
-| `zone.stratos.repo.hydrateRecord`    | query        | Single record hydration endpoint             |
-| `zone.stratos.repo.hydrateRecords`   | procedure    | Batch hydration endpoint (up to 100 records) |
-| `zone.stratos.sync.subscribeRecords` | subscription | WebSocket firehose                           |
-| `zone.stratos.sync.getRepo`          | query        | Export full repository as CAR file           |
-| `zone.stratos.repo.importRepo`       | procedure    | Import repository from CAR file              |
+| Lexicon                              | Type         | Description                                                 |
+| ------------------------------------ | ------------ | ----------------------------------------------------------- |
+| `zone.stratos.actor.enrollment`      | record       | User's Stratos service enrollments                          |
+| `zone.stratos.boundary.defs`         | defs         | Domain/Domains type definitions                             |
+| `zone.stratos.feed.post`             | record       | Post with boundary                                          |
+| `zone.stratos.repo.hydrateRecord`    | query        | Single record hydration endpoint                            |
+| `zone.stratos.repo.hydrateRecords`   | procedure    | Batch hydration endpoint (up to 100 records)                |
+| `zone.stratos.sync.subscribeRecords` | subscription | WebSocket firehose                                          |
+| `zone.stratos.sync.getRepo`          | query        | Export full repository as CAR file                          |
+| `zone.stratos.repo.importRepo`       | procedure    | Import repository from CAR file                             |
+| `zone.stratos.feedgen.getFeed`       | query        | Authenticated; returns fully-hydrated boundary-scoped posts |
+| `zone.stratos.feedgen.describeFeed`  | query        | Unauthenticated; returns the configured feed list           |
 
 ### Adding New Lexicons
 

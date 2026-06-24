@@ -92,7 +92,7 @@ test.describe('Private Post with Image', () => {
 
     // Mock server domains
     await page.route(
-      '**/xrpc/zone.stratos.server.getDomains',
+      '**/xrpc/zone.stratos.server.listDomains',
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -152,6 +152,27 @@ test.describe('Private Post with Image', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ domains: ['example.com'] }),
+        })
+      },
+    )
+
+    // Mock AppView author feed (called during startup)
+    await page.route('**/xrpc/app.bsky.feed.getAuthorFeed**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
+      })
+    })
+
+    // Mock feedgen getFeed (proxied through PDS)
+    await page.route(
+      '**/xrpc/zone.stratos.feedgen.getFeed**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ feed: [], cursor: 'mock-cursor' }),
         })
       },
     )

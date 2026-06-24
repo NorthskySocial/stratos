@@ -1,0 +1,34 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.feedgen.describeFeed",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List feeds offered by this generator.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "feeds"],
+          "properties": {
+            "did": { "type": "string", "format": "did" },
+            "feeds": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#feedDescription" }
+            }
+          }
+        }
+      }
+    },
+    "feedDescription": {
+      "type": "object",
+      "required": ["id", "boundary"],
+      "properties": {
+        "id": { "type": "string" },
+        "boundary": { "type": "string" },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

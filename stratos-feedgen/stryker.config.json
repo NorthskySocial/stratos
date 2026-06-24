@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "inPlace": true,
+  "reporters": ["html", "clear-text", "progress"],
+  "mutate": [
+    "src/subscription/actor-syncer.ts",
+    "src/subscription/service-stream.ts",
+    "src/upstream/client.ts",
+    "!src/**/index.ts",
+    "!src/**/*.d.ts"
+  ],
+  "incremental": true,
+  "concurrency": 4,
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 60
+  }
+}

@@ -1,7 +1,7 @@
 import { Agent } from '@atproto/api'
 import { Lexicons } from '@atproto/lexicon'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
-import { stratosLexicons } from '@northskysocial/stratos-core'
+import { stratosLexicons } from '@northskysocial/stratos-client/lexicons'
 
 /**
  * Configure an Agent with Stratos lexicons.

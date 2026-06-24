@@ -48,7 +48,7 @@ export function registerHydrationHandlers(
     handler: createXrpcHandler(ctx, 'zone.stratos.repo.hydrateRecords', {
       requireAuth: false,
       handler: async (args) => {
-        const { input, auth, did } = args
+        const { input, did } = args
         // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
         const body = (input ?? (args as any).req?.body) as
           | HydrateRecordsInput
@@ -64,9 +64,11 @@ export function registerHydrationHandlers(
         }
 
         const requests = body!.uris.map((uri) => ({ uri }))
+        // Viewer identity is derived strictly from the authenticated
+        // credential; a client-supplied `did` cannot override it.
         const context = await getHydrationContext(
           ctx,
-          did ?? auth?.credentials?.did ?? null,
+          did ?? null,
           ctx.cfg?.service?.publicUrl,
         )
         const result = await hydrationService.hydrateRecords(requests, context)
@@ -84,7 +86,7 @@ export function registerHydrationHandlers(
     type: 'query',
     handler: createXrpcHandler(ctx, 'zone.stratos.repo.hydrateRecord', {
       requireAuth: false,
-      handler: async ({ params, auth, did }) => {
+      handler: async ({ params, did }) => {
         const uri = params.uri as string | undefined
         const cid = params.cid as string | undefined
 
@@ -92,9 +94,11 @@ export function registerHydrationHandlers(
           throw new InvalidRequestError('URI required', 'InvalidInput')
         }
 
+        // Viewer identity is derived strictly from the authenticated
+        // credential; a client-supplied `did` cannot override it.
         const context = await getHydrationContext(
           ctx,
-          did ?? auth?.credentials?.did ?? null,
+          did ?? null,
           ctx.cfg?.service?.publicUrl,
         )
         const result = await hydrationService.hydrateRecord(

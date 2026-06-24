@@ -239,6 +239,17 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
   }
 
   /**
+   * List only service enrollments with optional pagination.
+   * @param options - Optional filtering and pagination options.
+   * @returns A Promise resolving to an array of service StoredEnrollment objects.
+   */
+  async listServiceEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    return this.inner.listServiceEnrollments(options)
+  }
+
+  /**
    * Get the total number of enrollments in the store.
    * @returns A Promise resolving to the total enrollment count.
    */

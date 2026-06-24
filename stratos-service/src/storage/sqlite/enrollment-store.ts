@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { asc, eq, gt, and } from 'drizzle-orm'
 import {
   type EnrollmentStoreReader,
   type StoredEnrollment,
@@ -49,6 +49,7 @@ export class SqliteEnrollmentStore
         signingKeyDid: record.signingKeyDid,
         active: record.active ? 'true' : 'false',
         enrollmentRkey: record.enrollmentRkey ?? null,
+        isService: record.isService ?? false,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -58,6 +59,7 @@ export class SqliteEnrollmentStore
           signingKeyDid: record.signingKeyDid,
           active: record.active ? 'true' : 'false',
           enrollmentRkey: record.enrollmentRkey ?? null,
+          isService: record.isService ?? false,
         },
       })
 
@@ -108,6 +110,7 @@ export class SqliteEnrollmentStore
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }
   }
 
@@ -130,6 +133,7 @@ export class SqliteEnrollmentStore
       set.active = updates.active ? 'true' : 'false'
     if (updates.enrollmentRkey !== undefined)
       set.enrollmentRkey = updates.enrollmentRkey ?? null
+    if (updates.isService !== undefined) set.isService = updates.isService
 
     if (Object.keys(set).length > 0) {
       await this.db.update(enrollment).set(set).where(eq(enrollment.did, did))
@@ -148,14 +152,13 @@ export class SqliteEnrollmentStore
     const limit = options?.limit ?? 50
     const cursor = options?.cursor
 
-    const query = this.db.select().from(enrollment).limit(limit)
-    // Basic cursor implementation based on DID
-    if (cursor) {
-      // For simplicity, using alphabetical DID as cursor
-      // In a real app, maybe use a primary key or timestamp
-    }
+    const rows = await this.db
+      .select()
+      .from(enrollment)
+      .where(cursor ? gt(enrollment.did, cursor) : undefined)
+      .orderBy(asc(enrollment.did))
+      .limit(limit)
 
-    const rows = await query
     return rows.map((row) => ({
       did: row.did,
       enrolledAt: row.enrolledAt,
@@ -163,6 +166,41 @@ export class SqliteEnrollmentStore
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
+    }))
+  }
+
+  /**
+   * List only service enrollments with optional pagination
+   * @param options - Pagination options
+   * @returns List of service enrollments
+   */
+  async listServiceEnrollments(options?: {
+    limit?: number
+    cursor?: string
+  }): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 50
+    const cursor = options?.cursor
+
+    const condition = cursor
+      ? and(eq(enrollment.isService, true), gt(enrollment.did, cursor))
+      : eq(enrollment.isService, true)
+
+    const rows = await this.db
+      .select()
+      .from(enrollment)
+      .where(condition)
+      .orderBy(asc(enrollment.did))
+      .limit(limit)
+
+    return rows.map((row) => ({
+      did: row.did,
+      enrolledAt: row.enrolledAt,
+      pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }))
   }
 

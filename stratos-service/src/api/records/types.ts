@@ -63,10 +63,16 @@ export async function sequenceChange(
     trace?: SequenceTrace
   },
 ) {
-  // Sequence the change for subscriptions
+  // Sequence the change for subscriptions.
+  // Path is canonicalized to `${collection}/${rkey}` (no leading slash) to
+  // match the format produced by every other code path (postgres actor-store,
+  // record reader, etc). AtUri.pathname has a leading slash which would break
+  // downstream `path.startsWith('${collection}/')` checks.
+  const uriPathname = new AtUriSyntax(op.uri).pathname
+  const path = uriPathname.startsWith('/') ? uriPathname.slice(1) : uriPathname
   const event: LexValue = {
     action: op.action,
-    path: new AtUriSyntax(op.uri).pathname,
+    path,
     cid: op.cid,
     record: op.record as LexValue | undefined,
     commit: op.commitCid,

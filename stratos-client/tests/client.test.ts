@@ -290,6 +290,7 @@ describe('scopes', () => {
     expect(scopes).toContain(
       'repo:zone.stratos.feed.post?action=create&action=delete',
     )
+    expect(scopes).toContain('rpc:zone.stratos.feedgen.getFeed?aud=*')
     expect(scopes).not.toContain('transition:generic')
     expect(scopes).not.toContain('transition:chat.bsky')
   })

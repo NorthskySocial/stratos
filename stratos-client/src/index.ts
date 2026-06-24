@@ -26,5 +26,6 @@ export {
 export {
   STRATOS_SCOPES,
   buildCollectionScope,
+  buildRpcScope,
   buildStratosScopes,
 } from './scopes.js'

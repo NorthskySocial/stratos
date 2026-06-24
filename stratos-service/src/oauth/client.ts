@@ -334,6 +334,7 @@ export async function createOAuthClient(
       response_types: ['code'],
       scope: config.scope ?? OAUTH_SCOPE,
       token_endpoint_auth_method: clientKey ? 'private_key_jwt' : 'none',
+      ...(clientKey && { token_endpoint_auth_signing_alg: 'ES256' }),
       dpop_bound_access_tokens: true,
       application_type: 'web',
     },

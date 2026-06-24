@@ -21,7 +21,16 @@ Records are validated on write:
 - Cross-namespace embeds are rejected (no `app.bsky` references in Stratos records).
 
 On read, `getRecord` checks whether the requesting DID shares at least one boundary with the record.
-Access-denied responses are returned as 404 to avoid leaking record existence.
+Access-denied responses are returned as 404 to avoid leaking record existence. The viewer DID is
+always taken from the authenticated credential — hydration and read endpoints never accept a
+client-supplied viewer DID.
+
+## Service Identities
+
+Enrollments are classified by an `isService` flag, not by inspecting endpoint fields such as
+`pdsEndpoint`. Service identities are **read-only**: `createRecord` rejects service enrollments with
+`ServiceWriteForbidden`, while reads remain scoped to the service's own enrolled boundaries. A
+non-enrolled caller is rejected before any write or signing work occurs.
 
 ## Rate Limiting
 

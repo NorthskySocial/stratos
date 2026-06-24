@@ -56,6 +56,16 @@ export class BoundaryNotAllowedError extends StratosError {
 }
 
 /**
+ * Error thrown when a configured service enrollment is invalid
+ */
+export class InvalidServiceEnrollmentError extends StratosError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, 'InvalidServiceEnrollment', options)
+    this.name = 'InvalidServiceEnrollmentError'
+  }
+}
+
+/**
  * Error thrown when a record is not found
  */
 export class RecordNotFoundError extends StratosError {

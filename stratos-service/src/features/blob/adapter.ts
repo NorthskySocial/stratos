@@ -112,34 +112,33 @@ export class BlobAuthServiceImpl implements BlobAuthService {
   ): Promise<Map<string, boolean>> {
     const results = new Map<string, boolean>()
 
-    // Optimization: Resolve boundaries once
-    let viewerDomains: string[] = []
-    if (viewerDid) {
-      viewerDomains = await this.boundaryResolver.getBoundaries(viewerDid)
+    // Ownership bypass: if viewer is the actor owning the repository, access is granted for all blobs.
+    if (viewerDid && viewerDid === actorDid) {
+      for (const cid of blobCids) {
+        results.set(cid.toString(), true)
+      }
+      return results
     }
 
-    // Simple implementation: call canAccessBlob for each (can be optimized with shared context)
+    // Unauthenticated viewers cannot access private blobs (Stratos default)
+    if (!viewerDid) {
+      for (const cid of blobCids) {
+        results.set(cid.toString(), false)
+      }
+      return results
+    }
+
+    // Optimization: Resolve boundaries once for the batch
+    const viewerDomains = await this.boundaryResolver.getBoundaries(viewerDid)
+
     for (const cid of blobCids) {
-      const cidStr = cid.toString()
-      // If owner, all true
-      if (viewerDid && viewerDid === actorDid) {
-        results.set(cidStr, true)
-        continue
-      }
-
-      // Safety check, if viewer is null, all false
-      if (!viewerDid) {
-        results.set(cidStr, false)
-        continue
-      }
-
       const access = await this.canAccessBlobInternal(
         viewerDid,
         viewerDomains,
         actorDid,
         cid,
       )
-      results.set(cidStr, access)
+      results.set(cid.toString(), access)
     }
 
     return results

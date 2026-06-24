@@ -64,17 +64,30 @@ describe('API Records', () => {
     })
 
     // Simple in-memory enrollment store for testing
-    const enrolledDids = new Set<string>()
+    const enrollments = new Map<
+      string,
+      {
+        did: string
+        enrolledAt: string
+        pdsEndpoint?: string | undefined
+        signingKeyDid?: string | undefined
+        active?: boolean | undefined
+        isService?: boolean | undefined
+      }
+    >()
     const enrollmentStore = {
-      isEnrolled: (did: string) => Promise.resolve(enrolledDids.has(did)),
+      isEnrolled: (did: string) => Promise.resolve(enrollments.has(did)),
+      getEnrollment: (did: string) =>
+        Promise.resolve(enrollments.get(did) ?? null),
       enroll: async (record: {
         did: string
         enrolledAt: string
         pdsEndpoint?: string | undefined
         signingKeyDid?: string | undefined
         active?: boolean | undefined
+        isService?: boolean | undefined
       }) => {
-        enrolledDids.add(record.did)
+        enrollments.set(record.did, record)
         await Promise.resolve()
       },
     }

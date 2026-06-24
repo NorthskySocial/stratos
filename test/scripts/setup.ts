@@ -6,7 +6,7 @@ import { accountExists, createAccount, createInviteCode } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { loadState, saveState, type TestState } from './lib/state.ts'
 import { error, fail, info, pass, section, warn } from './lib/log.ts'
-import { isPostgres } from './lib/backend.ts'
+import { isAppview, isPostgres } from './lib/backend.ts'
 
 async function prepareTestDataDir() {
   info('Preparing test-data directory...')
@@ -100,12 +100,17 @@ async function startStratos(envVars: Record<string, string>) {
   info('Building and starting container...')
 
   const composeArgs = ['-f', 'docker-compose.test.yml']
-  if (isPostgres()) {
+  if (isAppview()) {
+    composeArgs.push('-f', 'docker-compose.e2e.yml')
+    info('Using AppView E2E stack (Stratos + AppView + PostgreSQL)')
+  } else if (isPostgres()) {
     composeArgs.push('-f', 'docker-compose.postgres.yml')
     info('Using PostgreSQL storage backend')
   }
   composeArgs.push('up', '-d', '--build', '--force-recreate')
-  if (isPostgres()) {
+  if (isAppview()) {
+    composeArgs.push('--wait', 'postgres', 'stratos', 'appview')
+  } else if (isPostgres()) {
     composeArgs.push('postgres', 'stratos')
   } else {
     composeArgs.push('stratos')

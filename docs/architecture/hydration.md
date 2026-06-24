@@ -96,6 +96,15 @@ AppViews typically use `zone.stratos.repo.hydrateRecords` to hydrate multiple st
 The 404 response for denied access is deliberate — it avoids leaking the existence of records to
 unauthorized viewers.
 
+### Viewer Identity
+
+The viewer used for boundary scoping is derived **strictly from the authenticated credential**
+(`auth.credentials.did`). The hydration endpoints accept no client-supplied viewer DID, so a caller
+cannot spoof another identity to widen the boundary set. The viewer's boundaries are resolved from
+that DID, and only records sharing at least one of those boundaries are returned. This applies
+uniformly to user and service callers — a service identity reads only within its own enrolled
+boundaries.
+
 ## Trust Model
 
 The `source.cid` in the stub allows AppViews to verify the hydrated record hasn't changed:

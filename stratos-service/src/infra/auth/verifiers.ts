@@ -33,9 +33,10 @@ export interface AuthVerifiers {
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did?: string } }>
   /** Admin auth (basic auth or bearer token with admin password) */
-  admin: (
-    ctx: import('@atproto/xrpc-server').MethodAuthContext,
-  ) => Promise<{ credentials: { type: string } }>
+  admin: (ctx: {
+    req: import('node:http').IncomingMessage
+    res: import('node:http').ServerResponse
+  }) => Promise<{ credentials: { type: string } }>
   /** Stream auth for zone.stratos.sync.subscribeRecords */
   subscribeAuth: StreamAuthVerifier
 }
@@ -65,7 +66,6 @@ function safeEqual(a: string, b: string): boolean {
  * @param dpopVerifier - DPoP verifier
  * @param allowListProvider - External allowlist provider
  * @param devMode - Development mode flag
- * @param syncToken - Sync token
  * @param logger
  * @returns Auth verifiers object
  */
@@ -79,7 +79,6 @@ export function createAuthVerifiers(
   dpopVerifier: DpopVerifier,
   allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
-  syncToken: string | undefined,
   logger?: Logger,
 ): AuthVerifiers {
   return {
@@ -103,11 +102,7 @@ export function createAuthVerifiers(
       logger,
     }),
     admin: createAdminVerifier(adminPassword),
-    subscribeAuth: createSubscribeAuthVerifier(
-      syncToken,
-      idResolver,
-      serviceDid,
-    ),
+    subscribeAuth: createSubscribeAuthVerifier(idResolver, serviceDid),
   }
 }
 
@@ -412,63 +407,41 @@ function createAdminVerifier(
 }
 
 /**
- * Creates the stream auth verifier for sync subscriptions
+ * Creates the stream auth verifier for sync subscriptions.
  *
- * @param syncToken - Sync token for authenticated subscriptions
+ * Only inter-service auth JWTs (Authorization: Bearer) are accepted. The master
+ * sync token, query-parameter tokens, and anonymous access have been removed.
+ *
  * @param idResolver - Identity resolver
  * @param ourDid - Our service DID
  * @returns Auth verifier function
- * @throws AuthRequiredError if sync token is invalid
+ * @throws AuthRequiredError if the service-auth JWT is missing or invalid
  */
-function createSubscribeAuthVerifier(
-  syncToken: string | undefined,
+export function createSubscribeAuthVerifier(
   idResolver: IdResolver,
   ourDid: string,
 ): AuthVerifiers['subscribeAuth'] {
   return async (ctx) => {
     const authHeader = ctx.req?.headers?.authorization
-    const query = (ctx.req as { query?: Record<string, unknown> }).query
-    const queryToken = query?.token
-
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7).trim()
-
-      // 1. Check if it's the master sync token
-      if (syncToken && safeEqual(token, syncToken)) {
-        return { credentials: { type: 'sync' } }
-      }
-
-      // 2. Check if it's a service auth JWT
-      try {
-        const result = await verifyServiceAuth(
-          authHeader,
-          ourDid,
-          'zone.stratos.sync.subscribeRecords',
-          idResolver,
-        )
-        return {
-          credentials: { type: 'service', did: result.iss, iss: result.iss },
-        }
-      } catch {
-        // Fall through
-      }
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw new AuthRequiredError('Service authorization required')
     }
 
-    if (typeof queryToken === 'string' && syncToken) {
-      if (safeEqual(queryToken, syncToken)) {
-        return { credentials: { type: 'sync' } }
+    try {
+      const result = await verifyServiceAuth(
+        authHeader,
+        ourDid,
+        'zone.stratos.sync.subscribeRecords',
+        idResolver,
+      )
+      return {
+        credentials: { type: 'service', did: result.iss, iss: result.iss },
       }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Service authorization failed'
+      throw new AuthRequiredError(message)
     }
-
-    // If no token, allow but check individual actor permissions if needed
-    // Actually, standard subscribeRecords allows anyone to connect
-    // and we just filter based on what they ask for if needed.
-    // But Stratos sync typically requires a token for full access.
-    if (syncToken && (authHeader || queryToken)) {
-      throw new AuthRequiredError('Invalid sync token')
-    }
-
-    return { credentials: { type: 'anonymous' } }
   }
 }
 

@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "inPlace": true,
+  "reporters": ["html", "clear-text", "progress"],
+  "mutate": [
+    "src/config.ts",
+    "src/features/blob/adapter.ts",
+    "src/features/enrollment/**/*.ts",
+    "src/features/hydration/**/*.ts",
+    "src/features/sync/**/*.ts",
+    "src/infra/auth/**/*.ts",
+    "src/subscription/**/*.ts",
+    "src/storage/sqlite/enrollment-store.ts",
+    "src/infra/storage/sqlite/enrollment-store.ts",
+    "src/infra/storage/postgres/enrollment-store.ts",
+    "src/infra/storage/cached-enrollment-store.ts",
+    "src/api/handlers/repo-read-handlers.ts",
+    "!src/**/index.ts",
+    "!src/**/*.d.ts"
+  ],
+  "incremental": true,
+  "concurrency": 4,
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 60
+  }
+}
