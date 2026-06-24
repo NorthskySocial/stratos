@@ -118,14 +118,14 @@ stratos-service/src/features/{feature}/
 
 **Service infrastructure** (`stratos-service/src/`):
 
-| Module          | Description                                                                                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api/`          | XRPC handlers: `records.ts` (CRUD), `handlers.ts` (getRecord, getRepo, importRepo)                                                                        |
-| `auth/`         | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifier (`verifier.ts`), enrollment auth (`enrollment.ts`) |
+| Module          | Description                                                                                                                                                                                                                                                      |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api/`          | XRPC handlers: `records.ts` (CRUD), `handlers.ts` (getRecord, getRepo, importRepo)                                                                                                                                                                               |
+| `auth/`         | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifier (`verifier.ts`), enrollment auth (`enrollment.ts`)                                                                                                        |
 | `oauth/`        | OAuth client (`client.ts`), enrollment authorization routes (`routes.ts`), admin authorization routes (`admin-routes.ts`), admin web-session store (`admin-session-store.ts`), admin flow handlers (`handlers/admin-authorize.ts`, `handlers/admin-callback.ts`) |
-| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                    |
-| `blobstore/`    | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                     |
-| `adapters/`     | Storage backend implementations: `sqlite/`, `postgres/`                                                                                                   |
+| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                                                                                                                           |
+| `blobstore/`    | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                                                                                                                            |
+| `adapters/`     | Storage backend implementations: `sqlite/`, `postgres/`                                                                                                                                                                                                          |
 
 **Client library** (`stratos-client/src/`):
 
@@ -281,12 +281,12 @@ parsed into `config.adminDids`).
 
 **Flow** (routes in `stratos-service/src/oauth/admin-routes.ts`, mounted at `/admin/oauth`):
 
-| Route                    | Handler                                  | Purpose                                                              |
-| ------------------------ | ---------------------------------------- | ------------------------------------------------------------------- |
-| `GET /admin/oauth/authorize` | `handlers/admin-authorize.ts`        | Starts OAuth; pins `redirect_uri` to the admin callback             |
-| `GET /admin/oauth/callback`  | `handlers/admin-callback.ts`         | Token exchange, allowlist check, establishes web session            |
-| `GET /admin/whoami`          | inline in `admin-routes.ts`          | Returns `{ did, isAdmin }` for the active session, else 401         |
-| `POST /admin/oauth/logout`   | inline in `admin-routes.ts`          | Deletes the session and clears the cookie                           |
+| Route                        | Handler                       | Purpose                                                     |
+| ---------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| `GET /admin/oauth/authorize` | `handlers/admin-authorize.ts` | Starts OAuth; pins `redirect_uri` to the admin callback     |
+| `GET /admin/oauth/callback`  | `handlers/admin-callback.ts`  | Token exchange, allowlist check, establishes web session    |
+| `GET /admin/whoami`          | inline in `admin-routes.ts`   | Returns `{ did, isAdmin }` for the active session, else 401 |
+| `POST /admin/oauth/logout`   | inline in `admin-routes.ts`   | Deletes the session and clears the cookie                   |
 
 **Session model**: the callback enforces the allowlist (revoking the OAuth session and returning
 `403 NotAdmin` on a miss), then mints an opaque server-side session via `AdminSessionStore`

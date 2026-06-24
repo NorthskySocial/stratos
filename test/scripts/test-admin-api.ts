@@ -50,7 +50,10 @@ async function getBaseUrl(): Promise<string> {
 async function screenshot(page: Page, name: string): Promise<void> {
   try {
     await Deno.mkdir(SCREENSHOT_DIR, { recursive: true })
-    await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png`, fullPage: true })
+    await page.screenshot({
+      path: `${SCREENSHOT_DIR}/${name}.png`,
+      fullPage: true,
+    })
     dim(`Screenshot saved: test-data/screenshots/${name}.png`)
   } catch {
     dim(`Failed to save screenshot: ${name}.png`)
@@ -79,11 +82,16 @@ async function adminLogin(
     await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
     await handleNgrokInterstitial(page)
 
-    await page.waitForSelector('input[type="password"], input[name="password"]', {
-      timeout: 15_000,
-    })
+    await page.waitForSelector(
+      'input[type="password"], input[name="password"]',
+      {
+        timeout: 15_000,
+      },
+    )
     const usernameInput =
-      (await page.$('input[name="username"]:not([readonly]):not([disabled])')) ??
+      (await page.$(
+        'input[name="username"]:not([readonly]):not([disabled])',
+      )) ??
       (await page.$('input[name="identifier"]:not([readonly]):not([disabled])'))
     if (usernameInput && !(await usernameInput.inputValue())) {
       await usernameInput.fill(handle)
@@ -95,7 +103,11 @@ async function adminLogin(
     await page.waitForURL(
       (url: URL) => {
         const s = url.toString()
-        return s.includes('/admin') || s.includes('authorize') || s.includes('consent')
+        return (
+          s.includes('/admin') ||
+          s.includes('authorize') ||
+          s.includes('consent')
+        )
       },
       { timeout: 15_000 },
     )
@@ -127,7 +139,10 @@ async function adminLogin(
     return sessionCookie?.value ?? null
   } catch (err) {
     await screenshot(page, 'admin-login-error')
-    fail('Admin OAuth login threw', err instanceof Error ? err.message : String(err))
+    fail(
+      'Admin OAuth login threw',
+      err instanceof Error ? err.message : String(err),
+    )
     return null
   } finally {
     await context.close()
@@ -202,11 +217,7 @@ async function waitForPdsBoundaries(
   let last: string[] | null = null
   while (Date.now() < deadline) {
     last = await readPdsBoundaries(did)
-    if (
-      last &&
-      last.length === want.size &&
-      last.every((b) => want.has(b))
-    ) {
+    if (last && last.length === want.size && last.every((b) => want.has(b))) {
       return last
     }
     await new Promise((r) => setTimeout(r, 1_000))
@@ -264,7 +275,11 @@ async function run(): Promise<void> {
   })
   let sessionCookie: string | null = null
   try {
-    sessionCookie = await adminLogin(browser, operator.handle, operator.password)
+    sessionCookie = await adminLogin(
+      browser,
+      operator.handle,
+      operator.password,
+    )
   } finally {
     await browser.close()
   }
@@ -325,7 +340,8 @@ async function run(): Promise<void> {
   )
   const setBody = set.body as BoundaryResponse
   assert(
-    set.status === 200 && sameSet(setBody?.boundaries ?? [], [DOMAINS.swordsmith]),
+    set.status === 200 &&
+      sameSet(setBody?.boundaries ?? [], [DOMAINS.swordsmith]),
     'setBoundaries replaces the boundary set',
     `status=${set.status}, boundaries=[${setBody?.boundaries?.join(', ') ?? ''}]`,
   )
@@ -336,7 +352,9 @@ async function run(): Promise<void> {
     'DB reflects setBoundaries',
     `[${dbAfterSet.join(', ')}]`,
   )
-  const pdsAfterSet = await waitForPdsBoundaries(target.did, [DOMAINS.swordsmith])
+  const pdsAfterSet = await waitForPdsBoundaries(target.did, [
+    DOMAINS.swordsmith,
+  ])
   assert(
     pdsAfterSet !== null && sameSet(pdsAfterSet, [DOMAINS.swordsmith]),
     'PDS enrollment record reflects setBoundaries',
@@ -351,7 +369,8 @@ async function run(): Promise<void> {
   )
   const removeBody = remove.body as BoundaryResponse
   assert(
-    remove.status === 200 && !removeBody?.boundaries?.includes(DOMAINS.swordsmith),
+    remove.status === 200 &&
+      !removeBody?.boundaries?.includes(DOMAINS.swordsmith),
     'removeBoundary drops the boundary',
     `status=${remove.status}, boundaries=[${removeBody?.boundaries?.join(', ') ?? ''}]`,
   )
