@@ -52,6 +52,13 @@ test-state.json
 docs/*-prompt.md
 .github/*-instructions.md
 
+# Local planning / design work-package artifacts (not committed)
+plans/
+docs/design/service-auth-client.md
+docs/design/service-auth-client-work-packages.md
+docs/design/service-auth-inter-service.md
+docs/design/service-auth-inter-service-work-packages.md
+
 # CDK
 docs/.vitepress/cache
 /webapp/public/client-metadata.json
