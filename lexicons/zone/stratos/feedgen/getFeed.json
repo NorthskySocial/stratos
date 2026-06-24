@@ -1,0 +1,65 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.feedgen.getFeed",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Fetch a boundary-scoped hydrated feed. Requires service-auth.",
+      "parameters": {
+        "type": "params",
+        "required": ["feed"],
+        "properties": {
+          "feed": { "type": "string", "description": "Configured feed id." },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": { "type": "string" }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["feed"],
+          "properties": {
+            "cursor": { "type": "string" },
+            "feed": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#feedViewPost" }
+            }
+          }
+        }
+      },
+      "errors": [{ "name": "UnknownFeed" }, { "name": "BoundaryMismatch" }]
+    },
+    "feedViewPost": {
+      "type": "object",
+      "required": ["post"],
+      "properties": {
+        "post": { "type": "ref", "ref": "#postView" }
+      }
+    },
+    "postView": {
+      "type": "object",
+      "required": ["uri", "cid", "author", "record", "indexedAt"],
+      "properties": {
+        "uri": { "type": "string", "format": "at-uri" },
+        "cid": { "type": "string", "format": "cid" },
+        "author": { "type": "ref", "ref": "#authorView" },
+        "record": { "type": "unknown" },
+        "indexedAt": { "type": "string", "format": "datetime" }
+      }
+    },
+    "authorView": {
+      "type": "object",
+      "required": ["did"],
+      "properties": {
+        "did": { "type": "string", "format": "did" },
+        "handle": { "type": "string" }
+      }
+    }
+  }
+}

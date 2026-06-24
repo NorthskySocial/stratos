@@ -61,7 +61,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={handleBackdropClick} onkeydown={null}>
+<div class="overlay" role="button" tabindex="-1" onclick={handleBackdropClick}>
   <div class="modal">
     <div class="modal-header">
       <div>

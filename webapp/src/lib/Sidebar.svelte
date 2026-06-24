@@ -33,13 +33,7 @@
     onSetServiceUrl,
   }: Props = $props()
 
-  let inputUrl = $derived.by(() => {
-    let value = $state(serviceUrl)
-    return {
-      get value() { return value },
-      set value(v) { value = v }
-    }
-  })
+  let inputUrl = $state(serviceUrl)
 </script>
 
 <nav class="sidebar-nav">

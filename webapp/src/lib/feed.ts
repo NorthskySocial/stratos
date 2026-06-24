@@ -340,6 +340,54 @@ export async function fetchAppviewStratosPosts(
 }
 
 /**
+ * Fetch Stratos posts from a feed generator, proxied through the user's PDS.
+ *
+ * Unlike the AppView path, `zone.stratos.feedgen.getFeed` requires a service-auth
+ * JWT that only the PDS can mint. Setting the `atproto-proxy` header makes the PDS
+ * mint a JWT (iss=userDID, aud=feedgenDID, lxm=getFeed) and forward the request to
+ * the feed generator's `serviceEndpoint`. The request URL is therefore resolved
+ * against the PDS (via `session.fetchHandler`), not against the feed gen directly.
+ *
+ * @param session - OAuth session for the user
+ * @param feedgenDid - the feed generator's did:web
+ * @param feed - the configured feed id to request
+ * @param cursor - Cursor for pagination, if any
+ * @returns Array of FeedPost objects and the next cursor
+ */
+export async function fetchFeedgenPosts(
+  session: OAuthSession,
+  feedgenDid: string,
+  feed: string,
+  cursor?: string,
+): Promise<{ posts: FeedPost[]; cursor?: string }> {
+  try {
+    const path = '/xrpc/zone.stratos.feedgen.getFeed'
+    const params = new URLSearchParams({ feed, limit: '50' })
+    if (cursor) params.set('cursor', cursor)
+
+    const res = await session.fetchHandler(`${path}?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'atproto-proxy': `${feedgenDid}#stratos_feedgen` },
+    })
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '')
+      console.error(`[feedgen] getFeed failed: ${res.status} ${errText}`)
+      return { posts: [] }
+    }
+
+    const body = (await res.json()) as StratosTimelineResponse
+    console.log(`[feedgen] getFeed: ${body.feed?.length ?? 0} posts`)
+    return {
+      posts: mapFeedViewPosts(body.feed ?? [], true),
+      cursor: body.cursor,
+    }
+  } catch (err) {
+    console.error('[feedgen] getFeed error:', err)
+    return { posts: [] }
+  }
+}
+
+/**
  * Combine public and Stratos posts into a unified feed
  * @param publicPosts - Public posts from other sources
  * @param stratosPosts - Stratos posts from the user's Stratos instance

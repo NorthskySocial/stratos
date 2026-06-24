@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import * as fs from 'fs'
 import * as path from 'path'
-import { stratosLexicons } from '../src'
+import { stratosLexicons } from '../src/lexicons'
 
 describe('Lexicon Registration Safety', () => {
-  it('should ensure all lexicons used in webapp are registered in stratos-core', () => {
+  it('should ensure all lexicons used in webapp are registered in stratos-client', () => {
     const webappDir = path.resolve(__dirname, '../../webapp/src')
     const lexiconIdRegex = /zone\.stratos\.[a-zA-Z0-9.]+/g
     const foundLexicons = new Set<string>()

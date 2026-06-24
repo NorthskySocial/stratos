@@ -1,0 +1,27 @@
+{
+  "name": "stratos-feedgen",
+  "root": "stratos/stratos-feedgen",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/stratos-feedgen",
+        "command": "pnpm build"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/stratos-feedgen",
+        "command": "pnpm test"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "stratos/stratos-feedgen",
+        "command": "node dist/bin/main.js"
+      }
+    }
+  }
+}

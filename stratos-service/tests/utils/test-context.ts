@@ -58,6 +58,7 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
       mode: ENROLLMENT_MODE.OPEN,
       allowedDids: [],
       allowedPdsEndpoints: [],
+      serviceEnrollments: [],
     },
     identity: {
       plcUrl: 'https://plc.directory',

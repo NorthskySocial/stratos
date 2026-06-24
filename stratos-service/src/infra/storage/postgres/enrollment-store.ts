@@ -38,6 +38,7 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }
   }
 
@@ -62,6 +63,35 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       signingKeyDid: row.signingKeyDid,
       active: row.active === 'true',
       enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
+    }))
+  }
+
+  async listServiceEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 100
+    const cursor = options?.cursor
+
+    const condition = cursor
+      ? and(eq(pgEnrollment.isService, true), gt(pgEnrollment.did, cursor))
+      : eq(pgEnrollment.isService, true)
+
+    const rows = await this.db
+      .select()
+      .from(pgEnrollment)
+      .where(condition)
+      .orderBy(asc(pgEnrollment.did))
+      .limit(limit)
+
+    return rows.map((row) => ({
+      did: row.did,
+      enrolledAt: row.enrolledAt,
+      pdsEndpoint: row.pdsEndpoint ?? undefined,
+      signingKeyDid: row.signingKeyDid,
+      active: row.active === 'true',
+      enrollmentRkey: row.enrollmentRkey ?? undefined,
+      isService: row.isService,
     }))
   }
 
@@ -97,6 +127,7 @@ export class PgEnrollmentStoreWriter
         signingKeyDid: data.signingKeyDid,
         active: data.active ? 'true' : 'false',
         enrollmentRkey: data.enrollmentRkey ?? null,
+        isService: data.isService ?? false,
       })
       .onConflictDoUpdate({
         target: pgEnrollment.did,
@@ -106,6 +137,7 @@ export class PgEnrollmentStoreWriter
           signingKeyDid: data.signingKeyDid,
           active: data.active ? 'true' : 'false',
           enrollmentRkey: data.enrollmentRkey ?? null,
+          isService: data.isService ?? false,
         },
       })
 
@@ -135,6 +167,9 @@ export class PgEnrollmentStoreWriter
     }
     if (updates.enrollmentRkey !== undefined) {
       setValues.enrollmentRkey = updates.enrollmentRkey
+    }
+    if (updates.isService !== undefined) {
+      setValues.isService = updates.isService
     }
 
     if (Object.keys(setValues).length > 0) {

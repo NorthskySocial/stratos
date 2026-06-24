@@ -1,10 +1,12 @@
 #!/usr/bin/env -S deno run -A
 // Run all E2E test phases sequentially.
-// Usage: deno run -A test/scripts/run-all.ts [--direct] [--postgres]
+// Usage: deno run -A test/scripts/run-all.ts [--direct] [--postgres] [--appview]
 //
 // Options:
 //   --direct   Bypass OAuth and enroll users directly in the database
 //   --postgres Use PostgreSQL storage backend instead of SQLite
+//   --appview  Bring up the AppView stack and run the service-auth subscription
+//              feed phase. Implies --direct and the PostgreSQL backend.
 //
 // Phases:
 //   1. setup — create PDS accounts, start Stratos
@@ -18,12 +20,16 @@ import { fail, info, pass, section, summary } from './lib/log.ts'
 const SCRIPTS_DIR = new URL('.', import.meta.url).pathname
 
 // Parse command line args
-const directMode = Deno.args.includes('--direct')
+const appviewMode = Deno.args.includes('--appview')
+const directMode = appviewMode || Deno.args.includes('--direct')
 const preserve = Deno.args.includes('--preserve')
-const postgresMode = Deno.args.includes('--postgres')
+const postgresMode = appviewMode || Deno.args.includes('--postgres')
 
 if (postgresMode) {
   Deno.env.set('STRATOS_E2E_BACKEND', 'postgres')
+}
+if (appviewMode) {
+  Deno.env.set('STRATOS_E2E_APPVIEW', 'true')
 }
 
 interface Phase {
@@ -43,6 +49,9 @@ const phases: Phase[] = [
   { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
   { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
   { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
+  ...(appviewMode
+    ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
+    : []),
   { name: 'Unenrollment', script: 'test-unenrollment.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },
 ]
@@ -77,6 +86,9 @@ async function run() {
   }
   if (postgresMode) {
     info('Running with POSTGRESQL storage backend')
+  }
+  if (appviewMode) {
+    info('Running AppView service-auth subscription E2E (Stratos + AppView)')
   }
 
   let phasesRun = 0

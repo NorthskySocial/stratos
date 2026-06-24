@@ -256,10 +256,11 @@ OAuth metadata and scope selector UI.
 
 ### Required scopes
 
-| Scope                                | Description                   | Dependency                                    |
-| ------------------------------------ | ----------------------------- | --------------------------------------------- |
-| `repo:zone.stratos.actor.enrollment` | Read/write enrollment records | None                                          |
-| `repo:zone.stratos.feed.post`        | Read/write Stratos posts      | Requires `repo:zone.stratos.actor.enrollment` |
+| Scope                                    | Description                         | Dependency                                    |
+| ---------------------------------------- | ----------------------------------- | --------------------------------------------- |
+| `repo:zone.stratos.actor.enrollment`     | Read/write enrollment records       | None                                          |
+| `repo:zone.stratos.feed.post`            | Read/write Stratos posts            | Requires `repo:zone.stratos.actor.enrollment` |
+| `rpc:zone.stratos.feedgen.getFeed?aud=*` | Call any feed generator's `getFeed` | None                                          |
 
 ### Scope utilities
 
@@ -278,7 +279,8 @@ const enrollmentScope = buildCollectionScope(STRATOS_SCOPES.enrollment)
 const scopes = buildStratosScopes()
 // => ['atproto',
 //     'repo:zone.stratos.actor.enrollment',
-//     'repo:zone.stratos.feed.post']
+//     'repo:zone.stratos.feed.post?action=create&action=delete',
+//     'rpc:zone.stratos.feedgen.getFeed?aud=*']
 ```
 
 ### OAuth client metadata

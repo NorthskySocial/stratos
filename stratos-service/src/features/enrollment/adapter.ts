@@ -92,6 +92,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       signingKeyDid: record.signingKeyDid,
       active: record.active,
       enrollmentRkey: record.enrollmentRkey,
+      isService: record.isService ?? false,
     }
   }
 

@@ -1,4 +1,10 @@
-import { sqliteTable, text, index, primaryKey } from 'drizzle-orm/sqlite-core'
+import {
+  sqliteTable,
+  text,
+  integer,
+  index,
+  primaryKey,
+} from 'drizzle-orm/sqlite-core'
 
 /**
  * OAuth session storage - stores authenticated user sessions
@@ -29,6 +35,7 @@ export const enrollment = sqliteTable('enrollment', {
   signingKeyDid: text('signingKeyDid').notNull(),
   active: text('active').notNull().default('true'),
   enrollmentRkey: text('enrollmentRkey'),
+  isService: integer('isService', { mode: 'boolean' }).notNull().default(false),
 })
 
 /**

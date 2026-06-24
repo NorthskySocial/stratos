@@ -75,42 +75,16 @@ export default defineConfig(({ command, mode }) => {
               if (id.includes('svelte')) {
                 return 'vendor-svelte'
               }
-              // Group all heavy polyfills together
-              if (
-                id.includes('buffer') ||
-                id.includes('base64-js') ||
-                id.includes('ieee754') ||
-                id.includes('crypto-browserify') ||
-                id.includes('elliptic') ||
-                id.includes('bn.js') ||
-                id.includes('browserify-sign') ||
-                id.includes('browserify-aes') ||
-                id.includes('browserify-des') ||
-                id.includes('browserify-cipher') ||
-                id.includes('parse-asn1') ||
-                id.includes('asn1.js') ||
-                id.includes('hash.js') ||
-                id.includes('create-hmac') ||
-                id.includes('create-hash') ||
-                id.includes('create-ecdh') ||
-                id.includes('pbkdf2') ||
-                id.includes('randombytes') ||
-                id.includes('randomfill') ||
-                id.includes('diffie-hellman') ||
-                id.includes('public-encrypt') ||
-                id.includes('miller-rabin') ||
-                id.includes('brorand') ||
-                id.includes('minimalistic-crypto-utils') ||
-                id.includes('hmac-drbg')
-              ) {
-                return 'vendor-polyfills'
-              }
               if (
                 id.includes('@atproto/oauth-client-browser') ||
                 id.includes('@atproto/crypto')
               ) {
                 return 'vendor-atproto-oauth'
               }
+              // Node polyfills (buffer/crypto-browserify family) and their
+              // shared low-level deps must stay in a single chunk. Splitting
+              // them out creates a vendor <-> vendor-polyfills init cycle that
+              // crashes at runtime ("Object.defineProperty called on non-object").
               return 'vendor'
             }
           },

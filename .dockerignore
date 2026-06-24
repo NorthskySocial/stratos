@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# Use **/ so nested workspace node_modules are excluded too. A bare
+# `node_modules/` only matches the context root, which let host
+# package manager symlinks (e.g. Deno's .deno store) leak into the
+# image and dangle, breaking module resolution at build time.
+**/node_modules/
 .pnpm-store/
 
 # Build outputs (rebuilt in container)

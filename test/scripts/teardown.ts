@@ -6,7 +6,7 @@ import { fail, info, pass, section, warn } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
 import { stopNgrok } from './lib/ngrok.ts'
-import { isPostgres } from './lib/backend.ts'
+import { isAppview, isPostgres } from './lib/backend.ts'
 
 async function deleteTestAccounts() {
   info('Deleting test accounts from PDS...')
@@ -29,7 +29,8 @@ async function stopDockerCompose() {
   info('Stopping Stratos container...')
   try {
     const composeArgs = ['compose', '-f', 'docker-compose.test.yml']
-    if (isPostgres()) composeArgs.push('-f', 'docker-compose.postgres.yml')
+    if (isAppview()) composeArgs.push('-f', 'docker-compose.e2e.yml')
+    else if (isPostgres()) composeArgs.push('-f', 'docker-compose.postgres.yml')
     composeArgs.push('stop')
     const compose = new Deno.Command('docker', {
       args: composeArgs,

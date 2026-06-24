@@ -7,7 +7,7 @@ import {
   ValidationError,
   type ValidationResult,
 } from '@atproto/lexicon'
-import { is$typed, maybe$typed } from './util.js'
+import { type $Typed, is$typed, maybe$typed } from './util.js'
 
 export const schemaDict = {} as const satisfies Record<string, LexiconDoc>
 export const schemas = Object.values(schemaDict) satisfies LexiconDoc[]

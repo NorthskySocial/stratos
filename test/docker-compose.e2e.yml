@@ -31,10 +31,13 @@ services:
       STORAGE_BACKEND: postgres
       STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
       STRATOS_DEV_MODE: 'true'
-      STRATOS_SYNC_TOKEN: test-sync-token
       STRATOS_PUBLIC_URL: https://stratos.test
       STRATOS_SERVICE_DID: did:web:stratos.test
       STRATOS_OAUTH_CLIENT_ID: https://stratos.test/client-metadata.json
+      # AppView enrolled as a service. The signingKey lets Stratos verify the
+      # AppView's inter-service JWTs without resolving its (non-resolvable)
+      # did:web over the network.
+      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:appview.test","signingKey":"did:key:zQ3shqu5PGsBcRm7NU1uXcmLsfuNV4LvTTuChtYJbiXnjQaE5","boundaries":["swordsmith","aekea"]}]'
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,7 +56,9 @@ services:
       APPVIEW_PORT: '3200'
       STRATOS_URL: http://stratos:3100
       APPVIEW_PG_URL: postgres://stratos:stratos@postgres:5432/appview
-      APPVIEW_SYNC_TOKEN: test-sync-token
+      APPVIEW_SERVICE_DID: did:web:appview.test
+      STRATOS_SERVICE_DID: did:web:stratos.test
+      APPVIEW_SIGNING_KEY: '0956d99570075b192e76269ca8781ae31679df438d3bab32c6dbb1abcb7e9cdc'
     depends_on:
       stratos:
         condition: service_healthy

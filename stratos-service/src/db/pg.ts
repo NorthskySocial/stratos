@@ -234,7 +234,8 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
         "pdsEndpoint" TEXT,
         "signingKeyDid" TEXT NOT NULL,
         "active" TEXT NOT NULL DEFAULT 'true',
-        "enrollmentRkey" TEXT
+        "enrollmentRkey" TEXT,
+        "isService" BOOLEAN NOT NULL DEFAULT FALSE
       )
     `,
   )
@@ -264,6 +265,13 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     db,
     'enrollment_add_enrollmentRkey',
     sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "enrollmentRkey" TEXT`,
+  )
+
+  // Migration: add isService column if missing (for existing databases)
+  await executeMigrationStep(
+    db,
+    'enrollment_add_isService',
+    sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "isService" BOOLEAN NOT NULL DEFAULT FALSE`,
   )
 }
 

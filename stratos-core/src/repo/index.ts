@@ -8,6 +8,8 @@ export {
 
 export { StratosSqlRepoTransactor } from './transactor.js'
 
+export { exportRepoCarStream, type RepoCarSource } from './export.js'
+
 export { LruBlockCache } from './lru-block-cache.js'
 
 export {
