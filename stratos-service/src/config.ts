@@ -569,6 +569,45 @@ export function isAllowedCredentialedOrigin(
 }
 
 /**
+ * CSRF defense for cookie-authenticated admin requests.
+ *
+ * The primary CSRF gate is the admin session cookie's `SameSite=Strict`
+ * attribute: a forged cross-site request never carries the cookie, so it fails
+ * the downstream session check regardless of this function. This Origin/Referer
+ * screen is defense in depth on top of that — a same-site sub-origin or a
+ * SameSite-relaxing proxy is still rejected here unless it resolves to an
+ * allowlisted credentialed origin.
+ *
+ * Requests with no Origin and no Referer (e.g. same-origin server-to-server
+ * admin tooling) are allowed through: a browser cross-site POST always carries
+ * an `Origin`, so the no-header case cannot be a browser-driven forgery, and the
+ * SameSite cookie remains the gate. Blocking it would break legitimate
+ * non-browser admin callers for no security gain.
+ *
+ * @returns true if the request may proceed past CSRF screening
+ */
+export function passesAdminCsrfCheck(
+  req: import('node:http').IncomingMessage,
+  config: { publicUrl: string; devMode: boolean },
+): boolean {
+  const origin = req.headers?.origin
+  if (origin) {
+    return isAllowedCredentialedOrigin(origin, config)
+  }
+
+  const referer = req.headers?.referer
+  if (referer) {
+    try {
+      return isAllowedCredentialedOrigin(new URL(referer).origin, config)
+    } catch {
+      return false
+    }
+  }
+
+  return true
+}
+
+/**
  * Get the full service DID with fragment for use in source.service field
  * @example "did:plc:abc123#atproto_pns"
  *

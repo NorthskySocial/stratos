@@ -17,7 +17,10 @@ import {
 } from '../src/oauth/admin-routes.js'
 import { handleAdminCallback } from '../src/oauth/handlers/admin-callback.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
-import { isAllowedCredentialedOrigin } from '../src/config.js'
+import {
+  isAllowedCredentialedOrigin,
+  passesAdminCsrfCheck,
+} from '../src/config.js'
 import { createTestConfig } from './utils'
 
 const ADMIN_DID = 'did:plc:usagi'
@@ -30,7 +33,9 @@ function makeAdminCtx(headers: Record<string, string | undefined>): {
 } {
   return {
     req: { headers } as unknown as import('node:http').IncomingMessage,
-    res: { setHeader: vi.fn() } as unknown as import('node:http').ServerResponse,
+    res: {
+      setHeader: vi.fn(),
+    } as unknown as import('node:http').ServerResponse,
   }
 }
 
@@ -129,6 +134,48 @@ describe('isAllowedCredentialedOrigin', () => {
         devMode: false,
       }),
     ).toBe(false)
+  })
+})
+
+describe('passesAdminCsrfCheck', () => {
+  const deps = { publicUrl: PUBLIC_URL, devMode: false }
+  const makeReq = (headers: Record<string, string>) =>
+    ({ headers }) as unknown as import('node:http').IncomingMessage
+
+  it('admits a request whose Origin is the service origin', () => {
+    expect(passesAdminCsrfCheck(makeReq({ origin: PUBLIC_URL }), deps)).toBe(
+      true,
+    )
+  })
+
+  it('rejects a request with a foreign Origin', () => {
+    expect(
+      passesAdminCsrfCheck(
+        makeReq({ origin: 'https://gehirn.tokyo.jp' }),
+        deps,
+      ),
+    ).toBe(false)
+  })
+
+  it('falls back to Referer when no Origin is present', () => {
+    expect(
+      passesAdminCsrfCheck(makeReq({ referer: `${PUBLIC_URL}/admin` }), deps),
+    ).toBe(true)
+    expect(
+      passesAdminCsrfCheck(
+        makeReq({ referer: 'https://gehirn.tokyo.jp/admin' }),
+        deps,
+      ),
+    ).toBe(false)
+  })
+
+  // A browser cross-site POST always carries an Origin, so the no-header case
+  // cannot be a browser-driven forgery; the SameSite=Strict cookie is the gate.
+  // This passes through intentionally so same-origin server-to-server admin
+  // tooling (the E2E suite) is not blocked — guarding against a regression to
+  // fail-closed behavior.
+  it('admits a request with neither Origin nor Referer', () => {
+    expect(passesAdminCsrfCheck(makeReq({}), deps)).toBe(true)
   })
 })
 
@@ -236,7 +283,10 @@ describe('admin OAuth callback', () => {
   let dataDir: string
   let db: ServiceDb
   let store: SqliteAdminSessionStore
-  let oauthClient: { callback: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn> }
+  let oauthClient: {
+    callback: ReturnType<typeof vi.fn>
+    revoke: ReturnType<typeof vi.fn>
+  }
 
   beforeEach(async () => {
     dataDir = join(
@@ -285,7 +335,11 @@ describe('admin OAuth callback', () => {
     expect(res.cookie).toHaveBeenCalledWith(
       ADMIN_SESSION_COOKIE,
       expect.any(String),
-      expect.objectContaining({ httpOnly: true, secure: true, sameSite: 'lax' }),
+      expect.objectContaining({
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+      }),
     )
     expect(res.redirect).toHaveBeenCalledWith('/admin')
 
