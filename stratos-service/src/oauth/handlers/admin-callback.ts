@@ -49,7 +49,7 @@ export const handleAdminCallback = (config: AdminAuthRoutesConfig) => {
       res.cookie(ADMIN_SESSION_COOKIE, sessionKey, {
         httpOnly: true,
         secure: isSecure,
-        sameSite: 'lax',
+        sameSite: 'strict',
         maxAge: ADMIN_SESSION_TTL_MS,
         path: '/',
       })

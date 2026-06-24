@@ -2,6 +2,7 @@ import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import type { Logger } from '@northskysocial/stratos-core'
 import type { AdminSessionStore } from './admin-session-store.js'
+import { passesAdminCsrfCheck } from '../config.js'
 import { handleAdminAuthorize } from './handlers/admin-authorize.js'
 import { handleAdminCallback } from './handlers/admin-callback.js'
 
@@ -59,6 +60,7 @@ export function createAdminAuthRoutes(
   const router = express.Router()
   const { adminSessionStore, baseUrl } = config
   const isSecure = baseUrl.startsWith('https://')
+  const csrfDeps = { publicUrl: baseUrl, devMode: config.devMode ?? false }
 
   router.get('/oauth/authorize', handleAdminAuthorize(config))
   router.get('/oauth/callback', handleAdminCallback(config))
@@ -75,6 +77,13 @@ export function createAdminAuthRoutes(
   })
 
   router.post('/oauth/logout', async (req, res) => {
+    if (!passesAdminCsrfCheck(req, csrfDeps)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Cross-origin admin request rejected',
+      })
+    }
+
     const cookies = (req as unknown as { cookies?: Record<string, string> })
       .cookies
     const sessionKey = cookies?.[ADMIN_SESSION_COOKIE]
@@ -84,7 +93,7 @@ export function createAdminAuthRoutes(
     res.clearCookie(ADMIN_SESSION_COOKIE, {
       httpOnly: true,
       secure: isSecure,
-      sameSite: 'lax',
+      sameSite: 'strict',
       path: '/',
     })
     res.json({ success: true })

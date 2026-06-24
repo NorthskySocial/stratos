@@ -10,10 +10,7 @@ import {
   EnrollmentDeniedError,
   type Logger,
 } from '@northskysocial/stratos-core'
-import {
-  isAllowedCredentialedOrigin,
-  StratosServiceConfig,
-} from '../../config.js'
+import { passesAdminCsrfCheck, StratosServiceConfig } from '../../config.js'
 import { ExternalAllowListProvider } from '../../features/enrollment/internal/allow-list.js'
 import { verifyEnrolled } from '../../features'
 import { ADMIN_SESSION_COOKIE } from '../../oauth/admin-routes.js'
@@ -386,44 +383,6 @@ function readAdminSessionCookie(
     }
   }
   return undefined
-}
-
-/**
- * CSRF defense for cookie-authenticated admin requests.
- *
- * Cookie sessions are CSRF-susceptible in a way Bearer tokens were not, and
- * `SameSite=Lax` does not cover same-site sub-origins or all request shapes.
- * As defense in depth, the request's `Origin` (falling back to `Referer`)
- * must resolve to an allowlisted credentialed origin. Same-origin admin UI
- * requests (plan 004) pass; cross-site forged POSTs do not.
- *
- * Requests with no Origin/Referer at all (e.g. server-to-server tooling that
- * also lacks a browser session cookie) are not blocked here — they simply
- * won't carry the cookie and fail the session check instead.
- *
- * @returns true if the request may proceed past CSRF screening
- */
-function passesAdminCsrfCheck(
-  req: import('node:http').IncomingMessage,
-  deps: { publicUrl: string; devMode: boolean },
-): boolean {
-  const origin = req.headers?.origin
-  if (origin) {
-    return isAllowedCredentialedOrigin(origin, deps)
-  }
-
-  const referer = req.headers?.referer
-  if (referer) {
-    try {
-      return isAllowedCredentialedOrigin(new URL(referer).origin, deps)
-    } catch {
-      return false
-    }
-  }
-
-  // No Origin and no Referer: nothing to forge against. The session-cookie
-  // check downstream is the real gate.
-  return true
 }
 
 /**
