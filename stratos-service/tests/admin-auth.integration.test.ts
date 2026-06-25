@@ -91,6 +91,31 @@ describe('SqliteAdminSessionStore', () => {
     await store.del(key)
     expect(await store.get(key)).toBeUndefined()
   })
+
+  it('sweeps only expired sessions, leaving live ones intact', async () => {
+    const expired = await store.create(ADMIN_DID, -1_000)
+    const live = await store.create(ADMIN_DID, 60_000)
+
+    const removed = await store.deleteExpired()
+
+    expect(removed).toBe(1)
+    expect(await store.get(live)).toBeDefined()
+    // The expired row is gone; a direct del would have been a no-op.
+    const req: any = {
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${expired}` },
+    }
+    const did = await resolveAdminSession(req, {
+      adminSessionStore: store,
+      adminDids: [ADMIN_DID],
+    })
+    expect(did).toBeNull()
+  })
+
+  it('sweeps nothing when all sessions are live', async () => {
+    await store.create(ADMIN_DID, 60_000)
+    await store.create(ADMIN_DID, 60_000)
+    expect(await store.deleteExpired()).toBe(0)
+  })
 })
 
 describe('isAllowedCredentialedOrigin', () => {
@@ -393,7 +418,7 @@ describe('resolveAdminSession (whoami / logout)', () => {
 
   it('returns the DID for a live, allowlisted session', async () => {
     const key = await store.create(ADMIN_DID, 60_000)
-    const req: any = { cookies: { [ADMIN_SESSION_COOKIE]: key } }
+    const req: any = { headers: { cookie: `${ADMIN_SESSION_COOKIE}=${key}` } }
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
@@ -404,7 +429,7 @@ describe('resolveAdminSession (whoami / logout)', () => {
   it('returns null once the session is deleted (logout)', async () => {
     const key = await store.create(ADMIN_DID, 60_000)
     await store.del(key)
-    const req: any = { cookies: { [ADMIN_SESSION_COOKIE]: key } }
+    const req: any = { headers: { cookie: `${ADMIN_SESSION_COOKIE}=${key}` } }
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
@@ -413,7 +438,7 @@ describe('resolveAdminSession (whoami / logout)', () => {
   })
 
   it('returns null when there is no session cookie', async () => {
-    const req: any = { cookies: {} }
+    const req: any = { headers: {} }
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],

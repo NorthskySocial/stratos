@@ -13,7 +13,7 @@ import {
 import { passesAdminCsrfCheck, StratosServiceConfig } from '../../config.js'
 import { ExternalAllowListProvider } from '../../features/enrollment/internal/allow-list.js'
 import { verifyEnrolled } from '../../features'
-import { ADMIN_SESSION_COOKIE } from '../../oauth/admin-routes.js'
+import { readAdminSessionCookie } from '../../oauth/admin-routes.js'
 import type { AdminSessionStore } from '../../oauth/admin-session-store.js'
 
 /**
@@ -361,28 +361,6 @@ async function verifyDpop(
     }
     return { credentials: { type: 'anonymous' } }
   }
-}
-
-/**
- * Reads the opaque admin session id from the request's Cookie header.
- *
- * The admin verifier runs at the raw `IncomingMessage` level (no Express
- * cookie parsing), so the cookie is parsed directly here.
- */
-function readAdminSessionCookie(
-  req: import('node:http').IncomingMessage,
-): string | undefined {
-  const cookieHeader = req.headers?.cookie
-  if (!cookieHeader) return undefined
-  for (const part of cookieHeader.split(';')) {
-    const eq = part.indexOf('=')
-    if (eq === -1) continue
-    const name = part.slice(0, eq).trim()
-    if (name === ADMIN_SESSION_COOKIE) {
-      return decodeURIComponent(part.slice(eq + 1).trim())
-    }
-  }
-  return undefined
 }
 
 /**
