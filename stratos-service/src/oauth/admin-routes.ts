@@ -13,6 +13,33 @@ import { handleAdminCallback } from './handlers/admin-callback.js'
 export const ADMIN_SESSION_COOKIE = 'stratos_admin_session'
 
 /**
+ * Read the opaque admin session id straight from the request's `Cookie`
+ * header.
+ *
+ * This deliberately parses the raw header rather than reading `req.cookies`.
+ * The latter only exists after the `cookie-parser` middleware has run; a
+ * reordering would make `req.cookies` `undefined` and silently log every admin
+ * out (the failure the type cast masked). Reading the header directly has no
+ * such ordering dependency, and the same accessor serves both the Express
+ * routes here and the raw `IncomingMessage` admin auth verifier.
+ */
+export function readAdminSessionCookie(
+  req: import('node:http').IncomingMessage,
+): string | undefined {
+  const cookieHeader = req.headers?.cookie
+  if (!cookieHeader) return undefined
+  for (const part of cookieHeader.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq === -1) continue
+    const name = part.slice(0, eq).trim()
+    if (name === ADMIN_SESSION_COOKIE) {
+      return decodeURIComponent(part.slice(eq + 1).trim())
+    }
+  }
+  return undefined
+}
+
+/**
  * Lifetime of an admin web session.
  */
 export const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000
@@ -37,9 +64,7 @@ export async function resolveAdminSession(
   req: express.Request,
   config: Pick<AdminAuthRoutesConfig, 'adminSessionStore' | 'adminDids'>,
 ): Promise<string | null> {
-  const cookies = (req as unknown as { cookies?: Record<string, string> })
-    .cookies
-  const sessionKey = cookies?.[ADMIN_SESSION_COOKIE]
+  const sessionKey = readAdminSessionCookie(req)
   if (!sessionKey) return null
 
   const session = await config.adminSessionStore.get(sessionKey)
@@ -66,6 +91,13 @@ export function createAdminAuthRoutes(
   router.get('/oauth/callback', handleAdminCallback(config))
 
   router.get('/whoami', async (req, res) => {
+    if (!passesAdminCsrfCheck(req, csrfDeps)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Cross-origin admin request rejected',
+      })
+    }
+
     const did = await resolveAdminSession(req, config)
     if (!did) {
       return res.status(401).json({
@@ -84,9 +116,7 @@ export function createAdminAuthRoutes(
       })
     }
 
-    const cookies = (req as unknown as { cookies?: Record<string, string> })
-      .cookies
-    const sessionKey = cookies?.[ADMIN_SESSION_COOKIE]
+    const sessionKey = readAdminSessionCookie(req)
     if (sessionKey) {
       await adminSessionStore.del(sessionKey)
     }
