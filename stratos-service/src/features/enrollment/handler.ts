@@ -324,9 +324,11 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
         await ctx.enrollmentStore.addBoundary(did, boundary)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
 
+        let pdsSync: 'ok' | 'failed' = 'ok'
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
         } catch (err) {
+          pdsSync = 'failed'
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to update PDS enrollment record after addBoundary',
@@ -334,10 +336,10 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
         }
 
         ctx.logger?.info(
-          { adminDid, targetDid: did, boundary },
+          { adminDid, targetDid: did, boundary, pdsSync },
           'admin added boundary',
         )
-        res.json({ did, boundaries })
+        res.json({ did, boundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
@@ -396,9 +398,11 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
         await ctx.enrollmentStore.removeBoundary(did, boundary)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
 
+        let pdsSync: 'ok' | 'failed' = 'ok'
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
         } catch (err) {
+          pdsSync = 'failed'
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to update PDS enrollment record after removeBoundary',
@@ -406,10 +410,10 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
         }
 
         ctx.logger?.info(
-          { adminDid, targetDid: did, boundary },
+          { adminDid, targetDid: did, boundary, pdsSync },
           'admin removed boundary',
         )
-        res.json({ did, boundaries })
+        res.json({ did, boundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
@@ -475,9 +479,11 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
 
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
 
+        let pdsSync: 'ok' | 'failed' = 'ok'
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
         } catch (err) {
+          pdsSync = 'failed'
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to update PDS enrollment record after setBoundaries',
@@ -485,10 +491,15 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
         }
 
         ctx.logger?.info(
-          { adminDid, targetDid: did, boundaryCount: boundaries.length },
+          {
+            adminDid,
+            targetDid: did,
+            boundaryCount: boundaries.length,
+            pdsSync,
+          },
           'admin set boundaries',
         )
-        res.json({ did, boundaries })
+        res.json({ did, boundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
