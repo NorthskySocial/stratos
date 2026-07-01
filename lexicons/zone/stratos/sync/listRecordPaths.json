@@ -1,0 +1,95 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.listRecordPaths",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Full-state recovery: enumerate a repo's record paths and their current CIDs, mirroring listRecords semantics. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo to enumerate."
+          },
+          "collection": {
+            "type": "string",
+            "format": "nsid",
+            "description": "Optional single collection to enumerate. When omitted, all collections are enumerated."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor from a previous response."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "Maximum number of rows to return in this page."
+          },
+          "excludeValues": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, record values are omitted and only path metadata is returned."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["records"],
+          "properties": {
+            "records": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#recordPath" },
+              "description": "The record paths in this page."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor to fetch the next page. Absent when enumeration is complete."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "RepoNotFound",
+          "description": "The requested repo does not exist."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "Service authentication is required."
+        }
+      ]
+    },
+    "recordPath": {
+      "type": "object",
+      "description": "A record path with its current CID and optionally its value.",
+      "required": ["collection", "rkey", "cid"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid",
+          "description": "The record collection."
+        },
+        "rkey": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The record key."
+        },
+        "cid": {
+          "type": "cid-link",
+          "description": "The CID of the current record value."
+        },
+        "value": {
+          "type": "unknown",
+          "description": "The current record value, inlined by default. Omitted when excludeValues is true."
+        }
+      }
+    }
+  }
+}

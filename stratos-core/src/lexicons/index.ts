@@ -18,6 +18,8 @@ import zoneStratosRepoUploadBlob from '../../../lexicons/zone/stratos/sync/uploa
 import zoneStratosServerListDomains from '../../../lexicons/zone/stratos/server/listDomains.json' with { type: 'json' }
 import zoneStratosSyncGetBlob from '../../../lexicons/zone/stratos/sync/getBlob.json' with { type: 'json' }
 import zoneStratosSyncGetRepo from '../../../lexicons/zone/stratos/sync/getRepo.json' with { type: 'json' }
+import zoneStratosSyncListRecordPaths from '../../../lexicons/zone/stratos/sync/listRecordPaths.json' with { type: 'json' }
+import zoneStratosSyncListRepoOps from '../../../lexicons/zone/stratos/sync/listRepoOps.json' with { type: 'json' }
 import zoneStratosSyncSubscribeRecords from '../../../lexicons/zone/stratos/sync/subscribeRecords.json' with { type: 'json' }
 
 export const stratosLexicons: LexiconDoc[] = [
@@ -40,6 +42,8 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosServerListDomains as LexiconDoc,
   zoneStratosSyncGetBlob as LexiconDoc,
   zoneStratosSyncGetRepo as LexiconDoc,
+  zoneStratosSyncListRecordPaths as LexiconDoc,
+  zoneStratosSyncListRepoOps as LexiconDoc,
   zoneStratosSyncSubscribeRecords as LexiconDoc,
 ]
 
