@@ -533,7 +533,12 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
           ],
         })
         await store.repo.putBlock(recordCid, recordBytes, unsigned.rev)
-        await signAndPersistCommit(store.repo, keypair, unsigned)
+        // SWP-11: signAndPersistCommit takes a bound ActorSignFn, not a Keypair.
+        await signAndPersistCommit(
+          store.repo,
+          (bytes: Uint8Array) => keypair.sign(bytes),
+          unsigned,
+        )
       })
 
       const commit = await readCurrentSignedCommit(ctx, repoDid)
