@@ -136,7 +136,7 @@ async function verifyJwtSignature(
  * @returns DID document of the issuer
  * @throws InvalidRequestError if DID resolution fails
  */
-async function resolveIssuerDid(
+export async function resolveIssuerDid(
   iss: string,
   idResolver: IdResolver,
 ): Promise<DidDocument> {
@@ -152,7 +152,7 @@ async function resolveIssuerDid(
  * @param parts - JWT parts (header, payload, signature)
  * @returns Signing input bytes and signature bytes
  */
-function prepareVerificationData(parts: string[]) {
+export function prepareVerificationData(parts: string[]) {
   const signingInput = `${parts[0]}.${parts[1]}`
   const signature = Buffer.from(parts[2], 'base64url')
   const signingInputBytes = new TextEncoder().encode(signingInput)
@@ -190,7 +190,7 @@ async function verifyAgainstVerificationMethods(
  * @param signatureBytes - Signature bytes
  * @returns True if verification succeeds, false otherwise
  */
-async function verifyWithMethod(
+export async function verifyWithMethod(
   vm: NonNullable<DidDocument['verificationMethod']>[number],
   signingInputBytes: Uint8Array,
   signatureBytes: Uint8Array,
