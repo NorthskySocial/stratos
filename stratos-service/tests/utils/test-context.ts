@@ -53,6 +53,7 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
         cooldownMs: 10_000,
         cooldownJitterMs: 1_000,
       },
+      spaceCredentialTtlSeconds: 7_200,
     },
     enrollment: {
       mode: ENROLLMENT_MODE.OPEN,
