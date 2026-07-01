@@ -3,6 +3,7 @@ import type { AppContext } from '../context-types.js'
 import {
   registerEnrollmentHandlers,
   registerHydrationHandlers,
+  registerSpaceCredentialHandlers,
   registerSyncHandlers,
 } from '../features/index.js'
 import { type XrpcServerInternal } from './types.js'
@@ -100,4 +101,5 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   registerEnrollmentHandlers(server, ctx)
   registerHydrationHandlers(server, ctx)
   registerSyncHandlers(server, ctx)
+  registerSpaceCredentialHandlers(server, ctx)
 }
