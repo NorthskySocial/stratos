@@ -57,6 +57,20 @@ export interface FeedgenStore {
   getPost: (uri: string) => Promise<IndexedPost | null>
   listPostsByBoundary: (opts: ListPostsOpts) => Promise<ListPostsResult>
 
+  // deletion / purge helpers (SWP-12)
+  /** Delete every post (and its cascaded boundary rows) authored by `did`. Returns rows removed. */
+  deletePostsByDid: (did: string) => Promise<number>
+  /**
+   * Remove `did`'s membership in `boundary` from the post/index. Posts that are
+   * left with no remaining boundary rows are deleted outright. Returns the
+   * number of posts fully deleted.
+   */
+  deletePostsByDidBoundary: (did: string, boundary: string) => Promise<number>
+  /** Delete every post scoped (in any actor) to `boundary`, service-wide. Returns rows removed. */
+  deletePostsByBoundary: (boundary: string) => Promise<number>
+  /** Delete the sync cursor for `did`. Returns rows removed (0 or 1). */
+  deleteCursor: (did: string) => Promise<number>
+
   // sync cursor
   upsertCursor: (did: string, seq: number, updatedAt: string) => Promise<void>
   getCursor: (did: string) => Promise<number | null>
