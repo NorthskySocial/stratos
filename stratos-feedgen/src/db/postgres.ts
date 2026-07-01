@@ -132,6 +132,71 @@ export class PgFeedgenStore implements FeedgenStore {
     await this.db.delete(postTbl).where(eq(postTbl.uri, uri))
   }
 
+  async deletePostsByDid(did: string): Promise<number> {
+    // FK ON DELETE CASCADE removes the matching post_boundary rows.
+    const deleted = await this.db
+      .delete(postTbl)
+      .where(eq(postTbl.did, did))
+      .returning({ uri: postTbl.uri })
+    return deleted.length
+  }
+
+  async deletePostsByDidBoundary(
+    did: string,
+    boundary: string,
+  ): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      // Drop this DID's membership in `boundary` from the index.
+      await tx
+        .delete(postBoundaryTbl)
+        .where(
+          and(
+            eq(postBoundaryTbl.boundary, boundary),
+            inArray(
+              postBoundaryTbl.uri,
+              tx
+                .select({ uri: postTbl.uri })
+                .from(postTbl)
+                .where(eq(postTbl.did, did)),
+            ),
+          ),
+        )
+      // Delete any of this DID's posts now left with no boundary rows at all.
+      const deleted = await tx
+        .delete(postTbl)
+        .where(
+          and(
+            eq(postTbl.did, did),
+            sql`NOT EXISTS (SELECT 1 FROM post_boundary pb WHERE pb.uri = ${postTbl.uri})`,
+          ),
+        )
+        .returning({ uri: postTbl.uri })
+      return deleted.length
+    })
+  }
+
+  async deletePostsByBoundary(boundary: string): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      const scoped = await tx
+        .select({ uri: postBoundaryTbl.uri })
+        .from(postBoundaryTbl)
+        .where(eq(postBoundaryTbl.boundary, boundary))
+      if (scoped.length === 0) return 0
+      const uris = [...new Set(scoped.map((r) => r.uri))]
+      // FK ON DELETE CASCADE removes all boundary rows for these posts.
+      await tx.delete(postTbl).where(inArray(postTbl.uri, uris))
+      return uris.length
+    })
+  }
+
+  async deleteCursor(did: string): Promise<number> {
+    const deleted = await this.db
+      .delete(syncCursorTbl)
+      .where(eq(syncCursorTbl.did, did))
+      .returning({ did: syncCursorTbl.did })
+    return deleted.length
+  }
+
   async getPost(uri: string): Promise<IndexedPost | null> {
     const rows = await this.db
       .select()

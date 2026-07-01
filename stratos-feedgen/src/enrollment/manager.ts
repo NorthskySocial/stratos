@@ -56,4 +56,13 @@ export class EnrollmentManager {
     this.cache.set(did, boundaries)
     return boundaries
   }
+
+  /**
+   * Drop the cached boundary set for `did`. Used by the deletion pathway so a
+   * viewer whose enrollment changed no longer resolves against stale cached
+   * boundaries. Idempotent: invalidating an absent DID is a no-op.
+   */
+  invalidate(did: string): void {
+    this.cache.delete(did)
+  }
 }
