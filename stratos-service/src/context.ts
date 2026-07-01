@@ -46,6 +46,7 @@ import {
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { RedisCache } from './infra/storage/redis-cache.js'
+import { InProcessActorSigner } from './infra/signing/index.js'
 
 export * from './context-types.js'
 export { SqliteSequenceOps } from './storage/sqlite/sequence-ops.js'
@@ -113,11 +114,9 @@ export async function createAppContext(
     logger,
   )
 
-  const SIGNING_KEY_TTL_MS = 5 * 60 * 1000
-  const signingKeyCache = new Map<
-    string,
-    { key: crypto.Keypair; expiresAt: number }
-  >()
+  // Per-actor signing seam. Confines raw private key material — the TTL cache
+  // and key-store access that previously lived here now live inside the signer.
+  const actorSigner = new InProcessActorSigner(actorStore, { logger })
 
   const ctx: AppContext = {
     cfg,
@@ -131,31 +130,9 @@ export async function createAppContext(
     ...services,
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
+    actorSigner,
     app: initExpressApp(),
     logger,
-
-    /**
-     * Returns the actor's signing keypair, using a TTL cache to avoid
-     * redundant DB lookups and P256 key imports on every write.
-     *
-     * @param did - The DID of the actor
-     * @returns The signing key for the actor, or a new one if none exists
-     */
-    async getActorSigningKey(did: string) {
-      const now = Date.now()
-      const cached = signingKeyCache.get(did)
-      if (cached && cached.expiresAt > now) {
-        return cached.key
-      }
-      const keypair =
-        (await actorStore.loadSigningKey(did)) ??
-        (await actorStore.createSigningKey(did))
-      signingKeyCache.set(did, {
-        key: keypair,
-        expiresAt: now + SIGNING_KEY_TTL_MS,
-      })
-      return keypair
-    },
 
     /**
      * Create an attestation for an actor
@@ -398,10 +375,10 @@ function setupMigrationCallback(ctx: AppContext) {
         if (!isEnrolled) return
 
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
-        const signingKey = await ctx.getActorSigningKey(did)
+        const signingKeyDid = await ctx.actorSigner.getPublicKey(did)
         await ctx.profileRecordWriter.putEnrollmentRecord(did, 'self', {
           service: ctx.cfg.service.publicUrl,
-          signingKey: signingKey.did(),
+          signingKey: signingKeyDid,
           boundaries: boundaries.map((b) => ({ value: b })),
           createdAt: new Date().toISOString(),
         })

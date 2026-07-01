@@ -17,6 +17,7 @@ import {
   type StubWriterService,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
+import type { ActorSigner } from './infra/signing/index.js'
 import { BackgroundStubQueue } from './features/stub/internal/background-queue.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { type StratosServiceConfig } from './config.js'
@@ -37,7 +38,12 @@ export interface IdentityContext {
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
-  getActorSigningKey(did: string): Promise<crypto.Keypair>
+  /**
+   * The per-actor signing seam. Confines raw private key material — callers
+   * sign and read public keys through this interface and never hold a
+   * per-actor `Keypair`.
+   */
+  actorSigner: ActorSigner
   createAttestation(
     did: string,
     boundaries: string[],

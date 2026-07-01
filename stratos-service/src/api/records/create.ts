@@ -1,7 +1,6 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { TID } from '@atproto/common-web'
 import { AtUri } from '@atproto/syntax'
-import * as crypto from '@atproto/crypto'
 import {
   computeCid,
   encodeRecord,
@@ -10,6 +9,7 @@ import {
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
+import type { ActorSignFn } from '../../infra/signing/index.js'
 import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
 import { type SequenceTrace, type WritePhases } from './types.js'
 import { type Cid as CID } from '@atproto/lex-data'
@@ -95,7 +95,7 @@ export async function createRecord(
     )
   }
 
-  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+  const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
   // Validate the record if requested
   if (validate) {
@@ -120,7 +120,7 @@ export async function createRecord(
     record,
     precomputed.recordBytes,
     precomputed.cid,
-    actorSigningKey,
+    actorSign,
     sequenceTrace,
     phases,
   )
@@ -257,7 +257,7 @@ async function validateCreateInput(
  * @param record - Record data
  * @param recordBytes - Record bytes
  * @param cid - Content ID
- * @param actorSigningKey - Actor signing key
+ * @param actorSign - Bound actor signing function
  * @param sequenceTrace - Sequence trace
  * @param phases - Write phases
  * @returns Result of the create transaction
@@ -270,7 +270,7 @@ async function performCreateTransaction(
   record: unknown,
   recordBytes: Uint8Array,
   cid: CID,
-  actorSigningKey: crypto.Keypair,
+  actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
@@ -288,7 +288,7 @@ async function performCreateTransaction(
         record,
         recordBytes,
         cid,
-        actorSigningKey,
+        actorSign,
         sequenceTrace,
         phases,
       )
@@ -311,7 +311,7 @@ async function performCreateTransaction(
  * @param record - Record data
  * @param recordBytes - Record bytes
  * @param cid - CID of the record
- * @param actorSigningKey - Signing key for the actor
+ * @param actorSign - Bound signing function for the actor
  * @param sequenceTrace - Sequence trace for the operation
  * @param phases - Write phases for tracking performance
  * @returns Result of the create transaction
@@ -324,7 +324,7 @@ async function executeTransaction(
   record: unknown,
   recordBytes: Uint8Array,
   cid: CID,
-  actorSigningKey: crypto.Keypair,
+  actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
@@ -337,7 +337,7 @@ async function executeTransaction(
     const manager = createRepoManager(
       ctx.logger,
       store,
-      actorSigningKey,
+      actorSign,
       sequenceTrace,
     )
 
