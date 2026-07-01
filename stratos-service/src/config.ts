@@ -59,6 +59,12 @@ const envSchema = z
       .int()
       .nonnegative()
       .default(1_000),
+    /** Space-credential lifetime in seconds (default 7200 = 2h per spec). */
+    STRATOS_SPACE_CREDENTIAL_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(7_200),
 
     // Enrollment
     STRATOS_ENROLLMENT_MODE: z
@@ -224,6 +230,8 @@ export interface StratosServiceConfig {
       cooldownMs: number
       cooldownJitterMs: number
     }
+    /** Space-credential lifetime in seconds (`exp = iat + this`). */
+    spaceCredentialTtlSeconds: number
   }
   enrollment: {
     mode: ENROLLMENT_MODE
@@ -479,6 +487,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
         cooldownMs: env.STRATOS_WRITE_RATE_COOLDOWN_MS,
         cooldownJitterMs: env.STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS,
       },
+      spaceCredentialTtlSeconds: env.STRATOS_SPACE_CREDENTIAL_TTL_SECONDS,
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,
