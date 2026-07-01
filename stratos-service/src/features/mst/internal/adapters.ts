@@ -1,21 +1,24 @@
 import { Cid } from '@atproto/lex-data'
-import type { Keypair } from '@atproto/crypto'
 import type {
   RepoWrite,
   SequencingService,
   SigningService,
 } from '@northskysocial/stratos-core'
+import type { ActorSignFn } from '../../../infra/signing/actor-signer.js'
 import { ActorTransactor } from '../../../actor-store-types.js'
 import { sequenceChange, SequenceTrace } from '../../../api'
 
 /**
- * Adapter for commit signing using @atproto/identity Keypair
+ * Adapter that satisfies the core {@link SigningService} from a bound
+ * {@link ActorSignFn}. It holds only the signing function (which internally
+ * reaches into `infra/signing/`), never a `Keypair` — so no raw private key
+ * material lives in this module.
  */
-export class KeypairSigningService implements SigningService {
-  constructor(private keypair: Keypair) {} // Keypair from @atproto/identity or similar
+export class SignFnSigningService implements SigningService {
+  constructor(private readonly sign: ActorSignFn) {}
 
   /**
-   * Sign a commit using the Keypair's private key.'
+   * Sign a commit via the bound signing function.
    * @param _did - The DID of the actor.
    * @param unsignedBytes - The unsigned bytes to sign.
    * @returns A Promise resolving to the signed bytes.
@@ -24,7 +27,7 @@ export class KeypairSigningService implements SigningService {
     _did: string,
     unsignedBytes: Uint8Array,
   ): Promise<Uint8Array> {
-    return this.keypair.sign(unsignedBytes)
+    return this.sign(unsignedBytes)
   }
 }
 

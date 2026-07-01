@@ -2,12 +2,12 @@ import { Cid } from '@atproto/lex-data'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
 import { create as cidCreate, toString as cidToString } from '@atcute/cid'
-import type { Keypair } from '@atproto/crypto'
 import {
   BlockMap,
   parseCid,
   type UnsignedCommitData,
 } from '@northskysocial/stratos-core'
+import type { ActorSignFn } from '../../../infra/signing/actor-signer.js'
 import { ActorRepoTransactor } from '../../../actor-store-types.js'
 import { WritePhases } from '../../../api'
 
@@ -31,14 +31,17 @@ export interface ExtraBlock {
 }
 
 /**
- * Sign a commit with the given signing key and unsigned commit data.
- * @param signingKey - The signing key to use.
+ * Sign a commit with the given signing function and unsigned commit data.
+ *
+ * Receives a bound {@link ActorSignFn} rather than a `Keypair` so that raw
+ * private key material stays confined to `infra/signing/`.
+ * @param sign - The bound signing function to use.
  * @param unsigned - The unsigned commit data to sign.
  * @param extraBlocks - Optional extra blocks to include in the commit.
  * @returns A promise that resolves to the signed commit data.
  */
 export async function signCommit(
-  signingKey: Keypair,
+  sign: ActorSignFn,
   unsigned: UnsignedCommitData,
   extraBlocks?: ExtraBlock[],
 ): Promise<SignedCommitData> {
@@ -51,7 +54,7 @@ export async function signCommit(
   }
 
   const unsignedBytes = cborEncode(unsignedCommit)
-  const sig = await signingKey.sign(unsignedBytes)
+  const sig = await sign(unsignedBytes)
 
   const signedCommit = {
     ...unsignedCommit,
@@ -88,7 +91,7 @@ export async function signCommit(
 /**
  * Sign and persist a commit to the repository.
  * @param repoTransactor - The repository transactor to use.
- * @param signingKey - The signing key to use.
+ * @param sign - The bound signing function to use.
  * @param unsigned - The unsigned commit data to sign and persist.
  * @param phases - Optional phases to track performance metrics.
  * @param extraBlocks - Optional extra blocks to include in the commit.
@@ -96,13 +99,13 @@ export async function signCommit(
  */
 export async function signAndPersistCommit(
   repoTransactor: ActorRepoTransactor,
-  signingKey: Keypair,
+  sign: ActorSignFn,
   unsigned: UnsignedCommitData,
   phases?: WritePhases,
   extraBlocks?: ExtraBlock[],
 ): Promise<SignedCommitResult> {
   let t0 = performance.now()
-  const signed = await signCommit(signingKey, unsigned, extraBlocks)
+  const signed = await signCommit(sign, unsigned, extraBlocks)
   if (phases) phases.transactSign = performance.now() - t0
 
   t0 = performance.now()

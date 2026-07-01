@@ -60,10 +60,14 @@ describe('Record Update Handler', () => {
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),
       },
-      getActorSigningKey: vi.fn().mockResolvedValue({
-        did: 'did:key:zDnaeTestKey',
+      actorSigner: {
         sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-      }),
+        getSignFn: vi
+          .fn()
+          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
+        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
+        ensureKey: vi.fn().mockResolvedValue(undefined),
+      },
       repoWriteLocks: {
         acquire: vi.fn().mockResolvedValue(() => {}),
       },

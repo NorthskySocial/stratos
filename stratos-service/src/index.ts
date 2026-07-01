@@ -345,12 +345,18 @@ export class StratosServer {
             did,
             writes: [],
           })
-          await signAndPersistCommit(store.repo, ctx.signingKey, unsigned)
+          // The empty initial commit is signed with the service key (unchanged
+          // behavior); wrap its sign() to match signAndPersistCommit's SignFn.
+          await signAndPersistCommit(
+            store.repo,
+            (bytes) => ctx.signingKey.sign(bytes),
+            unsigned,
+          )
         })
       },
       createSigningKey: async (did: string) => {
-        const keypair = await ctx.actorStore.createSigningKey(did)
-        return keypair.did()
+        await ctx.actorSigner.ensureKey(did)
+        return ctx.actorSigner.getPublicKey(did)
       },
       createAttestation: ctx.createAttestation,
     })

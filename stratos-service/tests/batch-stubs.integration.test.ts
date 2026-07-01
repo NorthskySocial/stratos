@@ -81,7 +81,14 @@ describe('applyWritesBatch PDS Stubs', () => {
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),
       } as any,
-      getActorSigningKey: vi.fn().mockResolvedValue(signingKey),
+      actorSigner: {
+        sign: (_did: string, bytes: Uint8Array) => signingKey.sign(bytes),
+        getSignFn: vi
+          .fn()
+          .mockResolvedValue((bytes: Uint8Array) => signingKey.sign(bytes)),
+        getPublicKey: vi.fn().mockResolvedValue(signingKey.did()),
+        ensureKey: vi.fn().mockResolvedValue(undefined),
+      },
       sequenceEvents: {
         emit: vi.fn(),
       } as any,
