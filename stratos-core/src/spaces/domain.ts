@@ -45,7 +45,10 @@ export const SKEY_MIN_BYTES = 1
 /** Maximum skey length in UTF-8 bytes (inclusive). */
 export const SKEY_MAX_BYTES = 512
 
-function err(code: SpacesErrorCode, message: string): {
+function err(
+  code: SpacesErrorCode,
+  message: string,
+): {
   ok: false
   error: SpacesError
 } {

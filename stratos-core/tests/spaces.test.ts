@@ -190,22 +190,24 @@ describe('spaces addressing', () => {
 
   describe('parseSpaceUri rejections', () => {
     it('rejects the wrong scheme', () => {
-      expect(expectErr(parseSpaceUri(`at://${SERVICE_DID}/${SPACE_TYPE}/pottery`))).toBe(
-        'invalid-scheme',
-      )
-      expect(expectErr(parseSpaceUri(`https://${SERVICE_DID}/${SPACE_TYPE}/pottery`))).toBe(
-        'invalid-scheme',
-      )
+      expect(
+        expectErr(parseSpaceUri(`at://${SERVICE_DID}/${SPACE_TYPE}/pottery`)),
+      ).toBe('invalid-scheme')
+      expect(
+        expectErr(
+          parseSpaceUri(`https://${SERVICE_DID}/${SPACE_TYPE}/pottery`),
+        ),
+      ).toBe('invalid-scheme')
       // Case-sensitive scheme: "ATS://" is not "ats://".
-      expect(expectErr(parseSpaceUri(`ATS://${SERVICE_DID}/${SPACE_TYPE}/pottery`))).toBe(
-        'invalid-scheme',
-      )
+      expect(
+        expectErr(parseSpaceUri(`ATS://${SERVICE_DID}/${SPACE_TYPE}/pottery`)),
+      ).toBe('invalid-scheme')
     })
 
     it('rejects too few components', () => {
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}`))).toBe(
-        'invalid-component-count',
-      )
+      expect(
+        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}`)),
+      ).toBe('invalid-component-count')
       expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}`))).toBe(
         'invalid-component-count',
       )
@@ -213,50 +215,62 @@ describe('spaces addressing', () => {
 
     it('rejects too many components', () => {
       expect(
-        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery/extra`)),
+        expectErr(
+          parseSpaceUri(
+            `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery/extra`,
+          ),
+        ),
       ).toBe('invalid-component-count')
     })
 
     it('rejects an empty / invalid space DID', () => {
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}/${SPACE_TYPE}/pottery`))).toBe(
-        'invalid-space-did',
-      )
+      expect(
+        expectErr(parseSpaceUri(`${ATS_SCHEME}/${SPACE_TYPE}/pottery`)),
+      ).toBe('invalid-space-did')
     })
 
     it('rejects an invalid space type NSID', () => {
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/nope/pottery`))).toBe(
-        'invalid-space-type',
-      )
+      expect(
+        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/nope/pottery`)),
+      ).toBe('invalid-space-type')
     })
 
     it('rejects a 513-byte skey', () => {
       const s513 = 'a'.repeat(513)
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/${s513}`))).toBe(
-        'invalid-skey',
-      )
+      expect(
+        expectErr(
+          parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/${s513}`),
+        ),
+      ).toBe('invalid-skey')
     })
 
     it('rejects skey "." and ".."', () => {
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/.`))).toBe(
-        'invalid-skey',
-      )
+      expect(
+        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/.`)),
+      ).toBe('invalid-skey')
       // ".." collapses to 3 components: spaceDid/spaceType/"..".
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/..`))).toBe(
-        'invalid-skey',
-      )
+      expect(
+        expectErr(
+          parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/..`),
+        ),
+      ).toBe('invalid-skey')
     })
 
     it('rejects invalid skey characters', () => {
       // "%20" contains "%", which is not in the record-key alphabet.
       expect(
-        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/bad%20`)),
+        expectErr(
+          parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/bad%20`),
+        ),
       ).toBe('invalid-skey')
     })
   })
 
   describe('parseRecordUri rejections', () => {
     it('rejects too few components', () => {
-      expect(expectErr(parseRecordUri(VALID_SPACE_URI))).toBe('invalid-component-count')
+      expect(expectErr(parseRecordUri(VALID_SPACE_URI))).toBe(
+        'invalid-component-count',
+      )
     })
 
     it('rejects too many components', () => {
@@ -284,15 +298,31 @@ describe('spaces addressing', () => {
   describe('format rejections (no exceptions on invalid input)', () => {
     it('formatSpaceUri rejects invalid parts without throwing', () => {
       expect(
-        expectErr(formatSpaceUri({ spaceDid: '', spaceType: SPACE_TYPE, skey: 'pottery' })),
+        expectErr(
+          formatSpaceUri({
+            spaceDid: '',
+            spaceType: SPACE_TYPE,
+            skey: 'pottery',
+          }),
+        ),
       ).toBe('invalid-space-did')
       expect(
         expectErr(
-          formatSpaceUri({ spaceDid: SERVICE_DID, spaceType: 'nope', skey: 'pottery' }),
+          formatSpaceUri({
+            spaceDid: SERVICE_DID,
+            spaceType: 'nope',
+            skey: 'pottery',
+          }),
         ),
       ).toBe('invalid-space-type')
       expect(
-        expectErr(formatSpaceUri({ spaceDid: SERVICE_DID, spaceType: SPACE_TYPE, skey: '..' })),
+        expectErr(
+          formatSpaceUri({
+            spaceDid: SERVICE_DID,
+            spaceType: SPACE_TYPE,
+            skey: '..',
+          }),
+        ),
       ).toBe('invalid-skey')
     })
 
@@ -305,18 +335,30 @@ describe('spaces addressing', () => {
         collection: COLLECTION,
         rkey: 'self',
       }
-      expect(expectErr(formatRecordUri({ ...base, authorDid: '' }))).toBe('invalid-author-did')
-      expect(expectErr(formatRecordUri({ ...base, rkey: '.' }))).toBe('invalid-rkey')
+      expect(expectErr(formatRecordUri({ ...base, authorDid: '' }))).toBe(
+        'invalid-author-did',
+      )
+      expect(expectErr(formatRecordUri({ ...base, rkey: '.' }))).toBe(
+        'invalid-rkey',
+      )
     })
   })
 
   describe('strict-equality semantics (no normalization)', () => {
     it('does not case-fold: differing byte-strings are different resources', () => {
       const lower = expectOk(
-        formatSpaceUri({ spaceDid: 'did:web:example.com', spaceType: SPACE_TYPE, skey: 'abc' }),
+        formatSpaceUri({
+          spaceDid: 'did:web:example.com',
+          spaceType: SPACE_TYPE,
+          skey: 'abc',
+        }),
       )
       const upperSkey = expectOk(
-        formatSpaceUri({ spaceDid: 'did:web:example.com', spaceType: SPACE_TYPE, skey: 'ABC' }),
+        formatSpaceUri({
+          spaceDid: 'did:web:example.com',
+          spaceType: SPACE_TYPE,
+          skey: 'ABC',
+        }),
       )
       expect(lower).not.toBe(upperSkey)
     })
@@ -332,7 +374,9 @@ describe('spaces addressing', () => {
 
   describe('boundaryToSpaceUri', () => {
     it('maps a boundary to a space URI (scheme A: serviceDid->spaceDid, domainName->skey)', () => {
-      const uri = expectOk(boundaryToSpaceUri(`${SERVICE_DID}/pottery`, SPACE_TYPE))
+      const uri = expectOk(
+        boundaryToSpaceUri(`${SERVICE_DID}/pottery`, SPACE_TYPE),
+      )
       expect(uri).toBe(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery`)
     })
 
@@ -343,7 +387,9 @@ describe('spaces addressing', () => {
     })
 
     it('rejects a boundary without a "/"', () => {
-      expect(expectErr(boundaryToSpaceUri(SERVICE_DID, SPACE_TYPE))).toBe('invalid-boundary')
+      expect(expectErr(boundaryToSpaceUri(SERVICE_DID, SPACE_TYPE))).toBe(
+        'invalid-boundary',
+      )
     })
 
     it('rejects a boundary with an invalid service DID', () => {
@@ -353,23 +399,27 @@ describe('spaces addressing', () => {
     })
 
     it('rejects a boundary whose domainName is not a valid skey', () => {
-      expect(expectErr(boundaryToSpaceUri(`${SERVICE_DID}/bad name`, SPACE_TYPE))).toBe(
+      expect(
+        expectErr(boundaryToSpaceUri(`${SERVICE_DID}/bad name`, SPACE_TYPE)),
+      ).toBe('invalid-skey')
+      // Empty domainName (trailing slash).
+      expect(expectErr(boundaryToSpaceUri(`${SERVICE_DID}/`, SPACE_TYPE))).toBe(
         'invalid-skey',
       )
-      // Empty domainName (trailing slash).
-      expect(expectErr(boundaryToSpaceUri(`${SERVICE_DID}/`, SPACE_TYPE))).toBe('invalid-skey')
     })
 
     it('rejects an invalid spaceType parameter', () => {
-      expect(expectErr(boundaryToSpaceUri(`${SERVICE_DID}/pottery`, 'nope'))).toBe(
-        'invalid-space-type',
-      )
+      expect(
+        expectErr(boundaryToSpaceUri(`${SERVICE_DID}/pottery`, 'nope')),
+      ).toBe('invalid-space-type')
     })
   })
 
   describe('spaceUriToBoundary', () => {
     it('maps a space URI back to a boundary', () => {
-      const boundary = expectOk(spaceUriToBoundary(VALID_SPACE_URI, SERVICE_DID))
+      const boundary = expectOk(
+        spaceUriToBoundary(VALID_SPACE_URI, SERVICE_DID),
+      )
       expect(boundary).toBe(`${SERVICE_DID}/pottery`)
     })
 
@@ -380,15 +430,21 @@ describe('spaces addressing', () => {
     })
 
     it('errors on a mismatched service DID', () => {
-      expect(expectErr(spaceUriToBoundary(VALID_SPACE_URI, 'did:web:other.example.com'))).toBe(
-        'service-did-mismatch',
-      )
+      expect(
+        expectErr(
+          spaceUriToBoundary(VALID_SPACE_URI, 'did:web:other.example.com'),
+        ),
+      ).toBe('service-did-mismatch')
     })
 
     it('does not treat a byte-different-but-similar DID as a match (strict equality)', () => {
       // Same DID with different case is NOT equal.
       const uri = expectOk(
-        formatSpaceUri({ spaceDid: 'did:web:example.com', spaceType: SPACE_TYPE, skey: 'abc' }),
+        formatSpaceUri({
+          spaceDid: 'did:web:example.com',
+          spaceType: SPACE_TYPE,
+          skey: 'abc',
+        }),
       )
       expect(expectErr(spaceUriToBoundary(uri, 'did:web:Example.com'))).toBe(
         'service-did-mismatch',
@@ -396,7 +452,9 @@ describe('spaces addressing', () => {
     })
 
     it('propagates parse errors for a malformed URI', () => {
-      expect(expectErr(spaceUriToBoundary('at://x/y/z', SERVICE_DID))).toBe('invalid-scheme')
+      expect(expectErr(spaceUriToBoundary('at://x/y/z', SERVICE_DID))).toBe(
+        'invalid-scheme',
+      )
     })
   })
 })
