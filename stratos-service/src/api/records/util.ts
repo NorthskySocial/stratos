@@ -1,11 +1,11 @@
 import type { Logger } from '@northskysocial/stratos-core'
 import { ActorRepoManager } from '@northskysocial/stratos-core'
 import type { ActorStore, ActorTransactor } from '../../actor-store-types.js'
-import type { Keypair } from '@atproto/crypto'
+import type { ActorSignFn } from '../../infra/signing/actor-signer.js'
 import type { SequenceTrace } from './types.js'
 import {
   ActorStoreSequencingService,
-  KeypairSigningService,
+  SignFnSigningService,
 } from '../../features/mst/internal/adapters.js'
 
 // WARNING: Do NOT pass store.repo.db to ActorRepoManager. The manager must
@@ -19,16 +19,16 @@ import {
  *
  * @param logger - Logger instance
  * @param store - Actor transactor store
- * @param actorSigningKey - Private key for signing commits
+ * @param sign - Bound signing function for the actor's commits (no key material)
  * @param sequenceTrace - Sequence trace for tracking commit sequencing
  */
 export function createRepoManager(
   logger: Logger | undefined,
   store: ActorTransactor,
-  actorSigningKey: Keypair,
+  sign: ActorSignFn,
   sequenceTrace: SequenceTrace,
 ): ActorRepoManager {
-  const signingService = new KeypairSigningService(actorSigningKey)
+  const signingService = new SignFnSigningService(sign)
   const sequencingService = new ActorStoreSequencingService(
     store,
     sequenceTrace,

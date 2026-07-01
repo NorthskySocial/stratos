@@ -161,7 +161,7 @@ async function buildCommitWithRetry(
   mstOps: MstWriteOp[],
   precomputed: PrecomputedBatchOp[],
 ): Promise<CommitResult> {
-  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+  const actorSign = await ctx.actorSigner.getSignFn(callerDid)
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
   let result: CommitResult
   try {
@@ -187,7 +187,7 @@ async function buildCommitWithRetry(
 
         const commitResult = await signAndPersistCommit(
           store.repo,
-          actorSigningKey,
+          actorSign,
           unsigned,
         )
 
