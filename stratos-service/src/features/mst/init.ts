@@ -6,7 +6,7 @@ import {
 import { type ActorTransactor } from '../../actor-store-types.js'
 import { type SequenceTrace } from '../../api/index.js'
 import {
-  KeypairSigningService,
+  SignFnSigningService,
   ActorStoreSequencingService,
 } from './internal/adapters.js'
 
@@ -20,11 +20,15 @@ export interface MstContext {
 
 /**
  * Initialize MST context
- * @param signingKey - Keypair for signing commits
+ * @param signingKey - Service Keypair used only for the default signing service
+ *   exposed on the context (per-actor writes bind their own signer at the call
+ *   site). Service-key handling is out of scope for the actor-signer seam.
  * @returns MST context
  */
 export function initMst(signingKey: Keypair): MstContext {
-  const signingService = new KeypairSigningService(signingKey)
+  const signingService = new SignFnSigningService((bytes) =>
+    signingKey.sign(bytes),
+  )
 
   return {
     signingService,

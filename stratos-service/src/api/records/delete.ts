@@ -53,7 +53,7 @@ export async function deleteRecord(
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUriSyntax(uriStr)
 
-  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+  const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
   const t0 = performance.now()
   const unlock = await ctx.repoWriteLocks.acquire(callerDid)
@@ -68,7 +68,7 @@ export async function deleteRecord(
         const manager = createRepoManager(
           ctx.logger,
           store,
-          actorSigningKey,
+          actorSign,
           sequenceTrace,
         )
 

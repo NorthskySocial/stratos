@@ -190,13 +190,8 @@ async function performUpdate(
   sequenceTrace: SequenceTrace,
 ) {
   const { collection, rkey, record } = input
-  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
-  const manager = createRepoManager(
-    ctx.logger,
-    store,
-    actorSigningKey,
-    sequenceTrace,
-  )
+  const actorSign = await ctx.actorSigner.getSignFn(callerDid)
+  const manager = createRepoManager(ctx.logger, store, actorSign, sequenceTrace)
 
   const repoWrites: RepoWrite[] = [
     { action: 'update', collection, rkey, record, cid },
