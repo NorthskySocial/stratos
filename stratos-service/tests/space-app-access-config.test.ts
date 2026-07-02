@@ -14,7 +14,9 @@ const SERVICE_DID = 'did:web:host'
 const BASE_ENV: Record<string, string> = {
   STRATOS_SERVICE_DID: SERVICE_DID,
   STRATOS_PUBLIC_URL: 'https://host.example.com',
-  STRATOS_ALLOWED_DOMAINS: 'eng,ops',
+  // 'general' is the default STRATOS_RESERVED_DOMAIN (SWP-03); envToConfig
+  // asserts the reserved domain is within STRATOS_ALLOWED_DOMAINS at startup.
+  STRATOS_ALLOWED_DOMAINS: 'general,eng,ops',
 }
 const CLIENT_ID = 'https://app.example/client-metadata.json'
 const spaceUri = (skey: string) =>
