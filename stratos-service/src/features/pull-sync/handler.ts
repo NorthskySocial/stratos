@@ -4,6 +4,7 @@ import type { AppContext } from '../../context.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import type { HandlerAuth } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
+import { resolveCredentialScope } from '../../infra/auth/credential-scope.js'
 import {
   listRepoOps,
   type ListRepoOpsParams,
@@ -64,6 +65,29 @@ async function resolveCallerBoundaries(
 }
 
 /**
+ * Resolve the effective boundary set for a pull-sync request, accepting EITHER
+ * inter-service auth (existing behaviour, unchanged) OR a space credential
+ * (SWP-07). A space credential for space S yields the singleton `{boundary(S)}`
+ * so the same fail-closed oplog/recovery gate returns records in S ONLY.
+ *
+ * @param ctx - Application context
+ * @param auth - Handler auth context
+ * @returns The caller's boundary set
+ * @throws AuthRequiredError when neither auth path resolves a usable scope
+ */
+async function resolveEffectiveBoundaries(
+  ctx: AppContext,
+  auth: HandlerAuth | undefined,
+): Promise<ReadonlySet<string>> {
+  const credentialScope = resolveCredentialScope(auth, ctx.serviceDid)
+  if (credentialScope) {
+    return new Set(credentialScope.viewerDomains)
+  }
+  const callerDid = requireServiceCaller(auth)
+  return resolveCallerBoundaries(ctx, callerDid)
+}
+
+/**
  * Clamp a caller-supplied limit into `[1, MAX_LIMIT]`, defaulting when absent.
  * @param raw - The raw limit param
  * @returns The effective limit
@@ -84,8 +108,7 @@ export const listRepoOpsHandler = (ctx: AppContext) =>
   createXrpcHandler(ctx, 'zone.stratos.sync.listRepoOps', {
     requireAuth: false,
     handler: async ({ params, auth }) => {
-      const callerDid = requireServiceCaller(auth)
-      const callerBoundaries = await resolveCallerBoundaries(ctx, callerDid)
+      const callerBoundaries = await resolveEffectiveBoundaries(ctx, auth)
 
       const did = params.did as string | undefined
       if (!did) {
@@ -124,8 +147,7 @@ export const listRecordPathsHandler = (ctx: AppContext) =>
   createXrpcHandler(ctx, 'zone.stratos.sync.listRecordPaths', {
     requireAuth: false,
     handler: async ({ params, auth }) => {
-      const callerDid = requireServiceCaller(auth)
-      const callerBoundaries = await resolveCallerBoundaries(ctx, callerDid)
+      const callerBoundaries = await resolveEffectiveBoundaries(ctx, auth)
 
       const did = params.did as string | undefined
       if (!did) {
@@ -163,13 +185,13 @@ export function registerPullSyncHandlers(
 
   xrpc.method('zone.stratos.sync.listRepoOps', {
     type: 'query',
-    auth: ctx.authVerifier.service,
+    auth: ctx.authVerifier.serviceOrSpaceCredential,
     handler: listRepoOpsHandler(ctx),
   })
 
   xrpc.method('zone.stratos.sync.listRecordPaths', {
     type: 'query',
-    auth: ctx.authVerifier.service,
+    auth: ctx.authVerifier.serviceOrSpaceCredential,
     handler: listRecordPathsHandler(ctx),
   })
 }
