@@ -8,6 +8,11 @@ import {
   type DelegationVerifierDeps,
 } from '../../infra/auth/delegation-verifier.js'
 import { ReplayStore, type NxExStore } from '../../infra/auth/replay-store.js'
+import {
+  verifyClientAttestation,
+  type ClientAttestationVerifierDeps,
+} from '../../infra/auth/client-attestation-verifier.js'
+import { resolveAppAccess, type AppAccess } from './app-access.js'
 import { mintSpaceCredential } from './minter.js'
 
 /**
@@ -24,6 +29,11 @@ interface GetSpaceCredentialInput {
   space?: string
   /** Optional space-delegation JWT (spec-shaped identity path). */
   delegationToken?: string
+  /**
+   * Optional client-attestation JWT (SWP-08). Required only for spaces gated on
+   * client app identity (`appAccess#allowList`); ignored for `#open` spaces.
+   */
+  clientAttestation?: string
 }
 
 /**
@@ -76,10 +86,11 @@ export function registerSpaceCredentialHandlers(
  *      the DPoP-authenticated user (reject anonymous).
  *   4. Map the space URI to its boundary and confirm the user is enrolled in it
  *      (live enrollment-store lookup, no cache) → else {@link NotEnrolled}.
- *   5. Mint the credential and return `{ credential, expiresAt }`.
- *
- * App-axis (client attestation) gating is intentionally NOT enforced here; it
- * is SWP-08.
+ *   5. App-axis gating (SWP-08): if the space's `appAccess` is `#allowList`,
+ *      require a valid client attestation whose attested `client_id` is listed
+ *      (else `AttestationRequired` / `ClientNotAllowed`). `#open` spaces ignore
+ *      any attestation supplied and behave exactly as SWP-06 built.
+ *   6. Mint the credential and return `{ credential, expiresAt }`.
  *
  * @param ctx - Application context.
  * @param input - Request body.
@@ -129,6 +140,9 @@ async function handleGetSpaceCredential(
       'NotEnrolled',
     )
   }
+
+  // App-axis (client attestation) gating (SWP-08). `#open` spaces are a no-op.
+  await enforceAppAccess(ctx, space, input?.clientAttestation)
 
   const { credential, expiresAt } = await mintSpaceCredential({
     signingKey: ctx.signingKey,
@@ -193,6 +207,86 @@ async function resolveDelegationIdentity(
     throw new InvalidRequestError(
       'Delegation token could not be verified',
       'InvalidToken',
+    )
+  }
+}
+
+/**
+ * Enforce app-axis (client attestation) gating for a space (SWP-08).
+ *
+ * Resolves the space's `appAccess` policy from service config:
+ *   - `#open` (default for any unconfigured space): NO-OP — any supplied
+ *     attestation is ignored, so the request path is byte-identical to SWP-06.
+ *   - `#allowList`: a client attestation is REQUIRED. It is verified in full
+ *     (see {@link verifyClientAttestation}), and its *attested* `client_id`
+ *     (`iss`) MUST be a member of the list.
+ *
+ * @throws InvalidRequestError('AttestationRequired') if the space is gated but
+ *   no attestation was supplied, or it fails verification.
+ * @throws InvalidRequestError('ClientNotAllowed') if a valid attestation's
+ *   attested client_id is not in the allow-list.
+ */
+async function enforceAppAccess(
+  ctx: AppContext,
+  space: string,
+  clientAttestation: string | undefined,
+): Promise<void> {
+  const access: AppAccess = resolveAppAccess(
+    ctx.cfg.stratos.spaceAppAccess,
+    space,
+    ctx.serviceDid,
+  )
+  if (access.kind === 'open') {
+    // Open space: ignore any attestation supplied; identical to SWP-06.
+    return
+  }
+
+  if (!clientAttestation) {
+    throw new InvalidRequestError(
+      'This space requires a client attestation',
+      'AttestationRequired',
+    )
+  }
+
+  const replayStore = getReplayStore(ctx)
+  if (!replayStore) {
+    ctx.logger?.warn(
+      'client attestation unavailable: no replay store (cache) configured',
+    )
+    throw new InvalidRequestError(
+      'Client attestation could not be verified',
+      'AttestationRequired',
+    )
+  }
+
+  const deps: ClientAttestationVerifierDeps = {
+    serviceDid: ctx.serviceDid,
+    jwksResolver: ctx.jwksResolver,
+    replayStore,
+    logger: ctx.logger,
+  }
+
+  let clientId: string
+  try {
+    const result = await verifyClientAttestation(clientAttestation, deps)
+    clientId = result.clientId
+  } catch (err) {
+    // Every verification failure surfaces as a single AttestationRequired code
+    // (the exact reason is logged, not leaked), mirroring the delegation path.
+    ctx.logger?.info(
+      { err: err instanceof Error ? err.message : String(err) },
+      'client attestation rejected',
+    )
+    throw new InvalidRequestError(
+      'Client attestation could not be verified',
+      'AttestationRequired',
+    )
+  }
+
+  if (!access.clientIds.includes(clientId)) {
+    throw new InvalidRequestError(
+      'Client is not permitted to access this space',
+      'ClientNotAllowed',
     )
   }
 }

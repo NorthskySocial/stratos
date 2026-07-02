@@ -18,6 +18,7 @@ import {
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
 import type { ActorSigner } from './infra/signing/index.js'
+import type { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { BackgroundStubQueue } from './features/stub/internal/background-queue.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { type StratosServiceConfig } from './config.js'
@@ -44,6 +45,12 @@ export interface IdentityContext {
    * per-actor `Keypair`.
    */
   actorSigner: ActorSigner
+  /**
+   * Shared external-client JWKS resolver (SWP-08). Resolves arbitrary
+   * confidential clients' published keys (with a process-wide TTL cache) so
+   * client attestations can be verified during `getSpaceCredential`.
+   */
+  jwksResolver: JwksResolver
   createAttestation(
     did: string,
     boundaries: string[],
