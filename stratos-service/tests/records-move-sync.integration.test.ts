@@ -144,7 +144,6 @@ describe('Record move sync contract', () => {
         warn: vi.fn(),
       },
       sequenceEvents: { emit: vi.fn() },
-      stubQueue: { enqueueWrite: vi.fn() },
       boundaryResolver: {
         getBoundaries: vi
           .fn()

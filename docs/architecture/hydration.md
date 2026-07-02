@@ -1,15 +1,17 @@
 # Hydration Architecture
 
 Stratos uses the _source field pattern_ to separate data storage from presentation. Full records
-with boundary content are stored in Stratos; lightweight stub records on the user's PDS point back
-to the full record.
+with boundary content are stored in Stratos; when a record is hydrated, Stratos returns it wrapped
+with a `source` field that points back to the full record.
 
 ## Source Field Pattern
 
-When a user creates a record in Stratos, two writes happen:
+When a user creates a record in Stratos, a single write happens:
 
-1. Full record - stored in Stratos (with text content, boundary, etc.)
-2. Stub record - written to the user's PDS with a `source` field
+1. Full record - stored in the user's per-actor repo on Stratos (with text content, boundary, etc.).
+   Nothing is written to the user's mainstream PDS on the record write path.
+
+On hydration, Stratos returns the record with an added `source` field:
 
 ```typescript
 interface RecordSource {
@@ -37,7 +39,7 @@ interface RecordSource {
 }
 ```
 
-**Stub record (on user's PDS):**
+**Hydrated record (returned by Stratos, carrying the `source` field):**
 
 ```json
 {
@@ -71,8 +73,8 @@ AppViews and clients discover the Stratos service URL through the user's
 > 3. Resolve service DID from: https://stratos.example.com/.well-known/did.json
 > 4. Use service DID to hydrate records (validates source.service field matches)
 
-The `source.service` field in stubs is a DID+fragment string, not a URL — the AppView resolves the
-full URL by looking up the DID document.
+The `source.service` field is a DID+fragment string, not a URL — the AppView resolves the full URL
+by looking up the DID document.
 
 ## Hydration Model
 
@@ -83,11 +85,11 @@ Stratos `com.atproto.repo.getRecord` applies boundary access control:
 | Caller enrolled + shares boundary      | Full record returned |
 | Caller enrolled but different boundary | 404 (not visible)    |
 | Caller not enrolled                    | 404                  |
-| Unauthenticated (stub only)            | 404                  |
+| Unauthenticated                        | 404                  |
 
 ### Batch Hydration (`hydrateRecords`)
 
-AppViews typically use `zone.stratos.repo.hydrateRecords` to hydrate multiple stubs for a feed.
+AppViews typically use `zone.stratos.repo.hydrateRecords` to hydrate multiple records for a feed.
 
 - Returns a list of successfully hydrated records.
 - Records the viewer cannot access are listed in `blocked`.
@@ -107,11 +109,11 @@ boundaries.
 
 ## Trust Model
 
-The `source.cid` in the stub allows AppViews to verify the hydrated record hasn't changed:
+The `source.cid` returned on hydration allows AppViews to verify the hydrated record hasn't changed:
 
 ```typescript
 // AppView verification after hydrating
-if (hydratedRecord.cid !== stub.source.subject.cid) {
+if (hydratedRecord.cid !== hydratedRecord.source.subject.cid) {
   throw new Error('Record CID mismatch — content may have been tampered with')
 }
 ```
@@ -120,6 +122,6 @@ Combined with the enrollment attestation
 system ([Enrollment Signing](/architecture/enrollment-signing)), this gives AppViews a complete
 verification chain:
 
-1. Stub CID on PDS matches hydrated record
+1. `source.cid` returned on hydration matches the hydrated record's CID
 2. Service attestation verifies user's boundary memberships were endorsed by the service
 3. Record commits are signed with the user's P-256 key (enrolled key is in the attestation)

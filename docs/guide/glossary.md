@@ -14,15 +14,11 @@ The process by which a user registers with a Stratos service via OAuth. This res
 
 ### Hydration
 
-The process where a client or AppView fetches the full content of a Stratos-backed record. Because Stratos records are private, only "stub" records exist on the PDS. Hydration resolves these stubs into full records after verifying access controls.
-
-### Stub Record
-
-A lightweight record stored on a user's PDS that points to the full record in Stratos. It contains a `source` field with the URI and CID of the actual content, allowing for discovery and integrity verification.
+The process where a client or AppView fetches the full content of a Stratos-backed record. Because Stratos records are private and live only in the user's per-actor repo on Stratos, hydration resolves a record reference into its full content after verifying access controls, returning it with a `source` field.
 
 ### Source Field
 
-A field within a stub record that specifies where the full record is located. It includes the `uri` of the record in Stratos, the `cid` for verification, and the `service` DID of the Stratos instance.
+A field returned on a hydrated record that specifies where the full record is located. It includes the `uri` of the record in Stratos, the `cid` for verification, and the `service` DID of the Stratos instance. Stratos does not write per-record stubs to the user's PDS; the `source` field is attached at hydration time.
 
 ## Technical Terms
 
@@ -36,7 +32,7 @@ A data structure used by AT Protocol to represent a repository's state. Stratos 
 
 ### Service DID
 
-The decentralized identifier for the Stratos service itself (e.g., `did:web:stratos.actor`). It is used to sign enrollment attestations and as a reference in stub records.
+The decentralized identifier for the Stratos service itself (e.g., `did:web:stratos.actor`). It is used to sign enrollment attestations and as the `source.service` reference on hydrated records.
 
 ### subscribeRecords
 

@@ -21,8 +21,8 @@ ecosystem.
 1. _A user enrolls_ with a Stratos service via OAuth. The service writes a
    `zone.stratos.actor.enrollment` record to the user's PDS.
 2. _The user creates private records_ by calling the Stratos XRPC API. Records are stored in the
-   user's per-actor repo on Stratos, not on the PDS. A lightweight stub record is written to the PDS
-   with a `source` field pointing back to Stratos.
+   user's per-actor repo on Stratos, not on the PDS. Nothing is written to the PDS on the record
+   write path; hydrated records carry a `source` field pointing back to Stratos.
 3. _A standalone indexer_ subscribes to the PDS firehose (to discover enrollments) and to each
    user's `subscribeRecords` stream (to index records with their boundary metadata).
 4. _An AppView_ queries the indexed PostgreSQL tables. When a viewer requests a feed, the AppView
