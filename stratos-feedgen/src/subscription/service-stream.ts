@@ -7,6 +7,17 @@ import { WebSocket as NodeWebSocket } from 'ws'
 export interface ServiceStreamCallbacks {
   onEnroll: (did: string, boundaries: string[]) => void | Promise<void>
   onUnenroll: (did: string) => void | Promise<void>
+  /**
+   * SWP-13: an already-enrolled actor's boundary set changed. `boundaries` is
+   * the set AFTER the change (`boundaries-after`); the consumer diffs it against
+   * its held snapshot to purge derived state for any boundary the actor left and
+   * to evict the stale viewer cache entry. Optional so existing wirings that
+   * only care about enroll/unenroll need no change.
+   */
+  onBoundariesChanged?: (
+    did: string,
+    boundaries: string[],
+  ) => void | Promise<void>
 }
 
 export interface ServiceStreamConfig {
@@ -25,7 +36,7 @@ export interface ServiceStreamConfig {
 
 interface EnrollmentMessage {
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   service?: string
   boundaries?: string[]
   time: string
@@ -235,13 +246,24 @@ export class ServiceStream {
       if (header['t'] !== '#enrollment') return
       const [body] = decodeFirst(rest) as [Record<string, unknown>, Uint8Array]
       const enrollment = body as unknown as EnrollmentMessage
-      if (enrollment.action === 'enroll') {
-        await this.callbacks.onEnroll(
-          enrollment.did,
-          enrollment.boundaries ?? [],
-        )
-      } else if (enrollment.action === 'unenroll') {
-        await this.callbacks.onUnenroll(enrollment.did)
+      switch (enrollment.action) {
+        case 'enroll':
+          await this.callbacks.onEnroll(
+            enrollment.did,
+            enrollment.boundaries ?? [],
+          )
+          break
+        case 'unenroll':
+          await this.callbacks.onUnenroll(enrollment.did)
+          break
+        case 'boundaries':
+          // SWP-13: optional so consumers that don't track boundary changes can
+          // omit it. An unknown/future action simply falls through as a no-op.
+          await this.callbacks.onBoundariesChanged?.(
+            enrollment.did,
+            enrollment.boundaries ?? [],
+          )
+          break
       }
     } catch (err) {
       this.onError?.(err as Error)

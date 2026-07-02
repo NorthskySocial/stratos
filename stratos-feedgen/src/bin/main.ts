@@ -164,6 +164,44 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       `${summary.postsPurged} posts purged, ${summary.errors} errors)`,
   )
 
+  // Apply an actor's current boundary set: purge derived state for any
+  // configured boundary the actor left, refresh the enrolled-actor snapshot,
+  // evict the (now stale) cached viewer→boundaries entry so revocation is not
+  // masked by the boundary cache, and re-evaluate live-syncer membership.
+  // Shared by the `enroll` frame (which may carry a changed set) and the
+  // dedicated SWP-13 `boundaries` change frame; idempotent either way.
+  const applyBoundarySet = async (
+    did: string,
+    boundaries: string[],
+  ): Promise<void> => {
+    const now = new Date().toISOString()
+    const existing = await store.getEnrolledActor(did)
+    if (existing) {
+      const nextSet = new Set(boundaries)
+      const lost = existing.boundaries.filter(
+        (b) => configuredBoundaries.has(b) && !nextSet.has(b),
+      )
+      for (const boundary of lost) {
+        await purger.purgeActorBoundary(did, boundary)
+      }
+    }
+    await store.upsertEnrolledActor({
+      did,
+      boundaries,
+      enrolledAt: existing?.enrolledAt ?? now,
+      lastSeenAt: now,
+    })
+    // The boundary cache may hold a stale set for this viewer. `purgeActorBoundary`
+    // already invalidates when a boundary is lost; invalidate here too so a pure
+    // grow (no lost boundary) still evicts the stale entry.
+    enrollmentManager.invalidate(did)
+    if (intersectsBoundaries(boundaries, configuredBoundaries)) {
+      pool.addActor(did)
+    } else {
+      pool.removeActor(did)
+    }
+  }
+
   const serviceStream = new ServiceStream(
     {
       stratosServiceUrl: cfg.stratosServiceUrl,
@@ -171,35 +209,16 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     },
     {
       onEnroll: async (did, boundaries) => {
-        const now = new Date().toISOString()
-        const existing = await store.getEnrolledActor(did)
-        // Boundary-set-change handling: a re-enroll frame carries the actor's
-        // current boundary set. If they lost a configured boundary they still
-        // hold others for, purge the derived state for each lost boundary.
-        if (existing) {
-          const nextSet = new Set(boundaries)
-          const lost = existing.boundaries.filter(
-            (b) => configuredBoundaries.has(b) && !nextSet.has(b),
-          )
-          for (const boundary of lost) {
-            await purger.purgeActorBoundary(did, boundary)
-          }
-        }
-        await store.upsertEnrolledActor({
-          did,
-          boundaries,
-          enrolledAt: existing?.enrolledAt ?? now,
-          lastSeenAt: now,
-        })
-        // The boundary cache may hold a stale set for this viewer.
-        enrollmentManager.invalidate(did)
-        if (intersectsBoundaries(boundaries, configuredBoundaries)) {
-          pool.addActor(did)
-        } else {
-          pool.removeActor(did)
-        }
+        await applyBoundarySet(did, boundaries)
+      },
+      // SWP-13: dedicated boundary-set-change frame. Drives the SWP-12
+      // boundary-shrink purge (closing D-1: previously no stream trigger fired
+      // for an in-place boundary change) and event-driven cache eviction.
+      onBoundariesChanged: async (did, boundaries) => {
+        await applyBoundarySet(did, boundaries)
       },
       onUnenroll: async (did) => {
+        // purgeActor invalidates the boundary cache as part of the purge.
         await purger.purgeActor(did)
       },
     },

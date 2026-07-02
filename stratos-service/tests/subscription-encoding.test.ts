@@ -10,10 +10,12 @@ import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import {
   decodeEvent,
   eventInScope,
+  eventVisibleToCaller,
   formatEvent,
   hasBoundaryIntersection,
   type SeqEvent,
 } from '../src/subscription/index.js'
+import type { EnrollmentEvent } from '../src/context-types.js'
 
 function createCborEvent(event: Record<string, unknown>): Uint8Array {
   return new Uint8Array(cborEncode(event as unknown as LexValue))
@@ -312,6 +314,63 @@ describe('Subscription CBOR encoding roundtrip', () => {
 
     it('is false for empty boundaries', () => {
       expect(hasBoundaryIntersection(new Set(['nerv']), [])).toBe(false)
+    })
+  })
+
+  // SWP-13: service-stream event scoping. A `boundaries` change must reach a
+  // caller that held a NOW-REMOVED boundary even if the after-set no longer
+  // intersects the caller — otherwise the caller never learns the actor left.
+  describe('eventVisibleToCaller (SWP-13 boundary-change scoping)', () => {
+    const mk = (e: Partial<EnrollmentEvent>): EnrollmentEvent => ({
+      did: 'did:plc:actor',
+      action: 'boundaries',
+      time: '2026-07-02T00:00:00.000Z',
+      ...e,
+    })
+
+    it('enroll follows plain after-set intersection', () => {
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ action: 'enroll', boundaries: ['nerv', 'seele'] }),
+        ),
+      ).toBe(true)
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ action: 'enroll', boundaries: ['seele'] }),
+        ),
+      ).toBe(false)
+    })
+
+    it('boundary shrink removing the last shared boundary is STILL delivered (prior intersects)', () => {
+      // Caller holds `nerv`; actor moves from [nerv, seele] to [seele].
+      // After-set [seele] does NOT intersect {nerv}, but prior does, so the
+      // caller must still receive it to purge its `nerv`-scoped state.
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ boundaries: ['seele'], priorBoundaries: ['nerv', 'seele'] }),
+        ),
+      ).toBe(true)
+    })
+
+    it('boundary change is delivered when the after-set intersects (grow into caller scope)', () => {
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ boundaries: ['nerv', 'seele'], priorBoundaries: ['seele'] }),
+        ),
+      ).toBe(true)
+    })
+
+    it('boundary change touching neither prior nor after of the caller is dropped', () => {
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ boundaries: ['seele'], priorBoundaries: ['aekea'] }),
+        ),
+      ).toBe(false)
     })
   })
 })
