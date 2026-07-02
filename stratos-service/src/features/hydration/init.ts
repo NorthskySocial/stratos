@@ -2,6 +2,7 @@ import {
   type BoundaryResolver,
   type Cache,
   type EnrollmentStoreReader,
+  type Logger,
 } from '@northskysocial/stratos-core'
 import {
   CachedBoundaryResolver,
@@ -19,6 +20,7 @@ import { type BloomManager } from '../blob'
  * @param enrollmentStore - Enrollment store reader
  * @param bloomManager - Bloom manager
  * @param cache - Optional cache for boundary resolution
+ * @param logger - Optional logger for invariant reporting
  * @returns Hydration context
  */
 export function initHydration(
@@ -26,6 +28,7 @@ export function initHydration(
   enrollmentStore: EnrollmentStoreReader,
   bloomManager: BloomManager,
   cache?: Cache,
+  logger?: Logger,
 ): HydrationContext {
   let boundaryResolver: BoundaryResolver = new EnrollmentBoundaryResolver(
     enrollmentStore,
@@ -38,6 +41,7 @@ export function initHydration(
   const hydrationService = new HydrationServiceImpl(
     recordResolver,
     boundaryResolver,
+    logger,
   )
 
   const syncService = new SyncServiceImpl(

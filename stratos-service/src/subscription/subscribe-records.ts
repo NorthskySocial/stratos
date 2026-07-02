@@ -20,12 +20,18 @@ export interface SeqEvent {
 
 /**
  * Record operation in a commit
+ *
+ * `boundary` carries the op's domain set explicitly, independent of `record`.
+ * It exists so a scoped removal (e.g. a move's old-home tombstone) can be gated
+ * to the boundary it left WITHOUT inlining the record body — deletes never leak
+ * content. When absent, boundaries are decoded from `record.boundary` as usual.
  */
 export interface RecordOp {
   action: 'create' | 'update' | 'delete'
   path: string
   cid?: string
   record?: unknown
+  boundary?: { values?: Array<{ value: string }> }
 }
 
 /**
@@ -443,8 +449,16 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
 
     const boundaries = new Set<string>()
     for (const op of rawOps) {
+      // Prefer an explicit op-level boundary (a scoped removal carries its old
+      // domain here without a record body); otherwise fall back to the record's
+      // own boundary. This lets a move's removal op be gated to the domain it
+      // left while emitting a clean delete (no content).
       const record = op.record as Record<string, unknown> | undefined
-      const boundary = record?.boundary as Record<string, unknown> | undefined
+      const opBoundary = op.boundary as Record<string, unknown> | undefined
+      const recordBoundary = record?.boundary as
+        | Record<string, unknown>
+        | undefined
+      const boundary = opBoundary ?? recordBoundary
       const values = boundary?.values as Array<{ value: string }> | undefined
       if (values) {
         for (const v of values) boundaries.add(v.value)

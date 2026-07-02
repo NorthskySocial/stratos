@@ -230,13 +230,14 @@ async function initCoreServices(
       })
     : new EnrollmentBoundaryResolver(enrollmentStore)
 
-  const blobCtx = initBlob(actorStore, boundaryResolver)
+  const blobCtx = initBlob(actorStore, boundaryResolver, logger)
 
   const hydrationCtx = initHydration(
     actorStore,
     enrollmentStore,
     blobCtx.bloomManager,
     cache,
+    logger,
   )
 
   const mstCtx = initMst(signingKey)

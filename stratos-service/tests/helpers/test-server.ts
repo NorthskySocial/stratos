@@ -33,7 +33,7 @@ export class TestServer {
       STRATOS_PORT: '3101', // Explicit positive port for tests
       STRATOS_PUBLIC_URL: 'https://example.com', // Compliant URL for OAuth client
       STRATOS_DATA_DIR: dataDir,
-      STRATOS_ALLOWED_DOMAINS: 'test.com,example.com',
+      STRATOS_ALLOWED_DOMAINS: 'test.com,example.com,general',
       STRATOS_ENROLLMENT_MODE: 'open',
       STRATOS_SIGNING_KEY_HEX: randomBytes(32).toString('hex'),
       STORAGE_BACKEND: 'sqlite',

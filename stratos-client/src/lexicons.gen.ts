@@ -89,9 +89,10 @@ export const stratosLexicons: LexiconDoc[] = [
       "properties": {
         "values": {
           "type": "array",
-          "description": "List of domains that can access this record.",
+          "description": "The single domain that can access this record. Exactly one domain per record (one record, one space); the array shape is retained for wire compatibility.",
           "items": { "type": "ref", "ref": "#Domain" },
-          "maxLength": 10
+          "minLength": 1,
+          "maxLength": 1
         }
       }
     }
@@ -751,6 +752,78 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.space.feed",
+  "defs": {
+    "main": {
+      "type": "space",
+      "description": "A members-only Stratos post feed",
+      "key": "any",
+      "name": "Stratos Feed",
+      "collections": ["zone.stratos.feed.post"]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.space.getSpaceCredential",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is bearer-shaped and multi-use until it expires; it is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided, otherwise from the DPoP-authenticated user. Membership is checked live against the enrollment store. App-axis (client attestation) gating is NOT enforced here (SWP-08).",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["space"],
+          "properties": {
+            "space": {
+              "type": "string",
+              "description": "The three-component ats:// space URI to issue a credential for. Its space DID must equal this service's DID."
+            },
+            "delegationToken": {
+              "type": "string",
+              "description": "Optional space-delegation JWT. When present, the caller's identity is taken from this token (its target space must equal `space`) instead of the DPoP session."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["credential", "expiresAt"],
+          "properties": {
+            "credential": {
+              "type": "string",
+              "description": "The compact-serialized space-credential JWT."
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "datetime",
+              "description": "The credential's expiry time (matches the JWT `exp` claim)."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidToken",
+          "description": "The supplied delegation token failed verification, or its target space does not match the requested space."
+        },
+        {
+          "name": "NotEnrolled",
+          "description": "The identified user is not enrolled in the boundary corresponding to the requested space."
+        },
+        {
+          "name": "UnknownSpace",
+          "description": "The requested space URI is malformed or its space DID does not match this service's DID."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.sync.getBlob",
   "defs": {
     "main": {
@@ -803,6 +876,251 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The requested repo does not exist or has no commits."
         }
       ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.listRecordPaths",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Full-state recovery: enumerate a repo's record paths and their current CIDs, mirroring listRecords semantics. Record values are inlined by default; excludeValues returns metadata only. Boundary-gated: the caller only observes records within its enrolled boundaries. Intended as the fallback when the oplog (listRepoOps) returns OplogTruncated: the caller enumerates paths, diffs locally, and fetches misses. Callers must authenticate with a signed service JWT via the Authorization: Bearer header.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo to enumerate."
+          },
+          "collection": {
+            "type": "string",
+            "format": "nsid",
+            "description": "Optional single collection to enumerate. When omitted, all collections are enumerated."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor from a previous response."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "Maximum number of rows to return in this page."
+          },
+          "excludeValues": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, record values are omitted and only path metadata is returned."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["records"],
+          "properties": {
+            "records": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#recordPath" },
+              "description": "The record paths in this page."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor to fetch the next page. Absent when enumeration is complete."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "RepoNotFound",
+          "description": "The requested repo does not exist."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "Service authentication is required."
+        }
+      ]
+    },
+    "recordPath": {
+      "type": "object",
+      "description": "A record path with its current CID and optionally its value.",
+      "required": ["collection", "rkey", "cid"],
+      "properties": {
+        "collection": {
+          "type": "string",
+          "format": "nsid",
+          "description": "The record collection."
+        },
+        "rkey": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The record key."
+        },
+        "cid": {
+          "type": "cid-link",
+          "description": "The CID of the current record value."
+        },
+        "value": {
+          "type": "unknown",
+          "description": "The current record value, inlined by default. Omitted when excludeValues is true."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.listRepoOps",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. When the response reaches the end of the available log, `caughtUp` is true and the repo's current signed commit is included. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned so the caller falls back to full-state recovery (listRecordPaths).",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo to sync."
+          },
+          "since": {
+            "type": "string",
+            "format": "tid",
+            "description": "A revision (TID). Only operations after this revision are returned. Omit to start from the beginning of retained history."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "Maximum number of operations to return in this page."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor from a previous response."
+          },
+          "excludeValues": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, record values are omitted and only operation metadata is returned."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ops", "caughtUp"],
+          "properties": {
+            "ops": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#repoOp" },
+              "description": "The operations in this page, in ascending revision order."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor to fetch the next page. Absent when caughtUp is true."
+            },
+            "caughtUp": {
+              "type": "boolean",
+              "description": "True when this response reached the end of the available log. When true, `commit` is present."
+            },
+            "commit": {
+              "type": "ref",
+              "ref": "#signedCommit",
+              "description": "The repo's current signed MST commit. Required and present when caughtUp is true."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "OplogTruncated",
+          "description": "The requested `since` revision is unknown or predates retained history (compacted). The caller must fall back to full-state recovery."
+        },
+        {
+          "name": "RepoNotFound",
+          "description": "The requested repo does not exist."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "Service authentication is required."
+        }
+      ]
+    },
+    "repoOp": {
+      "type": "object",
+      "description": "A single record operation in the oplog. `cid` null means delete; `prev` null means create.",
+      "required": ["rev", "collection", "rkey"],
+      "properties": {
+        "rev": {
+          "type": "string",
+          "format": "tid",
+          "description": "The revision of the commit that produced this operation. Atomic multi-writes share one rev."
+        },
+        "collection": {
+          "type": "string",
+          "format": "nsid",
+          "description": "The record collection."
+        },
+        "rkey": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The record key."
+        },
+        "cid": {
+          "type": "cid-link",
+          "description": "The CID of the current record value. Null (absent) for a delete."
+        },
+        "prev": {
+          "type": "cid-link",
+          "description": "The CID of the record value this operation superseded. Null (absent) for a create."
+        },
+        "value": {
+          "type": "unknown",
+          "description": "The current record value, inlined by default for create/update ops. Omitted when excludeValues is true or for a delete."
+        }
+      }
+    },
+    "signedCommit": {
+      "type": "object",
+      "description": "A signed MST v3 commit, as persisted (read verbatim, not re-signed).",
+      "required": ["did", "version", "data", "rev", "sig"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of the repo."
+        },
+        "version": {
+          "type": "integer",
+          "description": "The commit version (3)."
+        },
+        "data": {
+          "type": "cid-link",
+          "description": "CID of the MST root node."
+        },
+        "rev": {
+          "type": "string",
+          "format": "tid",
+          "description": "The commit revision."
+        },
+        "prev": {
+          "type": "cid-link",
+          "description": "CID of the previous commit, or null."
+        },
+        "sig": {
+          "type": "bytes",
+          "description": "The commit signature."
+        }
+      }
     }
   }
 },

@@ -21,9 +21,10 @@
       "properties": {
         "values": {
           "type": "array",
-          "description": "List of domains that can access this record.",
+          "description": "The single domain that can access this record. Exactly one domain per record (one record, one space); the array shape is retained for wire compatibility.",
           "items": { "type": "ref", "ref": "#Domain" },
-          "maxLength": 10
+          "minLength": 1,
+          "maxLength": 1
         }
       }
     }

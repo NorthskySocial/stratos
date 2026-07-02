@@ -4,7 +4,9 @@ import {
   dbConfigSchema,
   ENROLLMENT_MODE,
   InvalidServiceEnrollmentError,
+  isValidSkey,
   loggingConfigSchema,
+  qualifyBoundary,
   qualifyBoundaries,
   redisConfigSchema,
   validateServiceEnrollments,
@@ -38,6 +40,11 @@ const envSchema = z
     // Stratos namespace config
     STRATOS_ALLOWED_DOMAINS: commaListSchema,
     STRATOS_AUTO_ENROLL_DOMAINS: commaListSchema,
+    /**
+     * Reserved all-members domain (bare name). Force-included in every
+     * enrollment's boundary set; must also appear in STRATOS_ALLOWED_DOMAINS.
+     */
+    STRATOS_RESERVED_DOMAIN: z.string().min(1).default('general'),
     STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
     STRATOS_WRITE_RATE_MAX_WRITES: z.coerce
       .number()
@@ -221,6 +228,12 @@ export interface StratosServiceConfig {
   stratos: {
     serviceDid: string
     allowedDomains: string[]
+    /**
+     * Service-qualified reserved all-members domain (e.g.
+     * `did:web:stratos.example.com/general`). Force-included in every
+     * enrollment's boundary set and guaranteed to be within `allowedDomains`.
+     */
+    reservedDomain: string
     retentionDays: number
     devMode?: boolean
     importMaxBytes: number
@@ -450,12 +463,50 @@ function loadServiceEnrollments(
 
   return validateServiceEnrollments(raw, { serviceDid, allowedDomains })
 }
+/**
+ * Resolve and validate the reserved all-members domain at startup.
+ *
+ * The bare name must be a valid skey (it becomes the space `skey`), and its
+ * service-qualified form must be within the allowed-domains set — otherwise the
+ * reserved domain could never be granted to enrollments. Fails fast with a
+ * clear message so a misconfiguration is caught at boot rather than at write
+ * time.
+ *
+ * @param serviceDid - Bare service DID used to qualify the reserved name.
+ * @param bareName - Reserved domain name from STRATOS_RESERVED_DOMAIN.
+ * @param allowedDomains - Service-qualified allowed boundaries.
+ * @returns The service-qualified reserved domain.
+ */
+function resolveReservedDomain(
+  serviceDid: string,
+  bareName: string,
+  allowedDomains: string[],
+): string {
+  if (!isValidSkey(bareName)) {
+    throw new Error(
+      `STRATOS_RESERVED_DOMAIN "${bareName}" is not a valid domain skey (1-512 UTF-8 bytes, record-key syntax)`,
+    )
+  }
+  const reservedDomain = qualifyBoundary(serviceDid, bareName)
+  if (!allowedDomains.includes(reservedDomain)) {
+    throw new Error(
+      `STRATOS_RESERVED_DOMAIN "${bareName}" must be listed in STRATOS_ALLOWED_DOMAINS (expected qualified "${reservedDomain}" among [${allowedDomains.join(', ')}])`,
+    )
+  }
+  return reservedDomain
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
   const allowedDomains = qualifyBoundaries(
     serviceDid,
     env.STRATOS_ALLOWED_DOMAINS,
+  )
+  const reservedDomain = resolveReservedDomain(
+    serviceDid,
+    env.STRATOS_RESERVED_DOMAIN,
+    allowedDomains,
   )
 
   return {
@@ -478,6 +529,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     stratos: {
       serviceDid,
       allowedDomains,
+      reservedDomain,
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
