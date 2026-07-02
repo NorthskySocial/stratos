@@ -14,6 +14,11 @@ import {
   type ServiceEnrollment,
 } from '@northskysocial/stratos-core'
 import { readFileSync } from 'node:fs'
+import {
+  validateSpaceAppAccess,
+  type RawSpaceAppAccess,
+  type SpaceAppAccessConfig,
+} from './features/space-credential/app-access.js'
 
 /**
  * Environment variable schema for stratos service
@@ -89,6 +94,24 @@ const envSchema = z
       .string()
       .optional()
       .transform((v) => v || undefined),
+
+    // Per-space app-gating (client attestation, SWP-08). JSON array mapping a
+    // space (skey/domainName) to an appAccess policy (`open` default, or
+    // `allowList` of client_ids). Mirrors the service-enrollment mechanism.
+    STRATOS_SPACE_APP_ACCESS_FILE: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_SPACE_APP_ACCESS: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    /** External-client JWKS cache TTL (ms) for client attestation. */
+    STRATOS_CLIENT_JWKS_CACHE_TTL_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(300_000),
 
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
@@ -245,6 +268,13 @@ export interface StratosServiceConfig {
     }
     /** Space-credential lifetime in seconds (`exp = iat + this`). */
     spaceCredentialTtlSeconds: number
+    /**
+     * Per-space app-gating (client attestation, SWP-08). Maps a space boundary
+     * to its `appAccess` policy; unconfigured spaces default to `#open`.
+     */
+    spaceAppAccess: SpaceAppAccessConfig
+    /** External-client JWKS cache TTL (ms) for client-attestation resolution. */
+    clientJwksCacheTtlMs: number
   }
   enrollment: {
     mode: ENROLLMENT_MODE
@@ -463,6 +493,7 @@ function loadServiceEnrollments(
 
   return validateServiceEnrollments(raw, { serviceDid, allowedDomains })
 }
+
 /**
  * Resolve and validate the reserved all-members domain at startup.
  *
@@ -494,6 +525,78 @@ function resolveReservedDomain(
     )
   }
   return reservedDomain
+}
+
+/**
+ * Load, merge and validate per-space app-gating (client attestation) config.
+ * Combines file and inline JSON sources (identical mechanism to service
+ * enrollments); duplicate spaces across sources fail fast.
+ *
+ * @param env - Environment variables object.
+ * @param serviceDid - Service DID used to qualify space boundaries.
+ * @returns The validated app-access config (empty ⇒ every space is `#open`).
+ */
+function loadSpaceAppAccess(
+  env: Env,
+  serviceDid: string,
+): SpaceAppAccessConfig {
+  const raw: RawSpaceAppAccess[] = []
+
+  if (env.STRATOS_SPACE_APP_ACCESS_FILE) {
+    let contents: string
+    try {
+      contents = readFileSync(env.STRATOS_SPACE_APP_ACCESS_FILE, 'utf8')
+    } catch (err) {
+      throw new InvalidServiceEnrollmentError(
+        `failed to read space app-access file "${env.STRATOS_SPACE_APP_ACCESS_FILE}"`,
+        { cause: err },
+      )
+    }
+    raw.push(
+      ...parseSpaceAppAccessJson(
+        contents,
+        `file "${env.STRATOS_SPACE_APP_ACCESS_FILE}"`,
+      ),
+    )
+  }
+
+  if (env.STRATOS_SPACE_APP_ACCESS) {
+    raw.push(
+      ...parseSpaceAppAccessJson(
+        env.STRATOS_SPACE_APP_ACCESS,
+        'STRATOS_SPACE_APP_ACCESS',
+      ),
+    )
+  }
+
+  return validateSpaceAppAccess(raw, serviceDid)
+}
+
+/**
+ * Parse raw space app-access entries from a JSON source.
+ * @param raw - JSON string expected to encode an array of entries.
+ * @param source - Human-readable origin used in error messages.
+ * @returns The parsed raw entries.
+ */
+function parseSpaceAppAccessJson(
+  raw: string,
+  source: string,
+): RawSpaceAppAccess[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new InvalidServiceEnrollmentError(
+      `space app-access from ${source} is not valid JSON`,
+      { cause: err },
+    )
+  }
+  if (!Array.isArray(parsed)) {
+    throw new InvalidServiceEnrollmentError(
+      `space app-access from ${source} must be a JSON array`,
+    )
+  }
+  return parsed as RawSpaceAppAccess[]
 }
 
 export function envToConfig(env: Env): StratosServiceConfig {
@@ -540,6 +643,8 @@ export function envToConfig(env: Env): StratosServiceConfig {
         cooldownJitterMs: env.STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS,
       },
       spaceCredentialTtlSeconds: env.STRATOS_SPACE_CREDENTIAL_TTL_SECONDS,
+      spaceAppAccess: loadSpaceAppAccess(env, serviceDid),
+      clientJwksCacheTtlMs: env.STRATOS_CLIENT_JWKS_CACHE_TTL_MS,
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,
