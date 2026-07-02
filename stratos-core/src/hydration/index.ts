@@ -19,6 +19,7 @@ export type {
 // Domain functions
 export {
   canAccessRecord,
+  isDomainlessRecord,
   hasIntersection,
   filterAccessibleRecords,
   parseServiceEndpoint,
