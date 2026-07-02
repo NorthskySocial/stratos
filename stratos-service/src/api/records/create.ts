@@ -128,16 +128,6 @@ export async function createRecord(
   // Notify subscribers
   ctx.sequenceEvents.emit(callerDid)
 
-  // Write stub to user's PDS (background, non-blocking)
-  enqueuePdsStub(
-    ctx,
-    callerDid,
-    collection,
-    input.rkey ?? precomputed.uri.rkey,
-    record,
-    result.cid,
-  )
-
   return {
     uri: result.uri.toString(),
     cid: parseCid(result.cid).toString(),
@@ -170,51 +160,6 @@ async function precomputeRecordData(
   const recordCid = await computeCid(recordBytes)
   phases.prepareCommitBuild = performance.now() - t0
   return { uri, recordBytes, cid: recordCid }
-}
-
-/**
- * Enqueue a stub write to the user's PDS in the background.
- *
- * @param ctx - Application context
- * @param callerDid - DID of the caller
- * @param collection - Collection NSID
- * @param rkey - Record key
- * @param record - Record content
- * @param cid - Record CID
- */
-function enqueuePdsStub(
-  ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  rkey: string,
-  record: unknown,
-  cid: CID,
-): void {
-  const recordObj = record as Record<string, unknown>
-  const createdAt =
-    typeof recordObj.createdAt === 'string'
-      ? recordObj.createdAt
-      : new Date().toISOString()
-  const recordType =
-    typeof recordObj.$type === 'string' ? recordObj.$type : collection
-
-  setImmediate(() => {
-    try {
-      ctx.stubQueue.enqueueWrite(
-        callerDid,
-        collection,
-        rkey,
-        recordType,
-        parseCid(cid),
-        createdAt,
-      )
-    } catch (err) {
-      ctx.logger?.warn(
-        { did: callerDid, cid: parseCid(cid).toString(), err },
-        'failed to queue stub write',
-      )
-    }
-  })
 }
 
 /**

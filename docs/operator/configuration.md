@@ -193,31 +193,31 @@ Stratos validates DPoP tokens using JWKS-based signature verification (not token
 
 ## Complete Environment Variable Reference
 
-| Variable                        | Required | Default                 | Description                            |
-| ------------------------------- | -------- | ----------------------- | -------------------------------------- |
-| `STRATOS_SERVICE_DID`           | ✅       | —                       | Service DID (`did:web:<host>`)         |
-| `STRATOS_PUBLIC_URL`            | ✅       | —                       | Public base URL                        |
-| `STRATOS_ALLOWED_DOMAINS`       | ✅       | —                       | Comma-separated allowed boundary names |
-| `STRATOS_PORT`                  |          | `3100`                  | HTTP listen port                       |
-| `STRATOS_SERVICE_FRAGMENT`      |          | `atproto_pns`           | Fragment for source field in stubs     |
-| `STRATOS_DATA_DIR`              |          | `./data`                | Base data directory (sqlite)           |
-| `STORAGE_BACKEND`               |          | `sqlite`                | `sqlite` or `postgres`                 |
-| `STRATOS_POSTGRES_URL`          |          | —                       | Full Postgres DSN                      |
-| `STRATOS_PG_ACTOR_POOL_SIZE`    |          | —                       | Actor transaction pool size            |
-| `STRATOS_PG_ADMIN_POOL_SIZE`    |          | —                       | Admin/schema pool size                 |
-| `STRATOS_BLOB_STORAGE`          |          | `local`                 | `local` or `s3`                        |
-| `STRATOS_S3_BUCKET`             |          | —                       | S3 bucket name                         |
-| `STRATOS_S3_REGION`             |          | —                       | S3 region                              |
-| `STRATOS_S3_ENDPOINT`           |          | —                       | S3-compatible endpoint override        |
-| `STRATOS_ENROLLMENT_MODE`       |          | `allowlist`             | `open` or `allowlist`                  |
-| `STRATOS_ALLOWED_DIDS`          |          | —                       | Comma-separated allowed DIDs           |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` |          | —                       | Comma-separated allowed PDS URLs       |
-| `STRATOS_AUTO_ENROLL_DOMAINS`   |          | all allowed             | Domains assigned to new users          |
-| `STRATOS_PLC_URL`               |          | `https://plc.directory` | DID PLC resolver URL                   |
-| `STRATOS_OAUTH_CLIENT_ID`       |          | —                       | OAuth client metadata URL              |
-| `STRATOS_OAUTH_REDIRECT_URI`    |          | —                       | OAuth callback URI                     |
-| `STRATOS_SIGNING_KEY_HEX`       |          | auto-generated          | Service secp256k1 key                  |
-| `STRATOS_IMPORT_MAX_BYTES`      |          | `268435456`             | Max CAR import size                    |
-| `STRATOS_WRITE_RATE_MAX_WRITES` |          | `300`                   | Per-DID write limit                    |
-| `STRATOS_WRITE_RATE_WINDOW_MS`  |          | `60000`                 | Rate limit window                      |
-| `LOG_LEVEL`                     |          | `info`                  | `debug`, `info`, `warn`, `error`       |
+| Variable                        | Required | Default                 | Description                                                                                                      |
+| ------------------------------- | -------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `STRATOS_SERVICE_DID`           | ✅       | —                       | Service DID (`did:web:<host>`)                                                                                   |
+| `STRATOS_PUBLIC_URL`            | ✅       | —                       | Public base URL                                                                                                  |
+| `STRATOS_ALLOWED_DOMAINS`       | ✅       | —                       | Comma-separated allowed boundary names                                                                           |
+| `STRATOS_PORT`                  |          | `3100`                  | HTTP listen port                                                                                                 |
+| `STRATOS_SERVICE_FRAGMENT`      |          | `atproto_pns`           | Fragment for the service entry in the DID document (and the `source.service` DID+fragment returned on hydration) |
+| `STRATOS_DATA_DIR`              |          | `./data`                | Base data directory (sqlite)                                                                                     |
+| `STORAGE_BACKEND`               |          | `sqlite`                | `sqlite` or `postgres`                                                                                           |
+| `STRATOS_POSTGRES_URL`          |          | —                       | Full Postgres DSN                                                                                                |
+| `STRATOS_PG_ACTOR_POOL_SIZE`    |          | —                       | Actor transaction pool size                                                                                      |
+| `STRATOS_PG_ADMIN_POOL_SIZE`    |          | —                       | Admin/schema pool size                                                                                           |
+| `STRATOS_BLOB_STORAGE`          |          | `local`                 | `local` or `s3`                                                                                                  |
+| `STRATOS_S3_BUCKET`             |          | —                       | S3 bucket name                                                                                                   |
+| `STRATOS_S3_REGION`             |          | —                       | S3 region                                                                                                        |
+| `STRATOS_S3_ENDPOINT`           |          | —                       | S3-compatible endpoint override                                                                                  |
+| `STRATOS_ENROLLMENT_MODE`       |          | `allowlist`             | `open` or `allowlist`                                                                                            |
+| `STRATOS_ALLOWED_DIDS`          |          | —                       | Comma-separated allowed DIDs                                                                                     |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` |          | —                       | Comma-separated allowed PDS URLs                                                                                 |
+| `STRATOS_AUTO_ENROLL_DOMAINS`   |          | all allowed             | Domains assigned to new users                                                                                    |
+| `STRATOS_PLC_URL`               |          | `https://plc.directory` | DID PLC resolver URL                                                                                             |
+| `STRATOS_OAUTH_CLIENT_ID`       |          | —                       | OAuth client metadata URL                                                                                        |
+| `STRATOS_OAUTH_REDIRECT_URI`    |          | —                       | OAuth callback URI                                                                                               |
+| `STRATOS_SIGNING_KEY_HEX`       |          | auto-generated          | Service secp256k1 key                                                                                            |
+| `STRATOS_IMPORT_MAX_BYTES`      |          | `268435456`             | Max CAR import size                                                                                              |
+| `STRATOS_WRITE_RATE_MAX_WRITES` |          | `300`                   | Per-DID write limit                                                                                              |
+| `STRATOS_WRITE_RATE_WINDOW_MS`  |          | `60000`                 | Rate limit window                                                                                                |
+| `LOG_LEVEL`                     |          | `info`                  | `debug`, `info`, `warn`, `error`                                                                                 |
