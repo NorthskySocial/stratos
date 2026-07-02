@@ -44,6 +44,7 @@ import {
   type IdentityContext,
 } from './context-types.js'
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
+import { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { RedisCache } from './infra/storage/redis-cache.js'
 import { InProcessActorSigner } from './infra/signing/index.js'
@@ -118,6 +119,14 @@ export async function createAppContext(
   // and key-store access that previously lived here now live inside the signer.
   const actorSigner = new InProcessActorSigner(actorStore, { logger })
 
+  // Shared external-client JWKS resolver (SWP-08). Process-wide so its TTL cache
+  // is reused across `getSpaceCredential` requests. Uses the user-agent fetch.
+  const jwksResolver = new JwksResolver({
+    fetch: fetchWithUserAgent,
+    cacheTtlMs: cfg.stratos.clientJwksCacheTtlMs,
+    logger,
+  })
+
   const ctx: AppContext = {
     cfg,
     version: VERSION,
@@ -131,6 +140,7 @@ export async function createAppContext(
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
     actorSigner,
+    jwksResolver,
     app: initExpressApp(),
     logger,
 
