@@ -9,6 +9,7 @@ import {
   encodeRecord,
   MstWriteOp,
   parseCid,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from '../../features'
@@ -39,6 +40,11 @@ export interface PrecomputedBatchOp {
   recordBytes?: Uint8Array
   cid?: CID
   tempRev?: string
+  /**
+   * Domains the record held BEFORE this op, captured inside the transaction for
+   * update ops so a domain change (move) can emit a boundary-carrying removal.
+   */
+  previousDomains?: string[]
 }
 
 /**
@@ -257,6 +263,16 @@ async function persistBatchBlocks(
         throw new InvalidRequestError('Record not found', 'RecordNotFound')
       }
     } else {
+      if (pre.action === 'update') {
+        // Capture pre-update domains so a move can emit a scoped removal.
+        const existing = await store.record.getRecord(
+          new AtUriSyntax(pre.uri),
+          null,
+        )
+        pre.previousDomains = existing
+          ? StratosValidator.extractBoundaryDomains(existing.value)
+          : []
+      }
       await store.repo.putBlock(pre.cid!, pre.recordBytes!, pre.tempRev!)
     }
   }
@@ -288,7 +304,40 @@ async function sequenceBatchChanges(
       rev,
       trace: sequenceTrace,
     })
+
+    // A move (update that changes domains) emits a boundary-carrying removal
+    // scoped to each domain the record left, sharing this op's rev. See
+    // update.ts:sequenceMoveRemovals for the full rationale.
+    const removedDomains = computeRemovedDomains(pre)
+    if (removedDomains.length > 0) {
+      await sequenceChange(store, {
+        action: 'delete',
+        uri: pre.uri,
+        boundary: { values: removedDomains.map((value) => ({ value })) },
+        commitCid,
+        rev,
+        trace: sequenceTrace,
+      })
+    }
   }
+}
+
+/**
+ * Domains an update op removed relative to its pre-update state (a move).
+ * Returns an empty array for creates, deletes, and updates that keep their
+ * domain.
+ *
+ * @param pre - A precomputed batch op with `previousDomains` populated.
+ * @returns The domains the record left.
+ */
+function computeRemovedDomains(pre: PrecomputedBatchOp): string[] {
+  if (pre.action !== 'update' || !pre.previousDomains?.length) return []
+  const newDomains = new Set(
+    StratosValidator.extractBoundaryDomains(
+      pre.op.record as Record<string, unknown>,
+    ),
+  )
+  return pre.previousDomains.filter((d) => !newDomains.has(d))
 }
 
 /**
