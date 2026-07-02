@@ -56,12 +56,20 @@ export interface InfoMessage {
 }
 
 /**
- * Enrollment message for subscription
+ * Enrollment message for subscription.
+ *
+ * `action`:
+ * - `enroll` / `unenroll`: an actor entered / fully left the service.
+ * - `boundaries` (SWP-13): the actor stayed enrolled but its boundary set
+ *   changed. `boundaries` carries the set AFTER the change (`boundaries-after`).
+ *   Consumers diff this against their held snapshot and purge derived state for
+ *   any boundary the actor left. This closes SWP-12 Deviation D-1, which lacked
+ *   a stream trigger for boundary-set shrinks.
  */
 export interface EnrollmentMessage {
   $type: 'zone.stratos.sync.subscribeRecords#enrollment'
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   service?: string
   boundaries?: string[]
   time: string
@@ -264,7 +272,7 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
         while (eventQueue.length > 0) {
           if (signal.aborted) return
           const event = eventQueue.shift()!
-          if (!hasBoundaryIntersection(callerBoundaries, event.boundaries)) {
+          if (!eventVisibleToCaller(callerBoundaries, event)) {
             continue
           }
           if (event.action === 'enroll' && replayedDids.has(event.did)) {
@@ -276,6 +284,8 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
             did: event.did,
             action: event.action,
             service: event.service,
+            // Wire frame carries only `{did, boundaries-after}` — the
+            // scoping-only `priorBoundaries` field is never emitted.
             boundaries: event.boundaries,
             time: event.time,
           }
@@ -530,6 +540,37 @@ export function hasBoundaryIntersection(
 ): boolean {
   if (!boundaries) return false
   return boundaries.some((b) => callerBoundaries.has(b))
+}
+
+/**
+ * Whether an enrollment event should be delivered to a caller holding
+ * `callerBoundaries`.
+ *
+ * `enroll`/`unenroll` retain the pre-SWP-13 semantics exactly: a plain
+ * intersection against the event's own boundary set.
+ *
+ * A `boundaries` change (SWP-13) is different: the after-set alone is
+ * insufficient, because a pure shrink that removes the last boundary the caller
+ * shares would no longer intersect the caller's set and the caller would never
+ * learn the actor left its scope. So the change is delivered when the caller's
+ * set intersects EITHER the prior set OR the after-set; the caller then diffs
+ * the after-set against its own held snapshot to decide what to purge.
+ *
+ * @param callerBoundaries - Boundaries the subscribing service is enrolled in
+ * @param event - The enrollment event under consideration
+ * @returns True if the event is in the caller's scope
+ */
+export function eventVisibleToCaller(
+  callerBoundaries: ReadonlySet<string>,
+  event: EnrollmentEvent,
+): boolean {
+  if (event.action === 'boundaries') {
+    return (
+      hasBoundaryIntersection(callerBoundaries, event.priorBoundaries) ||
+      hasBoundaryIntersection(callerBoundaries, event.boundaries)
+    )
+  }
+  return hasBoundaryIntersection(callerBoundaries, event.boundaries)
 }
 
 /**

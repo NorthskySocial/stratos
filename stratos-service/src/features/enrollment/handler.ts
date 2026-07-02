@@ -310,8 +310,11 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
           })
         }
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.addBoundary(did, boundary)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
@@ -376,8 +379,11 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
           })
         }
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.removeBoundary(did, boundary)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
@@ -450,7 +456,10 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
           })
         }
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
+
+        emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
@@ -502,6 +511,53 @@ function registerListDomainsHandler(ctx: AppContext): void {
       }
     },
   )
+}
+
+/**
+ * Emit a service-stream `boundaries` change event (SWP-13).
+ *
+ * Fired whenever an enrolled actor's boundary set is mutated in place (admin
+ * add/remove/set) so downstream services can drop derived state for any
+ * boundary the actor left, WITHOUT waiting for a cache TTL. Closes SWP-12 D-1,
+ * which had no stream trigger for a boundary-set shrink. Emission is skipped
+ * when the set is unchanged (idempotent no-op). `priorBoundaries` is carried for
+ * stream scoping only and is not written to the wire frame.
+ *
+ * @param ctx - Application context
+ * @param did - DID whose boundaries changed
+ * @param boundaries - The boundary set AFTER the change (`boundaries-after`)
+ * @param priorBoundaries - The boundary set BEFORE the change
+ */
+function emitBoundaryChangeEvent(
+  ctx: AppContext,
+  did: string,
+  boundaries: string[],
+  priorBoundaries: string[],
+): void {
+  if (boundarySetsEqual(priorBoundaries, boundaries)) return
+  ctx.enrollmentEvents.emit('enrollment', {
+    did,
+    action: 'boundaries',
+    boundaries,
+    priorBoundaries,
+    time: new Date().toISOString(),
+  })
+  ctx.logger?.info(
+    { did, boundaryCount: boundaries.length },
+    'emitted boundary-change event',
+  )
+}
+
+/**
+ * Whether two boundary sets are equal regardless of order.
+ * @param a - First boundary set
+ * @param b - Second boundary set
+ * @returns True if both sets contain exactly the same boundaries
+ */
+function boundarySetsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const set = new Set(a)
+  return b.every((x) => set.has(x))
 }
 
 /**

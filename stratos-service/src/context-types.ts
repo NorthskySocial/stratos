@@ -156,9 +156,23 @@ export interface AppContext
 
 export interface EnrollmentEvent {
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   service?: string
+  /**
+   * For `enroll`: the boundary set the actor was enrolled into.
+   * For `boundaries`: the actor's boundary set AFTER the change (`boundaries-after`).
+   * Absent for `unenroll`.
+   */
   boundaries?: string[]
+  /**
+   * Only set on a `boundaries` change event: the actor's boundary set BEFORE the
+   * change. Used solely for service-side stream scoping so a caller that held a
+   * now-removed boundary still receives the change (a pure shrink whose after-set
+   * no longer intersects the caller must not be silently dropped). This field is
+   * NOT written to the wire frame — the on-stream `#enrollment` message carries
+   * only `{did, boundaries-after}` per the SWP-13 contract.
+   */
+  priorBoundaries?: string[]
   time: string
 }
 
