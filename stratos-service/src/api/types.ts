@@ -5,6 +5,13 @@ export interface HandlerAuth {
     type: string
     did?: string
     iss?: string
+    /**
+     * Present ONLY for space-credential auth (SWP-07). The three-component
+     * `ats://` space URI the credential admits the caller to. When set, the
+     * caller has NO `did` — visibility is scoped to this space's boundary and
+     * still filtered per-record by the existing boundary gate.
+     */
+    spaceUri?: string
   }
 }
 
