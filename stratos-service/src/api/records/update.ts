@@ -93,7 +93,7 @@ export async function updateRecord(
   callerDid: string,
 ): Promise<UpdateRecordOutput & { phases?: WritePhases }> {
   const phases: WritePhases = {}
-  const { repo, collection, rkey, record } = input
+  const { repo, collection } = input
   const sequenceTrace: SequenceTrace = {
     requestId: input.requestId,
     queuedAtMs: Date.now(),
@@ -155,15 +155,6 @@ export async function updateRecord(
 
   // Notify subscribers
   ctx.sequenceEvents.emit(callerDid)
-
-  enqueueStubUpdate(
-    ctx,
-    callerDid,
-    collection,
-    rkey,
-    record,
-    updateResult.cidStr,
-  )
 
   return {
     uri: updateResult.uri,
@@ -323,39 +314,4 @@ async function sequenceMoveRemovals(
     rev,
     trace: sequenceTrace,
   })
-}
-
-/**
- * Enqueue a stub write to the user's PDS in the background.'
- * @param ctx - The application context
- * @param callerDid - The DID of the caller
- * @param collection - The collection name
- * @param rkey - The record key
- * @param record - The updated record object
- * @param cidStr - The CID string of the updated record
- */
-function enqueueStubUpdate(
-  ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  rkey: string,
-  record: unknown,
-  cidStr: string,
-) {
-  const recordObj = record as Record<string, unknown>
-  const createdAt =
-    typeof recordObj.createdAt === 'string'
-      ? recordObj.createdAt
-      : new Date().toISOString()
-  const recordType =
-    typeof recordObj.$type === 'string' ? recordObj.$type : collection
-
-  ctx.stubQueue.enqueueWrite(
-    callerDid,
-    collection,
-    rkey,
-    recordType,
-    parseCid(cidStr),
-    createdAt,
-  )
 }

@@ -77,9 +77,6 @@ describe('Record Delete Handler', () => {
       sequenceEvents: {
         emit: vi.fn(),
       },
-      stubQueue: {
-        enqueueDelete: vi.fn(),
-      },
     }
 
     // Setup actor and a record
@@ -135,13 +132,6 @@ describe('Record Delete Handler', () => {
       ),
     ).rejects.toThrow('Record not found')
 
-    // Verify stub was enqueued
-    expect(ctx.stubQueue.enqueueDelete).toHaveBeenCalledWith(
-      testDid,
-      collection,
-      rkey,
-    )
-
     // Verify event was emitted
     expect(ctx.sequenceEvents.emit).toHaveBeenCalledWith(testDid)
   })
@@ -188,10 +178,5 @@ describe('Record Delete Handler', () => {
     )
 
     expect(result.commit).toBeDefined()
-    expect(ctx.stubQueue.enqueueDelete).toHaveBeenCalledWith(
-      testDid,
-      collection,
-      'missing',
-    )
   })
 })

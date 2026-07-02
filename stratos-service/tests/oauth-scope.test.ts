@@ -14,17 +14,15 @@ describe('OAUTH_SCOPE', () => {
     expect(scopes).toContain('repo:zone.stratos.actor.enrollment')
   })
 
-  it('should contain post record scope', () => {
+  it('no longer requests the feed.post write scope (SWP-10: stub writes removed)', () => {
     const scopes = OAUTH_SCOPE.split(' ')
-    expect(scopes).toContain(
+    expect(scopes).not.toContain(
       'repo:zone.stratos.feed.post?action=create&action=delete',
     )
   })
 
   it('should match the expected full value', () => {
-    expect(OAUTH_SCOPE).toBe(
-      'atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete',
-    )
+    expect(OAUTH_SCOPE).toBe('atproto repo:zone.stratos.actor.enrollment')
   })
 })
 

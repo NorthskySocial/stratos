@@ -1,5 +1,3 @@
-import { type NodeOAuthClient } from '@atproto/oauth-client-node'
-import { type Logger } from '@northskysocial/stratos-core'
 import {
   type RepoContext,
   type SequenceEventEmitter,
@@ -9,9 +7,6 @@ import { type StratosServiceConfig } from '../../config.js'
 import { type ActorStore } from '../../actor-store-types.js'
 import { WriteRateLimiter } from '../../shared/rate-limiter.js'
 import { RepoWriteLocks } from '../../shared/repo-write-lock.js'
-import { type PdsAgent, StubWriterServiceImpl } from './adapter.js'
-import { BackgroundStubQueue } from './internal/background-queue.js'
-import { Agent } from '@atproto/api'
 
 /**
  * Initialize the repo context
@@ -19,9 +14,6 @@ import { Agent } from '@atproto/api'
  * @param actorStore - Actor store
  * @param mstCtx - MST context
  * @param sequenceEvents - Sequence event emitter
- * @param oauthClient - OAuth client
- * @param serviceDidWithFragment - Service DID with fragment
- * @param logger - Optional logger
  * @returns Initialized repo context
  */
 export function initRepo(
@@ -29,9 +21,6 @@ export function initRepo(
   actorStore: ActorStore,
   mstCtx: MstContext,
   sequenceEvents: SequenceEventEmitter,
-  oauthClient: NodeOAuthClient,
-  serviceDidWithFragment: string,
-  logger?: Logger,
 ): RepoContext {
   const writeRateLimiter = new WriteRateLimiter({
     maxWrites: cfg.stratos.writeRateLimit.maxWrites,
@@ -42,26 +31,12 @@ export function initRepo(
 
   const repoWriteLocks = new RepoWriteLocks()
 
-  const stubWriter = new StubWriterServiceImpl(async (did) => {
-    try {
-      const session = await oauthClient.restore(did)
-      return { api: new Agent(session) as unknown as PdsAgent['api'] }
-    } catch (err) {
-      logger?.error({ err }, 'Failed to restore OAuth session')
-      return null
-    }
-  }, serviceDidWithFragment)
-
-  const stubQueue = new BackgroundStubQueue(stubWriter, logger)
-
   return {
     ...mstCtx,
     actorStore,
     repoWriteLocks,
     writeRateLimiter,
     rateLimits: writeRateLimiter,
-    stubWriter,
-    stubQueue,
     sequenceEvents,
   }
 }

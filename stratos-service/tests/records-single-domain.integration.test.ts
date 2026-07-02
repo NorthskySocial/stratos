@@ -98,7 +98,6 @@ describe('Single-domain write enforcement', () => {
         warn: vi.fn(),
       },
       sequenceEvents: { emit: vi.fn() },
-      stubQueue: { enqueueWrite: vi.fn(), enqueueDelete: vi.fn() },
       boundaryResolver: {
         getBoundaries: vi.fn().mockResolvedValue([DOMAIN_A, DOMAIN_B]),
       },

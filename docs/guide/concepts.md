@@ -29,10 +29,13 @@ OAuth. On successful enrollment the service:
 The enrollment record on the PDS is the public anchor for discovery: any AppView or client can read
 it to find the Stratos endpoint and verify the user's boundaries.
 
-## Stub Record
+## Source Field
 
-When a user creates a Stratos record, the service also writes a **stub record** to the user's PDS.
-The stub contains only a `source` field pointing back to Stratos:
+Stratos does **not** write per-record stub records to the user's PDS. The only artifact Stratos
+writes to a user's mainstream PDS is the `zone.stratos.actor.enrollment` record (see above).
+
+When a client or AppView hydrates a Stratos record (via `zone.stratos.repo.hydrateRecords`), the
+returned record carries a `source` field pointing back to Stratos:
 
 ```json
 {
@@ -49,8 +52,9 @@ The stub contains only a `source` field pointing back to Stratos:
 }
 ```
 
-AppViews detect the `source` field and call `getRecord` at the Stratos service to hydrate the full
-content, subject to boundary checks.
+The `source` field lets a consumer verify which service backs the record and re-fetch the full
+content subject to boundary checks. Discovery of a user's Stratos endpoint flows through the
+enrollment record; per-actor record writes are announced over the sync stream (below).
 
 ## Sync Stream
 
