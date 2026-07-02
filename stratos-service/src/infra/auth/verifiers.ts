@@ -9,9 +9,15 @@ import {
 import { verifyServiceAuth } from './verifier.js'
 import { DpopVerificationError, DpopVerifier } from './index.js'
 import {
+  SPACE_CREDENTIAL_TYP,
+  SpaceCredentialVerificationError,
+  verifySpaceCredential,
+} from './space-credential-verifier.js'
+import {
   EnrollmentDeniedError,
   type Logger,
 } from '@northskysocial/stratos-core'
+import type { Keypair } from '@atproto/crypto'
 import { StratosServiceConfig } from '../../config.js'
 import { ExternalAllowListProvider } from '../../features/enrollment/internal/allow-list.js'
 import { verifyEnrolled } from '../../features'
@@ -32,6 +38,55 @@ export interface AuthVerifiers {
   optionalStandard: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did?: string } }>
+  /**
+   * Space-credential auth (SWP-07): a multi-use JWT this service minted for a
+   * single space, verified against our OWN signing key (no DID resolution).
+   * Yields the admitted space URI; the caller has no `did`.
+   */
+  spaceCredential: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{ credentials: { type: 'space-credential'; spaceUri: string } }>
+  /**
+   * Composition of {@link standard} and {@link spaceCredential} (SWP-07). A
+   * DPoP session yields `{ type: 'user', did }`; a space credential (a Bearer
+   * JWT whose `typ` is a space credential) yields
+   * `{ type: 'space-credential', spaceUri }`. Anything else is rejected. This
+   * is bound to read/sync endpoints ONLY; writes never accept a credential.
+   */
+  standardOrSpaceCredential: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials:
+      | { type: string; did: string }
+      | { type: 'space-credential'; spaceUri: string }
+  }>
+  /**
+   * Composition of {@link optionalStandard} and {@link spaceCredential}
+   * (SWP-07). Used for read endpoints that were previously anonymous-friendly
+   * (the hydration surface): an anonymous request stays anonymous (behaviour
+   * unchanged), a DPoP session yields a user, and a space-credential Bearer JWT
+   * yields `{ type: 'space-credential', spaceUri }`.
+   */
+  optionalStandardOrSpaceCredential: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials:
+      | { type: string; did?: string }
+      | { type: 'space-credential'; spaceUri: string }
+  }>
+  /**
+   * Composition of {@link service} and {@link spaceCredential} (SWP-07) for the
+   * pull-sync read endpoints. A space-credential Bearer JWT yields
+   * `{ type: 'space-credential', spaceUri }`; any other Bearer is verified as
+   * inter-service auth and behaves EXACTLY as before.
+   */
+  serviceOrSpaceCredential: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<{
+    credentials:
+      | { type: string; did: string; iss: string }
+      | { type: 'space-credential'; spaceUri: string }
+  }>
   /** Admin auth (basic auth or bearer token with admin password) */
   admin: (ctx: {
     req: import('node:http').IncomingMessage
@@ -66,6 +121,7 @@ function safeEqual(a: string, b: string): boolean {
  * @param dpopVerifier - DPoP verifier
  * @param allowListProvider - External allowlist provider
  * @param devMode - Development mode flag
+ * @param signingKey - This service's signing keypair (space-credential authority)
  * @param logger
  * @returns Auth verifiers object
  */
@@ -79,27 +135,50 @@ export function createAuthVerifiers(
   dpopVerifier: DpopVerifier,
   allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
+  signingKey: Pick<Keypair, 'did'>,
   logger?: Logger,
 ): AuthVerifiers {
+  const standard = createStandardVerifier({
+    devMode,
+    idResolver,
+    cfg,
+    enrollmentStore,
+    allowListProvider,
+    dpopVerifier,
+    logger,
+  })
+  const spaceCredential = createSpaceCredentialVerifier({
+    serviceDid,
+    signingKey,
+    logger,
+  })
+  const service = createServiceVerifier({ serviceDid, idResolver })
+  const optionalStandard = createOptionalStandardVerifier({
+    devMode,
+    idResolver,
+    cfg,
+    enrollmentStore,
+    allowListProvider,
+    dpopVerifier,
+    logger,
+  })
   return {
-    standard: createStandardVerifier({
-      devMode,
-      idResolver,
-      cfg,
-      enrollmentStore,
-      allowListProvider,
-      dpopVerifier,
-      logger,
+    standard,
+    service,
+    optionalStandard,
+    spaceCredential,
+    standardOrSpaceCredential: createStandardOrSpaceCredentialVerifier({
+      standard,
+      spaceCredential,
     }),
-    service: createServiceVerifier({ serviceDid, idResolver }),
-    optionalStandard: createOptionalStandardVerifier({
-      devMode,
-      idResolver,
-      cfg,
-      enrollmentStore,
-      allowListProvider,
-      dpopVerifier,
-      logger,
+    optionalStandardOrSpaceCredential:
+      createOptionalStandardOrSpaceCredentialVerifier({
+        optionalStandard,
+        spaceCredential,
+      }),
+    serviceOrSpaceCredential: createServiceOrSpaceCredentialVerifier({
+      service,
+      spaceCredential,
     }),
     admin: createAdminVerifier(adminPassword),
     subscribeAuth: createSubscribeAuthVerifier(idResolver, serviceDid),
@@ -237,6 +316,160 @@ function createServiceVerifier(deps: {
         err instanceof Error ? err.message : 'Service authorization failed'
       throw new AuthRequiredError(message)
     }
+  }
+}
+
+/**
+ * Extract a `Bearer` token whose JWT `typ` header is a space credential, or
+ * `null` if the header is absent, not `Bearer`, or the token is not a
+ * space-credential JWT. Only a cheap header peek — full verification (signature,
+ * `exp`, `sub`) happens in {@link verifySpaceCredential}.
+ *
+ * @param authHeader - The raw Authorization header value.
+ * @returns The bearer token when it looks like a space credential, else null.
+ */
+function extractSpaceCredentialToken(
+  authHeader: string | undefined,
+): string | null {
+  if (!authHeader?.startsWith('Bearer ')) return null
+  const token = authHeader.slice(7).trim()
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  try {
+    const header = JSON.parse(
+      Buffer.from(parts[0], 'base64url').toString(),
+    ) as {
+      typ?: string
+    }
+    return header?.typ === SPACE_CREDENTIAL_TYP ? token : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Creates the space-credential auth verifier (SWP-07).
+ *
+ * Accepts a `Bearer` JWT whose `typ` is a space credential, verifies it against
+ * OUR OWN signing key (no DID resolution), and yields the admitted space URI.
+ * The caller has no `did`; downstream scope enforcement maps the space to its
+ * boundary and injects a singleton viewer-boundary set so the existing
+ * per-record gate still applies.
+ *
+ * @param deps - Service DID, our signing key, and an optional logger.
+ * @returns Auth verifier function.
+ * @throws AuthRequiredError if the header is missing / not a space credential,
+ *   or the credential fails verification.
+ */
+function createSpaceCredentialVerifier(deps: {
+  serviceDid: string
+  signingKey: Pick<Keypair, 'did'>
+  logger?: Logger
+}): AuthVerifiers['spaceCredential'] {
+  return async (ctx) => {
+    const authHeader = ctx.req?.headers?.authorization
+    const token = extractSpaceCredentialToken(authHeader)
+    if (!token) {
+      throw new AuthRequiredError('Space credential required')
+    }
+    try {
+      const result = await verifySpaceCredential(token, {
+        serviceKey: deps.signingKey,
+        serviceDid: deps.serviceDid,
+      })
+      return {
+        credentials: {
+          type: 'space-credential' as const,
+          spaceUri: result.spaceUri,
+        },
+      }
+    } catch (err) {
+      if (err instanceof SpaceCredentialVerificationError) {
+        deps.logger?.info(
+          { reason: err.name, message: err.message, path: ctx.req?.url },
+          'auth rejected: space credential verification failed',
+        )
+        throw new AuthRequiredError(err.message)
+      }
+      throw err
+    }
+  }
+}
+
+/**
+ * Creates the combined standard-or-space-credential verifier (SWP-07).
+ *
+ * Routing is by Authorization scheme / JWT `typ`:
+ *   - A `Bearer` whose `typ` is a space credential → the space-credential path.
+ *   - Anything else (DPoP, dev `Bearer did:...`) → the standard user path,
+ *     which behaves EXACTLY as before.
+ *
+ * Bound to read/sync endpoints ONLY; write endpoints keep `standard`.
+ *
+ * @param deps - The already-constructed standard and space-credential verifiers.
+ * @returns Auth verifier function.
+ */
+function createStandardOrSpaceCredentialVerifier(deps: {
+  standard: AuthVerifiers['standard']
+  spaceCredential: AuthVerifiers['spaceCredential']
+}): AuthVerifiers['standardOrSpaceCredential'] {
+  return async (ctx) => {
+    const authHeader = ctx.req?.headers?.authorization
+    if (extractSpaceCredentialToken(authHeader)) {
+      return deps.spaceCredential(ctx)
+    }
+    return deps.standard(ctx)
+  }
+}
+
+/**
+ * Creates the combined optional-standard-or-space-credential verifier (SWP-07)
+ * for the anonymous-friendly hydration read endpoints.
+ *
+ * Routing is by JWT `typ`:
+ *   - A `Bearer` whose `typ` is a space credential → the space-credential path.
+ *   - Anything else (no header, DPoP, dev `Bearer did:...`) → the optional
+ *     standard path, which stays anonymous when unauthenticated — EXACTLY as
+ *     the hydration endpoints behaved before SWP-07.
+ *
+ * @param deps - The optional-standard and space-credential verifiers.
+ * @returns Auth verifier function.
+ */
+function createOptionalStandardOrSpaceCredentialVerifier(deps: {
+  optionalStandard: AuthVerifiers['optionalStandard']
+  spaceCredential: AuthVerifiers['spaceCredential']
+}): AuthVerifiers['optionalStandardOrSpaceCredential'] {
+  return async (ctx) => {
+    const authHeader = ctx.req?.headers?.authorization
+    if (extractSpaceCredentialToken(authHeader)) {
+      return deps.spaceCredential(ctx)
+    }
+    return deps.optionalStandard(ctx)
+  }
+}
+
+/**
+ * Creates the combined service-or-space-credential verifier (SWP-07) for the
+ * pull-sync read endpoints.
+ *
+ * Routing is by JWT `typ`:
+ *   - A `Bearer` whose `typ` is a space credential → the space-credential path.
+ *   - Any other `Bearer` → the inter-service auth path, which behaves EXACTLY
+ *     as before.
+ *
+ * @param deps - The already-constructed service and space-credential verifiers.
+ * @returns Auth verifier function.
+ */
+function createServiceOrSpaceCredentialVerifier(deps: {
+  service: AuthVerifiers['service']
+  spaceCredential: AuthVerifiers['spaceCredential']
+}): AuthVerifiers['serviceOrSpaceCredential'] {
+  return async (ctx) => {
+    const authHeader = ctx.req?.headers?.authorization
+    if (extractSpaceCredentialToken(authHeader)) {
+      return deps.spaceCredential(ctx)
+    }
+    return deps.service(ctx)
   }
 }
 
