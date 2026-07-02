@@ -376,7 +376,23 @@ function setupMigrationCallback(ctx: AppContext) {
         const isEnrolled = await ctx.enrollmentStore.isEnrolled(did)
         if (!isEnrolled) return
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
+
+        // SWP-13: read-repair migration rewrites an actor's boundary set (e.g.
+        // legacy bare names → qualified). Surface it on the service stream so
+        // downstream caches invalidate without waiting for a TTL. Skip when the
+        // set is unchanged (order-insensitive) to stay idempotent.
+        if (!boundarySetsEqual(priorBoundaries, boundaries)) {
+          ctx.enrollmentEvents.emit('enrollment', {
+            did,
+            action: 'boundaries',
+            boundaries,
+            priorBoundaries,
+            time: new Date().toISOString(),
+          })
+        }
+
         const signingKeyDid = await ctx.actorSigner.getPublicKey(did)
         await ctx.profileRecordWriter.putEnrollmentRecord(did, 'self', {
           service: ctx.cfg.service.publicUrl,
@@ -389,6 +405,18 @@ function setupMigrationCallback(ctx: AppContext) {
       }
     })
   }
+}
+
+/**
+ * Whether two boundary sets are equal regardless of order.
+ * @param a - First boundary set
+ * @param b - Second boundary set
+ * @returns True if both sets contain exactly the same boundaries
+ */
+function boundarySetsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const set = new Set(a)
+  return b.every((x) => set.has(x))
 }
 
 /**

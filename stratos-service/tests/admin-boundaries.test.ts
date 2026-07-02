@@ -1,6 +1,8 @@
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import express from 'express'
 import type { AppContext } from '../src'
+import type { EnrollmentEventEmitter } from '../src'
 import type { EnrollmentStore } from '../src/oauth'
 import { registerEnrollmentHandlers } from '../src/features'
 
@@ -78,14 +80,18 @@ function createCtx(opts: {
   ctx: AppContext
   enrollmentStore: EnrollmentStore
   app: express.Application
+  enrollmentEvents: EnrollmentEventEmitter
 } {
   const enrollmentStore = createMockStore(opts.enrollmentStore)
 
   const app = express()
 
+  const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
+
   const ctx = {
     app,
     enrollmentStore,
+    enrollmentEvents,
     enrollmentService: {
       isEnrolled: enrollmentStore.isEnrolled,
       getEnrollment: vi.fn(),
@@ -133,7 +139,7 @@ function createCtx(opts: {
   registerEnrollmentHandlers(xrpcServer as any, ctx)
   // Ensure the router is initialized for tests that look into _router
   // ;(app as any)._router = (app as any)._router || express.Router()
-  return { ctx, enrollmentStore, app }
+  return { ctx, enrollmentStore, app, enrollmentEvents }
 }
 
 describe('admin boundary endpoints', () => {
@@ -328,6 +334,148 @@ describe('admin boundary endpoints', () => {
         { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
       )
       expect(res.statusCode).toBe(401)
+    })
+  })
+
+  // SWP-13 Task 2: an in-place boundary change must emit a `boundaries` event on
+  // the service stream carrying `{did, boundaries-after}`, so downstream caches
+  // invalidate without waiting for a TTL. This closes SWP-12 D-1 (no stream
+  // trigger previously existed for a boundary-set change).
+  describe('SWP-13 boundary-change event emission', () => {
+    interface CapturedEvent {
+      did: string
+      action: string
+      boundaries?: string[]
+      priorBoundaries?: string[]
+    }
+
+    function captureEvents(emitter: import('../src').EnrollmentEventEmitter) {
+      const events: CapturedEvent[] = []
+      emitter.on('enrollment', (e) => events.push(e as CapturedEvent))
+      return events
+    }
+
+    it('addBoundary emits a boundaries-after event', async () => {
+      // prior (1st getBoundaries) → after (2nd getBoundaries) differ.
+      const getBoundaries = vi
+        .fn()
+        .mockResolvedValueOnce(['did:web:nerv.tokyo.jp/posters-madness'])
+        .mockResolvedValue([
+          'did:web:nerv.tokyo.jp/posters-madness',
+          'did:web:nerv.tokyo.jp/bees',
+        ])
+      const { app, enrollmentEvents } = createCtx({
+        enrollmentStore: { getBoundaries },
+      })
+      const events = captureEvents(enrollmentEvents)
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.addBoundary',
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
+      )
+      expect(res.statusCode).toBe(200)
+
+      expect(events).toHaveLength(1)
+      expect(events[0].action).toBe('boundaries')
+      expect(events[0].did).toBe('did:plc:usagi')
+      expect(events[0].boundaries).toEqual([
+        'did:web:nerv.tokyo.jp/posters-madness',
+        'did:web:nerv.tokyo.jp/bees',
+      ])
+      expect(events[0].priorBoundaries).toEqual([
+        'did:web:nerv.tokyo.jp/posters-madness',
+      ])
+    })
+
+    it('removeBoundary emits a boundaries-after event reflecting the shrink', async () => {
+      const getBoundaries = vi
+        .fn()
+        .mockResolvedValueOnce([
+          'did:web:nerv.tokyo.jp/posters-madness',
+          'did:web:nerv.tokyo.jp/bees',
+        ])
+        .mockResolvedValue(['did:web:nerv.tokyo.jp/bees'])
+      const { app, enrollmentEvents } = createCtx({
+        enrollmentStore: { getBoundaries },
+      })
+      const events = captureEvents(enrollmentEvents)
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.removeBoundary',
+        {
+          did: 'did:plc:usagi',
+          boundary: 'did:web:nerv.tokyo.jp/posters-madness',
+        },
+      )
+      expect(res.statusCode).toBe(200)
+
+      expect(events).toHaveLength(1)
+      expect(events[0].action).toBe('boundaries')
+      expect(events[0].boundaries).toEqual(['did:web:nerv.tokyo.jp/bees'])
+      expect(events[0].priorBoundaries).toEqual([
+        'did:web:nerv.tokyo.jp/posters-madness',
+        'did:web:nerv.tokyo.jp/bees',
+      ])
+    })
+
+    it('setBoundaries emits a boundaries-after event', async () => {
+      const getBoundaries = vi
+        .fn()
+        .mockResolvedValue(['did:web:nerv.tokyo.jp/posters-madness'])
+      const { app, enrollmentEvents } = createCtx({
+        enrollmentStore: { getBoundaries },
+      })
+      const events = captureEvents(enrollmentEvents)
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.setBoundaries',
+        {
+          did: 'did:plc:usagi',
+          boundaries: [
+            'did:web:nerv.tokyo.jp/bees',
+            'did:web:nerv.tokyo.jp/plants',
+          ],
+        },
+      )
+      expect(res.statusCode).toBe(200)
+
+      expect(events).toHaveLength(1)
+      expect(events[0].action).toBe('boundaries')
+      expect(events[0].boundaries).toEqual([
+        'did:web:nerv.tokyo.jp/bees',
+        'did:web:nerv.tokyo.jp/plants',
+      ])
+    })
+
+    it('is idempotent: no event when the boundary set is unchanged', async () => {
+      // prior === after (mock returns the same set on both reads).
+      const getBoundaries = vi
+        .fn()
+        .mockResolvedValue([
+          'did:web:nerv.tokyo.jp/bees',
+          'did:web:nerv.tokyo.jp/plants',
+        ])
+      const { app, enrollmentEvents } = createCtx({
+        enrollmentStore: { getBoundaries },
+      })
+      const events = captureEvents(enrollmentEvents)
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.setBoundaries',
+        {
+          did: 'did:plc:usagi',
+          boundaries: [
+            'did:web:nerv.tokyo.jp/plants',
+            'did:web:nerv.tokyo.jp/bees',
+          ],
+        },
+      )
+      expect(res.statusCode).toBe(200)
+      expect(events).toHaveLength(0)
     })
   })
 })
