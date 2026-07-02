@@ -224,6 +224,7 @@ async function initCoreServices(
     enrollmentStore,
     enrollmentCtx.enrollmentValidator,
     enrollmentCtx.allowListProvider,
+    signingKey,
     logger,
   )
 
@@ -303,6 +304,7 @@ async function initIdentity(
  * @param oauthClient - OAuth client context for token management.
  * @param enrollmentStore - Store for managing user enrollments.
  * @param allowListProvider - Optional provider for external allowlists.
+ * @param signingKey - This service's signing keypair (space-credential authority).
  * @param logger - Logger instance for logging application events.
  * @returns Initialized authentication components.
  */
@@ -312,7 +314,8 @@ function initAuth(
   oauthClient: AppContext['oauthClient'],
   enrollmentStore: AppContext['enrollmentStore'],
   enrollmentValidator: AppContext['enrollmentValidator'],
-  allowListProvider?: ExternalAllowListProvider,
+  allowListProvider: ExternalAllowListProvider | undefined,
+  signingKey: AppContext['signingKey'],
   logger?: AppContext['logger'],
 ) {
   const dpopVerifier = new DpopVerifier({
@@ -335,6 +338,7 @@ function initAuth(
     dpopVerifier,
     allowListProvider,
     cfg.stratos.devMode === true,
+    signingKey,
     logger,
   )
 
