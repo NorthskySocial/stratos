@@ -44,7 +44,9 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
       allowedDomains: [
         'did:web:nerv.tokyo.jp/engineering',
         'did:web:nerv.tokyo.jp/design',
+        'did:web:nerv.tokyo.jp/general',
       ],
+      reservedDomain: 'did:web:nerv.tokyo.jp/general',
       retentionDays: 30,
       importMaxBytes: 256 * 1024 * 1024,
       writeRateLimit: {

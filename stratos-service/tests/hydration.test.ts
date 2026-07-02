@@ -195,6 +195,42 @@ describe('Hydration Features', () => {
       }
     })
 
+    it('fails closed and logs an invariant for a domainless record (non-owner)', async () => {
+      const uri = 'at://did:plc:asuka/app.bsky.feed.post/domainless'
+      const logger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+      }
+      const loggedService = new HydrationServiceImpl(
+        mockRecordResolver,
+        mockBoundaryResolver,
+        logger as any,
+      )
+      // A record with NO boundaries — the single-domain write path prevents
+      // this, so it is an invariant violation surfacing at hydration.
+      mockRecordResolver.getRecord.mockResolvedValue({
+        uri,
+        cid: 'cid-domainless',
+        value: { text: 'orphaned' },
+        boundaries: [],
+      })
+
+      const result = await loggedService.hydrateRecord({ uri }, {
+        viewerDid: 'did:plc:shinji',
+        viewerDomains: ['did:web:nerv.tokyo.jp/pilots'],
+      } as any)
+
+      // Fail closed: the removed empty-boundary "all enrolled" branch means a
+      // non-owner cannot access a domainless record.
+      expect(result.status).toBe('blocked')
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ uri, ownerDid: 'did:plc:asuka' }),
+        expect.stringContaining('invariant violation'),
+      )
+    })
+
     it('resolves viewer boundaries if not provided but viewerDid is present', async () => {
       const uri = 'at://did:plc:gendo/app.bsky.feed.post/999'
       mockRecordResolver.getRecord.mockResolvedValue({

@@ -5,8 +5,12 @@ import type { AccessCheckInput, HydrationContext } from './types.js'
  *
  * Access is granted if:
  * 1. The viewer is the owner of the record
- * 2. The record has no boundaries (public to enrolled users)
- * 3. The viewer shares at least one boundary domain with the record
+ * 2. The viewer shares at least one boundary domain with the record
+ *
+ * A record with no boundaries is fail-closed inaccessible: the write path
+ * enforces exactly one domain per record, so a domainless record is an
+ * invariant violation. Callers should detect the empty-boundary case and log
+ * it via {@link isDomainlessRecord} before invoking this function.
  *
  * @param input - Access check input containing record boundaries and viewer context
  * @returns true if the viewer can access the record
@@ -24,13 +28,25 @@ export function canAccessRecord(input: AccessCheckInput): boolean {
     return false
   }
 
-  // Record with no boundaries is accessible to all enrolled users
-  if (recordBoundaries.length === 0) {
-    return true
-  }
-
-  // Check for boundary intersection
+  // Fail closed: with the empty-boundary "all enrolled" branch removed, a
+  // record carrying no domain has an empty intersection and is denied.
   return hasIntersection(recordBoundaries, context.viewerDomains)
+}
+
+/**
+ * Whether a record has no boundaries, which the single-domain write path
+ * prevents. A domainless record surfacing at hydration time is an invariant
+ * violation; call sites with a logger should record it and treat the record as
+ * fail-closed inaccessible.
+ *
+ * Note: the owner still accesses their own records via {@link canAccessRecord}'s
+ * owner short-circuit; this predicate only flags the anomaly for logging.
+ *
+ * @param recordBoundaries - The record's boundary domains.
+ * @returns true when the record carries no domain.
+ */
+export function isDomainlessRecord(recordBoundaries: string[]): boolean {
+  return recordBoundaries.length === 0
 }
 
 /**
