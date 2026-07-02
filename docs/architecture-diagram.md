@@ -11,7 +11,7 @@ Service.
 ```mermaid
 graph TD
     subgraph "External Ecosystem"
-        PDS["User's PDS<br/>(Stores Stubs)"]
+        PDS["User's PDS<br/>(Stores Enrollment)"]
         AV["AppView<br/>(Indexing & Hydration)"]
         PLC["Identity Resolver<br/>(PLC / DID:WEB)"]
         EAL["External Allow List<br/>(HTTP Endpoint)"]
@@ -33,14 +33,13 @@ graph TD
 
     Client -- "6. Write Full Record" --> SS
     SS -- "7. Store Full Record" --> AS
-    SS -- "8. Write Stub Record" --> PDS
-    SS -- "9. Emit Event" --> FR
+    SS -- "8. Emit Event" --> FR
 
-    AV -- "10. Index Stubs" --> PDS
-    AV -- "11. Resolve Service DID" --> PLC
-    AV -- "12. getRecord (Hydration)" --> SS
-    SS -- "13. Boundary Filtered Content" --> AV
-    AV -- "14. Hydrated Feed" --> Client
+    AV -- "9. Index Records (subscribeRecords)" --> FR
+    AV -- "10. Resolve Service DID" --> PLC
+    AV -- "11. getRecord (Hydration)" --> SS
+    SS -- "12. Boundary Filtered Content" --> AV
+    AV -- "13. Hydrated Feed" --> Client
 ```
 
 ## Record Hydration Flow (Sequence)
@@ -58,12 +57,11 @@ sequenceDiagram
     Note over C, S: Record Creation
     C->>S: postRecord(full_content, boundary)
     S->>S: Store full record in ActorStore
-    S->>P: putRecord(stub_with_source_field)
     S->>S: Emit subscribeRecords event
 
     Note over C, S: Hydration Flow
-    AV->>P: subscribeRepos / getRecord (Stub)
-    AV->>AV: Detect 'source' field in stub
+    AV->>S: subscribeRecords (index records + source field)
+    AV->>AV: Detect 'source' field on record
     AV->>S: com.atproto.repo.getRecord(at://did/coll/rkey)
     Note right of S: Validates requester DID<br/>Checks boundary permissions
     S-->>AV: Full record content

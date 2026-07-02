@@ -80,9 +80,6 @@ describe('Record Update Handler', () => {
       sequenceEvents: {
         emit: vi.fn(),
       },
-      stubQueue: {
-        enqueueWrite: vi.fn(),
-      },
       boundaryResolver: {
         getBoundaries: vi
           .fn()
@@ -156,9 +153,6 @@ describe('Record Update Handler', () => {
       testDid,
     )
     expect(readResult.value).toMatchObject({ text: 'Updated text' })
-
-    // Verify stub was enqueued
-    expect(ctx.stubQueue.enqueueWrite).toHaveBeenCalled()
   })
 
   it('should throw AuthRequiredError when updating another users record', async () => {

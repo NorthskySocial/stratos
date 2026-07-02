@@ -118,7 +118,6 @@ async function importRepo(
 | Max CAR size  | 256 MiB (configurable by operator)       |
 | CID integrity | Verified for every block                 |
 | Target repo   | Must not already have an existing commit |
-| PDS stubs     | Not created on import                    |
 
 The import validates that the commit DID matches the authenticated user, then indexes all records
 from the MST.

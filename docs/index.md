@@ -25,5 +25,5 @@ features:
     details: Users enroll via standard ATprotocol OAuth. An enrollment record is published to their PDS for endpoint discovery.
   - icon: 🔗
     title: Source Field Hydration
-    details: Minimal stub records on the PDS carry a source field. Appviews resolve full content from Stratos with boundary checks.
+    details: Hydrated records carry a source field pointing back to Stratos. Appviews resolve full content from Stratos with boundary checks.
 ---

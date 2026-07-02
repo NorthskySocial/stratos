@@ -66,16 +66,18 @@ When you enroll:
 
 ## Private Data: A tale of two records
 
-When you post something via Stratos, it is stored within the service but discoverable via the
-Firehose using a source field pattern:
+When you post something via Stratos, it is stored within the service and never written to your
+public PDS:
 
 - The full post (with your actual text, attachments, and boundary label) is stored securely inside
   Stratos.
-- A tiny stub record is written to your public PDS. The stub contains no content — only a pointer
-  that says _"the real version of this lives over here, and you'll need permission to read it"_.
+- Nothing about the post lands on your public PDS. Your enrollment record — published once when you
+  join — advertises your Stratos endpoint so apps know where to look.
+- When an app hydrates a post, Stratos returns it with a `source` field: a pointer that says _"the
+  real version of this lives over here, and you'll need permission to read it"_.
 
-This means the network can still index and route your posts using the same infrastructure as public
-content on our PDS, but the actual content never leaks out.
+This means apps can discover and route your posts through your enrollment, but the actual content
+never leaks onto the public network.
 
 <div class="animation-card">
   <div class="animation-label">
@@ -89,13 +91,13 @@ content on our PDS, but the actual content never leaks out.
 
 ## Putting It Together
 
-| Step                    | What happens                                                               |
-| ----------------------- | -------------------------------------------------------------------------- |
-| You enroll              | Your boundaries are recorded; an enrollment record lands on your PDS       |
-| You write a post        | Full content stored in Stratos; a stub goes to your PDS                    |
-| Someone opens your feed | The app fetches the stub, sees the pointer, asks Stratos for the full post |
-| Stratos checks          | Does the requester share your boundary? Yes → full post. No → nothing      |
-| You see your feed       | Only posts from boundaries you're in appear                                |
+| Step                    | What happens                                                              |
+| ----------------------- | ------------------------------------------------------------------------- |
+| You enroll              | Your boundaries are recorded; an enrollment record lands on your PDS      |
+| You write a post        | Full content stored in Stratos; nothing is written to your PDS            |
+| Someone opens your feed | The app hydrates via Stratos, sees the source pointer, gets the full post |
+| Stratos checks          | Does the requester share your boundary? Yes → full post. No → nothing     |
+| You see your feed       | Only posts from boundaries you're in appear                               |
 
 ---
 

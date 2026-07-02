@@ -182,7 +182,6 @@ export async function createAppContext(
     async destroy() {
       await storageDestroy()
       services.repoCtx.repoWriteLocks.destroy()
-      services.repoCtx.stubQueue.stop()
       if (services.enrollmentCtx.allowListProvider) {
         await services.enrollmentCtx.allowListProvider.stop()
       }
@@ -252,15 +251,7 @@ async function initCoreServices(
 
   const mstCtx = initMst(signingKey)
 
-  const repoCtx = initRepo(
-    cfg,
-    actorStore,
-    mstCtx,
-    sequenceEvents,
-    oauthClient,
-    getServiceDidWithFragment(cfg),
-    logger,
-  )
+  const repoCtx = initRepo(cfg, actorStore, mstCtx, sequenceEvents)
 
   return {
     enrollmentCtx,

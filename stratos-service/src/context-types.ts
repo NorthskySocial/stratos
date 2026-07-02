@@ -14,12 +14,10 @@ import {
   type HydrationService,
   type LexiconProvider,
   type Logger,
-  type StubWriterService,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
 import type { ActorSigner } from './infra/signing/index.js'
 import type { JwksResolver } from './infra/auth/jwks-resolver.js'
-import { BackgroundStubQueue } from './features/stub/internal/background-queue.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { type StratosServiceConfig } from './config.js'
 import { type EnrollmentStore } from './oauth'
@@ -114,8 +112,6 @@ export interface RepoContext extends MstContext {
   repoWriteLocks: RepoWriteLocks
   writeRateLimiter: WriteRateLimiter
   rateLimits: WriteRateLimiter // Added for compatibility
-  stubWriter: StubWriterService
-  stubQueue: BackgroundStubQueue
   sequenceEvents: SequenceEventEmitter
 }
 

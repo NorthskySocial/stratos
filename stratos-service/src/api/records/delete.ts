@@ -103,8 +103,5 @@ export async function deleteRecord(
   // Notify subscribers
   ctx.sequenceEvents.emit(callerDid)
 
-  // Delete stub from user's PDS (background, non-blocking)
-  ctx.stubQueue.enqueueDelete(callerDid, collection, rkey)
-
   return { ...result, phases }
 }
