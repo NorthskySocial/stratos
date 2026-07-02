@@ -61,7 +61,7 @@ class FakeWebSocket {
 
 function encodeEnrollmentFrame(body: {
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   boundaries?: string[]
   time?: string
 }): Uint8Array {
@@ -189,6 +189,98 @@ describe('ServiceStream', () => {
       expect(enrolls).toEqual(['did:plc:utena'])
       expect(unenrolls).toEqual(['did:plc:utena'])
     })
+    stream.stop()
+  })
+
+  it('dispatches boundaries-change events to onBoundariesChanged (SWP-13)', async () => {
+    const mint = makeMintToken()
+    const changes: Array<{ did: string; boundaries: string[] }> = []
+    const enrolls: string[] = []
+    const unenrolls: string[] = []
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+      },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: (did) => {
+          unenrolls.push(did)
+        },
+        onBoundariesChanged: (did, boundaries) => {
+          changes.push({ did, boundaries })
+        },
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(
+      encodeEnrollmentFrame({
+        did: 'did:plc:asuka',
+        action: 'boundaries',
+        boundaries: ['nerv/eva-02'],
+      }),
+    )
+
+    await vi.waitFor(() =>
+      expect(changes).toEqual([
+        { did: 'did:plc:asuka', boundaries: ['nerv/eva-02'] },
+      ]),
+    )
+    // The change frame must not be misrouted as enroll/unenroll.
+    expect(enrolls).toEqual([])
+    expect(unenrolls).toEqual([])
+    stream.stop()
+  })
+
+  it('ignores boundaries-change frames when no onBoundariesChanged handler is wired', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+      },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+        // onBoundariesChanged intentionally omitted.
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(
+      encodeEnrollmentFrame({
+        did: 'did:plc:asuka',
+        action: 'boundaries',
+        boundaries: ['nerv/eva-02'],
+      }),
+    )
+    // A following enroll frame must still be delivered — the optional-callback
+    // no-op must not break the consumer loop.
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:rei', action: 'enroll' }))
+
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:rei']))
+    expect(errors).toEqual([])
     stream.stop()
   })
 
