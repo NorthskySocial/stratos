@@ -10,6 +10,13 @@ export { loadState }
 const envPath = new URL('../../../.env', import.meta.url).pathname
 await load({ envPath, export: true })
 
+// Defined before the loadState() call below: state.ts imports STATE_FILE from
+// this module (circular), so it must be initialized before loadState reads it,
+// or the read hits the temporal dead zone, throws, and loadState silently
+// falls back to empty state — baking the wrong SERVICE_DID into DOMAINS.
+export const STATE_FILE = new URL('../../test-state.json', import.meta.url)
+  .pathname
+
 const state = await loadState()
 
 // Use the ngrok URL from state if available, otherwise fall back to environment or default.
@@ -98,7 +105,19 @@ export const TEST_USERS: Record<string, TestUser> = {
 }
 
 export const TEST_ROOT = new URL('../..', import.meta.url).pathname
-export const STATE_FILE = new URL('../../test-state.json', import.meta.url)
-  .pathname
 export const TEST_DATA_DIR = new URL('../../test-data', import.meta.url)
   .pathname
+
+/**
+ * E2E user dedicated as the admin operator for the admin-API phase. Chosen so it
+ * is *not* mutated by the posts phase, keeping the admin phase decoupled. Its DID
+ * is injected into `STRATOS_ADMIN_DIDS` at setup so the service trusts it.
+ */
+export const ADMIN_OPERATOR_KEY = 'haruki'
+
+/**
+ * E2E user whose boundaries the admin-API phase mutates. Also untouched by the
+ * posts phase, so boundary churn here cannot perturb the post access-control
+ * assertions.
+ */
+export const ADMIN_TARGET_KEY = 'fuyuko'

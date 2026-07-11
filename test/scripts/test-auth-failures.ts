@@ -65,7 +65,7 @@ async function fillPdsLoginForm(page: Page, handle: string) {
 
 async function verifyPdsError(page: Page) {
   const errorSelector =
-    'text=/Invalid username or password|Authentication failed|Invalid identifier or password/i'
+    'text=/Invalid username or password|Authentication failed|Invalid identifier or password|Wrong identifier or password/i'
   try {
     await page.waitForSelector(errorSelector, {
       timeout: 10_000,

@@ -2,7 +2,7 @@
 import { loadState, saveState } from './lib/state.ts'
 import { error, fail, info, pass, section } from './lib/log.ts'
 import { enrollmentStatus, unenroll } from './lib/stratos.ts'
-import { createSession, getEnrollmentRecord } from './lib/pds.ts'
+import { getEnrollmentRecord } from './lib/pds.ts'
 import { STRATOS_URL } from './lib/config.ts'
 
 async function run() {
@@ -43,11 +43,7 @@ async function run() {
     }
     pass(`User ${testUserKey} is active in Stratos`)
 
-    const session = await createSession(userState.handle, userState.password)
-    const recordBefore = await getEnrollmentRecord(
-      userState.did,
-      session.accessJwt,
-    )
+    const recordBefore = await getEnrollmentRecord(userState.did)
     if (!recordBefore.exists) {
       throw new Error('Enrollment record not found on PDS before unenrollment')
     }
@@ -65,10 +61,7 @@ async function run() {
     pass('User is inactive in Stratos')
 
     // 4. Verify PDS record deletion
-    const recordAfter = await getEnrollmentRecord(
-      userState.did,
-      session.accessJwt,
-    )
+    const recordAfter = await getEnrollmentRecord(userState.did)
     if (recordAfter.exists) {
       throw new Error(
         'Enrollment record still exists on PDS after unenrollment',
@@ -102,7 +95,7 @@ async function run() {
     userState.enrolled = false
     passed++
   } catch (err) {
-    error(`Unenrollment test failed for ${testUserKey}`, err)
+    error(`Unenrollment test failed for ${testUserKey}`, { error: String(err) })
     failed++
   }
 

@@ -56,6 +56,22 @@ export const atprotoLexicons: LexiconDoc[] = [
             },
           },
         },
+        output: {
+          encoding: 'application/json',
+          schema: {
+            type: 'object',
+            properties: {
+              commit: {
+                type: 'object',
+                required: ['cid', 'rev'],
+                properties: {
+                  cid: { type: 'string' },
+                  rev: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
       },
     },
   },

@@ -294,7 +294,11 @@ async function run() {
       }
 
       const status = await checkEnrollmentStatus(userState.did)
-      if (status?.enrolled) {
+      // `enrolled: true` alone is ambiguous — the status endpoint reports
+      // eligible-but-not-yet-enrolled DIDs the same way (active: false, no
+      // rkey). Only an existing enrollment record (enrollmentRkey present)
+      // means OAuth has actually run and we can safely skip it.
+      if (status?.enrolled && status.enrollmentRkey) {
         warn(`${userDef.name} (${userState.did}) already enrolled — skipping`)
         userState.enrolled = true
         passed++

@@ -120,27 +120,26 @@ export async function deleteAccount(did: string): Promise<void> {
 /** Check for enrollment record on PDS */
 export async function getEnrollmentRecord(
   did: string,
-  accessJwt: string,
 ): Promise<{ exists: boolean; value?: Record<string, unknown> }> {
   const collection = 'zone.stratos.actor.enrollment'
+  // Enrollment records are keyed by the Stratos service DID, not a fixed
+  // "self" rkey, so list the collection instead of guessing the rkey.
+  const params = new URLSearchParams({ repo: did, collection })
   const res = await fetch(
-    `${PDS_URL}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=${collection}&rkey=self`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessJwt}`,
-      },
-    },
+    `${PDS_URL}/xrpc/com.atproto.repo.listRecords?${params}`,
   )
-
-  if (res.status === 404) {
-    return { exists: false }
-  }
 
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`Failed to get enrollment record: ${res.status} ${body}`)
+    throw new Error(`Failed to list enrollment records: ${res.status} ${body}`)
   }
 
-  const data = await res.json()
-  return { exists: true, value: data.value }
+  const data = (await res.json()) as {
+    records?: Array<{ value?: Record<string, unknown> }>
+  }
+  const record = data.records?.[0]
+  if (!record) {
+    return { exists: false }
+  }
+  return { exists: true, value: record.value }
 }

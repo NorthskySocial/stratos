@@ -189,6 +189,7 @@ describe('Integration: Full Stratos Flow', () => {
         mode: ENROLLMENT_MODE.OPEN,
         allowedDids: [],
         allowedPdsEndpoints: [],
+        serviceEnrollments: [],
       }
 
       const mockResolver = createMockIdResolver(null)
@@ -206,6 +207,7 @@ describe('Integration: Full Stratos Flow', () => {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [testDid],
         allowedPdsEndpoints: [],
+        serviceEnrollments: [],
       }
 
       const mockResolver = createMockIdResolver(null)
@@ -223,6 +225,7 @@ describe('Integration: Full Stratos Flow', () => {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
+        serviceEnrollments: [],
       }
 
       const didDoc = {
@@ -252,6 +255,7 @@ describe('Integration: Full Stratos Flow', () => {
         mode: ENROLLMENT_MODE.ALLOWLIST,
         allowedDids: [],
         allowedPdsEndpoints: [testPds],
+        serviceEnrollments: [],
       }
 
       const mockResolver = createMockIdResolver(null)
