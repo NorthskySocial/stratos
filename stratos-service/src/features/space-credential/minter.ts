@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { Keypair } from '@atproto/crypto'
+import {
+  SPACE_CREDENTIAL_KID,
+  SPACE_CREDENTIAL_TYP,
+} from '../../infra/auth/space-credential-verifier.js'
 
 /**
  * Space-credential minter (SWP-06).
@@ -33,10 +37,11 @@ import type { Keypair } from '@atproto/crypto'
  * `keypair.sign` output, base64url-encoded.
  */
 
-/** Required JWT `typ` header value for a space credential. */
-export const SPACE_CREDENTIAL_TYP = 'atproto-space-credential+jwt'
+// The wire contract (typ/kid) is owned by the verifier so mint and verify can
+// never drift — a mismatch would make the service reject its own credentials.
+export { SPACE_CREDENTIAL_TYP }
 /** JWT `kid` header value (the authority's atproto signing key). */
-export const ATPROTO_KID = '#atproto'
+export const ATPROTO_KID = SPACE_CREDENTIAL_KID
 /** Default credential lifetime in seconds (2h) per the spec. */
 export const DEFAULT_SPACE_CREDENTIAL_TTL_SECONDS = 7_200
 

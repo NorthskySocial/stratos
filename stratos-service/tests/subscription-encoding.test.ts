@@ -164,9 +164,36 @@ describe('Subscription CBOR encoding roundtrip', () => {
       const decoded = {
         ops: [],
         boundaries: ['nerv'],
+        excludeBoundaries: [],
         decodeOk: false,
       }
       expect(eventInScope(decoded, new Set(['nerv']))).toBe(false)
+    })
+
+    it('suppresses a move removal for a caller who shares the retained (new) domain', () => {
+      // A move from `old` to `new` emits a scoped delete carrying boundary=[old]
+      // and excludeBoundary=[new]. A caller enrolled in BOTH must NOT observe the
+      // removal (it still sees the record via `new`) — the bug this guards against
+      // is the removal superseding the update and deleting a live record.
+      const eventData = {
+        ops: [
+          {
+            action: 'delete',
+            path: 'zone.stratos.feed.post/abc',
+            boundary: { values: [{ value: 'old' }] },
+            excludeBoundary: { values: [{ value: 'new' }] },
+          },
+        ],
+      }
+      const decoded = decodeEvent(createSeqEvent(eventData))
+      expect(decoded.boundaries).toContain('old')
+      expect(decoded.excludeBoundaries).toContain('new')
+      // Both-domains caller: excluded (still sees the record via `new`).
+      expect(eventInScope(decoded, new Set(['old', 'new']))).toBe(false)
+      // Old-domain-only caller: observes the removal (lost access).
+      expect(eventInScope(decoded, new Set(['old']))).toBe(true)
+      // New-domain-only caller: not in `old`, so no removal (sees the update).
+      expect(eventInScope(decoded, new Set(['new']))).toBe(false)
     })
 
     it('matches event with a shared boundary', () => {

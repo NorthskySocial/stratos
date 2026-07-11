@@ -1,4 +1,24 @@
-import type { RecordSource } from '../stub'
+/**
+ * Strong reference to a record with content hash.
+ */
+export interface SubjectRef {
+  /** AT-URI of the record */
+  uri: string
+  /** CID of the full record for integrity verification */
+  cid: string
+}
+
+/**
+ * Source field indicating where to hydrate a record's full content from.
+ */
+export interface RecordSource {
+  /** When hydration is needed. 'authenticated' requires viewer auth. */
+  vary: 'authenticated' | 'unauthenticated'
+  /** Reference to the full record at the hydration service */
+  subject: SubjectRef
+  /** DID with fragment pointing to the service entry (e.g. 'did:plc:abc#atproto_pns') */
+  service: string
+}
 
 /**
  * Context for hydration requests - contains viewer information

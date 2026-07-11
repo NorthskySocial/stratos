@@ -139,27 +139,16 @@ export async function readCurrentSignedCommit(
 }
 
 /**
- * An expanded op carrying the source `action` so the coalescing pass can derive
- * `prev` faithfully. `action` is internal and stripped from the wire result.
- */
-interface ExpandedOp extends RepoOp {
-  action: 'create' | 'update' | 'delete'
-}
-
-/**
- * Expand a decoded event into per-op entries, all sharing the event's `rev`.
- * Deletes carry `cid: null`. The `prev` field is derived by the coalescing pass
- * ({@link coalesceCurrentValues}): the true superseded CID is used when the
- * prior op is present in the returned window, otherwise the op `action` decides
- * create (`prev: null`) vs update/delete (`prev` present as an empty sentinel is
- * NOT emitted — see coalescer). The `action` is retained here only for that
- * derivation and never reaches the wire.
+ * Expand a decoded event into per-op `RepoOp` entries, all sharing the event's
+ * `rev`. Deletes carry `cid: null`. `prev` is left null here and derived by the
+ * coalescing pass ({@link coalesceCurrentValues}) from the prior op for the same
+ * path within the returned window.
  *
  * @param decoded - Event decoded via {@link decodeEvent}
  * @param rev - The shared revision for all ops in this event
  * @returns One expanded op per record op in the event
  */
-function expandEventOps(decoded: DecodedEvent, rev: string): ExpandedOp[] {
+function expandEventOps(decoded: DecodedEvent, rev: string): RepoOp[] {
   return decoded.ops.map((op: RecordOp) => {
     const { collection, rkey } = splitPath(op.path)
     const isDelete = op.action === 'delete'
@@ -170,7 +159,6 @@ function expandEventOps(decoded: DecodedEvent, rev: string): ExpandedOp[] {
       cid: isDelete ? null : (op.cid ?? null),
       prev: null,
       value: isDelete ? undefined : op.record,
-      action: op.action,
     }
   })
 }
@@ -194,9 +182,9 @@ async function collectOps(
   startSeq: number,
   sinceLocated: boolean,
   callerBoundaries: ReadonlySet<string>,
-): Promise<{ ops: ExpandedOp[]; lastSeq: number; drained: boolean }> {
+): Promise<{ ops: RepoOp[]; lastSeq: number; drained: boolean }> {
   const { did, since, limit } = params
-  const collected: ExpandedOp[] = []
+  const collected: RepoOp[] = []
   let afterSeq = startSeq
   let located = sinceLocated
   let drained = false
@@ -266,7 +254,13 @@ function isEventInScope(
   callerBoundaries: ReadonlySet<string>,
 ): boolean {
   if (!decoded.decodeOk) return false
-  return decoded.boundaries.some((b) => callerBoundaries.has(b))
+  if (!decoded.boundaries.some((b) => callerBoundaries.has(b))) return false
+  // Suppress a move's scoped removal for callers who still see the record via
+  // the domain it moved into (mirrors eventInScope in subscribe-records).
+  if (decoded.excludeBoundaries.some((b) => callerBoundaries.has(b))) {
+    return false
+  }
+  return true
 }
 
 /**
@@ -285,7 +279,7 @@ function isEventInScope(
  * @returns The coalesced, current-value-only ops
  */
 function coalesceCurrentValues(
-  ops: ExpandedOp[],
+  ops: RepoOp[],
   excludeValues: boolean,
 ): RepoOp[] {
   // Track, per path, the last cid we emitted for that path within this window

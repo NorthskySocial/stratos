@@ -423,30 +423,54 @@ function deriveServiceDid(env: Env, publicUrl: string): string {
 }
 
 /**
- * Parse raw service-enrollment entries from a JSON source.
- * @param raw - JSON string expected to encode an array of entries.
- * @param source - Human-readable origin used in error messages.
- * @returns The parsed raw entries.
+ * Load a JSON-array config from an optional file source plus an optional inline
+ * source, merging both. Shared by service-enrollment and space-app-access
+ * loading so the file-read / JSON-parse / array-shape checks live in one place;
+ * each caller supplies its own error factory and human-readable `label`.
+ *
+ * @param opts - File/inline env values, the inline env var name, a label used in
+ *   messages, and the error factory to throw on any failure.
+ * @returns The merged raw entries (unvalidated).
  */
-function parseServiceEnrollmentJson(
-  raw: string,
-  source: string,
-): RawServiceEnrollment[] {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch (err) {
-    throw new InvalidServiceEnrollmentError(
-      `service enrollments from ${source} is not valid JSON`,
-      { cause: err },
-    )
+function loadMergedJsonArray<T>(opts: {
+  filePath: string | undefined
+  inline: string | undefined
+  inlineEnvName: string
+  label: string
+  makeError: (message: string, options?: { cause?: unknown }) => Error
+}): T[] {
+  const { filePath, inline, inlineEnvName, label, makeError } = opts
+  const parseArray = (text: string, source: string): T[] => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch (err) {
+      throw makeError(`${label} from ${source} is not valid JSON`, {
+        cause: err,
+      })
+    }
+    if (!Array.isArray(parsed)) {
+      throw makeError(`${label} from ${source} must be a JSON array`)
+    }
+    return parsed as T[]
   }
-  if (!Array.isArray(parsed)) {
-    throw new InvalidServiceEnrollmentError(
-      `service enrollments from ${source} must be a JSON array`,
-    )
+
+  const raw: T[] = []
+  if (filePath) {
+    let contents: string
+    try {
+      contents = readFileSync(filePath, 'utf8')
+    } catch (err) {
+      throw makeError(`failed to read ${label} file "${filePath}"`, {
+        cause: err,
+      })
+    }
+    raw.push(...parseArray(contents, `file "${filePath}"`))
   }
-  return parsed as RawServiceEnrollment[]
+  if (inline) {
+    raw.push(...parseArray(inline, inlineEnvName))
+  }
+  return raw
 }
 
 /**
@@ -462,34 +486,14 @@ function loadServiceEnrollments(
   serviceDid: string,
   allowedDomains: string[],
 ): ServiceEnrollment[] {
-  const raw: RawServiceEnrollment[] = []
-
-  if (env.STRATOS_SERVICE_ENROLLMENTS_FILE) {
-    let contents: string
-    try {
-      contents = readFileSync(env.STRATOS_SERVICE_ENROLLMENTS_FILE, 'utf8')
-    } catch (err) {
-      throw new InvalidServiceEnrollmentError(
-        `failed to read service enrollments file "${env.STRATOS_SERVICE_ENROLLMENTS_FILE}"`,
-        { cause: err },
-      )
-    }
-    raw.push(
-      ...parseServiceEnrollmentJson(
-        contents,
-        `file "${env.STRATOS_SERVICE_ENROLLMENTS_FILE}"`,
-      ),
-    )
-  }
-
-  if (env.STRATOS_SERVICE_ENROLLMENTS) {
-    raw.push(
-      ...parseServiceEnrollmentJson(
-        env.STRATOS_SERVICE_ENROLLMENTS,
-        'STRATOS_SERVICE_ENROLLMENTS',
-      ),
-    )
-  }
+  const raw = loadMergedJsonArray<RawServiceEnrollment>({
+    filePath: env.STRATOS_SERVICE_ENROLLMENTS_FILE,
+    inline: env.STRATOS_SERVICE_ENROLLMENTS,
+    inlineEnvName: 'STRATOS_SERVICE_ENROLLMENTS',
+    label: 'service enrollments',
+    makeError: (message, options) =>
+      new InvalidServiceEnrollmentError(message, options),
+  })
 
   return validateServiceEnrollments(raw, { serviceDid, allowedDomains })
 }
@@ -540,63 +544,16 @@ function loadSpaceAppAccess(
   env: Env,
   serviceDid: string,
 ): SpaceAppAccessConfig {
-  const raw: RawSpaceAppAccess[] = []
-
-  if (env.STRATOS_SPACE_APP_ACCESS_FILE) {
-    let contents: string
-    try {
-      contents = readFileSync(env.STRATOS_SPACE_APP_ACCESS_FILE, 'utf8')
-    } catch (err) {
-      throw new InvalidServiceEnrollmentError(
-        `failed to read space app-access file "${env.STRATOS_SPACE_APP_ACCESS_FILE}"`,
-        { cause: err },
-      )
-    }
-    raw.push(
-      ...parseSpaceAppAccessJson(
-        contents,
-        `file "${env.STRATOS_SPACE_APP_ACCESS_FILE}"`,
-      ),
-    )
-  }
-
-  if (env.STRATOS_SPACE_APP_ACCESS) {
-    raw.push(
-      ...parseSpaceAppAccessJson(
-        env.STRATOS_SPACE_APP_ACCESS,
-        'STRATOS_SPACE_APP_ACCESS',
-      ),
-    )
-  }
+  const raw = loadMergedJsonArray<RawSpaceAppAccess>({
+    filePath: env.STRATOS_SPACE_APP_ACCESS_FILE,
+    inline: env.STRATOS_SPACE_APP_ACCESS,
+    inlineEnvName: 'STRATOS_SPACE_APP_ACCESS',
+    label: 'space app-access',
+    makeError: (message, options) =>
+      new InvalidServiceEnrollmentError(message, options),
+  })
 
   return validateSpaceAppAccess(raw, serviceDid)
-}
-
-/**
- * Parse raw space app-access entries from a JSON source.
- * @param raw - JSON string expected to encode an array of entries.
- * @param source - Human-readable origin used in error messages.
- * @returns The parsed raw entries.
- */
-function parseSpaceAppAccessJson(
-  raw: string,
-  source: string,
-): RawSpaceAppAccess[] {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch (err) {
-    throw new InvalidServiceEnrollmentError(
-      `space app-access from ${source} is not valid JSON`,
-      { cause: err },
-    )
-  }
-  if (!Array.isArray(parsed)) {
-    throw new InvalidServiceEnrollmentError(
-      `space app-access from ${source} must be a JSON array`,
-    )
-  }
-  return parsed as RawSpaceAppAccess[]
 }
 
 export function envToConfig(env: Env): StratosServiceConfig {

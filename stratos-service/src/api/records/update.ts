@@ -310,6 +310,9 @@ async function sequenceMoveRemovals(
     action: 'delete',
     uri: uriStr,
     boundary: { values: removedDomains.map((value) => ({ value })) },
+    // The record still exists in its new domain(s): a subscriber enrolled in
+    // both the old and new domain must observe the UPDATE, not this removal.
+    excludeBoundary: { values: [...newDomains].map((value) => ({ value })) },
     commitCid,
     rev,
     trace: sequenceTrace,

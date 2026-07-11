@@ -373,15 +373,20 @@ function initExpressApp(): express.Express {
 function setupMigrationCallback(ctx: AppContext) {
   if (!(ctx.boundaryResolver instanceof MigratingBoundaryResolver)) return
 
-  ctx.boundaryResolver.onMigrated = (did: string, boundaries: string[]) => {
+  ctx.boundaryResolver.onMigrated = (
+    did: string,
+    boundaries: string[],
+    priorBoundaries: string[],
+  ) => {
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     setImmediate(async () => {
       try {
         const isEnrolled = await ctx.enrollmentStore.isEnrolled(did)
         if (!isEnrolled) return
 
-        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
-        await ctx.enrollmentStore.setBoundaries(did, boundaries)
+        // `persistMigrated` already wrote the migrated set, so `priorBoundaries`
+        // is supplied by the resolver (a store read here would return the
+        // already-migrated set and suppress the event below).
 
         // SWP-13: read-repair migration rewrites an actor's boundary set (e.g.
         // legacy bare names → qualified). Surface it on the service stream so
