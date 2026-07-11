@@ -20,17 +20,22 @@ interface XRPCResponse<T> {
   data: T
 }
 
-/**
- * Decodes bytes from various formats into Uint8Array.
- */
+// PDS records may carry the sig as a raw Uint8Array, a Buffer-like, or the
+// { $bytes: base64 } JSON encoding — normalize all three.
 const decodeBytes = (val: unknown): Uint8Array | null => {
   if (val instanceof Uint8Array) return val
   if (val && typeof val === 'object' && '_isBuffer' in val && val._isBuffer) {
     return val as unknown as Uint8Array
   }
   if (typeof val === 'object' && val !== null && '$bytes' in val) {
-    const b64: string = (val as { $bytes: string }).$bytes
-    const binary = atob(b64)
+    const b64: unknown = (val as { $bytes: unknown }).$bytes
+    if (typeof b64 !== 'string') return null
+    let binary: string
+    try {
+      binary = atob(b64)
+    } catch {
+      return null
+    }
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i)
@@ -40,12 +45,6 @@ const decodeBytes = (val: unknown): Uint8Array | null => {
   return null
 }
 
-/**
- * Parses attestation data from a given object.
- *
- * @param val - The object to parse.
- * @returns The parsed attestation data, or null if parsing fails.
- */
 const parseAttestation = (val: unknown): ServiceAttestation | null => {
   if (typeof val !== 'object' || val === null) return null
   const obj = val as Record<string, unknown>
@@ -55,12 +54,22 @@ const parseAttestation = (val: unknown): ServiceAttestation | null => {
   return { sig, signingKey: obj.signingKey }
 }
 
+const isBoundary = (val: unknown): val is { value: string } =>
+  typeof val === 'object' &&
+  val !== null &&
+  typeof (val as { value: unknown }).value === 'string'
+
+const parseBoundaries = (val: unknown): Array<{ value: string }> => {
+  if (!Array.isArray(val)) return []
+  return val.filter(isBoundary)
+}
+
 /**
  * Parses an enrollment record from a lexicon-compliant object.
  *
  * @param val - The value of the record.
  * @param rkey - The record key.
- * @returns The parsed enrollment record, or null if parsing fails.
+ * @returns The parsed enrollment record, or null for invalid records.
  */
 export const parseEnrollmentRecord = (
   val: unknown,
@@ -75,7 +84,7 @@ export const parseEnrollmentRecord = (
   if (!attestation) return null
   return {
     service: obj.service,
-    boundaries: Array.isArray(obj.boundaries) ? obj.boundaries : [],
+    boundaries: parseBoundaries(obj.boundaries),
     signingKey: obj.signingKey,
     attestation,
     createdAt: obj.createdAt,

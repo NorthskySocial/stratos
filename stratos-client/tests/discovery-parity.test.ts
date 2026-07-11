@@ -98,6 +98,30 @@ describe('discovery parity (client fork vs. core original)', () => {
       ['empty object', {}],
       ['null', null],
       ['plain non-object (string)', 'not-an-object'],
+      [
+        'malformed base64 $bytes',
+        {
+          ...validRecord,
+          attestation: {
+            ...validAttestation,
+            sig: { $bytes: '!!!not-base64!!!' },
+          },
+        },
+      ],
+      [
+        'non-string $bytes',
+        {
+          ...validRecord,
+          attestation: { ...validAttestation, sig: { $bytes: null } },
+        },
+      ],
+      [
+        'boundaries with malformed elements',
+        {
+          ...validRecord,
+          boundaries: ['plain-string', null, { value: 'geo:tokyo-3' }],
+        },
+      ],
     ]
 
     it.each(cases)('agrees for: %s', (_name, value) => {
