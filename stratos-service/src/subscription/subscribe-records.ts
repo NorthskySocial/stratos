@@ -441,6 +441,13 @@ async function getEventsSince(
 export interface DecodedEvent {
   ops: RecordOp[]
   boundaries: string[]
+  /**
+   * Domains in which the record still exists after this event (a move's new
+   * home). A subscriber sharing one of these is EXCLUDED from an otherwise
+   * in-scope scoped removal, so a move is never observed as a deletion by a
+   * caller who can still see the record via the retained domain.
+   */
+  excludeBoundaries: string[]
   decodeOk: boolean
 }
 
@@ -458,6 +465,7 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       : [decoded]
 
     const boundaries = new Set<string>()
+    const excludeBoundaries = new Set<string>()
     for (const op of rawOps) {
       // Prefer an explicit op-level boundary (a scoped removal carries its old
       // domain here without a record body); otherwise fall back to the record's
@@ -473,15 +481,28 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       if (values) {
         for (const v of values) boundaries.add(v.value)
       }
+      // A move's removal op names the domain(s) the record moved INTO; a
+      // subscriber that shares one of those still sees the record and must be
+      // excluded from this removal.
+      const excludeBoundary = op.excludeBoundary as
+        | Record<string, unknown>
+        | undefined
+      const excludeValues = excludeBoundary?.values as
+        | Array<{ value: string }>
+        | undefined
+      if (excludeValues) {
+        for (const v of excludeValues) excludeBoundaries.add(v.value)
+      }
     }
 
     return {
       ops: rawOps as unknown as RecordOp[],
       boundaries: [...boundaries],
+      excludeBoundaries: [...excludeBoundaries],
       decodeOk: true,
     }
   } catch {
-    return { ops: [], boundaries: [], decodeOk: false }
+    return { ops: [], boundaries: [], excludeBoundaries: [], decodeOk: false }
   }
 }
 
@@ -524,6 +545,12 @@ export function eventInScope(
   if (!decoded.decodeOk) return false
   const shared = decoded.boundaries.filter((b) => callerBoundaries.has(b))
   if (shared.length === 0) return false
+  // A move's scoped removal is suppressed for callers who still see the record
+  // via the domain it moved into — otherwise a both-domains subscriber would
+  // observe a move as a spurious deletion.
+  if (decoded.excludeBoundaries.some((b) => callerBoundaries.has(b))) {
+    return false
+  }
   if (domain) return shared.includes(domain)
   return true
 }

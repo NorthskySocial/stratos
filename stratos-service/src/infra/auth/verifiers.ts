@@ -167,19 +167,18 @@ export function createAuthVerifiers(
     service,
     optionalStandard,
     spaceCredential,
-    standardOrSpaceCredential: createStandardOrSpaceCredentialVerifier({
+    standardOrSpaceCredential: withSpaceCredentialFallback(
       standard,
       spaceCredential,
-    }),
-    optionalStandardOrSpaceCredential:
-      createOptionalStandardOrSpaceCredentialVerifier({
-        optionalStandard,
-        spaceCredential,
-      }),
-    serviceOrSpaceCredential: createServiceOrSpaceCredentialVerifier({
+    ),
+    optionalStandardOrSpaceCredential: withSpaceCredentialFallback(
+      optionalStandard,
+      spaceCredential,
+    ),
+    serviceOrSpaceCredential: withSpaceCredentialFallback(
       service,
       spaceCredential,
-    }),
+    ),
     admin: createAdminVerifier(adminPassword),
     subscribeAuth: createSubscribeAuthVerifier(idResolver, serviceDid),
   }
@@ -397,79 +396,30 @@ function createSpaceCredentialVerifier(deps: {
 }
 
 /**
- * Creates the combined standard-or-space-credential verifier (SWP-07).
+ * Composes a space-credential verifier with a base verifier (SWP-07). Routing is
+ * by JWT `typ`: a `Bearer` whose `typ` is a space credential takes the
+ * space-credential path; anything else (no header, DPoP, dev `Bearer did:...`,
+ * or inter-service `Bearer`) falls through to `fallback`, which behaves EXACTLY
+ * as before. Bound to read/sync endpoints ONLY; write endpoints keep `standard`.
  *
- * Routing is by Authorization scheme / JWT `typ`:
- *   - A `Bearer` whose `typ` is a space credential → the space-credential path.
- *   - Anything else (DPoP, dev `Bearer did:...`) → the standard user path,
- *     which behaves EXACTLY as before.
- *
- * Bound to read/sync endpoints ONLY; write endpoints keep `standard`.
- *
- * @param deps - The already-constructed standard and space-credential verifiers.
- * @returns Auth verifier function.
+ * @param fallback - The base verifier used when the token is not a space credential.
+ * @param spaceCredential - The space-credential verifier.
+ * @returns A verifier yielding either the fallback's or the credential's result.
  */
-function createStandardOrSpaceCredentialVerifier(deps: {
-  standard: AuthVerifiers['standard']
-  spaceCredential: AuthVerifiers['spaceCredential']
-}): AuthVerifiers['standardOrSpaceCredential'] {
+function withSpaceCredentialFallback<R>(
+  fallback: (
+    ctx: import('@atproto/xrpc-server').MethodAuthContext,
+  ) => Promise<R>,
+  spaceCredential: AuthVerifiers['spaceCredential'],
+): (
+  ctx: import('@atproto/xrpc-server').MethodAuthContext,
+) => Promise<R | Awaited<ReturnType<AuthVerifiers['spaceCredential']>>> {
   return async (ctx) => {
     const authHeader = ctx.req?.headers?.authorization
     if (extractSpaceCredentialToken(authHeader)) {
-      return deps.spaceCredential(ctx)
+      return spaceCredential(ctx)
     }
-    return deps.standard(ctx)
-  }
-}
-
-/**
- * Creates the combined optional-standard-or-space-credential verifier (SWP-07)
- * for the anonymous-friendly hydration read endpoints.
- *
- * Routing is by JWT `typ`:
- *   - A `Bearer` whose `typ` is a space credential → the space-credential path.
- *   - Anything else (no header, DPoP, dev `Bearer did:...`) → the optional
- *     standard path, which stays anonymous when unauthenticated — EXACTLY as
- *     the hydration endpoints behaved before SWP-07.
- *
- * @param deps - The optional-standard and space-credential verifiers.
- * @returns Auth verifier function.
- */
-function createOptionalStandardOrSpaceCredentialVerifier(deps: {
-  optionalStandard: AuthVerifiers['optionalStandard']
-  spaceCredential: AuthVerifiers['spaceCredential']
-}): AuthVerifiers['optionalStandardOrSpaceCredential'] {
-  return async (ctx) => {
-    const authHeader = ctx.req?.headers?.authorization
-    if (extractSpaceCredentialToken(authHeader)) {
-      return deps.spaceCredential(ctx)
-    }
-    return deps.optionalStandard(ctx)
-  }
-}
-
-/**
- * Creates the combined service-or-space-credential verifier (SWP-07) for the
- * pull-sync read endpoints.
- *
- * Routing is by JWT `typ`:
- *   - A `Bearer` whose `typ` is a space credential → the space-credential path.
- *   - Any other `Bearer` → the inter-service auth path, which behaves EXACTLY
- *     as before.
- *
- * @param deps - The already-constructed service and space-credential verifiers.
- * @returns Auth verifier function.
- */
-function createServiceOrSpaceCredentialVerifier(deps: {
-  service: AuthVerifiers['service']
-  spaceCredential: AuthVerifiers['spaceCredential']
-}): AuthVerifiers['serviceOrSpaceCredential'] {
-  return async (ctx) => {
-    const authHeader = ctx.req?.headers?.authorization
-    if (extractSpaceCredentialToken(authHeader)) {
-      return deps.spaceCredential(ctx)
-    }
-    return deps.service(ctx)
+    return fallback(ctx)
   }
 }
 

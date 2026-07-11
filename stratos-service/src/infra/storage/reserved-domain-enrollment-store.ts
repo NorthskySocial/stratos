@@ -105,6 +105,15 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
     did: string,
     updates: Partial<Omit<EnrollmentRecord, 'did'>>,
   ): Promise<void> {
+    // An update that rewrites `boundaries` must also honor the reserved-domain
+    // invariant — otherwise this documented single chokepoint could be bypassed,
+    // silently dropping the reserved all-members domain from an enrollment.
+    if (updates.boundaries !== undefined) {
+      return this.inner.updateEnrollment(did, {
+        ...updates,
+        boundaries: withReserved(updates.boundaries, this.reservedDomain),
+      })
+    }
     return this.inner.updateEnrollment(did, updates)
   }
 }

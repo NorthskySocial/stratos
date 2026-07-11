@@ -1,5 +1,6 @@
 import { compactVerify } from 'jose'
 import type { Logger } from '@northskysocial/stratos-core'
+import { decodeCompactJwt } from './jwt.js'
 import {
   JwksResolutionError,
   MalformedJwksError,
@@ -211,24 +212,11 @@ function decodeToken(token: string): {
   header: AttestationHeader
   payload: AttestationPayload
 } {
-  const parts = token.split('.')
-  if (parts.length !== 3) {
-    throw new MalformedAttestationError('Invalid JWT format')
-  }
-  try {
-    const header = JSON.parse(
-      Buffer.from(parts[0], 'base64url').toString(),
-    ) as AttestationHeader
-    const payload = JSON.parse(
-      Buffer.from(parts[1], 'base64url').toString(),
-    ) as AttestationPayload
-    if (!header || typeof header !== 'object') {
-      throw new Error('missing header')
-    }
-    return { header, payload }
-  } catch {
-    throw new MalformedAttestationError('Invalid JWT encoding')
-  }
+  const { header, payload } = decodeCompactJwt<
+    AttestationHeader,
+    AttestationPayload
+  >(token, (message) => new MalformedAttestationError(message))
+  return { header, payload }
 }
 
 /** Require a syntactically valid HTTPS URL, else {@link NonHttpsClientError}. */

@@ -420,10 +420,19 @@ describe('admin boundary endpoints', () => {
       ])
     })
 
-    it('setBoundaries emits a boundaries-after event', async () => {
+    it('setBoundaries emits the EFFECTIVE persisted set (re-read after write)', async () => {
+      // The store decorator force-includes the reserved domain, so the emitted
+      // event must carry the effective persisted set (re-read after the write),
+      // not the requested boundaries. First read = prior; second = effective.
+      const effective = [
+        'did:web:nerv.tokyo.jp/bees',
+        'did:web:nerv.tokyo.jp/plants',
+        'did:web:nerv.tokyo.jp/general',
+      ]
       const getBoundaries = vi
         .fn()
-        .mockResolvedValue(['did:web:nerv.tokyo.jp/posters-madness'])
+        .mockResolvedValueOnce(['did:web:nerv.tokyo.jp/posters-madness'])
+        .mockResolvedValue(effective)
       const { app, enrollmentEvents } = createCtx({
         enrollmentStore: { getBoundaries },
       })
@@ -444,10 +453,11 @@ describe('admin boundary endpoints', () => {
 
       expect(events).toHaveLength(1)
       expect(events[0].action).toBe('boundaries')
-      expect(events[0].boundaries).toEqual([
-        'did:web:nerv.tokyo.jp/bees',
-        'did:web:nerv.tokyo.jp/plants',
-      ])
+      // The reserved 'general' domain — added by the store decorator, absent
+      // from the request — is present, proving the handler re-read the store.
+      expect(events[0].boundaries).toEqual(effective)
+      // And the HTTP response reflects the effective set too.
+      expect(res.body.boundaries).toEqual(effective)
     })
 
     it('is idempotent: no event when the boundary set is unchanged', async () => {

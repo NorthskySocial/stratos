@@ -80,9 +80,14 @@ describe('MigratingBoundaryResolver', () => {
     resolver.onMigrated = onMigrated
 
     await resolver.getBoundaries('did:plc:faye' as any)
-    expect(onMigrated).toHaveBeenCalledWith('did:plc:faye' as any, [
-      'did:web:bebop.cowboy.space/bounty-hunters',
-    ])
+    // onMigrated receives the new (qualified) set AND the pre-migration set;
+    // the prior set must be the original legacy names, captured before
+    // persistMigrated wrote the qualified set.
+    expect(onMigrated).toHaveBeenCalledWith(
+      'did:plc:faye' as any,
+      ['did:web:bebop.cowboy.space/bounty-hunters'],
+      ['bounty-hunters'],
+    )
   })
 
   it('returns qualified boundaries even if DB update fails', async () => {

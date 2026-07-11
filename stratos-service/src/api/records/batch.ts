@@ -247,6 +247,12 @@ async function persistBatchBlocks(
       if (!existing) {
         throw new InvalidRequestError('Record not found', 'RecordNotFound')
       }
+      // Capture the deleted record's domains so a boundary-carrying removal can
+      // be sequenced (a plain delete op carries no boundary and is otherwise
+      // invisible to every subscriber).
+      pre.previousDomains = StratosValidator.extractBoundaryDomains(
+        existing.value,
+      )
     } else {
       if (pre.action === 'update') {
         // Capture pre-update domains so a move can emit a scoped removal.
@@ -290,15 +296,40 @@ async function sequenceBatchChanges(
       trace: sequenceTrace,
     })
 
+    if (pre.action === 'delete') {
+      // A plain delete op carries no boundary, so the event above is dropped by
+      // the fail-closed scope gate for every subscriber. Emit a boundary-carrying
+      // removal scoped to the record's domains so members that could see the
+      // record observe the deletion (and only them). See update.ts.
+      const domains = pre.previousDomains ?? []
+      if (domains.length > 0) {
+        await sequenceChange(store, {
+          action: 'delete',
+          uri: pre.uri,
+          boundary: { values: domains.map((value) => ({ value })) },
+          commitCid,
+          rev,
+          trace: sequenceTrace,
+        })
+      }
+      continue
+    }
+
     // A move (update that changes domains) emits a boundary-carrying removal
     // scoped to each domain the record left, sharing this op's rev. See
     // update.ts:sequenceMoveRemovals for the full rationale.
     const removedDomains = computeRemovedDomains(pre)
     if (removedDomains.length > 0) {
+      const newDomains = StratosValidator.extractBoundaryDomains(
+        pre.op.record as Record<string, unknown>,
+      )
       await sequenceChange(store, {
         action: 'delete',
         uri: pre.uri,
         boundary: { values: removedDomains.map((value) => ({ value })) },
+        // Suppress the removal for subscribers who still see the record via its
+        // new domain(s) — they must observe the update, not a deletion.
+        excludeBoundary: { values: newDomains.map((value) => ({ value })) },
         commitCid,
         rev,
         trace: sequenceTrace,

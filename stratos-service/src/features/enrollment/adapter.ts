@@ -102,6 +102,12 @@ export class EnrollmentServiceImpl implements EnrollmentService {
    * @param did - The user's DID.
    */
   async unenroll(did: string): Promise<void> {
+    // Capture the user's boundaries BEFORE the enrollment is deleted: the
+    // unenroll event is scoped by these so services that shared a boundary
+    // receive it and purge. Without boundaries the service stream's
+    // intersection gate drops the event and no live purge ever fires.
+    const priorBoundaries = await this.enrollmentStore.getBoundaries(did)
+
     await this.enrollmentStore.unenroll(did)
     await this.actorStoreDestroyer(did)
     this.logger?.info({ did }, 'user unenrolled (hard delete)')
@@ -109,6 +115,7 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     this.enrollmentEvents?.emit('enrollment', {
       did,
       action: 'unenroll',
+      boundaries: priorBoundaries,
       time: new Date().toISOString(),
     })
   }
@@ -259,7 +266,18 @@ export class CachedBoundaryResolver implements BoundaryResolver {
  * updates the DB, and fires a callback for PDS re-enrollment.
  */
 export class MigratingBoundaryResolver implements BoundaryResolver {
-  onMigrated?: (did: string, boundaries: string[]) => void
+  /**
+   * Fired after a legacy boundary set is migrated to qualified form. Receives
+   * both the new (`boundaries`) and the pre-migration (`priorBoundaries`) sets —
+   * the prior set MUST be captured here because `persistMigrated` has already
+   * written the new set, so a later store read would return the migrated set and
+   * make the change look like a no-op.
+   */
+  onMigrated?: (
+    did: string,
+    boundaries: string[],
+    priorBoundaries: string[],
+  ) => void
 
   constructor(private deps: MigrationDeps) {}
 
@@ -302,7 +320,7 @@ export class MigratingBoundaryResolver implements BoundaryResolver {
       boundaries.length,
     )
     if (success) {
-      this.onMigrated?.(did, qualified)
+      this.onMigrated?.(did, qualified, boundaries)
     }
 
     return qualified

@@ -60,11 +60,18 @@ function ok<T>(value: T): { ok: true; value: T } {
 }
 
 /**
+ * Shared encoder — reused across calls to avoid allocating a `TextEncoder` on
+ * every skey validation (this runs on the record write path). `TextEncoder` is
+ * used rather than `Buffer` so the module stays browser-safe for `stratos-client`.
+ */
+const UTF8_ENCODER = new TextEncoder()
+
+/**
  * Returns the UTF-8 byte length of a string. Independent of code-unit /
  * code-point counting so the skey byte-length rule can be enforced exactly.
  */
 export function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length
+  return UTF8_ENCODER.encode(s).length
 }
 
 /**

@@ -459,10 +459,17 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
 
-        emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
+        // Re-read the EFFECTIVE persisted set: the store decorator force-includes
+        // the reserved all-members domain, so the requested `boundaries` may omit
+        // it. Emitting/returning the requested set would make a feedgen diff the
+        // reserved domain as "lost" and wrongly purge the actor's reserved-domain
+        // derived state.
+        const effectiveBoundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        emitBoundaryChangeEvent(ctx, did, effectiveBoundaries, priorBoundaries)
 
         try {
-          await updatePdsEnrollmentRecord(ctx, did, boundaries)
+          await updatePdsEnrollmentRecord(ctx, did, effectiveBoundaries)
         } catch (err) {
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
@@ -471,10 +478,10 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
         }
 
         ctx.logger?.info(
-          { did, boundaryCount: boundaries.length },
+          { did, boundaryCount: effectiveBoundaries.length },
           'admin set boundaries',
         )
-        res.json({ did, boundaries })
+        res.json({ did, boundaries: effectiveBoundaries })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },

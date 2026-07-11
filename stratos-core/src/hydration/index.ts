@@ -7,6 +7,8 @@ export type {
   BatchHydrationResult,
   HydratableRecord,
   AccessCheckInput,
+  RecordSource,
+  SubjectRef,
 } from './types.js'
 
 // Ports

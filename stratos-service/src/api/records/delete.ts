@@ -1,9 +1,13 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import { RepoWrite } from '@northskysocial/stratos-core'
+import { RepoWrite, StratosValidator } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
-import { type SequenceTrace, type WritePhases } from './types.js'
+import {
+  sequenceChange,
+  type SequenceTrace,
+  type WritePhases,
+} from './types.js'
 import { withConcurrencyRetry } from './validation.js'
 
 export interface DeleteRecordInput {
@@ -72,6 +76,15 @@ export async function deleteRecord(
           sequenceTrace,
         )
 
+        // Capture the record's domains before applyWrites removes it, so a
+        // boundary-carrying removal can be sequenced. A plain delete op carries
+        // no boundary and is dropped by the fail-closed scope gate for every
+        // subscriber, so without this the deletion would never propagate.
+        const existing = await store.record.getRecord(uri, null)
+        const deletedDomains = existing
+          ? StratosValidator.extractBoundaryDomains(existing.value)
+          : []
+
         const repoWrites: RepoWrite[] = [{ action: 'delete', collection, rkey }]
 
         const writeResult = await manager.applyWrites(
@@ -83,6 +96,19 @@ export async function deleteRecord(
         const ti = performance.now()
         await store.record.deleteRecord(uri.toString())
         phases.transactPersist = performance.now() - ti
+
+        if (deletedDomains.length > 0) {
+          await sequenceChange(store, {
+            action: 'delete',
+            uri: uriStr,
+            boundary: {
+              values: deletedDomains.map((value) => ({ value })),
+            },
+            commitCid: writeResult.commitCid.toString(),
+            rev: writeResult.rev,
+            trace: sequenceTrace,
+          })
+        }
 
         return {
           commit: {

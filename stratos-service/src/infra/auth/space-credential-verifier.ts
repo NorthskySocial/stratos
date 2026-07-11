@@ -1,6 +1,7 @@
 import type { Keypair } from '@atproto/crypto'
 import * as crypto from '@atproto/crypto'
 import { parseSpaceUri } from '@northskysocial/stratos-core'
+import { decodeCompactJwt } from './jwt.js'
 
 /**
  * Space-credential verifier (SWP-07).
@@ -188,24 +189,10 @@ function decodeToken(token: string): {
   header: SpaceCredentialHeader
   payload: SpaceCredentialClaims
 } {
-  const parts = token.split('.')
-  if (parts.length !== 3) {
-    throw new MalformedSpaceCredentialError('Invalid JWT format')
-  }
-  try {
-    const header = JSON.parse(
-      Buffer.from(parts[0], 'base64url').toString(),
-    ) as SpaceCredentialHeader
-    const payload = JSON.parse(
-      Buffer.from(parts[1], 'base64url').toString(),
-    ) as SpaceCredentialClaims
-    if (!header || typeof header !== 'object') {
-      throw new Error('missing header')
-    }
-    return { parts, header, payload }
-  } catch {
-    throw new MalformedSpaceCredentialError('Invalid JWT encoding')
-  }
+  return decodeCompactJwt<SpaceCredentialHeader, SpaceCredentialClaims>(
+    token,
+    (message) => new MalformedSpaceCredentialError(message),
+  )
 }
 
 /**

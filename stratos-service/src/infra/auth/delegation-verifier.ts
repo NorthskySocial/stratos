@@ -5,6 +5,7 @@ import {
   resolveIssuerDid,
   verifyWithMethod,
 } from './verifier.js'
+import { decodeCompactJwt } from './jwt.js'
 import type { ReplayStore } from './replay-store.js'
 
 /**
@@ -39,13 +40,22 @@ export const ATPROTO_KID = '#atproto'
 export const SPACE_HOST_FRAGMENT = '#atproto_space_host'
 /** Replay-store namespace for delegation nonces. */
 export const DELEGATION_REPLAY_KIND = 'space-delegation'
-/**
- * Replay-record TTL (seconds). Must exceed the token exp window (default 60s)
- * plus the maximum clock skew, so a token can never outlive its replay record.
- */
-export const DELEGATION_REPLAY_TTL = 120
 /** Default clock-skew tolerance (seconds) for `iat`/`exp`. */
 export const DEFAULT_CLOCK_SKEW = 30
+/**
+ * Maximum accepted token lifetime (`exp - iat`, seconds). The spec default is
+ * 60s; anything materially longer is rejected. This bounds the window a single
+ * token can be replayed within and keeps the replay TTL sufficient to cover the
+ * token's whole validity.
+ */
+export const MAX_DELEGATION_LIFETIME = 300
+/**
+ * Replay-record TTL (seconds). Must exceed the maximum token lifetime plus twice
+ * the clock skew, so a token can never outlive its replay record (which would
+ * silently re-enable "single-use" tokens once the record expires).
+ */
+export const DELEGATION_REPLAY_TTL =
+  MAX_DELEGATION_LIFETIME + 2 * DEFAULT_CLOCK_SKEW
 
 /**
  * Base class for all delegation-verification failures. Each distinct validation
@@ -218,24 +228,10 @@ function decodeToken(token: string): {
   header: DelegationHeader
   payload: DelegationPayload
 } {
-  const parts = token.split('.')
-  if (parts.length !== 3) {
-    throw new MalformedDelegationTokenError('Invalid JWT format')
-  }
-  try {
-    const header = JSON.parse(
-      Buffer.from(parts[0], 'base64url').toString(),
-    ) as DelegationHeader
-    const payload = JSON.parse(
-      Buffer.from(parts[1], 'base64url').toString(),
-    ) as DelegationPayload
-    if (!header || typeof header !== 'object') {
-      throw new Error('missing header')
-    }
-    return { parts, header, payload }
-  } catch {
-    throw new MalformedDelegationTokenError('Invalid JWT encoding')
-  }
+  return decodeCompactJwt<DelegationHeader, DelegationPayload>(
+    token,
+    (message) => new MalformedDelegationTokenError(message),
+  )
 }
 
 /**
@@ -257,6 +253,11 @@ function validateTiming(payload: DelegationPayload, clockSkew: number): void {
   }
   if (now > payload.exp + clockSkew) {
     throw new DelegationTimingError('Delegation token expired')
+  }
+  if (payload.exp - payload.iat > MAX_DELEGATION_LIFETIME) {
+    throw new DelegationTimingError(
+      `Delegation token lifetime exceeds ${MAX_DELEGATION_LIFETIME}s`,
+    )
   }
 }
 

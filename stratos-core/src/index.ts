@@ -18,7 +18,6 @@ export type { BlobMetadata as BlobInfo } from './blob/reader.js'
 
 // Features - Enrollment exports Enrollment type (domain)
 export * from './enrollment/index.js'
-export * from './stub/index.js'
 export * from './hydration/index.js'
 
 // Attestation
