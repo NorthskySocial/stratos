@@ -85,6 +85,38 @@ describe('Enrollment Discovery', () => {
       const result2 = parseEnrollmentRecord(recordInvalidBoundaries, 'rkey')
       expect(result2?.boundaries).toEqual([])
     })
+
+    it('should return null (not throw) for malformed base64 $bytes', () => {
+      const record = {
+        ...validRecord,
+        attestation: {
+          ...validRecord.attestation,
+          sig: { $bytes: '!!!not-base64!!!' },
+        },
+      }
+      expect(() => parseEnrollmentRecord(record, 'rkey')).not.toThrow()
+      expect(parseEnrollmentRecord(record, 'rkey')).toBeNull()
+    })
+
+    it('should return null for non-string $bytes', () => {
+      const record = {
+        ...validRecord,
+        attestation: {
+          ...validRecord.attestation,
+          sig: { $bytes: null },
+        },
+      }
+      expect(parseEnrollmentRecord(record, 'rkey')).toBeNull()
+    })
+
+    it('should filter out malformed boundaries elements', () => {
+      const record = {
+        ...validRecord,
+        boundaries: ['plain-string', null, { value: 'geo:tokyo-3' }],
+      }
+      const result = parseEnrollmentRecord(record, 'rkey')
+      expect(result?.boundaries).toEqual([{ value: 'geo:tokyo-3' }])
+    })
   })
 
   describe('getEnrollmentByServiceDid', () => {
