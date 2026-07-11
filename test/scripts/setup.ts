@@ -2,6 +2,7 @@
 // Setup script — creates PDS accounts, starts Stratos via Docker Compose, waits for health.
 
 import { TEST_DATA_DIR, TEST_ROOT, TEST_USERS } from './lib/config.ts'
+import { ADMIN_OPERATOR_KEY } from './lib/config.ts'
 import { accountExists, createAccount, createInviteCode } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { loadState, saveState, type TestState } from './lib/state.ts'
@@ -92,6 +93,17 @@ function getEnvVars(state: TestState): Record<string, string> {
     envVars['STRATOS_OAUTH_REDIRECT_URI'] =
       'http://127.0.0.1:3100/oauth/callback'
   }
+
+  const operatorDid = state.users[ADMIN_OPERATOR_KEY]?.did
+  if (operatorDid) {
+    info(`Designating admin operator: ${operatorDid}`)
+    envVars['STRATOS_ADMIN_DIDS'] = operatorDid
+  } else {
+    warn(
+      `Admin operator "${ADMIN_OPERATOR_KEY}" has no DID in state — admin-API phase will be unable to authorize`,
+    )
+  }
+
   return envVars
 }
 

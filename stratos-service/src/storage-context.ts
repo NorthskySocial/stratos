@@ -17,13 +17,19 @@ import { CachedEnrollmentStore } from './infra/storage/cached-enrollment-store.j
 import {
   createPgOAuthStores,
   createSqliteOAuthStores,
+  PgAdminSessionStore,
+  SqliteAdminSessionStore,
+  type AdminSessionStore,
   type EnrollmentStore,
   type OAuthSessionStoreBackend,
   type OAuthStateStoreBackend,
 } from './oauth'
 import { SqliteEnrollmentStore } from './storage/sqlite/enrollment-store.js'
 import { StratosActorStore } from './storage/sqlite/actor-store.js'
-import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
+import type {
+  EnrollmentStoreReader,
+  Logger,
+} from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
 import type { AppContextOptions } from './context-types.js'
 import {
@@ -39,6 +45,7 @@ export interface StorageContext {
     sessionStore: OAuthSessionStoreBackend
     stateStore: OAuthStateStoreBackend
   }
+  adminSessionStore: AdminSessionStore
   checkDbHealth: () => Promise<'ok' | 'error'>
   destroy: () => Promise<void>
 }
@@ -63,6 +70,7 @@ export async function createStorageContext(
     sessionStore: OAuthSessionStoreBackend
     stateStore: OAuthStateStoreBackend
   }
+  let adminSessionStore: AdminSessionStore
   let actorStore: ActorStore
   let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
@@ -95,6 +103,7 @@ export async function createStorageContext(
     await cachedEnrollmentStore.warm()
     enrollmentStore = cachedEnrollmentStore
     oauthStores = createPgOAuthStores(pgDb)
+    adminSessionStore = new PgAdminSessionStore(pgDb, logger)
     actorStore = new PostgresActorStore({
       connectionString: cfg.storage.postgresUrl,
       blobstore,
@@ -117,6 +126,7 @@ export async function createStorageContext(
     await migrateServiceDb(db)
     enrollmentStore = new SqliteEnrollmentStore(db)
     oauthStores = createSqliteOAuthStores(db)
+    adminSessionStore = new SqliteAdminSessionStore(db, logger)
     actorStore = new StratosActorStore({
       dataDir: path.join(cfg.storage.dataDir, 'actors'),
       blobstore,
@@ -133,12 +143,56 @@ export async function createStorageContext(
     }
   }
 
+  const sweep = scheduleExpiredSessionSweep(adminSessionStore, logger)
+  const closeBackend = destroy
+  destroy = async () => {
+    sweep.stop()
+    await closeBackend()
+  }
+
   return {
     db,
     enrollmentStore,
     oauthStores,
+    adminSessionStore,
     actorStore,
     checkDbHealth,
     destroy,
   }
+}
+
+/**
+ * Interval between periodic expired-admin-session sweeps. Sessions are also
+ * purged lazily on read; this bound keeps the table from growing without limit
+ * when expired sessions are never read again.
+ */
+const ADMIN_SESSION_SWEEP_INTERVAL_MS = 60 * 60 * 1000
+
+/**
+ * Start a periodic sweep that deletes expired admin sessions. The timer is
+ * `unref`'d so it never keeps the process alive, and {@link ScheduledSweep.stop}
+ * clears it during shutdown.
+ */
+function scheduleExpiredSessionSweep(
+  store: AdminSessionStore,
+  logger?: Logger,
+): ScheduledSweep {
+  const timer = setInterval(() => {
+    store
+      .deleteExpired()
+      .then((removed) => {
+        if (removed > 0) {
+          logger?.info({ removed }, 'admin session: swept expired sessions')
+        }
+      })
+      .catch((err) => {
+        logger?.warn({ err }, 'admin session: expired sweep failed')
+      })
+  }, ADMIN_SESSION_SWEEP_INTERVAL_MS)
+  timer.unref()
+  return { stop: () => clearInterval(timer) }
+}
+
+interface ScheduledSweep {
+  stop: () => void
 }

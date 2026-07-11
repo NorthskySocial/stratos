@@ -31,6 +31,12 @@ if (postgresMode) {
 if (appviewMode) {
   Deno.env.set('STRATOS_E2E_APPVIEW', 'true')
 }
+if (directMode) {
+  // The admin-API phase needs a real OAuth login + a target with a live OAuth
+  // session (for the PDS enrollment-record rewrite). Direct enrollment provides
+  // neither, so the phase reads this flag and skips cleanly.
+  Deno.env.set('STRATOS_E2E_DIRECT', 'true')
+}
 
 interface Phase {
   name: string
@@ -52,6 +58,7 @@ const phases: Phase[] = [
   ...(appviewMode
     ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
     : []),
+  { name: 'Admin API: Boundary Management', script: 'test-admin-api.ts' },
   { name: 'Unenrollment', script: 'test-unenrollment.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },
 ]

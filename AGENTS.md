@@ -118,14 +118,14 @@ stratos-service/src/features/{feature}/
 
 **Service infrastructure** (`stratos-service/src/`):
 
-| Module          | Description                                                                                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api/`          | XRPC handlers: `records.ts` (CRUD), `handlers.ts` (getRecord, getRepo, importRepo)                                                                        |
-| `auth/`         | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifier (`verifier.ts`), enrollment auth (`enrollment.ts`) |
-| `oauth/`        | OAuth client (`client.ts`), authorization routes (`routes.ts`)                                                                                            |
-| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                    |
-| `blobstore/`    | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                     |
-| `adapters/`     | Storage backend implementations: `sqlite/`, `postgres/`                                                                                                   |
+| Module          | Description                                                                                                                                                                                                                                                      |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api/`          | XRPC handlers: `records.ts` (CRUD), `handlers.ts` (getRecord, getRepo, importRepo)                                                                                                                                                                               |
+| `auth/`         | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifier (`verifier.ts`), enrollment auth (`enrollment.ts`)                                                                                                        |
+| `oauth/`        | OAuth client (`client.ts`), enrollment authorization routes (`routes.ts`), admin authorization routes (`admin-routes.ts`), admin web-session store (`admin-session-store.ts`), admin flow handlers (`handlers/admin-authorize.ts`, `handlers/admin-callback.ts`) |
+| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                                                                                                                           |
+| `blobstore/`    | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                                                                                                                            |
+| `adapters/`     | Storage backend implementations: `sqlite/`, `postgres/`                                                                                                                                                                                                          |
 
 **Client library** (`stratos-client/src/`):
 
@@ -267,7 +267,38 @@ definitions in `stratos-core/src/db/schema/` and Postgres-specific tables in
 Follow the pattern in `stratos-service/src/api/records.ts` for handler structure.
 
 Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`, `.service` (
-inter-service JWT), `.admin` (basic/bearer).
+inter-service JWT), `.admin` (OAuth-authorized operator via server-side session cookie; see Admin
+Authorization below).
+
+---
+
+## Admin Authorization
+
+Admin access is OAuth-only — there is no shared admin password. An operator logs in through the
+normal ATProto OAuth flow with identity-only scope (`OAUTH_ADMIN_SCOPE = 'atproto'`, no repo
+writes), and their DID must appear on the `STRATOS_ADMIN_DIDS` allowlist (comma-separated env var,
+parsed into `config.adminDids`).
+
+**Flow** (routes in `stratos-service/src/oauth/admin-routes.ts`, mounted at `/admin/oauth`):
+
+| Route                        | Handler                       | Purpose                                                     |
+| ---------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| `GET /admin/oauth/authorize` | `handlers/admin-authorize.ts` | Starts OAuth; pins `redirect_uri` to the admin callback     |
+| `GET /admin/oauth/callback`  | `handlers/admin-callback.ts`  | Token exchange, allowlist check, establishes web session    |
+| `GET /admin/whoami`          | inline in `admin-routes.ts`   | Returns `{ did, isAdmin }` for the active session, else 401 |
+| `POST /admin/oauth/logout`   | inline in `admin-routes.ts`   | Deletes the session and clears the cookie                   |
+
+**Session model**: the callback enforces the allowlist (revoking the OAuth session and returning
+`403 NotAdmin` on a miss), then mints an opaque server-side session via `AdminSessionStore`
+(`admin-session-store.ts`; `SqliteAdminSessionStore` / `PgAdminSessionStore`). The only value placed
+in the `stratos_admin_session` HttpOnly cookie is a 32-byte random key — the DID and expiry live in
+the `admin_session` table. Sessions expire after `ADMIN_SESSION_TTL_MS` (12 hours) and are deleted on
+read once expired.
+
+**Request-time verification**: the `.admin` XRPC verifier (`createAdminVerifier` in
+`infra/auth/verifiers.ts`) reads the cookie at the raw `IncomingMessage` level, requires a valid
+unexpired session whose DID is still on the allowlist, and applies a CSRF origin check
+(cross-origin requests are rejected). On success it yields `{ type: 'admin', did }`.
 
 ---
 

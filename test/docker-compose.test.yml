@@ -65,6 +65,7 @@ services:
       STRATOS_OAUTH_CLIENT_ID: ${STRATOS_OAUTH_CLIENT_ID:-http://127.0.0.1:3100/client-metadata.json}
       STRATOS_OAUTH_CLIENT_URI: ${STRATOS_OAUTH_CLIENT_URI:-http://127.0.0.1:3100}
       STRATOS_OAUTH_REDIRECT_URI: ${STRATOS_OAUTH_REDIRECT_URI:-http://127.0.0.1:3100/oauth/callback}
+      STRATOS_ADMIN_DIDS: ${STRATOS_ADMIN_DIDS:-}
     depends_on:
       ssl-init:
         condition: service_completed_successfully

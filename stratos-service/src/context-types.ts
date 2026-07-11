@@ -56,6 +56,7 @@ export interface StorageContext {
     sessionStore: import('./oauth/client.js').OAuthSessionStoreBackend
     stateStore: import('./oauth/client.js').OAuthStateStoreBackend
   }
+  adminSessionStore: import('./oauth/admin-session-store.js').AdminSessionStore
 }
 
 /**

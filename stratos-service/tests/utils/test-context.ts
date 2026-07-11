@@ -67,6 +67,7 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
     logging: {
       level: 'info',
     },
+    adminDids: [],
     dpop: {
       requireNonce: false,
     },
