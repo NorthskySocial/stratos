@@ -45,9 +45,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # stratos-core is published first: stratos-client declares a runtime
-      # dependency on it, so it must exist in the registry for the client to
-      # be installable by external consumers.
+      # stratos-core is published for server-side consumers that depend on it
+      # directly (indexer / service / feedgen). stratos-client does not
+      # depend on it — it carries its own copy of enrollment discovery — so
+      # this ordering is incidental: the client is installable whether or
+      # not stratos-core is in the registry.
       - name: Build stratos-core
         run: pnpm --filter @northskysocial/stratos-core build
 
