@@ -1,6 +1,6 @@
 /**
- * Parsed components of a three-component `ats://` space URI:
- * `ats://{spaceDid}/{spaceType}/{skey}`.
+ * Parsed components of a space URI:
+ * `at://{spaceDid}/space/{spaceType}/{skey}`.
  */
 export interface SpaceUri {
   /** Space authority DID (the service DID). */
@@ -12,8 +12,8 @@ export interface SpaceUri {
 }
 
 /**
- * Parsed components of a six-component `ats://` record URI:
- * `ats://{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
+ * Parsed components of a record URI:
+ * `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
  */
 export interface RecordUri {
   /** Space authority DID (the service DID). */
@@ -31,11 +31,17 @@ export interface RecordUri {
 }
 
 /**
- * Kinds of failure that can occur while parsing/validating an `ats://` URI or a
- * Stratos boundary. Used as the discriminant of {@link SpacesError}.
+ * Kinds of failure that can occur while parsing/validating a space/record URI
+ * or a Stratos boundary. Used as the discriminant of {@link SpacesError}.
+ *
+ * `invalid-scheme` covers input that is not an `at://` URI (including the
+ * retired `ats://` scheme); `invalid-space-marker` covers any `at://` URI whose
+ * segment after the authority is missing or is not the literal `space` marker —
+ * including inputs too short to have that segment, such as `at://did:web:x`.
  */
 export type SpacesErrorCode =
   | 'invalid-scheme'
+  | 'invalid-space-marker'
   | 'invalid-component-count'
   | 'invalid-space-did'
   | 'invalid-space-type'

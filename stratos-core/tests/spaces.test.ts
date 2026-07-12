@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ATS_SCHEME,
+  AT_SCHEME,
+  SPACE_SEGMENT,
   boundaryToSpaceUri,
   formatRecordUri,
   formatSpaceUri,
@@ -16,13 +17,14 @@ import {
   type SpacesResult,
 } from '../src'
 
-const SERVICE_DID = 'did:web:stratos.example.com'
-const AUTHOR_DID = 'did:plc:abc123xyz'
+const SERVICE_DID = 'did:web:nerv.example.com'
+const AUTHOR_DID = 'did:plc:spike23bebop'
 const SPACE_TYPE = 'zone.stratos.space.pottery'
 const COLLECTION = 'app.bsky.feed.post'
+const SKEY = 'bebop'
 
-const VALID_SPACE_URI = `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery`
-const VALID_RECORD_URI = `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery/${AUTHOR_DID}/${COLLECTION}/3k2a`
+const VALID_SPACE_URI = `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}`
+const VALID_RECORD_URI = `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}/${AUTHOR_DID}/${COLLECTION}/3k2a`
 
 function expectOk<T>(r: SpacesResult<T>): T {
   expect(r.ok).toBe(true)
@@ -34,6 +36,15 @@ function expectErr<T>(r: SpacesResult<T>): string {
   expect(r.ok).toBe(false)
   if (r.ok) throw new Error('expected error, got ok')
   return r.error.code
+}
+
+// Builds an `at://` URI with the correct marker at the segment after the
+// authority and exactly `n` `/`-separated components, so component-count checks
+// can be tested in isolation from the marker check.
+function markerUriWithSegments(n: number): string {
+  const segs = [SERVICE_DID, SPACE_SEGMENT]
+  while (segs.length < n) segs.push('x')
+  return AT_SCHEME + segs.join('/')
 }
 
 describe('spaces addressing', () => {
@@ -105,12 +116,25 @@ describe('spaces addressing', () => {
       // 513-byte string is over the byte limit.
       expect(utf8ByteLength('x'.repeat(513))).toBe(513)
     })
+
+    it('byte-counts skeys past the fast-path length cutoff', () => {
+      // Strings up to 170 code units cannot exceed 512 bytes and skip the byte
+      // count; past that they are byte-counted. 200 ASCII chars is 200 bytes
+      // (accepted); 200 three-byte chars is 600 bytes (rejected).
+      const asciiOk = 'a'.repeat(200)
+      expect(utf8ByteLength(asciiOk)).toBe(200)
+      expect(isValidSkey(asciiOk)).toBe(true)
+      const multiByteOver = 'あ'.repeat(200)
+      expect(multiByteOver.length).toBe(200)
+      expect(utf8ByteLength(multiByteOver)).toBe(600)
+      expect(isValidSkey(multiByteOver)).toBe(false)
+    })
   })
 
   describe('isSyntacticDid', () => {
     it('accepts well-formed DIDs', () => {
       expect(isSyntacticDid('did:plc:abc123')).toBe(true)
-      expect(isSyntacticDid('did:web:stratos.example.com')).toBe(true)
+      expect(isSyntacticDid('did:web:nerv.example.com')).toBe(true)
     })
 
     it('rejects empty / malformed DIDs', () => {
@@ -119,7 +143,7 @@ describe('spaces addressing', () => {
       expect(isSyntacticDid('did:')).toBe(false)
       expect(isSyntacticDid('notadid')).toBe(false)
       // DIDs cannot contain "/", so a boundary string is not a DID.
-      expect(isSyntacticDid('did:web:stratos.example.com/pottery')).toBe(false)
+      expect(isSyntacticDid('did:web:nerv.example.com/pottery')).toBe(false)
     })
   })
 
@@ -142,7 +166,7 @@ describe('spaces addressing', () => {
       expect(parts).toEqual({
         spaceDid: SERVICE_DID,
         spaceType: SPACE_TYPE,
-        skey: 'pottery',
+        skey: SKEY,
       } satisfies SpaceUri)
       const reformatted = expectOk(formatSpaceUri(parts))
       expect(reformatted).toBe(VALID_SPACE_URI)
@@ -152,7 +176,7 @@ describe('spaces addressing', () => {
       const parts: SpaceUri = {
         spaceDid: SERVICE_DID,
         spaceType: SPACE_TYPE,
-        skey: 'engineering',
+        skey: 'swordfish',
       }
       const uri = expectOk(formatSpaceUri(parts))
       expect(expectOk(parseSpaceUri(uri))).toEqual(parts)
@@ -165,7 +189,7 @@ describe('spaces addressing', () => {
       expect(parts).toEqual({
         spaceDid: SERVICE_DID,
         spaceType: SPACE_TYPE,
-        skey: 'pottery',
+        skey: SKEY,
         authorDid: AUTHOR_DID,
         collection: COLLECTION,
         rkey: '3k2a',
@@ -178,7 +202,7 @@ describe('spaces addressing', () => {
       const parts: RecordUri = {
         spaceDid: SERVICE_DID,
         spaceType: SPACE_TYPE,
-        skey: 'pottery',
+        skey: SKEY,
         authorDid: AUTHOR_DID,
         collection: COLLECTION,
         rkey: 'self',
@@ -188,50 +212,115 @@ describe('spaces addressing', () => {
     })
   })
 
-  describe('parseSpaceUri rejections', () => {
-    it('rejects the wrong scheme', () => {
-      expect(
-        expectErr(parseSpaceUri(`at://${SERVICE_DID}/${SPACE_TYPE}/pottery`)),
-      ).toBe('invalid-scheme')
-      expect(
-        expectErr(
-          parseSpaceUri(`https://${SERVICE_DID}/${SPACE_TYPE}/pottery`),
-        ),
-      ).toBe('invalid-scheme')
-      // Case-sensitive scheme: "ATS://" is not "ats://".
-      expect(
-        expectErr(parseSpaceUri(`ATS://${SERVICE_DID}/${SPACE_TYPE}/pottery`)),
-      ).toBe('invalid-scheme')
+  describe('scheme rejection', () => {
+    it('rejects the retired ats:// scheme', () => {
+      const spaceLike = `ats://${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}`
+      const recordLike = `ats://${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}/${AUTHOR_DID}/${COLLECTION}/3k2a`
+      expect(expectErr(parseSpaceUri(spaceLike))).toBe('invalid-scheme')
+      expect(expectErr(parseRecordUri(recordLike))).toBe('invalid-scheme')
     })
 
-    it('rejects too few components', () => {
+    it('rejects other schemes', () => {
       expect(
-        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}`)),
-      ).toBe('invalid-component-count')
-      expect(expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}`))).toBe(
+        expectErr(
+          parseSpaceUri(
+            `https://${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}`,
+          ),
+        ),
+      ).toBe('invalid-scheme')
+      // Scheme is case-sensitive: "AT://" is not "at://".
+      expect(
+        expectErr(
+          parseSpaceUri(
+            `AT://${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}`,
+          ),
+        ),
+      ).toBe('invalid-scheme')
+    })
+  })
+
+  describe('space marker rejection', () => {
+    it('rejects a missing marker (public-shaped space URI)', () => {
+      expect(
+        expectErr(
+          parseSpaceUri(
+            `${AT_SCHEME}did:web:tokyo3.example.com/com.evangelion.type/rei`,
+          ),
+        ),
+      ).toBe('invalid-space-marker')
+    })
+
+    it('rejects a marker in the wrong position', () => {
+      // 4 components (the right count) but the marker is not the segment after
+      // the authority.
+      expect(
+        expectErr(
+          parseSpaceUri(
+            `${AT_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/${SPACE_SEGMENT}/${SKEY}`,
+          ),
+        ),
+      ).toBe('invalid-space-marker')
+    })
+
+    it('rejects a public-shaped record URI in both parsers', () => {
+      const publicUri = `${AT_SCHEME}did:plc:reikagami/com.evangelion.feed.post/3kabc`
+      expect(expectErr(parseSpaceUri(publicUri))).toBe('invalid-space-marker')
+      expect(expectErr(parseRecordUri(publicUri))).toBe('invalid-space-marker')
+    })
+  })
+
+  describe('component-count rejection (marker present)', () => {
+    it('rejects a space URI with the wrong number of components', () => {
+      for (const n of [3, 5, 6, 8]) {
+        expect(expectErr(parseSpaceUri(markerUriWithSegments(n)))).toBe(
+          'invalid-component-count',
+        )
+      }
+    })
+
+    it('rejects a record URI with the wrong number of components', () => {
+      for (const n of [3, 5, 6, 8]) {
+        expect(expectErr(parseRecordUri(markerUriWithSegments(n)))).toBe(
+          'invalid-component-count',
+        )
+      }
+    })
+
+    it('rejects the space form fed to the record parser and vice versa', () => {
+      expect(expectErr(parseRecordUri(VALID_SPACE_URI))).toBe(
+        'invalid-component-count',
+      )
+      expect(expectErr(parseSpaceUri(VALID_RECORD_URI))).toBe(
         'invalid-component-count',
       )
     })
 
-    it('rejects too many components', () => {
-      expect(
-        expectErr(
-          parseSpaceUri(
-            `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery/extra`,
-          ),
-        ),
-      ).toBe('invalid-component-count')
+    it('rejects trailing extra components', () => {
+      expect(expectErr(parseSpaceUri(`${VALID_SPACE_URI}/extra`))).toBe(
+        'invalid-component-count',
+      )
+      expect(expectErr(parseRecordUri(`${VALID_RECORD_URI}/extra`))).toBe(
+        'invalid-component-count',
+      )
     })
+  })
 
+  describe('parseSpaceUri component rejections', () => {
     it('rejects an empty / invalid space DID', () => {
       expect(
-        expectErr(parseSpaceUri(`${ATS_SCHEME}/${SPACE_TYPE}/pottery`)),
+        expectErr(
+          parseSpaceUri(`${AT_SCHEME}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}`),
+        ),
       ).toBe('invalid-space-did')
     })
 
     it('rejects an invalid space type NSID', () => {
       expect(
-        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/nope/pottery`)),
+        expectErr(
+          parseSpaceUri(
+            `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/nope/${SKEY}`,
+          ),
+        ),
       ).toBe('invalid-space-type')
     })
 
@@ -239,19 +328,26 @@ describe('spaces addressing', () => {
       const s513 = 'a'.repeat(513)
       expect(
         expectErr(
-          parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/${s513}`),
+          parseSpaceUri(
+            `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${s513}`,
+          ),
         ),
       ).toBe('invalid-skey')
     })
 
     it('rejects skey "." and ".."', () => {
       expect(
-        expectErr(parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/.`)),
+        expectErr(
+          parseSpaceUri(
+            `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/.`,
+          ),
+        ),
       ).toBe('invalid-skey')
-      // ".." collapses to 3 components: spaceDid/spaceType/"..".
       expect(
         expectErr(
-          parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/..`),
+          parseSpaceUri(
+            `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/..`,
+          ),
         ),
       ).toBe('invalid-skey')
     })
@@ -260,37 +356,27 @@ describe('spaces addressing', () => {
       // "%20" contains "%", which is not in the record-key alphabet.
       expect(
         expectErr(
-          parseSpaceUri(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/bad%20`),
+          parseSpaceUri(
+            `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/bad%20`,
+          ),
         ),
       ).toBe('invalid-skey')
     })
   })
 
-  describe('parseRecordUri rejections', () => {
-    it('rejects too few components', () => {
-      expect(expectErr(parseRecordUri(VALID_SPACE_URI))).toBe(
-        'invalid-component-count',
-      )
-    })
-
-    it('rejects too many components', () => {
-      expect(expectErr(parseRecordUri(`${VALID_RECORD_URI}/extra`))).toBe(
-        'invalid-component-count',
-      )
-    })
-
+  describe('parseRecordUri component rejections', () => {
     it('rejects an empty author DID', () => {
-      const uri = `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery//${COLLECTION}/3k2a`
+      const uri = `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}//${COLLECTION}/3k2a`
       expect(expectErr(parseRecordUri(uri))).toBe('invalid-author-did')
     })
 
     it('rejects an invalid collection NSID', () => {
-      const uri = `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery/${AUTHOR_DID}/nope/3k2a`
+      const uri = `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}/${AUTHOR_DID}/nope/3k2a`
       expect(expectErr(parseRecordUri(uri))).toBe('invalid-collection')
     })
 
     it('rejects an invalid rkey', () => {
-      const uri = `${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery/${AUTHOR_DID}/${COLLECTION}/.`
+      const uri = `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}/${AUTHOR_DID}/${COLLECTION}/.`
       expect(expectErr(parseRecordUri(uri))).toBe('invalid-rkey')
     })
   })
@@ -302,7 +388,7 @@ describe('spaces addressing', () => {
           formatSpaceUri({
             spaceDid: '',
             spaceType: SPACE_TYPE,
-            skey: 'pottery',
+            skey: SKEY,
           }),
         ),
       ).toBe('invalid-space-did')
@@ -311,7 +397,7 @@ describe('spaces addressing', () => {
           formatSpaceUri({
             spaceDid: SERVICE_DID,
             spaceType: 'nope',
-            skey: 'pottery',
+            skey: SKEY,
           }),
         ),
       ).toBe('invalid-space-type')
@@ -330,7 +416,7 @@ describe('spaces addressing', () => {
       const base: RecordUri = {
         spaceDid: SERVICE_DID,
         spaceType: SPACE_TYPE,
-        skey: 'pottery',
+        skey: SKEY,
         authorDid: AUTHOR_DID,
         collection: COLLECTION,
         rkey: 'self',
@@ -373,17 +459,35 @@ describe('spaces addressing', () => {
   })
 
   describe('boundaryToSpaceUri', () => {
-    it('maps a boundary to a space URI (scheme A: serviceDid->spaceDid, domainName->skey)', () => {
+    it('maps a boundary to a space URI (serviceDid->spaceDid, domainName->skey)', () => {
       const uri = expectOk(
-        boundaryToSpaceUri(`${SERVICE_DID}/pottery`, SPACE_TYPE),
+        boundaryToSpaceUri(`${SERVICE_DID}/${SKEY}`, SPACE_TYPE),
       )
-      expect(uri).toBe(`${ATS_SCHEME}${SERVICE_DID}/${SPACE_TYPE}/pottery`)
+      expect(uri).toBe(
+        `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${SPACE_TYPE}/${SKEY}`,
+      )
     })
 
     it('uses the caller-supplied spaceType and hardcodes nothing', () => {
       const other = 'zone.stratos.space.other'
-      const uri = expectOk(boundaryToSpaceUri(`${SERVICE_DID}/eng`, other))
-      expect(uri).toBe(`${ATS_SCHEME}${SERVICE_DID}/${other}/eng`)
+      const uri = expectOk(boundaryToSpaceUri(`${SERVICE_DID}/nerv`, other))
+      expect(uri).toBe(
+        `${AT_SCHEME}${SERVICE_DID}/${SPACE_SEGMENT}/${other}/nerv`,
+      )
+    })
+
+    it('produces the same string as formatSpaceUri for equivalent parts', () => {
+      const viaBoundary = expectOk(
+        boundaryToSpaceUri(`${SERVICE_DID}/${SKEY}`, SPACE_TYPE),
+      )
+      const viaFormat = expectOk(
+        formatSpaceUri({
+          spaceDid: SERVICE_DID,
+          spaceType: SPACE_TYPE,
+          skey: SKEY,
+        }),
+      )
+      expect(viaBoundary).toBe(viaFormat)
     })
 
     it('rejects a boundary without a "/"', () => {
@@ -410,7 +514,7 @@ describe('spaces addressing', () => {
 
     it('rejects an invalid spaceType parameter', () => {
       expect(
-        expectErr(boundaryToSpaceUri(`${SERVICE_DID}/pottery`, 'nope')),
+        expectErr(boundaryToSpaceUri(`${SERVICE_DID}/${SKEY}`, 'nope')),
       ).toBe('invalid-space-type')
     })
   })
@@ -420,11 +524,11 @@ describe('spaces addressing', () => {
       const boundary = expectOk(
         spaceUriToBoundary(VALID_SPACE_URI, SERVICE_DID),
       )
-      expect(boundary).toBe(`${SERVICE_DID}/pottery`)
+      expect(boundary).toBe(`${SERVICE_DID}/${SKEY}`)
     })
 
     it('round-trips with boundaryToSpaceUri', () => {
-      const boundary = `${SERVICE_DID}/pottery`
+      const boundary = `${SERVICE_DID}/${SKEY}`
       const uri = expectOk(boundaryToSpaceUri(boundary, SPACE_TYPE))
       expect(expectOk(spaceUriToBoundary(uri, SERVICE_DID))).toBe(boundary)
     })
@@ -452,9 +556,16 @@ describe('spaces addressing', () => {
     })
 
     it('propagates parse errors for a malformed URI', () => {
-      expect(expectErr(spaceUriToBoundary('at://x/y/z', SERVICE_DID))).toBe(
-        'invalid-scheme',
-      )
+      // Retired scheme surfaces as invalid-scheme.
+      expect(
+        expectErr(
+          spaceUriToBoundary(`ats://x/${SPACE_SEGMENT}/y/z`, SERVICE_DID),
+        ),
+      ).toBe('invalid-scheme')
+      // Missing marker surfaces as invalid-space-marker.
+      expect(
+        expectErr(spaceUriToBoundary(`${AT_SCHEME}x/y/z`, SERVICE_DID)),
+      ).toBe('invalid-space-marker')
     })
   })
 })
