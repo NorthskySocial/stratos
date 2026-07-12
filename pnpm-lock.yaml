@@ -90,9 +90,6 @@ importers:
       '@atcute/repo':
         specifier: ^0.1.2
         version: 0.1.2
-      '@northskysocial/stratos-core':
-        specifier: workspace:*
-        version: link:../stratos-core
     devDependencies:
       '@atcute/cbor':
         specifier: ^2.3.2
@@ -106,6 +103,9 @@ importers:
       '@atproto/lexicon':
         specifier: ^0.6.1
         version: 0.6.2
+      '@northskysocial/stratos-core':
+        specifier: workspace:*
+        version: link:../stratos-core
       '@types/node':
         specifier: ^25.2.1
         version: 25.2.1
@@ -5985,6 +5985,7 @@ packages:
 
   uuid@10.0.0:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   uuid@8.3.2:

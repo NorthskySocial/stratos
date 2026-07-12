@@ -46,8 +46,14 @@ const decodeBytes = (val: unknown): Uint8Array | null => {
     return val as unknown as Uint8Array
   }
   if (typeof val === 'object' && val !== null && '$bytes' in val) {
-    const b64: string = (val as { $bytes: string }).$bytes
-    const binary = atob(b64)
+    const b64: unknown = (val as { $bytes: unknown }).$bytes
+    if (typeof b64 !== 'string') return null
+    let binary: string
+    try {
+      binary = atob(b64)
+    } catch {
+      return null
+    }
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i)
@@ -72,6 +78,16 @@ const parseAttestation = (val: unknown): ServiceAttestation | null => {
   return { sig, signingKey: obj.signingKey }
 }
 
+const isBoundary = (val: unknown): val is { value: string } =>
+  typeof val === 'object' &&
+  val !== null &&
+  typeof (val as { value: unknown }).value === 'string'
+
+const parseBoundaries = (val: unknown): Array<{ value: string }> => {
+  if (!Array.isArray(val)) return []
+  return val.filter(isBoundary)
+}
+
 /**
  * Parses an enrollment record from a lexicon-compliant object.
  *
@@ -92,7 +108,7 @@ export const parseEnrollmentRecord = (
   if (!attestation) return null
   return {
     service: obj.service,
-    boundaries: Array.isArray(obj.boundaries) ? obj.boundaries : [],
+    boundaries: parseBoundaries(obj.boundaries),
     signingKey: obj.signingKey,
     attestation,
     createdAt: obj.createdAt,

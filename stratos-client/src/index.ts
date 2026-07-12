@@ -10,7 +10,11 @@ export type {
   VerifiedRecord,
 } from './types.js'
 
-export { getEnrollmentByServiceDid } from './discovery.js'
+export {
+  ENROLLMENT_COLLECTION,
+  getEnrollmentByServiceDid,
+  parseEnrollmentRecord,
+} from './discovery.js'
 export {
   createServiceFetchHandler,
   resolveServiceUrl,

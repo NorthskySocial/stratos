@@ -94,5 +94,26 @@ export default tseslint.config(
       'max-lines-per-function': 'off',
     },
   },
+  {
+    files: ['src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@northskysocial/stratos-core',
+                '@northskysocial/stratos-core/*',
+              ],
+              message:
+                'stratos-client must stay self-contained: anything src/ imports lands in the published dist/, and stratos-core drags in drizzle-orm, postgres, @libsql/client and zod. Port the code into src/ instead (see src/discovery.ts). Tests may still import stratos-core.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettierConfig,
 )
