@@ -769,7 +769,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "procedure",
-      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is bearer-shaped and multi-use until it expires; it is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided, otherwise from the DPoP-authenticated user. Membership is checked live against the enrollment store. App-axis (client attestation) gating is NOT enforced here (SWP-08).",
+      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is bearer-shaped and multi-use until it expires; it is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided, otherwise from the DPoP-authenticated user. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
       "input": {
         "encoding": "application/json",
         "schema": {
@@ -778,11 +778,15 @@ export const stratosLexicons: LexiconDoc[] = [
           "properties": {
             "space": {
               "type": "string",
-              "description": "The three-component ats:// space URI to issue a credential for. Its space DID must equal this service's DID."
+              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
             },
             "delegationToken": {
               "type": "string",
               "description": "Optional space-delegation JWT. When present, the caller's identity is taken from this token (its target space must equal `space`) instead of the DPoP session."
+            },
+            "clientAttestation": {
+              "type": "string",
+              "description": "Optional client-attestation JWT (an OAuth private_key_jwt client assertion to the space authority). Required only for spaces gated on client app identity (appAccess allowList); the allow-list is evaluated against the attested client_id. Ignored for open spaces."
             }
           }
         }
@@ -817,6 +821,14 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "UnknownSpace",
           "description": "The requested space URI is malformed or its space DID does not match this service's DID."
+        },
+        {
+          "name": "AttestationRequired",
+          "description": "The requested space gates on client app identity (appAccess allowList) but no valid client attestation was supplied."
+        },
+        {
+          "name": "ClientNotAllowed",
+          "description": "A valid client attestation was supplied but its attested client_id is not in the space's app allow-list."
         }
       ]
     }

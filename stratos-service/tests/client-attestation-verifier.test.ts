@@ -1,5 +1,5 @@
 /**
- * Unit tests for the client-attestation verifier (SWP-08, task 2).
+ * Unit tests for the client-attestation verifier.
  *
  * Covers each ordered check with a DISTINCT typed error, and proves the
  * critical ordering property: an invalid attestation must NOT consume its `jti`

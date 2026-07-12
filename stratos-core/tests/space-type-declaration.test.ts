@@ -7,12 +7,12 @@ import { isValidNsid } from '@atproto/syntax'
 import { parseCommaList } from '../src/index.js'
 
 // ---------------------------------------------------------------------------
-// SWP-02: Space-type declarations.
+// Space-type declarations.
 //
 // A space-type NSID resolves to a Lexicon def with `"type": "space"` as its
 // `main` def. This suite loads the declaration file(s) from disk and validates
-// them against the SWP-02 field table (see docs/spaces/01-space-model.md and
-// docs/spaces/work-packages/SWP-02-space-type-declarations.md).
+// them against the decided space-type field table (see
+// docs/spaces/01-space-model.md).
 // ---------------------------------------------------------------------------
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -110,7 +110,7 @@ describe('zone.stratos.space.feed declaration', () => {
     }
   })
 
-  // The v1 values are DECIDED (SWP-02, 2026-07-01). Pin them so drift is caught.
+  // The v1 values are decided; pin them so drift is caught.
   describe('v1 decided values', () => {
     it('matches the decided field table exactly', () => {
       expect(doc.id).toBe('zone.stratos.space.feed')

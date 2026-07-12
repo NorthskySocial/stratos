@@ -95,7 +95,7 @@ const envSchema = z
       .optional()
       .transform((v) => v || undefined),
 
-    // Per-space app-gating (client attestation, SWP-08). JSON array mapping a
+    // Per-space app-gating (client attestation). JSON array mapping a
     // space (skey/domainName) to an appAccess policy (`open` default, or
     // `allowList` of client_ids). Mirrors the service-enrollment mechanism.
     STRATOS_SPACE_APP_ACCESS_FILE: z
@@ -269,7 +269,7 @@ export interface StratosServiceConfig {
     /** Space-credential lifetime in seconds (`exp = iat + this`). */
     spaceCredentialTtlSeconds: number
     /**
-     * Per-space app-gating (client attestation, SWP-08). Maps a space boundary
+     * Per-space app-gating (client attestation). Maps a space boundary
      * to its `appAccess` policy; unconfigured spaces default to `#open`.
      */
     spaceAppAccess: SpaceAppAccessConfig

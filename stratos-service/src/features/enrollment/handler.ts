@@ -521,14 +521,15 @@ function registerListDomainsHandler(ctx: AppContext): void {
 }
 
 /**
- * Emit a service-stream `boundaries` change event (SWP-13).
+ * Emit a service-stream `boundaries` change event.
  *
  * Fired whenever an enrolled actor's boundary set is mutated in place (admin
  * add/remove/set) so downstream services can drop derived state for any
- * boundary the actor left, WITHOUT waiting for a cache TTL. Closes SWP-12 D-1,
- * which had no stream trigger for a boundary-set shrink. Emission is skipped
- * when the set is unchanged (idempotent no-op). `priorBoundaries` is carried for
- * stream scoping only and is not written to the wire frame.
+ * boundary the actor left, WITHOUT waiting for a cache TTL. Consumed by
+ * `eventInScope` boundary diffing in subscription/subscribe-records.ts.
+ * Emission is skipped when the set is unchanged (idempotent no-op).
+ * `priorBoundaries` is carried for stream scoping only and is not written to the
+ * wire frame.
  *
  * @param ctx - Application context
  * @param did - DID whose boundaries changed

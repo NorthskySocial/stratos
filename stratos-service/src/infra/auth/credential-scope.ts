@@ -3,7 +3,7 @@ import { spaceUriToBoundary } from '@northskysocial/stratos-core'
 import type { HandlerAuth } from '../../api/types.js'
 
 /**
- * Space-credential request scope (SWP-07).
+ * Space-credential request scope.
  *
  * When a read/sync request authenticates with a space credential for space S,
  * the request's effective visibility is the "members-of-S view": we reuse the
@@ -38,7 +38,7 @@ export interface CredentialScope {
 export const CREDENTIAL_VIEWER_DID = 'did:internal:space-credential'
 
 /**
- * Whether the given auth credentials are a space credential (SWP-07).
+ * Whether the given auth credentials are a space credential.
  *
  * @param auth - Handler auth context.
  * @returns True when the caller authenticated with a space credential.
@@ -49,7 +49,7 @@ export function isSpaceCredentialAuth(auth: HandlerAuth | undefined): boolean {
 
 /**
  * Resolve the {@link CredentialScope} for a space-credential request, mapping
- * the admitted space URI to its Stratos boundary via SWP-01
+ * the admitted space URI to its Stratos boundary via
  * {@link spaceUriToBoundary} and injecting it as the singleton viewer-boundary
  * set.
  *

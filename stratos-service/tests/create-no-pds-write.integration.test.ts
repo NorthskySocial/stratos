@@ -1,8 +1,8 @@
 /**
- * SWP-10 stub-removal proof: the record write path performs NO outbound PDS
+ * Stub-removal proof: the record write path performs NO outbound PDS
  * round trip.
  *
- * Before SWP-10, `createRecord`/`deleteRecord` enqueued a "stub" write/delete
+ * Previously, `createRecord`/`deleteRecord` enqueued a "stub" write/delete
  * against the caller's mainstream PDS (via an OAuth-restored `Agent`). That path
  * is deleted: the only artifact Stratos writes to a user's PDS is now the
  * `zone.stratos.actor.enrollment` record (written on the OAuth callback, not on
@@ -30,7 +30,7 @@ import { createMockBlobStore, createTestConfig } from './utils/index.js'
 
 const DOMAIN = 'did:web:nerv.tokyo.jp/engineering'
 
-describe('write path makes no outbound PDS round trip (SWP-10)', () => {
+describe('write path makes no outbound PDS round trip', () => {
   let dataDir: string
   let actorStore: StratosActorStore
   let enrollmentStore: SqliteEnrollmentStore

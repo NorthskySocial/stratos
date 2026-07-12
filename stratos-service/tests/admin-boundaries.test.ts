@@ -337,11 +337,11 @@ describe('admin boundary endpoints', () => {
     })
   })
 
-  // SWP-13 Task 2: an in-place boundary change must emit a `boundaries` event on
+  // An in-place boundary change must emit a `boundaries` event on
   // the service stream carrying `{did, boundaries-after}`, so downstream caches
-  // invalidate without waiting for a TTL. This closes SWP-12 D-1 (no stream
-  // trigger previously existed for a boundary-set change).
-  describe('SWP-13 boundary-change event emission', () => {
+  // invalidate without waiting for a TTL. Previously no stream
+  // trigger existed for a boundary-set change.
+  describe('boundary-change event emission', () => {
     interface CapturedEvent {
       did: string
       action: string

@@ -1,5 +1,5 @@
 /**
- * SWP-07 — space-credential acceptance on read/sync endpoints.
+ * Space-credential acceptance on read/sync endpoints.
  *
  * These tests exercise the COMPOSITION rule end-to-end at the handler layer: a
  * space credential for space S admits the caller to the API surface for S, but
@@ -33,12 +33,13 @@ import { HydrationServiceImpl } from '../src/features/hydration/adapter.js'
 import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 import { decode } from '@atcute/cbor'
 
 const SERVICE_DID = 'did:web:nerv.tokyo.jp'
 // Space S and a DIFFERENT space T (adversarial), both on THIS service.
-const SPACE_S = `ats://${SERVICE_DID}/zone.stratos.space.feed/alpha`
-const SPACE_T = `ats://${SERVICE_DID}/zone.stratos.space.feed/beta`
+const SPACE_S = makeSpaceUri(SERVICE_DID, 'zone.stratos.space.feed', 'alpha')
+const SPACE_T = makeSpaceUri(SERVICE_DID, 'zone.stratos.space.feed', 'beta')
 // Boundaries are the qualified `{serviceDid}/{skey}` form — the production
 // canonical form the record boundary gate compares against.
 const BOUNDARY_S = spaceUriToBoundary(SPACE_S, SERVICE_DID)
@@ -47,7 +48,7 @@ if (!BOUNDARY_S.ok || !BOUNDARY_T.ok) throw new Error('bad test boundary')
 
 const repoDid = 'did:plc:shinji-ikari'
 
-describe('SWP-07 space-credential acceptance', () => {
+describe('space-credential acceptance', () => {
   let dataDir: string
   let actorStore: StratosActorStore
   let enrollmentStore: SqliteEnrollmentStore
@@ -452,7 +453,11 @@ describe('SWP-07 space-credential acceptance', () => {
       const { credential } = await mintSpaceCredential({
         signingKey,
         issuerDid: SERVICE_DID,
-        spaceUri: 'ats://did:web:other.example/zone.stratos.space.feed/x',
+        spaceUri: makeSpaceUri(
+          'did:web:other.example',
+          'zone.stratos.space.feed',
+          'x',
+        ),
         ttlSeconds: 7_200,
       })
       await expect(

@@ -1,5 +1,5 @@
 /**
- * Unit tests for the space-credential verifier (SWP-07).
+ * Unit tests for the space-credential verifier.
  *
  * A space credential is a JWT this service mints and later re-accepts on its
  * read/sync surface. Verification happens against OUR OWN signing key (no DID
@@ -22,9 +22,14 @@ import {
   SpaceCredentialExpiredError,
   verifySpaceCredential,
 } from '../src/infra/auth/space-credential-verifier.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
-const SPACE_URI = `ats://${SERVICE_DID}/app.bsky.feed.generator/myspace`
+const SPACE_URI = makeSpaceUri(
+  SERVICE_DID,
+  'app.bsky.feed.generator',
+  'myspace',
+)
 
 const b64url = (value: unknown): string =>
   Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -114,7 +119,11 @@ describe('verifySpaceCredential', () => {
 
   it('rejects a foreign-space credential (sub.spaceDid ≠ serviceDid)', async () => {
     const signingKey = await Secp256k1Keypair.create()
-    const foreignSpace = 'ats://did:web:other.example/app.bsky.feed.generator/x'
+    const foreignSpace = makeSpaceUri(
+      'did:web:other.example',
+      'app.bsky.feed.generator',
+      'x',
+    )
     const { credential } = await mintSpaceCredential({
       signingKey,
       issuerDid: SERVICE_DID,

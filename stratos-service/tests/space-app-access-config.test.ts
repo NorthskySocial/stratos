@@ -1,26 +1,33 @@
 /**
  * Config-parsing tests for the per-space app-access (client-attestation gating)
- * setting (SWP-08, task 3). Mirrors the service-enrollment config mechanism:
+ * setting. Mirrors the service-enrollment config mechanism:
  * inline env + optional file JSON sources, boundary qualification, fail-fast.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { spaceUriToBoundary } from '@northskysocial/stratos-core'
 import { envToConfig, parseEnv } from '../src/config.js'
 import { resolveAppAccess } from '../src/features/space-credential/app-access.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:host'
 const BASE_ENV: Record<string, string> = {
   STRATOS_SERVICE_DID: SERVICE_DID,
   STRATOS_PUBLIC_URL: 'https://host.example.com',
-  // 'general' is the default STRATOS_RESERVED_DOMAIN (SWP-03); envToConfig
+  // 'general' is the default STRATOS_RESERVED_DOMAIN; envToConfig
   // asserts the reserved domain is within STRATOS_ALLOWED_DOMAINS at startup.
   STRATOS_ALLOWED_DOMAINS: 'general,eng,ops',
 }
 const CLIENT_ID = 'https://app.example/client-metadata.json'
 const spaceUri = (skey: string) =>
-  `ats://${SERVICE_DID}/app.bsky.feed.generator/${skey}`
+  makeSpaceUri(SERVICE_DID, 'app.bsky.feed.generator', skey)
+const boundaryFor = (skey: string) => {
+  const result = spaceUriToBoundary(spaceUri(skey), SERVICE_DID)
+  if (!result.ok) throw new Error(`bad test boundary: ${skey}`)
+  return result.value
+}
 
 describe('space app-access config parsing', () => {
   let saved: NodeJS.ProcessEnv
@@ -44,8 +51,7 @@ describe('space app-access config parsing', () => {
     const cfg = envToConfig(parseEnv())
     expect(cfg.stratos.spaceAppAccess.byBoundary.size).toBe(0)
     expect(
-      resolveAppAccess(cfg.stratos.spaceAppAccess, spaceUri('eng'), SERVICE_DID)
-        .kind,
+      resolveAppAccess(cfg.stratos.spaceAppAccess, boundaryFor('eng')).kind,
     ).toBe('open')
   })
 
@@ -58,14 +64,12 @@ describe('space app-access config parsing', () => {
     const cfg = envToConfig(parseEnv())
     const access = resolveAppAccess(
       cfg.stratos.spaceAppAccess,
-      spaceUri('eng'),
-      SERVICE_DID,
+      boundaryFor('eng'),
     )
     expect(access).toEqual({ kind: 'allowList', clientIds: [CLIENT_ID] })
     // A different (unconfigured) space stays open.
     expect(
-      resolveAppAccess(cfg.stratos.spaceAppAccess, spaceUri('ops'), SERVICE_DID)
-        .kind,
+      resolveAppAccess(cfg.stratos.spaceAppAccess, boundaryFor('ops')).kind,
     ).toBe('open')
   })
 
@@ -77,8 +81,7 @@ describe('space app-access config parsing', () => {
     })
     const cfg = envToConfig(parseEnv())
     expect(
-      resolveAppAccess(cfg.stratos.spaceAppAccess, spaceUri('eng'), SERVICE_DID)
-        .kind,
+      resolveAppAccess(cfg.stratos.spaceAppAccess, boundaryFor('eng')).kind,
     ).toBe('open')
   })
 

@@ -1,6 +1,6 @@
 /**
  * Contract tests for the space-delegation token verifier and the jti replay
- * store (SWP-05).
+ * store.
  *
  * These modules are dormant (wired to nothing yet); the contract these tests
  * pin down IS the deliverable. We mint delegation JWTs with local keypairs and
@@ -28,9 +28,14 @@ import {
   verifyDelegationToken,
 } from '../src/infra/auth/delegation-verifier.js'
 import { ReplayStore, type NxExStore } from '../src/infra/auth/replay-store.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
-const SPACE_URI = `ats://${SERVICE_DID}/app.bsky.feed.generator/myspace`
+const SPACE_URI = makeSpaceUri(
+  SERVICE_DID,
+  'app.bsky.feed.generator',
+  'myspace',
+)
 const AUD = `${SERVICE_DID}#atproto_space_host`
 
 // ---------------------------------------------------------------------------
@@ -295,7 +300,11 @@ describe('verifyDelegationToken (distinct rejection per violation)', () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const token = await mintToken({
       keypair,
-      sub: 'ats://did:web:other.authority/app.bsky.feed.generator/space',
+      sub: makeSpaceUri(
+        'did:web:other.authority',
+        'app.bsky.feed.generator',
+        'space',
+      ),
     })
     await expect(
       verifyDelegationToken(token, makeDeps(keypair)),

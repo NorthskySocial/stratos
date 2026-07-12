@@ -5,7 +5,7 @@ import type { Logger } from '@northskysocial/stratos-core'
 export type ClientVerifyKey = Awaited<ReturnType<typeof importJWK>>
 
 /**
- * External-client JWKS resolver (SWP-08, task 1).
+ * External-client JWKS resolver.
  *
  * Resolves an arbitrary OAuth-style client's public keys so a client
  * attestation can be verified. A `client_id` is an HTTPS URL to a

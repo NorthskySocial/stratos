@@ -66,8 +66,8 @@ async function resolveCallerBoundaries(
 
 /**
  * Resolve the effective boundary set for a pull-sync request, accepting EITHER
- * inter-service auth (existing behaviour, unchanged) OR a space credential
- * (SWP-07). A space credential for space S yields the singleton `{boundary(S)}`
+ * inter-service auth (existing behaviour, unchanged) OR a space credential.
+ * A space credential for space S yields the singleton `{boundary(S)}`
  * so the same fail-closed oplog/recovery gate returns records in S ONLY.
  *
  * @param ctx - Application context
