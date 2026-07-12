@@ -192,7 +192,7 @@ describe('ServiceStream', () => {
     stream.stop()
   })
 
-  it('dispatches boundaries-change events to onBoundariesChanged (SWP-13)', async () => {
+  it('dispatches boundaries-change events to onBoundariesChanged', async () => {
     const mint = makeMintToken()
     const changes: Array<{ did: string; boundaries: string[] }> = []
     const enrolls: string[] = []

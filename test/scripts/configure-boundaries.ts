@@ -7,7 +7,7 @@ import { getBoundaries, setBoundaries } from './lib/backend.ts'
 
 // The reserved all-members domain (STRATOS_RESERVED_DOMAIN, default 'general')
 // is force-included in every enrollment by the service, so it always appears in
-// the effective boundary set regardless of what was requested (SWP-03).
+// the effective boundary set regardless of what was requested.
 const RESERVED_DOMAIN = `${SERVICE_DID}/general`
 import { loadState } from './lib/state.ts'
 import { fail, info, pass, section } from './lib/log.ts'

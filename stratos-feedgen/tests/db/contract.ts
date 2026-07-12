@@ -284,7 +284,7 @@ export function describeStoreContract(
       })
     })
 
-    describe('purge helpers (SWP-12)', () => {
+    describe('purge helpers', () => {
       it('deletePostsByDid removes all of a DID posts and cascades index rows', async () => {
         await store.upsertPost(
           makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: ['a', 'b'] }),

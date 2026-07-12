@@ -8,7 +8,7 @@ export interface ServiceStreamCallbacks {
   onEnroll: (did: string, boundaries: string[]) => void | Promise<void>
   onUnenroll: (did: string) => void | Promise<void>
   /**
-   * SWP-13: an already-enrolled actor's boundary set changed. `boundaries` is
+   * An already-enrolled actor's boundary set changed. `boundaries` is
    * the set AFTER the change (`boundaries-after`); the consumer diffs it against
    * its held snapshot to purge derived state for any boundary the actor left and
    * to evict the stale viewer cache entry. Optional so existing wirings that
@@ -257,7 +257,7 @@ export class ServiceStream {
           await this.callbacks.onUnenroll(enrollment.did)
           break
         case 'boundaries':
-          // SWP-13: optional so consumers that don't track boundary changes can
+          // optional so consumers that don't track boundary changes can
           // omit it. An unknown/future action simply falls through as a no-op.
           await this.callbacks.onBoundariesChanged?.(
             enrollment.did,

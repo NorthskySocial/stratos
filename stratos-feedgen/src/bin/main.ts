@@ -108,7 +108,7 @@ interface StartSubscriptionDeps {
 /**
  * Wire the enrollment subscription: seed the actor pool, run startup
  * reconciliation (purging anything that left scope while down), then attach the
- * live enroll/unenroll consumer that drives the deletion pathway (SWP-12).
+ * live enroll/unenroll consumer that drives the deletion pathway.
  */
 async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream: ServiceStream
@@ -169,7 +169,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // evict the (now stale) cached viewer→boundaries entry so revocation is not
   // masked by the boundary cache, and re-evaluate live-syncer membership.
   // Shared by the `enroll` frame (which may carry a changed set) and the
-  // dedicated SWP-13 `boundaries` change frame; idempotent either way.
+  // dedicated `boundaries` change frame; idempotent either way.
   const applyBoundarySet = async (
     did: string,
     boundaries: string[],
@@ -211,9 +211,9 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       onEnroll: async (did, boundaries) => {
         await applyBoundarySet(did, boundaries)
       },
-      // SWP-13: dedicated boundary-set-change frame. Drives the SWP-12
-      // boundary-shrink purge (closing D-1: previously no stream trigger fired
-      // for an in-place boundary change) and event-driven cache eviction.
+      // dedicated boundary-set-change frame. Drives the boundary-shrink
+      // purge and event-driven cache eviction; without it no stream trigger
+      // fires for an in-place boundary change.
       onBoundariesChanged: async (did, boundaries) => {
         await applyBoundarySet(did, boundaries)
       },
