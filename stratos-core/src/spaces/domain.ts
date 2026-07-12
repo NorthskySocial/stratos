@@ -1,24 +1,33 @@
 /**
  * Pure, dependency-light library for parsing, serializing, validating, and
- * mapping `ats://` space/record URIs and Stratos boundaries.
+ * mapping permissioned space/record URIs and Stratos boundaries.
  *
- * This is the single source of truth for `ats://` addressing: no other code
- * should parse `ats://` strings.
+ * Space and record URIs reuse the standard `at://` scheme with a fixed literal
+ * `space` marker segment sitting where a collection NSID appears in a public
+ * atproto URI. This module is the single source of truth for that addressing:
+ * no other code should parse these URIs.
  *
  * URI grammar (byte-exact, no normalization):
- *   - record URI: `ats://{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
- *   - space URI:  `ats://{spaceDid}/{spaceType}/{skey}`
+ *   - space URI:  `at://{spaceDid}/space/{spaceType}/{skey}`
+ *   - record URI: `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
+ *
+ * The marker disambiguates these from public `at://` URIs by construction: a
+ * public collection segment is an NSID (always at least two dots) and never the
+ * bare word `space`, so a public-shaped URI is always reported as
+ * `invalid-space-marker` and can never be mistaken for a space URI. A URI that
+ * does carry `space` in the marker position but has the wrong segment count
+ * reports `invalid-component-count`.
  *
  * Canonical form is strict string equality: two URIs address the same resource
  * iff their strings are byte-equal. There is no case folding, no relative form,
  * and no DID compression.
  *
- * Error convention: the `stratos-core` package has no pre-existing discriminated
- * result / neverthrow precedent (the codebase otherwise signals failures by
- * throwing typed `StratosError` subclasses). Because this work package requires
- * that invalid input never throws, this module returns a discriminated
- * `SpacesResult<T> = { ok: true, value } | { ok: false, error }` instead.
- * Boolean predicates (e.g. {@link isValidSkey}) return plain booleans.
+ * Error convention: the rest of `stratos-core` signals failures by throwing
+ * typed `StratosError` subclasses, but parsing untrusted URIs is a routine,
+ * expected-to-fail operation that must never throw. This module therefore
+ * returns a discriminated `SpacesResult<T> = { ok: true, value } | { ok: false,
+ * error }` instead. Boolean predicates (e.g. {@link isValidSkey}) return plain
+ * booleans.
  *
  * DID validation is syntactic only (`did:` + method + non-empty
  * method-specific id), delegated to `@atproto/syntax`'s `isValidDid`. NSID and
@@ -37,8 +46,15 @@ import type {
   SpacesResult,
 } from './types.js'
 
-/** The URI scheme for Stratos space and record addresses. */
-export const ATS_SCHEME = 'ats://'
+/** The URI scheme shared with public atproto addresses. */
+export const AT_SCHEME = 'at://'
+
+/**
+ * The literal marker segment that identifies a space/record URI. It sits in the
+ * position a collection NSID occupies in a public `at://` URI and, unlike an
+ * NSID, contains no dots.
+ */
+export const SPACE_SEGMENT = 'space'
 
 /** Minimum skey length in UTF-8 bytes (inclusive). */
 export const SKEY_MIN_BYTES = 1
@@ -84,8 +100,12 @@ export function utf8ByteLength(s: string): number {
  * independently enforced via {@link utf8ByteLength}.
  */
 export function isValidSkey(s: string): boolean {
-  const bytes = utf8ByteLength(s)
-  if (bytes < SKEY_MIN_BYTES || bytes > SKEY_MAX_BYTES) {
+  // Every UTF-16 code unit encodes to >=1 UTF-8 byte and <=3 (a surrogate pair
+  // is 2 units -> 4 bytes), so utf8ByteLength(s) lies in [s.length, 3*s.length].
+  if (s.length === 0 || s.length > SKEY_MAX_BYTES) {
+    return false
+  }
+  if (s.length * 3 > SKEY_MAX_BYTES && utf8ByteLength(s) > SKEY_MAX_BYTES) {
     return false
   }
   return isValidRecordKey(s)
@@ -114,88 +134,50 @@ export function isValidRkey(s: string): boolean {
 }
 
 /**
- * Splits the path portion (everything after `ats://`) of a URI into its raw
- * components, or reports a scheme error. Empty components are preserved so that
- * callers can reject them explicitly.
+ * Splits the authority-and-path portion (everything after `at://`) of a URI
+ * into its raw `/`-separated components, or reports a scheme error. Empty
+ * components are preserved so that callers can reject them explicitly.
  */
-function splitAtsUri(s: string): SpacesResult<string[]> {
-  if (!s.startsWith(ATS_SCHEME)) {
-    return err('invalid-scheme', `URI must start with "${ATS_SCHEME}"`)
+function splitAtUri(s: string): SpacesResult<string[]> {
+  if (!s.startsWith(AT_SCHEME)) {
+    return err('invalid-scheme', `URI must start with "${AT_SCHEME}"`)
   }
-  const rest = s.slice(ATS_SCHEME.length)
+  const rest = s.slice(AT_SCHEME.length)
   return ok(rest.split('/'))
 }
 
 /**
- * Parses a three-component space URI: `ats://{spaceDid}/{spaceType}/{skey}`.
+ * Splits an `at://` URI, requires the literal `space` marker in the segment
+ * after the authority, and requires an exact component count. The marker is
+ * checked before the count so a public-shaped URI without it is reported as
+ * `invalid-space-marker` rather than a count mismatch. `label` ("space URI" /
+ * "record URI") and `expectedCount` keep the error messages per-kind.
  */
-export function parseSpaceUri(s: string): SpacesResult<SpaceUri> {
-  const split = splitAtsUri(s)
+function parseAtUriHeader(
+  s: string,
+  expectedCount: number,
+  label: string,
+): SpacesResult<string[]> {
+  const split = splitAtUri(s)
   if (!split.ok) return split
   const parts = split.value
-  if (parts.length !== 3) {
+  if (parts[1] !== SPACE_SEGMENT) {
     return err(
-      'invalid-component-count',
-      `space URI must have 3 components, got ${parts.length}`,
+      'invalid-space-marker',
+      `${label} must have "${SPACE_SEGMENT}" as the segment after the authority`,
     )
   }
-  const [spaceDid, spaceType, skey] = parts
-  if (!isSyntacticDid(spaceDid)) {
-    return err('invalid-space-did', `invalid space DID: "${spaceDid}"`)
-  }
-  if (!isValidNsidStr(spaceType)) {
-    return err('invalid-space-type', `invalid space type NSID: "${spaceType}"`)
-  }
-  if (!isValidSkey(skey)) {
-    return err('invalid-skey', `invalid skey: "${skey}"`)
-  }
-  return ok({ spaceDid, spaceType, skey })
-}
-
-/**
- * Parses a six-component record URI:
- * `ats://{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
- */
-export function parseRecordUri(s: string): SpacesResult<RecordUri> {
-  const split = splitAtsUri(s)
-  if (!split.ok) return split
-  const parts = split.value
-  if (parts.length !== 6) {
+  if (parts.length !== expectedCount) {
     return err(
       'invalid-component-count',
-      `record URI must have 6 components, got ${parts.length}`,
+      `${label} must have ${expectedCount} components, got ${parts.length}`,
     )
   }
-  const [spaceDid, spaceType, skey, authorDid, collection, rkey] = parts
-  if (!isSyntacticDid(spaceDid)) {
-    return err('invalid-space-did', `invalid space DID: "${spaceDid}"`)
-  }
-  if (!isValidNsidStr(spaceType)) {
-    return err('invalid-space-type', `invalid space type NSID: "${spaceType}"`)
-  }
-  if (!isValidSkey(skey)) {
-    return err('invalid-skey', `invalid skey: "${skey}"`)
-  }
-  if (!isSyntacticDid(authorDid)) {
-    return err('invalid-author-did', `invalid author DID: "${authorDid}"`)
-  }
-  if (!isValidNsidStr(collection)) {
-    return err('invalid-collection', `invalid collection NSID: "${collection}"`)
-  }
-  if (!isValidRkey(rkey)) {
-    return err('invalid-rkey', `invalid rkey: "${rkey}"`)
-  }
-  return ok({ spaceDid, spaceType, skey, authorDid, collection, rkey })
+  return ok(parts)
 }
 
-/**
- * Serializes space URI parts into `ats://{spaceDid}/{spaceType}/{skey}`.
- * Byte-exact inverse of {@link parseSpaceUri}: `parse(format(x)) === x` for
- * valid parts, and `format(parse(s)) === s` for valid URIs.
- *
- * Validates the parts and returns a result; invalid parts never throw.
- */
-export function formatSpaceUri(parts: SpaceUri): SpacesResult<string> {
+/** Validates the space-addressing fields shared by space and record URIs. */
+function validateSpaceParts(parts: SpaceUri): SpacesResult<SpaceUri> {
   if (!isSyntacticDid(parts.spaceDid)) {
     return err('invalid-space-did', `invalid space DID: "${parts.spaceDid}"`)
   }
@@ -208,29 +190,15 @@ export function formatSpaceUri(parts: SpaceUri): SpacesResult<string> {
   if (!isValidSkey(parts.skey)) {
     return err('invalid-skey', `invalid skey: "${parts.skey}"`)
   }
-  return ok(`${ATS_SCHEME}${parts.spaceDid}/${parts.spaceType}/${parts.skey}`)
+  return ok(parts)
 }
 
-/**
- * Serializes record URI parts into
- * `ats://{spaceDid}/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
- * Byte-exact inverse of {@link parseRecordUri}.
- *
- * Validates the parts and returns a result; invalid parts never throw.
- */
-export function formatRecordUri(parts: RecordUri): SpacesResult<string> {
-  if (!isSyntacticDid(parts.spaceDid)) {
-    return err('invalid-space-did', `invalid space DID: "${parts.spaceDid}"`)
-  }
-  if (!isValidNsidStr(parts.spaceType)) {
-    return err(
-      'invalid-space-type',
-      `invalid space type NSID: "${parts.spaceType}"`,
-    )
-  }
-  if (!isValidSkey(parts.skey)) {
-    return err('invalid-skey', `invalid skey: "${parts.skey}"`)
-  }
+/** Validates the record-only fields a record URI adds to the space fields. */
+function validateRecordExtras(parts: {
+  authorDid: string
+  collection: string
+  rkey: string
+}): SpacesResult<void> {
   if (!isSyntacticDid(parts.authorDid)) {
     return err('invalid-author-did', `invalid author DID: "${parts.authorDid}"`)
   }
@@ -243,20 +211,79 @@ export function formatRecordUri(parts: RecordUri): SpacesResult<string> {
   if (!isValidRkey(parts.rkey)) {
     return err('invalid-rkey', `invalid rkey: "${parts.rkey}"`)
   }
+  return ok(undefined)
+}
+
+/**
+ * Parses a space URI: `at://{spaceDid}/space/{spaceType}/{skey}` (4 components,
+ * with `space` as the segment following the authority).
+ */
+export function parseSpaceUri(s: string): SpacesResult<SpaceUri> {
+  const header = parseAtUriHeader(s, 4, 'space URI')
+  if (!header.ok) return header
+  const [spaceDid, , spaceType, skey] = header.value
+  return validateSpaceParts({ spaceDid, spaceType, skey })
+}
+
+/**
+ * Parses a record URI:
+ * `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`
+ * (7 components, with `space` as the segment following the authority).
+ */
+export function parseRecordUri(s: string): SpacesResult<RecordUri> {
+  const header = parseAtUriHeader(s, 7, 'record URI')
+  if (!header.ok) return header
+  const [spaceDid, , spaceType, skey, authorDid, collection, rkey] =
+    header.value
+  const space = validateSpaceParts({ spaceDid, spaceType, skey })
+  if (!space.ok) return space
+  const extras = validateRecordExtras({ authorDid, collection, rkey })
+  if (!extras.ok) return extras
+  return ok({ spaceDid, spaceType, skey, authorDid, collection, rkey })
+}
+
+/**
+ * Serializes space URI parts into `at://{spaceDid}/space/{spaceType}/{skey}`.
+ * Byte-exact inverse of {@link parseSpaceUri}: `parse(format(x)) === x` for
+ * valid parts, and `format(parse(s)) === s` for valid URIs.
+ *
+ * Validates the parts and returns a result; invalid parts never throw.
+ */
+export function formatSpaceUri(parts: SpaceUri): SpacesResult<string> {
+  const valid = validateSpaceParts(parts)
+  if (!valid.ok) return valid
   return ok(
-    `${ATS_SCHEME}${parts.spaceDid}/${parts.spaceType}/${parts.skey}/${parts.authorDid}/${parts.collection}/${parts.rkey}`,
+    `${AT_SCHEME}${parts.spaceDid}/${SPACE_SEGMENT}/${parts.spaceType}/${parts.skey}`,
   )
 }
 
 /**
- * Maps a Stratos boundary to a three-component space URI (mapping scheme A):
+ * Serializes record URI parts into
+ * `at://{spaceDid}/space/{spaceType}/{skey}/{authorDid}/{collection}/{rkey}`.
+ * Byte-exact inverse of {@link parseRecordUri}.
+ *
+ * Validates the parts and returns a result; invalid parts never throw.
+ */
+export function formatRecordUri(parts: RecordUri): SpacesResult<string> {
+  const space = validateSpaceParts(parts)
+  if (!space.ok) return space
+  const extras = validateRecordExtras(parts)
+  if (!extras.ok) return extras
+  return ok(
+    `${AT_SCHEME}${parts.spaceDid}/${SPACE_SEGMENT}/${parts.spaceType}/${parts.skey}/${parts.authorDid}/${parts.collection}/${parts.rkey}`,
+  )
+}
+
+/**
+ * Maps a Stratos boundary to a space URI:
  *   - boundary format: `{serviceDid}/{domainName}`
  *   - `serviceDid` -> `spaceDid`
- *   - `domainName` -> `skey` (validated as an skey)
+ *   - `domainName` -> `skey`
  *   - `spaceType`  -> caller-supplied NSID parameter
  *
  * The boundary is split on the first `/`. Because a syntactically valid DID
- * cannot contain `/`, this split is unambiguous.
+ * cannot contain `/`, this split is unambiguous. The URI is built via
+ * {@link formatSpaceUri} so the two can never drift.
  */
 export function boundaryToSpaceUri(
   boundary: string,
@@ -269,29 +296,14 @@ export function boundaryToSpaceUri(
       `boundary must be "{serviceDid}/{domainName}", got "${boundary}"`,
     )
   }
-  const serviceDid = boundary.slice(0, slash)
-  const domainName = boundary.slice(slash + 1)
-  if (!isSyntacticDid(serviceDid)) {
-    return err(
-      'invalid-space-did',
-      `invalid boundary service DID: "${serviceDid}"`,
-    )
-  }
-  if (!isValidNsidStr(spaceType)) {
-    return err('invalid-space-type', `invalid space type NSID: "${spaceType}"`)
-  }
-  if (!isValidSkey(domainName)) {
-    return err(
-      'invalid-skey',
-      `boundary domainName is not a valid skey: "${domainName}"`,
-    )
-  }
-  return ok(`${ATS_SCHEME}${serviceDid}/${spaceType}/${domainName}`)
+  const spaceDid = boundary.slice(0, slash)
+  const skey = boundary.slice(slash + 1)
+  return formatSpaceUri({ spaceDid, spaceType, skey })
 }
 
 /**
- * Inverse of {@link boundaryToSpaceUri}: maps a three-component space URI back
- * to a Stratos boundary `{serviceDid}/{domainName}`.
+ * Inverse of {@link boundaryToSpaceUri}: maps a space URI back to a Stratos
+ * boundary `{serviceDid}/{domainName}`.
  *
  * Errors if the URI's `spaceDid` does not byte-equal `expectedServiceDid`.
  */
