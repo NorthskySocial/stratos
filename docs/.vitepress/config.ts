@@ -7,16 +7,7 @@ export default defineConfig({
   description: 'Private permissioned data layer for ATprotocol',
   base,
 
-  srcExclude: [
-    'hydration-architecture.md',
-    'enrollment-signing.md',
-    'multi-domain-enrollment.md',
-    'architecture-diagram.md',
-    'client-guide.md',
-    'operator-guide.md',
-    'indexer-architecture.md',
-    'animations/**',
-  ],
+  srcExclude: ['multi-domain-enrollment.md', 'architecture-diagram.md'],
 
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' }]],
 
@@ -90,6 +81,7 @@ export default defineConfig({
             { text: 'Overview', link: '/operator/overview' },
             { text: 'Architecture', link: '/operator/architecture' },
             { text: 'Deployment', link: '/operator/deployment' },
+            { text: 'Deployment Examples', link: '/operator/examples/' },
             { text: 'Configuration', link: '/operator/configuration' },
             {
               text: 'AppView Integration',
