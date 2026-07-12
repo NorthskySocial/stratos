@@ -210,6 +210,8 @@ Stratos validates DPoP tokens using JWKS-based signature verification (not token
 | `STRATOS_POSTGRES_URL`                 |          | —                       | Full Postgres DSN                                                                                                |
 | `STRATOS_PG_ACTOR_POOL_SIZE`           |          | —                       | Actor transaction pool size                                                                                      |
 | `STRATOS_PG_ADMIN_POOL_SIZE`           |          | —                       | Admin/schema pool size                                                                                           |
+| `BSKY_DB_POSTGRES_URL`                 | ✅       | —                       | Postgres DSN for the bundled indexer's AppView (`bsky`) database. Required by the indexer.                       |
+| `STRATOS_SYNC_TOKEN`                   | ✅       | —                       | Auth token the bundled indexer uses to subscribe to Stratos sync streams. Required by the indexer.               |
 | `STRATOS_BLOB_STORAGE`                 |          | `local`                 | `local` or `s3`                                                                                                  |
 | `STRATOS_S3_BUCKET`                    |          | —                       | S3 bucket name                                                                                                   |
 | `STRATOS_S3_REGION`                    |          | —                       | S3 region                                                                                                        |
