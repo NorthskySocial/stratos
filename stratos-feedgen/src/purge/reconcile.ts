@@ -39,7 +39,7 @@ export interface ReconcileSummary {
 const DEFAULT_BATCH_SIZE = 25
 
 /**
- * Startup reconciliation (SWP-12). Compares the persisted `enrolled_actor`
+ * Startup reconciliation. Compares the persisted `enrolled_actor`
  * snapshot against a fresh `resolveEnrollments` snapshot and purges anything
  * that has left scope while the feedgen was down (covering enroll/unenroll
  * events missed during downtime).

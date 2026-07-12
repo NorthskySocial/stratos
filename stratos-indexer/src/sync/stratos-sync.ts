@@ -205,7 +205,7 @@ export class StratosServiceSubscription {
       if (msg.t === '#enrollment') {
         const enrollment = msg as unknown as EnrollmentMessage
         // 'boundaries' is a boundary-set change for a STILL-enrolled actor
-        // (SWP-13). Treating any non-'enroll' action as unenroll would purge a
+        // frame. Treating any non-'enroll' action as unenroll would purge a
         // still-enrolled actor, so re-affirm on 'enroll'/'boundaries' with the
         // after-set and only purge on an explicit 'unenroll'.
         if (

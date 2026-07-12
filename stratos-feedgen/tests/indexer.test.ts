@@ -114,7 +114,7 @@ describe('SubscriptionIndexer', () => {
     expect(await store.getCursor(DID)).toBe(2)
   })
 
-  // SWP-12: verify the normal record-delete op also purges the derived index
+  // verify the normal record-delete op also purges the derived index
   // (post_boundary) rows, not just the post row. This is the "Record deleted
   // (normal op)" trigger from the deletion contract.
   it('delete op cascades to boundary index rows', async () => {

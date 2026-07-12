@@ -15,7 +15,7 @@ import { ServiceStream } from '../src/subscription/index.js'
 import type { ResolveEnrollmentsResult } from '../src/upstream/index.js'
 
 /**
- * SWP-13 Task 4 — the committed envelope, proved EVENT-DRIVEN (not TTL).
+ * The revocation envelope, proved EVENT-DRIVEN (not TTL).
  *
  * With the feedgen boundary cache TTL pinned to one hour AND a frozen clock that
  * NEVER advances, the TTL can never be the reason a stale entry is dropped. So
@@ -127,7 +127,7 @@ function post(did: string, rkey: string, boundaries: string[]) {
   }
 }
 
-describe('SWP-13 feedgen revocation envelope (event-driven, not TTL)', () => {
+describe('feedgen revocation envelope (event-driven, not TTL)', () => {
   let store: FeedgenStore
 
   beforeEach(async () => {
@@ -240,7 +240,7 @@ describe('SWP-13 feedgen revocation envelope (event-driven, not TTL)', () => {
       }),
     )
 
-    // The event path must (1) evict the cache and (2) drive the SWP-12
+    // The event path must (1) evict the cache and (2) drive the
     // boundary-shrink purge for the lost boundary A.
     await vi.waitFor(async () => {
       const p = await store.listPostsByBoundary({

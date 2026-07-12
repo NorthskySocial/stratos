@@ -57,7 +57,7 @@ export interface FeedgenStore {
   getPost: (uri: string) => Promise<IndexedPost | null>
   listPostsByBoundary: (opts: ListPostsOpts) => Promise<ListPostsResult>
 
-  // deletion / purge helpers (SWP-12)
+  // deletion / purge helpers
   /** Delete every post (and its cascaded boundary rows) authored by `did`. Returns rows removed. */
   deletePostsByDid: (did: string) => Promise<number>
   /**

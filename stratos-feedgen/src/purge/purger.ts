@@ -58,7 +58,7 @@ function zeroCounts(): PurgeCounts {
 }
 
 /**
- * Feedgen deletion pathway (SWP-12).
+ * Feedgen deletion pathway.
  *
  * Purges the synced records **and** the derived state the feedgen holds for
  * content that has left scope: `post` rows (and their cascaded `post_boundary`
