@@ -12,7 +12,7 @@ import {
 import type { ReplayStore } from './replay-store.js'
 
 /**
- * Client-attestation verifier (SWP-08, task 2).
+ * Client-attestation verifier.
  *
  * A client attestation is, structurally, an OAuth `private_key_jwt` client
  * assertion presented BY a confidential client TO the space authority. It lets

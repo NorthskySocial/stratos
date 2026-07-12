@@ -4,7 +4,7 @@ import { parseSpaceUri } from '@northskysocial/stratos-core'
 import { decodeCompactJwt } from './jwt.js'
 
 /**
- * Space-credential verifier (SWP-07).
+ * Space-credential verifier.
  *
  * A **space credential** is a JWT the space authority (this Stratos service)
  * mints (see `features/space-credential/minter.ts`) to grant a member
@@ -27,7 +27,7 @@ import { decodeCompactJwt } from './jwt.js'
  *   - Header `kid` MUST be exactly {@link SPACE_CREDENTIAL_KID} (`"#atproto"`).
  *   - Payload `exp` MUST be present and not in the past (with skew). There is
  *     no `aud` claim and NO `jti` consumption (the credential is multi-use).
- *   - Payload `sub` MUST parse as a three-component `ats://` space URI whose
+ *   - Payload `sub` MUST parse as an `at://` space URI whose
  *     `spaceDid` equals our configured service DID (we are the authority).
  *   - The signature MUST verify against OUR OWN service signing key.
  *
@@ -65,7 +65,7 @@ export class InvalidSpaceCredentialAlgError extends SpaceCredentialVerificationE
 export class InvalidSpaceCredentialKidError extends SpaceCredentialVerificationError {}
 /** `exp` was missing, malformed, or the credential has expired. */
 export class SpaceCredentialExpiredError extends SpaceCredentialVerificationError {}
-/** `sub` was absent, malformed, or not a three-component space URI. */
+/** `sub` was absent, malformed, or not a valid space URI. */
 export class InvalidSpaceCredentialSubError extends SpaceCredentialVerificationError {}
 /** `sub`'s `spaceDid` did not match our configured service DID. */
 export class ForeignSpaceCredentialError extends SpaceCredentialVerificationError {}

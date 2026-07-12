@@ -147,7 +147,7 @@ function validateHydrateRecordsInput(body: HydrateRecordsInput | undefined) {
  * Get hydration context.
  *
  * For a DPoP user, the viewer is the authenticated DID and their enrolled
- * boundaries. For a space credential (SWP-07), the viewer is a synthetic,
+ * boundaries. For a space credential, the viewer is a synthetic,
  * non-ownable DID scoped to EXACTLY the credential space's boundary — the
  * existing per-record gate then filters every record to that space (fail
  * closed). Credential auth carries no `did`, so it composes with, and never

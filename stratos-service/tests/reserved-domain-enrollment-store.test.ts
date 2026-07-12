@@ -1,5 +1,5 @@
 /**
- * SWP-03 reserved-domain force-inclusion.
+ * Reserved-domain force-inclusion.
  *
  * The reserved all-members domain is force-included in every enrollment write
  * (user OAuth enrollment, service reconciler, admin edits) and cannot be

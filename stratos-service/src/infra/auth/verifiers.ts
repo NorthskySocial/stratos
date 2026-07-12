@@ -39,7 +39,7 @@ export interface AuthVerifiers {
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: string; did?: string } }>
   /**
-   * Space-credential auth (SWP-07): a multi-use JWT this service minted for a
+   * Space-credential auth: a multi-use JWT this service minted for a
    * single space, verified against our OWN signing key (no DID resolution).
    * Yields the admitted space URI; the caller has no `did`.
    */
@@ -47,7 +47,7 @@ export interface AuthVerifiers {
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: 'space-credential'; spaceUri: string } }>
   /**
-   * Composition of {@link standard} and {@link spaceCredential} (SWP-07). A
+   * Composition of {@link standard} and {@link spaceCredential}. A
    * DPoP session yields `{ type: 'user', did }`; a space credential (a Bearer
    * JWT whose `typ` is a space credential) yields
    * `{ type: 'space-credential', spaceUri }`. Anything else is rejected. This
@@ -61,8 +61,8 @@ export interface AuthVerifiers {
       | { type: 'space-credential'; spaceUri: string }
   }>
   /**
-   * Composition of {@link optionalStandard} and {@link spaceCredential}
-   * (SWP-07). Used for read endpoints that were previously anonymous-friendly
+   * Composition of {@link optionalStandard} and {@link spaceCredential}.
+   * Used for read endpoints that were previously anonymous-friendly
    * (the hydration surface): an anonymous request stays anonymous (behaviour
    * unchanged), a DPoP session yields a user, and a space-credential Bearer JWT
    * yields `{ type: 'space-credential', spaceUri }`.
@@ -75,7 +75,7 @@ export interface AuthVerifiers {
       | { type: 'space-credential'; spaceUri: string }
   }>
   /**
-   * Composition of {@link service} and {@link spaceCredential} (SWP-07) for the
+   * Composition of {@link service} and {@link spaceCredential} for the
    * pull-sync read endpoints. A space-credential Bearer JWT yields
    * `{ type: 'space-credential', spaceUri }`; any other Bearer is verified as
    * inter-service auth and behaves EXACTLY as before.
@@ -347,7 +347,7 @@ function extractSpaceCredentialToken(
 }
 
 /**
- * Creates the space-credential auth verifier (SWP-07).
+ * Creates the space-credential auth verifier.
  *
  * Accepts a `Bearer` JWT whose `typ` is a space credential, verifies it against
  * OUR OWN signing key (no DID resolution), and yields the admitted space URI.
@@ -396,7 +396,7 @@ function createSpaceCredentialVerifier(deps: {
 }
 
 /**
- * Composes a space-credential verifier with a base verifier (SWP-07). Routing is
+ * Composes a space-credential verifier with a base verifier. Routing is
  * by JWT `typ`: a `Bearer` whose `typ` is a space credential takes the
  * space-credential path; anything else (no header, DPoP, dev `Bearer did:...`,
  * or inter-service `Bearer`) falls through to `fallback`, which behaves EXACTLY

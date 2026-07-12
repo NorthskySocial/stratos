@@ -1,5 +1,5 @@
 /**
- * SWP-03 write-path enforcement: exactly one domain per record.
+ * Write-path enforcement: exactly one domain per record.
  *
  * Zero-domain and multi-domain records are rejected on EVERY write entry point
  * (create, update, batch). Delete carries no domain and is unaffected. The

@@ -1,17 +1,16 @@
 import {
   ensureQualifiedBoundaries,
   InvalidServiceEnrollmentError,
-  spaceUriToBoundary,
 } from '@northskysocial/stratos-core'
 
 /**
- * Per-space app-gating policy (SWP-08, task 3).
+ * Per-space app-gating policy.
  *
  * The app-axis is a service-side setting mapping a space (by its Stratos
  * boundary `{serviceDid}/{skey}`, i.e. keyed on the space's skey/domainName) to
  * an {@link AppAccess} policy:
- *   - `#open` (the DEFAULT): no client attestation required. A space with no
- *     configured entry behaves exactly like SWP-06.
+ *   - `#open` (the default, and the behavior for any unconfigured space): no
+ *     client attestation required.
  *   - `#allowList`: a client attestation is REQUIRED, and its *attested*
  *     `client_id` (`iss`) must be a member of the allow-list.
  *
@@ -151,22 +150,18 @@ function isHttpsUrl(value: string): boolean {
 }
 
 /**
- * Look up the app-access policy for a space URI. Any space with no explicit
- * entry (or an un-mappable URI) resolves to the default `#open` policy — so
- * unconfigured spaces are never accidentally gated.
+ * Look up the app-access policy for a space's boundary. Any space with no
+ * explicit entry resolves to the default `#open` policy — so unconfigured
+ * spaces are never accidentally gated.
  *
  * @param config - The validated app-access config (may be undefined ⇒ all open).
- * @param spaceUri - The three-component `ats://` space URI.
- * @param serviceDid - This service's DID (to map the URI to a boundary).
+ * @param boundary - The space's qualified boundary `{serviceDid}/{skey}`.
  * @returns The resolved {@link AppAccess} (defaults to `#open`).
  */
 export function resolveAppAccess(
   config: SpaceAppAccessConfig | undefined,
-  spaceUri: string,
-  serviceDid: string,
+  boundary: string,
 ): AppAccess {
   if (!config) return DEFAULT_APP_ACCESS
-  const boundary = spaceUriToBoundary(spaceUri, serviceDid)
-  if (!boundary.ok) return DEFAULT_APP_ACCESS
-  return config.byBoundary.get(boundary.value) ?? DEFAULT_APP_ACCESS
+  return config.byBoundary.get(boundary) ?? DEFAULT_APP_ACCESS
 }

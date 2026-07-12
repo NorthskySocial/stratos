@@ -344,10 +344,10 @@ describe('Subscription CBOR encoding roundtrip', () => {
     })
   })
 
-  // SWP-13: service-stream event scoping. A `boundaries` change must reach a
+  // Service-stream event scoping. A `boundaries` change must reach a
   // caller that held a NOW-REMOVED boundary even if the after-set no longer
   // intersects the caller — otherwise the caller never learns the actor left.
-  describe('eventVisibleToCaller (SWP-13 boundary-change scoping)', () => {
+  describe('eventVisibleToCaller (boundary-change scoping)', () => {
     const mk = (e: Partial<EnrollmentEvent>): EnrollmentEvent => ({
       did: 'did:plc:actor',
       action: 'boundaries',

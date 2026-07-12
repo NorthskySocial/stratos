@@ -28,6 +28,6 @@ export function registerSyncHandlers(
     handler: getBlobHandler(ctx),
   })
 
-  // Pull-sync (SWP-09): boundary-gated oplog + full-state recovery.
+  // Pull-sync: boundary-gated oplog + full-state recovery.
   registerPullSyncHandlers(server, ctx)
 }

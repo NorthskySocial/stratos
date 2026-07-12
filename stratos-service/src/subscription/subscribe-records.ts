@@ -60,11 +60,11 @@ export interface InfoMessage {
  *
  * `action`:
  * - `enroll` / `unenroll`: an actor entered / fully left the service.
- * - `boundaries` (SWP-13): the actor stayed enrolled but its boundary set
+ * - `boundaries`: the actor stayed enrolled but its boundary set
  *   changed. `boundaries` carries the set AFTER the change (`boundaries-after`).
  *   Consumers diff this against their held snapshot and purge derived state for
- *   any boundary the actor left. This closes SWP-12 Deviation D-1, which lacked
- *   a stream trigger for boundary-set shrinks.
+ *   any boundary the actor left. Emitted by `emitBoundaryChangeEvent` in
+ *   features/enrollment/handler.ts.
  */
 export interface EnrollmentMessage {
   $type: 'zone.stratos.sync.subscribeRecords#enrollment'
@@ -573,10 +573,10 @@ export function hasBoundaryIntersection(
  * Whether an enrollment event should be delivered to a caller holding
  * `callerBoundaries`.
  *
- * `enroll`/`unenroll` retain the pre-SWP-13 semantics exactly: a plain
+ * `enroll`/`unenroll` retain their original semantics exactly: a plain
  * intersection against the event's own boundary set.
  *
- * A `boundaries` change (SWP-13) is different: the after-set alone is
+ * A `boundaries` change is different: the after-set alone is
  * insufficient, because a pure shrink that removes the last boundary the caller
  * shares would no longer intersect the caller's set and the caller would never
  * learn the actor left its scope. So the change is delivered when the caller's

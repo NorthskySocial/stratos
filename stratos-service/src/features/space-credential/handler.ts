@@ -1,5 +1,5 @@
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
-import { parseSpaceUri, spaceUriToBoundary } from '@northskysocial/stratos-core'
+import { parseSpaceUri } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
@@ -25,19 +25,19 @@ export const GET_SPACE_CREDENTIAL_METHOD =
  * Input body for {@link GET_SPACE_CREDENTIAL_METHOD}.
  */
 interface GetSpaceCredentialInput {
-  /** Three-component `ats://` space URI to issue a credential for. */
+  /** The space's `at://` URI to issue a credential for. */
   space?: string
   /** Optional space-delegation JWT (spec-shaped identity path). */
   delegationToken?: string
   /**
-   * Optional client-attestation JWT (SWP-08). Required only for spaces gated on
-   * client app identity (`appAccess#allowList`); ignored for `#open` spaces.
+   * Optional client-attestation JWT. Required only for spaces gated on client
+   * app identity (`appAccess#allowList`); ignored for `#open` spaces.
    */
   clientAttestation?: string
 }
 
 /**
- * Register the `zone.stratos.space.getSpaceCredential` handler (SWP-06).
+ * Register the `zone.stratos.space.getSpaceCredential` handler.
  *
  * Method-auth binding: `optionalStandard`. Both supported identity paths must
  * flow through a single method, but only one of them (the DPoP path) presents
@@ -79,17 +79,17 @@ export function registerSpaceCredentialHandlers(
  *
  * Steps (interim/DPoP path is live; delegation path is dormant):
  *   1. Require a `space` input.
- *   2. Parse `space` as a three-component space URI; its `spaceDid` MUST equal
+ *   2. Parse `space` as an `at://` space URI; its `spaceDid` MUST equal
  *      our configured service DID → else {@link UnknownSpace}.
- *   3. Resolve identity: if a `delegationToken` is present, verify it via SWP-05
+ *   3. Resolve identity: if a `delegationToken` is present, verify it
  *      (its target space MUST equal `space`) and take identity from it; else use
  *      the DPoP-authenticated user (reject anonymous).
  *   4. Map the space URI to its boundary and confirm the user is enrolled in it
  *      (live enrollment-store lookup, no cache) → else {@link NotEnrolled}.
- *   5. App-axis gating (SWP-08): if the space's `appAccess` is `#allowList`,
+ *   5. App-axis gating: if the space's `appAccess` is `#allowList`,
  *      require a valid client attestation whose attested `client_id` is listed
  *      (else `AttestationRequired` / `ClientNotAllowed`). `#open` spaces ignore
- *      any attestation supplied and behave exactly as SWP-06 built.
+ *      any attestation supplied.
  *   6. Mint the credential and return `{ credential, expiresAt }`.
  *
  * @param ctx - Application context.
@@ -107,7 +107,7 @@ async function handleGetSpaceCredential(
     throw new InvalidRequestError('space parameter required', 'InvalidRequest')
   }
 
-  // Space URI must be a valid three-component URI targeting THIS service.
+  // Space URI must be a valid `at://` space URI targeting THIS service.
   const parsed = parseSpaceUri(space)
   if (!parsed.ok || parsed.value.spaceDid !== ctx.serviceDid) {
     throw new InvalidRequestError(
@@ -115,6 +115,7 @@ async function handleGetSpaceCredential(
       'UnknownSpace',
     )
   }
+  const { spaceDid, skey } = parsed.value
 
   // Resolve identity via delegation token (dormant) or DPoP session (live).
   const userDid = input?.delegationToken
@@ -122,16 +123,7 @@ async function handleGetSpaceCredential(
     : requireDpopIdentity(dpopDid)
 
   // Membership: the user must be enrolled in the boundary for this space.
-  const boundaryResult = spaceUriToBoundary(space, ctx.serviceDid)
-  if (!boundaryResult.ok) {
-    // spaceDid already matched above, so this is not reachable in practice;
-    // treat a mapping failure as an unknown space rather than a 500.
-    throw new InvalidRequestError(
-      'Unknown space: could not map to boundary',
-      'UnknownSpace',
-    )
-  }
-  const boundary = boundaryResult.value
+  const boundary = `${spaceDid}/${skey}`
 
   const boundaries = await ctx.enrollmentStore.getBoundaries(userDid)
   if (!boundaries.includes(boundary)) {
@@ -141,8 +133,8 @@ async function handleGetSpaceCredential(
     )
   }
 
-  // App-axis (client attestation) gating (SWP-08). `#open` spaces are a no-op.
-  await enforceAppAccess(ctx, space, input?.clientAttestation)
+  // App-axis (client attestation) gating. `#open` spaces are a no-op.
+  await enforceAppAccess(ctx, boundary, input?.clientAttestation)
 
   const { credential, expiresAt } = await mintSpaceCredential({
     signingKey: ctx.signingKey,
@@ -155,9 +147,9 @@ async function handleGetSpaceCredential(
 }
 
 /**
- * Verify a delegation token (SWP-05) and return the delegating user's DID.
+ * Verify a delegation token and return the delegating user's DID.
  *
- * Every SWP-05 verification failure — and a target-space mismatch — surfaces as
+ * Every verification failure — and a target-space mismatch — surfaces as
  * a single `InvalidToken` error code (the exact reason is logged, not leaked).
  *
  * @param ctx - Application context.
@@ -212,11 +204,11 @@ async function resolveDelegationIdentity(
 }
 
 /**
- * Enforce app-axis (client attestation) gating for a space (SWP-08).
+ * Enforce app-axis (client attestation) gating for a space.
  *
  * Resolves the space's `appAccess` policy from service config:
  *   - `#open` (default for any unconfigured space): NO-OP — any supplied
- *     attestation is ignored, so the request path is byte-identical to SWP-06.
+ *     attestation is ignored.
  *   - `#allowList`: a client attestation is REQUIRED. It is verified in full
  *     (see {@link verifyClientAttestation}), and its *attested* `client_id`
  *     (`iss`) MUST be a member of the list.
@@ -228,16 +220,15 @@ async function resolveDelegationIdentity(
  */
 async function enforceAppAccess(
   ctx: AppContext,
-  space: string,
+  boundary: string,
   clientAttestation: string | undefined,
 ): Promise<void> {
   const access: AppAccess = resolveAppAccess(
     ctx.cfg.stratos.spaceAppAccess,
-    space,
-    ctx.serviceDid,
+    boundary,
   )
   if (access.kind === 'open') {
-    // Open space: ignore any attestation supplied; identical to SWP-06.
+    // Open space: ignore any attestation supplied.
     return
   }
 

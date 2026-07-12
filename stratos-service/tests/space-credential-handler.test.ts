@@ -1,12 +1,11 @@
 /**
- * Contract tests for the `zone.stratos.space.getSpaceCredential` endpoint
- * (SWP-06).
+ * Contract tests for the `zone.stratos.space.getSpaceCredential` endpoint.
  *
  * Exercises both identity paths against a mock XRPC server + mock AppContext:
  *   - Interim DPoP path (live): enrolled user gets a credential; non-enrolled
  *     is rejected `NotEnrolled`; a foreign-space URI is rejected `UnknownSpace`.
- *   - Delegation-token path (dormant, real SWP-05 verifier): happy path issues a
- *     credential; every SWP-05 failure surfaces as `InvalidToken`.
+ *   - Delegation-token path (dormant, real delegation verifier): happy path
+ *     issues a credential; every verification failure surfaces as `InvalidToken`.
  * The issued credential is decoded and verified against the service key (and
  * asserted to FAIL against another key), with the full spec claim set checked
  * including the absence of `aud`, and `exp - iat` equal to the configured TTL.
@@ -19,10 +18,15 @@ import { registerSpaceCredentialHandlers } from '../src/features/space-credentia
 import { DELEGATION_TYP } from '../src/infra/auth/delegation-verifier.js'
 import type { NxExStore } from '../src/infra/auth/replay-store.js'
 import type { AppContext } from '../src/index.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
 const TTL_SECONDS = 7_200
-const SPACE_URI = `ats://${SERVICE_DID}/app.bsky.feed.generator/myspace`
+const SPACE_URI = makeSpaceUri(
+  SERVICE_DID,
+  'app.bsky.feed.generator',
+  'myspace',
+)
 // boundaryToSpaceUri: boundary "{serviceDid}/{skey}" ⇄ space skey == domainName.
 const SPACE_BOUNDARY = `${SERVICE_DID}/myspace`
 const USER_DID = 'did:plc:abcabcabcabcabcabcabcabc'
@@ -151,7 +155,7 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
 }
 
 // ---------------------------------------------------------------------------
-// Delegation-token minting (real SWP-05 shape, signed by the user key).
+// Delegation-token minting (real delegation shape, signed by the user key).
 // ---------------------------------------------------------------------------
 const b64url = (v: unknown): string =>
   Buffer.from(JSON.stringify(v)).toString('base64url')
@@ -280,8 +284,11 @@ describe('getSpaceCredential — DPoP path', () => {
     const server = createMockXrpcServer()
     registerSpaceCredentialHandlers(server as any, ctx)
 
-    const foreign =
-      'ats://did:web:other.example/app.bsky.feed.generator/myspace'
+    const foreign = makeSpaceUri(
+      'did:web:other.example',
+      'app.bsky.feed.generator',
+      'myspace',
+    )
     const res = await invoke(server, { space: foreign }, USER_DID)
     expect(res.error?.name).toBe('UnknownSpace')
   })
@@ -362,7 +369,11 @@ describe('getSpaceCredential — delegation-token path', () => {
 
   it('token targeting a different space → InvalidToken', async () => {
     const { userKey, server } = await setup(true)
-    const otherSpace = `ats://${SERVICE_DID}/app.bsky.feed.generator/otherspace`
+    const otherSpace = makeSpaceUri(
+      SERVICE_DID,
+      'app.bsky.feed.generator',
+      'otherspace',
+    )
     const token = await mintDelegation({
       userKey,
       iss: userKey.did(),
@@ -390,10 +401,16 @@ describe('getSpaceCredential — delegation-token path', () => {
     ['tampered signature', { tamper: true }],
     [
       'foreign sub space did',
-      { sub: 'ats://did:web:evil.example/app.bsky.feed.generator/myspace' },
+      {
+        sub: makeSpaceUri(
+          'did:web:evil.example',
+          'app.bsky.feed.generator',
+          'myspace',
+        ),
+      },
     ],
   ])(
-    'SWP-05 failure (%s) surfaces as InvalidToken',
+    'delegation failure (%s) surfaces as InvalidToken',
     async (_label, overrides) => {
       const { userKey, server } = await setup(true)
       const token = await mintDelegation({

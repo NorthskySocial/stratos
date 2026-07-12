@@ -1,9 +1,9 @@
 /**
- * Contract tests for SWP-08 app-axis (client attestation) gating in the
+ * Contract tests for app-axis (client attestation) gating in the
  * `zone.stratos.space.getSpaceCredential` handler.
  *
  * NO live network — the JWKS resolver runs over a mocked fetch. Covers:
- *   - open space without attestation → OK (byte-identical to SWP-06);
+ *   - open space without attestation → OK (byte-identical to the ungated path);
  *   - open space WITH an attestation supplied → attestation ignored, OK;
  *   - allowList space without attestation → AttestationRequired;
  *   - listed client with a valid attestation → OK exactly once (replay rejected);
@@ -26,11 +26,16 @@ import {
   resolverFor,
   type ClientIdentity,
 } from './helpers/attestation.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
 const TTL_SECONDS = 7_200
 const SPACE_SKEY = 'myspace'
-const SPACE_URI = `ats://${SERVICE_DID}/app.bsky.feed.generator/${SPACE_SKEY}`
+const SPACE_URI = makeSpaceUri(
+  SERVICE_DID,
+  'app.bsky.feed.generator',
+  SPACE_SKEY,
+)
 const SPACE_BOUNDARY = `${SERVICE_DID}/${SPACE_SKEY}`
 const USER_DID = 'did:plc:abcabcabcabcabcabcabcabc'
 
@@ -145,8 +150,8 @@ async function verifyCredentialAgainst(keyDid: string, jwt: string) {
 }
 
 // ===========================================================================
-describe('getSpaceCredential — app-axis gating (SWP-08)', () => {
-  it('open space (no config) issues without attestation — identical to SWP-06', async () => {
+describe('getSpaceCredential — app-axis gating', () => {
+  it('open space (no config) issues without attestation — identical to the ungated path', async () => {
     const signingKey = await Secp256k1Keypair.create()
     const ctx = createMockCtx({ signingKey, clients: [] })
     const server = createMockXrpcServer()

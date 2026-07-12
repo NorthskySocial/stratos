@@ -44,7 +44,7 @@ export interface IdentityContext {
    */
   actorSigner: ActorSigner
   /**
-   * Shared external-client JWKS resolver (SWP-08). Resolves arbitrary
+   * Shared external-client JWKS resolver. Resolves arbitrary
    * confidential clients' published keys (with a process-wide TTL cache) so
    * client attestations can be verified during `getSpaceCredential`.
    */
@@ -166,7 +166,7 @@ export interface EnrollmentEvent {
    * now-removed boundary still receives the change (a pure shrink whose after-set
    * no longer intersects the caller must not be silently dropped). This field is
    * NOT written to the wire frame — the on-stream `#enrollment` message carries
-   * only `{did, boundaries-after}` per the SWP-13 contract.
+   * only `{did, boundaries-after}`.
    */
   priorBoundaries?: string[]
   time: string

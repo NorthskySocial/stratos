@@ -1,5 +1,5 @@
 /**
- * Unit tests for the external-client JWKS resolver (SWP-08, task 1).
+ * Unit tests for the external-client JWKS resolver.
  *
  * All fetches are mocked — NO live network. Exercises: HTTPS-only enforcement,
  * inline `jwks` vs fetched `jwks_uri`, TTL caching (hit / expiry), unknown-kid,

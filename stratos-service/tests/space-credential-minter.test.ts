@@ -1,5 +1,5 @@
 /**
- * Unit tests for the space-credential minter (SWP-06).
+ * Unit tests for the space-credential minter.
  *
  * A space credential is a JWT the space authority signs with its own signing
  * key. These tests mint credentials with a local Secp256k1 keypair and verify
@@ -14,9 +14,10 @@ import {
   SPACE_CREDENTIAL_TYP,
   mintSpaceCredential,
 } from '../src/features/space-credential/minter.js'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 const ISSUER_DID = 'did:web:stratos.test'
-const SPACE_URI = `ats://${ISSUER_DID}/app.bsky.feed.generator/myspace`
+const SPACE_URI = makeSpaceUri(ISSUER_DID, 'app.bsky.feed.generator', 'myspace')
 
 interface DecodedJwt {
   header: Record<string, unknown>

@@ -14,17 +14,21 @@ import {
   HydrationServiceImpl,
   mintSpaceCredential,
 } from '../src/features/index.js'
-import { canAccessRecord } from '@northskysocial/stratos-core'
+import {
+  canAccessRecord,
+  spaceUriToBoundary,
+} from '@northskysocial/stratos-core'
 import type {
   HydrationContext,
   HydrationRequest,
   RecordResolver,
 } from '@northskysocial/stratos-core'
+import { makeSpaceUri } from './helpers/space-uri.js'
 
 /**
- * SWP-13 Task 1 — Stratos live-check assertions.
+ * Stratos live-check assertions (revocation is immediate).
  *
- * The envelope's first invariant is that revocation is IMMEDIATE on Stratos:
+ * The first invariant is that revocation is IMMEDIATE on Stratos:
  * every hydration request re-resolves the viewer's live boundary set from the
  * enrollment store, so an unenroll or boundary removal is reflected on the very
  * NEXT request — no restart, no wait, no TTL. These tests assert that invariant
@@ -79,7 +83,7 @@ class FakeRecordResolver implements RecordResolver {
   }
 }
 
-describe('SWP-13 Stratos live-check (revocation is immediate)', () => {
+describe('Stratos live-check (revocation is immediate)', () => {
   let db: ServiceDb
   let store: SqliteEnrollmentStore
   let hydration: HydrationServiceImpl
@@ -163,7 +167,7 @@ describe('SWP-13 Stratos live-check (revocation is immediate)', () => {
 })
 
 /**
- * SWP-13 Task 1(c) — grep-level guard.
+ * No-new-cache guard (grep-level).
  *
  * No NEW membership cache may sit between the enrollment store and the read-path
  * gates (`canAccessRecord` in the hydration adapter, `eventInScope` in the
@@ -171,12 +175,12 @@ describe('SWP-13 Stratos live-check (revocation is immediate)', () => {
  * via the boundary resolver / enrollment store — never a fresh in-memory cache
  * introduced by this WP.
  *
- * The pre-existing `CachedEnrollmentStore` (postgres backend only, 300s TTL) is
- * documented in the SWP-13 Log; it invalidates synchronously on write, so it
- * does not add an in-process staleness window. This guard fails if a new caching
+ * The pre-existing `CachedEnrollmentStore` (postgres backend only, 300s TTL)
+ * invalidates synchronously on write, so it does not add an in-process
+ * staleness window. This guard fails if a new caching
  * layer name is wired into the hydration/subscription read paths.
  */
-describe('SWP-13 no-new-cache guard (grep-level)', () => {
+describe('no-new-cache guard (grep-level)', () => {
   function readSrc(relFromTestDir: string): string {
     const url = new URL(relFromTestDir, import.meta.url)
     return readFileSync(fileURLToPath(url), 'utf8')
@@ -203,29 +207,32 @@ describe('SWP-13 no-new-cache guard (grep-level)', () => {
 })
 
 /**
- * SWP-13 envelope point 3 — space credentials do NOT extend exposure.
+ * Space credentials do NOT extend exposure past membership.
  *
- * A space credential (SWP-06) is an out-of-band bearer token that admits API
+ * A space credential is an out-of-band bearer token that admits API
  * calls; it is NOT an input to the per-record boundary gate. `canAccessRecord`
  * decides purely on the viewer's LIVE `viewerDomains` vs. the record's
  * boundaries, so holding a (still-valid) credential after a viewer's membership
  * is revoked does not grant access.
  *
- * NOTE (SWP-07): the credential *verifier* — the consumer that would accept a
+ * NOTE: the credential *verifier* — the consumer that would accept a
  * credential on an API call and turn it into a session — has not landed in this
- * base (only the SWP-06 minter is present; there is no verifier that maps a
+ * base (only the minter is present; there is no verifier that maps a
  * credential to `viewerDomains`). The composition asserted here is therefore at
- * the gate level. When SWP-07 lands, extend this to run an actual
- * credential-authenticated hydration request and assert the same denial.
+ * the gate level. When the credential verifier lands, extend this to run an
+ * actual credential-authenticated hydration request and assert the same denial.
  */
-describe('SWP-13 credentials do not extend exposure (composition)', () => {
+describe('credentials do not extend exposure past membership (composition)', () => {
   const OWNER2 = 'did:plc:owner2'
   const VIEWER2 = 'did:plc:viewer2'
-  const SPACE_BOUNDARY = 'did:web:nerv.tokyo.jp/space'
-  const SPACE_URI = 'ats://did:web:nerv.tokyo.jp/space/thread'
+  const SPACE_DID = 'did:web:nerv.tokyo.jp'
+  const SPACE_URI = makeSpaceUri(SPACE_DID, 'zone.stratos.space.feed', 'thread')
+  const boundaryResult = spaceUriToBoundary(SPACE_URI, SPACE_DID)
+  if (!boundaryResult.ok) throw new Error('bad test boundary')
+  const SPACE_BOUNDARY = boundaryResult.value
 
   it('a still-valid credential does not bypass the per-record boundary gate after revocation', async () => {
-    // Prove a real, unexpired space credential exists (SWP-06 minter).
+    // Prove a real, unexpired space credential exists (via the minter).
     const key = await Secp256k1Keypair.create()
     const iat = Math.floor(Date.now() / 1000)
     const minted = await mintSpaceCredential({

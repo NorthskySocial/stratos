@@ -1,9 +1,9 @@
 /**
- * SWP-03 move sync contract (adversarial, both channels).
+ * Move sync contract (adversarial, both channels).
  *
  * A move re-homes a record from an OLD domain to a NEW domain. The observable
  * contract, on BOTH the in-stream `subscribeRecords` gate (`eventInScope`) and
- * the SWP-09 pull endpoint (`listRepoOps`):
+ * the pull endpoint (`listRepoOps`):
  *   - a subscriber scoped ONLY to the old domain observes a REMOVAL,
  *   - a subscriber scoped to the new domain observes a create/update,
  *   - a subscriber scoped to NEITHER observes nothing.

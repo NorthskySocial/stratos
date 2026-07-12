@@ -119,7 +119,7 @@ export async function createAppContext(
   // and key-store access that previously lived here now live inside the signer.
   const actorSigner = new InProcessActorSigner(actorStore, { logger })
 
-  // Shared external-client JWKS resolver (SWP-08). Process-wide so its TTL cache
+  // Shared external-client JWKS resolver. Process-wide so its TTL cache
   // is reused across `getSpaceCredential` requests. Uses the user-agent fetch.
   const jwksResolver = new JwksResolver({
     fetch: fetchWithUserAgent,
@@ -388,7 +388,7 @@ function setupMigrationCallback(ctx: AppContext) {
         // is supplied by the resolver (a store read here would return the
         // already-migrated set and suppress the event below).
 
-        // SWP-13: read-repair migration rewrites an actor's boundary set (e.g.
+        // Read-repair migration rewrites an actor's boundary set (e.g.
         // legacy bare names → qualified). Surface it on the service stream so
         // downstream caches invalidate without waiting for a TTL. Skip when the
         // set is unchanged (order-insensitive) to stay idempotent.

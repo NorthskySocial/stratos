@@ -6,7 +6,7 @@ import {
 } from '../../infra/auth/space-credential-verifier.js'
 
 /**
- * Space-credential minter (SWP-06).
+ * Space-credential minter.
  *
  * A **space credential** is a JWT by which the space authority (this Stratos
  * service) grants a member bearer-shaped, **multi-use** access to a space until
@@ -22,7 +22,7 @@ import {
  *     (`"#atproto_space"` OR `"#atproto"`) makes a dedicated `#atproto_space`
  *     entry unnecessary, so we always emit `#atproto`.
  *   - Payload `iss` = the space-authority DID (this service's DID).
- *   - Payload `sub` = the three-component `ats://` space URI.
+ *   - Payload `sub` = the space's `at://` URI.
  *   - Payload `iat` = issuance time (unix seconds).
  *   - Payload `exp` = `iat + ttlSeconds` (2h default).
  *   - Payload `jti` = a unique nonce.
@@ -67,7 +67,7 @@ export interface MintSpaceCredentialInput {
   signingKey: Keypair
   /** The space-authority DID → `iss`. */
   issuerDid: string
-  /** The three-component `ats://` space URI → `sub`. */
+  /** The space's `at://` URI → `sub`. */
   spaceUri: string
   /** Credential lifetime in seconds → `exp = iat + ttlSeconds`. */
   ttlSeconds: number

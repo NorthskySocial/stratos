@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * SWP-11 confinement guard.
+ * Confinement guard.
  *
  * Raw per-actor private key material must never leave `infra/signing/`. The
  * only APIs that hand back a `Keypair` carrying private material are the actor
