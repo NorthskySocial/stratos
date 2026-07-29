@@ -82,8 +82,9 @@
           "description": "The record key."
         },
         "cid": {
-          "type": "cid-link",
-          "description": "The CID of the current record value."
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the current record value."
         },
         "value": {
           "type": "unknown",
