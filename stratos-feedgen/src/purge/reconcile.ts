@@ -59,7 +59,13 @@ export async function reconcileEnrollments(
   configuredBoundaries: Set<string>,
   opts: ReconcileOptions = {},
 ): Promise<ReconcileSummary> {
-  const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE
+  // Guard the batching loop: a zero or negative batch size would never
+  // advance the loop index (an empty batch each pass - infinite loop).
+  // Treat non-positive values as unset and fall back to the default.
+  const batchSize =
+    opts.batchSize !== undefined && opts.batchSize > 0
+      ? opts.batchSize
+      : DEFAULT_BATCH_SIZE
   const maxActors = opts.maxActors ?? 0
   const log = deps.log ?? defaultLog
   const onError = deps.onError ?? defaultOnError

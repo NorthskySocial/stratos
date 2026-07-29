@@ -184,4 +184,26 @@ describe('reconcileEnrollments', () => {
       await store.getPost(`at://${VASH}/zone.stratos.feed.post/1`),
     ).not.toBeNull()
   })
+
+  it('falls back to the default batch size for non-positive batchSize', async () => {
+    // batchSize: 0 would never advance the batching loop (infinite loop);
+    // it must be treated as unset, and the run must still complete.
+    await store.upsertEnrolledActor(actor(VASH, ['crew']))
+    const client = {
+      resolveEnrollments: vi.fn(async (did: string) => ({
+        did,
+        enrolled: true,
+        boundaries: ['crew'],
+      })),
+    }
+    const purger = new Purger({ store, audit: () => {} })
+    for (const batchSize of [0, -5]) {
+      const summary = await reconcileEnrollments(
+        { store, purger, client, log: () => {} },
+        new Set(['crew']),
+        { batchSize },
+      )
+      expect(summary.examined).toBe(1)
+    }
+  })
 })
