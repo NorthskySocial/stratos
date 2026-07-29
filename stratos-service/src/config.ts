@@ -47,7 +47,8 @@ const envSchema = z
     STRATOS_AUTO_ENROLL_DOMAINS: commaListSchema,
     /**
      * Reserved all-members domain (bare name). Force-included in every
-     * enrollment's boundary set; must also appear in STRATOS_ALLOWED_DOMAINS.
+     * enrollment's boundary set and implicitly part of the allowed domains
+     * (listing it in STRATOS_ALLOWED_DOMAINS is optional).
      */
     STRATOS_RESERVED_DOMAIN: z.string().min(1).default('general'),
     STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
@@ -499,15 +500,17 @@ function loadServiceEnrollments(
 /**
  * Resolve and validate the reserved all-members domain at startup.
  *
- * The bare name must be a valid skey (it becomes the space `skey`), and its
- * service-qualified form must be within the allowed-domains set — otherwise the
- * reserved domain could never be granted to enrollments. Fails fast with a
- * clear message so a misconfiguration is caught at boot rather than at write
- * time.
+ * The bare name must be a valid skey (it becomes the space `skey`). The
+ * service-qualified form is implicitly part of the allowed-domains set: the
+ * reserved domain is force-included in every enrollment by design, so
+ * requiring operators to also list it in STRATOS_ALLOWED_DOMAINS only
+ * created an upgrade-time boot failure for deployments configured before the
+ * variable existed. Explicit listing remains supported and is a no-op.
  *
  * @param serviceDid - Bare service DID used to qualify the reserved name.
  * @param bareName - Reserved domain name from STRATOS_RESERVED_DOMAIN.
- * @param allowedDomains - Service-qualified allowed boundaries.
+ * @param allowedDomains - Service-qualified allowed boundaries (appended to
+ *   in place when the reserved domain is not already listed).
  * @returns The service-qualified reserved domain.
  */
 function resolveReservedDomain(
@@ -522,9 +525,7 @@ function resolveReservedDomain(
   }
   const reservedDomain = qualifyBoundary(serviceDid, bareName)
   if (!allowedDomains.includes(reservedDomain)) {
-    throw new Error(
-      `STRATOS_RESERVED_DOMAIN "${bareName}" must be listed in STRATOS_ALLOWED_DOMAINS (expected qualified "${reservedDomain}" among [${allowedDomains.join(', ')}])`,
-    )
+    allowedDomains.push(reservedDomain)
   }
   return reservedDomain
 }
