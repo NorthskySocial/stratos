@@ -107,57 +107,67 @@ export async function reconcileEnrollments(
         onError(entry.actor.did, entry.error)
         continue
       }
-      const { actor, fresh } = entry
-
-      if (!fresh.enrolled) {
-        const counts = await deps.purger.purgeActor(
-          actor.did,
-          'reconcile-unenroll',
-        )
-        summary.unenrolled++
-        summary.postsPurged += counts.posts
-        continue
-      }
-
-      // Still enrolled: purge any configured boundary the actor held before
-      // but no longer does, then refresh the persisted snapshot.
-      const freshSet = new Set(fresh.boundaries)
-      const lost = actor.boundaries.filter(
-        (b) => configuredBoundaries.has(b) && !freshSet.has(b),
-      )
-      if (lost.length > 0) {
-        summary.shrunk++
-        for (const boundary of lost) {
-          const counts = await deps.purger.purgeActorBoundary(
-            actor.did,
-            boundary,
-            'reconcile-boundary-shrink',
-          )
-          summary.postsPurged += counts.posts
-        }
-      }
-      // Persist EVERY fresh snapshot, not just shrinks: an expansion that is
-      // only held in memory would be invisible to the next reconcile, so a
-      // later revocation of the expanded boundary would diff against the
-      // stale persisted set and never purge it.
-      const persistedSet = new Set(actor.boundaries)
-      const changed =
-        lost.length > 0 ||
-        fresh.boundaries.length !== actor.boundaries.length ||
-        fresh.boundaries.some((b) => !persistedSet.has(b))
-      if (changed) {
-        await deps.store.upsertEnrolledActor({
-          did: actor.did,
-          boundaries: fresh.boundaries,
-          enrolledAt: actor.enrolledAt,
-          lastSeenAt: new Date().toISOString(),
-        })
-      }
+      await reconcileActor(deps, configuredBoundaries, entry, summary)
     }
   }
 
   log(summary)
   return summary
+}
+
+/**
+ * Apply one actor's fresh enrollment snapshot: purge on unenroll or boundary
+ * shrink, and persist any changed snapshot (including pure expansions - an
+ * expansion held only in memory would be invisible to the next reconcile, so
+ * a later revocation of the expanded boundary would diff against the stale
+ * persisted set and never purge it).
+ */
+async function reconcileActor(
+  deps: ReconcileDeps,
+  configuredBoundaries: Set<string>,
+  entry: { actor: EnrolledActor; fresh: ResolveEnrollmentsResult },
+  summary: ReconcileSummary,
+): Promise<void> {
+  const { actor, fresh } = entry
+
+  if (!fresh.enrolled) {
+    const counts = await deps.purger.purgeActor(actor.did, 'reconcile-unenroll')
+    summary.unenrolled++
+    summary.postsPurged += counts.posts
+    return
+  }
+
+  // Still enrolled: purge any configured boundary the actor held before but
+  // no longer does, then refresh the persisted snapshot.
+  const freshSet = new Set(fresh.boundaries)
+  const lost = actor.boundaries.filter(
+    (b) => configuredBoundaries.has(b) && !freshSet.has(b),
+  )
+  if (lost.length > 0) {
+    summary.shrunk++
+    for (const boundary of lost) {
+      const counts = await deps.purger.purgeActorBoundary(
+        actor.did,
+        boundary,
+        'reconcile-boundary-shrink',
+      )
+      summary.postsPurged += counts.posts
+    }
+  }
+
+  const persistedSet = new Set(actor.boundaries)
+  const changed =
+    lost.length > 0 ||
+    fresh.boundaries.length !== actor.boundaries.length ||
+    fresh.boundaries.some((b) => !persistedSet.has(b))
+  if (changed) {
+    await deps.store.upsertEnrolledActor({
+      did: actor.did,
+      boundaries: fresh.boundaries,
+      enrolledAt: actor.enrolledAt,
+      lastSeenAt: new Date().toISOString(),
+    })
+  }
 }
 
 function defaultLog(summary: ReconcileSummary): void {
