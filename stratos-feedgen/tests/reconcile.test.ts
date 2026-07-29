@@ -206,4 +206,49 @@ describe('reconcileEnrollments', () => {
       expect(summary.examined).toBe(1)
     }
   })
+
+  it('persists boundary expansions so a later shrink is purged', async () => {
+    // Run 1: fresh state EXPANDS from ['crew'] to ['crew', 'bounty'] - no
+    // loss detected, but the snapshot must still be persisted, otherwise the
+    // next run diffs against the stale set and never notices losing 'bounty'.
+    await store.upsertEnrolledActor(actor(FAYE, ['crew']))
+    const expandClient = {
+      resolveEnrollments: vi.fn(async (did: string) => ({
+        did,
+        enrolled: true,
+        boundaries: ['crew', 'bounty'],
+      })),
+    }
+    const purger = new Purger({ store, audit: () => {} })
+    await reconcileEnrollments(
+      { store, purger, client: expandClient, log: () => {} },
+      new Set(['crew', 'bounty']),
+    )
+    expect((await store.getEnrolledActor(FAYE))?.boundaries.sort()).toEqual(
+      ['bounty', 'crew'].sort(),
+    )
+
+    // Posts indexed under the expanded boundary while it was held.
+    await store.upsertPost(post(FAYE, '1', ['bounty']))
+
+    // Run 2: 'bounty' is revoked. Because the expansion was persisted, the
+    // diff sees the loss and purges the boundary's posts.
+    const shrinkClient = {
+      resolveEnrollments: vi.fn(async (did: string) => ({
+        did,
+        enrolled: true,
+        boundaries: ['crew'],
+      })),
+    }
+    const summary = await reconcileEnrollments(
+      { store, purger, client: shrinkClient, log: () => {} },
+      new Set(['crew', 'bounty']),
+    )
+    expect(summary.shrunk).toBe(1)
+    expect(summary.postsPurged).toBe(1)
+    expect(
+      await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
+    ).toBeNull()
+    expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual(['crew'])
+  })
 })

@@ -135,6 +135,17 @@ export async function reconcileEnrollments(
           )
           summary.postsPurged += counts.posts
         }
+      }
+      // Persist EVERY fresh snapshot, not just shrinks: an expansion that is
+      // only held in memory would be invisible to the next reconcile, so a
+      // later revocation of the expanded boundary would diff against the
+      // stale persisted set and never purge it.
+      const persistedSet = new Set(actor.boundaries)
+      const changed =
+        lost.length > 0 ||
+        fresh.boundaries.length !== actor.boundaries.length ||
+        fresh.boundaries.some((b) => !persistedSet.has(b))
+      if (changed) {
         await deps.store.upsertEnrolledActor({
           did: actor.did,
           boundaries: fresh.boundaries,
