@@ -1089,12 +1089,14 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The record key."
         },
         "cid": {
-          "type": "cid-link",
-          "description": "The CID of the current record value. Null (absent) for a delete."
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the current record value. Null (absent) for a delete."
         },
         "prev": {
-          "type": "cid-link",
-          "description": "The CID of the record value this operation superseded. Null (absent) for a create."
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the record value this operation superseded. Null (absent) for a create."
         },
         "value": {
           "type": "unknown",
