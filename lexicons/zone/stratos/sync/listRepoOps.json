@@ -54,12 +54,12 @@
             },
             "caughtUp": {
               "type": "boolean",
-              "description": "True when this response reached the end of the available log. When true, `commit` is present."
+              "description": "True when this response reached the end of the available log. When true, `commit` is present unless the repo has no commits yet."
             },
             "commit": {
               "type": "ref",
               "ref": "#signedCommit",
-              "description": "The repo's current signed MST commit. Required and present when caughtUp is true."
+              "description": "The repo's current signed MST commit. Present when caughtUp is true, EXCEPT for a repo with no commits yet (no writes) - in that case there is nothing to sign and also no ops to sync."
             }
           }
         }
