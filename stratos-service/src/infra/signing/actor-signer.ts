@@ -59,6 +59,15 @@ export class InProcessActorSigner implements ActorSigner {
     string,
     { key: Keypair; expiresAt: number }
   >()
+  /**
+   * Per-DID in-flight load-or-create. Neither store backend makes key creation
+   * idempotent (Postgres upserts a freshly generated key; SQLite rewrites the
+   * key file), so two concurrent first-use calls could each mint a key and
+   * return DIFFERENT keypairs — one caller would then sign with a key that no
+   * longer matches the persisted/public key. Serializing per DID makes all
+   * concurrent callers await the same load-or-create.
+   */
+  private readonly inflight = new Map<string, Promise<Keypair>>()
 
   constructor(
     private readonly actorStore: ActorStore,
@@ -92,12 +101,24 @@ export class InProcessActorSigner implements ActorSigner {
     return (bytes: Uint8Array) => this.sign(did, bytes)
   }
 
-  private async loadOrCreate(did: string): Promise<Keypair> {
+  private loadOrCreate(did: string): Promise<Keypair> {
     const now = Date.now()
     const cached = this.cache.get(did)
     if (cached && cached.expiresAt > now) {
-      return cached.key
+      return Promise.resolve(cached.key)
     }
+    const existing = this.inflight.get(did)
+    if (existing !== undefined) return existing
+
+    const pending = this.doLoadOrCreate(did, now)
+    this.inflight.set(did, pending)
+    // Release the slot after settle (success OR failure) so a failed load can
+    // be retried instead of poisoning every future call for this DID.
+    void pending.finally(() => this.inflight.delete(did))
+    return pending
+  }
+
+  private async doLoadOrCreate(did: string, now: number): Promise<Keypair> {
     // The ONLY place the private-key-returning key-store methods are called.
     const key =
       (await this.actorStore.loadSigningKey(did)) ??
