@@ -18,6 +18,30 @@ import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { decode } from '@atcute/cbor'
 
+// Spy PDS surfaces, attached to the REAL `Agent` constructor via a module
+// mock so a reintroduced PDS write anywhere in the write path is observed
+// (a locally constructed spy object would never be reached by product code).
+const { pdsCreateRecord, pdsDeleteRecord } = vi.hoisted(() => ({
+  pdsCreateRecord: vi.fn(async () => ({
+    data: { uri: 'at://pds/rec', cid: 'pdscid' },
+  })),
+  pdsDeleteRecord: vi.fn(async () => undefined),
+}))
+vi.mock('@atproto/api', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@atproto/api')>()
+  class MockAgent {
+    com = {
+      atproto: {
+        repo: {
+          createRecord: pdsCreateRecord,
+          deleteRecord: pdsDeleteRecord,
+        },
+      },
+    }
+  }
+  return { ...mod, Agent: MockAgent }
+})
+
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
 import {
   closeServiceDb,
@@ -37,10 +61,8 @@ describe('write path makes no outbound PDS round trip', () => {
   let db: ServiceDb
   let ctx: any
 
-  // Spy PDS surfaces. If any of these fire during a record write, the stub
-  // write path (or a regression that reintroduces it) is present.
-  let pdsCreateRecord: ReturnType<typeof vi.fn>
-  let pdsDeleteRecord: ReturnType<typeof vi.fn>
+  // Restoring an OAuth session is the first step of any PDS write; if the
+  // write path is clean it must never be reached during create/delete.
   let oauthRestore: ReturnType<typeof vi.fn>
 
   const testDid = 'did:plc:shinji-ikari'
@@ -67,10 +89,8 @@ describe('write path makes no outbound PDS round trip', () => {
     db = createServiceDb(join(dataDir, 'service.sqlite'))
     await migrateServiceDb(db)
 
-    pdsCreateRecord = vi.fn().mockResolvedValue({
-      data: { uri: 'at://pds/rec', cid: 'pdscid' },
-    })
-    pdsDeleteRecord = vi.fn().mockResolvedValue(undefined)
+    pdsCreateRecord.mockClear()
+    pdsDeleteRecord.mockClear()
     // Restoring an OAuth session is the first step of any PDS write; if the
     // write path is clean it must never be reached during create/delete.
     oauthRestore = vi
@@ -165,11 +185,5 @@ describe('write path makes no outbound PDS round trip', () => {
     expect(oauthRestore).not.toHaveBeenCalled()
     expect(pdsCreateRecord).not.toHaveBeenCalled()
     expect(pdsDeleteRecord).not.toHaveBeenCalled()
-  })
-
-  it('context exposes no PDS-write queue on the record write path', () => {
-    // The stub write path was wired through `ctx.stubQueue`; its removal means
-    // no such queue exists to enqueue outbound PDS writes.
-    expect((ctx as Record<string, unknown>).stubQueue).toBeUndefined()
   })
 })
