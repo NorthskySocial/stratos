@@ -1,8 +1,21 @@
 // Backend abstraction for E2E database operations.
 // Delegates to SQLite (db.ts) or PostgreSQL (pg-db.ts) based on the
 // STRATOS_E2E_BACKEND environment variable.
+//
+// Boundary writes mirror the service's reserved-domain invariant: the service
+// force-includes the reserved all-members domain on every enrollment write
+// (ReservedDomainEnrollmentStore), so direct DB writes must do the same or
+// direct-mode state diverges from what OAuth enrollment produces.
 
 import * as sqliteDb from './db.ts'
+import { RESERVED_DOMAIN } from './config.ts'
+
+/** Union the reserved all-members domain into a requested boundary set. */
+function withReserved(boundaries: string[] = []): string[] {
+  return boundaries.includes(RESERVED_DOMAIN)
+    ? boundaries
+    : [...boundaries, RESERVED_DOMAIN]
+}
 
 export type Backend = 'sqlite' | 'postgres'
 
@@ -46,11 +59,12 @@ export async function enrollUser(
   pdsEndpoint?: string,
   boundaries?: string[],
 ): Promise<void> {
+  const effective = withReserved(boundaries)
   if (isPostgres()) {
     const pg = await loadPgDb()
-    await pg.enrollUser(did, pdsEndpoint, boundaries)
+    await pg.enrollUser(did, pdsEndpoint, effective)
   } else {
-    sqliteDb.enrollUser(did, pdsEndpoint, boundaries)
+    sqliteDb.enrollUser(did, pdsEndpoint, effective)
   }
 }
 
@@ -67,11 +81,12 @@ export async function setBoundaries(
   did: string,
   boundaries: string[],
 ): Promise<void> {
+  const effective = withReserved(boundaries)
   if (isPostgres()) {
     const pg = await loadPgDb()
-    await pg.setBoundaries(did, boundaries)
+    await pg.setBoundaries(did, effective)
   } else {
-    sqliteDb.setBoundaries(did, boundaries)
+    sqliteDb.setBoundaries(did, effective)
   }
 }
 
