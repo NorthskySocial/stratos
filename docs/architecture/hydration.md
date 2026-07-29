@@ -112,11 +112,20 @@ boundaries.
 The `source.cid` returned on hydration allows AppViews to verify the hydrated record hasn't changed:
 
 ```typescript
-// AppView verification after hydrating
-if (hydratedRecord.cid !== hydratedRecord.source.subject.cid) {
+// AppView verification after hydrating: recompute the CID from the returned
+// record content and compare it against the source reference.
+const computedCid = await cidForCbor(hydratedRecord.value)
+if (computedCid.toString() !== hydratedRecord.source.subject.cid) {
   throw new Error('Record CID mismatch — content may have been tampered with')
 }
 ```
+
+Note the limits of this check: both the record value and `source.subject.cid` come from the same
+service response, so recomputing the CID proves the response is **internally consistent** (the
+content matches the reference the service claims for it) — it does not by itself prove
+**authenticity**. For that, fetch the record proof (`com.atproto.sync.getRecord`, which returns
+the signed commit and MST inclusion proof) and verify the commit signature against the user's
+enrolled signing key from the attestation chain below.
 
 Combined with the enrollment attestation
 system ([Enrollment Signing](/architecture/enrollment-signing)), this gives AppViews a complete
