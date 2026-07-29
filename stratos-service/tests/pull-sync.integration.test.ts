@@ -151,7 +151,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
   // ── op shapes & ordering ─────────────────────────────────────────────────
 
   describe('listRepoOps op shapes', () => {
-    it('emits create/update/delete with correct cid/prev nullability, in order', async () => {
+    it('emits create/update/delete with correct cid/prev presence, in order', async () => {
       await actorStore.create(repoDid)
       await appendEvent(repoDid, REV.r1, [
         { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'cidA1' },
@@ -185,18 +185,20 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         REV.r3,
         REV.r3,
       ])
-      // create: cid present, prev null
+      // create: cid present, prev ABSENT (optional lexicon fields are omitted,
+      // never null - the XRPC output validator rejects explicit nulls)
       expect(res.ops[0]).toMatchObject({
         collection: 'zone.stratos.feed.post',
         rkey: 'a',
         cid: 'cidA1',
-        prev: null,
       })
-      // update: cid present (prev null here since prior value not in-window)
+      expect(res.ops[0].prev).toBeUndefined()
+      // update: cid present (prev absent here since prior value not in-window)
       expect(res.ops[1]).toMatchObject({ rkey: 'b', cid: 'cidB1' })
-      // delete: cid null
+      // delete: cid absent
       const del = res.ops.find((o) => o.rkey === 'c')!
-      expect(del).toMatchObject({ rkey: 'c', cid: null, rev: REV.r3 })
+      expect(del).toMatchObject({ rkey: 'c', rev: REV.r3 })
+      expect(del.cid).toBeUndefined()
     })
 
     it('fail-closed: a delete-only event (no boundary in blob) is dropped', async () => {
@@ -678,10 +680,19 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       expect(res.commit).toBeDefined()
       expect(res.commit!.rev).toBe(commit!.rev)
 
-      // Verify the signature against the actor's known public key.
-      const { sig, ...rest } = res.commit as any
-      const unsignedBytes = encodeCbor(rest)
-      const sigBytes = fromBytes(sig)
+      // Verify the signature against the actor's known public key. The wire
+      // commit carries CIDs as strings and the sig as base64; rebuild the
+      // exact unsigned CBOR the signer produced ({did, version, data: $link,
+      // rev, prev: null}) and decode the sig from its base64 form.
+      const wire = res.commit!
+      const unsignedBytes = encodeCbor({
+        did: wire.did,
+        version: wire.version,
+        data: { $link: wire.data },
+        rev: wire.rev,
+        prev: null,
+      })
+      const sigBytes = fromBytes({ $bytes: wire.sig })
       const verified = await verifySignature(
         keypair.did(),
         unsignedBytes,
