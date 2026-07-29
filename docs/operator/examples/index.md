@@ -27,7 +27,8 @@ Copy the environment template, fill in the required values, then start the stack
 ```bash
 cp .env.example .env
 # edit .env — at minimum set STRATOS_SERVICE_DID, STRATOS_PUBLIC_URL,
-# STRATOS_ALLOWED_DOMAINS, and STRATOS_SYNC_TOKEN
+# STRATOS_ALLOWED_DOMAINS, STRATOS_SYNC_TOKEN, and (for the bundled
+# indexer) BSKY_DB_POSTGRES_URL
 docker compose up -d
 ```
 
