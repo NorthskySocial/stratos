@@ -28,9 +28,11 @@ function makeStore(opts: {
 
 describe('InProcessActorSigner', () => {
   it('serializes concurrent first-use so all callers get the SAME key', async () => {
-    // Neither backend makes creation idempotent - each create call would mint
-    // a fresh key. Gate the first load so both callers arrive before any
-    // create resolves, exactly the race that could persist two keys.
+    // The production backends implement atomic create-if-absent, so this stub
+    // is deliberately ADVERSARIAL (each create mints a fresh key) to prove
+    // the signer's own in-process coalescing works without relying on the
+    // store's guarantees. Gate the first load so both callers arrive before
+    // any create resolves - exactly the race being coalesced.
     let releaseLoad: () => void = () => {}
     const loadGate = new Promise<void>((resolve) => {
       releaseLoad = resolve
