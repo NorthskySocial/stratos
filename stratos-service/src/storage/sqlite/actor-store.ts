@@ -432,16 +432,30 @@ export class StratosActorStore implements ActorStore {
   }
 
   /**
-   * Create a signing key for an actor with the given DID.
+   * Create the signing key for an actor if absent (atomic create-if-absent).
+   *
+   * Concurrency: the key file is written with the exclusive `wx` flag, so
+   * when two callers race the first-use creation exactly one file is written
+   * and BOTH callers return that key - the loser discards its freshly
+   * generated keypair and imports the winner's. An existing key is never
+   * overwritten.
+   *
    * @param did - The DID of the actor.
-   * @returns A Promise resolving to the created P256Keypair.
+   * @returns A Promise resolving to the persisted P256Keypair.
    */
   async createSigningKey(did: string): Promise<crypto.P256Keypair> {
     const { directory } = await this.getLocation(did)
     const keyPath = path.join(directory, 'signing_key')
     const keypair = await crypto.P256Keypair.create({ exportable: true })
     const exported = await (keypair as crypto.ExportableKeypair).export()
-    await fs.writeFile(keyPath, exported)
+    try {
+      await fs.writeFile(keyPath, exported, { flag: 'wx' })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      // Lost the race (or the key already existed): return the persisted key.
+      const keyBytes = await fs.readFile(keyPath)
+      return crypto.P256Keypair.import(keyBytes, { exportable: true })
+    }
     return keypair
   }
 
