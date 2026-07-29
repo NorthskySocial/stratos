@@ -146,27 +146,33 @@ export class PgFeedgenStore implements FeedgenStore {
     boundary: string,
   ): Promise<number> {
     return this.db.transaction(async (tx) => {
+      // Only posts that actually held `boundary` are candidates for orphan
+      // deletion - a pre-existing boundaryless post for this DID must not be
+      // swept up by dropping an unrelated boundary.
+      const candidates = await tx
+        .select({ uri: postBoundaryTbl.uri })
+        .from(postBoundaryTbl)
+        .innerJoin(postTbl, eq(postTbl.uri, postBoundaryTbl.uri))
+        .where(
+          and(eq(postTbl.did, did), eq(postBoundaryTbl.boundary, boundary)),
+        )
+      if (candidates.length === 0) return 0
+      const uris = candidates.map((c) => c.uri)
       // Drop this DID's membership in `boundary` from the index.
       await tx
         .delete(postBoundaryTbl)
         .where(
           and(
             eq(postBoundaryTbl.boundary, boundary),
-            inArray(
-              postBoundaryTbl.uri,
-              tx
-                .select({ uri: postTbl.uri })
-                .from(postTbl)
-                .where(eq(postTbl.did, did)),
-            ),
+            inArray(postBoundaryTbl.uri, uris),
           ),
         )
-      // Delete any of this DID's posts now left with no boundary rows at all.
+      // Delete only those candidates now left with no boundary rows at all.
       const deleted = await tx
         .delete(postTbl)
         .where(
           and(
-            eq(postTbl.did, did),
+            inArray(postTbl.uri, uris),
             sql`NOT EXISTS (SELECT 1 FROM post_boundary pb WHERE pb.uri = ${postTbl.uri})`,
           ),
         )

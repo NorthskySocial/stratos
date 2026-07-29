@@ -358,6 +358,30 @@ export function describeStoreContract(
         expect(inGone.posts.map((p) => p.uri)).toEqual([`at://${FAYE_DID}/p/1`])
       })
 
+      it('deletePostsByDidBoundary leaves pre-existing boundaryless posts alone', async () => {
+        // p1 never referenced the dropped boundary and has no boundaries at
+        // all - it must not be swept up by the orphan check.
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: [] }),
+        )
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/2`, boundaries: ['gone'] }),
+        )
+        const deleted = await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')
+        expect(deleted).toBe(1)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/2`)).toBeNull()
+        // The boundaryless post survives.
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
+      })
+
+      it('deletePostsByDidBoundary returns 0 when the DID holds no posts in the boundary', async () => {
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: [] }),
+        )
+        expect(await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')).toBe(0)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
+      })
+
       it('deletePostsByBoundary removes every actor post in a boundary service-wide', async () => {
         await store.upsertPost(
           makePost({
