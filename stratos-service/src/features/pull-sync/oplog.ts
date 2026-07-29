@@ -367,6 +367,13 @@ export async function listRepoOps(
     if (cursorSeq === null) {
       throw new OplogTruncatedError('malformed cursor')
     }
+    // The next event we owe the caller is `cursorSeq + 1`. If compaction has
+    // advanced past it between pages, the intervening ops are gone — silently
+    // resuming would skip them and report a false caught-up. Fail closed into
+    // full-state recovery.
+    if (bounds === null || bounds.oldestSeq > cursorSeq + 1) {
+      throw new OplogTruncatedError('cursor predates retained history')
+    }
     startSeq = cursorSeq
     // A cursor is only ever issued AFTER `since` was located, so continuing
     // from a cursor means we are already past the `since` boundary.

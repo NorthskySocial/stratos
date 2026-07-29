@@ -386,6 +386,80 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         ),
       ).rejects.toBeInstanceOf(OplogTruncatedError)
     })
+
+    it('throws OplogTruncated when compaction advanced past a page cursor', async () => {
+      // Simulate a log whose retained history starts at seq 10 (everything
+      // earlier compacted away) while the caller resumes from a cursor issued
+      // before the compaction. Silently resuming would skip the trimmed ops
+      // and report a false caught-up.
+      const rows = [10, 11, 12].map((seq, i) => ({
+        seq,
+        did: repoDid,
+        eventType: 'append',
+        event: Buffer.from(
+          encodeRecord({
+            rev: `3zzzz00000${i}t1`,
+            ops: [
+              {
+                action: 'create',
+                path: `zone.stratos.feed.post/r${seq}`,
+                cid: `cid${seq}`,
+                record: {
+                  text: 'hello',
+                  boundary: { values: [{ value: 'nerv' }] },
+                },
+              },
+            ],
+          }),
+        ),
+        invalidated: 0,
+        sequencedAt: new Date().toISOString(),
+      }))
+      const compactedCtx = {
+        ...ctx,
+        actorStore: {
+          exists: async () => true,
+          read: async (_did: string, fn: (store: unknown) => unknown) =>
+            fn({
+              sequence: {
+                getOldestSeq: async () => 10,
+                getLatestSeq: async () => 12,
+                getEventsSince: async (after: number, limit = 100) =>
+                  rows.filter((r) => r.seq > after).slice(0, limit),
+              },
+              // No commits yet - the caught-up path tolerates a missing root.
+              repo: { getRootDetailed: async () => null },
+            }),
+        },
+      }
+
+      await expect(
+        listRepoOps(
+          compactedCtx,
+          {
+            did: repoDid,
+            cursor: encodeSeqCursor(3),
+            limit: 100,
+            excludeValues: false,
+          },
+          callerSet('nerv'),
+        ),
+      ).rejects.toBeInstanceOf(OplogTruncatedError)
+
+      // A cursor at the compaction edge (next owed = oldest retained) is
+      // still a valid resume point.
+      const ok = await listRepoOps(
+        compactedCtx,
+        {
+          did: repoDid,
+          cursor: encodeSeqCursor(9),
+          limit: 100,
+          excludeValues: false,
+        },
+        callerSet('nerv'),
+      )
+      expect(ok.ops).toHaveLength(3)
+    })
   })
 
   // ── adversarial boundary gating ──────────────────────────────────────────
