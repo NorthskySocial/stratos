@@ -151,6 +151,52 @@ describe('EnrollmentManager', () => {
     })
   })
 
+  describe('invalidate vs in-flight fetch race', () => {
+    it('does not re-cache a result fetched before the invalidation', async () => {
+      let resolveCall: (value: ResolveEnrollmentsResult) => void = () => {}
+      const pending = new Promise<ResolveEnrollmentsResult>((resolve) => {
+        resolveCall = resolve
+      })
+      const client = {
+        resolveEnrollments: vi.fn(async () => pending),
+      }
+      const mgr = new EnrollmentManager({ client })
+
+      // A resolve starts (pre-revocation boundary set still upstream) ...
+      const inflight = mgr.getBoundaries(SPIKE)
+      // ... the revocation lands and invalidates ...
+      mgr.invalidate(SPIKE)
+      // ... then the stale fetch completes.
+      resolveCall({
+        did: SPIKE,
+        enrolled: true,
+        boundaries: ['cowboybebop.tv/bounty'],
+      })
+      // The raced caller still gets the value it fetched ...
+      expect(await inflight).toEqual(['cowboybebop.tv/bounty'])
+
+      // ... but the cache was NOT repopulated with it: the next lookup goes
+      // back upstream instead of serving the pre-revocation set for a TTL.
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(1)
+      void mgr.getBoundaries(SPIKE)
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(2)
+    })
+
+    it('still caches normally when no invalidation raced the fetch', async () => {
+      const client = makeClient((did) => ({
+        did,
+        enrolled: true,
+        boundaries: ['anime.tv/season'],
+      }))
+      const mgr = new EnrollmentManager({ client })
+
+      mgr.invalidate(VASH)
+      expect(await mgr.getBoundaries(VASH)).toEqual(['anime.tv/season'])
+      expect(await mgr.getBoundaries(VASH)).toEqual(['anime.tv/season'])
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('LRU eviction', () => {
     it('evicts the oldest entry when max is exceeded', async () => {
       const client = makeClient((did) => ({
