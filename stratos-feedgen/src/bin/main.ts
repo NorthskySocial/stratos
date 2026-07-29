@@ -137,8 +137,6 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     },
   )
   pool.start()
-  const seeded = await pool.seedFromStore(configuredBoundaries)
-  console.log(`actor pool seeded with ${seeded} actors`)
 
   const purger = new Purger({
     store,
@@ -163,6 +161,13 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       `(${summary.unenrolled} unenrolled, ${summary.shrunk} shrunk, ` +
       `${summary.postsPurged} posts purged, ${summary.errors} errors)`,
   )
+
+  // Seed only AFTER reconciliation so the snapshot already reflects
+  // revocations that landed while the feedgen was down - otherwise an actor
+  // whose boundaries were revoked would enter the live pool from the stale
+  // snapshot and keep syncing until the next restart.
+  const seeded = await pool.seedFromStore(configuredBoundaries)
+  console.log(`actor pool seeded with ${seeded} actors`)
 
   // Apply an actor's current boundary set: purge derived state for any
   // configured boundary the actor left, refresh the enrolled-actor snapshot,
