@@ -7,6 +7,7 @@ import { encodeRecord } from '@northskysocial/stratos-core'
 import { decode } from '@atcute/cbor'
 
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
+import type { AppContext } from '../src/context.js'
 import {
   closeServiceDb,
   createServiceDb,
@@ -45,7 +46,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
   let actorStore: StratosActorStore
   let enrollmentStore: SqliteEnrollmentStore
   let db: ServiceDb
-  let ctx: any
+  let ctx: AppContext
 
   const repoDid = 'did:plc:shinji-ikari'
   const serviceDid = 'did:web:nerv.tokyo.jp'
@@ -77,7 +78,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         error: vi.fn(),
         warn: vi.fn(),
       },
-    }
+    } as unknown as AppContext
   })
 
   afterEach(async () => {
@@ -431,7 +432,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
               repo: { getRootDetailed: async () => null },
             }),
         },
-      }
+      } as unknown as AppContext
 
       await expect(
         listRepoOps(
