@@ -266,8 +266,10 @@ export async function unenroll(callerDid: string): Promise<void> {
   const res = await fetch(`${baseUrl}/xrpc/zone.stratos.enrollment.unenroll`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${callerDid}`,
     },
+    body: JSON.stringify({}),
   })
 
   if (!res.ok) {

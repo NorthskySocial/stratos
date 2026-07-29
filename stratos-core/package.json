@@ -80,5 +80,37 @@
     "dist",
     "src"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/",
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./atproto": {
+        "types": "./dist/atproto/index.d.ts",
+        "import": "./dist/atproto/index.js"
+      },
+      "./validation": {
+        "types": "./dist/validation/index.d.ts",
+        "import": "./dist/validation/index.js"
+      },
+      "./db": {
+        "types": "./dist/db/index.d.ts",
+        "import": "./dist/db/index.js"
+      },
+      "./db/pg": {
+        "types": "./dist/db/pg.d.ts",
+        "import": "./dist/db/pg.js"
+      },
+      "./enrollment": {
+        "types": "./dist/enrollment/index.d.ts",
+        "import": "./dist/enrollment/index.js"
+      }
+    }
+  }
 }

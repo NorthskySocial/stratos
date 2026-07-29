@@ -155,8 +155,8 @@ const envSchema = z
     // PLC directory
     STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
 
-    // Admin auth (optional)
-    STRATOS_ADMIN_PASSWORD: z.string().optional(),
+    // Admin auth: comma-separated list of admin DIDs (OAuth-authorized operators)
+    STRATOS_ADMIN_DIDS: z.string().optional(),
     // External allowlist (optional)
     STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
     STRATOS_VALKEY_URL: z.string().url().optional(),
@@ -301,9 +301,7 @@ export interface StratosServiceConfig {
   logging: {
     level: string
   }
-  admin?: {
-    password: string
-  }
+  adminDids: string[]
   dpop: {
     requireNonce: boolean
   }
@@ -635,11 +633,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
     logging: {
       level: env.LOG_LEVEL,
     },
-    admin: env.STRATOS_ADMIN_PASSWORD
-      ? {
-          password: env.STRATOS_ADMIN_PASSWORD,
-        }
-      : undefined,
+    adminDids: (env.STRATOS_ADMIN_DIDS ?? '')
+      .split(',')
+      .map((d) => d.trim())
+      .filter((d) => d.length > 0),
     dpop: {
       requireNonce: env.STRATOS_DPOP_REQUIRE_NONCE,
     },
@@ -648,6 +645,89 @@ export function envToConfig(env: Env): StratosServiceConfig {
       operatorContact: env.STRATOS_OPERATOR_CONTACT,
     },
   }
+}
+
+/**
+ * Determine whether a request Origin may receive credentialed
+ * (cookie-bearing) CORS responses.
+ *
+ * Reflected-origin + credentials is unsafe once an admin session cookie
+ * exists: any site could ride the session. Only the service's own origin
+ * (where the admin UI is served same-origin) and, in dev mode, loopback
+ * origins are trusted with credentials. The DPoP/XRPC surface does not rely
+ * on cookies and is handled separately (non-credentialed, any origin).
+ *
+ * @param origin - The request `Origin` header value (may be undefined)
+ * @param config - Service public URL and dev-mode flag
+ * @returns true if the origin may receive credentialed responses
+ */
+export function isAllowedCredentialedOrigin(
+  origin: string | undefined,
+  config: { publicUrl: string; devMode: boolean },
+): boolean {
+  if (!origin) return false
+
+  let originUrl: URL
+  try {
+    originUrl = new URL(origin)
+  } catch {
+    return false
+  }
+
+  try {
+    const serviceUrl = new URL(config.publicUrl)
+    if (originUrl.origin === serviceUrl.origin) return true
+  } catch {
+    // publicUrl unparseable; fall through to dev check
+  }
+
+  if (config.devMode) {
+    const host = originUrl.hostname
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * CSRF defense for cookie-authenticated admin requests.
+ *
+ * The primary CSRF gate is the admin session cookie's `SameSite=Strict`
+ * attribute: a forged cross-site request never carries the cookie, so it fails
+ * the downstream session check regardless of this function. This Origin/Referer
+ * screen is defense in depth on top of that — a same-site sub-origin or a
+ * SameSite-relaxing proxy is still rejected here unless it resolves to an
+ * allowlisted credentialed origin.
+ *
+ * Requests with no Origin and no Referer (e.g. same-origin server-to-server
+ * admin tooling) are allowed through: a browser cross-site POST always carries
+ * an `Origin`, so the no-header case cannot be a browser-driven forgery, and the
+ * SameSite cookie remains the gate. Blocking it would break legitimate
+ * non-browser admin callers for no security gain.
+ *
+ * @returns true if the request may proceed past CSRF screening
+ */
+export function passesAdminCsrfCheck(
+  req: import('node:http').IncomingMessage,
+  config: { publicUrl: string; devMode: boolean },
+): boolean {
+  const origin = req.headers?.origin
+  if (origin) {
+    return isAllowedCredentialedOrigin(origin, config)
+  }
+
+  const referer = req.headers?.referer
+  if (referer) {
+    try {
+      return isAllowedCredentialedOrigin(new URL(referer).origin, config)
+    } catch {
+      return false
+    }
+  }
+
+  return true
 }
 
 /**

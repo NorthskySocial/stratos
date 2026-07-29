@@ -6,6 +6,25 @@ import type { EnrollmentEventEmitter } from '../src'
 import type { EnrollmentStore } from '../src/oauth'
 import { registerEnrollmentHandlers } from '../src/features'
 
+// The boundary handlers write the user's PDS enrollment record through an
+// `Agent` constructed inside `updatePdsEnrollmentRecord`. Stub it so the PDS
+// write is deterministic: by default it succeeds (pdsSync: 'ok'); a failure is
+// injected per-test by making `oauthClient.restore` throw before the Agent is
+// ever built. The mock must be a real constructor (class), not an arrow
+// function — `new Agent(...)` would otherwise throw "not a constructor".
+vi.mock('@atproto/api', () => ({
+  Agent: class {
+    com = {
+      atproto: {
+        repo: {
+          putRecord: async () => ({}),
+        },
+      },
+    }
+    constructor(_session: unknown) {}
+  },
+}))
+
 interface MockResponse {
   statusCode: number
   body: unknown
@@ -76,6 +95,7 @@ function createMockStore(
 function createCtx(opts: {
   enrollmentStore?: Partial<EnrollmentStore>
   adminAuthFails?: boolean
+  pdsWriteFails?: boolean
 }): {
   ctx: AppContext
   enrollmentStore: EnrollmentStore
@@ -107,7 +127,13 @@ function createCtx(opts: {
         credentials: { did: null },
       })),
     },
-    oauthClient: { restore: vi.fn(async () => ({})) },
+    oauthClient: {
+      restore: opts.pdsWriteFails
+        ? vi.fn(async () => {
+            throw new Error('oauth session expired')
+          })
+        : vi.fn(async () => ({})),
+    },
     serviceDid: 'did:web:stratos.example.com',
     createAttestation: vi.fn(async () => ({
       sig: new Uint8Array([1, 2, 3]),
@@ -153,13 +179,32 @@ describe('admin boundary endpoints', () => {
         { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
       )
       expect(res.statusCode).toBe(200)
-      const body = res.body as { did: string; boundaries: string[] }
+      const body = res.body as {
+        did: string
+        boundaries: string[]
+        pdsSync: string
+      }
       expect(body.did).toBe('did:plc:usagi')
       expect(body.boundaries).toBeDefined()
+      expect(body.pdsSync).toBe('ok')
       expect(enrollmentStore.addBoundary).toHaveBeenCalledWith(
         'did:plc:usagi',
         'did:web:nerv.tokyo.jp/bees',
       )
+    })
+
+    it('reports pdsSync failed but still applies the local change on PDS write failure', async () => {
+      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.addBoundary',
+        { did: 'did:plc:usagi', boundary: 'did:web:nerv.tokyo.jp/bees' },
+      )
+      expect(res.statusCode).toBe(200)
+      const body = res.body as { boundaries: string[]; pdsSync: string }
+      expect(body.pdsSync).toBe('failed')
+      // The local store mutation is still applied; only PDS propagation failed.
+      expect(enrollmentStore.addBoundary).toHaveBeenCalled()
     })
 
     it('rejects unauthenticated requests', async () => {
@@ -224,12 +269,32 @@ describe('admin boundary endpoints', () => {
         },
       )
       expect(res.statusCode).toBe(200)
-      const body = res.body as { did: string; boundaries: string[] }
+      const body = res.body as {
+        did: string
+        boundaries: string[]
+        pdsSync: string
+      }
       expect(body.did).toBe('did:plc:usagi')
+      expect(body.pdsSync).toBe('ok')
       expect(enrollmentStore.removeBoundary).toHaveBeenCalledWith(
         'did:plc:usagi',
         'did:web:nerv.tokyo.jp/posters-madness',
       )
+    })
+
+    it('reports pdsSync failed on PDS write failure', async () => {
+      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.removeBoundary',
+        {
+          did: 'did:plc:usagi',
+          boundary: 'did:web:nerv.tokyo.jp/posters-madness',
+        },
+      )
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('failed')
+      expect(enrollmentStore.removeBoundary).toHaveBeenCalled()
     })
 
     it('rejects unauthenticated requests', async () => {
@@ -276,12 +341,32 @@ describe('admin boundary endpoints', () => {
         },
       )
       expect(res.statusCode).toBe(200)
-      const body = res.body as { did: string; boundaries: string[] }
+      const body = res.body as {
+        did: string
+        boundaries: string[]
+        pdsSync: string
+      }
       expect(body.did).toBe('did:plc:usagi')
+      expect(body.pdsSync).toBe('ok')
       expect(enrollmentStore.setBoundaries).toHaveBeenCalledWith(
         'did:plc:usagi',
         ['did:web:nerv.tokyo.jp/bees', 'did:web:nerv.tokyo.jp/plants'],
       )
+    })
+
+    it('reports pdsSync failed on PDS write failure', async () => {
+      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.setBoundaries',
+        {
+          did: 'did:plc:usagi',
+          boundaries: ['did:web:nerv.tokyo.jp/bees'],
+        },
+      )
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('failed')
+      expect(enrollmentStore.setBoundaries).toHaveBeenCalled()
     })
 
     it('allows setting empty boundaries', async () => {

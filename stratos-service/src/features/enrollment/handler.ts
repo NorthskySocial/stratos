@@ -1,4 +1,4 @@
-import { type Request, type Response } from 'express'
+import express, { type Request, type Response } from 'express'
 import { Agent } from '@atproto/api'
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
 import { type Enrollment } from '@northskysocial/stratos-core'
@@ -266,15 +266,26 @@ function registerAdminBoundaryHandlers(ctx: AppContext): void {
 }
 
 /**
+ * JSON body parser for the admin boundary routes. The global parser in
+ * index.ts skips every `/xrpc/` path (xrpc-server parses those), but these
+ * admin routes are raw express handlers registered under `/xrpc/`, so they
+ * must parse their own JSON body or `req.body` is undefined.
+ */
+const adminJsonParser = express.json({ limit: '100kb' })
+
+/**
  * Register handler for adding a boundary
  * @param ctx - Application context
  */
 function registerAddBoundaryHandler(ctx: AppContext): void {
   ctx.app.post(
     '/xrpc/zone.stratos.admin.addBoundary',
+    adminJsonParser,
     async (req: Request, res: Response) => {
+      let adminDid: string
       try {
-        await ctx.authVerifier.admin({ req, res })
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
       } catch {
         return res
           .status(401)
@@ -316,17 +327,22 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
+        let pdsSync: 'ok' | 'failed' = 'ok'
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
         } catch (err) {
+          pdsSync = 'failed'
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to update PDS enrollment record after addBoundary',
           )
         }
 
-        ctx.logger?.info({ did, boundary }, 'admin added boundary')
-        res.json({ did, boundaries })
+        ctx.logger?.info(
+          { adminDid, targetDid: did, boundary, pdsSync },
+          'admin added boundary',
+        )
+        res.json({ did, boundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
@@ -349,9 +365,12 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
   // POST /xrpc/zone.stratos.admin.removeBoundary
   ctx.app.post(
     '/xrpc/zone.stratos.admin.removeBoundary',
+    adminJsonParser,
     async (req: Request, res: Response) => {
+      let adminDid: string
       try {
-        await ctx.authVerifier.admin({ req, res })
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
       } catch {
         return res
           .status(401)
@@ -385,17 +404,22 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
+        let pdsSync: 'ok' | 'failed' = 'ok'
         try {
           await updatePdsEnrollmentRecord(ctx, did, boundaries)
         } catch (err) {
+          pdsSync = 'failed'
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to update PDS enrollment record after removeBoundary',
           )
         }
 
-        ctx.logger?.info({ did, boundary }, 'admin removed boundary')
-        res.json({ did, boundaries })
+        ctx.logger?.info(
+          { adminDid, targetDid: did, boundary, pdsSync },
+          'admin removed boundary',
+        )
+        res.json({ did, boundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
@@ -417,9 +441,12 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
 function registerSetBoundariesHandler(ctx: AppContext): void {
   ctx.app.post(
     '/xrpc/zone.stratos.admin.setBoundaries',
+    adminJsonParser,
     async (req: Request, res: Response) => {
+      let adminDid: string
       try {
-        await ctx.authVerifier.admin({ req, res })
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
       } catch {
         return res
           .status(401)
@@ -468,9 +495,11 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
 
         emitBoundaryChangeEvent(ctx, did, effectiveBoundaries, priorBoundaries)
 
+        let pdsSync: 'ok' | 'failed' = 'ok'
         try {
           await updatePdsEnrollmentRecord(ctx, did, effectiveBoundaries)
         } catch (err) {
+          pdsSync = 'failed'
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to update PDS enrollment record after setBoundaries',
@@ -478,10 +507,15 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
         }
 
         ctx.logger?.info(
-          { did, boundaryCount: effectiveBoundaries.length },
+          {
+            adminDid,
+            targetDid: did,
+            boundaryCount: effectiveBoundaries.length,
+            pdsSync,
+          },
           'admin set boundaries',
         )
-        res.json({ did, boundaries: effectiveBoundaries })
+        res.json({ did, boundaries: effectiveBoundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },

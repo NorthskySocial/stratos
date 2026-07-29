@@ -13,6 +13,13 @@ export const pgOauthState = pgTable('oauth_state', {
   createdAt: text('createdAt').notNull(),
 })
 
+export const pgAdminSession = pgTable('admin_session', {
+  key: text('key').primaryKey(),
+  did: text('did').notNull(),
+  createdAt: text('createdAt').notNull(),
+  expiresAt: text('expiresAt').notNull(),
+})
+
 export const pgEnrollment = pgTable('enrollment', {
   did: text('did').primaryKey(),
   enrolledAt: text('enrolledAt').notNull(),
@@ -39,6 +46,8 @@ export type PgOAuthSession = typeof pgOauthSession.$inferSelect
 export type PgNewOAuthSession = typeof pgOauthSession.$inferInsert
 export type PgOAuthState = typeof pgOauthState.$inferSelect
 export type PgNewOAuthState = typeof pgOauthState.$inferInsert
+export type PgAdminSession = typeof pgAdminSession.$inferSelect
+export type PgNewAdminSession = typeof pgAdminSession.$inferInsert
 export type PgEnrollment = typeof pgEnrollment.$inferSelect
 export type PgNewEnrollment = typeof pgEnrollment.$inferInsert
 export type PgEnrollmentBoundary = typeof pgEnrollmentBoundary.$inferSelect

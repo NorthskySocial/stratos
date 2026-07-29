@@ -16,10 +16,15 @@ import {
   destroyAppContext,
 } from './context.js'
 import { createLogger } from './logger.js'
-import { envToConfig, parseEnv, type StratosServiceConfig } from './config.js'
+import {
+  envToConfig,
+  isAllowedCredentialedOrigin,
+  parseEnv,
+  type StratosServiceConfig,
+} from './config.js'
 import { registerHandlers } from './api'
 import { registerSubscribeRecords } from './subscription'
-import { createOAuthRoutes } from './oauth'
+import { createAdminAuthRoutes, createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
 import { signAndPersistCommit, StratosBlockStoreReader } from './features'
 import { reconcileServiceEnrollments } from './features/enrollment'
@@ -96,24 +101,35 @@ export class StratosServer {
     })
 
     app.use(
-      cors({
-        origin: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
-        allowedHeaders: [
-          'Authorization',
-          'Content-Type',
-          'DPoP',
-          'DPoP-Nonce',
-          'x-trace-id',
-          'atproto-accept-labelers',
-          'atproto-proxy-type',
-          'ngrok-skip-browser-warning',
-        ],
-        exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate', 'x-trace-id'],
-        credentials: true,
-        maxAge: 86400,
-        preflightContinue: false,
-        optionsSuccessStatus: 204,
+      cors((req: express.Request, callback) => {
+        const origin = req.headers.origin
+        const credentialed = isAllowedCredentialedOrigin(origin, {
+          publicUrl: ctx.cfg.service.publicUrl,
+          devMode: ctx.cfg.stratos.devMode === true,
+        })
+        callback(null, {
+          // Reflect the request origin for the non-credentialed DPoP/XRPC
+          // surface; only allowlisted origins additionally receive
+          // `Access-Control-Allow-Credentials`, so no untrusted site can ride
+          // the admin session cookie.
+          origin: true,
+          methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+          allowedHeaders: [
+            'Authorization',
+            'Content-Type',
+            'DPoP',
+            'DPoP-Nonce',
+            'x-trace-id',
+            'atproto-accept-labelers',
+            'atproto-proxy-type',
+            'ngrok-skip-browser-warning',
+          ],
+          exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate', 'x-trace-id'],
+          credentials: credentialed,
+          maxAge: 86400,
+          preflightContinue: false,
+          optionsSuccessStatus: 204,
+        })
       }),
     )
     app.use(cookieParser())
@@ -163,6 +179,7 @@ export class StratosServer {
     this.registerWellKnownRoutes(app, ctx, cfg)
     this.registerStaticRoutes(app, cfg)
     this.registerOAuthRoutes(app, ctx, cfg)
+    this.registerAdminAuthRoutes(app, ctx, cfg)
     this.registerFeatureHandlers(app, ctx)
     this.registerErrorMiddleware(app, ctx, cfg)
   }
@@ -361,6 +378,29 @@ export class StratosServer {
       createAttestation: ctx.createAttestation,
     })
     app.use('/oauth', oauthRoutes)
+  }
+
+  /**
+   * Register admin OAuth authorization routes for the Stratos service.
+   * @param app - Express application instance
+   * @param ctx - Application context
+   * @param cfg - Stratos service configuration
+   * @private
+   */
+  private static registerAdminAuthRoutes(
+    app: express.Application,
+    ctx: AppContext,
+    cfg: StratosServiceConfig,
+  ) {
+    const adminRoutes = createAdminAuthRoutes({
+      oauthClient: ctx.oauthClient,
+      adminSessionStore: ctx.adminSessionStore,
+      adminDids: cfg.adminDids,
+      baseUrl: cfg.service.publicUrl,
+      devMode: cfg.stratos.devMode === true,
+      logger: ctx.logger,
+    })
+    app.use('/admin', adminRoutes)
   }
 
   /**
