@@ -13,6 +13,7 @@
 //   2. enrollment — OAuth enrollment via Playwright (or direct DB enrollment with --direct)
 //   3. boundaries — configure per-user boundaries
 //   4. posts — post CRUD + boundary access control
+//   4b. spaces — space credentials, credential-authed read/sync, revocation
 //   5. teardown — stop Stratos, clean up
 
 import { fail, info, pass, section, summary } from './lib/log.ts'
@@ -55,6 +56,7 @@ const phases: Phase[] = [
   { name: 'OAuth Login: Invalid Password', script: 'test-auth-failures.ts' },
   { name: 'Configure Boundaries', script: 'configure-boundaries.ts' },
   { name: 'Post CRUD & Boundaries', script: 'test-posts.ts' },
+  { name: 'Spaces: Credentials & Sync', script: 'test-spaces.ts' },
   ...(appviewMode
     ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
     : []),
