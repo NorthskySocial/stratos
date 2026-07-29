@@ -113,8 +113,14 @@ export class InProcessActorSigner implements ActorSigner {
     const pending = this.doLoadOrCreate(did, now)
     this.inflight.set(did, pending)
     // Release the slot after settle (success OR failure) so a failed load can
-    // be retried instead of poisoning every future call for this DID.
-    void pending.finally(() => this.inflight.delete(did))
+    // be retried instead of poisoning every future call for this DID. Use
+    // then(fn, fn) rather than finally(): finally() derives a NEW promise that
+    // re-rejects on failure, and discarding it raises an unhandled rejection
+    // even when every caller of `pending` handles the error.
+    const release = () => {
+      this.inflight.delete(did)
+    }
+    void pending.then(release, release)
     return pending
   }
 
