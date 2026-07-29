@@ -176,7 +176,9 @@ export class JwksResolver {
 
   /**
    * Parse `client_id` as a URL and require the `https:` scheme. Any non-HTTPS
-   * `client_id` (incl. `http:`) is rejected WITHOUT a fetch.
+   * `client_id` (incl. `http:`) is rejected WITHOUT a fetch. The host must
+   * also not be an obviously non-public destination (localhost or a
+   * loopback/private/link-local IP literal) — see {@link assertPublicHost}.
    */
   private requireHttpsUrl(clientId: string): URL {
     let url: URL
@@ -192,6 +194,7 @@ export class JwksResolver {
         `client_id must be an https URL, got "${url.protocol}//": "${clientId}"`,
       )
     }
+    assertPublicHost(url)
     return url
   }
 
@@ -251,6 +254,10 @@ export class JwksResolver {
         // Bounded: the URL is attacker-influencable; a hung endpoint must not
         // pin the auth request. Timeouts surface as MetadataFetchError below.
         signal: AbortSignal.timeout(this.fetchTimeoutMs),
+        // SSRF: refuse redirects outright — a public metadata URL must not be
+        // able to bounce the fetch to an internal destination. (Residual: DNS
+        // rebinding needs resolver-level pinning, out of scope here.)
+        redirect: 'error',
       })
     } catch (err) {
       this.logger?.warn(
@@ -279,4 +286,48 @@ export class JwksResolver {
 /** Best-effort error message extraction. */
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Reject URLs whose host is an obviously non-public destination: `localhost`
+ * (and subdomains), an IPv4 literal in a loopback/private/link-local/CGNAT/
+ * benchmark range, or an IPv6 loopback/unspecified/link-local/unique-local/
+ * v4-mapped literal. These URLs come from attacker-supplied attestations and
+ * must not let the service fetch its own internal network (SSRF).
+ *
+ * Residual: a public hostname that RESOLVES to an internal address (DNS
+ * rebinding) is not caught here — that requires resolver-level pinning.
+ */
+function assertPublicHost(url: URL): void {
+  // Node's URL keeps the brackets on IPv6 literals in `hostname`.
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  const deny = (why: string): never => {
+    throw new NonHttpsClientIdError(
+      `client metadata host "${host}" is not a public destination (${why})`,
+    )
+  }
+
+  if (host === 'localhost' || host.endsWith('.localhost')) deny('localhost')
+
+  // IPv6 literal (URL.hostname strips the brackets).
+  if (host.includes(':')) {
+    if (host === '::' || host === '::1') deny('IPv6 loopback/unspecified')
+    if (/^fe[89ab]/.test(host)) deny('IPv6 link-local')
+    if (/^f[cd]/.test(host)) deny('IPv6 unique-local')
+    if (host.startsWith('::ffff:')) deny('IPv4-mapped IPv6')
+    return
+  }
+
+  // IPv4 literal.
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
+  if (!m) return
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  if (a === 0) deny('unspecified range')
+  if (a === 10) deny('private range')
+  if (a === 127) deny('loopback')
+  if (a === 169 && b === 254) deny('link-local')
+  if (a === 172 && b >= 16 && b <= 31) deny('private range')
+  if (a === 192 && b === 168) deny('private range')
+  if (a === 100 && b >= 64 && b <= 127) deny('carrier-grade NAT range')
+  if (a === 198 && (b === 18 || b === 19)) deny('benchmark range')
 }

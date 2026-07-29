@@ -92,6 +92,44 @@ describe('JwksResolver', () => {
     )
   })
 
+  it('rejects non-public hosts WITHOUT fetching (SSRF)', async () => {
+    const fetch = vi.fn()
+    const resolver = new JwksResolver({ fetch: fetch as never })
+    const targets = [
+      'https://localhost/meta.json',
+      'https://evil.localhost/meta.json',
+      'https://127.0.0.1/meta.json',
+      'https://10.0.0.5/meta.json',
+      'https://172.16.9.1/meta.json',
+      'https://192.168.1.1/meta.json',
+      'https://169.254.169.254/meta.json',
+      'https://100.64.0.1/meta.json',
+      'https://0.0.0.0/meta.json',
+      'https://[::1]/meta.json',
+      'https://[fe80::1]/meta.json',
+      'https://[fc00::1]/meta.json',
+      'https://[::ffff:10.0.0.1]/meta.json',
+    ]
+    for (const target of targets) {
+      await expect(resolver.resolveJwks(target)).rejects.toBeInstanceOf(
+        NonHttpsClientIdError,
+      )
+    }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-public jwks_uri even from public client metadata', async () => {
+    const fetch = mockFetch({
+      [CLIENT_ID]: { jwks_uri: 'https://192.168.0.10/jwks.json' },
+    })
+    const resolver = new JwksResolver({ fetch: fetch as never })
+    await expect(resolver.resolveJwks(CLIENT_ID)).rejects.toBeInstanceOf(
+      NonHttpsClientIdError,
+    )
+    // Only the metadata fetch happened; the internal jwks_uri was never hit.
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('caches successful resolutions for the TTL (no second fetch)', async () => {
     const jwk = await makePublicJwk()
     const fetch = mockFetch({ [CLIENT_ID]: { jwks: { keys: [jwk] } } })
