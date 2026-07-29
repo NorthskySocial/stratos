@@ -88,19 +88,22 @@ export async function readSequencePage(
 
 /**
  * The oldest and latest retained sequence numbers for an actor, plus the
- * decoded `rev` of the oldest retained event. Used to decide whether a `since`
- * revision predates retained history (⇒ OplogTruncated).
+ * decoded `rev`s of the oldest and newest retained events. Used to decide
+ * whether a `since` revision falls inside retained history (below ⇒ compacted
+ * away; above ⇒ not a rev this repo issued — both are OplogTruncated).
  */
 export interface SequenceBounds {
   oldestSeq: number
   latestSeq: number
   oldestRev: string
+  newestRev: string
 }
 
 /**
  * Resolve the retention bounds of an actor's sequence log: the oldest and
- * latest `seq`, and the `rev` of the oldest retained event. Returns null when
- * the actor has no store or an empty log (nothing to truncate against).
+ * latest `seq`, and the `rev`s of the oldest and newest retained events.
+ * Returns null when the actor has no store or an empty log (nothing to
+ * truncate against).
  *
  * @param ctx - Application context
  * @param did - The repo DID
@@ -118,16 +121,21 @@ export async function getSequenceBounds(
     if (latestSeq === 0 && oldestSeq === 0) {
       const probe = await store.sequence.getEventsSince(-1, 1)
       if (probe.length === 0) return null
+      const rev = rowToSeqEvent(probe[0]).rev
       return {
         oldestSeq: probe[0].seq,
         latestSeq: probe[0].seq,
-        oldestRev: rowToSeqEvent(probe[0]).rev,
+        oldestRev: rev,
+        newestRev: rev,
       }
     }
-    // Read the single oldest event to decode its rev.
+    // Read the single oldest and newest events to decode their revs.
     const oldestRows = await store.sequence.getEventsSince(oldestSeq - 1, 1)
     const oldestRev =
       oldestRows.length > 0 ? rowToSeqEvent(oldestRows[0]).rev : ''
-    return { oldestSeq, latestSeq, oldestRev }
+    const newestRows = await store.sequence.getEventsSince(latestSeq - 1, 1)
+    const newestRev =
+      newestRows.length > 0 ? rowToSeqEvent(newestRows[0]).rev : ''
+    return { oldestSeq, latestSeq, oldestRev, newestRev }
   })
 }

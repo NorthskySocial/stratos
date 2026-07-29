@@ -975,8 +975,9 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The record key."
         },
         "cid": {
-          "type": "cid-link",
-          "description": "The CID of the current record value."
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the current record value."
         },
         "value": {
           "type": "unknown",
@@ -1055,7 +1056,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "errors": [
         {
           "name": "OplogTruncated",
-          "description": "The requested `since` revision is unknown or predates retained history (compacted). The caller must fall back to full-state recovery."
+          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. The caller must fall back to full-state recovery."
         },
         {
           "name": "RepoNotFound",

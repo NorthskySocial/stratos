@@ -339,6 +339,53 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         ),
       ).rejects.toBeInstanceOf(OplogTruncatedError)
     })
+
+    it('throws OplogTruncated when `since` postdates the newest retained rev', async () => {
+      // A `since` newer than anything this repo issued (foreign/garbage rev)
+      // must not silently return caughtUp - the syncer would diverge with no
+      // path back to recovery.
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'c1' },
+      ])
+
+      await expect(
+        listRepoOps(
+          ctx,
+          { did: repoDid, since: REV.r4, limit: 100, excludeValues: false },
+          callerSet('nerv'),
+        ),
+      ).rejects.toBeInstanceOf(OplogTruncatedError)
+    })
+
+    it('accepts `since` equal to the newest rev (routine caught-up poll)', async () => {
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'c1' },
+      ])
+
+      const res = await listRepoOps(
+        ctx,
+        { did: repoDid, since: REV.r1, limit: 100, excludeValues: false },
+        callerSet('nerv'),
+      )
+      expect(res.ops).toEqual([])
+      expect(res.caughtUp).toBe(true)
+    })
+
+    it('throws OplogTruncated for `since` against an empty log (unverifiable)', async () => {
+      // With no retained history at all the claimed position cannot be
+      // verified; fail closed into full-state recovery.
+      await actorStore.create(repoDid)
+
+      await expect(
+        listRepoOps(
+          ctx,
+          { did: repoDid, since: REV.r1, limit: 100, excludeValues: false },
+          callerSet('nerv'),
+        ),
+      ).rejects.toBeInstanceOf(OplogTruncatedError)
+    })
   })
 
   // ── adversarial boundary gating ──────────────────────────────────────────
