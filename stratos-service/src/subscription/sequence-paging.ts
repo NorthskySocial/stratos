@@ -10,6 +10,15 @@ import { type SeqEvent } from './index.js'
 export const SEQUENCE_DB_PAGE_SIZE = 100
 
 /**
+ * Permissive TID shape: 13 lowercase base-36 chars (a superset of the strict
+ * TID alphabet, keeping lexicographic ordering sane). A sequence event whose
+ * `rev` does not parse to this shape is treated as having no usable revision
+ * at all (rev stays '') so downstream consumers fail closed instead of
+ * comparing or emitting a malformed revision.
+ */
+const TID_SHAPE = /^[0-9a-z]{13}$/
+
+/**
  * A single row read from an actor's sequence store, normalized into a
  * {@link SeqEvent} with its `rev` decoded from the CBOR payload.
  *
@@ -30,7 +39,13 @@ export function rowToSeqEvent(row: {
   let rev = ''
   try {
     const decoded = cborDecode(row.event) as Record<string, unknown>
-    rev = (decoded.rev as string) ?? ''
+    // Runtime-validate: a malformed CBOR event can carry a non-string or
+    // non-TID `rev`; accepting it would let getSequenceBounds skip truncation
+    // detection or let listRepoOps compare/emit an invalid revision.
+    const raw = decoded.rev
+    if (typeof raw === 'string' && TID_SHAPE.test(raw)) {
+      rev = raw
+    }
   } catch {
     // Ignore decode errors; rev stays empty and gating fails closed downstream.
   }

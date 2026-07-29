@@ -202,6 +202,11 @@ async function collectOps(
     for (const event of page) {
       afterSeq = event.seq
 
+      // Fail closed on a malformed revision: an event whose `rev` did not
+      // decode to a valid TID (rev === '') cannot be ordered against `since`
+      // nor emitted as a lexicon-valid op — drop it entirely.
+      if (event.rev === '') continue
+
       // `since` start-mapping: skip events up to and including `rev === since`.
       // TIDs sort lexicographically, so emit only events with `rev > since`.
       if (!located) {
