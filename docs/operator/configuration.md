@@ -198,7 +198,7 @@ Stratos validates DPoP tokens using JWKS-based signature verification (not token
 | `STRATOS_SERVICE_DID`                  | ✅       | —                       | Service DID (`did:web:<host>`)                                                                                   |
 | `STRATOS_PUBLIC_URL`                   | ✅       | —                       | Public base URL                                                                                                  |
 | `STRATOS_ALLOWED_DOMAINS`              | ✅       | —                       | Comma-separated allowed boundary names                                                                           |
-| `STRATOS_RESERVED_DOMAIN`              |          | `general`               | Reserved all-members domain, force-included in every enrollment. Must be within `STRATOS_ALLOWED_DOMAINS`.       |
+| `STRATOS_RESERVED_DOMAIN`              |          | `general`               | Reserved all-members domain, force-included in every enrollment and implicitly part of the allowed domains.      |
 | `STRATOS_SPACE_CREDENTIAL_TTL_SECONDS` |          | `7200`                  | TTL (seconds) of issued space credentials (`getSpaceCredential`)                                                 |
 | `STRATOS_SPACE_APP_ACCESS`             |          | — (all open)            | JSON array of per-space client-attestation app-gating rules (`open` or `allowList`)                              |
 | `STRATOS_SPACE_APP_ACCESS_FILE`        |          | —                       | Path to a JSON file with the same shape as `STRATOS_SPACE_APP_ACCESS` (merged with it)                           |
