@@ -3,6 +3,7 @@ import type { AppContext } from '../../context.js'
 import {
   decodeEvent,
   type DecodedEvent,
+  eventInScope,
   type RecordOp,
 } from '../../subscription/index.js'
 import {
@@ -217,10 +218,11 @@ async function collectOps(
       }
 
       const decoded = decodeEvent(event)
-      // Fail closed: an undecodable event has unverifiable boundaries — drop it
-      // entirely (do not leak its existence, including deletes).
-      if (!decoded.decodeOk) continue
-      if (!isEventInScope(decoded, callerBoundaries)) continue
+      // Boundary gating shares the subscribeRecords in-stream predicate: it
+      // FAILS CLOSED (an undecodable event has unverifiable boundaries and is
+      // dropped entirely, deletes included - no existence leak) and suppresses
+      // a move's scoped removal for callers who still see the record.
+      if (!eventInScope(decoded, callerBoundaries)) continue
 
       // Emit a whole event's ops atomically (they share one rev); never split a
       // batch across a page boundary.
@@ -241,31 +243,6 @@ async function collectOps(
   }
 
   return { ops: collected, lastSeq: afterSeq, drained }
-}
-
-/**
- * Whether a decoded event is in scope for a caller holding `callerBoundaries`.
- * Same fail-closed semantics as the subscribeRecords in-stream gate: an event
- * whose payload could not be decoded, or that shares no boundary with the
- * caller, is denied — this also filters DELETES for out-of-scope records,
- * preventing an existence leak.
- *
- * @param decoded - Event decoded via {@link decodeEvent}
- * @param callerBoundaries - The caller's enrolled boundaries
- * @returns True if the caller may observe this event's ops
- */
-function isEventInScope(
-  decoded: DecodedEvent,
-  callerBoundaries: ReadonlySet<string>,
-): boolean {
-  if (!decoded.decodeOk) return false
-  if (!decoded.boundaries.some((b) => callerBoundaries.has(b))) return false
-  // Suppress a move's scoped removal for callers who still see the record via
-  // the domain it moved into (mirrors eventInScope in subscribe-records).
-  if (decoded.excludeBoundaries.some((b) => callerBoundaries.has(b))) {
-    return false
-  }
-  return true
 }
 
 /**
