@@ -195,6 +195,75 @@ describe('EnrollmentManager', () => {
       expect(await mgr.getBoundaries(VASH)).toEqual(['anime.tv/season'])
       expect(client.resolveEnrollments).toHaveBeenCalledTimes(1)
     })
+
+    it('lookups after invalidation do NOT join the pre-revocation fetch', async () => {
+      // Pre-revocation resolve hangs; post-invalidation resolve is fresh.
+      let resolveStale: (value: ResolveEnrollmentsResult) => void = () => {}
+      const staleFetch = new Promise<ResolveEnrollmentsResult>((resolve) => {
+        resolveStale = resolve
+      })
+      let call = 0
+      const client = {
+        resolveEnrollments: vi.fn(async (did: string) => {
+          call += 1
+          if (call === 1) return staleFetch
+          return { did, enrolled: true, boundaries: ['fresh'] }
+        }),
+      }
+      const mgr = new EnrollmentManager({ client })
+
+      const stale = mgr.getBoundaries(SPIKE)
+      mgr.invalidate(SPIKE)
+
+      // A lookup arriving AFTER the revocation must not share the stale
+      // in-flight promise - it starts a fresh resolve.
+      const fresh = await mgr.getBoundaries(SPIKE)
+      expect(fresh).toEqual(['fresh'])
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(2)
+
+      // The stale fetch settling later neither disturbs the fresh cache
+      // entry nor re-caches its own result.
+      resolveStale({
+        did: SPIKE,
+        enrolled: true,
+        boundaries: ['stale'],
+      })
+      expect(await stale).toEqual(['stale'])
+      expect(await mgr.getBoundaries(SPIKE)).toEqual(['fresh'])
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(2)
+    })
+
+    it("a detached fetch's cleanup does not tear down its replacement", async () => {
+      // Hold BOTH fetches open, settle the detached one first, and verify the
+      // replacement still single-flights (its inflight slot survived).
+      const resolvers: Array<(value: ResolveEnrollmentsResult) => void> = []
+      const client = {
+        resolveEnrollments: vi.fn(
+          () =>
+            new Promise<ResolveEnrollmentsResult>((resolve) => {
+              resolvers.push(resolve)
+            }),
+        ),
+      }
+      const mgr = new EnrollmentManager({ client })
+
+      const stale = mgr.getBoundaries(SPIKE)
+      mgr.invalidate(SPIKE)
+      const fresh = mgr.getBoundaries(SPIKE)
+
+      // Settle the detached (stale) fetch; its finally must NOT delete the
+      // replacement's inflight entry.
+      resolvers[0]({ did: SPIKE, enrolled: true, boundaries: ['stale'] })
+      await stale
+
+      // Joining now must share the replacement fetch, not start a third.
+      const joined = mgr.getBoundaries(SPIKE)
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(2)
+
+      resolvers[1]({ did: SPIKE, enrolled: true, boundaries: ['fresh'] })
+      expect(await fresh).toEqual(['fresh'])
+      expect(await joined).toEqual(['fresh'])
+    })
   })
 
   describe('LRU eviction', () => {
