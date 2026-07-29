@@ -146,6 +146,7 @@ export async function readCurrentSignedCommit(
         ? String((v as { $link: unknown }).$link)
         : null
     const sigBytes = decoded.sig as { $bytes?: unknown } | undefined
+    const sig = sigBytes?.$bytes
     const prev = link(decoded.prev)
     return {
       did: decoded.did as string,
@@ -154,7 +155,7 @@ export async function readCurrentSignedCommit(
       rev: decoded.rev as string,
       // Optional lexicon fields must be ABSENT, never null.
       ...(prev !== null ? { prev } : {}),
-      sig: String(sigBytes?.$bytes ?? ''),
+      sig: typeof sig === 'string' ? sig : '',
     }
   })
 }
