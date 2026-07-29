@@ -29,6 +29,13 @@ export type ClientVerifyKey = Awaited<ReturnType<typeof importJWK>>
 export const DEFAULT_JWKS_CACHE_TTL_MS = 5 * 60 * 1000
 
 /**
+ * Default timeout (ms) for outbound metadata/JWKS fetches. A slow or
+ * unresponsive client_id endpoint is attacker-influencable (the URL comes from
+ * the attestation) and must not hold auth requests open indefinitely.
+ */
+export const DEFAULT_JWKS_FETCH_TIMEOUT_MS = 3000
+
+/**
  * Base class for all JWKS-resolution failures. Distinct subclasses let the
  * attestation verifier (and its tests) discriminate why resolution failed.
  */
@@ -76,6 +83,8 @@ export interface JwksResolverOptions {
   fetch?: typeof globalThis.fetch
   /** Cache TTL in milliseconds (default {@link DEFAULT_JWKS_CACHE_TTL_MS}). */
   cacheTtlMs?: number
+  /** Outbound fetch timeout in ms (default {@link DEFAULT_JWKS_FETCH_TIMEOUT_MS}). */
+  fetchTimeoutMs?: number
   /** Optional logger for fail-closed diagnostics. */
   logger?: Logger
   /** Injectable clock (unix ms) for deterministic cache-expiry tests. */
@@ -89,6 +98,7 @@ export interface JwksResolverOptions {
 export class JwksResolver {
   private readonly fetchImpl: typeof globalThis.fetch
   private readonly cacheTtlMs: number
+  private readonly fetchTimeoutMs: number
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly cache = new Map<string, CacheEntry>()
@@ -96,6 +106,7 @@ export class JwksResolver {
   constructor(opts: JwksResolverOptions = {}) {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis)
     this.cacheTtlMs = opts.cacheTtlMs ?? DEFAULT_JWKS_CACHE_TTL_MS
+    this.fetchTimeoutMs = opts.fetchTimeoutMs ?? DEFAULT_JWKS_FETCH_TIMEOUT_MS
     this.logger = opts.logger
     this.now = opts.now ?? (() => Date.now())
   }
@@ -237,6 +248,9 @@ export class JwksResolver {
     try {
       res = await this.fetchImpl(url.toString(), {
         headers: { accept: 'application/json' },
+        // Bounded: the URL is attacker-influencable; a hung endpoint must not
+        // pin the auth request. Timeouts surface as MetadataFetchError below.
+        signal: AbortSignal.timeout(this.fetchTimeoutMs),
       })
     } catch (err) {
       this.logger?.warn(
