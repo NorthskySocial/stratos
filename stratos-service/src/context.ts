@@ -415,15 +415,21 @@ function setupMigrationCallback(ctx: AppContext) {
 }
 
 /**
- * Whether two boundary sets are equal regardless of order.
+ * Whether two boundary sets are equal regardless of order or duplicates.
+ * Compares deduplicated sizes (raw lengths would let a list with duplicates
+ * pass as equal to a distinct set of the same length).
  * @param a - First boundary set
  * @param b - Second boundary set
  * @returns True if both sets contain exactly the same boundaries
  */
 function boundarySetsEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  const set = new Set(a)
-  return b.every((x) => set.has(x))
+  const setA = new Set(a)
+  const setB = new Set(b)
+  if (setA.size !== setB.size) return false
+  for (const x of setB) {
+    if (!setA.has(x)) return false
+  }
+  return true
 }
 
 /**
