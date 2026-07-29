@@ -1,6 +1,4 @@
-import { timingSafeEqual } from 'node:crypto'
 import { IdResolver } from '@atproto/identity'
-import { NodeOAuthClient } from '@atproto/oauth-client-node'
 import {
   AuthRequiredError,
   InvalidRequestError,
@@ -18,9 +16,11 @@ import {
   type Logger,
 } from '@northskysocial/stratos-core'
 import type { Keypair } from '@atproto/crypto'
-import { StratosServiceConfig } from '../../config.js'
+import { passesAdminCsrfCheck, StratosServiceConfig } from '../../config.js'
 import { ExternalAllowListProvider } from '../../features/enrollment/internal/allow-list.js'
 import { verifyEnrolled } from '../../features'
+import { readAdminSessionCookie } from '../../oauth/admin-routes.js'
+import type { AdminSessionStore } from '../../oauth/admin-session-store.js'
 
 /**
  * Auth verifier collection for different auth scenarios
@@ -87,37 +87,23 @@ export interface AuthVerifiers {
       | { type: string; did: string; iss: string }
       | { type: 'space-credential'; spaceUri: string }
   }>
-  /** Admin auth (basic auth or bearer token with admin password) */
+  /** Admin auth (OAuth-authorized operator via server-side session cookie) */
   admin: (ctx: {
     req: import('node:http').IncomingMessage
     res: import('node:http').ServerResponse
-  }) => Promise<{ credentials: { type: string } }>
+  }) => Promise<{ credentials: { type: string; did: string } }>
   /** Stream auth for zone.stratos.sync.subscribeRecords */
   subscribeAuth: StreamAuthVerifier
-}
-
-/**
- * Timing-safe string comparison to prevent timing attacks on credentials
- */
-function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8')
-  const bufB = Buffer.from(b, 'utf8')
-  if (bufA.length !== bufB.length) {
-    // Compare against self to consume constant time, then return false
-    timingSafeEqual(bufA, bufA)
-    return false
-  }
-  return timingSafeEqual(bufA, bufB)
 }
 
 /**
  * Create auth verifiers for the application
  * @param serviceDid - Service DID
  * @param idResolver - Identity resolver
- * @param _oauthClient - OAuth client
  * @param cfg
  * @param enrollmentStore - Enrollment store
- * @param adminPassword - Admin password
+ * @param adminSessionStore - Admin web-session store
+ * @param adminDids - Allowlisted admin DIDs
  * @param dpopVerifier - DPoP verifier
  * @param allowListProvider - External allowlist provider
  * @param devMode - Development mode flag
@@ -128,10 +114,10 @@ function safeEqual(a: string, b: string): boolean {
 export function createAuthVerifiers(
   serviceDid: string,
   idResolver: IdResolver,
-  _oauthClient: NodeOAuthClient,
   cfg: StratosServiceConfig,
   enrollmentStore: import('@northskysocial/stratos-core').EnrollmentStoreReader,
-  adminPassword: string | undefined,
+  adminSessionStore: AdminSessionStore,
+  adminDids: string[],
   dpopVerifier: DpopVerifier,
   allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
@@ -179,7 +165,13 @@ export function createAuthVerifiers(
       service,
       spaceCredential,
     ),
-    admin: createAdminVerifier(adminPassword),
+    admin: createAdminVerifier({
+      adminSessionStore,
+      adminDids,
+      publicUrl: cfg.service.publicUrl,
+      devMode,
+      logger,
+    }),
     subscribeAuth: createSubscribeAuthVerifier(idResolver, serviceDid),
   }
 }
@@ -555,37 +547,58 @@ async function verifyDpop(
 }
 
 /**
- * Creates the admin auth verifier (basic auth or bearer token)
+ * Creates the admin auth verifier.
  *
- * @param adminPassword - Admin password for basic auth
+ * Admin auth is OAuth-only: the operator must have an established server-side
+ * web session (set by the admin OAuth callback) whose DID is on the configured
+ * allowlist. There is no password and no `Bearer did:` dev bypass — the cookie
+ * is the only accepted credential. A CSRF Origin/Referer check guards the
+ * cookie-authenticated mutation path.
+ *
+ * @param deps - Admin session store, allowlist, origin config, and logger
  * @returns Auth verifier function
- * @throws AuthRequiredError if admin authorization fails
+ * @throws AuthRequiredError if no valid admin session is present or CSRF fails
  */
-function createAdminVerifier(
-  adminPassword: string | undefined,
-): AuthVerifiers['admin'] {
+function createAdminVerifier(deps: {
+  adminSessionStore: AdminSessionStore
+  adminDids: string[]
+  publicUrl: string
+  devMode: boolean
+  logger?: Logger
+}): AuthVerifiers['admin'] {
   return async (ctx) => {
-    const authHeader = ctx.req?.headers?.authorization
-    if (!authHeader || !adminPassword) {
+    if (
+      !passesAdminCsrfCheck(ctx.req, {
+        publicUrl: deps.publicUrl,
+        devMode: deps.devMode,
+      })
+    ) {
+      deps.logger?.warn(
+        { origin: ctx.req.headers?.origin },
+        'admin auth rejected: cross-origin request blocked (CSRF)',
+      )
+      throw new AuthRequiredError('Cross-origin admin request rejected')
+    }
+
+    const sessionKey = readAdminSessionCookie(ctx.req)
+    if (!sessionKey) {
       throw new AuthRequiredError('Admin authorization required')
     }
 
-    let passwordAttempt: string | undefined
-    if (authHeader.startsWith('Basic ')) {
-      const credentials = Buffer.from(authHeader.slice(6), 'base64').toString(
-        'utf8',
+    const session = await deps.adminSessionStore.get(sessionKey)
+    if (!session) {
+      throw new AuthRequiredError('Admin session invalid or expired')
+    }
+
+    if (!deps.adminDids.includes(session.did)) {
+      deps.logger?.warn(
+        { did: session.did },
+        'admin auth rejected: DID not in allowlist',
       )
-      const parts = credentials.split(':')
-      passwordAttempt = parts[1]
-    } else if (authHeader.startsWith('Bearer ')) {
-      passwordAttempt = authHeader.slice(7).trim()
+      throw new AuthRequiredError('Not an authorized admin')
     }
 
-    if (passwordAttempt && safeEqual(passwordAttempt, adminPassword)) {
-      return { credentials: { type: 'admin' } }
-    }
-
-    throw new AuthRequiredError('Invalid admin credentials')
+    return { credentials: { type: 'admin', did: session.did } }
   }
 }
 

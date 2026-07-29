@@ -1,4 +1,5 @@
 import type { StratosScopes } from './types.js'
+import { ENROLLMENT_COLLECTION } from './discovery.js'
 
 const ALL_ACTIONS = ['create', 'update', 'delete']
 
@@ -7,7 +8,7 @@ const ALL_ACTIONS = ['create', 'update', 'delete']
  * these correspond to atproto granular scopes for specific collections.
  */
 export const STRATOS_SCOPES: StratosScopes = {
-  enrollment: 'zone.stratos.actor.enrollment',
+  enrollment: ENROLLMENT_COLLECTION,
   post: 'zone.stratos.feed.post',
   getFeed: 'zone.stratos.feedgen.getFeed',
 }

@@ -354,11 +354,12 @@ describe('space-credential acceptance', () => {
         // idResolver — only used by service/standard paths we don't exercise
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         {} as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        {} as any,
         ctx.cfg,
         enrollmentStore,
-        'admin-pw',
+        // adminSessionStore — the admin path is not exercised here
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        {} as any,
+        [],
         // dpopVerifier stub: rejects everything (so the standard path fails
         // exactly as an unauthenticated DPoP request would).
         {

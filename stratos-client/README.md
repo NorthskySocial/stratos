@@ -10,7 +10,8 @@ lightweight when compared `atproto` plus it is used in `stratos-client`.
 
 The `@northskysocial/stratos-client` package provides the building blocks for enrollment discovery,
 service routing, record verification, and OAuth scope management. This guide shows how to wire it
-into your app.
+into your app. The package is standalone — it has no runtime dependency on `@northskysocial/stratos-core`,
+only on `@atcute/*` packages, so pulling it into a client app doesn't drag in server-side dependencies.
 
 1. [Enrollment discovery](#1-enrollment-discovery)
 2. [Service routing](#2-service-routing)
@@ -111,6 +112,30 @@ const target = await getEnrollmentByServiceDid(did, agent.handle, serviceDid)
 `getEnrollmentByServiceDid` uses `com.atproto.repo.getRecord` with the service DID as the rkey
 for a direct O(1) lookup. This is more efficient than listing all records when targeting a
 specific service.
+
+### Parsing raw enrollment records
+
+If you already have a raw record value — from `com.atproto.repo.listRecords`, a firehose event, or
+a cache — you don't need a network round trip to turn it into a `StratosEnrollment`:
+
+```typescript
+import {
+  parseEnrollmentRecord,
+  ENROLLMENT_COLLECTION,
+} from '@northskysocial/stratos-client'
+
+const enrollment = parseEnrollmentRecord(record.value, rkey)
+if (enrollment) {
+  console.log(`Service: ${enrollment.service}`)
+}
+```
+
+`parseEnrollmentRecord(val, rkey)` validates and decodes a raw `zone.stratos.actor.enrollment`
+record value into a `StratosEnrollment`, returning `null` if the shape doesn't match. It does not
+verify the attestation — see [Verifying the attestation](#verifying-the-attestation) for that.
+
+`ENROLLMENT_COLLECTION` is the `zone.stratos.actor.enrollment` NSID constant, useful when filtering
+`listRecords` output or matching firehose commits by collection.
 
 ### Service DID to rkey conversion
 

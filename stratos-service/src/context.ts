@@ -204,7 +204,7 @@ async function initCoreServices(
   sequenceEvents: SequenceEventEmitter,
   logger?: Logger,
 ) {
-  const { enrollmentStore, actorStore } = storage
+  const { enrollmentStore, actorStore, adminSessionStore } = storage
   const { idResolver, signingKey, oauthClient } = identity
 
   const enrollmentCtx = await initEnrollment(
@@ -220,9 +220,8 @@ async function initCoreServices(
   const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
     cfg,
     idResolver,
-    oauthClient,
     enrollmentStore,
-    enrollmentCtx.enrollmentValidator,
+    adminSessionStore,
     enrollmentCtx.allowListProvider,
     signingKey,
     logger,
@@ -301,8 +300,8 @@ async function initIdentity(
  * Initializes authentication components for the application context.
  * @param cfg - Configuration options for the application.
  * @param idResolver - Identity resolver for user authentication.
- * @param oauthClient - OAuth client context for token management.
  * @param enrollmentStore - Store for managing user enrollments.
+ * @param adminSessionStore - Admin web-session store.
  * @param allowListProvider - Optional provider for external allowlists.
  * @param signingKey - This service's signing keypair (space-credential authority).
  * @param logger - Logger instance for logging application events.
@@ -311,9 +310,8 @@ async function initIdentity(
 function initAuth(
   cfg: AppContextOptions['cfg'],
   idResolver: AppContext['idResolver'],
-  oauthClient: AppContext['oauthClient'],
   enrollmentStore: AppContext['enrollmentStore'],
-  enrollmentValidator: AppContext['enrollmentValidator'],
+  adminSessionStore: AppContext['adminSessionStore'],
   allowListProvider: ExternalAllowListProvider | undefined,
   signingKey: AppContext['signingKey'],
   logger?: AppContext['logger'],
@@ -331,10 +329,10 @@ function initAuth(
   const authVerifier = createAuthVerifiers(
     cfg.service.did,
     idResolver,
-    oauthClient,
     cfg,
     enrollmentStore,
-    cfg.admin?.password,
+    adminSessionStore,
+    cfg.adminDids,
     dpopVerifier,
     allowListProvider,
     cfg.stratos.devMode === true,

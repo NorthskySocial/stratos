@@ -1,4 +1,4 @@
-name: Publish stratos-client to GitHub Packages
+name: Publish stratos packages to GitHub Packages
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish stratos-client
+    name: Publish stratos packages
     runs-on: ubuntu-latest
 
     steps:
@@ -45,24 +45,52 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # stratos-core is published for server-side consumers that depend on it
+      # directly (indexer / service / feedgen). stratos-client does not
+      # depend on it — it carries its own copy of enrollment discovery — so
+      # this ordering is incidental: the client is installable whether or
+      # not stratos-core is in the registry.
+      - name: Build stratos-core
+        run: pnpm --filter @northskysocial/stratos-core build
+
+      - name: Check if stratos-core version already published
+        id: core-version-check
+        run: |
+          VERSION=$(node -p "require('./stratos-core/package.json').version")
+          if npm view "@northskysocial/stratos-core@${VERSION}" version --registry=https://npm.pkg.github.com 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "stratos-core ${VERSION} already published — skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "stratos-core ${VERSION} not yet published — proceeding"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish stratos-core to GitHub Packages
+        if: steps.core-version-check.outputs.skip == 'false'
+        run: pnpm --filter @northskysocial/stratos-core publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build stratos-client
         run: pnpm --filter @northskysocial/stratos-client build
 
-      - name: Check if version already published
+      - name: Check if stratos-client version already published
         id: version-check
         run: |
           VERSION=$(node -p "require('./stratos-client/package.json').version")
           if npm view "@northskysocial/stratos-client@${VERSION}" version --registry=https://npm.pkg.github.com 2>/dev/null; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Version ${VERSION} already published — skipping"
+            echo "stratos-client ${VERSION} already published — skipping"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
-            echo "Version ${VERSION} not yet published — proceeding"
+            echo "stratos-client ${VERSION} not yet published — proceeding"
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to GitHub Packages
+      - name: Publish stratos-client to GitHub Packages
         if: steps.version-check.outputs.skip == 'false'
         run: pnpm --filter @northskysocial/stratos-client publish --no-git-checks
         env:

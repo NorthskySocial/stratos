@@ -211,9 +211,21 @@ describe('createSubscribeAuthVerifier (stream auth gate)', () => {
 
     const result = await verifier(makeCtx(`Bearer ${token}`))
 
-    expect(result.credentials.type).toBe('service')
-    expect(result.credentials.did).toBe(keypair.did())
-    expect(result.credentials.iss).toBe(keypair.did())
+    if ('status' in result) {
+      throw new Error(
+        `expected an authenticated result, got ${JSON.stringify(result)}`,
+      )
+    }
+    // The xrpc-server StreamAuthVerifier types `credentials` as `unknown`; the
+    // subscribe verifier always returns the service-credential shape on success.
+    const credentials = result.credentials as {
+      type: string
+      did: string
+      iss: string
+    }
+    expect(credentials.type).toBe('service')
+    expect(credentials.did).toBe(keypair.did())
+    expect(credentials.iss).toBe(keypair.did())
   })
 
   it('rejects a request with no authorization header', async () => {
