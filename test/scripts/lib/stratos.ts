@@ -408,20 +408,22 @@ export async function createRecordWithCredential(
 }
 
 /**
- * Fetch the record-proof CAR (`com.atproto.sync.getRecord`) for a record.
- * Returns the status and byte length of the CAR body.
+ * Fetch the full repo CAR (`zone.stratos.sync.getRepo`): all record blocks,
+ * MST nodes, and the signed commit. Returns status + CAR byte length.
+ * (The per-record proof endpoint `com.atproto.sync.getRecord` is documented
+ * but not registered by the service - see the enum-only HANDLER_METHOD entry.)
  */
-export async function getRecordProof(
+export async function getRepoCar(
   callerDid: string,
   did: string,
-  collection: string,
-  rkey: string,
 ): Promise<{ status: number; bytes: number }> {
   const baseUrl = await getBaseUrl()
-  const params = new URLSearchParams({ did, collection, rkey })
+  const params = new URLSearchParams({ did })
   const res = await fetch(
-    `${baseUrl}/xrpc/com.atproto.sync.getRecord?${params}`,
-    { headers: { Authorization: `Bearer ${callerDid}` } },
+    `${baseUrl}/xrpc/zone.stratos.sync.getRepo?${params}`,
+    {
+      headers: { Authorization: `Bearer ${callerDid}` },
+    },
   )
   const buf = await res.arrayBuffer().catch(() => new ArrayBuffer(0))
   return { status: res.status, bytes: buf.byteLength }

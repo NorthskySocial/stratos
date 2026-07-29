@@ -26,7 +26,7 @@ import {
   enrollmentStatus,
   getRecord,
   getSpaceCredential,
-  getRecordProof,
+  getRepoCar,
   hydrateRecordWithCredential,
   listPdsRecords,
   listRepoOpsWithCredential,
@@ -274,12 +274,13 @@ async function run(): Promise<void> {
     status.signingKey,
   )
 
-  // 8d. Durable signed-commit proof exists for the record (MST v3 today;
-  // re-derivable state at the LtHash cutover).
-  const proof = await getRecordProof(rei.did, rei.did, POST_COLLECTION, rkey)
+  // 8d. Durable signed-commit proof exists for the repo (MST v3 today;
+  // re-derivable state at the LtHash cutover). The full-repo CAR carries the
+  // signed commit, MST nodes, and record blocks.
+  const proof = await getRepoCar(rei.did, rei.did)
   assert(
     proof.status === 200 && proof.bytes > 0,
-    'Record proof CAR (signed commit + MST inclusion) is served',
+    'Repo CAR (signed commit + MST + records) is served',
     `status=${proof.status}, bytes=${proof.bytes}`,
   )
 
