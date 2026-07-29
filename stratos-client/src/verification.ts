@@ -1,4 +1,10 @@
 import { verifyRecord as atcuteVerifyRecord } from '@atcute/repo'
+import { encode as cborEncode } from '@atcute/cbor'
+import {
+  create as cidCreate,
+  toString as cidToString,
+  CODEC_DCBOR,
+} from '@atcute/cid'
 import {
   getPublicKeyFromDidController,
   P256PublicKey,
@@ -58,21 +64,53 @@ export const verifyCidIntegrity = async (
 }
 
 /**
+ * verifies that a record value matches its claimed CID by re-encoding the
+ * value as DAG-CBOR and comparing hashes. accepts records in atproto JSON
+ * interchange form ({$link} / {$bytes} wrappers are handled).
+ *
+ * this is the verification path for services that do not expose CAR
+ * inclusion proofs — the Stratos service removed com.atproto.sync.getRecord,
+ * so records fetched from it via com.atproto.repo.getRecord can only be
+ * checked for CID integrity, not commit-signature provenance.
+ *
+ * @param value the record value as returned by com.atproto.repo.getRecord
+ * @param expectedCid the CID claimed for the record
+ * @returns the verified record with level 'cid-integrity'
+ * @throws when the computed CID does not match the expected CID
+ */
+export const verifyRecordCid = async (
+  value: unknown,
+  expectedCid: string,
+): Promise<VerifiedRecord> => {
+  const bytes = cborEncode(value)
+  const computed = cidToString(await cidCreate(CODEC_DCBOR, bytes))
+  if (computed !== expectedCid) {
+    throw new Error(
+      `record CID mismatch: computed ${computed}, expected ${expectedCid}`,
+    )
+  }
+  return { cid: computed, record: value, level: 'cid-integrity' }
+}
+
+/**
  * resolves the service's signing public key from its DID document.
  * uses WebDidDocumentResolver for validated DID document fetching and
  * getPublicKeyFromDidController for key type dispatch.
  *
- * callers should cache the returned key — it does not change unless
- * the service rotates its signing key.
+ * pass a cache Map via options to memoize successful resolutions — the
+ * key does not change unless the service rotates its signing key.
  *
  * @param serviceDid the service's did:web identifier
- * @param options optional configuration (fetch function)
+ * @param options optional configuration (fetch function, cache)
  * @returns the service's public signing key
  */
 export const resolveServiceSigningKey = async (
   serviceDid: string,
   options?: ResolveSigningKeyOptions,
 ): Promise<PublicKey> => {
+  const cached = options?.cache?.get(serviceDid)
+  if (cached) return cached
+
   if (!serviceDid.startsWith('did:web:')) {
     throw new Error(`expected did:web, got: ${serviceDid}`)
   }
@@ -90,12 +128,18 @@ export const resolveServiceSigningKey = async (
 
   const found = getPublicKeyFromDidController(material)
 
+  let key: PublicKey
   switch (found.type) {
     case 'secp256k1':
-      return Secp256k1PublicKey.importRaw(found.publicKeyBytes)
+      key = await Secp256k1PublicKey.importRaw(found.publicKeyBytes)
+      break
     case 'p256':
-      return P256PublicKey.importRaw(found.publicKeyBytes)
+      key = await P256PublicKey.importRaw(found.publicKeyBytes)
+      break
   }
+
+  options?.cache?.set(serviceDid, key)
+  return key
 }
 
 /**
@@ -134,13 +178,18 @@ export const resolveUserSigningKey = async (
 }
 
 /**
- * fetches a record with its inclusion proof from a Stratos service
+ * fetches a record with its inclusion proof via com.atproto.sync.getRecord
  * and verifies it. verification priority:
  * 1. userSigningKey — verifies the user's per-actor commit signature ('user-signature')
  * 2. serviceSigningKey — verifies the service's commit signature ('service-signature')
  * 3. neither — CID integrity and MST path validation only ('cid-integrity')
  *
- * @param serviceUrl the Stratos service base URL
+ * note: the Stratos service no longer implements com.atproto.sync.getRecord
+ * (removed with private image support, #84). this helper works against
+ * standard PDSes and any service exposing CAR inclusion proofs; for records
+ * fetched from a Stratos service, use verifyRecordCid instead.
+ *
+ * @param serviceUrl the service base URL
  * @param did the repo DID
  * @param collection the collection NSID
  * @param rkey the record key
@@ -185,5 +234,53 @@ export const fetchAndVerifyRecord = async (
     rkey,
     did,
     options?.serviceSigningKey,
+  )
+}
+
+/** module-level signing key cache used by verifyStratosRecord. */
+const defaultSigningKeyCache = new Map<string, PublicKey>()
+
+/**
+ * verifies a Stratos record CAR with signature verification when possible,
+ * falling back to CID integrity when the service signing key cannot be
+ * resolved. service keys are cached across calls.
+ *
+ * note: obtain the CAR from a source that serves inclusion proofs (a PDS's
+ * com.atproto.sync.getRecord, or an owner-scoped zone.stratos.sync.getRepo
+ * export). the Stratos service does not serve per-record proofs; use
+ * verifyRecordCid for records fetched from it via com.atproto.repo.getRecord.
+ *
+ * @param carBytes the CAR file bytes containing the inclusion proof
+ * @param did the repo DID
+ * @param collection the collection NSID
+ * @param rkey the record key
+ * @param serviceDid the service's did:web identifier, if known
+ * @returns the verified record with its CID and verification level
+ */
+export const verifyStratosRecord = async (
+  carBytes: Uint8Array,
+  did: string,
+  collection: string,
+  rkey: string,
+  serviceDid?: string,
+): Promise<VerifiedRecord> => {
+  let signingKey: PublicKey | undefined
+  if (serviceDid) {
+    try {
+      signingKey = await resolveServiceSigningKey(serviceDid, {
+        cache: defaultSigningKeyCache,
+      })
+    } catch {
+      // key resolution failed — fall through to CID-only verification
+    }
+  }
+
+  return verifyRecordCar(
+    carBytes,
+    collection,
+    rkey,
+    did,
+    signingKey,
+    signingKey ? 'service-signature' : 'cid-integrity',
   )
 }

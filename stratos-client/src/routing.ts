@@ -11,6 +11,17 @@ export const serviceDIDToRkey = (serviceDid: string): string => {
 }
 
 /**
+ * options for createServiceFetchHandler.
+ */
+export interface ServiceFetchHandlerOptions {
+  /**
+   * extra headers to set on every routed request, e.g. development
+   * tunnel bypass headers. merged over the per-request headers.
+   */
+  headers?: HeadersInit
+}
+
+/**
  * creates a fetch handler that routes XRPC calls to a specific service URL
  * using an existing authenticated handler for DPoP credentials.
  *
@@ -20,16 +31,25 @@ export const serviceDIDToRkey = (serviceDid: string): string => {
  *
  * @param authenticatedHandler a handler that attaches auth headers (DPoP proof + access token)
  * @param serviceUrl the target Stratos service base URL
+ * @param options optional configuration (extra headers)
  * @returns a FetchHandlerObject that routes calls to the target service
  */
 export const createServiceFetchHandler = (
   authenticatedHandler: FetchHandler,
   serviceUrl: string,
+  options?: ServiceFetchHandlerOptions,
 ): FetchHandlerObject => {
   return {
     async handle(pathname: string, init?: RequestInit): Promise<Response> {
       const url = new URL(pathname, serviceUrl)
-      return authenticatedHandler(url.href, init ?? {})
+      if (!options?.headers) {
+        return authenticatedHandler(url.href, init ?? {})
+      }
+      const headers = new Headers(init?.headers)
+      new Headers(options.headers).forEach((value, name) => {
+        headers.set(name, value)
+      })
+      return authenticatedHandler(url.href, { ...init, headers })
     },
   }
 }

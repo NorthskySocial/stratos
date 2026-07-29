@@ -168,52 +168,23 @@ verify the enrollment is authentic, resolve the service's public key from its DI
 the signature over the DAG-CBOR encoded payload:
 
 ```typescript
-import { encode as cborEncode } from '@atcute/cbor'
-import { getPublicKeyFromDidController } from '@atcute/crypto'
-import { getAtprotoVerificationMaterial } from '@atcute/identity'
-import { WebDidDocumentResolver } from '@atcute/identity-resolver'
-import type { StratosEnrollment } from '@northskysocial/stratos-client'
+import { verifyEnrollmentAttestation } from '@northskysocial/stratos-client'
 
-async function verifyEnrollmentAttestation(
-  enrollment: StratosEnrollment,
-  did: string,
-): Promise<boolean> {
-  const serviceDid = new URL(enrollment.service).hostname
-    .replaceAll('.', ':')
-    .replace(/^/, 'did:web:')
+// enrollment.value is the raw record value; did is the enrolled user's DID
+const result = await verifyEnrollmentAttestation(enrollmentRecordValue, did)
 
-  const resolver = new WebDidDocumentResolver()
-  const doc = await resolver.resolve(serviceDid as `did:web:${string}`)
-
-  const material = getAtprotoVerificationMaterial(doc)
-  if (!material) return false
-
-  const { publicKeyBytes } = getPublicKeyFromDidController(material)
-
-  // attestation payload is DAG-CBOR with sorted keys: {boundaries, did, signingKey}
-  const boundaries = enrollment.boundaries.map((b) => b.value).sort()
-  const payload = cborEncode({
-    boundaries,
-    did,
-    signingKey: enrollment.signingKey,
-  })
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    publicKeyBytes,
-    { name: 'ECDSA', namedCurve: 'K-256' },
-    false,
-    ['verify'],
-  )
-
-  return crypto.subtle.verify(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    key,
-    enrollment.attestation.sig,
-    payload,
-  )
+if (result.valid) {
+  // result.serviceKey    — the service's attesting did:key
+  // result.userSigningKey — the user's per-actor signing did:key
+  // result.boundaries     — sorted boundary values covered by the attestation
+} else {
+  console.warn('attestation invalid:', result.error)
 }
 ```
+
+The attestation signature is verified against the service's `did:key` embedded in the record
+(`attestation.signingKey`) over the DAG-CBOR encoding of `{boundaries, did, signingKey}` with
+sorted keys. The function never throws — failures are reported via `result.error`.
 
 This confirms the Stratos service vouches for the user's DID, boundaries, and signing key binding.
 The service's `did:web` DID document is the root of trust — cache the resolved key to avoid repeated
@@ -227,7 +198,7 @@ The core routing decision is: _when reading/writing Stratos data and enrollment 
 calls to the Stratos service URL instead of the user's PDS._
 
 When a user has multiple enrollments, select the target enrollment first (see
-`findEnrollmentByService` in Section 1), then route using that enrollment's service URL.
+`findEnrollmentByService` below), then route using that enrollment's service URL.
 
 ### Routing logic
 

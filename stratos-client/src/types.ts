@@ -74,6 +74,11 @@ export interface ResolveSigningKeyOptions {
    * defaults to global fetch.
    */
   fetchFn?: typeof fetch
+  /**
+   * optional cache for successful key resolutions, keyed by service DID.
+   * pass a long-lived Map to avoid refetching the DID document.
+   */
+  cache?: Map<string, import('@atcute/crypto').PublicKey>
 }
 
 /**

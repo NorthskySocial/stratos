@@ -13,7 +13,11 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "references": [{ "path": "./stratos-core" }, { "path": "./stratos-service" }],
+  "references": [
+    { "path": "./stratos-core" },
+    { "path": "./stratos-service" },
+    { "path": "./stratos-client" }
+  ],
   "files": [],
   "include": ["test/**/*.ts"],
   "exclude": ["node_modules", "dist"]

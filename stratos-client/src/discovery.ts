@@ -102,17 +102,80 @@ export const parseEnrollmentRecord = (
  * @param serviceDid the service's DID (e.g., 'did:web:stratos.example.com')
  * @returns the enrollment if found, null otherwise
  */
+interface ListRecordsResponse {
+  records: Array<{ uri: string; value: unknown }>
+}
+
+const toHandler = (pdsUrlOrHandler: string | FetchHandler): FetchHandler =>
+  typeof pdsUrlOrHandler === 'string'
+    ? simpleFetchHandler({ service: pdsUrlOrHandler })
+    : pdsUrlOrHandler
+
+const extractRkey = (uri: string): string => {
+  const parts = uri.split('/')
+  return parts[parts.length - 1]
+}
+
+/**
+ * discovers all Stratos enrollments by listing enrollment records
+ * from the user's PDS via com.atproto.repo.listRecords.
+ *
+ * @param did the DID to check for enrollments
+ * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
+ * @returns all valid enrollments, empty array when none exist
+ */
+export const discoverEnrollments = async (
+  did: string,
+  pdsUrlOrHandler: string | FetchHandler,
+): Promise<StratosEnrollment[]> => {
+  const rpc = new Client({ handler: toHandler(pdsUrlOrHandler) })
+
+  try {
+    const res = (await rpc.get('com.atproto.repo.listRecords', {
+      params: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        repo: did as any,
+        collection: ENROLLMENT_COLLECTION,
+        limit: 100,
+      },
+    })) as XRPCResponse<ListRecordsResponse>
+
+    if (!res.ok) return []
+
+    const enrollments: StratosEnrollment[] = []
+    for (const record of res.data.records) {
+      const rkey = extractRkey(record.uri)
+      const enrollment = parseEnrollmentRecord(record.value, rkey)
+      if (enrollment) enrollments.push(enrollment)
+    }
+    return enrollments
+  } catch {
+    return []
+  }
+}
+
+/**
+ * discovers a single Stratos enrollment from the user's PDS.
+ * convenience wrapper around discoverEnrollments that returns the first match.
+ *
+ * @param did the DID to check for enrollment
+ * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
+ * @returns the first enrollment if any exist, null otherwise
+ */
+export const discoverEnrollment = async (
+  did: string,
+  pdsUrlOrHandler: string | FetchHandler,
+): Promise<StratosEnrollment | null> => {
+  const enrollments = await discoverEnrollments(did, pdsUrlOrHandler)
+  return enrollments[0] ?? null
+}
+
 export const getEnrollmentByServiceDid = async (
   did: string,
   pdsUrlOrHandler: string | FetchHandler,
   serviceDid: string,
 ): Promise<StratosEnrollment | null> => {
-  const handler =
-    typeof pdsUrlOrHandler === 'string'
-      ? simpleFetchHandler({ service: pdsUrlOrHandler })
-      : pdsUrlOrHandler
-
-  const rpc = new Client({ handler })
+  const rpc = new Client({ handler: toHandler(pdsUrlOrHandler) })
   const rkey = serviceDIDToRkey(serviceDid)
 
   try {
