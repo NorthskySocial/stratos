@@ -372,12 +372,20 @@ export async function listRepoOps(
     // from a cursor means we are already past the `since` boundary.
     sinceLocated = true
   } else if (since !== undefined) {
-    // Fresh request with `since`: OplogTruncated if `since` predates the oldest
-    // retained event. When the log is empty there is nothing to truncate.
+    // Fresh request with `since`. `since` is a POSITION in rev-time (TIDs sort
+    // lexicographically; events with `rev > since` are returned) — it need not
+    // name a retained event. It is only trusted inside the retained window
+    // [oldestRev, newestRev]: below it, the history the caller needs was
+    // compacted away; above it (or with no retained log, or undecodable
+    // bounds), it cannot be a rev this repo issued — silently returning
+    // `caughtUp` would let a diverged syncer conclude it is up to date. All
+    // cases fail closed into full-state recovery.
     if (
-      bounds !== null &&
-      bounds.oldestRev !== '' &&
-      since < bounds.oldestRev
+      bounds === null ||
+      bounds.oldestRev === '' ||
+      bounds.newestRev === '' ||
+      since < bounds.oldestRev ||
+      since > bounds.newestRev
     ) {
       throw new OplogTruncatedError()
     }
