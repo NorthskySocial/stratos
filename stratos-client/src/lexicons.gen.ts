@@ -765,6 +765,75 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.space.getRecord",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Get a single record from a permissioned space. Spec-shaped mirror of com.atproto.space.getRecord (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). The record must belong to the requested space; records outside it - including records with no space at all - resolve to RecordNotFound (no existence leak).",
+      "parameters": {
+        "type": "params",
+        "required": ["space", "repo", "collection", "rkey"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+          },
+          "repo": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the account whose repo to read from."
+          },
+          "collection": {
+            "type": "string",
+            "format": "nsid",
+            "description": "The NSID of the record collection."
+          },
+          "rkey": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "The Record Key."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid", "value"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            },
+            "value": {
+              "type": "unknown"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "RecordNotFound",
+          "description": "The record does not exist in the requested space (or does not exist at all - indistinguishable by design)."
+        },
+        {
+          "name": "UnknownSpace",
+          "description": "The requested space URI is malformed or its space DID does not match this service's DID."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "The caller is not admitted to the requested space (not a member, or the presented credential targets a different space)."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.space.getSpaceCredential",
   "defs": {
     "main": {

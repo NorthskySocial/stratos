@@ -4,6 +4,7 @@ import {
   registerEnrollmentHandlers,
   registerHydrationHandlers,
   registerSpaceCredentialHandlers,
+  registerSpaceReadHandlers,
   registerSyncHandlers,
 } from '../features/index.js'
 import { type XrpcServerInternal } from './types.js'
@@ -29,7 +30,6 @@ export enum HANDLER_METHOD {
   DESCRIBE_REPO = 'com.atproto.repo.describeRepo',
   APPLY_WRITES = 'com.atproto.repo.applyWrites',
   LIST_BLOBS = 'com.atproto.sync.listBlobs',
-  SYNC_GET_RECORD = 'com.atproto.sync.getRecord',
   STRATOS_GET_BLOB = 'zone.stratos.sync.getBlob',
   SYNC_GET_REPO = 'zone.stratos.sync.getRepo',
   STRATOS_UPLOAD_BLOB = 'zone.stratos.repo.uploadBlob',
@@ -102,4 +102,5 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
   registerHydrationHandlers(server, ctx)
   registerSyncHandlers(server, ctx)
   registerSpaceCredentialHandlers(server, ctx)
+  registerSpaceReadHandlers(server, ctx)
 }
