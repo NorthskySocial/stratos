@@ -46,11 +46,26 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
   }
 
   getEnrollment(did: string): Promise<EnrollmentRecord | null> {
-    return this.inner.getEnrollment(did)
+    // Union the reserved domain on the read side too: enrollments persisted
+    // BEFORE this decorator existed (or before the reserved domain was
+    // configured/changed) keep pre-invariant boundary sets until their next
+    // write - unioning here makes the invariant hold for every observer
+    // immediately, with no backfill migration. Records without a boundaries
+    // field (the backends store boundaries separately) pass through untouched.
+    return this.inner.getEnrollment(did).then((record) =>
+      record === null || record.boundaries === undefined
+        ? record
+        : {
+            ...record,
+            boundaries: withReserved(record.boundaries, this.reservedDomain),
+          },
+    )
   }
 
   getBoundaries(did: string): Promise<string[]> {
-    return this.inner.getBoundaries(did)
+    return this.inner
+      .getBoundaries(did)
+      .then((boundaries) => withReserved(boundaries, this.reservedDomain))
   }
 
   listEnrollments(

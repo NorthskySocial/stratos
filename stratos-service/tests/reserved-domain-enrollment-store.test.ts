@@ -95,4 +95,26 @@ describe('ReservedDomainEnrollmentStore', () => {
     await store.addBoundary(DID, OPS)
     expect(await boundaries()).toEqual([ENG, OPS, RESERVED].sort())
   })
+
+  it('unions the reserved domain on reads for pre-decorator enrollments', async () => {
+    // Simulate an enrollment persisted BEFORE the decorator existed (or before
+    // the reserved domain was configured) by writing through the raw store.
+    const raw = new SqliteEnrollmentStore(db)
+    await raw.enroll({
+      did: DID,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+    // The decorated read still reports the reserved domain without any write.
+    expect(await boundaries()).toEqual([ENG, RESERVED].sort())
+    // getEnrollment passes through untouched when the backend stores
+    // boundaries separately (no boundaries field on the record).
+    const record = await store.getEnrollment(DID)
+    expect(record).not.toBeNull()
+    expect(record?.boundaries).toBeUndefined()
+    // The raw store is untouched (read-side union, not a write-back).
+    expect((await raw.getBoundaries(DID)).sort()).toEqual([ENG])
+  })
 })
