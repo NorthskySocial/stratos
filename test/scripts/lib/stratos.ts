@@ -57,6 +57,7 @@ export async function enrollmentStatus(did: string): Promise<{
   active?: boolean
   enrolledAt?: string
   enrollmentRkey?: string
+  signingKey?: string
 }> {
   const baseUrl = await getBaseUrl()
   const res = await fetch(
@@ -72,6 +73,7 @@ export async function enrollmentStatus(did: string): Promise<{
     active?: boolean
     enrolledAt?: string
     enrollmentRkey?: string
+    signingKey?: string
   }
 }
 
@@ -276,4 +278,151 @@ export async function unenroll(callerDid: string): Promise<void> {
     const errBody = await res.text()
     throw new Error(`unenroll failed: ${res.status} ${errBody}`)
   }
+}
+
+// ─── Spaces (permissioned-data) helpers ─────────────────────────────────────
+
+export interface SpaceCredentialResponse {
+  credential: string
+  expiresAt: string
+}
+
+/**
+ * Request a space credential via `zone.stratos.space.getSpaceCredential`.
+ * Identity comes from the (dev-mode) Bearer DID session. Returns the raw
+ * response so callers can assert on error statuses/codes as well.
+ */
+export async function getSpaceCredential(
+  callerDid: string | null,
+  spaceUri: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const baseUrl = await getBaseUrl()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (callerDid) headers['Authorization'] = `Bearer ${callerDid}`
+  const res = await fetch(
+    `${baseUrl}/xrpc/zone.stratos.space.getSpaceCredential`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ space: spaceUri }),
+    },
+  )
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await res.json()) as Record<string, unknown>
+  } catch {
+    // leave body empty; caller asserts on status
+  }
+  return { status: res.status, body }
+}
+
+/**
+ * Hydrate a record presenting a SPACE CREDENTIAL as the bearer (no user
+ * identity). Returns status + parsed body for both success and denial paths.
+ */
+export async function hydrateRecordWithCredential(
+  credential: string,
+  uri: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const baseUrl = await getBaseUrl()
+  const params = new URLSearchParams({ uri })
+  const res = await fetch(
+    `${baseUrl}/xrpc/zone.stratos.repo.hydrateRecord?${params}`,
+    { headers: { Authorization: `Bearer ${credential}` } },
+  )
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await res.json()) as Record<string, unknown>
+  } catch {
+    // leave body empty; caller asserts on status
+  }
+  return { status: res.status, body }
+}
+
+export interface RepoOpsResponse {
+  ops: Array<{
+    rev: string
+    collection: string
+    rkey: string
+    cid?: string
+    value?: Record<string, unknown>
+  }>
+  caughtUp: boolean
+  cursor?: string
+  commit?: {
+    did: string
+    version: number
+    rev: string
+    sig?: unknown
+    data?: unknown
+  }
+}
+
+/**
+ * Pull-sync a repo's oplog via `zone.stratos.sync.listRepoOps`, authenticating
+ * with a space credential.
+ */
+export async function listRepoOpsWithCredential(
+  credential: string,
+  did: string,
+): Promise<{ status: number; body: RepoOpsResponse }> {
+  const baseUrl = await getBaseUrl()
+  const params = new URLSearchParams({ did })
+  const res = await fetch(
+    `${baseUrl}/xrpc/zone.stratos.sync.listRepoOps?${params}`,
+    { headers: { Authorization: `Bearer ${credential}` } },
+  )
+  const body = (await res.json().catch(() => ({}))) as RepoOpsResponse
+  return { status: res.status, body }
+}
+
+/**
+ * Attempt a record write presenting a SPACE CREDENTIAL as the bearer.
+ * Credentials are read/sync capabilities; the write path must reject them.
+ * Returns the status so the caller can assert the rejection.
+ */
+export async function createRecordWithCredential(
+  credential: string,
+  repo: string,
+  collection: string,
+  record: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const baseUrl = await getBaseUrl()
+  const res = await fetch(`${baseUrl}/xrpc/com.atproto.repo.createRecord`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${credential}`,
+    },
+    body: JSON.stringify({ repo, collection, record }),
+  })
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await res.json()) as Record<string, unknown>
+  } catch {
+    // leave body empty; caller asserts on status
+  }
+  return { status: res.status, body }
+}
+
+/**
+ * Fetch the record-proof CAR (`com.atproto.sync.getRecord`) for a record.
+ * Returns the status and byte length of the CAR body.
+ */
+export async function getRecordProof(
+  callerDid: string,
+  did: string,
+  collection: string,
+  rkey: string,
+): Promise<{ status: number; bytes: number }> {
+  const baseUrl = await getBaseUrl()
+  const params = new URLSearchParams({ did, collection, rkey })
+  const res = await fetch(
+    `${baseUrl}/xrpc/com.atproto.sync.getRecord?${params}`,
+    { headers: { Authorization: `Bearer ${callerDid}` } },
+  )
+  const buf = await res.arrayBuffer().catch(() => new ArrayBuffer(0))
+  return { status: res.status, bytes: buf.byteLength }
 }
