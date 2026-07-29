@@ -81,7 +81,10 @@ async function run() {
         },
         body: JSON.stringify({
           repo: userState.did,
-          collection: 'app.northsky.stratos.feed.post',
+          // Must be a VALID stratos collection: a stale/invalid NSID would be
+          // rejected for the wrong reason (InvalidCollection) and this check
+          // would pass even if enrollment gating were broken.
+          collection: 'zone.stratos.feed.post',
           record: { text: 'should fail', createdAt: new Date().toISOString() },
         }),
       },
