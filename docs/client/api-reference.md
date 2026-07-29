@@ -252,20 +252,20 @@ interface Domain {
 
 ## Error Codes
 
-| Error               | Description                                       |
-| ------------------- | ------------------------------------------------- |
-| `NotEnrolled`       | User hasn't enrolled with this Stratos service    |
-| `InvalidCollection` | Collection is not a valid stratos namespace       |
-| `InvalidRecord`     | Record failed validation (e.g., missing boundary) |
-| `RecordNotFound`    | Record doesn't exist or user doesn't have access  |
-| `RecordBlocked`     | Viewer blocked by boundary (for `hydrateRecord`)  |
-| `AuthRequired`      | Endpoint requires authentication                  |
-| `InvalidCar`        | CAR file is malformed or fails CID integrity      |
-| `RepoAlreadyExists` | Target repo already has a commit (import blocked) |
-| `TooManyUris`       | Too many URIs in batch request (max 100)          |
-| `OplogTruncated`    | `since` predates retained oplog history (use full-state recovery) |
-| `RepoNotFound`      | Requested repo does not exist (sync endpoints)    |
-| `InvalidToken`      | Delegation token failed verification or space mismatch |
-| `UnknownSpace`      | Space URI malformed or space DID not this service |
+| Error                 | Description                                                       |
+| --------------------- | ----------------------------------------------------------------- |
+| `NotEnrolled`         | User hasn't enrolled with this Stratos service                    |
+| `InvalidCollection`   | Collection is not a valid stratos namespace                       |
+| `InvalidRecord`       | Record failed validation (e.g., missing boundary)                 |
+| `RecordNotFound`      | Record doesn't exist or user doesn't have access                  |
+| `RecordBlocked`       | Viewer blocked by boundary (for `hydrateRecord`)                  |
+| `AuthRequired`        | Endpoint requires authentication                                  |
+| `InvalidCar`          | CAR file is malformed or fails CID integrity                      |
+| `RepoAlreadyExists`   | Target repo already has a commit (import blocked)                 |
+| `TooManyUris`         | Too many URIs in batch request (max 100)                          |
+| `OplogTruncated`      | `since` predates retained oplog history (use full-state recovery) |
+| `RepoNotFound`        | Requested repo does not exist (sync endpoints)                    |
+| `InvalidToken`        | Delegation token failed verification or space mismatch            |
+| `UnknownSpace`        | Space URI malformed or space DID not this service                 |
 | `AttestationRequired` | Space gates on app identity; no valid client attestation supplied |
-| `ClientNotAllowed`  | Attested `client_id` not in the space's allow-list |
+| `ClientNotAllowed`    | Attested `client_id` not in the space's allow-list                |
