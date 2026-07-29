@@ -40,7 +40,10 @@ function walk(dir: string): string[] {
 
 function isAllowed(file: string): boolean {
   const rel = relative(SRC_DIR, file)
-  return rel.split(sep).join('/').startsWith(ALLOWED_DIR.split(sep).join('/'))
+  // Anchor on the trailing separator: a bare prefix match would also admit
+  // sibling paths like infra/signing-helpers/ or infra/signingUtils.ts.
+  const posix = rel.split(sep).join('/')
+  return posix.startsWith(ALLOWED_DIR.split(sep).join('/') + '/')
 }
 
 describe('per-actor key material confinement', () => {
