@@ -298,6 +298,37 @@ function errMessage(err: unknown): string {
  * Residual: a public hostname that RESOLVES to an internal address (DNS
  * rebinding) is not caught here — that requires resolver-level pinning.
  */
+/** Non-public IPv6 literal prefixes/exact forms, tested in order. */
+const DENIED_IPV6: Array<[test: (h: string) => boolean, why: string]> = [
+  [(h) => h === '::' || h === '::1', 'IPv6 loopback/unspecified'],
+  [(h) => /^fe[89ab]/.test(h), 'IPv6 link-local'],
+  [(h) => /^f[cd]/.test(h), 'IPv6 unique-local'],
+  [(h) => h.startsWith('::ffff:'), 'IPv4-mapped IPv6'],
+]
+
+/** Non-public IPv4 ranges as [first-octet, second-octet-predicate, reason]. */
+const DENIED_IPV4: Array<[a: number, b: (b: number) => boolean, why: string]> =
+  [
+    [0, () => true, 'unspecified range'],
+    [10, () => true, 'private range'],
+    [127, () => true, 'loopback'],
+    [169, (b) => b === 254, 'link-local'],
+    [172, (b) => b >= 16 && b <= 31, 'private range'],
+    [192, (b) => b === 168, 'private range'],
+    [100, (b) => b >= 64 && b <= 127, 'carrier-grade NAT range'],
+    [198, (b) => b === 18 || b === 19, 'benchmark range'],
+  ]
+
+/**
+ * Reject URLs whose host is an obviously non-public destination: `localhost`
+ * (and subdomains), an IPv4 literal in a loopback/private/link-local/CGNAT/
+ * benchmark range, or an IPv6 loopback/unspecified/link-local/unique-local/
+ * v4-mapped literal. These URLs come from attacker-supplied attestations and
+ * must not let the service fetch its own internal network (SSRF).
+ *
+ * Residual: a public hostname that RESOLVES to an internal address (DNS
+ * rebinding) is not caught here — that requires resolver-level pinning.
+ */
 function assertPublicHost(url: URL): void {
   // Node's URL keeps the brackets on IPv6 literals in `hostname`.
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
@@ -309,25 +340,17 @@ function assertPublicHost(url: URL): void {
 
   if (host === 'localhost' || host.endsWith('.localhost')) deny('localhost')
 
-  // IPv6 literal (URL.hostname strips the brackets).
   if (host.includes(':')) {
-    if (host === '::' || host === '::1') deny('IPv6 loopback/unspecified')
-    if (/^fe[89ab]/.test(host)) deny('IPv6 link-local')
-    if (/^f[cd]/.test(host)) deny('IPv6 unique-local')
-    if (host.startsWith('::ffff:')) deny('IPv4-mapped IPv6')
+    for (const [test, why] of DENIED_IPV6) {
+      if (test(host)) deny(why)
+    }
     return
   }
 
-  // IPv4 literal.
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
   if (!m) return
   const [a, b] = [Number(m[1]), Number(m[2])]
-  if (a === 0) deny('unspecified range')
-  if (a === 10) deny('private range')
-  if (a === 127) deny('loopback')
-  if (a === 169 && b === 254) deny('link-local')
-  if (a === 172 && b >= 16 && b <= 31) deny('private range')
-  if (a === 192 && b === 168) deny('private range')
-  if (a === 100 && b >= 64 && b <= 127) deny('carrier-grade NAT range')
-  if (a === 198 && (b === 18 || b === 19)) deny('benchmark range')
+  for (const [first, second, why] of DENIED_IPV4) {
+    if (a === first && second(b)) deny(why)
+  }
 }
