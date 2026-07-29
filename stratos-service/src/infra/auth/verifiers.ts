@@ -380,7 +380,10 @@ function createSpaceCredentialVerifier(deps: {
           { reason: err.name, message: err.message, path: ctx.req?.url },
           'auth rejected: space credential verification failed',
         )
-        throw new AuthRequiredError(err.message)
+        // Generic message only: the detailed reason (expired / foreign /
+        // malformed / bad signature) stays in the log, matching the sibling
+        // verifiers, so callers cannot probe why a credential was rejected.
+        throw new AuthRequiredError('Authorization failed')
       }
       throw err
     }
