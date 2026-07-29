@@ -1590,9 +1590,17 @@ export class PostgresActorStore implements ActorStore {
   }
 
   /**
-   * Create a signing key for a specific actor schema.
+   * Create the signing key for a specific actor schema if absent
+   * (atomic create-if-absent).
+   *
+   * Concurrency: the insert is `ON CONFLICT DO NOTHING`, so when two callers
+   * (or two service instances) race the first-use creation, exactly one key
+   * is persisted and BOTH callers return it - the loser discards its freshly
+   * generated keypair and re-reads the winner's. An existing key is never
+   * overwritten.
+   *
    * @param did - The DID for which to create the signing key.
-   * @returns The created P256Keypair.
+   * @returns The persisted P256Keypair.
    */
   async createSigningKey(did: string): Promise<crypto.P256Keypair> {
     const schemaName = await this.getSchemaName(did)
@@ -1601,14 +1609,21 @@ export class PostgresActorStore implements ActorStore {
       const keypair = await crypto.P256Keypair.create({ exportable: true })
       const exported = await (keypair as crypto.ExportableKeypair).export()
       const txDb = tx as unknown as StratosPgDb
-      await txDb
+      const inserted = await txDb
         .insert(pgStratosSigningKey)
         .values({ did, key: Buffer.from(exported) })
-        .onConflictDoUpdate({
-          target: pgStratosSigningKey.did,
-          set: { key: Buffer.from(exported) },
-        })
-      return keypair
+        .onConflictDoNothing({ target: pgStratosSigningKey.did })
+        .returning({ did: pgStratosSigningKey.did })
+      if (inserted.length > 0) return keypair
+      // Lost the race (or the key already existed): return the persisted key.
+      const rows = await txDb
+        .select({ key: pgStratosSigningKey.key })
+        .from(pgStratosSigningKey)
+        .where(eq(pgStratosSigningKey.did, did))
+        .limit(1)
+      return crypto.P256Keypair.import(new Uint8Array(rows[0].key), {
+        exportable: true,
+      })
     })
   }
 
