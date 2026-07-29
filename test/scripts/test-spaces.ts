@@ -26,6 +26,7 @@ import {
   enrollmentStatus,
   getRecord,
   getSpaceCredential,
+  getSpaceRecord,
   getRepoCar,
   hydrateRecordWithCredential,
   listPdsRecords,
@@ -156,6 +157,48 @@ async function run(): Promise<void> {
     crossRead.status !== 200,
     'Swordsmith credential CANNOT read an aekea post (fail closed)',
     `status=${crossRead.status}, error=${crossRead.body.error}`,
+  )
+
+  // Spec-shaped space read (mirror of com.atproto.space.getRecord): both the
+  // member session and the space credential read the record via the space
+  // surface; a credential for a different space is refused.
+  const spaceReadUser = await getSpaceRecord(
+    rei.did,
+    SPACES.swordsmith,
+    rei.did,
+    POST_COLLECTION,
+    rkey,
+  )
+  assert(
+    spaceReadUser.status === 200 &&
+      (spaceReadUser.body.value as { text?: string })?.text ===
+        'a members-only transmission',
+    'space.getRecord: member session reads the record',
+    `status=${spaceReadUser.status}`,
+  )
+  const spaceReadCred = await getSpaceRecord(
+    swordsmithCred,
+    SPACES.swordsmith,
+    rei.did,
+    POST_COLLECTION,
+    rkey,
+  )
+  assert(
+    spaceReadCred.status === 200,
+    'space.getRecord: space credential reads the record',
+    `status=${spaceReadCred.status}`,
+  )
+  const spaceReadWrongCred = await getSpaceRecord(
+    swordsmithCred,
+    SPACES.aekea,
+    rei.did,
+    POST_COLLECTION,
+    rkey,
+  )
+  assert(
+    spaceReadWrongCred.status === 401,
+    'space.getRecord: credential for another space is refused',
+    `status=${spaceReadWrongCred.status}, error=${spaceReadWrongCred.body.error}`,
   )
 
   // ── 5. Syncer flow: pull sync with a credential ──────────────────────────

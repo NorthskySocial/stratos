@@ -341,6 +341,33 @@ export async function hydrateRecordWithCredential(
   return { status: res.status, body }
 }
 
+/**
+ * Read a record from a space via `zone.stratos.space.getRecord` (spec-shaped
+ * mirror of com.atproto.space.getRecord). The bearer may be a user DID
+ * (dev mode) or a space credential.
+ */
+export async function getSpaceRecord(
+  bearer: string,
+  space: string,
+  repo: string,
+  collection: string,
+  rkey: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const baseUrl = await getBaseUrl()
+  const params = new URLSearchParams({ space, repo, collection, rkey })
+  const res = await fetch(
+    `${baseUrl}/xrpc/zone.stratos.space.getRecord?${params}`,
+    { headers: { Authorization: `Bearer ${bearer}` } },
+  )
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await res.json()) as Record<string, unknown>
+  } catch {
+    // leave body empty; caller asserts on status
+  }
+  return { status: res.status, body }
+}
+
 export interface RepoOpsResponse {
   ops: Array<{
     rev: string

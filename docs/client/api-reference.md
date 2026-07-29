@@ -143,15 +143,19 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### Get Record Proof (CAR)
+### Get Space Record
 
 ```
-GET /xrpc/com.atproto.sync.getRecord?did=<did>&collection=<collection>&rkey=<rkey>
-Authorization: Bearer <access_token>
-Response: application/vnd.ipld.car
+GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
+Authorization: Bearer <access_token> | Bearer <space-credential>
+Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
-Returns a CAR containing the signed commit, MST inclusion proof nodes, and record block.
+Get a single record from a permissioned space (spec-shaped mirror of
+`com.atproto.space.getRecord`). Callable with standard user auth - the caller
+must be a member of the space - or with a space credential for that space (for
+syncing services). The record must belong to the requested space; records
+outside it (including records with no space) resolve to `RecordNotFound`.
 
 ### Export Repository
 
