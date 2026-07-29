@@ -1119,8 +1119,9 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The commit version (3)."
         },
         "data": {
-          "type": "cid-link",
-          "description": "CID of the MST root node."
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the MST root node."
         },
         "rev": {
           "type": "string",
@@ -1128,12 +1129,13 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The commit revision."
         },
         "prev": {
-          "type": "cid-link",
-          "description": "CID of the previous commit, or null."
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the previous commit. Absent for the first commit."
         },
         "sig": {
-          "type": "bytes",
-          "description": "The commit signature."
+          "type": "string",
+          "description": "The commit signature, base64-encoded (the exact persisted bytes)."
         }
       }
     }

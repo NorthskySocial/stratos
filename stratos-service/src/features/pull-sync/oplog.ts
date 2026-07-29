@@ -36,22 +36,28 @@ export interface RepoOp {
   rev: string
   collection: string
   rkey: string
-  cid: string | null
-  prev: string | null
+  /** CID of the current record value. ABSENT (not null) for a delete. */
+  cid?: string
+  /** CID of the superseded value. ABSENT (not null) for a create. */
+  prev?: string
   value?: unknown
 }
 
 /**
- * A signed MST v3 commit, decoded verbatim from the persisted commit block.
- * Never re-signed.
+ * A signed MST v3 commit, decoded verbatim from the persisted commit block and
+ * serialized to lex-JSON-safe primitives (CIDs as strings, signature as
+ * base64). Never re-signed.
  */
 export interface SignedCommit {
   did: string
   version: number
-  data: unknown
+  /** CID (string form) of the MST root node. */
+  data: string
   rev: string
-  prev: unknown
-  sig: unknown
+  /** CID (string form) of the previous commit. ABSENT for the first commit. */
+  prev?: string
+  /** Commit signature, base64 of the exact persisted bytes. */
+  sig: string
 }
 
 export interface ListRepoOpsParams {
@@ -127,23 +133,37 @@ export async function readCurrentSignedCommit(
     if (!root) return null
     const bytes = await store.repo.getBytes(root.cid)
     if (!bytes) return null
-    const decoded = cborDecode(bytes) as Record<string, unknown>
+    // Normalize decoder wrapper types (CID links, byte strings) to plain lex
+    // JSON via a JSON round trip, then flatten to primitives: the XRPC layer
+    // cannot serialize foreign wrapper classes, and the response contract
+    // carries CIDs as strings and the signature as base64.
+    const decoded = JSON.parse(JSON.stringify(cborDecode(bytes))) as Record<
+      string,
+      unknown
+    >
+    const link = (v: unknown): string | null =>
+      v && typeof v === 'object' && '$link' in v
+        ? String((v as { $link: unknown }).$link)
+        : null
+    const sigBytes = decoded.sig as { $bytes?: unknown } | undefined
+    const prev = link(decoded.prev)
     return {
       did: decoded.did as string,
       version: decoded.version as number,
-      data: decoded.data,
+      data: link(decoded.data) ?? String(decoded.data),
       rev: decoded.rev as string,
-      prev: decoded.prev ?? null,
-      sig: decoded.sig,
+      // Optional lexicon fields must be ABSENT, never null.
+      ...(prev !== null ? { prev } : {}),
+      sig: String(sigBytes?.$bytes ?? ''),
     }
   })
 }
 
 /**
  * Expand a decoded event into per-op `RepoOp` entries, all sharing the event's
- * `rev`. Deletes carry `cid: null`. `prev` is left null here and derived by the
- * coalescing pass ({@link coalesceCurrentValues}) from the prior op for the same
- * path within the returned window.
+ * `rev`. Deletes carry NO `cid` (absent). `prev` is left absent here and
+ * derived by the coalescing pass ({@link coalesceCurrentValues}) from the
+ * prior op for the same path within the returned window.
  *
  * @param decoded - Event decoded via {@link decodeEvent}
  * @param rev - The shared revision for all ops in this event
@@ -157,8 +177,9 @@ function expandEventOps(decoded: DecodedEvent, rev: string): RepoOp[] {
       rev,
       collection,
       rkey,
-      cid: isDelete ? null : (op.cid ?? null),
-      prev: null,
+      // Optional lexicon fields must be ABSENT, never null: the XRPC output
+      // validator rejects explicit nulls on optional properties.
+      ...(isDelete || op.cid == null ? {} : { cid: op.cid }),
       value: isDelete ? undefined : op.record,
     }
   })
@@ -267,7 +288,7 @@ function coalesceCurrentValues(
   // Track, per path, the last cid we emitted for that path within this window
   // (to derive the true `prev`), and the index of the surviving entry so a
   // later op supersedes it in place.
-  const lastCidForPath = new Map<string, string | null>()
+  const lastCidForPath = new Map<string, string | undefined>()
   const survivorIndex = new Map<string, number>()
   const result: RepoOp[] = []
 
@@ -275,21 +296,15 @@ function coalesceCurrentValues(
     const path = `${op.collection}/${op.rkey}`
     const priorCid = lastCidForPath.get(path)
 
-    // `prev`: prefer the actual superseded CID when we've seen the prior op in
-    // this window; otherwise fall back to the op action — a create has no prev,
-    // an update/delete had a prior value we cannot name (prev stays null but the
-    // op is not misrepresented as it still carries its own cid/value).
-    let prev: string | null = null
-    if (priorCid !== undefined) {
-      prev = priorCid
-    }
-
+    // `prev`: the actual superseded CID when we've seen the prior op in this
+    // window; otherwise ABSENT - a create has no prev, and an update/delete
+    // whose prior value predates the window cannot name it.
     const entry: RepoOp = {
       rev: op.rev,
       collection: op.collection,
       rkey: op.rkey,
-      cid: op.cid,
-      prev,
+      ...(op.cid !== undefined ? { cid: op.cid } : {}),
+      ...(priorCid !== undefined ? { prev: priorCid } : {}),
       value: op.value,
     }
 
