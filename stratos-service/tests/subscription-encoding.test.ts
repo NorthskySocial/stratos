@@ -10,10 +10,12 @@ import { encode as cborEncode, type LexValue } from '@atproto/lex-cbor'
 import {
   decodeEvent,
   eventInScope,
+  eventVisibleToCaller,
   formatEvent,
   hasBoundaryIntersection,
   type SeqEvent,
 } from '../src/subscription/index.js'
+import type { EnrollmentEvent } from '../src/context-types.js'
 
 function createCborEvent(event: Record<string, unknown>): Uint8Array {
   return new Uint8Array(cborEncode(event as unknown as LexValue))
@@ -162,9 +164,36 @@ describe('Subscription CBOR encoding roundtrip', () => {
       const decoded = {
         ops: [],
         boundaries: ['nerv'],
+        excludeBoundaries: [],
         decodeOk: false,
       }
       expect(eventInScope(decoded, new Set(['nerv']))).toBe(false)
+    })
+
+    it('suppresses a move removal for a caller who shares the retained (new) domain', () => {
+      // A move from `old` to `new` emits a scoped delete carrying boundary=[old]
+      // and excludeBoundary=[new]. A caller enrolled in BOTH must NOT observe the
+      // removal (it still sees the record via `new`) — the bug this guards against
+      // is the removal superseding the update and deleting a live record.
+      const eventData = {
+        ops: [
+          {
+            action: 'delete',
+            path: 'zone.stratos.feed.post/abc',
+            boundary: { values: [{ value: 'old' }] },
+            excludeBoundary: { values: [{ value: 'new' }] },
+          },
+        ],
+      }
+      const decoded = decodeEvent(createSeqEvent(eventData))
+      expect(decoded.boundaries).toContain('old')
+      expect(decoded.excludeBoundaries).toContain('new')
+      // Both-domains caller: excluded (still sees the record via `new`).
+      expect(eventInScope(decoded, new Set(['old', 'new']))).toBe(false)
+      // Old-domain-only caller: observes the removal (lost access).
+      expect(eventInScope(decoded, new Set(['old']))).toBe(true)
+      // New-domain-only caller: not in `old`, so no removal (sees the update).
+      expect(eventInScope(decoded, new Set(['new']))).toBe(false)
     })
 
     it('matches event with a shared boundary', () => {
@@ -312,6 +341,63 @@ describe('Subscription CBOR encoding roundtrip', () => {
 
     it('is false for empty boundaries', () => {
       expect(hasBoundaryIntersection(new Set(['nerv']), [])).toBe(false)
+    })
+  })
+
+  // Service-stream event scoping. A `boundaries` change must reach a
+  // caller that held a NOW-REMOVED boundary even if the after-set no longer
+  // intersects the caller — otherwise the caller never learns the actor left.
+  describe('eventVisibleToCaller (boundary-change scoping)', () => {
+    const mk = (e: Partial<EnrollmentEvent>): EnrollmentEvent => ({
+      did: 'did:plc:actor',
+      action: 'boundaries',
+      time: '2026-07-02T00:00:00.000Z',
+      ...e,
+    })
+
+    it('enroll follows plain after-set intersection', () => {
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ action: 'enroll', boundaries: ['nerv', 'seele'] }),
+        ),
+      ).toBe(true)
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ action: 'enroll', boundaries: ['seele'] }),
+        ),
+      ).toBe(false)
+    })
+
+    it('boundary shrink removing the last shared boundary is STILL delivered (prior intersects)', () => {
+      // Caller holds `nerv`; actor moves from [nerv, seele] to [seele].
+      // After-set [seele] does NOT intersect {nerv}, but prior does, so the
+      // caller must still receive it to purge its `nerv`-scoped state.
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ boundaries: ['seele'], priorBoundaries: ['nerv', 'seele'] }),
+        ),
+      ).toBe(true)
+    })
+
+    it('boundary change is delivered when the after-set intersects (grow into caller scope)', () => {
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ boundaries: ['nerv', 'seele'], priorBoundaries: ['seele'] }),
+        ),
+      ).toBe(true)
+    })
+
+    it('boundary change touching neither prior nor after of the caller is dropped', () => {
+      expect(
+        eventVisibleToCaller(
+          new Set(['nerv']),
+          mk({ boundaries: ['seele'], priorBoundaries: ['aekea'] }),
+        ),
+      ).toBe(false)
     })
   })
 })

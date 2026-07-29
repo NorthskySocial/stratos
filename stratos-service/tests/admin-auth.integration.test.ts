@@ -233,7 +233,8 @@ describe('admin auth verifier', () => {
       {} as never,
       undefined,
       false,
-      undefined,
+      // signingKey — the space-credential path is not exercised here
+      { did: () => cfg.service.did },
     )
   })
 

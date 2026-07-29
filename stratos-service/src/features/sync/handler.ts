@@ -2,6 +2,7 @@ import { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { getBlobHandler } from '../../api/handlers/blob-handlers.js'
+import { registerPullSyncHandlers } from '../pull-sync/index.js'
 
 /**
  * Register sync handlers with the XRPC server
@@ -26,4 +27,7 @@ export function registerSyncHandlers(
     auth: ctx.authVerifier.optionalStandard,
     handler: getBlobHandler(ctx),
   })
+
+  // Pull-sync: boundary-gated oplog + full-state recovery.
+  registerPullSyncHandlers(server, ctx)
 }

@@ -54,8 +54,9 @@ Stratos container via `env_file`. Create it by copying `.env.example` and adjust
 cp .env.example .env
 ```
 
-For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`,
-and point `STRATOS_ALLOWED_PDS_ENDPOINTS` at your PDS. `USE_OAUTH=true` must be set or the OAuth
+For the test suite, set `STRATOS_ENROLLMENT_MODE=open`, `STRATOS_ALLOWED_DOMAINS=swordsmith,aekea`
+(the reserved all-members domain `general` is implicitly included), and point
+`STRATOS_ALLOWED_PDS_ENDPOINTS` at your PDS. `USE_OAUTH=true` must be set or the OAuth
 routes won't be registered and enrollment will fail with "Cannot GET /oauth/authorize". See
 the [project README](../README.md) for the full list of available variables.
 
@@ -363,6 +364,26 @@ Test 8: Delete records
 
 Results: 15/15 passed
 ```
+
+---
+
+### Stage 4b — Spaces (`test-spaces.ts`)
+
+Validates the permissioned-spaces (0016-shaped) flow end to end: a PDS user who is a **member of
+a space** obtains a space credential and uses it to read and sync records hosted **only in
+Stratos** (Reading A: Stratos is the repo host).
+
+| #   | Test                                            | What it proves                                             |
+| --- | ----------------------------------------------- | ---------------------------------------------------------- |
+| 1   | Member obtains a space credential               | membership → `getSpaceCredential` → JWT + expiry           |
+| 2   | Non-member is denied a credential               | `NotEnrolled` gating                                       |
+| 3   | Foreign / malformed space URIs rejected         | merged `at://…/space/…` addressing enforced                |
+| 4   | Credential-authed read of a member record       | credential admits the space, not a user identity           |
+| 5   | Credential fails closed on out-of-space records | no cross-space leakage                                     |
+| 6   | Pull sync (`listRepoOps`) with a credential     | syncer flow: boundary-gated ops + signed caught-up commit  |
+| 7   | Writes never accept a credential                | credentials are read/sync capabilities; writes stay bound  |
+| 8   | Revocation invalidates future credentials       | boundary removal → `NotEnrolled`                           |
+| 9   | Migration anchors                               | single-boundary records, no PDS post records, `signingKey` |
 
 ---
 

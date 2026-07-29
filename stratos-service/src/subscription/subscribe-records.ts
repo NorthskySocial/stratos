@@ -20,12 +20,18 @@ export interface SeqEvent {
 
 /**
  * Record operation in a commit
+ *
+ * `boundary` carries the op's domain set explicitly, independent of `record`.
+ * It exists so a scoped removal (e.g. a move's old-home tombstone) can be gated
+ * to the boundary it left WITHOUT inlining the record body — deletes never leak
+ * content. When absent, boundaries are decoded from `record.boundary` as usual.
  */
 export interface RecordOp {
   action: 'create' | 'update' | 'delete'
   path: string
   cid?: string
   record?: unknown
+  boundary?: { values?: Array<{ value: string }> }
 }
 
 /**
@@ -50,12 +56,20 @@ export interface InfoMessage {
 }
 
 /**
- * Enrollment message for subscription
+ * Enrollment message for subscription.
+ *
+ * `action`:
+ * - `enroll` / `unenroll`: an actor entered / fully left the service.
+ * - `boundaries`: the actor stayed enrolled but its boundary set
+ *   changed. `boundaries` carries the set AFTER the change (`boundaries-after`).
+ *   Consumers diff this against their held snapshot and purge derived state for
+ *   any boundary the actor left. Emitted by `emitBoundaryChangeEvent` in
+ *   features/enrollment/handler.ts.
  */
 export interface EnrollmentMessage {
   $type: 'zone.stratos.sync.subscribeRecords#enrollment'
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   service?: string
   boundaries?: string[]
   time: string
@@ -258,7 +272,7 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
         while (eventQueue.length > 0) {
           if (signal.aborted) return
           const event = eventQueue.shift()!
-          if (!hasBoundaryIntersection(callerBoundaries, event.boundaries)) {
+          if (!eventVisibleToCaller(callerBoundaries, event)) {
             continue
           }
           if (event.action === 'enroll' && replayedDids.has(event.did)) {
@@ -270,6 +284,8 @@ function createServiceSubscriptionHandler(ctx: AppContext) {
             did: event.did,
             action: event.action,
             service: event.service,
+            // Wire frame carries only `{did, boundaries-after}` — the
+            // scoping-only `priorBoundaries` field is never emitted.
             boundaries: event.boundaries,
             time: event.time,
           }
@@ -425,6 +441,13 @@ async function getEventsSince(
 export interface DecodedEvent {
   ops: RecordOp[]
   boundaries: string[]
+  /**
+   * Domains in which the record still exists after this event (a move's new
+   * home). A subscriber sharing one of these is EXCLUDED from an otherwise
+   * in-scope scoped removal, so a move is never observed as a deletion by a
+   * caller who can still see the record via the retained domain.
+   */
+  excludeBoundaries: string[]
   decodeOk: boolean
 }
 
@@ -442,22 +465,44 @@ export function decodeEvent(event: SeqEvent): DecodedEvent {
       : [decoded]
 
     const boundaries = new Set<string>()
+    const excludeBoundaries = new Set<string>()
     for (const op of rawOps) {
+      // Prefer an explicit op-level boundary (a scoped removal carries its old
+      // domain here without a record body); otherwise fall back to the record's
+      // own boundary. This lets a move's removal op be gated to the domain it
+      // left while emitting a clean delete (no content).
       const record = op.record as Record<string, unknown> | undefined
-      const boundary = record?.boundary as Record<string, unknown> | undefined
+      const opBoundary = op.boundary as Record<string, unknown> | undefined
+      const recordBoundary = record?.boundary as
+        | Record<string, unknown>
+        | undefined
+      const boundary = opBoundary ?? recordBoundary
       const values = boundary?.values as Array<{ value: string }> | undefined
       if (values) {
         for (const v of values) boundaries.add(v.value)
+      }
+      // A move's removal op names the domain(s) the record moved INTO; a
+      // subscriber that shares one of those still sees the record and must be
+      // excluded from this removal.
+      const excludeBoundary = op.excludeBoundary as
+        | Record<string, unknown>
+        | undefined
+      const excludeValues = excludeBoundary?.values as
+        | Array<{ value: string }>
+        | undefined
+      if (excludeValues) {
+        for (const v of excludeValues) excludeBoundaries.add(v.value)
       }
     }
 
     return {
       ops: rawOps as unknown as RecordOp[],
       boundaries: [...boundaries],
+      excludeBoundaries: [...excludeBoundaries],
       decodeOk: true,
     }
   } catch {
-    return { ops: [], boundaries: [], decodeOk: false }
+    return { ops: [], boundaries: [], excludeBoundaries: [], decodeOk: false }
   }
 }
 
@@ -500,6 +545,12 @@ export function eventInScope(
   if (!decoded.decodeOk) return false
   const shared = decoded.boundaries.filter((b) => callerBoundaries.has(b))
   if (shared.length === 0) return false
+  // A move's scoped removal is suppressed for callers who still see the record
+  // via the domain it moved into — otherwise a both-domains subscriber would
+  // observe a move as a spurious deletion.
+  if (decoded.excludeBoundaries.some((b) => callerBoundaries.has(b))) {
+    return false
+  }
   if (domain) return shared.includes(domain)
   return true
 }
@@ -516,6 +567,37 @@ export function hasBoundaryIntersection(
 ): boolean {
   if (!boundaries) return false
   return boundaries.some((b) => callerBoundaries.has(b))
+}
+
+/**
+ * Whether an enrollment event should be delivered to a caller holding
+ * `callerBoundaries`.
+ *
+ * `enroll`/`unenroll` retain their original semantics exactly: a plain
+ * intersection against the event's own boundary set.
+ *
+ * A `boundaries` change is different: the after-set alone is
+ * insufficient, because a pure shrink that removes the last boundary the caller
+ * shares would no longer intersect the caller's set and the caller would never
+ * learn the actor left its scope. So the change is delivered when the caller's
+ * set intersects EITHER the prior set OR the after-set; the caller then diffs
+ * the after-set against its own held snapshot to decide what to purge.
+ *
+ * @param callerBoundaries - Boundaries the subscribing service is enrolled in
+ * @param event - The enrollment event under consideration
+ * @returns True if the event is in the caller's scope
+ */
+export function eventVisibleToCaller(
+  callerBoundaries: ReadonlySet<string>,
+  event: EnrollmentEvent,
+): boolean {
+  if (event.action === 'boundaries') {
+    return (
+      hasBoundaryIntersection(callerBoundaries, event.priorBoundaries) ||
+      hasBoundaryIntersection(callerBoundaries, event.boundaries)
+    )
+  }
+  return hasBoundaryIntersection(callerBoundaries, event.boundaries)
 }
 
 /**

@@ -1,0 +1,154 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.listRepoOps",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. When the response reaches the end of the available log, `caughtUp` is true and the repo's current signed commit is included. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned so the caller falls back to full-state recovery (listRecordPaths).",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo to sync."
+          },
+          "since": {
+            "type": "string",
+            "format": "tid",
+            "description": "A revision (TID). Only operations after this revision are returned. Omit to start from the beginning of retained history."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "Maximum number of operations to return in this page."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor from a previous response."
+          },
+          "excludeValues": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, record values are omitted and only operation metadata is returned."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ops", "caughtUp"],
+          "properties": {
+            "ops": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#repoOp" },
+              "description": "The operations in this page, in ascending revision order."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor to fetch the next page. Absent when caughtUp is true."
+            },
+            "caughtUp": {
+              "type": "boolean",
+              "description": "True when this response reached the end of the available log. When true, `commit` is present unless the repo has no commits yet."
+            },
+            "commit": {
+              "type": "ref",
+              "ref": "#signedCommit",
+              "description": "The repo's current signed MST commit. Present when caughtUp is true, EXCEPT for a repo with no commits yet (no writes) - in that case there is nothing to sign and also no ops to sync."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "OplogTruncated",
+          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. The caller must fall back to full-state recovery."
+        },
+        {
+          "name": "RepoNotFound",
+          "description": "The requested repo does not exist."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "Service authentication is required."
+        }
+      ]
+    },
+    "repoOp": {
+      "type": "object",
+      "description": "A single record operation in the oplog. `cid` null means delete; `prev` null means create.",
+      "required": ["rev", "collection", "rkey"],
+      "properties": {
+        "rev": {
+          "type": "string",
+          "format": "tid",
+          "description": "The revision of the commit that produced this operation. Atomic multi-writes share one rev."
+        },
+        "collection": {
+          "type": "string",
+          "format": "nsid",
+          "description": "The record collection."
+        },
+        "rkey": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The record key."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the current record value. Null (absent) for a delete."
+        },
+        "prev": {
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the record value this operation superseded. Null (absent) for a create."
+        },
+        "value": {
+          "type": "unknown",
+          "description": "The current record value, inlined by default for create/update ops. Omitted when excludeValues is true or for a delete."
+        }
+      }
+    },
+    "signedCommit": {
+      "type": "object",
+      "description": "A signed MST v3 commit, as persisted (read verbatim, not re-signed).",
+      "required": ["did", "version", "data", "rev", "sig"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of the repo."
+        },
+        "version": {
+          "type": "integer",
+          "description": "The commit version (3)."
+        },
+        "data": {
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the MST root node."
+        },
+        "rev": {
+          "type": "string",
+          "format": "tid",
+          "description": "The commit revision."
+        },
+        "prev": {
+          "type": "string",
+          "format": "cid",
+          "description": "The CID (string form) of the previous commit. Absent for the first commit."
+        },
+        "sig": {
+          "type": "string",
+          "description": "The commit signature, base64-encoded (the exact persisted bytes)."
+        }
+      }
+    }
+  }
+}

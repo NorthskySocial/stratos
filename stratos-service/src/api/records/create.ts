@@ -1,7 +1,6 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { TID } from '@atproto/common-web'
 import { AtUri } from '@atproto/syntax'
-import * as crypto from '@atproto/crypto'
 import {
   computeCid,
   encodeRecord,
@@ -10,6 +9,7 @@ import {
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
+import type { ActorSignFn } from '../../infra/signing/index.js'
 import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
 import { type SequenceTrace, type WritePhases } from './types.js'
 import { type Cid as CID } from '@atproto/lex-data'
@@ -95,7 +95,7 @@ export async function createRecord(
     )
   }
 
-  const actorSigningKey = await ctx.getActorSigningKey(callerDid)
+  const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 
   // Validate the record if requested
   if (validate) {
@@ -120,23 +120,13 @@ export async function createRecord(
     record,
     precomputed.recordBytes,
     precomputed.cid,
-    actorSigningKey,
+    actorSign,
     sequenceTrace,
     phases,
   )
 
   // Notify subscribers
   ctx.sequenceEvents.emit(callerDid)
-
-  // Write stub to user's PDS (background, non-blocking)
-  enqueuePdsStub(
-    ctx,
-    callerDid,
-    collection,
-    input.rkey ?? precomputed.uri.rkey,
-    record,
-    result.cid,
-  )
 
   return {
     uri: result.uri.toString(),
@@ -170,51 +160,6 @@ async function precomputeRecordData(
   const recordCid = await computeCid(recordBytes)
   phases.prepareCommitBuild = performance.now() - t0
   return { uri, recordBytes, cid: recordCid }
-}
-
-/**
- * Enqueue a stub write to the user's PDS in the background.
- *
- * @param ctx - Application context
- * @param callerDid - DID of the caller
- * @param collection - Collection NSID
- * @param rkey - Record key
- * @param record - Record content
- * @param cid - Record CID
- */
-function enqueuePdsStub(
-  ctx: AppContext,
-  callerDid: string,
-  collection: string,
-  rkey: string,
-  record: unknown,
-  cid: CID,
-): void {
-  const recordObj = record as Record<string, unknown>
-  const createdAt =
-    typeof recordObj.createdAt === 'string'
-      ? recordObj.createdAt
-      : new Date().toISOString()
-  const recordType =
-    typeof recordObj.$type === 'string' ? recordObj.$type : collection
-
-  setImmediate(() => {
-    try {
-      ctx.stubQueue.enqueueWrite(
-        callerDid,
-        collection,
-        rkey,
-        recordType,
-        parseCid(cid),
-        createdAt,
-      )
-    } catch (err) {
-      ctx.logger?.warn(
-        { did: callerDid, cid: parseCid(cid).toString(), err },
-        'failed to queue stub write',
-      )
-    }
-  })
 }
 
 /**
@@ -257,7 +202,7 @@ async function validateCreateInput(
  * @param record - Record data
  * @param recordBytes - Record bytes
  * @param cid - Content ID
- * @param actorSigningKey - Actor signing key
+ * @param actorSign - Bound actor signing function
  * @param sequenceTrace - Sequence trace
  * @param phases - Write phases
  * @returns Result of the create transaction
@@ -270,7 +215,7 @@ async function performCreateTransaction(
   record: unknown,
   recordBytes: Uint8Array,
   cid: CID,
-  actorSigningKey: crypto.Keypair,
+  actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
@@ -288,7 +233,7 @@ async function performCreateTransaction(
         record,
         recordBytes,
         cid,
-        actorSigningKey,
+        actorSign,
         sequenceTrace,
         phases,
       )
@@ -311,7 +256,7 @@ async function performCreateTransaction(
  * @param record - Record data
  * @param recordBytes - Record bytes
  * @param cid - CID of the record
- * @param actorSigningKey - Signing key for the actor
+ * @param actorSign - Bound signing function for the actor
  * @param sequenceTrace - Sequence trace for the operation
  * @param phases - Write phases for tracking performance
  * @returns Result of the create transaction
@@ -324,7 +269,7 @@ async function executeTransaction(
   record: unknown,
   recordBytes: Uint8Array,
   cid: CID,
-  actorSigningKey: crypto.Keypair,
+  actorSign: ActorSignFn,
   sequenceTrace: SequenceTrace,
   phases: WritePhases,
 ): Promise<TransactionResult> {
@@ -337,7 +282,7 @@ async function executeTransaction(
     const manager = createRepoManager(
       ctx.logger,
       store,
-      actorSigningKey,
+      actorSign,
       sequenceTrace,
     )
 

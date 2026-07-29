@@ -7,6 +7,8 @@ export type {
   BatchHydrationResult,
   HydratableRecord,
   AccessCheckInput,
+  RecordSource,
+  SubjectRef,
 } from './types.js'
 
 // Ports
@@ -19,6 +21,7 @@ export type {
 // Domain functions
 export {
   canAccessRecord,
+  isDomainlessRecord,
   hasIntersection,
   filterAccessibleRecords,
   parseServiceEndpoint,

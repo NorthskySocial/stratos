@@ -9,7 +9,8 @@ import { envToConfig, parseEnv } from '../src/config.js'
 const BASE_ENV: Record<string, string> = {
   STRATOS_SERVICE_DID: 'did:web:host',
   STRATOS_PUBLIC_URL: 'https://host.example.com',
-  STRATOS_ALLOWED_DOMAINS: 'eng,ops',
+  // `general` is the default reserved domain; it must appear in allowed domains.
+  STRATOS_ALLOWED_DOMAINS: 'eng,ops,general',
 }
 
 describe('service enrollment config parsing', () => {

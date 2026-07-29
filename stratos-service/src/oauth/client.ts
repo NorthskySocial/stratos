@@ -12,12 +12,12 @@ import type { ServicePgDb } from '../db/pg.js'
 
 /**
  * Granular OAuth scopes for PDS access.
- * Covers writing enrollment records and stub records for all Stratos record types.
+ * Covers writing the enrollment record (the only artifact Stratos writes to a
+ * user's mainstream PDS).
  */
 export const OAUTH_SCOPE = [
   'atproto',
   'repo:zone.stratos.actor.enrollment',
-  'repo:zone.stratos.feed.post?action=create&action=delete',
 ].join(' ')
 
 /**

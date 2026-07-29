@@ -58,6 +58,21 @@ export async function sequenceChange(
     uri: string
     cid?: string
     record?: unknown
+    /**
+     * Explicit op-level boundary for scoped removals (e.g. a move's old-home
+     * tombstone). Lets the event be gated to a domain WITHOUT inlining the
+     * record body, so the removal is observed only by subscribers of the old
+     * domain and never leaks content.
+     */
+    boundary?: { values: Array<{ value: string }> }
+    /**
+     * Domains in which the record STILL exists after this op (a move's new
+     * home). A scoped removal is suppressed for any subscriber that shares one
+     * of these, because that subscriber still sees the record via the retained
+     * domain and must NOT observe a spurious deletion. Empty/absent for a full
+     * delete.
+     */
+    excludeBoundary?: { values: Array<{ value: string }> }
     commitCid: string
     rev: string
     trace?: SequenceTrace
@@ -75,6 +90,8 @@ export async function sequenceChange(
     path,
     cid: op.cid,
     record: op.record as LexValue | undefined,
+    boundary: op.boundary as LexValue | undefined,
+    excludeBoundary: op.excludeBoundary as LexValue | undefined,
     commit: op.commitCid,
     rev: op.rev,
     trace: op.trace as LexValue | undefined,

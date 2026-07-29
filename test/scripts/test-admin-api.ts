@@ -17,6 +17,7 @@ import {
   ADMIN_TARGET_KEY,
   DOMAINS,
   PDS_URL,
+  RESERVED_DOMAIN,
   STRATOS_URL,
 } from './lib/config.ts'
 import { ADMIN_SESSION_COOKIE } from './lib/admin.ts'
@@ -332,31 +333,31 @@ async function run(): Promise<void> {
     pdsAfterAdd ? `[${pdsAfterAdd.join(', ')}]` : 'no PDS record found',
   )
 
-  // 4. setBoundaries via the admin API to a single known boundary.
+  // 4. setBoundaries via the admin API to a single known boundary. The
+  // EFFECTIVE set is always `requested ∪ {RESERVED_DOMAIN}`: the service
+  // force-includes the reserved all-members domain on every write and read.
   const set = await adminFetch(
     'zone.stratos.admin.setBoundaries',
     { did: target.did, boundaries: [DOMAINS.swordsmith] },
     sessionCookie,
   )
+  const setExpected = [DOMAINS.swordsmith, RESERVED_DOMAIN]
   const setBody = set.body as BoundaryResponse
   assert(
-    set.status === 200 &&
-      sameSet(setBody?.boundaries ?? [], [DOMAINS.swordsmith]),
-    'setBoundaries replaces the boundary set',
+    set.status === 200 && sameSet(setBody?.boundaries ?? [], setExpected),
+    'setBoundaries replaces the boundary set (reserved domain retained)',
     `status=${set.status}, boundaries=[${setBody?.boundaries?.join(', ') ?? ''}]`,
   )
 
   const dbAfterSet = await getBoundaries(target.did)
   assert(
-    sameSet(dbAfterSet, [DOMAINS.swordsmith]),
+    sameSet(dbAfterSet, setExpected),
     'DB reflects setBoundaries',
     `[${dbAfterSet.join(', ')}]`,
   )
-  const pdsAfterSet = await waitForPdsBoundaries(target.did, [
-    DOMAINS.swordsmith,
-  ])
+  const pdsAfterSet = await waitForPdsBoundaries(target.did, setExpected)
   assert(
-    pdsAfterSet !== null && sameSet(pdsAfterSet, [DOMAINS.swordsmith]),
+    pdsAfterSet !== null && sameSet(pdsAfterSet, setExpected),
     'PDS enrollment record reflects setBoundaries',
     pdsAfterSet ? `[${pdsAfterSet.join(', ')}]` : 'no PDS record found',
   )

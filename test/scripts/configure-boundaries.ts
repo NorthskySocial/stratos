@@ -2,8 +2,13 @@
 // Configure boundaries — adjusts per-user boundary assignments after enrollment.
 // Rei → [swordsmith], Sakura → [swordsmith], kaoruko → [aekea]
 
-import { TEST_USERS } from './lib/config.ts'
+import { SERVICE_DID, TEST_USERS } from './lib/config.ts'
 import { getBoundaries, setBoundaries } from './lib/backend.ts'
+
+// The reserved all-members domain (STRATOS_RESERVED_DOMAIN, default 'general')
+// is force-included in every enrollment by the service, so it always appears in
+// the effective boundary set regardless of what was requested.
+const RESERVED_DOMAIN = `${SERVICE_DID}/general`
 import { loadState } from './lib/state.ts'
 import { fail, info, pass, section } from './lib/log.ts'
 
@@ -37,9 +42,10 @@ async function run() {
     try {
       await setBoundaries(userState.did, userDef.boundaries)
 
-      // Verify
+      // Verify. The effective set is the requested boundaries PLUS the
+      // force-included reserved domain.
       const actual = await getBoundaries(userState.did)
-      const expected = new Set(userDef.boundaries)
+      const expected = new Set([...userDef.boundaries, RESERVED_DOMAIN])
       const actualSet = new Set(actual)
 
       if (
@@ -51,7 +57,7 @@ async function run() {
       } else {
         fail(
           `${userDef.name} boundary mismatch`,
-          `expected [${userDef.boundaries.join(', ')}], got [${actual.join(', ')}]`,
+          `expected [${[...expected].join(', ')}], got [${actual.join(', ')}]`,
         )
         failed++
       }

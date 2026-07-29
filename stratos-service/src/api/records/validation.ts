@@ -4,6 +4,8 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
   assertBoundaryMatchesService,
   BoundaryServiceMismatchError,
+  isValidSkey,
+  parseQualifiedBoundary,
   StratosValidationError,
   StratosValidator,
 } from '@northskysocial/stratos-core'
@@ -38,8 +40,24 @@ export async function assertCallerCanWriteDomains(
   const requestedDomains = StratosValidator.extractBoundaryDomains(
     record as Record<string, unknown>,
   )
-  if (requestedDomains.length === 0) {
-    return
+
+  // One record, one space: exactly one domain is required. Zero domains and
+  // more than one domain are both write errors (no legacy data to migrate).
+  if (requestedDomains.length !== 1) {
+    throw new InvalidRequestError(
+      `Records must target exactly one domain, received ${requestedDomains.length}`,
+      'InvalidDomainCount',
+    )
+  }
+
+  // The bare domain name is the space skey; validate it as such.
+  const [onlyDomain] = requestedDomains
+  const bareName = parseQualifiedBoundary(onlyDomain)?.name ?? onlyDomain
+  if (!isValidSkey(bareName)) {
+    throw new InvalidRequestError(
+      `Domain "${onlyDomain}" is not a valid domain skey`,
+      'InvalidDomain',
+    )
   }
 
   // Reject records whose boundaries target a different Stratos service

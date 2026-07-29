@@ -1,3 +1,6 @@
 export * from './verifier.js'
 export * from './introspection-client.js'
 export * from './dpop-verifier.js'
+export * from './replay-store.js'
+export * from './delegation-verifier.js'
+export * from './space-credential-verifier.js'

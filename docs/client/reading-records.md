@@ -2,10 +2,9 @@
 
 ## The Source Field Pattern
 
-When a record is created in Stratos, two records are written:
-
-1. Full record in Stratos — actual content, boundaries, all fields.
-2. Stub record on the user's PDS — `source` field pointing to Stratos.
+When a record is created in Stratos, only the full record is written to the user's per-actor repo on
+Stratos — nothing is written to the user's mainstream PDS. When a client or AppView hydrates that
+record, Stratos returns it with a `source` field pointing back to the service:
 
 ```json
 {
@@ -148,7 +147,7 @@ async function listRecords(
 
 When reading feeds through an AppView, hydration happens automatically:
 
-1. AppView indexes stubs with `source` fields.
+1. AppView indexes records (with their `source` fields) via the Stratos sync stream.
 2. When rendering a feed, AppView resolves `source.service` to get the Stratos endpoint.
 3. AppView calls `getRecord` at Stratos with the viewer identity.
 4. Stratos returns full content if the viewer has boundary access.

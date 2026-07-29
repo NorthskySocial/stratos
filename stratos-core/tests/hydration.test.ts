@@ -54,12 +54,28 @@ describe('Hydration Domain', () => {
       expect(canAccessRecord(input)).toBe(false)
     })
 
-    it('should grant access when record has no boundaries (public to enrolled)', () => {
+    it('should fail closed when a non-owner record has no boundaries (invariant violation)', () => {
       const input: AccessCheckInput = {
         recordBoundaries: [],
         ownerDid: 'did:plc:owner123',
         context: {
           viewerDid: 'did:plc:viewer456',
+          viewerDomains: ['engineering.example.com'],
+        },
+      }
+
+      // The empty-boundary "all enrolled" branch was removed: a domainless
+      // record (which the single-domain write path prevents) is fail-closed
+      // inaccessible to non-owners.
+      expect(canAccessRecord(input)).toBe(false)
+    })
+
+    it('should still grant the owner access to their own domainless record', () => {
+      const input: AccessCheckInput = {
+        recordBoundaries: [],
+        ownerDid: 'did:plc:owner123',
+        context: {
+          viewerDid: 'did:plc:owner123',
           viewerDomains: [],
         },
       }
@@ -122,6 +138,9 @@ describe('Hydration Domain', () => {
           boundaries: ['team-b.example.com'],
           ownerDid: 'did:plc:b',
         },
+        // A domainless record (invariant violation) owned by a third party is
+        // now fail-closed inaccessible — the empty-boundary "all enrolled"
+        // branch was removed.
         { uri: 'at://did:plc:c/post/3', boundaries: [], ownerDid: 'did:plc:c' },
       ]
 
@@ -132,9 +151,8 @@ describe('Hydration Domain', () => {
 
       const accessible = filterAccessibleRecords(records, context)
 
-      expect(accessible).toHaveLength(2)
+      expect(accessible).toHaveLength(1)
       expect(accessible[0].uri).toBe('at://did:plc:a/post/1')
-      expect(accessible[1].uri).toBe('at://did:plc:c/post/3')
     })
 
     it('should include records owned by viewer regardless of boundaries', () => {
