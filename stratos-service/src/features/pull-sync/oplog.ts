@@ -406,8 +406,9 @@ export async function listRepoOps(
     return {
       ops: coalesced,
       caughtUp: true,
-      // `commit` is REQUIRED when caughtUp; it may be null only for a repo with
-      // no root yet (no writes), in which case there are also no ops to sync.
+      // `commit` is present when caughtUp EXCEPT for a repo with no root yet
+      // (no writes) — there is nothing to sign and also no ops to sync. The
+      // lexicon documents this no-commit exception.
       ...(commit ? { commit } : {}),
     }
   }
