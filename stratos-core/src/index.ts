@@ -18,11 +18,11 @@ export type { BlobMetadata as BlobInfo } from './blob/reader.js'
 
 // Features - Enrollment exports Enrollment type (domain)
 export * from './enrollment/index.js'
-export * from './stub/index.js'
 export * from './hydration/index.js'
 
 // Attestation
 export * from './attestation/index.js'
+export * from './spaces/index.js'
 export * from './atproto/index.js'
 export * from './config/index.js'
 export * from './lexicons/index.js'

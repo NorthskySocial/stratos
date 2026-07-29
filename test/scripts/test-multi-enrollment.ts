@@ -160,6 +160,13 @@ async function testStatusMatchPds(testUsers: (UserState & { name: string })[]) {
 async function run() {
   section('Phase: Multi-Enrollment Verification')
 
+  if (Deno.env.get('STRATOS_E2E_DIRECT') === 'true') {
+    info(
+      'Direct mode: PDS enrollment records (and their rkeys) are only written by the OAuth enrollment flow — skipping.',
+    )
+    return
+  }
+
   const state = await loadState()
   const rei = state.users.rei
   const sakura = state.users.sakura

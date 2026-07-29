@@ -14,6 +14,7 @@ import {
   migrateServicePgDb,
 } from './db/pg.js'
 import { CachedEnrollmentStore } from './infra/storage/cached-enrollment-store.js'
+import { ReservedDomainEnrollmentStore } from './infra/storage/reserved-domain-enrollment-store.js'
 import {
   createPgOAuthStores,
   createSqliteOAuthStores,
@@ -101,7 +102,10 @@ export async function createStorageContext(
       cacheTtlMs: 5 * 60 * 1000,
     })
     await cachedEnrollmentStore.warm()
-    enrollmentStore = cachedEnrollmentStore
+    enrollmentStore = new ReservedDomainEnrollmentStore(
+      cachedEnrollmentStore,
+      cfg.stratos.reservedDomain,
+    )
     oauthStores = createPgOAuthStores(pgDb)
     adminSessionStore = new PgAdminSessionStore(pgDb, logger)
     actorStore = new PostgresActorStore({
@@ -124,7 +128,10 @@ export async function createStorageContext(
   } else {
     db = createServiceDb(serviceDbPath)
     await migrateServiceDb(db)
-    enrollmentStore = new SqliteEnrollmentStore(db)
+    enrollmentStore = new ReservedDomainEnrollmentStore(
+      new SqliteEnrollmentStore(db),
+      cfg.stratos.reservedDomain,
+    )
     oauthStores = createSqliteOAuthStores(db)
     adminSessionStore = new SqliteAdminSessionStore(db, logger)
     actorStore = new StratosActorStore({

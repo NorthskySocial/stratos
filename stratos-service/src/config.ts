@@ -4,7 +4,9 @@ import {
   dbConfigSchema,
   ENROLLMENT_MODE,
   InvalidServiceEnrollmentError,
+  isValidSkey,
   loggingConfigSchema,
+  qualifyBoundary,
   qualifyBoundaries,
   redisConfigSchema,
   validateServiceEnrollments,
@@ -12,6 +14,11 @@ import {
   type ServiceEnrollment,
 } from '@northskysocial/stratos-core'
 import { readFileSync } from 'node:fs'
+import {
+  validateSpaceAppAccess,
+  type RawSpaceAppAccess,
+  type SpaceAppAccessConfig,
+} from './features/space-credential/app-access.js'
 
 /**
  * Environment variable schema for stratos service
@@ -38,6 +45,12 @@ const envSchema = z
     // Stratos namespace config
     STRATOS_ALLOWED_DOMAINS: commaListSchema,
     STRATOS_AUTO_ENROLL_DOMAINS: commaListSchema,
+    /**
+     * Reserved all-members domain (bare name). Force-included in every
+     * enrollment's boundary set and implicitly part of the allowed domains
+     * (listing it in STRATOS_ALLOWED_DOMAINS is optional).
+     */
+    STRATOS_RESERVED_DOMAIN: z.string().min(1).default('general'),
     STRATOS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
     STRATOS_WRITE_RATE_MAX_WRITES: z.coerce
       .number()
@@ -59,6 +72,12 @@ const envSchema = z
       .int()
       .nonnegative()
       .default(1_000),
+    /** Space-credential lifetime in seconds (default 7200 = 2h per spec). */
+    STRATOS_SPACE_CREDENTIAL_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(7_200),
 
     // Enrollment
     STRATOS_ENROLLMENT_MODE: z
@@ -76,6 +95,24 @@ const envSchema = z
       .string()
       .optional()
       .transform((v) => v || undefined),
+
+    // Per-space app-gating (client attestation). JSON array mapping a
+    // space (skey/domainName) to an appAccess policy (`open` default, or
+    // `allowList` of client_ids). Mirrors the service-enrollment mechanism.
+    STRATOS_SPACE_APP_ACCESS_FILE: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    STRATOS_SPACE_APP_ACCESS: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
+    /** External-client JWKS cache TTL (ms) for client attestation. */
+    STRATOS_CLIENT_JWKS_CACHE_TTL_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(300_000),
 
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
@@ -215,6 +252,12 @@ export interface StratosServiceConfig {
   stratos: {
     serviceDid: string
     allowedDomains: string[]
+    /**
+     * Service-qualified reserved all-members domain (e.g.
+     * `did:web:stratos.example.com/general`). Force-included in every
+     * enrollment's boundary set and guaranteed to be within `allowedDomains`.
+     */
+    reservedDomain: string
     retentionDays: number
     devMode?: boolean
     importMaxBytes: number
@@ -224,6 +267,15 @@ export interface StratosServiceConfig {
       cooldownMs: number
       cooldownJitterMs: number
     }
+    /** Space-credential lifetime in seconds (`exp = iat + this`). */
+    spaceCredentialTtlSeconds: number
+    /**
+     * Per-space app-gating (client attestation). Maps a space boundary
+     * to its `appAccess` policy; unconfigured spaces default to `#open`.
+     */
+    spaceAppAccess: SpaceAppAccessConfig
+    /** External-client JWKS cache TTL (ms) for client-attestation resolution. */
+    clientJwksCacheTtlMs: number
   }
   enrollment: {
     mode: ENROLLMENT_MODE
@@ -370,30 +422,54 @@ function deriveServiceDid(env: Env, publicUrl: string): string {
 }
 
 /**
- * Parse raw service-enrollment entries from a JSON source.
- * @param raw - JSON string expected to encode an array of entries.
- * @param source - Human-readable origin used in error messages.
- * @returns The parsed raw entries.
+ * Load a JSON-array config from an optional file source plus an optional inline
+ * source, merging both. Shared by service-enrollment and space-app-access
+ * loading so the file-read / JSON-parse / array-shape checks live in one place;
+ * each caller supplies its own error factory and human-readable `label`.
+ *
+ * @param opts - File/inline env values, the inline env var name, a label used in
+ *   messages, and the error factory to throw on any failure.
+ * @returns The merged raw entries (unvalidated).
  */
-function parseServiceEnrollmentJson(
-  raw: string,
-  source: string,
-): RawServiceEnrollment[] {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch (err) {
-    throw new InvalidServiceEnrollmentError(
-      `service enrollments from ${source} is not valid JSON`,
-      { cause: err },
-    )
+function loadMergedJsonArray<T>(opts: {
+  filePath: string | undefined
+  inline: string | undefined
+  inlineEnvName: string
+  label: string
+  makeError: (message: string, options?: { cause?: unknown }) => Error
+}): T[] {
+  const { filePath, inline, inlineEnvName, label, makeError } = opts
+  const parseArray = (text: string, source: string): T[] => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch (err) {
+      throw makeError(`${label} from ${source} is not valid JSON`, {
+        cause: err,
+      })
+    }
+    if (!Array.isArray(parsed)) {
+      throw makeError(`${label} from ${source} must be a JSON array`)
+    }
+    return parsed as T[]
   }
-  if (!Array.isArray(parsed)) {
-    throw new InvalidServiceEnrollmentError(
-      `service enrollments from ${source} must be a JSON array`,
-    )
+
+  const raw: T[] = []
+  if (filePath) {
+    let contents: string
+    try {
+      contents = readFileSync(filePath, 'utf8')
+    } catch (err) {
+      throw makeError(`failed to read ${label} file "${filePath}"`, {
+        cause: err,
+      })
+    }
+    raw.push(...parseArray(contents, `file "${filePath}"`))
   }
-  return parsed as RawServiceEnrollment[]
+  if (inline) {
+    raw.push(...parseArray(inline, inlineEnvName))
+  }
+  return raw
 }
 
 /**
@@ -409,43 +485,87 @@ function loadServiceEnrollments(
   serviceDid: string,
   allowedDomains: string[],
 ): ServiceEnrollment[] {
-  const raw: RawServiceEnrollment[] = []
-
-  if (env.STRATOS_SERVICE_ENROLLMENTS_FILE) {
-    let contents: string
-    try {
-      contents = readFileSync(env.STRATOS_SERVICE_ENROLLMENTS_FILE, 'utf8')
-    } catch (err) {
-      throw new InvalidServiceEnrollmentError(
-        `failed to read service enrollments file "${env.STRATOS_SERVICE_ENROLLMENTS_FILE}"`,
-        { cause: err },
-      )
-    }
-    raw.push(
-      ...parseServiceEnrollmentJson(
-        contents,
-        `file "${env.STRATOS_SERVICE_ENROLLMENTS_FILE}"`,
-      ),
-    )
-  }
-
-  if (env.STRATOS_SERVICE_ENROLLMENTS) {
-    raw.push(
-      ...parseServiceEnrollmentJson(
-        env.STRATOS_SERVICE_ENROLLMENTS,
-        'STRATOS_SERVICE_ENROLLMENTS',
-      ),
-    )
-  }
+  const raw = loadMergedJsonArray<RawServiceEnrollment>({
+    filePath: env.STRATOS_SERVICE_ENROLLMENTS_FILE,
+    inline: env.STRATOS_SERVICE_ENROLLMENTS,
+    inlineEnvName: 'STRATOS_SERVICE_ENROLLMENTS',
+    label: 'service enrollments',
+    makeError: (message, options) =>
+      new InvalidServiceEnrollmentError(message, options),
+  })
 
   return validateServiceEnrollments(raw, { serviceDid, allowedDomains })
 }
+
+/**
+ * Resolve and validate the reserved all-members domain at startup.
+ *
+ * The bare name must be a valid skey (it becomes the space `skey`). The
+ * service-qualified form is implicitly part of the allowed-domains set: the
+ * reserved domain is force-included in every enrollment by design, so
+ * requiring operators to also list it in STRATOS_ALLOWED_DOMAINS only
+ * created an upgrade-time boot failure for deployments configured before the
+ * variable existed. Explicit listing remains supported and is a no-op.
+ *
+ * @param serviceDid - Bare service DID used to qualify the reserved name.
+ * @param bareName - Reserved domain name from STRATOS_RESERVED_DOMAIN.
+ * @param allowedDomains - Service-qualified allowed boundaries (appended to
+ *   in place when the reserved domain is not already listed).
+ * @returns The service-qualified reserved domain.
+ */
+function resolveReservedDomain(
+  serviceDid: string,
+  bareName: string,
+  allowedDomains: string[],
+): string {
+  if (!isValidSkey(bareName)) {
+    throw new Error(
+      `STRATOS_RESERVED_DOMAIN "${bareName}" is not a valid domain skey (1-512 UTF-8 bytes, record-key syntax)`,
+    )
+  }
+  const reservedDomain = qualifyBoundary(serviceDid, bareName)
+  if (!allowedDomains.includes(reservedDomain)) {
+    allowedDomains.push(reservedDomain)
+  }
+  return reservedDomain
+}
+
+/**
+ * Load, merge and validate per-space app-gating (client attestation) config.
+ * Combines file and inline JSON sources (identical mechanism to service
+ * enrollments); duplicate spaces across sources fail fast.
+ *
+ * @param env - Environment variables object.
+ * @param serviceDid - Service DID used to qualify space boundaries.
+ * @returns The validated app-access config (empty ⇒ every space is `#open`).
+ */
+function loadSpaceAppAccess(
+  env: Env,
+  serviceDid: string,
+): SpaceAppAccessConfig {
+  const raw = loadMergedJsonArray<RawSpaceAppAccess>({
+    filePath: env.STRATOS_SPACE_APP_ACCESS_FILE,
+    inline: env.STRATOS_SPACE_APP_ACCESS,
+    inlineEnvName: 'STRATOS_SPACE_APP_ACCESS',
+    label: 'space app-access',
+    makeError: (message, options) =>
+      new InvalidServiceEnrollmentError(message, options),
+  })
+
+  return validateSpaceAppAccess(raw, serviceDid)
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
   const allowedDomains = qualifyBoundaries(
     serviceDid,
     env.STRATOS_ALLOWED_DOMAINS,
+  )
+  const reservedDomain = resolveReservedDomain(
+    serviceDid,
+    env.STRATOS_RESERVED_DOMAIN,
+    allowedDomains,
   )
 
   return {
@@ -468,6 +588,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     stratos: {
       serviceDid,
       allowedDomains,
+      reservedDomain,
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
       importMaxBytes: env.STRATOS_IMPORT_MAX_BYTES,
@@ -477,6 +598,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
         cooldownMs: env.STRATOS_WRITE_RATE_COOLDOWN_MS,
         cooldownJitterMs: env.STRATOS_WRITE_RATE_COOLDOWN_JITTER_MS,
       },
+      spaceCredentialTtlSeconds: env.STRATOS_SPACE_CREDENTIAL_TTL_SECONDS,
+      spaceAppAccess: loadSpaceAppAccess(env, serviceDid),
+      clientJwksCacheTtlMs: env.STRATOS_CLIENT_JWKS_CACHE_TTL_MS,
     },
     enrollment: {
       mode: env.STRATOS_ENROLLMENT_MODE,

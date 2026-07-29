@@ -43,6 +43,29 @@ export class RedisCache implements Cache {
   }
 
   /**
+   * Atomically set a key only if it does not already exist, with a TTL.
+   *
+   * Wraps the single-round-trip `SET key value EX ttl NX` command, which is the
+   * atomic primitive behind single-use / replay-protection semantics: the key
+   * is created iff absent, so exactly one caller across all instances observes
+   * the successful set.
+   *
+   * @param key - The key to set.
+   * @param value - The value to set.
+   * @param ttlSeconds - TTL in seconds applied to the key on creation.
+   * @returns True iff the key was newly created (Redis replied `OK`); false if
+   *   the key already existed (Redis replied `null`).
+   */
+  async setNxEx(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const reply = await this.redis.set(key, value, 'EX', ttlSeconds, 'NX')
+    return reply === 'OK'
+  }
+
+  /**
    * Add a member to a set.
    * @param key - The key of the set.
    * @param members - The members to add to the set.

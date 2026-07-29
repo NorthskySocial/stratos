@@ -283,5 +283,147 @@ export function describeStoreContract(
         expect(await store.getEnrolledActor(SPIKE_DID)).toBeNull()
       })
     })
+
+    describe('purge helpers', () => {
+      it('deletePostsByDid removes all of a DID posts and cascades index rows', async () => {
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: ['a', 'b'] }),
+        )
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/2`, boundaries: ['a'] }),
+        )
+        await store.upsertPost(
+          makePost({
+            uri: `at://${FAYE_DID}/p/1`,
+            did: FAYE_DID,
+            boundaries: ['a'],
+          }),
+        )
+        const removed = await store.deletePostsByDid(SPIKE_DID)
+        expect(removed).toBe(2)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).toBeNull()
+        expect(await store.getPost(`at://${SPIKE_DID}/p/2`)).toBeNull()
+        // FAYE's post survives.
+        expect(await store.getPost(`at://${FAYE_DID}/p/1`)).not.toBeNull()
+        // Index rows cascaded: boundary 'a' now only holds FAYE's post.
+        const inA = await store.listPostsByBoundary({
+          boundary: 'a',
+          limit: 10,
+        })
+        expect(inA.posts.map((p) => p.uri)).toEqual([`at://${FAYE_DID}/p/1`])
+        const inB = await store.listPostsByBoundary({
+          boundary: 'b',
+          limit: 10,
+        })
+        expect(inB.posts).toEqual([])
+      })
+
+      it('deletePostsByDid returns 0 for a DID with no posts (idempotent)', async () => {
+        expect(await store.deletePostsByDid(VASH_DID)).toBe(0)
+      })
+
+      it('deletePostsByDidBoundary drops the boundary and deletes now-orphaned posts', async () => {
+        // p1 is only in the lost boundary -> deleted; p2 also has another
+        // boundary -> survives but loses the membership; FAYE's post untouched.
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: ['gone'] }),
+        )
+        await store.upsertPost(
+          makePost({
+            uri: `at://${SPIKE_DID}/p/2`,
+            boundaries: ['gone', 'kept'],
+          }),
+        )
+        await store.upsertPost(
+          makePost({
+            uri: `at://${FAYE_DID}/p/1`,
+            did: FAYE_DID,
+            boundaries: ['gone'],
+          }),
+        )
+        const fullyDeleted = await store.deletePostsByDidBoundary(
+          SPIKE_DID,
+          'gone',
+        )
+        expect(fullyDeleted).toBe(1)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).toBeNull()
+        const p2 = await store.getPost(`at://${SPIKE_DID}/p/2`)
+        expect(p2).not.toBeNull()
+        expect(p2!.boundaries).toEqual(['kept'])
+        // FAYE's membership in 'gone' is untouched.
+        const inGone = await store.listPostsByBoundary({
+          boundary: 'gone',
+          limit: 10,
+        })
+        expect(inGone.posts.map((p) => p.uri)).toEqual([`at://${FAYE_DID}/p/1`])
+      })
+
+      it('deletePostsByDidBoundary leaves pre-existing boundaryless posts alone', async () => {
+        // p1 never referenced the dropped boundary and has no boundaries at
+        // all - it must not be swept up by the orphan check.
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: [] }),
+        )
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/2`, boundaries: ['gone'] }),
+        )
+        const deleted = await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')
+        expect(deleted).toBe(1)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/2`)).toBeNull()
+        // The boundaryless post survives.
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
+      })
+
+      it('deletePostsByDidBoundary returns 0 when the DID holds no posts in the boundary', async () => {
+        await store.upsertPost(
+          makePost({ uri: `at://${SPIKE_DID}/p/1`, boundaries: [] }),
+        )
+        expect(await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')).toBe(0)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
+      })
+
+      it('deletePostsByBoundary removes every actor post in a boundary service-wide', async () => {
+        await store.upsertPost(
+          makePost({
+            uri: `at://${SPIKE_DID}/p/1`,
+            boundaries: ['space', 'other'],
+          }),
+        )
+        await store.upsertPost(
+          makePost({
+            uri: `at://${FAYE_DID}/p/1`,
+            did: FAYE_DID,
+            boundaries: ['space'],
+          }),
+        )
+        await store.upsertPost(
+          makePost({
+            uri: `at://${VASH_DID}/p/1`,
+            did: VASH_DID,
+            boundaries: ['unrelated'],
+          }),
+        )
+        const removed = await store.deletePostsByBoundary('space')
+        expect(removed).toBe(2)
+        expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).toBeNull()
+        expect(await store.getPost(`at://${FAYE_DID}/p/1`)).toBeNull()
+        // A post that merely shared another boundary with a deleted post is
+        // still deleted (it was scoped to 'space'); the unrelated one survives.
+        expect(await store.getPost(`at://${VASH_DID}/p/1`)).not.toBeNull()
+        const other = await store.listPostsByBoundary({
+          boundary: 'other',
+          limit: 10,
+        })
+        expect(other.posts).toEqual([])
+      })
+
+      it('deleteCursor removes cursor state and is idempotent', async () => {
+        await store.upsertCursor(SPIKE_DID, 7, '2024-01-01T00:00:00.000Z')
+        expect(await store.deleteCursor(SPIKE_DID)).toBe(1)
+        expect(await store.getCursor(SPIKE_DID)).toBeNull()
+        // second call is a no-op
+        expect(await store.deleteCursor(SPIKE_DID)).toBe(0)
+      })
+    })
   })
 }

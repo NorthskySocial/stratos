@@ -432,16 +432,40 @@ export class StratosActorStore implements ActorStore {
   }
 
   /**
-   * Create a signing key for an actor with the given DID.
+   * Create the signing key for an actor if absent (atomic create-if-absent).
+   *
+   * Concurrency: the key bytes are fully written to a unique temporary file
+   * first, then atomically hard-linked to `signing_key`. Linking fails with
+   * EEXIST if another caller (or an earlier run) already published a key, so
+   * exactly one key is ever persisted, a loser never observes a partially
+   * written file (the visible name only ever points at complete bytes), and
+   * BOTH callers return the winner's key. An existing key is never
+   * overwritten.
+   *
    * @param did - The DID of the actor.
-   * @returns A Promise resolving to the created P256Keypair.
+   * @returns A Promise resolving to the persisted P256Keypair.
    */
   async createSigningKey(did: string): Promise<crypto.P256Keypair> {
     const { directory } = await this.getLocation(did)
     const keyPath = path.join(directory, 'signing_key')
     const keypair = await crypto.P256Keypair.create({ exportable: true })
     const exported = await (keypair as crypto.ExportableKeypair).export()
-    await fs.writeFile(keyPath, exported)
+    const tmpPath = path.join(
+      directory,
+      `.signing_key.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    )
+    try {
+      await fs.writeFile(tmpPath, exported, { flag: 'wx' })
+      await fs.link(tmpPath, keyPath)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      // Lost the race (or the key already existed): the linked file is
+      // complete by construction, so it is safe to read and import.
+      const keyBytes = await fs.readFile(keyPath)
+      return crypto.P256Keypair.import(keyBytes, { exportable: true })
+    } finally {
+      await fs.rm(tmpPath, { force: true })
+    }
     return keypair
   }
 

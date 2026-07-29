@@ -26,7 +26,7 @@ export interface StratosSyncConfig {
 
 interface EnrollmentMessage {
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   service?: string
   boundaries?: string[]
   time: string
@@ -204,9 +204,16 @@ export class StratosServiceSubscription {
       const msg = decodeFirst(data) as unknown as Record<string, unknown>
       if (msg.t === '#enrollment') {
         const enrollment = msg as unknown as EnrollmentMessage
-        if (enrollment.action === 'enroll') {
+        // 'boundaries' is a boundary-set change for a STILL-enrolled actor
+        // frame. Treating any non-'enroll' action as unenroll would purge a
+        // still-enrolled actor, so re-affirm on 'enroll'/'boundaries' with the
+        // after-set and only purge on an explicit 'unenroll'.
+        if (
+          enrollment.action === 'enroll' ||
+          enrollment.action === 'boundaries'
+        ) {
           this.callbacks.onEnroll(enrollment.did, enrollment.boundaries ?? [])
-        } else {
+        } else if (enrollment.action === 'unenroll') {
           this.callbacks.onUnenroll(enrollment.did)
         }
       }

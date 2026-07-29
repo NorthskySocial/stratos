@@ -44,8 +44,10 @@ import {
   type IdentityContext,
 } from './context-types.js'
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
+import { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { RedisCache } from './infra/storage/redis-cache.js'
+import { InProcessActorSigner } from './infra/signing/index.js'
 
 export * from './context-types.js'
 export { SqliteSequenceOps } from './storage/sqlite/sequence-ops.js'
@@ -113,11 +115,17 @@ export async function createAppContext(
     logger,
   )
 
-  const SIGNING_KEY_TTL_MS = 5 * 60 * 1000
-  const signingKeyCache = new Map<
-    string,
-    { key: crypto.Keypair; expiresAt: number }
-  >()
+  // Per-actor signing seam. Confines raw private key material — the TTL cache
+  // and key-store access that previously lived here now live inside the signer.
+  const actorSigner = new InProcessActorSigner(actorStore, { logger })
+
+  // Shared external-client JWKS resolver. Process-wide so its TTL cache
+  // is reused across `getSpaceCredential` requests. Uses the user-agent fetch.
+  const jwksResolver = new JwksResolver({
+    fetch: fetchWithUserAgent,
+    cacheTtlMs: cfg.stratos.clientJwksCacheTtlMs,
+    logger,
+  })
 
   const ctx: AppContext = {
     cfg,
@@ -131,31 +139,10 @@ export async function createAppContext(
     ...services,
     signingDidKey: signingKey.did(),
     serviceDid: cfg.service.did,
+    actorSigner,
+    jwksResolver,
     app: initExpressApp(),
     logger,
-
-    /**
-     * Returns the actor's signing keypair, using a TTL cache to avoid
-     * redundant DB lookups and P256 key imports on every write.
-     *
-     * @param did - The DID of the actor
-     * @returns The signing key for the actor, or a new one if none exists
-     */
-    async getActorSigningKey(did: string) {
-      const now = Date.now()
-      const cached = signingKeyCache.get(did)
-      if (cached && cached.expiresAt > now) {
-        return cached.key
-      }
-      const keypair =
-        (await actorStore.loadSigningKey(did)) ??
-        (await actorStore.createSigningKey(did))
-      signingKeyCache.set(did, {
-        key: keypair,
-        expiresAt: now + SIGNING_KEY_TTL_MS,
-      })
-      return keypair
-    },
 
     /**
      * Create an attestation for an actor
@@ -195,7 +182,6 @@ export async function createAppContext(
     async destroy() {
       await storageDestroy()
       services.repoCtx.repoWriteLocks.destroy()
-      services.repoCtx.stubQueue.stop()
       if (services.enrollmentCtx.allowListProvider) {
         await services.enrollmentCtx.allowListProvider.stop()
       }
@@ -237,6 +223,7 @@ async function initCoreServices(
     enrollmentStore,
     adminSessionStore,
     enrollmentCtx.allowListProvider,
+    signingKey,
     logger,
   )
 
@@ -252,26 +239,19 @@ async function initCoreServices(
       })
     : new EnrollmentBoundaryResolver(enrollmentStore)
 
-  const blobCtx = initBlob(actorStore, boundaryResolver)
+  const blobCtx = initBlob(actorStore, boundaryResolver, logger)
 
   const hydrationCtx = initHydration(
     actorStore,
     enrollmentStore,
     blobCtx.bloomManager,
     cache,
+    logger,
   )
 
   const mstCtx = initMst(signingKey)
 
-  const repoCtx = initRepo(
-    cfg,
-    actorStore,
-    mstCtx,
-    sequenceEvents,
-    oauthClient,
-    getServiceDidWithFragment(cfg),
-    logger,
-  )
+  const repoCtx = initRepo(cfg, actorStore, mstCtx, sequenceEvents)
 
   return {
     enrollmentCtx,
@@ -323,6 +303,7 @@ async function initIdentity(
  * @param enrollmentStore - Store for managing user enrollments.
  * @param adminSessionStore - Admin web-session store.
  * @param allowListProvider - Optional provider for external allowlists.
+ * @param signingKey - This service's signing keypair (space-credential authority).
  * @param logger - Logger instance for logging application events.
  * @returns Initialized authentication components.
  */
@@ -331,7 +312,8 @@ function initAuth(
   idResolver: AppContext['idResolver'],
   enrollmentStore: AppContext['enrollmentStore'],
   adminSessionStore: AppContext['adminSessionStore'],
-  allowListProvider?: ExternalAllowListProvider,
+  allowListProvider: ExternalAllowListProvider | undefined,
+  signingKey: AppContext['signingKey'],
   logger?: AppContext['logger'],
 ) {
   const dpopVerifier = new DpopVerifier({
@@ -354,6 +336,7 @@ function initAuth(
     dpopVerifier,
     allowListProvider,
     cfg.stratos.devMode === true,
+    signingKey,
     logger,
   )
 
@@ -388,18 +371,39 @@ function initExpressApp(): express.Express {
 function setupMigrationCallback(ctx: AppContext) {
   if (!(ctx.boundaryResolver instanceof MigratingBoundaryResolver)) return
 
-  ctx.boundaryResolver.onMigrated = (did: string, boundaries: string[]) => {
+  ctx.boundaryResolver.onMigrated = (
+    did: string,
+    boundaries: string[],
+    priorBoundaries: string[],
+  ) => {
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     setImmediate(async () => {
       try {
         const isEnrolled = await ctx.enrollmentStore.isEnrolled(did)
         if (!isEnrolled) return
 
-        await ctx.enrollmentStore.setBoundaries(did, boundaries)
-        const signingKey = await ctx.getActorSigningKey(did)
+        // `persistMigrated` already wrote the migrated set, so `priorBoundaries`
+        // is supplied by the resolver (a store read here would return the
+        // already-migrated set and suppress the event below).
+
+        // Read-repair migration rewrites an actor's boundary set (e.g.
+        // legacy bare names → qualified). Surface it on the service stream so
+        // downstream caches invalidate without waiting for a TTL. Skip when the
+        // set is unchanged (order-insensitive) to stay idempotent.
+        if (!boundarySetsEqual(priorBoundaries, boundaries)) {
+          ctx.enrollmentEvents.emit('enrollment', {
+            did,
+            action: 'boundaries',
+            boundaries,
+            priorBoundaries,
+            time: new Date().toISOString(),
+          })
+        }
+
+        const signingKeyDid = await ctx.actorSigner.getPublicKey(did)
         await ctx.profileRecordWriter.putEnrollmentRecord(did, 'self', {
           service: ctx.cfg.service.publicUrl,
-          signingKey: signingKey.did(),
+          signingKey: signingKeyDid,
           boundaries: boundaries.map((b) => ({ value: b })),
           createdAt: new Date().toISOString(),
         })
@@ -408,6 +412,24 @@ function setupMigrationCallback(ctx: AppContext) {
       }
     })
   }
+}
+
+/**
+ * Whether two boundary sets are equal regardless of order or duplicates.
+ * Compares deduplicated sizes (raw lengths would let a list with duplicates
+ * pass as equal to a distinct set of the same length).
+ * @param a - First boundary set
+ * @param b - Second boundary set
+ * @returns True if both sets contain exactly the same boundaries
+ */
+function boundarySetsEqual(a: string[], b: string[]): boolean {
+  const setA = new Set(a)
+  const setB = new Set(b)
+  if (setA.size !== setB.size) return false
+  for (const x of setB) {
+    if (!setA.has(x)) return false
+  }
+  return true
 }
 
 /**

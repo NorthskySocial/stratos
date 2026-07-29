@@ -321,8 +321,11 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
           })
         }
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.addBoundary(did, boundary)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
         let pdsSync: 'ok' | 'failed' = 'ok'
         try {
@@ -395,8 +398,11 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
           })
         }
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.removeBoundary(did, boundary)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
         let pdsSync: 'ok' | 'failed' = 'ok'
         try {
@@ -477,11 +483,21 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
           })
         }
 
+        const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
+
+        // Re-read the EFFECTIVE persisted set: the store decorator force-includes
+        // the reserved all-members domain, so the requested `boundaries` may omit
+        // it. Emitting/returning the requested set would make a feedgen diff the
+        // reserved domain as "lost" and wrongly purge the actor's reserved-domain
+        // derived state.
+        const effectiveBoundaries = await ctx.enrollmentStore.getBoundaries(did)
+
+        emitBoundaryChangeEvent(ctx, did, effectiveBoundaries, priorBoundaries)
 
         let pdsSync: 'ok' | 'failed' = 'ok'
         try {
-          await updatePdsEnrollmentRecord(ctx, did, boundaries)
+          await updatePdsEnrollmentRecord(ctx, did, effectiveBoundaries)
         } catch (err) {
           pdsSync = 'failed'
           ctx.logger?.warn(
@@ -494,12 +510,12 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
           {
             adminDid,
             targetDid: did,
-            boundaryCount: boundaries.length,
+            boundaryCount: effectiveBoundaries.length,
             pdsSync,
           },
           'admin set boundaries',
         )
-        res.json({ did, boundaries, pdsSync })
+        res.json({ did, boundaries: effectiveBoundaries, pdsSync })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
@@ -536,6 +552,54 @@ function registerListDomainsHandler(ctx: AppContext): void {
       }
     },
   )
+}
+
+/**
+ * Emit a service-stream `boundaries` change event.
+ *
+ * Fired whenever an enrolled actor's boundary set is mutated in place (admin
+ * add/remove/set) so downstream services can drop derived state for any
+ * boundary the actor left, WITHOUT waiting for a cache TTL. Consumed by
+ * `eventInScope` boundary diffing in subscription/subscribe-records.ts.
+ * Emission is skipped when the set is unchanged (idempotent no-op).
+ * `priorBoundaries` is carried for stream scoping only and is not written to the
+ * wire frame.
+ *
+ * @param ctx - Application context
+ * @param did - DID whose boundaries changed
+ * @param boundaries - The boundary set AFTER the change (`boundaries-after`)
+ * @param priorBoundaries - The boundary set BEFORE the change
+ */
+function emitBoundaryChangeEvent(
+  ctx: AppContext,
+  did: string,
+  boundaries: string[],
+  priorBoundaries: string[],
+): void {
+  if (boundarySetsEqual(priorBoundaries, boundaries)) return
+  ctx.enrollmentEvents.emit('enrollment', {
+    did,
+    action: 'boundaries',
+    boundaries,
+    priorBoundaries,
+    time: new Date().toISOString(),
+  })
+  ctx.logger?.info(
+    { did, boundaryCount: boundaries.length },
+    'emitted boundary-change event',
+  )
+}
+
+/**
+ * Whether two boundary sets are equal regardless of order.
+ * @param a - First boundary set
+ * @param b - Second boundary set
+ * @returns True if both sets contain exactly the same boundaries
+ */
+function boundarySetsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const set = new Set(a)
+  return b.every((x) => set.has(x))
 }
 
 /**

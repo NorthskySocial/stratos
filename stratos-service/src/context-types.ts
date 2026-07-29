@@ -14,10 +14,10 @@ import {
   type HydrationService,
   type LexiconProvider,
   type Logger,
-  type StubWriterService,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from './actor-store-types.js'
-import { BackgroundStubQueue } from './features/stub/internal/background-queue.js'
+import type { ActorSigner } from './infra/signing/index.js'
+import type { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { type StratosServiceConfig } from './config.js'
 import { type EnrollmentStore } from './oauth'
@@ -37,7 +37,18 @@ export interface IdentityContext {
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
-  getActorSigningKey(did: string): Promise<crypto.Keypair>
+  /**
+   * The per-actor signing seam. Confines raw private key material — callers
+   * sign and read public keys through this interface and never hold a
+   * per-actor `Keypair`.
+   */
+  actorSigner: ActorSigner
+  /**
+   * Shared external-client JWKS resolver. Resolves arbitrary
+   * confidential clients' published keys (with a process-wide TTL cache) so
+   * client attestations can be verified during `getSpaceCredential`.
+   */
+  jwksResolver: JwksResolver
   createAttestation(
     did: string,
     boundaries: string[],
@@ -102,8 +113,6 @@ export interface RepoContext extends MstContext {
   repoWriteLocks: RepoWriteLocks
   writeRateLimiter: WriteRateLimiter
   rateLimits: WriteRateLimiter // Added for compatibility
-  stubWriter: StubWriterService
-  stubQueue: BackgroundStubQueue
   sequenceEvents: SequenceEventEmitter
 }
 
@@ -144,9 +153,23 @@ export interface AppContext
 
 export interface EnrollmentEvent {
   did: string
-  action: 'enroll' | 'unenroll'
+  action: 'enroll' | 'unenroll' | 'boundaries'
   service?: string
+  /**
+   * For `enroll`: the boundary set the actor was enrolled into.
+   * For `boundaries`: the actor's boundary set AFTER the change (`boundaries-after`).
+   * Absent for `unenroll`.
+   */
   boundaries?: string[]
+  /**
+   * Only set on a `boundaries` change event: the actor's boundary set BEFORE the
+   * change. Used solely for service-side stream scoping so a caller that held a
+   * now-removed boundary still receives the change (a pure shrink whose after-set
+   * no longer intersects the caller must not be silently dropped). This field is
+   * NOT written to the wire frame — the on-stream `#enrollment` message carries
+   * only `{did, boundaries-after}`.
+   */
+  priorBoundaries?: string[]
   time: string
 }
 

@@ -12,9 +12,11 @@ import type {
 import {
   canAccessRecord,
   hydrateRecordBlobs,
+  type Logger,
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { ActorStore } from '../../actor-store-types.js'
+import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
 
 /**
  * Implementation of RecordResolver port using actor store
@@ -124,6 +126,7 @@ export class HydrationServiceImpl implements HydrationService {
   constructor(
     private recordResolver: RecordResolver,
     private boundaryResolver: BoundaryResolver,
+    private logger?: Logger,
   ) {}
 
   /**
@@ -168,6 +171,10 @@ export class HydrationServiceImpl implements HydrationService {
     }
 
     // Check access
+    logDomainlessInvariant(this.logger, record.boundaries, {
+      uri: record.uri,
+      ownerDid,
+    })
     const hasAccess = canAccessRecord({
       recordBoundaries: record.boundaries,
       ownerDid,
@@ -291,6 +298,10 @@ export class HydrationServiceImpl implements HydrationService {
     }
 
     // Check access
+    logDomainlessInvariant(this.logger, record.boundaries, {
+      uri: record.uri,
+      ownerDid,
+    })
     const hasAccess = canAccessRecord({
       recordBoundaries: record.boundaries,
       ownerDid,

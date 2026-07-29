@@ -60,10 +60,14 @@ describe('Record Update Handler', () => {
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),
       },
-      getActorSigningKey: vi.fn().mockResolvedValue({
-        did: 'did:key:zDnaeTestKey',
+      actorSigner: {
         sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-      }),
+        getSignFn: vi
+          .fn()
+          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
+        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
+        ensureKey: vi.fn().mockResolvedValue(undefined),
+      },
       repoWriteLocks: {
         acquire: vi.fn().mockResolvedValue(() => {}),
       },
@@ -75,9 +79,6 @@ describe('Record Update Handler', () => {
       },
       sequenceEvents: {
         emit: vi.fn(),
-      },
-      stubQueue: {
-        enqueueWrite: vi.fn(),
       },
       boundaryResolver: {
         getBoundaries: vi
@@ -152,9 +153,6 @@ describe('Record Update Handler', () => {
       testDid,
     )
     expect(readResult.value).toMatchObject({ text: 'Updated text' })
-
-    // Verify stub was enqueued
-    expect(ctx.stubQueue.enqueueWrite).toHaveBeenCalled()
   })
 
   it('should throw AuthRequiredError when updating another users record', async () => {

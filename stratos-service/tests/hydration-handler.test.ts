@@ -32,6 +32,10 @@ describe('hydration-handler', () => {
     }
     mockCtx = {
       actorStore: {},
+      serviceDid: 'did:web:stratos.test',
+      authVerifier: {
+        optionalStandardOrSpaceCredential: vi.fn(),
+      },
       boundaryResolver: {
         getBoundaries: vi.fn().mockResolvedValue(['engineering']),
       },

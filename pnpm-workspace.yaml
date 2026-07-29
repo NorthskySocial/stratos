@@ -6,4 +6,10 @@ packages:
   - 'stratos-feedgen'
   - 'webapp'
 allowBuilds:
+  core-js: true
+  cpu-features: true
+  esbuild: true
   ngrok: true
+  protobufjs: true
+  sharp: true
+  ssh2: true

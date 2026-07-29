@@ -33,6 +33,10 @@ async function run() {
 
   info(`Unenrolling ${testUserKey} (${userState.did})...`)
 
+  // Direct (DB-only) enrollment never writes the PDS enrollment record, so
+  // the PDS-record existence/deletion checks only apply to the OAuth flow.
+  const directMode = Deno.env.get('STRATOS_E2E_DIRECT') === 'true'
+
   try {
     // 1. Verify user IS enrolled in Stratos and HAS a record on PDS
     const statusBefore = await enrollmentStatus(userState.did)
@@ -43,11 +47,17 @@ async function run() {
     }
     pass(`User ${testUserKey} is active in Stratos`)
 
-    const recordBefore = await getEnrollmentRecord(userState.did)
-    if (!recordBefore.exists) {
-      throw new Error('Enrollment record not found on PDS before unenrollment')
+    if (directMode) {
+      info('Direct mode: skipping PDS enrollment-record existence check')
+    } else {
+      const recordBefore = await getEnrollmentRecord(userState.did)
+      if (!recordBefore.exists) {
+        throw new Error(
+          'Enrollment record not found on PDS before unenrollment',
+        )
+      }
+      pass('Enrollment record exists on PDS')
     }
-    pass('Enrollment record exists on PDS')
 
     // 2. Perform unenrollment
     await unenroll(userState.did)
@@ -60,14 +70,18 @@ async function run() {
     }
     pass('User is inactive in Stratos')
 
-    // 4. Verify PDS record deletion
-    const recordAfter = await getEnrollmentRecord(userState.did)
-    if (recordAfter.exists) {
-      throw new Error(
-        'Enrollment record still exists on PDS after unenrollment',
-      )
+    // 4. Verify PDS record deletion (OAuth flow only - see above)
+    if (directMode) {
+      info('Direct mode: skipping PDS enrollment-record deletion check')
+    } else {
+      const recordAfter = await getEnrollmentRecord(userState.did)
+      if (recordAfter.exists) {
+        throw new Error(
+          'Enrollment record still exists on PDS after unenrollment',
+        )
+      }
+      pass('Enrollment record deleted from PDS')
     }
-    pass('Enrollment record deleted from PDS')
 
     // 5. Verify subsequent authenticated requests fail
     // (using Bearer bypass which checks isEnrolled)
@@ -81,7 +95,10 @@ async function run() {
         },
         body: JSON.stringify({
           repo: userState.did,
-          collection: 'app.northsky.stratos.feed.post',
+          // Must be a VALID stratos collection: a stale/invalid NSID would be
+          // rejected for the wrong reason (InvalidCollection) and this check
+          // would pass even if enrollment gating were broken.
+          collection: 'zone.stratos.feed.post',
           record: { text: 'should fail', createdAt: new Date().toISOString() },
         }),
       },

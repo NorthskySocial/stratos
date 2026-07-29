@@ -118,10 +118,6 @@ describe('Hydration Handlers', () => {
           return { credentials: {} }
         },
       },
-      stubQueue: {
-        enqueueWrite: vi.fn(),
-        enqueueDelete: vi.fn(),
-      },
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),
       },

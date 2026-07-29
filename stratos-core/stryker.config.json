@@ -11,6 +11,7 @@
   "mutate": [
     "src/enrollment/**/*.ts",
     "src/hydration/**/*.ts",
+    "src/spaces/**/*.ts",
     "src/validation/**/*.ts",
     "src/storage/enrollment-store.ts",
     "src/repo/export.ts",

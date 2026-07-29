@@ -57,10 +57,14 @@ describe('Record Delete Handler', () => {
       writeRateLimiter: {
         assertWriteAllowed: vi.fn(),
       },
-      getActorSigningKey: vi.fn().mockResolvedValue({
-        did: 'did:key:zDnaeTestKey',
+      actorSigner: {
         sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
-      }),
+        getSignFn: vi
+          .fn()
+          .mockResolvedValue(() => Promise.resolve(new Uint8Array(64))),
+        getPublicKey: vi.fn().mockResolvedValue('did:key:zDnaeTestKey'),
+        ensureKey: vi.fn().mockResolvedValue(undefined),
+      },
       repoWriteLocks: {
         acquire: vi.fn().mockResolvedValue(() => {}),
       },
@@ -72,9 +76,6 @@ describe('Record Delete Handler', () => {
       },
       sequenceEvents: {
         emit: vi.fn(),
-      },
-      stubQueue: {
-        enqueueDelete: vi.fn(),
       },
     }
 
@@ -131,13 +132,6 @@ describe('Record Delete Handler', () => {
       ),
     ).rejects.toThrow('Record not found')
 
-    // Verify stub was enqueued
-    expect(ctx.stubQueue.enqueueDelete).toHaveBeenCalledWith(
-      testDid,
-      collection,
-      rkey,
-    )
-
     // Verify event was emitted
     expect(ctx.sequenceEvents.emit).toHaveBeenCalledWith(testDid)
   })
@@ -184,10 +178,5 @@ describe('Record Delete Handler', () => {
     )
 
     expect(result.commit).toBeDefined()
-    expect(ctx.stubQueue.enqueueDelete).toHaveBeenCalledWith(
-      testDid,
-      collection,
-      'missing',
-    )
   })
 })

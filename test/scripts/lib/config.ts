@@ -50,6 +50,33 @@ export const DOMAINS = {
   aekea: `${SERVICE_DID}/aekea`,
 } as const
 
+/**
+ * The reserved all-members domain (STRATOS_RESERVED_DOMAIN, default 'general'),
+ * force-included in every enrollment by the service. Any assertion on an
+ * EFFECTIVE boundary set must expect `requested ∪ {RESERVED_DOMAIN}`.
+ */
+export const RESERVED_DOMAIN = `${SERVICE_DID}/general`
+
+/**
+ * The Stratos space type NSID (declared in lexicons/zone/stratos/space/feed.json)
+ * used for all space URIs in the e2e suite.
+ */
+export const SPACE_TYPE = 'zone.stratos.space.feed'
+
+/**
+ * Format a space URI in the merged-spec `at://{spaceDid}/space/{spaceType}/{skey}`
+ * form for a boundary's domain name (skey).
+ */
+export function spaceUriFor(skey: string): string {
+  return `at://${SERVICE_DID}/space/${SPACE_TYPE}/${skey}`
+}
+
+/** Space URIs for the test domains, keyed like {@link DOMAINS}. */
+export const SPACES = {
+  swordsmith: spaceUriFor('swordsmith'),
+  aekea: spaceUriFor('aekea'),
+} as const
+
 // Random suffix to avoid handle conflicts with previously created accounts
 const TEST_RUN_ID = Math.floor(Math.random() * 100000)
   .toString()

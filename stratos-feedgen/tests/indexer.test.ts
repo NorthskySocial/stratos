@@ -114,6 +114,44 @@ describe('SubscriptionIndexer', () => {
     expect(await store.getCursor(DID)).toBe(2)
   })
 
+  // verify the normal record-delete op also purges the derived index
+  // (post_boundary) rows, not just the post row. This is the "Record deleted
+  // (normal op)" trigger from the deletion contract.
+  it('delete op cascades to boundary index rows', async () => {
+    await indexer.applyCommit({
+      did: DID,
+      seq: 1,
+      time: '2024-01-02T00:00:00.000Z',
+      ops: [
+        {
+          action: 'create',
+          path: POST_PATH,
+          cid: 'bafy1',
+          record: postRecord(),
+        },
+      ],
+    })
+    // Present in the feed before delete.
+    const before = await store.listPostsByBoundary({
+      boundary: 'example.com/eng',
+      limit: 10,
+    })
+    expect(before.posts.map((p) => p.uri)).toEqual([URI])
+
+    await indexer.applyCommit({
+      did: DID,
+      seq: 2,
+      time: '2024-01-03T00:00:00.000Z',
+      ops: [{ action: 'delete', path: POST_PATH }],
+    })
+    // Gone from the feed/index after delete (cascade).
+    const after = await store.listPostsByBoundary({
+      boundary: 'example.com/eng',
+      limit: 10,
+    })
+    expect(after.posts).toEqual([])
+  })
+
   it('ignores non-zone.stratos.feed.post collections', async () => {
     await indexer.applyCommit({
       did: DID,

@@ -8,11 +8,15 @@ import { envToConfig, parseEnv } from '../src/config.js'
 import { createServiceDb, migrateServiceDb, type ServiceDb } from '../src/db'
 import { reconcileServiceEnrollments } from '../src/features/enrollment/index.js'
 import { SqliteEnrollmentStore } from '../src/context.js'
+import { ReservedDomainEnrollmentStore } from '../src/infra/storage/reserved-domain-enrollment-store.js'
+
+const RESERVED = 'did:web:host/general'
 
 const BASE_ENV: Record<string, string> = {
   STRATOS_SERVICE_DID: 'did:web:host',
   STRATOS_PUBLIC_URL: 'https://host.example.com',
-  STRATOS_ALLOWED_DOMAINS: 'eng,ops',
+  // `general` is the default reserved domain; it must appear in allowed domains.
+  STRATOS_ALLOWED_DOMAINS: 'eng,ops,general',
 }
 
 const SIGNING_KEY_DID = 'did:key:z6MkBootKey'
@@ -27,14 +31,20 @@ describe('service enrollment boot reconciliation', () => {
   let saved: NodeJS.ProcessEnv
   let tmp: string
   let db: ServiceDb
-  let store: SqliteEnrollmentStore
+  // Wrap in the reserved-domain decorator to mirror production wiring in
+  // storage-context.ts, so the reconciler path force-includes the reserved
+  // domain exactly as it does on a live boot.
+  let store: ReservedDomainEnrollmentStore
 
   beforeEach(async () => {
     saved = { ...process.env }
     tmp = mkdtempSync(join(tmpdir(), 'stratos-svc-boot-'))
     db = createServiceDb(join(tmp, 'service.sqlite'))
     await migrateServiceDb(db)
-    store = new SqliteEnrollmentStore(db)
+    store = new ReservedDomainEnrollmentStore(
+      new SqliteEnrollmentStore(db),
+      RESERVED,
+    )
   })
 
   afterEach(() => {
@@ -68,16 +78,17 @@ describe('service enrollment boot reconciliation', () => {
     expect(spiegel?.active).toBe(true)
     expect(spiegel?.signingKeyDid).toBe(SIGNING_KEY_DID)
     expect(spiegel?.pdsEndpoint).toBeUndefined()
-    expect(await store.getBoundaries('did:web:spiegel.appview')).toEqual([
-      'did:web:host/eng',
-    ])
+    // The reserved domain is force-included in every service enrollment.
+    // Boundary order is not semantically meaningful, so compare as sets.
+    expect(
+      (await store.getBoundaries('did:web:spiegel.appview')).sort(),
+    ).toEqual(['did:web:host/eng', RESERVED].sort())
 
     const vash = await store.getEnrollment('did:web:vash.appview')
     expect(vash?.isService).toBe(true)
-    expect(await store.getBoundaries('did:web:vash.appview')).toEqual([
-      'did:web:host/eng',
-      'did:web:host/ops',
-    ])
+    expect((await store.getBoundaries('did:web:vash.appview')).sort()).toEqual(
+      ['did:web:host/eng', 'did:web:host/ops', RESERVED].sort(),
+    )
 
     const services = await store.listServiceEnrollments()
     expect(services.map((e) => e.did).sort()).toEqual([
