@@ -76,6 +76,7 @@
 
   /** Load one member's detail. Shared by the search box and the member list. */
   async function loadMember(did: string) {
+    if (busy) return
     error = null
     warning = null
     busy = true
@@ -214,8 +215,9 @@
         {#each members as member (member.did)}
           <li>
             <button
-              class="squish w-full cursor-pointer rounded-2xl bg-bubble p-4 text-left shadow-brand"
+              class="squish w-full cursor-pointer rounded-2xl bg-bubble p-4 text-left shadow-brand disabled:cursor-not-allowed disabled:opacity-60"
               data-testid="member-row"
+              disabled={busy}
               onclick={() => loadMember(member.did)}
               type="button"
             >
