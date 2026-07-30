@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import {
     addBoundary,
     getEnrollmentStatus,
@@ -70,7 +71,9 @@
     }
   }
 
-  $effect(() => {
+  // onMount, not $effect: the member list is loaded once on open. An $effect
+  // would re-run whenever the reactive state read inside loadMembers changes.
+  onMount(() => {
     void loadMembers()
   })
 
