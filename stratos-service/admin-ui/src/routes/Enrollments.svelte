@@ -214,12 +214,12 @@
       {/if}
     </div>
 
-    {#if membersError}
+    {#if membersError && members.length === 0}
       <div class="space-y-3" data-testid="members-error">
         <p class="text-error">Failed to load members: {membersError}</p>
         <Button
           disabled={membersLoading}
-          onclick={() => loadMembers()}
+          onclick={() => loadMembers(membersCursor)}
           testid="members-retry"
           variant="secondary"
         >
@@ -267,6 +267,12 @@
         {/each}
       </ul>
 
+      {#if membersError}
+        <p class="mt-4 text-error" data-testid="members-error">
+          Failed to load more members: {membersError}
+        </p>
+      {/if}
+
       {#if membersCursor}
         <div class="mt-4">
           <Button
@@ -275,7 +281,11 @@
             testid="members-load-more"
             variant="secondary"
           >
-            {membersLoading ? 'Loading…' : 'Load more'}
+            {membersLoading
+              ? 'Loading…'
+              : membersError
+                ? 'Retry'
+                : 'Load more'}
           </Button>
         </div>
       {/if}
