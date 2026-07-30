@@ -22,6 +22,7 @@ export function registerEnrollmentHandlers(
   registerEnrollmentUnenroll(server, ctx)
   registerResolveEnrollmentsHandler(ctx)
   registerAdminBoundaryHandlers(ctx)
+  registerListEnrollmentsHandler(ctx)
   registerListDomainsHandler(ctx)
 }
 
@@ -524,6 +525,91 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
         res.status(500).json({
           error: 'InternalError',
           message: 'Failed to set boundaries',
+        })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for listing enrollments.
+ *
+ * Paginates over the enrollment store using the DID-ordered cursor convention
+ * already used by the sync subscription. Boundaries are read through the store
+ * (not raw SQL) so the reserved-domain decorator still force-includes the
+ * all-members domain; the per-row reads are issued in parallel to keep a full
+ * page to a single round-trip's worth of latency.
+ *
+ * @param ctx - Application context
+ */
+function registerListEnrollmentsHandler(ctx: AppContext): void {
+  const DEFAULT_LIMIT = 50
+  const MAX_LIMIT = 100
+
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.listEnrollments',
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res })
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const rawLimit = req.query.limit
+        let limit = DEFAULT_LIMIT
+        if (rawLimit !== undefined) {
+          limit = Number(rawLimit)
+          if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+            return res.status(400).json({
+              error: 'InvalidRequest',
+              message: `limit must be an integer between 1 and ${MAX_LIMIT}`,
+            })
+          }
+        }
+
+        const rawCursor = req.query.cursor
+        if (rawCursor !== undefined && typeof rawCursor !== 'string') {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'cursor must be a string',
+          })
+        }
+
+        const page = await ctx.enrollmentStore.listEnrollments({
+          limit,
+          cursor: rawCursor,
+        })
+        const boundaries = await Promise.all(
+          page.map((enrollment) =>
+            ctx.enrollmentStore.getBoundaries(enrollment.did),
+          ),
+        )
+
+        const enrollments = page.map((enrollment, index) => ({
+          did: enrollment.did,
+          enrolledAt: enrollment.enrolledAt,
+          active: enrollment.active,
+          isService: enrollment.isService ?? false,
+          boundaries: boundaries[index],
+        }))
+
+        res.json({
+          enrollments,
+          // A short page means there is nothing after it.
+          cursor: page.length === limit ? page[page.length - 1].did : undefined,
+          total: await ctx.enrollmentStore.enrollmentCount(),
+        })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.listEnrollments failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list enrollments',
         })
       }
     },
