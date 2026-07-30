@@ -165,7 +165,7 @@ signing time_. It does not prove:
 
 For high-stakes operations, also call the live status endpoint:
 
-```
+```http
 GET /xrpc/zone.stratos.enrollment.status?did=<did>
 ```
 

@@ -1,0 +1,15 @@
+{
+  // Lint config for the VitePress docs site. Style rules that fight
+  // documentation prose are relaxed; substantive rules stay on.
+  "config": {
+    // Prose lines are wrapped by the renderer, not the source.
+    "MD013": false,
+    // VitePress uses inline HTML (badges, containers, kbd) legitimately.
+    "MD033": false,
+    // VitePress pages open with <script setup> before the H1.
+    "MD041": false,
+    // Don't count the frontmatter title as a second H1.
+    "MD025": { "front_matter_title": "" },
+  },
+  "ignores": ["**/node_modules", "**/.vitepress"],
+}

@@ -1,5 +1,7 @@
 import { config as dotenvConfig } from 'dotenv'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type http from 'node:http'
 import express from 'express'
 import './types.js'
@@ -315,7 +317,13 @@ export class StratosServer {
   }
 
   /**
-   * Register static routes for serving assets.
+   * Register static routes for serving assets and the built admin UI.
+   *
+   * The admin UI mount at `/admin` is registered before the admin auth router
+   * (`/admin/oauth/*`, `/admin/whoami`); `express.static` only responds when a
+   * matching file exists, so API paths fall through to the router. The SPA uses
+   * hash routing, so `/admin/` + `index.html` covers every client route and no
+   * wildcard fallback is needed.
    * @param app - Express application instance
    * @param cfg - Stratos service configuration
    * @private
@@ -325,6 +333,27 @@ export class StratosServer {
     cfg: StratosServiceConfig,
   ) {
     app.use('/assets', express.static(path.join(cfg.storage.dataDir, 'assets')))
+
+    const adminUiDir = this.resolveAdminUiDir()
+    if (adminUiDir) {
+      app.use('/admin', express.static(adminUiDir))
+    }
+  }
+
+  /**
+   * Locate the built admin UI. `build:admin` outputs to `dist/admin-ui`; when
+   * running compiled code this module sits in `dist/`, while `tsx` runs it
+   * from `src/`, so both locations are probed.
+   * @returns Directory containing the built admin UI, or undefined if absent
+   * @private
+   */
+  private static resolveAdminUiDir(): string | undefined {
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+    const candidates = [
+      path.join(moduleDir, 'admin-ui'),
+      path.join(moduleDir, '..', 'dist', 'admin-ui'),
+    ]
+    return candidates.find((dir) => existsSync(path.join(dir, 'index.html')))
   }
 
   /**
