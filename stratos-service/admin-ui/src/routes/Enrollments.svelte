@@ -107,7 +107,14 @@
     let did = query
     if (!did.startsWith('did:')) {
       busy = true
-      const resolved = await resolveDid(did).finally(() => (busy = false))
+      let resolved: string | null = null
+      try {
+        resolved = await resolveDid(did)
+      } catch {
+        resolved = null
+      } finally {
+        busy = false
+      }
       if (!resolved) {
         error = `Could not resolve handle "${query}" to a DID`
         loadedDid = null
