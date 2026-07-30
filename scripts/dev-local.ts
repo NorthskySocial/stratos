@@ -3,6 +3,7 @@ import concurrently from 'concurrently'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
+import { spawn, type ChildProcess } from 'node:child_process'
 import dotenv from 'dotenv'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -83,37 +84,60 @@ async function start() {
     const derivedServiceDid = `did:web:${encodeURIComponent(new URL(serviceUrl).hostname)}`
     console.log(`Derived Service DID: ${derivedServiceDid}`)
 
-    // 3. Start ngrok for webapp
-    // Wait a bit to avoid collision
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    // 3. Start a cloudflared quick tunnel for the webapp.
+    //
+    // The webapp cannot share the ngrok session: on free-tier ngrok an
+    // endpoint without an explicit domain defaults to the account's single
+    // static domain and POOLS with the service tunnel — requests then
+    // round-robin between service and webapp, breaking OAuth metadata
+    // lookups. cloudflared quick tunnels are free, need no account, and hand
+    // out a distinct random *.trycloudflare.com URL.
+    // Set NGROK_WEBAPP_TUNNEL=false to skip and keep the webapp local-only.
+    const webappTunnelDisabled = process.env.NGROK_WEBAPP_TUNNEL === 'false'
+    let webappUrl = 'http://localhost:5173'
+    let webappTunnelProc: ChildProcess | undefined
 
-    const webappDomain = process.env.NGROK_WEBAPP_DOMAIN
-    const webappEndpointBuilder = (session as any)
-      .httpEndpoint()
-      .metadata('stratos-webapp')
-      .forwardsTo('Stratos WebApp (UI)')
+    if (webappTunnelDisabled) {
+      console.log('Webapp tunnel disabled (NGROK_WEBAPP_TUNNEL=false)')
+    } else {
+      webappUrl = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(
+          'cloudflared',
+          ['tunnel', '--url', 'http://localhost:5173', '--no-autoupdate'],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+        webappTunnelProc = proc
 
-    if (webappDomain) {
-      if (
-        webappDomain.endsWith('ngrok-free.app') ||
-        webappDomain.endsWith('ngrok.io')
-      ) {
-        webappEndpointBuilder.domain(webappDomain)
-      } else {
-        // Use hostname() for custom domains (paid plans)
-        // If hostname() is not available, we use domain() as fallback but it might fail with ERR_NGROK_314
-        if (typeof webappEndpointBuilder.hostname === 'function') {
-          webappEndpointBuilder.hostname(webappDomain)
-        } else {
-          webappEndpointBuilder.domain(webappDomain)
+        const timeout = setTimeout(() => {
+          proc.kill()
+          reject(new Error('cloudflared did not report a tunnel URL in 30s'))
+        }, 30000)
+
+        const scan = (chunk: Buffer) => {
+          const match = chunk
+            .toString()
+            .match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
+          if (match) {
+            clearTimeout(timeout)
+            resolve(match[0])
+          }
         }
+        proc.stdout.on('data', scan)
+        proc.stderr.on('data', scan)
+        proc.on('exit', (code) => {
+          clearTimeout(timeout)
+          reject(new Error(`cloudflared exited early (code ${code})`))
+        })
+      })
+
+      if (new URL(webappUrl).hostname === new URL(serviceUrl).hostname) {
+        console.error(
+          `ERROR: webapp tunnel claimed the service domain (${webappUrl}); ` +
+            'requests would round-robin between the two backends.',
+        )
+        process.exit(1)
       }
     }
-
-    const webappListener = await webappEndpointBuilder.listenAndForward(
-      'http://localhost:5173',
-    )
-    const webappUrl = webappListener.url()!
     console.log(`Webapp Tunnel URL: ${webappUrl}`)
 
     // 3. Update webapp/public/client-metadata.json with actual tunnel URL
@@ -250,7 +274,7 @@ async function start() {
       // Cleanup listeners if they exist
       try {
         serviceListener.close()
-        webappListener.close()
+        webappTunnelProc?.kill()
       } catch {
         // Ignore
       }
