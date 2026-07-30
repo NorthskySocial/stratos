@@ -12,9 +12,13 @@
   $effect(() => {
     handle = null
     const current = did
-    void resolveHandle(current).then((resolved) => {
-      if (did === current) handle = resolved
-    })
+    void resolveHandle(current)
+      .then((resolved) => {
+        if (did === current) handle = resolved
+      })
+      .catch(() => {
+        // Resolution is best-effort; the raw DID stays on screen.
+      })
   })
 </script>
 
