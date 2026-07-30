@@ -9,7 +9,7 @@
     // VitePress pages open with <script setup> before the H1.
     "MD041": false,
     // Don't count the frontmatter title as a second H1.
-    "MD025": { "front_matter_title": "" }
+    "MD025": { "front_matter_title": "" },
   },
-  "ignores": ["**/node_modules", "**/.vitepress"]
+  "ignores": ["**/node_modules", "**/.vitepress"],
 }

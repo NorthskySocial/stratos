@@ -79,13 +79,13 @@ The implementation follows these steps to ensure secure and performant authoriza
 1. **Identity Resolution**: Resolve the viewer's boundaries using the `BoundaryResolver`. If the viewer is the `actorDid` (the owner), access is granted immediately (bypass).
 2. **Association Lookup**: Query the `stratos_record_blob` table in the actor's store to find all `recordUri`s associated with the `blobCid`.
 3. **Boundary Extraction**:
-    - Fetch the records identified in step 2.
-    - Extract boundaries from each record.
-    - _Optimization_: If a `stratos_record_boundary` table exists, this becomes a single join query.
+   - Fetch the records identified in step 2.
+   - Extract boundaries from each record.
+   - _Optimization_: If a `stratos_record_boundary` table exists, this becomes a single join query.
 4. **Policy Evaluation**:
-    - If any associated record has **no boundaries**, the blob is considered "public" within the Stratos instance (subject to service configuration).
-    - If the viewer shares at least one boundary with **any** of the associated records, access is granted.
-    - If no records are found associating with the blob, it is treated as an "orphaned" or "unattached" blob (see Questions).
+   - If any associated record has **no boundaries**, the blob is considered "public" within the Stratos instance (subject to service configuration).
+   - If the viewer shares at least one boundary with **any** of the associated records, access is granted.
+   - If no records are found associating with the blob, it is treated as an "orphaned" or "unattached" blob (see Questions).
 
 ##### Caching Strategy
 
@@ -122,15 +122,15 @@ _Note: If boundary extraction from record values is too slow, we may consider de
 ## Implementation Plan
 
 1. **Stratos-Core**:
-    - Add `BlobAuthService` interface and implementation.
-    - Update `BlobMetadataReader` if needed for batch boundary lookups.
+   - Add `BlobAuthService` interface and implementation.
+   - Update `BlobMetadataReader` if needed for batch boundary lookups.
 2. **Stratos-Service**:
-    - Implement `com.atproto.sync.getBlob` handler in `src/api/handlers/`.
-    - Integrate `BlobAuthService` into the XRPC handler.
-    - Add caching layer for boundaries.
+   - Implement `com.atproto.sync.getBlob` handler in `src/api/handlers/`.
+   - Integrate `BlobAuthService` into the XRPC handler.
+   - Add caching layer for boundaries.
 3. **Stratos-Client**:
-    - Update client to support blob fetching.
-    - Update documentation.
+   - Update client to support blob fetching.
+   - Update documentation.
 
 ## Questions & Considerations
 
