@@ -45,10 +45,16 @@
 
   async function search() {
     const query = searchDid.trim()
-    if (!query) return
+    if (!query || busy) return
     error = null
     warning = null
     busy = true
+    // Clear the current member so a slow lookup cannot leave the previous
+    // member's boundaries on screen next to the new DID.
+    loadedDid = null
+    boundaries = []
+    status = null
+    setInput = ''
     try {
       let did = query
       if (!did.startsWith('did:')) {
@@ -73,6 +79,7 @@
   }
 
   async function mutate(action: () => Promise<BoundariesResponse>) {
+    if (busy) return
     error = null
     warning = null
     busy = true
@@ -93,7 +100,7 @@
   }
 
   function handleAdd() {
-    if (!loadedDid || !selectedDomain) return
+    if (!loadedDid || !selectedDomain || busy) return
     const did = loadedDid
     const boundary = selectedDomain
     selectedDomain = ''
@@ -101,13 +108,13 @@
   }
 
   function handleRemove(boundary: string) {
-    if (!loadedDid) return
+    if (!loadedDid || busy) return
     const did = loadedDid
     void mutate(() => removeBoundary(did, boundary))
   }
 
   function handleSet() {
-    if (!loadedDid) return
+    if (!loadedDid || busy) return
     const did = loadedDid
     const next = setInput
       .split(',')
@@ -182,7 +189,7 @@
               {#each boundaries as boundary (boundary)}
                 <Chip
                   label={boundary}
-                  onremove={() => handleRemove(boundary)}
+                  onremove={busy ? undefined : () => handleRemove(boundary)}
                   removable
                   testid="boundary-chip"
                 />
