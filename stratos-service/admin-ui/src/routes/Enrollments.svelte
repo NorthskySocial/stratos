@@ -6,6 +6,7 @@
     removeBoundary,
     resolveEnrollments,
     setBoundaries,
+    type BoundariesResponse,
     type EnrollmentStatusResponse,
   } from '../lib/api/client'
   import Button from '../lib/components/ui/Button.svelte'
@@ -25,6 +26,7 @@
   let selectedDomain = $state('')
   let setInput = $state('')
   let error = $state<string | null>(null)
+  let warning = $state<string | null>(null)
   let busy = $state(false)
 
   $effect(() => {
@@ -45,6 +47,7 @@
     const query = searchDid.trim()
     if (!query) return
     error = null
+    warning = null
     busy = true
     try {
       let did = query
@@ -69,13 +72,19 @@
     }
   }
 
-  async function mutate(action: () => Promise<{ boundaries: string[] }>) {
+  async function mutate(action: () => Promise<BoundariesResponse>) {
     error = null
+    warning = null
     busy = true
     try {
       const res = await action()
       boundaries = res.boundaries
       setInput = res.boundaries.join(', ')
+      if (res.pdsSync === 'failed') {
+        warning =
+          'Boundaries saved here, but the member\u2019s PDS enrollment record ' +
+          'could not be updated. Retry to sync it.'
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     } finally {
@@ -134,6 +143,14 @@
 
   {#if error}
     <Card><p class="text-error" data-testid="enrollments-error">{error}</p></Card>
+  {/if}
+
+  {#if warning}
+    <Card>
+      <p class="text-purple dark:text-mint" data-testid="enrollments-warning">
+        {warning}
+      </p>
+    </Card>
   {/if}
 
   {#if loadedDid}

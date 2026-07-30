@@ -40,6 +40,11 @@ export interface EnrollmentStatusResponse {
 export interface BoundariesResponse {
   did: string
   boundaries: string[]
+  /**
+   * 'failed' when the boundary change persisted locally but the member's PDS
+   * enrollment record could not be rewritten.
+   */
+  pdsSync?: 'ok' | 'failed'
 }
 
 export class ApiError extends Error {
