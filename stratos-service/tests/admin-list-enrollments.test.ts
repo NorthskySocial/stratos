@@ -237,6 +237,25 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
     },
   )
 
+  it('rejects a non-scalar limit', async () => {
+    const { app, enrollmentStore } = createCtx({})
+
+    // `?limit[]=1` parses to an array, which Number() would coerce to 1.
+    const res = await invokeGetRoute(app, ROUTE, { limit: ['1'] })
+
+    expect(res.statusCode).toBe(400)
+    expect(enrollmentStore.listEnrollments).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-scalar cursor', async () => {
+    const { app, enrollmentStore } = createCtx({})
+
+    const res = await invokeGetRoute(app, ROUTE, { cursor: ['did:plc:rei'] })
+
+    expect(res.statusCode).toBe(400)
+    expect(enrollmentStore.listEnrollments).not.toHaveBeenCalled()
+  })
+
   it('reports a store failure as an internal error', async () => {
     const { app } = createCtx({
       enrollmentStore: {
