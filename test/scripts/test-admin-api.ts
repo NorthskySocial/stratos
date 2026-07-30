@@ -195,6 +195,33 @@ async function adminFetch(
   return { status: res.status, body: parsed }
 }
 
+/** GET an admin XRPC query with the session cookie. */
+async function adminList(
+  path: string,
+  sessionCookie: string | null,
+  query: Record<string, string> = {},
+): Promise<{ status: number; body: unknown }> {
+  const baseUrl = await getBaseUrl()
+  const headers: Record<string, string> = {
+    'ngrok-skip-browser-warning': 'true',
+  }
+  if (sessionCookie) {
+    headers['Cookie'] = `${ADMIN_SESSION_COOKIE}=${sessionCookie}`
+  }
+  const search = new URLSearchParams(query).toString()
+  const res = await fetch(
+    `${baseUrl}/xrpc/${path}${search ? `?${search}` : ''}`,
+    { headers },
+  )
+  let parsed: unknown
+  try {
+    parsed = await res.json()
+  } catch {
+    parsed = undefined
+  }
+  return { status: res.status, body: parsed }
+}
+
 /** Read the boundaries recorded on the user's PDS enrollment record. */
 async function readPdsBoundaries(did: string): Promise<string[] | null> {
   const result = await listPdsRecords(PDS_URL, did, ENROLLMENT_COLLECTION)
@@ -302,6 +329,29 @@ async function run(): Promise<void> {
     lookup.enrolled,
     'Admin lookup: target user appears as enrolled',
     `${target.handle} (${target.did})`,
+  )
+
+  // 1b. The member list surfaces the target without knowing its DID up front.
+  const listed = await adminList(
+    'zone.stratos.admin.listEnrollments',
+    sessionCookie,
+  )
+  const listedBody = listed.body as {
+    enrollments?: Array<{ did: string; boundaries: string[] }>
+    total?: number
+  }
+  assert(
+    listed.status === 200 &&
+      listedBody.enrollments?.some((e) => e.did === target.did) === true,
+    'listEnrollments includes the enrolled target',
+    `status=${listed.status}, returned=${listedBody.enrollments?.length ?? 0}, total=${listedBody.total ?? '?'}`,
+  )
+
+  const unauthList = await adminList('zone.stratos.admin.listEnrollments', null)
+  assert(
+    unauthList.status === 401,
+    'listEnrollments without session cookie is rejected (401)',
+    `status=${unauthList.status}`,
   )
 
   // 2. addBoundary via the admin API.
