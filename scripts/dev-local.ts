@@ -143,6 +143,9 @@ async function start() {
           `ERROR: webapp tunnel claimed the service domain (${webappUrl}); ` +
             'requests would round-robin between the two backends.',
         )
+        webappTunnelProc?.kill()
+        serviceListener.close()
+        session.close()
         process.exit(1)
       }
     }
