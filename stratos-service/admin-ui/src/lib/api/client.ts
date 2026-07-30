@@ -37,6 +37,20 @@ export interface EnrollmentStatusResponse {
   boundaries?: string[]
 }
 
+export interface EnrollmentSummary {
+  did: string
+  enrolledAt: string
+  active: boolean
+  isService: boolean
+  boundaries: string[]
+}
+
+export interface ListEnrollmentsResponse {
+  enrollments: EnrollmentSummary[]
+  cursor?: string
+  total?: number
+}
+
 export interface BoundariesResponse {
   did: string
   boundaries: string[]
@@ -119,6 +133,18 @@ export function getHealth(): Promise<HealthResponse> {
 
 export function listDomains(): Promise<ListDomainsResponse> {
   return request<ListDomainsResponse>('/xrpc/zone.stratos.server.listDomains')
+}
+
+export function listEnrollments(
+  options: { limit?: number; cursor?: string } = {},
+): Promise<ListEnrollmentsResponse> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.cursor !== undefined) params.set('cursor', options.cursor)
+  const query = params.toString()
+  return request<ListEnrollmentsResponse>(
+    `/xrpc/zone.stratos.admin.listEnrollments${query ? `?${query}` : ''}`,
+  )
 }
 
 export function resolveEnrollments(
