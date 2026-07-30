@@ -61,6 +61,7 @@ const phases: Phase[] = [
     ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
     : []),
   { name: 'Admin API: Boundary Management', script: 'test-admin-api.ts' },
+  { name: 'Admin UI: SPA Smoke Tests', script: 'test-admin-ui.ts' },
   { name: 'Unenrollment', script: 'test-unenrollment.ts' },
   { name: 'Teardown', script: 'teardown.ts', always: true },
 ]
