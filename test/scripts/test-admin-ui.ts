@@ -179,8 +179,42 @@ async function run(): Promise<void> {
     )
     await screenshot(page, 'admin-ui-01-authenticated')
 
-    // 4. Enrollments screen: the enrolled target appears via DID lookup.
+    // 4. Enrollments screen: the member list loads and contains the target,
+    // then selecting that row opens its detail.
     await page.click('a[href="#/enrollments"]')
+    await page.waitForSelector('[data-testid="members-list"]', {
+      timeout: 15_000,
+    })
+    const memberRows = await page.locator('[data-testid="member-row"]').count()
+    assert(
+      memberRows > 0,
+      'Member list loads enrolled members without searching',
+      `${memberRows} rows`,
+    )
+
+    const targetRow = page
+      .locator('[data-testid="member-row"]')
+      .filter({ hasText: target.did })
+    assert(
+      (await targetRow.count()) > 0,
+      'Target user appears in the member list',
+      `${target.handle} (${target.did})`,
+    )
+    await screenshot(page, 'admin-ui-02-member-list')
+
+    await targetRow.first().click()
+    await page.waitForSelector('[data-testid="enrollment-detail"]', {
+      timeout: 15_000,
+    })
+    const rowDetail = await page.textContent(
+      '[data-testid="enrollment-detail"]',
+    )
+    assert(
+      rowDetail?.includes(target.did) === true,
+      'Selecting a member row opens that member detail',
+    )
+
+    // Search by DID still jumps straight to a member.
     await page.fill('[data-testid="did-input"]', target.did)
     await page.click('[data-testid="did-search"]')
     await page.waitForSelector('[data-testid="enrollment-detail"]', {
