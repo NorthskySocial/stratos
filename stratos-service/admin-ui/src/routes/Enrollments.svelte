@@ -37,6 +37,7 @@
   let membersTotal = $state<number | undefined>(undefined)
   let membersLoading = $state(false)
   let membersLoaded = $state(false)
+  let membersError = $state<string | null>(null)
 
   $effect(() => {
     listDomains()
@@ -55,6 +56,7 @@
   async function loadMembers(cursor?: string) {
     if (membersLoading) return
     membersLoading = true
+    membersError = null
     try {
       const res = await listEnrollments({ limit: PAGE_SIZE, cursor })
       members = cursor ? [...members, ...res.enrollments] : res.enrollments
@@ -62,9 +64,7 @@
       membersTotal = res.total
       membersLoaded = true
     } catch (err) {
-      error = `Failed to load members: ${
-        err instanceof Error ? err.message : String(err)
-      }`
+      membersError = err instanceof Error ? err.message : String(err)
     } finally {
       membersLoading = false
     }
@@ -204,7 +204,19 @@
       {/if}
     </div>
 
-    {#if !membersLoaded && membersLoading}
+    {#if membersError}
+      <div class="space-y-3" data-testid="members-error">
+        <p class="text-error">Failed to load members: {membersError}</p>
+        <Button
+          disabled={membersLoading}
+          onclick={() => loadMembers()}
+          testid="members-retry"
+          variant="secondary"
+        >
+          Retry
+        </Button>
+      </div>
+    {:else if !membersLoaded && membersLoading}
       <p class="text-muted">Loading…</p>
     {:else if members.length === 0}
       <p class="text-muted" data-testid="members-empty">
