@@ -122,8 +122,12 @@ async function main() {
   )
   const suffix = randomBytes(2).toString('hex')
   const db = createClient({ url: `file:${dbPath}` })
-  const enrolled: Array<{ handle: string; did: string; boundaries: string[] }> =
-    []
+  const enrolled: Array<{
+    handle: string
+    did: string
+    password: string
+    boundaries: string[]
+  }> = []
 
   console.log(`Enrolling ${count} users (service DID: ${serviceDid})`)
 
@@ -166,20 +170,25 @@ async function main() {
       })
     }
 
-    enrolled.push({ handle: account.handle, did: account.did, boundaries })
+    enrolled.push({
+      handle: account.handle,
+      did: account.did,
+      password,
+      boundaries,
+    })
     console.log(`  ✓ ${account.handle} → ${account.did}`)
     console.log(`    boundaries: ${boundaries.join(', ')}`)
-    console.log(`    password: ${password}`)
   }
 
   db.close()
 
   const outPath = path.join(rootDir, 'scripts', 'dev-enrolled-users.json')
-  fs.writeFileSync(outPath, JSON.stringify(enrolled, null, 2))
+  fs.writeFileSync(outPath, JSON.stringify(enrolled, null, 2), { mode: 0o600 })
   console.log(
-    `\nDone. ${enrolled.length} users enrolled; details in ${outPath}`,
+    `\nDone. ${enrolled.length} users enrolled. Handles, DIDs, and passwords ` +
+      `are in ${outPath} (owner-readable only).`,
   )
-  console.log('Look them up in the admin UI by DID (or handle, once resolved).')
+  console.log('Look them up in the admin UI by DID or handle.')
 }
 
 main().catch((err) => {
