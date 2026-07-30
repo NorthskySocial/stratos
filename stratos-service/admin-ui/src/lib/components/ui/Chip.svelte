@@ -14,7 +14,7 @@
   data-testid={testid}
 >
   {label}
-  {#if removable}
+  {#if removable && onremove}
     <button
       aria-label="Remove {label}"
       class="squish ml-1 cursor-pointer rounded-full border-none bg-transparent px-1 text-white/80 hover:text-white"
