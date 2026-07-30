@@ -182,28 +182,47 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
 
     await invokeGetRoute(app, ROUTE, { cursor: 'did:plc:asuka' })
 
+    // Over-fetches by one to detect whether another page exists.
     expect(listEnrollments).toHaveBeenCalledWith({
-      limit: 50,
+      limit: 51,
       cursor: 'did:plc:asuka',
     })
   })
 
-  it('returns a cursor only when the page is full', async () => {
+  it('returns a cursor only when another page exists', async () => {
+    const { app } = createCtx({
+      enrollmentStore: {
+        // Three rows for a limit of 2: the extra row signals a next page.
+        listEnrollments: vi.fn(async () => [
+          storedEnrollment('did:plc:rei'),
+          storedEnrollment('did:plc:shinji'),
+          storedEnrollment('did:plc:asuka'),
+        ]),
+        enrollmentCount: vi.fn(async () => 5),
+      } as unknown as Partial<EnrollmentStore>,
+    })
+
+    const res = await invokeGetRoute(app, ROUTE, { limit: '2' })
+    const body = res.body as { enrollments: unknown[]; cursor?: string }
+    expect(body.enrollments).toHaveLength(2)
+    expect(body.cursor).toBe('did:plc:shinji')
+  })
+
+  it('omits the cursor on a final page that exactly fills the limit', async () => {
     const { app } = createCtx({
       enrollmentStore: {
         listEnrollments: vi.fn(async () => [
           storedEnrollment('did:plc:rei'),
           storedEnrollment('did:plc:shinji'),
         ]),
-        enrollmentCount: vi.fn(async () => 5),
+        enrollmentCount: vi.fn(async () => 2),
       } as unknown as Partial<EnrollmentStore>,
     })
 
-    const full = await invokeGetRoute(app, ROUTE, { limit: '2' })
-    expect((full.body as { cursor?: string }).cursor).toBe('did:plc:shinji')
-
-    const short = await invokeGetRoute(app, ROUTE, { limit: '10' })
-    expect((short.body as { cursor?: string }).cursor).toBeUndefined()
+    const res = await invokeGetRoute(app, ROUTE, { limit: '2' })
+    const body = res.body as { enrollments: unknown[]; cursor?: string }
+    expect(body.enrollments).toHaveLength(2)
+    expect(body.cursor).toBeUndefined()
   })
 
   it.each([['0'], ['101'], ['abc'], ['1.5']])(

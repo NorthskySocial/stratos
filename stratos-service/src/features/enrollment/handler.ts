@@ -578,10 +578,16 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
           })
         }
 
-        const page = await ctx.enrollmentStore.listEnrollments({
-          limit,
+        // Over-fetch by one to learn whether another page exists, so a final
+        // page that happens to be exactly `limit` long does not hand back a
+        // cursor that resolves to nothing.
+        const rows = await ctx.enrollmentStore.listEnrollments({
+          limit: limit + 1,
           cursor: rawCursor,
         })
+        const hasMore = rows.length > limit
+        const page = hasMore ? rows.slice(0, limit) : rows
+
         const boundaries = await Promise.all(
           page.map((enrollment) =>
             ctx.enrollmentStore.getBoundaries(enrollment.did),
@@ -598,8 +604,7 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
 
         res.json({
           enrollments,
-          // A short page means there is nothing after it.
-          cursor: page.length === limit ? page[page.length - 1].did : undefined,
+          cursor: hasMore ? page[page.length - 1].did : undefined,
           total: await ctx.enrollmentStore.enrollmentCount(),
         })
       } catch (err) {
