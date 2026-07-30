@@ -55,22 +55,25 @@ function didWebUrl(did: string): string | null {
     }
   }
 
+  // did:web carries an optional port inside the first segment, percent-encoded
+  // (`did:web:example.com%3A3000`), so hostname and port are parsed from the
+  // decoded value and validated independently. Everything after the first
+  // segment is path data, never authority. A decoded host that still holds
+  // authority delimiters (`@`, extra `:`, `/`, `?`, `#`) is rejected: it could
+  // point the request at another origin, e.g. `example.com:443@localhost`.
   const decodedHost = decode(hostSegment)
   if (decodedHost === null) return null
-  // The decoded host must be a bare hostname. Anything carrying authority
-  // delimiters (`@`, `:`, `/`, `?`, `#`) could redirect the request at another
-  // origin, e.g. `example.com:443@localhost`.
-  if (!HOSTNAME_RE.test(decodedHost)) return null
 
-  let host = decodedHost
-  if (segments.length > 0) {
-    const decodedPort = decode(segments[0])
-    if (decodedPort !== null && PORT_RE.test(decodedPort)) {
-      const port = Number(decodedPort)
-      if (port < 1 || port > 65535) return null
-      host += `:${port}`
-      segments.shift()
-    }
+  const [hostname, portValue, ...extraAuthority] = decodedHost.split(':')
+  if (extraAuthority.length > 0) return null
+  if (!HOSTNAME_RE.test(hostname)) return null
+
+  let host = hostname
+  if (portValue !== undefined) {
+    if (!PORT_RE.test(portValue)) return null
+    const port = Number(portValue)
+    if (port < 1 || port > 65535) return null
+    host += `:${port}`
   }
 
   if (segments.length === 0) {
