@@ -112,6 +112,7 @@
       <div class="grow">
         <TextField
           bind:value={searchDid}
+          ariaLabel="Member DID or handle"
           onenter={search}
           placeholder="did:plc:… or handle.example.com"
           testid="did-input"
