@@ -4,7 +4,7 @@
 
 ### Create Record
 
-```
+```http
 POST /xrpc/com.atproto.repo.createRecord
 Authorization: Bearer <access_token>
 
@@ -17,7 +17,7 @@ Authorization: Bearer <access_token>
 
 ### Get Record
 
-```
+```http
 GET /xrpc/com.atproto.repo.getRecord?repo=<did>&collection=<collection>&rkey=<rkey>
 Authorization: Bearer <access_token>
 ```
@@ -26,7 +26,7 @@ Authorization: Bearer <access_token>
 
 A single record hydration endpoint that applies boundary-aware filtering.
 
-```
+```http
 GET /xrpc/zone.stratos.repo.hydrateRecord?uri=<at-uri>[&cid=<cid>]
 Authorization: Bearer <access_token>
 ```
@@ -37,7 +37,7 @@ Returns the record if the viewer is authorized, otherwise throws `RecordNotFound
 
 Batch hydration for up to 100 records.
 
-```
+```http
 POST /xrpc/zone.stratos.repo.hydrateRecords
 Authorization: Bearer <access_token>
 
@@ -60,7 +60,7 @@ Returns:
 
 Batch create/update/delete operations.
 
-```
+```http
 POST /xrpc/com.atproto.repo.applyWrites
 Authorization: Bearer <access_token>
 
@@ -83,7 +83,7 @@ Authorization: Bearer <access_token>
 
 ### List Records
 
-```
+```http
 GET /xrpc/com.atproto.repo.listRecords?repo=<did>&collection=<collection>&limit=50
 Authorization: Bearer <access_token>
 ```
@@ -92,7 +92,7 @@ Authorization: Bearer <access_token>
 
 Upload a blob to the repository.
 
-```
+```http
 POST /xrpc/com.atproto.repo.uploadBlob
 Authorization: Bearer <access_token>
 Content-Type: * /* (binary)
@@ -104,7 +104,7 @@ Returns: `{ blob: BlobRef }`
 
 Stratos-specific alias (preferred for boundary filtering on some implementations):
 
-```
+```http
 POST /xrpc/zone.stratos.repo.uploadBlob
 Authorization: Bearer <access_token>
 Content-Type: * /* (binary)
@@ -116,7 +116,7 @@ Content-Type: * /* (binary)
 
 Fetch a blob from an actor's repository. Requires the viewer to have access to at least one record referencing this blob.
 
-```
+```http
 GET /xrpc/com.atproto.sync.getBlob?did=<did>&cid=<cid>
 Authorization: Bearer <access_token>
 ```
@@ -125,14 +125,14 @@ Returns: `* /*` (binary content)
 
 Stratos-specific alias (guarantees boundary-aware access control):
 
-```
+```http
 GET /xrpc/zone.stratos.sync.getBlob?did=<did>&cid=<cid>
 Authorization: Bearer <access_token>
 ```
 
 ### Delete Record
 
-```
+```http
 POST /xrpc/com.atproto.repo.deleteRecord
 Authorization: Bearer <access_token>
 
@@ -145,7 +145,7 @@ Authorization: Bearer <access_token>
 
 ### Get Space Record
 
-```
+```http
 GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
 Authorization: Bearer <access_token> | Bearer <space-credential>
 Response: { "uri": "...", "cid": "...", "value": { ... } }
@@ -159,7 +159,7 @@ outside it (including records with no space) resolve to `RecordNotFound`.
 
 ### Export Repository
 
-```
+```http
 GET /xrpc/zone.stratos.sync.getRepo?did=<did>[&since=<rev>]
 Authorization: Bearer <access_token>
 Response: application/vnd.ipld.car
@@ -169,7 +169,7 @@ Returns a full CAR of the repo: all record blocks, MST nodes, and the signed com
 
 ### Import Repository
 
-```
+```http
 POST /xrpc/zone.stratos.repo.importRepo
 Authorization: Bearer <access_token>
 Content-Type: application/vnd.ipld.car
@@ -178,7 +178,7 @@ Response: { "imported": <count> }
 
 ### Check Enrollment
 
-```
+```http
 GET /xrpc/zone.stratos.enrollment.status?did=<user-did>
 ```
 
@@ -187,7 +187,7 @@ Authenticated: also returns boundaries, signing key, enrollment rkey, and a fres
 
 ### Pull Sync: List Repo Operations
 
-```
+```http
 GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cursor=<c>][&excludeValues=true]
 Authorization: Bearer <service-jwt>
 ```
@@ -200,7 +200,7 @@ history, the `OplogTruncated` error is returned - fall back to full-state recove
 
 ### Pull Sync: List Record Paths (Full-State Recovery)
 
-```
+```http
 GET /xrpc/zone.stratos.sync.listRecordPaths?did=<did>[&collection=<nsid>][&limit=<n>][&cursor=<c>][&excludeValues=true]
 Authorization: Bearer <service-jwt>
 ```
@@ -211,7 +211,7 @@ enumerate paths, diff locally, and fetch misses.
 
 ### Get Space Credential
 
-```
+```http
 POST /xrpc/zone.stratos.space.getSpaceCredential
 Authorization: DPoP <access_token>
 Content-Type: application/json

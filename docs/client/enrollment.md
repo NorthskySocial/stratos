@@ -29,7 +29,7 @@ Each enrollment record is stored at `at://<did>/zone.stratos.actor.enrollment/<s
 
 A user enrolled in two Stratos services would have two records:
 
-```
+```text
 at://did:plc:abc123/zone.stratos.actor.enrollment/did:web:service-a.example.com  → Service A
 at://did:plc:abc123/zone.stratos.actor.enrollment/did:web:service-b.example.com  → Service B
 ```

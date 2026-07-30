@@ -15,7 +15,7 @@ Stratos separates two concerns when handling domain boundaries:
 
 ## Enrollment Assignment Logic
 
-```
+```text
 if STRATOS_AUTO_ENROLL_DOMAINS is set and non-empty:
     enroll user with autoEnrollDomains
 else:
@@ -50,7 +50,7 @@ STRATOS_AUTO_ENROLL_DOMAINS=posters-madness
 
 ## Data Flow
 
-```
+```text
 OAuth Enrollment
     ├── selectEnrollBoundaries(autoEnrollDomains, allowedDomains)
     │       → determines which boundaries the user gets

@@ -1,7 +1,7 @@
 # Getting Started
 
 This guide explains how to integrate Stratos private namespace functionality into ATprotocol client
-applications. It is based on how Stratos was integrated with [pdsls](https://github.com/pdsls/pdsls)
+applications. It is based on how Stratos was integrated with [pdsls](https://pdsls.dev)
 and maps patterns to the Bluesky [social-app](https://github.com/bluesky-social/social-app) codebase
 as a reference architecture.
 

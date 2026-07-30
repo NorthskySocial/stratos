@@ -17,9 +17,9 @@ This document outlines the design for enabling ATProtocol blob support in Strato
 
 In ATProtocol, blobs are typically referenced by records. In Stratos, records are gated by boundaries. To maintain consistency and security, blobs must inherit the access restrictions of the records that reference them.
 
-1.  **Direct Association**: A blob is accessible if the viewer has access to at least one record that references that blob CID.
-2.  **Boundary Check**: Access to a record is determined by comparing the record's boundaries with the viewer's boundaries (via `BoundaryResolver`).
-3.  **Performant Authorization**: Since blob downloads can be frequent, the authorization check must be highly optimized.
+1. **Direct Association**: A blob is accessible if the viewer has access to at least one record that references that blob CID.
+2. **Boundary Check**: Access to a record is determined by comparing the record's boundaries with the viewer's boundaries (via `BoundaryResolver`).
+3. **Performant Authorization**: Since blob downloads can be frequent, the authorization check must be highly optimized.
 
 ### New Components
 
@@ -76,13 +76,13 @@ export interface BlobAuthService {
 
 The implementation follows these steps to ensure secure and performant authorization:
 
-1.  **Identity Resolution**: Resolve the viewer's boundaries using the `BoundaryResolver`. If the viewer is the `actorDid` (the owner), access is granted immediately (bypass).
-2.  **Association Lookup**: Query the `stratos_record_blob` table in the actor's store to find all `recordUri`s associated with the `blobCid`.
-3.  **Boundary Extraction**:
+1. **Identity Resolution**: Resolve the viewer's boundaries using the `BoundaryResolver`. If the viewer is the `actorDid` (the owner), access is granted immediately (bypass).
+2. **Association Lookup**: Query the `stratos_record_blob` table in the actor's store to find all `recordUri`s associated with the `blobCid`.
+3. **Boundary Extraction**:
     - Fetch the records identified in step 2.
     - Extract boundaries from each record.
     - _Optimization_: If a `stratos_record_boundary` table exists, this becomes a single join query.
-4.  **Policy Evaluation**:
+4. **Policy Evaluation**:
     - If any associated record has **no boundaries**, the blob is considered "public" within the Stratos instance (subject to service configuration).
     - If the viewer shares at least one boundary with **any** of the associated records, access is granted.
     - If no records are found associating with the blob, it is treated as an "orphaned" or "unattached" blob (see Questions).
@@ -121,19 +121,19 @@ _Note: If boundary extraction from record values is too slow, we may consider de
 
 ## Implementation Plan
 
-1.  **Stratos-Core**:
+1. **Stratos-Core**:
     - Add `BlobAuthService` interface and implementation.
     - Update `BlobMetadataReader` if needed for batch boundary lookups.
-2.  **Stratos-Service**:
+2. **Stratos-Service**:
     - Implement `com.atproto.sync.getBlob` handler in `src/api/handlers/`.
     - Integrate `BlobAuthService` into the XRPC handler.
     - Add caching layer for boundaries.
-3.  **Stratos-Client**:
+3. **Stratos-Client**:
     - Update client to support blob fetching.
     - Update documentation.
 
 ## Questions & Considerations
 
-1.  **Orphaned Blobs**: How should we handle blobs that are uploaded but not yet referenced by any record? Currently, ATProtocol allows "unattached" blobs for a period. In a private-first service like Stratos, should we allow downloading unattached blobs, or only if the uploader is the viewer?
-2.  **Performance vs. Strictness**: Is denormalizing boundaries into a separate table worth the storage overhead for faster `getBlob` authorization?
-3.  **Boundary Resolution**: Should we support a "service-wide" boundary cache to avoid re-resolving boundaries for the same viewer across different actor requests?
+1. **Orphaned Blobs**: How should we handle blobs that are uploaded but not yet referenced by any record? Currently, ATProtocol allows "unattached" blobs for a period. In a private-first service like Stratos, should we allow downloading unattached blobs, or only if the uploader is the viewer?
+2. **Performance vs. Strictness**: Is denormalizing boundaries into a separate table worth the storage overhead for faster `getBlob` authorization?
+3. **Boundary Resolution**: Should we support a "service-wide" boundary cache to avoid re-resolving boundaries for the same viewer across different actor requests?

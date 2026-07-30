@@ -165,7 +165,7 @@ STRATOS_S3_ENDPOINT="http://minio.local:9000"
 
 S3 key structure:
 
-```
+```text
 stratos/blocks/{did}/{cid}       # Permanent blobs
 stratos/tmp/{did}/{key}          # Temporary uploads
 stratos/quarantine/{did}/{cid}   # Taken-down blobs
@@ -175,10 +175,12 @@ stratos/quarantine/{did}/{cid}   # Taken-down blobs
 
 1. Stop the Stratos service.
 2. Sync blobs to S3:
+
    ```bash
    aws s3 sync /var/lib/stratos/data/blobs/ s3://my-bucket/stratos/blocks/ \
      --exclude "temp/*" --exclude "quarantine/*"
    ```
+
 3. Update config to `STRATOS_BLOB_STORAGE="s3"`.
 4. Restart the service.
 

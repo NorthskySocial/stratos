@@ -51,12 +51,13 @@ jobs:
       - name: Markdown Lint
         uses: DavidAnson/markdownlint-cli2-action@v19
         with:
-          globs: '**/*.md'
+          config: 'docs/.markdownlint-cli2.jsonc'
+          globs: 'docs/**/*.md'
 
       - name: Check Broken Links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --verbose --no-progress './**/*.md'
+          args: --verbose --no-progress --exclude-path docs/node_modules './docs/**/*.md'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
