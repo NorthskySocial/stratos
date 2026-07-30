@@ -122,12 +122,27 @@ async function main() {
   )
   const suffix = randomBytes(2).toString('hex')
   const db = createClient({ url: `file:${dbPath}` })
+  const outPath = path.join(rootDir, 'scripts', 'dev-enrolled-users.json')
   const enrolled: Array<{
     handle: string
     did: string
     password: string
+    enrolled: boolean
     boundaries: string[]
   }> = []
+
+  /**
+   * Persist the journal after every account creation. A PDS account exists the
+   * moment it is created, so its password must survive a later failure in the
+   * enrollment writes or the account becomes unusable.
+   */
+  const writeJournal = () => {
+    fs.writeFileSync(outPath, JSON.stringify(enrolled, null, 2), {
+      mode: 0o600,
+    })
+    // writeFileSync only applies mode when creating the file.
+    fs.chmodSync(outPath, 0o600)
+  }
 
   console.log(`Enrolling ${count} users (service DID: ${serviceDid})`)
 
@@ -136,6 +151,16 @@ async function main() {
     const password = randomBytes(12).toString('base64url')
     const invite = await createInviteCode()
     const account = await createAccount(handle, password, invite)
+
+    const entry = {
+      handle: account.handle,
+      did: account.did,
+      password,
+      enrolled: false,
+      boundaries: [] as string[],
+    }
+    enrolled.push(entry)
+    writeJournal()
 
     // Round-robin one extra domain on top of the reserved all-members domain.
     const extra = domains.filter((domain) => domain !== reserved)
@@ -170,20 +195,15 @@ async function main() {
       })
     }
 
-    enrolled.push({
-      handle: account.handle,
-      did: account.did,
-      password,
-      boundaries,
-    })
+    entry.enrolled = true
+    entry.boundaries = boundaries
+    writeJournal()
     console.log(`  ✓ ${account.handle} → ${account.did}`)
     console.log(`    boundaries: ${boundaries.join(', ')}`)
   }
 
   db.close()
 
-  const outPath = path.join(rootDir, 'scripts', 'dev-enrolled-users.json')
-  fs.writeFileSync(outPath, JSON.stringify(enrolled, null, 2), { mode: 0o600 })
   console.log(
     `\nDone. ${enrolled.length} users enrolled. Handles, DIDs, and passwords ` +
       `are in ${outPath} (owner-readable only).`,
