@@ -124,6 +124,14 @@ async function start() {
         }
         proc.stdout.on('data', scan)
         proc.stderr.on('data', scan)
+        proc.on('error', (err) => {
+          clearTimeout(timeout)
+          reject(
+            new Error(
+              `failed to start cloudflared (is it installed? https://developers.cloudflare.com/cloudflared/): ${err.message}`,
+            ),
+          )
+        })
         proc.on('exit', (code) => {
           clearTimeout(timeout)
           reject(new Error(`cloudflared exited early (code ${code})`))
