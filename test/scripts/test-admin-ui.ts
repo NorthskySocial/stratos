@@ -229,6 +229,9 @@ async function run(): Promise<void> {
     assert(true, 'Reload after logout stays unauthenticated')
   } catch (err) {
     await screenshot(page, 'admin-ui-error')
+    // fail() only prints; assert() owns the counter, so increment it here or
+    // the phase would exit 0 on any thrown error (e.g. a selector timeout).
+    failed++
     fail(
       'Admin UI flow threw',
       err instanceof Error ? err.message : String(err),
