@@ -113,12 +113,14 @@ async function start() {
           reject(new Error('cloudflared did not report a tunnel URL in 30s'))
         }, 30000)
 
+        let urlCaptured = false
         const scan = (chunk: Buffer) => {
           const match = chunk
             .toString()
             .match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
           if (match) {
             clearTimeout(timeout)
+            urlCaptured = true
             resolve(match[0])
           }
         }
@@ -134,7 +136,14 @@ async function start() {
         })
         proc.on('exit', (code) => {
           clearTimeout(timeout)
-          reject(new Error(`cloudflared exited early (code ${code})`))
+          if (urlCaptured) {
+            // The promise already settled, so rejecting here would be a no-op.
+            console.error(
+              `\ncloudflared webapp tunnel exited (code ${code}); the webapp is no longer publicly reachable.`,
+            )
+          } else {
+            reject(new Error(`cloudflared exited early (code ${code})`))
+          }
         })
       })
 
