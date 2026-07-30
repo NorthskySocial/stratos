@@ -154,7 +154,12 @@
 
   {#if warning}
     <Card>
-      <p class="text-purple dark:text-mint" data-testid="enrollments-warning">
+      <p
+        aria-live="polite"
+        class="text-purple dark:text-mint"
+        data-testid="enrollments-warning"
+        role="status"
+      >
         {warning}
       </p>
     </Card>
