@@ -57,17 +57,21 @@ function didWebUrl(did: string): string | null {
 
   const decodedHost = decode(hostSegment)
   if (decodedHost === null) return null
+  // The decoded host must be a bare hostname. Anything carrying authority
+  // delimiters (`@`, `:`, `/`, `?`, `#`) could redirect the request at another
+  // origin, e.g. `example.com:443@localhost`.
+  if (!HOSTNAME_RE.test(decodedHost)) return null
 
   let host = decodedHost
   if (segments.length > 0) {
     const decodedPort = decode(segments[0])
     if (decodedPort !== null && PORT_RE.test(decodedPort)) {
-      host += `:${decodedPort}`
+      const port = Number(decodedPort)
+      if (port < 1 || port > 65535) return null
+      host += `:${port}`
       segments.shift()
     }
   }
-  const bareHost = host.split(':')[0]
-  if (!HOSTNAME_RE.test(bareHost)) return null
 
   if (segments.length === 0) {
     return `https://${host}/.well-known/did.json`
