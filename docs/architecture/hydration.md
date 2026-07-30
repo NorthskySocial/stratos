@@ -69,8 +69,8 @@ AppViews and clients discover the Stratos service URL through the user's
 `zone.stratos.actor.enrollment` record on their PDS:
 
 > 1. Fetch enrollment record from users PDS repo
-> 2. Each record has: { service: "https://stratos.example.com", ... }
-> 3. Resolve service DID from: https://stratos.example.com/.well-known/did.json
+> 2. Each record has: { service: "<https://stratos.example.com>", ... }
+> 3. Resolve service DID from: <https://stratos.example.com/.well-known/did.json>
 > 4. Use service DID to hydrate records (validates source.service field matches)
 
 The `source.service` field is a DID+fragment string, not a URL — the AppView resolves the full URL

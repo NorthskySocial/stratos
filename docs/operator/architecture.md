@@ -48,7 +48,7 @@ schema.
 
 **SQLite layout:**
 
-```
+```text
 /data/stratos/
 ├── service.sqlite              # Enrollment, OAuth sessions
 ├── blobs/                      # Blob storage (local provider)

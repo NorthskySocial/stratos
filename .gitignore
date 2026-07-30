@@ -67,3 +67,5 @@ docs/.vitepress/cache
 .stryker-tmp/
 **/reports/mutation/
 **/stryker.log
+# Local dev batch-enrollment output (contains test-account passwords)
+scripts/dev-enrolled-users.json

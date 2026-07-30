@@ -19,7 +19,7 @@ Stratos separates two concerns:
 
 When a user enrolls via OAuth, the service assigns them boundaries based on this logic:
 
-```
+```text
 if autoEnrollDomains is set and non-empty:
     enroll user with autoEnrollDomains
 else:
@@ -33,7 +33,7 @@ This is implemented in `selectEnrollBoundaries()` in `stratos-service/src/oauth/
 Given the existing domain `atverkackt.de`, adding three new domains where only
 `posters-madness` is auto-enrolled:
 
-```
+```bash
 STRATOS_ALLOWED_DOMAINS=atverkackt.de,posters-madness,bees,plants
 STRATOS_AUTO_ENROLL_DOMAINS=posters-madness
 ```
@@ -84,7 +84,7 @@ Both values are passed as environment variables to the ECS task definition in
 
 ## Data Flow
 
-```
+```text
 OAuth Enrollment
     ├── selectEnrollBoundaries(autoEnrollDomains, allowedDomains)
     │       → determines which boundaries the user gets

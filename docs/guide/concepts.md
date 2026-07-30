@@ -7,7 +7,7 @@ share at least one boundary with a record to access it.
 
 Boundary values are addressable in `{serviceDid}/{name}` format:
 
-```
+```text
 did:web:stratos.example.com/general
 did:web:stratos.example.com/writers
 ```
