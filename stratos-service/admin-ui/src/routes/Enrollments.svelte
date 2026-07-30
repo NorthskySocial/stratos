@@ -3,11 +3,13 @@
     addBoundary,
     getEnrollmentStatus,
     listDomains,
+    listEnrollments,
     removeBoundary,
     resolveEnrollments,
     setBoundaries,
     type BoundariesResponse,
     type EnrollmentStatusResponse,
+    type EnrollmentSummary,
   } from '../lib/api/client'
   import Button from '../lib/components/ui/Button.svelte'
   import Card from '../lib/components/ui/Card.svelte'
@@ -29,6 +31,13 @@
   let warning = $state<string | null>(null)
   let busy = $state(false)
 
+  const PAGE_SIZE = 25
+  let members = $state<EnrollmentSummary[]>([])
+  let membersCursor = $state<string | undefined>(undefined)
+  let membersTotal = $state<number | undefined>(undefined)
+  let membersLoading = $state(false)
+  let membersLoaded = $state(false)
+
   $effect(() => {
     listDomains()
       .then((res) => (domains = res.domains))
@@ -43,9 +52,30 @@
     domains.filter((domain) => !boundaries.includes(domain)),
   )
 
-  async function search() {
-    const query = searchDid.trim()
-    if (!query || busy) return
+  async function loadMembers(cursor?: string) {
+    if (membersLoading) return
+    membersLoading = true
+    try {
+      const res = await listEnrollments({ limit: PAGE_SIZE, cursor })
+      members = cursor ? [...members, ...res.enrollments] : res.enrollments
+      membersCursor = res.cursor
+      membersTotal = res.total
+      membersLoaded = true
+    } catch (err) {
+      error = `Failed to load members: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    } finally {
+      membersLoading = false
+    }
+  }
+
+  $effect(() => {
+    void loadMembers()
+  })
+
+  /** Load one member's detail. Shared by the search box and the member list. */
+  async function loadMember(did: string) {
     error = null
     warning = null
     busy = true
@@ -56,14 +86,6 @@
     status = null
     setInput = ''
     try {
-      let did = query
-      if (!did.startsWith('did:')) {
-        const resolved = await resolveDid(did)
-        if (!resolved) {
-          throw new Error(`Could not resolve handle "${query}" to a DID`)
-        }
-        did = resolved
-      }
       const res = await resolveEnrollments(did)
       loadedDid = res.did
       enrolled = res.enrolled
@@ -78,6 +100,23 @@
     }
   }
 
+  async function search() {
+    const query = searchDid.trim()
+    if (!query || busy) return
+    let did = query
+    if (!did.startsWith('did:')) {
+      busy = true
+      const resolved = await resolveDid(did).finally(() => (busy = false))
+      if (!resolved) {
+        error = `Could not resolve handle "${query}" to a DID`
+        loadedDid = null
+        return
+      }
+      did = resolved
+    }
+    await loadMember(did)
+  }
+
   async function mutate(action: () => Promise<BoundariesResponse>) {
     if (busy) return
     error = null
@@ -87,6 +126,12 @@
       const res = await action()
       boundaries = res.boundaries
       setInput = res.boundaries.join(', ')
+      // Keep the member list in step with the edit rather than refetching.
+      members = members.map((member) =>
+        member.did === res.did
+          ? { ...member, boundaries: res.boundaries }
+          : member,
+      )
       if (res.pdsSync === 'failed') {
         warning =
           'Boundaries saved here, but the member\u2019s PDS enrollment record ' +
@@ -143,9 +188,74 @@
       </Button>
     </div>
     <p class="mt-3 text-xs text-muted">
-      There is no list-all-enrollments endpoint; look up members by DID or
-      handle.
+      Search jumps straight to a member; the list below shows everyone
+      enrolled.
     </p>
+  </Card>
+
+  <Card testid="members-card">
+    <div class="mb-4 flex items-baseline justify-between">
+      <h2 class="font-display text-lg italic">Members</h2>
+      {#if membersTotal !== undefined}
+        <span class="text-sm text-muted" data-testid="members-total">
+          {members.length} of {membersTotal}
+        </span>
+      {/if}
+    </div>
+
+    {#if !membersLoaded && membersLoading}
+      <p class="text-muted">Loading…</p>
+    {:else if members.length === 0}
+      <p class="text-muted" data-testid="members-empty">
+        No members are enrolled yet.
+      </p>
+    {:else}
+      <ul class="space-y-2" data-testid="members-list">
+        {#each members as member (member.did)}
+          <li>
+            <button
+              class="squish w-full cursor-pointer rounded-2xl bg-bubble p-4 text-left shadow-brand"
+              data-testid="member-row"
+              onclick={() => loadMember(member.did)}
+              type="button"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <Identity did={member.did} />
+                <div class="flex items-center gap-3">
+                  {#if member.isService}
+                    <span class="text-xs text-muted">service</span>
+                  {/if}
+                  <StatusDot
+                    label={member.active ? 'active' : 'inactive'}
+                    ok={member.active}
+                  />
+                </div>
+              </div>
+              {#if member.boundaries.length > 0}
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  {#each member.boundaries as boundary (boundary)}
+                    <Chip label={boundary} />
+                  {/each}
+                </div>
+              {/if}
+            </button>
+          </li>
+        {/each}
+      </ul>
+
+      {#if membersCursor}
+        <div class="mt-4">
+          <Button
+            disabled={membersLoading}
+            onclick={() => loadMembers(membersCursor)}
+            testid="members-load-more"
+            variant="secondary"
+          >
+            {membersLoading ? 'Loading…' : 'Load more'}
+          </Button>
+        </div>
+      {/if}
+    {/if}
   </Card>
 
   {#if error}
