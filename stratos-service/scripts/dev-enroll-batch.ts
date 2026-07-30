@@ -145,10 +145,18 @@ async function main() {
       .digest('hex')
       .slice(0, 16)}`
 
+    // Upsert rather than replace: a full row replacement would drop any
+    // enrollmentRkey already recorded for this DID.
     await db.execute({
-      sql: `INSERT OR REPLACE INTO enrollment
+      sql: `INSERT INTO enrollment
               (did, enrolledAt, pdsEndpoint, signingKeyDid, active, isService)
-            VALUES (?, ?, ?, ?, 'true', 0)`,
+            VALUES (?, ?, ?, ?, 'true', 0)
+            ON CONFLICT(did) DO UPDATE SET
+              enrolledAt = excluded.enrolledAt,
+              pdsEndpoint = excluded.pdsEndpoint,
+              signingKeyDid = excluded.signingKeyDid,
+              active = excluded.active,
+              isService = excluded.isService`,
       args: [account.did, new Date().toISOString(), PDS_URL, signingKeyDid],
     })
     for (const boundary of boundaries) {
