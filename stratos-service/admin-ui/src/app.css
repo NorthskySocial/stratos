@@ -1,0 +1,141 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@font-face {
+  font-family: 'Geist';
+  src: url('./assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'MuseoModerno';
+  src: url('./assets/fonts/MuseoModerno-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'MuseoModerno';
+  src: url('./assets/fonts/MuseoModerno-Italic-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@theme {
+  --color-ink: #1f0b35;
+  --color-mint: #2affba;
+  --color-purple: #9a45ec;
+  --color-periwinkle: #7780dc;
+  --color-grad-a: #bb0ffb;
+  --color-grad-b: #2affba;
+  --color-error: #e5484d;
+
+  --font-display: 'MuseoModerno', system-ui, sans-serif;
+  --font-sans: 'Geist', system-ui, sans-serif;
+}
+
+:root {
+  --grad: linear-gradient(135deg, #bb0ffb, #2affba);
+  --background: #ffffff;
+  --bg-soft: color-mix(in oklch, #7780dc, #ffffff 88%);
+  --foreground: var(--color-ink);
+  --muted: color-mix(in oklch, #1f0b35, #ffffff 40%);
+  --bubble-bg: #ffffff;
+  --accent: var(--color-purple);
+  --shadow: 0 4px 16px rgb(31 11 53 / 0.12);
+  --shadow-pop: 0 8px 24px rgb(31 11 53 / 0.2);
+}
+
+.dark {
+  --background: var(--color-ink);
+  --bg-soft: color-mix(in oklch, #1f0b35, #ffffff 6%);
+  --foreground: #ffffff;
+  --muted: color-mix(in oklch, #ffffff, #1f0b35 40%);
+  --bubble-bg: #2b1548;
+  --accent: var(--color-mint);
+  --shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.55);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--bg-soft);
+  --color-bubble: var(--bubble-bg);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+}
+
+@utility text-gradient {
+  background-image: var(--grad);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* Gradient-ring pill: shared by inputs, chips, and secondary buttons. */
+@utility pill {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--bubble-bg), var(--bubble-bg)) padding-box,
+    var(--grad) border-box;
+  color: var(--foreground);
+  box-shadow: var(--shadow);
+}
+
+/* Solid gradient fill: primary actions and active chips. */
+@utility grad-fill {
+  background: var(--grad);
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+
+@utility shadow-brand {
+  box-shadow: var(--shadow);
+}
+
+@utility shadow-brand-pop {
+  box-shadow: var(--shadow-pop);
+}
+
+/* Spring/squish interaction animation. */
+@media (prefers-reduced-motion: no-preference) {
+  .squish {
+    transition:
+      transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 0.15s ease;
+  }
+  .squish:hover:not(:disabled) {
+    transform: scale(1.06);
+  }
+  .squish:active:not(:disabled) {
+    transform: scale(1.1, 0.9);
+  }
+}
+
+body {
+  @apply bg-background font-sans text-foreground antialiased;
+  margin: 0;
+  transition:
+    background 0.25s ease,
+    color 0.25s ease;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+#app {
+  min-height: 100dvh;
+}

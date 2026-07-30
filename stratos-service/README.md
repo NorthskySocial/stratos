@@ -91,6 +91,32 @@ pnpm build
 pnpm test
 ```
 
+## Admin UI
+
+A Svelte 5 admin interface lives in `admin-ui/` and is served by the service at
+`/admin` (built output in `dist/admin-ui`, produced by `pnpm build`). Auth is
+the admin OAuth session cookie (`STRATOS_ADMIN_DIDS` allowlist); the UI holds
+no credential.
+
+### Development
+
+```bash
+pnpm dev:admin
+```
+
+Starts a Vite dev server with HMR that proxies `/xrpc`, `/health`, and
+`/admin` to the running service. The proxy target is read from
+`VITE_STRATOS_SERVICE_URL` (default `http://localhost:3100`). The service must
+run with `STRATOS_DEV_MODE=true`, or the CSRF origin screen rejects proxied
+admin calls with 403. The OAuth round-trip lands on the service origin once;
+development then continues on the Vite origin with the same session cookie.
+
+### Build
+
+```bash
+pnpm build:admin
+```
+
 ## License
 
 MIT
