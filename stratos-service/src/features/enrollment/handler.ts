@@ -561,6 +561,14 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
         const rawLimit = req.query.limit
         let limit = DEFAULT_LIMIT
         if (rawLimit !== undefined) {
+          // Express parses `?limit[]=1` into an array, and Number(['1']) is 1,
+          // so non-string input must be rejected before coercion.
+          if (typeof rawLimit !== 'string') {
+            return res.status(400).json({
+              error: 'InvalidRequest',
+              message: `limit must be an integer between 1 and ${MAX_LIMIT}`,
+            })
+          }
           limit = Number(rawLimit)
           if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
             return res.status(400).json({
