@@ -40,6 +40,12 @@
 
 :root {
   --grad: linear-gradient(135deg, #bb0ffb, #2affba);
+  /*
+   * Filled controls carry white text, so their gradient stops at the purple
+   * end of the brand ramp. The mint end of --grad is far too light to hold
+   * white text at 4.5:1, so it is reserved for gradient text and ring borders.
+   */
+  --grad-solid: linear-gradient(135deg, #bb0ffb, #8b3ce0);
   --background: #ffffff;
   --bg-soft: color-mix(in oklch, #7780dc, #ffffff 88%);
   --foreground: var(--color-ink);
@@ -90,7 +96,7 @@
 
 /* Solid gradient fill: primary actions and active chips. */
 @utility grad-fill {
-  background: var(--grad);
+  background: var(--grad-solid);
   color: #ffffff;
   border: none;
   border-radius: 999px;
