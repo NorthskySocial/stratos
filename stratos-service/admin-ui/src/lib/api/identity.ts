@@ -67,7 +67,7 @@ function didWebUrl(did: string): string | null {
     }
   }
   const bareHost = host.split(':')[0]
-  if (!HOSTNAME_RE.test(bareHost) && bareHost !== 'localhost') return null
+  if (!HOSTNAME_RE.test(bareHost)) return null
 
   if (segments.length === 0) {
     return `https://${host}/.well-known/did.json`
