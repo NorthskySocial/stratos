@@ -3,7 +3,8 @@
 </script>
 
 <button
-  aria-label="Toggle theme"
+  aria-label={theme.dark ? 'Switch to light theme' : 'Switch to dark theme'}
+  aria-pressed={theme.dark}
   class="pill squish cursor-pointer px-3 py-1 text-sm"
   data-testid="theme-toggle"
   onclick={toggleTheme}
