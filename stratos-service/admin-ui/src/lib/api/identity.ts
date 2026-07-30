@@ -45,9 +45,26 @@ function didWebUrl(did: string): string | null {
   const hostSegment = segments.shift()
   if (!hostSegment) return null
 
-  let host = decodeURIComponent(hostSegment)
-  if (segments.length > 0 && PORT_RE.test(decodeURIComponent(segments[0]))) {
-    host += `:${decodeURIComponent(segments.shift()!)}`
+  // Malformed percent escapes throw; a bad DID must resolve to null rather
+  // than reject the caller's promise.
+  const decode = (value: string): string | null => {
+    try {
+      return decodeURIComponent(value)
+    } catch {
+      return null
+    }
+  }
+
+  const decodedHost = decode(hostSegment)
+  if (decodedHost === null) return null
+
+  let host = decodedHost
+  if (segments.length > 0) {
+    const decodedPort = decode(segments[0])
+    if (decodedPort !== null && PORT_RE.test(decodedPort)) {
+      host += `:${decodedPort}`
+      segments.shift()
+    }
   }
   const bareHost = host.split(':')[0]
   if (!HOSTNAME_RE.test(bareHost) && bareHost !== 'localhost') return null
@@ -57,8 +74,8 @@ function didWebUrl(did: string): string | null {
   }
   const parts: string[] = []
   for (const segment of segments) {
-    const decoded = decodeURIComponent(segment)
-    if (!PATH_SEGMENT_RE.test(decoded)) return null
+    const decoded = decode(segment)
+    if (decoded === null || !PATH_SEGMENT_RE.test(decoded)) return null
     parts.push(encodeURIComponent(decoded))
   }
   return `https://${host}/${parts.join('/')}/did.json`
