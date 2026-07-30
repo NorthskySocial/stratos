@@ -30,7 +30,11 @@
   $effect(() => {
     listDomains()
       .then((res) => (domains = res.domains))
-      .catch(() => (domains = []))
+      .catch((err: unknown) => {
+        error = `Failed to load allowed domains: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      })
   })
 
   const availableDomains = $derived(
