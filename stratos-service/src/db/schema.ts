@@ -37,6 +37,16 @@ export const adminSession = sqliteTable('admin_session', {
 })
 
 /**
+ * Admins granted at runtime. Config-provided admins are not stored here; the
+ * effective admin set is the union of this table and STRATOS_ADMIN_DIDS.
+ */
+export const adminUser = sqliteTable('admin_user', {
+  did: text('did').primaryKey(),
+  addedAt: text('addedAt').notNull(),
+  addedBy: text('addedBy'),
+})
+
+/**
  * Enrollment storage - tracks enrolled users
  */
 export const enrollment = sqliteTable('enrollment', {

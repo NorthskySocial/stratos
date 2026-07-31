@@ -1,0 +1,40 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.removeAdmin",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Revoke admin access from a DID. Config-provided admins cannot be revoked here, and an admin cannot revoke their own access.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID to revoke admin access from."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did"],
+          "properties": {
+            "did": { "type": "string", "format": "did" }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "The DID does not hold admin access."
+        }
+      ]
+    }
+  }
+}

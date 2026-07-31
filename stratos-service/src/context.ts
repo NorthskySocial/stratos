@@ -204,7 +204,8 @@ async function initCoreServices(
   sequenceEvents: SequenceEventEmitter,
   logger?: Logger,
 ) {
-  const { enrollmentStore, actorStore, adminSessionStore } = storage
+  const { enrollmentStore, actorStore, adminSessionStore, adminUserStore } =
+    storage
   const { idResolver, signingKey, oauthClient } = identity
 
   const enrollmentCtx = await initEnrollment(
@@ -222,6 +223,7 @@ async function initCoreServices(
     idResolver,
     enrollmentStore,
     adminSessionStore,
+    adminUserStore,
     enrollmentCtx.allowListProvider,
     signingKey,
     logger,
@@ -302,6 +304,7 @@ async function initIdentity(
  * @param idResolver - Identity resolver for user authentication.
  * @param enrollmentStore - Store for managing user enrollments.
  * @param adminSessionStore - Admin web-session store.
+ * @param adminUserStore - Store of admins granted at runtime.
  * @param allowListProvider - Optional provider for external allowlists.
  * @param signingKey - This service's signing keypair (space-credential authority).
  * @param logger - Logger instance for logging application events.
@@ -312,6 +315,7 @@ function initAuth(
   idResolver: AppContext['idResolver'],
   enrollmentStore: AppContext['enrollmentStore'],
   adminSessionStore: AppContext['adminSessionStore'],
+  adminUserStore: AppContext['adminUserStore'],
   allowListProvider: ExternalAllowListProvider | undefined,
   signingKey: AppContext['signingKey'],
   logger?: AppContext['logger'],
@@ -332,6 +336,7 @@ function initAuth(
     cfg,
     enrollmentStore,
     adminSessionStore,
+    adminUserStore,
     cfg.adminDids,
     dpopVerifier,
     allowListProvider,
