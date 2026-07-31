@@ -9,9 +9,9 @@ The AT Protocol permissioned data proposal
 ([proposal 0016](https://github.com/bluesky-social/proposals/blob/main/0016-permissioned-data/README.md),
 with a work-in-progress implementation branch at
 [bluesky-social/atproto#5187](https://github.com/bluesky-social/atproto/pull/5187))
-defines a standard model for private records: a *space* is a named,
+defines a standard model for private records: a _space_ is a named,
 membership-gated container of records, addressed by an `at://` URI and served
-by a *space authority* that decides who may read from it. Stratos implements
+by a _space authority_ that decides who may read from it. Stratos implements
 this model. Every Stratos boundary is served as a permissioned space, and the
 service exposes spec-shaped endpoints under `zone.stratos.space.*` that mirror
 the proposed `com.atproto.space.*` methods.
@@ -39,28 +39,28 @@ stays gated by enrollment and, where configured, an app allow-list.
 A Stratos boundary is a qualified string, `{serviceDid}/{domainName}`. A
 space URI is:
 
-```
+```text
 at://{spaceDid}/space/{spaceType}/{skey}
 ```
 
 The two map onto each other field by field:
 
-| Boundary component | Space component | Example                        |
-| ------------------ | --------------- | ------------------------------ |
-| `serviceDid`       | `spaceDid`      | `did:web:stratos.example.com`  |
-| `domainName`       | `skey`          | `engineering`                  |
-| (implied)          | `spaceType`     | `zone.stratos.space.feed`      |
+| Boundary component | Space component | Example                       |
+| ------------------ | --------------- | ----------------------------- |
+| `serviceDid`       | `spaceDid`      | `did:web:stratos.example.com` |
+| `domainName`       | `skey`          | `engineering`                 |
+| (implied)          | `spaceType`     | `zone.stratos.space.feed`     |
 
 So the boundary `did:web:stratos.example.com/engineering` is the space:
 
-```
+```text
 at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering
 ```
 
 A record inside a space gets a longer URI that appends the author, the
 collection, and the record key:
 
-```
+```text
 at://did:web:stratos.example.com/space/zone.stratos.space.feed/engineering/did:plc:ewvi7nxzyoun6zhxrhs64oiz/zone.stratos.feed.post/3jt6walwmos2y
 ```
 
@@ -123,7 +123,7 @@ Access to a space follows three stages: membership, credential, read.
 records which boundaries the user belongs to, and a
 `zone.stratos.actor.enrollment` record is written to the user's PDS so that
 clients and AppViews can discover the service. In space terms, boundary
-membership *is* space membership; there is no separate membership store.
+membership _is_ space membership; there is no separate membership store.
 
 **Credential.** A member (or a service acting for one) calls
 `zone.stratos.space.getSpaceCredential` with the space URI. The service
@@ -201,12 +201,12 @@ Stratos service and its authorized consumers.
 
 Reads reach the data over four paths, all boundary-gated:
 
-| Path                                  | Consumer            | Auth                       |
-| ------------------------------------- | ------------------- | -------------------------- |
-| Record CRUD (`zone.stratos.repo.*`)   | The owning user     | OAuth + DPoP               |
-| Hydration (`hydrateRecord(s)`)        | AppViews, clients   | Service JWT / user auth    |
-| Spec-shaped read (`space.getRecord`)  | Spec clients, hosts | User auth or space credential |
-| Sync (`sync.subscribeRecords`, pull sync) | Indexers, feedgens | Service JWT               |
+| Path                                      | Consumer            | Auth                          |
+| ----------------------------------------- | ------------------- | ----------------------------- |
+| Record CRUD (`zone.stratos.repo.*`)       | The owning user     | OAuth + DPoP                  |
+| Hydration (`hydrateRecord(s)`)            | AppViews, clients   | Service JWT / user auth       |
+| Spec-shaped read (`space.getRecord`)      | Spec clients, hosts | User auth or space credential |
+| Sync (`sync.subscribeRecords`, pull sync) | Indexers, feedgens  | Service JWT                   |
 
 The [feed generator](./feed-generator.md) is the reference consumer of the
 sync and hydration paths: it indexes boundary-scoped posts from the sync
@@ -219,14 +219,14 @@ stream and serves them back to viewers as hydrated timelines.
 The `zone.stratos.space.*` methods are deliberately shaped as mirrors, not
 approximations:
 
-| Stratos NSID                            | Proposal counterpart            | Status                     |
-| --------------------------------------- | ------------------------------- | -------------------------- |
-| `zone.stratos.space.getRecord`          | `com.atproto.space.getRecord`   | Spec-shaped mirror         |
-| `zone.stratos.space.getSpaceCredential` | Space credential issuance       | Spec-shaped mirror         |
-| `zone.stratos.space.feed`               | Space type declaration          | Standard `type: space` lexicon |
-| `zone.stratos.repo.hydrateRecord(s)`    | none                            | Stratos-specific           |
-| `zone.stratos.sync.subscribeRecords`    | none                            | Stratos-specific           |
-| `zone.stratos.sync.listRepoOps` / `listRecordPaths` | none                | Stratos-specific pull sync |
+| Stratos NSID                                        | Proposal counterpart          | Status                         |
+| --------------------------------------------------- | ----------------------------- | ------------------------------ |
+| `zone.stratos.space.getRecord`                      | `com.atproto.space.getRecord` | Spec-shaped mirror             |
+| `zone.stratos.space.getSpaceCredential`             | Space credential issuance     | Spec-shaped mirror             |
+| `zone.stratos.space.feed`                           | Space type declaration        | Standard `type: space` lexicon |
+| `zone.stratos.repo.hydrateRecord(s)`                | none                          | Stratos-specific               |
+| `zone.stratos.sync.subscribeRecords`                | none                          | Stratos-specific               |
+| `zone.stratos.sync.listRepoOps` / `listRecordPaths` | none                          | Stratos-specific pull sync     |
 
 On the wire, the credential format follows the spec exactly: the
 `atproto-space-credential+jwt` type header, `ES256K` or `ES256` signing, and
