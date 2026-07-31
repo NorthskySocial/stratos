@@ -532,6 +532,124 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
 }
 
 /**
+ * A member row as returned by the admin listing, with boundaries attached.
+ */
+interface ListedEnrollment {
+  did: string
+  enrolledAt: string
+  active: boolean
+  isService: boolean
+  boundaries: string[]
+}
+
+/**
+ * Attach boundaries to enrollment rows.
+ *
+ * Read through the store rather than the join table directly so the
+ * reserved-domain decorator still force-includes the all-members domain.
+ * @param ctx - Application context
+ * @param rows - Enrollment rows to hydrate
+ * @returns The rows with their boundaries attached
+ */
+async function withBoundaries(
+  ctx: AppContext,
+  rows: Array<{
+    did: string
+    enrolledAt: string
+    active: boolean
+    isService?: boolean
+  }>,
+): Promise<ListedEnrollment[]> {
+  const boundaries = await Promise.all(
+    rows.map((row) => ctx.enrollmentStore.getBoundaries(row.did)),
+  )
+  return rows.map((row, index) => ({
+    did: row.did,
+    enrolledAt: row.enrolledAt,
+    active: row.active,
+    isService: row.isService ?? false,
+    boundaries: boundaries[index],
+  }))
+}
+
+/**
+ * Read one unfiltered page of enrollments.
+ *
+ * Over-fetches by one to learn whether another page exists, so a final page
+ * that happens to be exactly `limit` long does not hand back a cursor that
+ * resolves to nothing.
+ * @param ctx - Application context
+ * @param limit - Page size
+ * @param cursor - DID to resume after
+ * @returns The page and whether more results follow
+ */
+async function collectPage(
+  ctx: AppContext,
+  limit: number,
+  cursor?: string,
+): Promise<{ enrollments: ListedEnrollment[]; hasMore: boolean }> {
+  const rows = await ctx.enrollmentStore.listEnrollments({
+    limit: limit + 1,
+    cursor,
+  })
+  const hasMore = rows.length > limit
+  return {
+    enrollments: await withBoundaries(
+      ctx,
+      hasMore ? rows.slice(0, limit) : rows,
+    ),
+    hasMore,
+  }
+}
+
+/**
+ * Read one page of enrollments holding a given boundary.
+ *
+ * There is no reverse boundary index, so this scans the DID-ordered listing in
+ * chunks and filters, stopping as soon as the page is full. The cursor is the
+ * last *matching* DID, so resuming re-scans only the non-matching rows that
+ * followed it.
+ * @param ctx - Application context
+ * @param limit - Page size
+ * @param boundary - Boundary every returned member must hold
+ * @param cursor - DID to resume after
+ * @returns The page and whether more results follow
+ */
+async function collectFilteredPage(
+  ctx: AppContext,
+  limit: number,
+  boundary: string,
+  cursor?: string,
+): Promise<{ enrollments: ListedEnrollment[]; hasMore: boolean }> {
+  const SCAN_CHUNK = 100
+  const matches: ListedEnrollment[] = []
+  let scanCursor = cursor
+
+  while (matches.length <= limit) {
+    const rows = await ctx.enrollmentStore.listEnrollments({
+      limit: SCAN_CHUNK,
+      cursor: scanCursor,
+    })
+    if (rows.length === 0) break
+    scanCursor = rows[rows.length - 1].did
+
+    for (const enrollment of await withBoundaries(ctx, rows)) {
+      if (!enrollment.boundaries.includes(boundary)) continue
+      matches.push(enrollment)
+      if (matches.length > limit) break
+    }
+
+    if (rows.length < SCAN_CHUNK) break
+  }
+
+  const hasMore = matches.length > limit
+  return {
+    enrollments: hasMore ? matches.slice(0, limit) : matches,
+    hasMore,
+  }
+}
+
+/**
  * Register handler for listing enrollments.
  *
  * Paginates over the enrollment store using the DID-ordered cursor convention
@@ -586,34 +704,29 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
           })
         }
 
-        // Over-fetch by one to learn whether another page exists, so a final
-        // page that happens to be exactly `limit` long does not hand back a
-        // cursor that resolves to nothing.
-        const rows = await ctx.enrollmentStore.listEnrollments({
-          limit: limit + 1,
-          cursor: rawCursor,
-        })
-        const hasMore = rows.length > limit
-        const page = hasMore ? rows.slice(0, limit) : rows
+        const rawBoundary = req.query.boundary
+        if (
+          rawBoundary !== undefined &&
+          (typeof rawBoundary !== 'string' || rawBoundary.length === 0)
+        ) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'boundary must be a non-empty string',
+          })
+        }
 
-        const boundaries = await Promise.all(
-          page.map((enrollment) =>
-            ctx.enrollmentStore.getBoundaries(enrollment.did),
-          ),
-        )
-
-        const enrollments = page.map((enrollment, index) => ({
-          did: enrollment.did,
-          enrolledAt: enrollment.enrolledAt,
-          active: enrollment.active,
-          isService: enrollment.isService ?? false,
-          boundaries: boundaries[index],
-        }))
+        const { enrollments, hasMore } = rawBoundary
+          ? await collectFilteredPage(ctx, limit, rawBoundary, rawCursor)
+          : await collectPage(ctx, limit, rawCursor)
 
         res.json({
           enrollments,
-          cursor: hasMore ? page[page.length - 1].did : undefined,
-          total: await ctx.enrollmentStore.enrollmentCount(),
+          cursor: hasMore ? enrollments[enrollments.length - 1].did : undefined,
+          // A filtered total would need a full scan; the unfiltered count
+          // would misreport the result set, so it is omitted instead.
+          total: rawBoundary
+            ? undefined
+            : await ctx.enrollmentStore.enrollmentCount(),
         })
       } catch (err) {
         ctx.logger?.error(

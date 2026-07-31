@@ -292,4 +292,109 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
     expect(res.statusCode).toBe(500)
     expect((res.body as { error: string }).error).toBe('InternalError')
   })
+
+  describe('boundary filter', () => {
+    /** A store whose members hold alternating boundaries. */
+    function alternatingStore(dids: string[]) {
+      return {
+        listEnrollments: vi.fn(async (opts?: { cursor?: string }) => {
+          const start = opts?.cursor ? dids.indexOf(opts.cursor) + 1 : 0
+          return dids.slice(start).map((did) => storedEnrollment(did))
+        }),
+        getBoundaries: vi.fn(async (did: string) =>
+          dids.indexOf(did) % 2 === 0
+            ? [`${NERV}/general`, `${NERV}/swordsmith`]
+            : [`${NERV}/general`],
+        ),
+        enrollmentCount: vi.fn(async () => dids.length),
+      } as unknown as Partial<EnrollmentStore>
+    }
+
+    it('returns only members holding the boundary', async () => {
+      const { app } = createCtx({
+        enrollmentStore: alternatingStore([
+          'did:plc:a',
+          'did:plc:b',
+          'did:plc:c',
+          'did:plc:d',
+        ]),
+      })
+
+      const res = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/swordsmith`,
+      })
+
+      const body = res.body as { enrollments: Array<{ did: string }> }
+      expect(body.enrollments.map((e) => e.did)).toEqual([
+        'did:plc:a',
+        'did:plc:c',
+      ])
+    })
+
+    it('omits the total, which would report the unfiltered count', async () => {
+      const { app } = createCtx({
+        enrollmentStore: alternatingStore(['did:plc:a', 'did:plc:b']),
+      })
+
+      const res = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/swordsmith`,
+      })
+
+      expect((res.body as { total?: number }).total).toBeUndefined()
+    })
+
+    it('paginates on matches, not on rows scanned', async () => {
+      const dids = Array.from({ length: 10 }, (_, i) => `did:plc:m${i}`)
+      const { app } = createCtx({ enrollmentStore: alternatingStore(dids) })
+
+      const first = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/swordsmith`,
+        limit: '2',
+      })
+      const firstBody = first.body as {
+        enrollments: Array<{ did: string }>
+        cursor?: string
+      }
+      expect(firstBody.enrollments.map((e) => e.did)).toEqual([
+        'did:plc:m0',
+        'did:plc:m2',
+      ])
+      expect(firstBody.cursor).toBe('did:plc:m2')
+
+      // Resuming from the last match continues after it without repeats.
+      const second = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/swordsmith`,
+        limit: '2',
+        cursor: firstBody.cursor!,
+      })
+      const secondBody = second.body as { enrollments: Array<{ did: string }> }
+      expect(secondBody.enrollments.map((e) => e.did)).toEqual([
+        'did:plc:m4',
+        'did:plc:m6',
+      ])
+    })
+
+    it('returns an empty page when nothing holds the boundary', async () => {
+      const { app } = createCtx({
+        enrollmentStore: alternatingStore(['did:plc:a', 'did:plc:b']),
+      })
+
+      const res = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/nobody-here`,
+      })
+
+      const body = res.body as { enrollments: unknown[]; cursor?: string }
+      expect(body.enrollments).toEqual([])
+      expect(body.cursor).toBeUndefined()
+    })
+
+    it.each([[''], [['a']]])('rejects a malformed boundary', async (value) => {
+      const { app, enrollmentStore } = createCtx({})
+
+      const res = await invokeGetRoute(app, ROUTE, { boundary: value })
+
+      expect(res.statusCode).toBe(400)
+      expect(enrollmentStore.listEnrollments).not.toHaveBeenCalled()
+    })
+  })
 })
