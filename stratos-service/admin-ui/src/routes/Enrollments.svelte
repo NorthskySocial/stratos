@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { router } from 'svelte-spa-router'
   import {
     addBoundary,
     getEnrollmentStatus,
@@ -19,6 +20,7 @@
   import StatusDot from '../lib/components/ui/StatusDot.svelte'
   import TextField from '../lib/components/ui/TextField.svelte'
   import { resolveDid } from '../lib/api/identity'
+  import { boundaryName } from '../lib/boundaries'
 
   let searchDid = $state('')
   let loadedDid = $state<string | null>(null)
@@ -39,6 +41,8 @@
   let membersLoading = $state(false)
   let membersLoaded = $state(false)
   let membersError = $state<string | null>(null)
+  /** Full boundary value, or '' for no filter. Seeded from the hash query. */
+  let boundaryFilter = $state('')
 
   $effect(() => {
     listDomains()
@@ -59,7 +63,11 @@
     membersLoading = true
     membersError = null
     try {
-      const res = await listEnrollments({ limit: PAGE_SIZE, cursor })
+      const res = await listEnrollments({
+        limit: PAGE_SIZE,
+        cursor,
+        boundary: boundaryFilter || undefined,
+      })
       members = cursor ? [...members, ...res.enrollments] : res.enrollments
       membersCursor = res.cursor
       membersTotal = res.total
@@ -74,8 +82,20 @@
   // onMount, not $effect: the member list is loaded once on open. An $effect
   // would re-run whenever the reactive state read inside loadMembers changes.
   onMount(() => {
+    boundaryFilter =
+      new URLSearchParams(router.querystring ?? '').get('boundary') ?? ''
     void loadMembers()
   })
+
+  /** Re-run the listing from the first page under a new filter. */
+  function applyFilter(boundary: string) {
+    boundaryFilter = boundary
+    members = []
+    membersCursor = undefined
+    membersTotal = undefined
+    membersLoaded = false
+    void loadMembers()
+  }
 
   /** Load one member's detail. Shared by the search box and the member list. */
   async function loadMember(did: string) {
@@ -199,19 +219,36 @@
       </Button>
     </div>
     <p class="mt-3 text-xs text-muted">
-      Search jumps straight to a member; the list below shows everyone
-      enrolled.
+      Search jumps straight to a member, including one the domain filter below
+      excludes.
     </p>
   </Card>
 
   <Card testid="members-card">
-    <div class="mb-4 flex items-baseline justify-between">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="font-display text-lg italic">Members</h2>
-      {#if membersTotal !== undefined}
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-2">
+          <span class="text-sm text-muted">Domain</span>
+          <select
+            class="pill cursor-pointer px-4 py-1.5 text-sm outline-none"
+            data-testid="members-filter"
+            onchange={(event) =>
+              applyFilter((event.currentTarget as HTMLSelectElement).value)}
+            value={boundaryFilter}
+          >
+            <option value="">All domains</option>
+            {#each domains as domain (domain)}
+              <option value={domain}>{boundaryName(domain)}</option>
+            {/each}
+          </select>
+        </label>
         <span class="text-sm text-muted" data-testid="members-total">
-          {members.length} of {membersTotal}
+          {membersTotal !== undefined
+            ? `${members.length} of ${membersTotal}`
+            : `${members.length} shown`}
         </span>
-      {/if}
+      </div>
     </div>
 
     {#if membersError && members.length === 0}
@@ -230,7 +267,9 @@
       <p class="text-muted">Loading…</p>
     {:else if members.length === 0}
       <p class="text-muted" data-testid="members-empty">
-        No members are enrolled yet.
+        {boundaryFilter
+          ? `No members hold ${boundaryName(boundaryFilter)}.`
+          : 'No members are enrolled yet.'}
       </p>
     {:else}
       <ul class="space-y-2" data-testid="members-list">
@@ -258,7 +297,7 @@
               {#if member.boundaries.length > 0}
                 <div class="mt-2 flex flex-wrap gap-1.5">
                   {#each member.boundaries as boundary (boundary)}
-                    <Chip label={boundary} />
+                    <Chip label={boundaryName(boundary)} />
                   {/each}
                 </div>
               {/if}
@@ -312,7 +351,7 @@
   {#if loadedDid}
     <Card testid="enrollment-detail">
       <div class="space-y-4">
-        <h2 class="font-display text-lg italic">
+        <h2 class="font-sans text-lg font-semibold not-italic">
           <Identity did={loadedDid} testid="enrollment-identity" />
         </h2>
         <div class="flex items-center gap-6">
@@ -337,7 +376,7 @@
             <div class="flex flex-wrap gap-2">
               {#each boundaries as boundary (boundary)}
                 <Chip
-                  label={boundary}
+                  label={boundaryName(boundary)}
                   onremove={busy ? undefined : () => handleRemove(boundary)}
                   removable
                   testid="boundary-chip"
@@ -360,7 +399,7 @@
               >
                 <option value="">Select a domain…</option>
                 {#each availableDomains as domain (domain)}
-                  <option value={domain}>{domain}</option>
+                  <option value={domain}>{boundaryName(domain)}</option>
                 {/each}
               </select>
             </label>
@@ -373,25 +412,37 @@
             </Button>
           </div>
 
-          <div class="flex items-end gap-3">
-            <div class="grow">
-              <TextField
-                bind:value={setInput}
-                label="Set boundaries (comma-separated)"
-                onenter={handleSet}
-                placeholder="engineering, leadership"
-                testid="set-boundaries-input"
-              />
-            </div>
-            <Button
-              disabled={busy}
-              onclick={handleSet}
-              testid="set-boundaries"
-              variant="secondary"
+          <details class="rounded-2xl bg-background/40 p-3">
+            <summary
+              class="cursor-pointer text-sm font-medium text-muted select-none"
+              data-testid="set-boundaries-toggle"
             >
-              Set
-            </Button>
-          </div>
+              Set boundaries
+            </summary>
+            <div class="mt-3 flex items-end gap-3">
+              <div class="grow">
+                <TextField
+                  bind:value={setInput}
+                  ariaLabel="Boundaries, comma-separated"
+                  onenter={handleSet}
+                  placeholder="engineering, leadership"
+                  testid="set-boundaries-input"
+                />
+              </div>
+              <Button
+                disabled={busy}
+                onclick={handleSet}
+                testid="set-boundaries"
+                variant="secondary"
+              >
+                Set
+              </Button>
+            </div>
+            <p class="mt-2 text-xs text-muted">
+              Replaces every boundary at once. Values are full domains, not
+              short names.
+            </p>
+          </details>
         {/if}
       </div>
     </Card>
