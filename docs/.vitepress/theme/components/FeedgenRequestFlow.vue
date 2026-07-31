@@ -72,11 +72,19 @@
       <div class="panel" style="left: 640px; top: 168px; width: 220px">
         <div class="prow">
           <span class="icon">🔏</span>
-          <span class="c-txt">verify service JWT<br /><span class="c-dim">against the user&#39;s DID doc</span></span>
+          <span class="c-txt"
+            >verify service JWT<br /><span class="c-dim"
+              >against the user&#39;s DID doc</span
+            ></span
+          >
         </div>
         <div class="prow">
           <span class="icon">🧭</span>
-          <span class="c-txt">viewer boundaries<br /><span class="c-dim">TTL + LRU cache</span></span>
+          <span class="c-txt"
+            >viewer boundaries<br /><span class="c-dim"
+              >TTL + LRU cache</span
+            ></span
+          >
         </div>
         <div class="prow">
           <span class="icon">🗃️</span>

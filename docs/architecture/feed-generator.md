@@ -10,10 +10,10 @@ browsable timelines. It subscribes to a single upstream Stratos service,
 maintains a local post index, and serves fully hydrated, boundary-scoped
 feeds to clients over two XRPC methods:
 
-| Lexicon                              | Type                    | Purpose                                        |
-| ------------------------------------ | ----------------------- | ---------------------------------------------- |
-| `zone.stratos.feedgen.getFeed`       | query (authenticated)   | Hydrated posts the viewer is entitled to see   |
-| `zone.stratos.feedgen.describeFeed`  | query (unauthenticated) | The configured feed list, for introspection    |
+| Lexicon                             | Type                    | Purpose                                      |
+| ----------------------------------- | ----------------------- | -------------------------------------------- |
+| `zone.stratos.feedgen.getFeed`      | query (authenticated)   | Hydrated posts the viewer is entitled to see |
+| `zone.stratos.feedgen.describeFeed` | query (unauthenticated) | The configured feed list, for introspection  |
 
 The spec-shaped `zone.stratos.space.getRecord` endpoint answers one record
 for one caller; it cannot build a timeline. The feed generator exists to
@@ -49,8 +49,8 @@ request time. Two kinds of background subscription keep that index current:
 
 <FeedgenIndexingFlow />
 
-The service-level stream tells the feed generator *who* to follow; the
-per-actor streams deliver *what* they wrote, already scoped to the
+The service-level stream tells the feed generator _who_ to follow; the
+per-actor streams deliver _what_ they wrote, already scoped to the
 boundaries the feed generator is entitled to observe. Posts land in a SQLite
 (WAL) index keyed by uri, author, boundary, and `sortAt`, with cursors
 persisted so restarts resume rather than re-index.
@@ -59,12 +59,12 @@ persisted so restarts resume rather than re-index.
 
 Every hop is authenticated, and each direction uses a different mechanism:
 
-| Direction                     | Mechanism                                                                             | Verified by                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Client → PDS                  | OAuth + DPoP                                                                          | The PDS                                                  |
-| PDS → Feed generator          | Service-auth JWT: `iss` = user DID, `aud` = feedgen DID, `lxm` = endpoint, `exp` < 60s | Feed generator, via the user's DID document              |
-| Feed generator → Stratos      | Service-auth JWT: `iss` = feedgen DID, `aud` = Stratos DID, `lxm` = endpoint           | Stratos `service` verifier                               |
-| Feed generator → Stratos (WS) | Same JWT shape as a Bearer header, `lxm` = `zone.stratos.sync.subscribeRecords`        | Stratos `subscribeAuth` verifier                         |
+| Direction                     | Mechanism                                                                              | Verified by                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Client → PDS                  | OAuth + DPoP                                                                           | The PDS                                     |
+| PDS → Feed generator          | Service-auth JWT: `iss` = user DID, `aud` = feedgen DID, `lxm` = endpoint, `exp` < 60s | Feed generator, via the user's DID document |
+| Feed generator → Stratos      | Service-auth JWT: `iss` = feedgen DID, `aud` = Stratos DID, `lxm` = endpoint           | Stratos `service` verifier                  |
+| Feed generator → Stratos (WS) | Same JWT shape as a Bearer header, `lxm` = `zone.stratos.sync.subscribeRecords`        | Stratos `subscribeAuth` verifier            |
 
 The feed generator has its own identity: a `did:web` whose DID document
 publishes an `#atproto` verification method (its signing key) and a service
@@ -97,12 +97,12 @@ client's job, the same division of responsibility the public network uses.
 The feed generator binds to exactly one upstream Stratos service. Required
 configuration:
 
-| Env var               | Description                                            |
-| --------------------- | ------------------------------------------------------ |
-| `FEEDGEN_SERVICE_DID` | The feed generator's own DID (`did:web:<host>`)        |
-| `FEEDGEN_SIGNING_KEY` | Its signing key (hex secp256k1)                        |
-| `STRATOS_SERVICE_URL` | Base URL of the upstream Stratos                       |
-| `STRATOS_SERVICE_DID` | DID of the upstream Stratos                            |
+| Env var               | Description                                     |
+| --------------------- | ----------------------------------------------- |
+| `FEEDGEN_SERVICE_DID` | The feed generator's own DID (`did:web:<host>`) |
+| `FEEDGEN_SIGNING_KEY` | Its signing key (hex secp256k1)                 |
+| `STRATOS_SERVICE_URL` | Base URL of the upstream Stratos                |
+| `STRATOS_SERVICE_DID` | DID of the upstream Stratos                     |
 
 Because all reads go through the local index and blob cache, the feed
 generator absorbs feed traffic that would otherwise hit the Stratos service,
