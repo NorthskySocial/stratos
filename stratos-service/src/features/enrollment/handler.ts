@@ -264,6 +264,71 @@ function registerAdminBoundaryHandlers(ctx: AppContext): void {
   registerAddBoundaryHandler(ctx)
   registerRemoveBoundaryHandler(ctx)
   registerSetBoundariesHandler(ctx)
+  registerSetActiveHandler(ctx)
+}
+
+/**
+ * Register handler for activating and deactivating a member.
+ *
+ * Deactivation is reversible and leaves the enrollment and its boundaries in
+ * place, unlike unenrollment, which the member drives themselves and which
+ * also removes their PDS enrollment record.
+ * @param ctx - Application context
+ */
+function registerSetActiveHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.setActive',
+    adminJsonParser,
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did, active } = req.body as { did?: string; active?: boolean }
+
+        if (!did || typeof active !== 'boolean') {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'did and a boolean active are required',
+          })
+        }
+
+        const enrollment = await ctx.enrollmentStore.getEnrollment(did)
+        if (!enrollment) {
+          return res.status(404).json({
+            error: 'NotFound',
+            message: `user ${did} is not enrolled`,
+          })
+        }
+
+        if (enrollment.active !== active) {
+          await ctx.enrollmentStore.updateEnrollment(did, { active })
+        }
+
+        ctx.logger?.info(
+          { adminDid, targetDid: did, active },
+          active ? 'admin activated member' : 'admin deactivated member',
+        )
+        res.json({ did, active })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.setActive failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to update member state',
+        })
+      }
+    },
+  )
 }
 
 /**
