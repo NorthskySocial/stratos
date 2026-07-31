@@ -137,12 +137,18 @@ export function listDomains(): Promise<ListDomainsResponse> {
 }
 
 export function listEnrollments(
-  options: { limit?: number; cursor?: string; boundary?: string } = {},
+  options: {
+    limit?: number
+    cursor?: string
+    boundary?: string
+    active?: boolean
+  } = {},
 ): Promise<ListEnrollmentsResponse> {
   const params = new URLSearchParams()
   if (options.limit !== undefined) params.set('limit', String(options.limit))
   if (options.cursor !== undefined) params.set('cursor', options.cursor)
   if (options.boundary !== undefined) params.set('boundary', options.boundary)
+  if (options.active !== undefined) params.set('active', String(options.active))
   const query = params.toString()
   return request<ListEnrollmentsResponse>(
     `/xrpc/zone.stratos.admin.listEnrollments${query ? `?${query}` : ''}`,

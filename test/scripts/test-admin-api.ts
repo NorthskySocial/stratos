@@ -500,7 +500,7 @@ async function run(): Promise<void> {
   )
   assert(
     selfRevoke.status === 400,
-    'removeAdmin refuses to revoke a config admin / the caller',
+    'removeAdmin refuses to revoke a config admin',
     `status=${selfRevoke.status}`,
   )
 

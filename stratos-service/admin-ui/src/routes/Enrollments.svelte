@@ -47,14 +47,6 @@
   /** '' shows everyone, otherwise only active or only deactivated members. */
   let activeFilter = $state<'' | 'active' | 'inactive'>('')
 
-  const visibleMembers = $derived(
-    activeFilter === ''
-      ? members
-      : members.filter((member) =>
-          activeFilter === 'active' ? member.active : !member.active,
-        ),
-  )
-
   $effect(() => {
     listDomains()
       .then((res) => (domains = res.domains))
@@ -78,6 +70,7 @@
         limit: PAGE_SIZE,
         cursor,
         boundary: boundaryFilter || undefined,
+        active: activeFilter === '' ? undefined : activeFilter === 'active',
       })
       members = cursor ? [...members, ...res.enrollments] : res.enrollments
       membersCursor = res.cursor
@@ -98,14 +91,23 @@
     void loadMembers()
   })
 
-  /** Re-run the listing from the first page under a new filter. */
-  function applyFilter(boundary: string) {
-    boundaryFilter = boundary
+  /** Re-run the listing from the first page under the current filters. */
+  function reloadMembers() {
     members = []
     membersCursor = undefined
     membersTotal = undefined
     membersLoaded = false
     void loadMembers()
+  }
+
+  function applyBoundaryFilter(boundary: string) {
+    boundaryFilter = boundary
+    reloadMembers()
+  }
+
+  function applyActiveFilter(value: string) {
+    activeFilter = value as '' | 'active' | 'inactive'
+    reloadMembers()
   }
 
   /** Load one member's detail. Shared by the search box and the member list. */
@@ -218,10 +220,14 @@
     warning = null
     busy = true
     try {
-      await setActive(did, next)
-      status = status ? { ...status, active: next } : status
+      const res = await setActive(did, next)
+      // Re-read rather than trusting local state: the row must show what was
+      // committed, and `status` may not have loaded.
+      status = await getEnrollmentStatus(did).catch(() =>
+        status ? { ...status, active: res.active } : status,
+      )
       members = members.map((member) =>
-        member.did === did ? { ...member, active: next } : member,
+        member.did === did ? { ...member, active: res.active } : member,
       )
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
@@ -265,7 +271,9 @@
             class="pill cursor-pointer px-4 py-1.5 text-sm outline-none"
             data-testid="members-filter"
             onchange={(event) =>
-              applyFilter((event.currentTarget as HTMLSelectElement).value)}
+              applyBoundaryFilter(
+                (event.currentTarget as HTMLSelectElement).value,
+              )}
             value={boundaryFilter}
           >
             <option value="">All domains</option>
@@ -277,9 +285,11 @@
         <label class="flex items-center gap-2">
           <span class="text-sm text-muted">Status</span>
           <select
-            bind:value={activeFilter}
             class="pill cursor-pointer px-4 py-1.5 text-sm outline-none"
             data-testid="members-active-filter"
+            onchange={(event) =>
+              applyActiveFilter((event.currentTarget as HTMLSelectElement).value)}
+            value={activeFilter}
           >
             <option value="">All</option>
             <option value="active">Active</option>
@@ -287,9 +297,9 @@
           </select>
         </label>
         <span class="text-sm text-muted" data-testid="members-total">
-          {membersTotal !== undefined && activeFilter === ''
-            ? `${visibleMembers.length} of ${membersTotal}`
-            : `${visibleMembers.length} shown`}
+          {membersTotal !== undefined
+            ? `${members.length} of ${membersTotal}`
+            : `${members.length} shown`}
         </span>
       </div>
     </div>
@@ -308,7 +318,7 @@
       </div>
     {:else if !membersLoaded && membersLoading}
       <p class="text-muted">Loading…</p>
-    {:else if visibleMembers.length === 0}
+    {:else if members.length === 0}
       <p class="text-muted" data-testid="members-empty">
         {activeFilter === 'inactive'
           ? 'No members are deactivated.'
@@ -318,7 +328,7 @@
       </p>
     {:else}
       <ul class="space-y-2" data-testid="members-list">
-        {#each visibleMembers as member (member.did)}
+        {#each members as member (member.did)}
           <li>
             <button
               class="squish w-full cursor-pointer rounded-2xl bg-bubble p-4 text-left shadow-brand disabled:cursor-not-allowed disabled:opacity-60"
