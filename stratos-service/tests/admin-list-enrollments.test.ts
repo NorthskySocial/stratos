@@ -388,6 +388,73 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
       expect(body.cursor).toBeUndefined()
     })
 
+    it('filters by active state', async () => {
+      const { app } = createCtx({
+        enrollmentStore: {
+          listEnrollments: vi.fn(async () => [
+            storedEnrollment('did:plc:a'),
+            storedEnrollment('did:plc:b', { active: false }),
+            storedEnrollment('did:plc:c', { active: false }),
+          ]),
+          enrollmentCount: vi.fn(async () => 3),
+        } as unknown as Partial<EnrollmentStore>,
+      })
+
+      const inactive = await invokeGetRoute(app, ROUTE, { active: 'false' })
+      const inactiveBody = inactive.body as {
+        enrollments: Array<{ did: string }>
+        total?: number
+      }
+      expect(inactiveBody.enrollments.map((e) => e.did)).toEqual([
+        'did:plc:b',
+        'did:plc:c',
+      ])
+      expect(inactiveBody.total).toBeUndefined()
+
+      const active = await invokeGetRoute(app, ROUTE, { active: 'true' })
+      expect(
+        (
+          active.body as { enrollments: Array<{ did: string }> }
+        ).enrollments.map((e) => e.did),
+      ).toEqual(['did:plc:a'])
+    })
+
+    it('combines the boundary and active filters', async () => {
+      const { app } = createCtx({
+        enrollmentStore: {
+          listEnrollments: vi.fn(async () => [
+            storedEnrollment('did:plc:a'),
+            storedEnrollment('did:plc:b', { active: false }),
+          ]),
+          getBoundaries: vi.fn(async () => [`${NERV}/swordsmith`]),
+          enrollmentCount: vi.fn(async () => 2),
+        } as unknown as Partial<EnrollmentStore>,
+      })
+
+      const res = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/swordsmith`,
+        active: 'false',
+      })
+
+      expect(
+        (res.body as { enrollments: Array<{ did: string }> }).enrollments.map(
+          (e) => e.did,
+        ),
+      ).toEqual(['did:plc:b'])
+    })
+
+    it.each([['yes'], [''], [['true']]])(
+      'rejects a malformed active value (%o)',
+      async (value) => {
+        const { app, enrollmentStore } = createCtx({})
+
+        const res = await invokeGetRoute(app, ROUTE, { active: value })
+
+        expect(res.statusCode).toBe(400)
+        expect(enrollmentStore.listEnrollments).not.toHaveBeenCalled()
+      },
+    )
+
     it.each([[''], [['a']]])('rejects a malformed boundary', async (value) => {
       const { app, enrollmentStore } = createCtx({})
 

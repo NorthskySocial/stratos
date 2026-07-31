@@ -487,9 +487,9 @@ function registerSetActiveHandler(ctx: AppContext): void {
       }
 
       try {
-        const { did, active } = req.body as { did?: string; active?: boolean }
+        const { did, active } = req.body as { did?: unknown; active?: unknown }
 
-        if (!did || typeof active !== 'boolean') {
+        if (!looksLikeDid(did) || typeof active !== 'boolean') {
           return res.status(400).json({
             error: 'InvalidRequest',
             message: 'did and a boolean active are required',
@@ -864,29 +864,31 @@ async function collectPage(
 }
 
 /**
- * Read one page of enrollments holding a given boundary.
+ * Read one page of enrollments matching a predicate.
  *
- * There is no reverse boundary index, so this scans the DID-ordered listing in
- * chunks and filters, stopping as soon as the page is full. The cursor is the
- * last *matching* DID, so resuming re-scans only the non-matching rows that
- * followed it.
+ * There is no index to filter on, so this scans the DID-ordered listing in
+ * chunks, stopping as soon as the page is full. The cursor is the last
+ * *matching* DID, so resuming re-scans only the non-matching rows that
+ * followed it. Filtering here rather than in the client keeps pagination
+ * meaningful: a page is always `limit` matches, not `limit` rows of which
+ * some are hidden.
  * @param ctx - Application context
  * @param limit - Page size
- * @param boundary - Boundary every returned member must hold
+ * @param matches - Predicate every returned member must satisfy
  * @param cursor - DID to resume after
  * @returns The page and whether more results follow
  */
 async function collectFilteredPage(
   ctx: AppContext,
   limit: number,
-  boundary: string,
+  matches: (enrollment: ListedEnrollment) => boolean,
   cursor?: string,
 ): Promise<{ enrollments: ListedEnrollment[]; hasMore: boolean }> {
   const SCAN_CHUNK = 100
-  const matches: ListedEnrollment[] = []
+  const found: ListedEnrollment[] = []
   let scanCursor = cursor
 
-  while (matches.length <= limit) {
+  while (found.length <= limit) {
     const rows = await ctx.enrollmentStore.listEnrollments({
       limit: SCAN_CHUNK,
       cursor: scanCursor,
@@ -895,17 +897,17 @@ async function collectFilteredPage(
     scanCursor = rows[rows.length - 1].did
 
     for (const enrollment of await withBoundaries(ctx, rows)) {
-      if (!enrollment.boundaries.includes(boundary)) continue
-      matches.push(enrollment)
-      if (matches.length > limit) break
+      if (!matches(enrollment)) continue
+      found.push(enrollment)
+      if (found.length > limit) break
     }
 
     if (rows.length < SCAN_CHUNK) break
   }
 
-  const hasMore = matches.length > limit
+  const hasMore = found.length > limit
   return {
-    enrollments: hasMore ? matches.slice(0, limit) : matches,
+    enrollments: hasMore ? found.slice(0, limit) : found,
     hasMore,
   }
 }
@@ -976,8 +978,31 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
           })
         }
 
-        const { enrollments, hasMore } = rawBoundary
-          ? await collectFilteredPage(ctx, limit, rawBoundary, rawCursor)
+        const rawActive = req.query.active
+        if (
+          rawActive !== undefined &&
+          rawActive !== 'true' &&
+          rawActive !== 'false'
+        ) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: "active must be 'true' or 'false'",
+          })
+        }
+        const wantActive =
+          rawActive === undefined ? undefined : rawActive === 'true'
+
+        const filtered = rawBoundary !== undefined || wantActive !== undefined
+        const { enrollments, hasMore } = filtered
+          ? await collectFilteredPage(
+              ctx,
+              limit,
+              (enrollment) =>
+                (rawBoundary === undefined ||
+                  enrollment.boundaries.includes(rawBoundary)) &&
+                (wantActive === undefined || enrollment.active === wantActive),
+              rawCursor,
+            )
           : await collectPage(ctx, limit, rawCursor)
 
         res.json({
@@ -985,7 +1010,7 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
           cursor: hasMore ? enrollments[enrollments.length - 1].did : undefined,
           // A filtered total would need a full scan; the unfiltered count
           // would misreport the result set, so it is omitted instead.
-          total: rawBoundary
+          total: filtered
             ? undefined
             : await ctx.enrollmentStore.enrollmentCount(),
         })

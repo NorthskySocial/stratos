@@ -201,6 +201,9 @@ describe('POST /xrpc/zone.stratos.admin.setActive', () => {
     [{ did: 'did:plc:usagi' }],
     [{ did: 'did:plc:usagi', active: 'false' }],
     [{ active: false }],
+    [{ did: 42, active: false }],
+    [{ did: 'not-a-did', active: false }],
+    [{ did: { did: 'did:plc:usagi' }, active: false }],
   ])('rejects a malformed body (%o)', async (body) => {
     const { app, enrollmentStore } = createCtx({})
 

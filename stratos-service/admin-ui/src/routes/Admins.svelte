@@ -133,6 +133,8 @@
 
     {#if !loaded && loading}
       <p class="text-muted">Loading…</p>
+    {:else if error && admins.length === 0}
+      <p class="text-muted">Could not load the admin list.</p>
     {:else if admins.length === 0}
       <p class="text-muted" data-testid="admins-empty">No admins configured.</p>
     {:else}
