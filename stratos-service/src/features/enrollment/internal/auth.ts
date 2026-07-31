@@ -21,14 +21,24 @@ export interface EnrollmentAuthDeps {
  *
  * @param did - DID to verify
  * @param deps - Dependencies for enrollment verification
- * @throws EnrollmentDeniedError if the DID is not enrolled
+ * @throws EnrollmentDeniedError if the DID is not enrolled or was deactivated
  */
 export async function verifyEnrolled(
   did: string,
   deps: EnrollmentAuthDeps,
 ): Promise<void> {
-  const isEnrolled = await deps.enrollmentStore.getEnrollment(did)
-  if (isEnrolled) {
+  const enrollment = await deps.enrollmentStore.getEnrollment(did)
+  if (enrollment) {
+    // A deactivated enrollment still has a row, so an enrolled-or-not check
+    // would let a suspended member keep working. Deny before falling through
+    // to the auto-enrollment path, which would otherwise readmit them.
+    if (!enrollment.active) {
+      deps.logger?.warn({ did }, 'request denied: enrollment is deactivated')
+      throw new EnrollmentDeniedError(
+        'Enrollment is deactivated',
+        'NotInAllowlist',
+      )
+    }
     return
   }
 
