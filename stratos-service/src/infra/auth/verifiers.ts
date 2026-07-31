@@ -21,6 +21,7 @@ import { ExternalAllowListProvider } from '../../features/enrollment/internal/al
 import { verifyEnrolled } from '../../features'
 import { readAdminSessionCookie } from '../../oauth/admin-routes.js'
 import type { AdminSessionStore } from '../../oauth/admin-session-store.js'
+import type { AdminUserStore } from '../../oauth/admin-user-store.js'
 
 /**
  * Auth verifier collection for different auth scenarios
@@ -117,6 +118,7 @@ export function createAuthVerifiers(
   cfg: StratosServiceConfig,
   enrollmentStore: import('@northskysocial/stratos-core').EnrollmentStoreReader,
   adminSessionStore: AdminSessionStore,
+  adminUserStore: AdminUserStore,
   adminDids: string[],
   dpopVerifier: DpopVerifier,
   allowListProvider: ExternalAllowListProvider | undefined,
@@ -167,6 +169,7 @@ export function createAuthVerifiers(
     ),
     admin: createAdminVerifier({
       adminSessionStore,
+      adminUserStore,
       adminDids,
       publicUrl: cfg.service.publicUrl,
       devMode,
@@ -564,6 +567,7 @@ async function verifyDpop(
  */
 function createAdminVerifier(deps: {
   adminSessionStore: AdminSessionStore
+  adminUserStore: AdminUserStore
   adminDids: string[]
   publicUrl: string
   devMode: boolean
@@ -593,10 +597,14 @@ function createAdminVerifier(deps: {
       throw new AuthRequiredError('Admin session invalid or expired')
     }
 
-    if (!deps.adminDids.includes(session.did)) {
+    // Config admins are the recovery floor; granted admins live in the DB.
+    const authorized =
+      deps.adminDids.includes(session.did) ||
+      (await deps.adminUserStore.has(session.did))
+    if (!authorized) {
       deps.logger?.warn(
         { did: session.did },
-        'admin auth rejected: DID not in allowlist',
+        'admin auth rejected: DID not an admin',
       )
       throw new AuthRequiredError('Not an authorized admin')
     }

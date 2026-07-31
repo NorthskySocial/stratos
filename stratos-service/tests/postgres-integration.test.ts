@@ -517,6 +517,37 @@ describe('PostgreSQL Backend Integration', () => {
       expect(result?.enrollmentRkey).toBe('did:web:stratos.example.com')
     })
 
+    it('should update the active flag via updateEnrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zFayeValentine1',
+        active: true,
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, { active: false })
+      expect((await enrollmentStore.getEnrollment(testDid))?.active).toBe(false)
+
+      await enrollmentStore.updateEnrollment(testDid, { active: true })
+      expect((await enrollmentStore.getEnrollment(testDid))?.active).toBe(true)
+    })
+
+    it('should update signingKeyDid via updateEnrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zEdward1',
+        active: true,
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        signingKeyDid: 'did:key:zEinRotated2',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.signingKeyDid).toBe('did:key:zEinRotated2')
+    })
+
     it('should update pdsEndpoint without affecting enrollmentRkey', async () => {
       await enrollmentStore.enroll({
         did: testDid,

@@ -195,6 +195,33 @@ async function adminFetch(
   return { status: res.status, body: parsed }
 }
 
+/** GET an admin XRPC query with the session cookie. */
+async function adminList(
+  path: string,
+  sessionCookie: string | null,
+  query: Record<string, string> = {},
+): Promise<{ status: number; body: unknown }> {
+  const baseUrl = await getBaseUrl()
+  const headers: Record<string, string> = {
+    'ngrok-skip-browser-warning': 'true',
+  }
+  if (sessionCookie) {
+    headers['Cookie'] = `${ADMIN_SESSION_COOKIE}=${sessionCookie}`
+  }
+  const search = new URLSearchParams(query).toString()
+  const res = await fetch(
+    `${baseUrl}/xrpc/${path}${search ? `?${search}` : ''}`,
+    { headers },
+  )
+  let parsed: unknown
+  try {
+    parsed = await res.json()
+  } catch {
+    parsed = undefined
+  }
+  return { status: res.status, body: parsed }
+}
+
 /** Read the boundaries recorded on the user's PDS enrollment record. */
 async function readPdsBoundaries(did: string): Promise<string[] | null> {
   const result = await listPdsRecords(PDS_URL, did, ENROLLMENT_COLLECTION)
@@ -304,6 +331,29 @@ async function run(): Promise<void> {
     `${target.handle} (${target.did})`,
   )
 
+  // 1b. The member list surfaces the target without knowing its DID up front.
+  const listed = await adminList(
+    'zone.stratos.admin.listEnrollments',
+    sessionCookie,
+  )
+  const listedBody = listed.body as {
+    enrollments?: Array<{ did: string; boundaries: string[] }>
+    total?: number
+  }
+  assert(
+    listed.status === 200 &&
+      listedBody.enrollments?.some((e) => e.did === target.did) === true,
+    'listEnrollments includes the enrolled target',
+    `status=${listed.status}, returned=${listedBody.enrollments?.length ?? 0}, total=${listedBody.total ?? '?'}`,
+  )
+
+  const unauthList = await adminList('zone.stratos.admin.listEnrollments', null)
+  assert(
+    unauthList.status === 401,
+    'listEnrollments without session cookie is rejected (401)',
+    `status=${unauthList.status}`,
+  )
+
   // 2. addBoundary via the admin API.
   const add = await adminFetch(
     'zone.stratos.admin.addBoundary',
@@ -386,6 +436,107 @@ async function run(): Promise<void> {
     unauth.status === 401,
     'addBoundary without session cookie is rejected (401)',
     `status=${unauth.status}`,
+  )
+
+  // 7. Deactivate and reactivate the target, checking the change is persisted
+  // and visible in the admin listing.
+  const deactivated = await adminFetch(
+    'zone.stratos.admin.setActive',
+    { did: target.did, active: false },
+    sessionCookie,
+  )
+  assert(
+    deactivated.status === 200,
+    'setActive deactivates the target',
+    `status=${deactivated.status}`,
+  )
+
+  const afterDeactivate = await enrollmentStatus(target.did)
+  assert(
+    afterDeactivate.active === false,
+    'enrollment status reports the target as deactivated',
+    `active=${afterDeactivate.active}`,
+  )
+
+  // The listing is the surface an operator actually reads, so assert there
+  // too rather than only on the single-record status.
+  const listedInactive = await adminList(
+    'zone.stratos.admin.listEnrollments',
+    sessionCookie,
+    { active: 'false' },
+  )
+  const inactiveDids = (
+    listedInactive.body as { enrollments?: Array<{ did: string }> }
+  ).enrollments?.map((e) => e.did)
+  assert(
+    inactiveDids?.includes(target.did) === true,
+    'listEnrollments filtered to deactivated includes the target',
+    `dids=[${inactiveDids?.join(', ') ?? ''}]`,
+  )
+
+  const reactivated = await adminFetch(
+    'zone.stratos.admin.setActive',
+    { did: target.did, active: true },
+    sessionCookie,
+  )
+  const afterReactivate = await enrollmentStatus(target.did)
+  assert(
+    reactivated.status === 200 && afterReactivate.active === true,
+    'setActive reactivates the target',
+    `status=${reactivated.status}, active=${afterReactivate.active}`,
+  )
+
+  // 8. Admin management: the operator is listed, grants are revocable, and
+  // config-provided admins are not.
+  const admins = await adminList('zone.stratos.admin.listAdmins', sessionCookie)
+  const adminsBody = admins.body as {
+    admins?: Array<{ did: string; source: string }>
+  }
+  const operatorEntry = adminsBody.admins?.find((a) => a.did === operator.did)
+  assert(
+    admins.status === 200 && operatorEntry?.source === 'config',
+    'listAdmins reports the operator as a config admin',
+    `status=${admins.status}, source=${operatorEntry?.source}`,
+  )
+
+  const granted = await adminFetch(
+    'zone.stratos.admin.addAdmin',
+    { did: target.did },
+    sessionCookie,
+  )
+  assert(
+    granted.status === 200,
+    'addAdmin grants access to the target',
+    `status=${granted.status}`,
+  )
+
+  const configRevoke = await adminFetch(
+    'zone.stratos.admin.removeAdmin',
+    { did: operator.did },
+    sessionCookie,
+  )
+  assert(
+    configRevoke.status === 400,
+    'removeAdmin refuses to revoke a config admin',
+    `status=${configRevoke.status}`,
+  )
+
+  const revoked = await adminFetch(
+    'zone.stratos.admin.removeAdmin',
+    { did: target.did },
+    sessionCookie,
+  )
+  assert(
+    revoked.status === 200,
+    'removeAdmin revokes the granted admin',
+    `status=${revoked.status}`,
+  )
+
+  const unauthAdmins = await adminList('zone.stratos.admin.listAdmins', null)
+  assert(
+    unauthAdmins.status === 401,
+    'listAdmins without session cookie is rejected (401)',
+    `status=${unauthAdmins.status}`,
   )
 
   summary(passed, failed)

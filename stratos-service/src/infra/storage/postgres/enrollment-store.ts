@@ -165,6 +165,13 @@ export class PgEnrollmentStoreWriter
     if (updates.pdsEndpoint !== undefined) {
       setValues.pdsEndpoint = updates.pdsEndpoint
     }
+    if (updates.signingKeyDid !== undefined) {
+      setValues.signingKeyDid = updates.signingKeyDid
+    }
+    if (updates.active !== undefined) {
+      // Stored as text to match the sqlite backend's encoding.
+      setValues.active = updates.active ? 'true' : 'false'
+    }
     if (updates.enrollmentRkey !== undefined) {
       setValues.enrollmentRkey = updates.enrollmentRkey
     }

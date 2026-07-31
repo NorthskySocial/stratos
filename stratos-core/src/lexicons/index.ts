@@ -1,6 +1,11 @@
 import type { LexiconDoc } from '@atproto/lexicon'
 import { atprotoLexicons } from './atproto.js'
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
+import zoneStratosAdminListEnrollments from '../../../lexicons/zone/stratos/admin/listEnrollments.json' with { type: 'json' }
+import zoneStratosAdminAddAdmin from '../../../lexicons/zone/stratos/admin/addAdmin.json' with { type: 'json' }
+import zoneStratosAdminListAdmins from '../../../lexicons/zone/stratos/admin/listAdmins.json' with { type: 'json' }
+import zoneStratosAdminRemoveAdmin from '../../../lexicons/zone/stratos/admin/removeAdmin.json' with { type: 'json' }
+import zoneStratosAdminSetActive from '../../../lexicons/zone/stratos/admin/setActive.json' with { type: 'json' }
 import zoneStratosEmbedImages from '../../../lexicons/zone/stratos/embed/images.json' with { type: 'json' }
 import zoneStratosBoundaryDefs from '../../../lexicons/zone/stratos/boundary/defs.json' with { type: 'json' }
 import zoneStratosDefs from '../../../lexicons/zone/stratos/defs.json' with { type: 'json' }
@@ -27,6 +32,11 @@ import zoneStratosSyncSubscribeRecords from '../../../lexicons/zone/stratos/sync
 export const stratosLexicons: LexiconDoc[] = [
   ...atprotoLexicons,
   zoneStratosActorEnrollment as LexiconDoc,
+  zoneStratosAdminListEnrollments as LexiconDoc,
+  zoneStratosAdminAddAdmin as LexiconDoc,
+  zoneStratosAdminListAdmins as LexiconDoc,
+  zoneStratosAdminRemoveAdmin as LexiconDoc,
+  zoneStratosAdminSetActive as LexiconDoc,
   zoneStratosEmbedImages as LexiconDoc,
   zoneStratosBoundaryDefs as LexiconDoc,
   zoneStratosDefs as LexiconDoc,

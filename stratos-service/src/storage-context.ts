@@ -19,8 +19,11 @@ import {
   createPgOAuthStores,
   createSqliteOAuthStores,
   PgAdminSessionStore,
+  PgAdminUserStore,
   SqliteAdminSessionStore,
+  SqliteAdminUserStore,
   type AdminSessionStore,
+  type AdminUserStore,
   type EnrollmentStore,
   type OAuthSessionStoreBackend,
   type OAuthStateStoreBackend,
@@ -47,6 +50,7 @@ export interface StorageContext {
     stateStore: OAuthStateStoreBackend
   }
   adminSessionStore: AdminSessionStore
+  adminUserStore: AdminUserStore
   checkDbHealth: () => Promise<'ok' | 'error'>
   destroy: () => Promise<void>
 }
@@ -72,6 +76,7 @@ export async function createStorageContext(
     stateStore: OAuthStateStoreBackend
   }
   let adminSessionStore: AdminSessionStore
+  let adminUserStore: AdminUserStore
   let actorStore: ActorStore
   let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
@@ -108,6 +113,7 @@ export async function createStorageContext(
     )
     oauthStores = createPgOAuthStores(pgDb)
     adminSessionStore = new PgAdminSessionStore(pgDb, logger)
+    adminUserStore = new PgAdminUserStore(pgDb, logger)
     actorStore = new PostgresActorStore({
       connectionString: cfg.storage.postgresUrl,
       blobstore,
@@ -134,6 +140,7 @@ export async function createStorageContext(
     )
     oauthStores = createSqliteOAuthStores(db)
     adminSessionStore = new SqliteAdminSessionStore(db, logger)
+    adminUserStore = new SqliteAdminUserStore(db, logger)
     actorStore = new StratosActorStore({
       dataDir: path.join(cfg.storage.dataDir, 'actors'),
       blobstore,
@@ -162,6 +169,7 @@ export async function createStorageContext(
     enrollmentStore,
     oauthStores,
     adminSessionStore,
+    adminUserStore,
     actorStore,
     checkDbHealth,
     destroy,
