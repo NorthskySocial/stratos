@@ -32,13 +32,10 @@
     {#if health.components}
       <Card title="Components">
         <ul class="space-y-2">
-          {#each Object.entries(health.components) as [name, component] (name)}
+          {#each Object.entries(health.components) as [name, status] (name)}
             <li class="flex items-center justify-between">
               <span class="text-sm">{name}</span>
-              <StatusDot
-                label={component.status}
-                ok={component.status === 'ok'}
-              />
+              <StatusDot label={status} ok={status === 'ok'} />
             </li>
           {/each}
         </ul>
