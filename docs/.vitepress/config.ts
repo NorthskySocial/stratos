@@ -104,6 +104,10 @@ export default defineConfig({
             { text: 'Hydration Architecture', link: '/architecture/hydration' },
             { text: 'Indexer Architecture', link: '/indexer-architecture' },
             {
+              text: 'Feed Generator',
+              link: '/architecture/feed-generator',
+            },
+            {
               text: 'Enrollment Signing',
               link: '/architecture/enrollment-signing',
             },
