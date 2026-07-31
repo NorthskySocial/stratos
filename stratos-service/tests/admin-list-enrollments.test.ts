@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { inspect } from 'node:util'
 import { describe, expect, it, vi } from 'vitest'
 import express from 'express'
 import type { AppContext, EnrollmentEventEmitter } from '../src'
@@ -42,7 +43,7 @@ function invokeGetRoute(
         return reject(
           err instanceof Error
             ? err
-            : new Error(`express next() called with: ${String(err)}`),
+            : new Error(`express next() called with: ${inspect(err)}`),
         )
       }
       resolve({ statusCode, body: null })
