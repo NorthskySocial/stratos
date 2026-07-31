@@ -194,3 +194,38 @@ export function setBoundaries(
     boundaries,
   })
 }
+
+export function setActive(
+  did: string,
+  active: boolean,
+): Promise<{ did: string; active: boolean }> {
+  return post<{ did: string; active: boolean }>(
+    '/xrpc/zone.stratos.admin.setActive',
+    { did, active },
+  )
+}
+
+export interface AdminUser {
+  did: string
+  /** `config` admins come from the environment and cannot be revoked here. */
+  source: 'config' | 'database'
+  addedAt?: string
+  addedBy?: string
+}
+
+export interface ListAdminsResponse {
+  admins: AdminUser[]
+  viewer?: string
+}
+
+export function listAdmins(): Promise<ListAdminsResponse> {
+  return request<ListAdminsResponse>('/xrpc/zone.stratos.admin.listAdmins')
+}
+
+export function addAdmin(did: string): Promise<{ did: string }> {
+  return post<{ did: string }>('/xrpc/zone.stratos.admin.addAdmin', { did })
+}
+
+export function removeAdmin(did: string): Promise<{ did: string }> {
+  return post<{ did: string }>('/xrpc/zone.stratos.admin.removeAdmin', { did })
+}

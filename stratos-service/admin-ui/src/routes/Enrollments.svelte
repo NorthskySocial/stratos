@@ -8,6 +8,7 @@
     listEnrollments,
     removeBoundary,
     resolveEnrollments,
+    setActive,
     setBoundaries,
     type BoundariesResponse,
     type EnrollmentStatusResponse,
@@ -43,6 +44,16 @@
   let membersError = $state<string | null>(null)
   /** Full boundary value, or '' for no filter. Seeded from the hash query. */
   let boundaryFilter = $state('')
+  /** '' shows everyone, otherwise only active or only deactivated members. */
+  let activeFilter = $state<'' | 'active' | 'inactive'>('')
+
+  const visibleMembers = $derived(
+    activeFilter === ''
+      ? members
+      : members.filter((member) =>
+          activeFilter === 'active' ? member.active : !member.active,
+        ),
+  )
 
   $effect(() => {
     listDomains()
@@ -198,6 +209,26 @@
       .filter((entry) => entry.length > 0)
     void mutate(() => setBoundaries(did, next))
   }
+
+  async function toggleActive() {
+    if (!loadedDid || busy) return
+    const did = loadedDid
+    const next = !(status?.active ?? true)
+    error = null
+    warning = null
+    busy = true
+    try {
+      await setActive(did, next)
+      status = status ? { ...status, active: next } : status
+      members = members.map((member) =>
+        member.did === did ? { ...member, active: next } : member,
+      )
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      busy = false
+    }
+  }
 </script>
 
 <div class="space-y-6" data-testid="enrollments-screen">
@@ -243,10 +274,22 @@
             {/each}
           </select>
         </label>
+        <label class="flex items-center gap-2">
+          <span class="text-sm text-muted">Status</span>
+          <select
+            bind:value={activeFilter}
+            class="pill cursor-pointer px-4 py-1.5 text-sm outline-none"
+            data-testid="members-active-filter"
+          >
+            <option value="">All</option>
+            <option value="active">Active</option>
+            <option value="inactive">Deactivated</option>
+          </select>
+        </label>
         <span class="text-sm text-muted" data-testid="members-total">
-          {membersTotal !== undefined
-            ? `${members.length} of ${membersTotal}`
-            : `${members.length} shown`}
+          {membersTotal !== undefined && activeFilter === ''
+            ? `${visibleMembers.length} of ${membersTotal}`
+            : `${visibleMembers.length} shown`}
         </span>
       </div>
     </div>
@@ -265,15 +308,17 @@
       </div>
     {:else if !membersLoaded && membersLoading}
       <p class="text-muted">Loading…</p>
-    {:else if members.length === 0}
+    {:else if visibleMembers.length === 0}
       <p class="text-muted" data-testid="members-empty">
-        {boundaryFilter
-          ? `No members hold ${boundaryName(boundaryFilter)}.`
-          : 'No members are enrolled yet.'}
+        {activeFilter === 'inactive'
+          ? 'No members are deactivated.'
+          : boundaryFilter
+            ? `No members hold ${boundaryName(boundaryFilter)}.`
+            : 'No members are enrolled yet.'}
       </p>
     {:else}
       <ul class="space-y-2" data-testid="members-list">
-        {#each members as member (member.did)}
+        {#each visibleMembers as member (member.did)}
           <li>
             <button
               class="squish w-full cursor-pointer rounded-2xl bg-bubble p-4 text-left shadow-brand disabled:cursor-not-allowed disabled:opacity-60"
@@ -289,7 +334,7 @@
                     <span class="text-xs text-muted">service</span>
                   {/if}
                   <StatusDot
-                    label={member.active ? 'active' : 'inactive'}
+                    label={member.active ? 'active' : 'deactivated'}
                     ok={member.active}
                   />
                 </div>
@@ -354,7 +399,7 @@
         <h2 class="font-sans text-lg font-semibold not-italic">
           <Identity did={loadedDid} testid="enrollment-identity" />
         </h2>
-        <div class="flex items-center gap-6">
+        <div class="flex flex-wrap items-center gap-6">
           <StatusDot label={enrolled ? 'enrolled' : 'not enrolled'} ok={enrolled} />
           {#if status?.enrolledAt}
             <span class="text-sm text-muted">
@@ -362,7 +407,17 @@
             </span>
           {/if}
           {#if status?.active === false}
-            <span class="text-sm text-error">inactive</span>
+            <span class="text-sm text-error">deactivated</span>
+          {/if}
+          {#if enrolled}
+            <Button
+              disabled={busy}
+              onclick={toggleActive}
+              testid="toggle-active"
+              variant={status?.active === false ? 'secondary' : 'danger'}
+            >
+              {status?.active === false ? 'Reactivate' : 'Deactivate'}
+            </Button>
           {/if}
         </div>
 
