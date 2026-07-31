@@ -9,18 +9,21 @@
   import Health from './routes/Health.svelte'
   import Domains from './routes/Domains.svelte'
   import Enrollments from './routes/Enrollments.svelte'
+  import Admins from './routes/Admins.svelte'
 
   const routes = {
     '/': Health,
     '/health': Health,
     '/domains': Domains,
     '/enrollments': Enrollments,
+    '/admins': Admins,
   }
 
   const nav = [
     { href: '#/health', label: 'Health', match: ['/', '/health'] },
     { href: '#/domains', label: 'Domains', match: ['/domains'] },
     { href: '#/enrollments', label: 'Enrollments', match: ['/enrollments'] },
+    { href: '#/admins', label: 'Admins', match: ['/admins'] },
   ]
 
   $effect(() => {

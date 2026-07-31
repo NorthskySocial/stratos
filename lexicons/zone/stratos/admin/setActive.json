@@ -1,0 +1,42 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.setActive",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Activate or deactivate an enrolled member. Requires admin authorization. Deactivation is reversible and preserves the member's boundaries.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "active"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did",
+              "description": "The member to update."
+            },
+            "active": {
+              "type": "boolean",
+              "description": "Whether the member's enrollment should be active."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "active"],
+          "properties": {
+            "did": { "type": "string", "format": "did" },
+            "active": { "type": "boolean" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "NotFound", "description": "The DID is not enrolled." }
+      ]
+    }
+  }
+}

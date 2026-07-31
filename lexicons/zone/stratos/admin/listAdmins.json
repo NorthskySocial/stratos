@@ -1,0 +1,50 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listAdmins",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List everyone holding admin access. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["admins"],
+          "properties": {
+            "admins": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#admin" }
+            },
+            "viewer": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the requesting admin."
+            }
+          }
+        }
+      }
+    },
+    "admin": {
+      "type": "object",
+      "required": ["did", "source"],
+      "properties": {
+        "did": { "type": "string", "format": "did" },
+        "source": {
+          "type": "string",
+          "description": "Where the grant comes from. Config admins cannot be revoked through the API.",
+          "knownValues": ["config", "database"]
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When access was granted. Absent for config admins."
+        },
+        "addedBy": {
+          "type": "string",
+          "format": "did",
+          "description": "Who granted access. Absent for config admins."
+        }
+      }
+    }
+  }
+}

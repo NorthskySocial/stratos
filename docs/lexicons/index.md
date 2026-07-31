@@ -32,6 +32,10 @@ type, and shared definition available in this namespace (`zone.stratos.*`).
 
 <LexiconGroup :lexicons="ns('actor')" />
 
+## Admin
+
+<LexiconGroup :lexicons="ns('admin')" />
+
 ## Boundary
 
 <LexiconGroup :lexicons="ns('boundary')" />

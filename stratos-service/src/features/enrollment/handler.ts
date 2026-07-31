@@ -22,6 +22,7 @@ export function registerEnrollmentHandlers(
   registerEnrollmentUnenroll(server, ctx)
   registerResolveEnrollmentsHandler(ctx)
   registerAdminBoundaryHandlers(ctx)
+  registerListEnrollmentsHandler(ctx)
   registerListDomainsHandler(ctx)
 }
 
@@ -263,6 +264,267 @@ function registerAdminBoundaryHandlers(ctx: AppContext): void {
   registerAddBoundaryHandler(ctx)
   registerRemoveBoundaryHandler(ctx)
   registerSetBoundariesHandler(ctx)
+  registerSetActiveHandler(ctx)
+  registerAdminUserHandlers(ctx)
+}
+
+/**
+ * Register handlers for managing who holds admin access.
+ * @param ctx - Application context
+ */
+function registerAdminUserHandlers(ctx: AppContext): void {
+  registerListAdminsHandler(ctx)
+  registerAddAdminHandler(ctx)
+  registerRemoveAdminHandler(ctx)
+}
+
+/**
+ * Reject anything that is not a syntactically plausible DID, so a typo cannot
+ * be granted admin access and then be impossible to match against a session.
+ * @param did - Candidate DID
+ * @returns Whether the value looks like a DID
+ */
+function looksLikeDid(did: unknown): did is string {
+  return typeof did === 'string' && /^did:[a-z]+:[A-Za-z0-9._:%-]+$/.test(did)
+}
+
+/**
+ * Register handler for listing admins.
+ *
+ * Returns config-provided and runtime-granted admins together, tagged by
+ * source so the caller can tell which ones are revocable.
+ * @param ctx - Application context
+ */
+function registerListAdminsHandler(ctx: AppContext): void {
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.listAdmins',
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const granted = await ctx.adminUserStore.list()
+        const configured = ctx.cfg.adminDids.map((did) => ({
+          did,
+          source: 'config' as const,
+        }))
+        // A DID in both places is shown once, as config: that is the entry
+        // that cannot be revoked.
+        const admins = [
+          ...configured,
+          ...granted
+            .filter((row) => !ctx.cfg.adminDids.includes(row.did))
+            .map((row) => ({
+              did: row.did,
+              source: 'database' as const,
+              addedAt: row.addedAt,
+              addedBy: row.addedBy,
+            })),
+        ]
+
+        res.json({ admins, viewer: adminDid })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.listAdmins failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list admins',
+        })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for granting admin access.
+ * @param ctx - Application context
+ */
+function registerAddAdminHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.addAdmin',
+    adminJsonParser,
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did } = req.body as { did?: unknown }
+        if (!looksLikeDid(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'a valid did is required',
+          })
+        }
+
+        if (ctx.cfg.adminDids.includes(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: `${did} is already an admin through configuration`,
+          })
+        }
+
+        await ctx.adminUserStore.add(did, adminDid)
+        ctx.logger?.info({ adminDid, targetDid: did }, 'admin granted access')
+        res.json({ did })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.addAdmin failed',
+        )
+        res
+          .status(500)
+          .json({ error: 'InternalError', message: 'Failed to add admin' })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for revoking admin access.
+ *
+ * Config-provided admins cannot be revoked here: they are the recovery path if
+ * the database is emptied. Self-revocation is refused so an operator cannot
+ * lock themselves out in one click.
+ * @param ctx - Application context
+ */
+function registerRemoveAdminHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.removeAdmin',
+    adminJsonParser,
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did } = req.body as { did?: unknown }
+        if (!looksLikeDid(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'a valid did is required',
+          })
+        }
+
+        if (ctx.cfg.adminDids.includes(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: `${did} is an admin through configuration and must be removed there`,
+          })
+        }
+
+        if (did === adminDid) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'you cannot revoke your own admin access',
+          })
+        }
+
+        if (!(await ctx.adminUserStore.has(did))) {
+          return res
+            .status(404)
+            .json({ error: 'NotFound', message: `${did} is not an admin` })
+        }
+
+        await ctx.adminUserStore.remove(did)
+        ctx.logger?.info({ adminDid, targetDid: did }, 'admin revoked access')
+        res.json({ did })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.removeAdmin failed',
+        )
+        res
+          .status(500)
+          .json({ error: 'InternalError', message: 'Failed to remove admin' })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for activating and deactivating a member.
+ *
+ * Deactivation is reversible and leaves the enrollment and its boundaries in
+ * place, unlike unenrollment, which the member drives themselves and which
+ * also removes their PDS enrollment record.
+ * @param ctx - Application context
+ */
+function registerSetActiveHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.setActive',
+    adminJsonParser,
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did, active } = req.body as { did?: unknown; active?: unknown }
+
+        if (!looksLikeDid(did) || typeof active !== 'boolean') {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'did and a boolean active are required',
+          })
+        }
+
+        const enrollment = await ctx.enrollmentStore.getEnrollment(did)
+        if (!enrollment) {
+          return res.status(404).json({
+            error: 'NotFound',
+            message: `user ${did} is not enrolled`,
+          })
+        }
+
+        if (enrollment.active !== active) {
+          await ctx.enrollmentStore.updateEnrollment(did, { active })
+        }
+
+        ctx.logger?.info(
+          { adminDid, targetDid: did, active },
+          active ? 'admin activated member' : 'admin deactivated member',
+        )
+        res.json({ did, active })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.setActive failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to update member state',
+        })
+      }
+    },
+  )
 }
 
 /**
@@ -524,6 +786,284 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
         res.status(500).json({
           error: 'InternalError',
           message: 'Failed to set boundaries',
+        })
+      }
+    },
+  )
+}
+
+/**
+ * A member row as returned by the admin listing, with boundaries attached.
+ */
+interface ListedEnrollment {
+  did: string
+  enrolledAt: string
+  active: boolean
+  isService: boolean
+  boundaries: string[]
+}
+
+/**
+ * Attach boundaries to enrollment rows.
+ *
+ * Read through the store rather than the join table directly so the
+ * reserved-domain decorator still force-includes the all-members domain.
+ * @param ctx - Application context
+ * @param rows - Enrollment rows to hydrate
+ * @returns The rows with their boundaries attached
+ */
+async function withBoundaries(
+  ctx: AppContext,
+  rows: Array<{
+    did: string
+    enrolledAt: string
+    active: boolean
+    isService?: boolean
+  }>,
+): Promise<ListedEnrollment[]> {
+  const boundaries = await Promise.all(
+    rows.map((row) => ctx.enrollmentStore.getBoundaries(row.did)),
+  )
+  return rows.map((row, index) => ({
+    did: row.did,
+    enrolledAt: row.enrolledAt,
+    active: row.active,
+    isService: row.isService ?? false,
+    boundaries: boundaries[index],
+  }))
+}
+
+/**
+ * Read one unfiltered page of enrollments.
+ *
+ * Over-fetches by one to learn whether another page exists, so a final page
+ * that happens to be exactly `limit` long does not hand back a cursor that
+ * resolves to nothing.
+ * @param ctx - Application context
+ * @param limit - Page size
+ * @param cursor - DID to resume after
+ * @returns The page and whether more results follow
+ */
+async function collectPage(
+  ctx: AppContext,
+  limit: number,
+  cursor?: string,
+): Promise<{
+  enrollments: ListedEnrollment[]
+  hasMore: boolean
+  nextCursor?: string
+}> {
+  const rows = await ctx.enrollmentStore.listEnrollments({
+    limit: limit + 1,
+    cursor,
+  })
+  const hasMore = rows.length > limit
+  return {
+    enrollments: await withBoundaries(
+      ctx,
+      hasMore ? rows.slice(0, limit) : rows,
+    ),
+    hasMore,
+  }
+}
+
+/**
+ * Read one page of enrollments matching a predicate.
+ *
+ * There is no index to filter on, so this scans the DID-ordered listing in
+ * chunks, stopping as soon as the page is full. The cursor is the last
+ * *matching* DID, so resuming re-scans only the non-matching rows that
+ * followed it. Filtering here rather than in the client keeps pagination
+ * meaningful: a page is always `limit` matches, not `limit` rows of which
+ * some are hidden.
+ * @param ctx - Application context
+ * @param limit - Page size
+ * @param matches - Predicate every returned member must satisfy
+ * @param cursor - DID to resume after
+ * @returns The page and whether more results follow
+ */
+async function collectFilteredPage(
+  ctx: AppContext,
+  limit: number,
+  matches: (enrollment: ListedEnrollment) => boolean,
+  cursor?: string,
+): Promise<{
+  enrollments: ListedEnrollment[]
+  hasMore: boolean
+  nextCursor?: string
+}> {
+  const SCAN_CHUNK = 100
+  // A filter matching nothing would otherwise scan the whole table, issuing a
+  // boundary read per row, and starve the connection pool for every other
+  // request. Stop after this many rows and hand back a cursor so the caller
+  // can resume; pagination still reaches every match, one bounded step at a
+  // time.
+  const MAX_ROWS_SCANNED = 1_000
+  const found: ListedEnrollment[] = []
+  let scanCursor = cursor
+  let scanned = 0
+  let exhausted = false
+
+  while (found.length <= limit && scanned < MAX_ROWS_SCANNED) {
+    const rows = await ctx.enrollmentStore.listEnrollments({
+      limit: SCAN_CHUNK,
+      cursor: scanCursor,
+    })
+    if (rows.length === 0) {
+      exhausted = true
+      break
+    }
+    scanCursor = rows[rows.length - 1].did
+    scanned += rows.length
+
+    for (const enrollment of await withBoundaries(ctx, rows)) {
+      if (!matches(enrollment)) continue
+      found.push(enrollment)
+      if (found.length > limit) break
+    }
+
+    if (rows.length < SCAN_CHUNK) {
+      exhausted = true
+      break
+    }
+  }
+
+  // More results may follow either because the page filled, or because the
+  // scan budget ran out before reaching the end of the table.
+  const pageFull = found.length > limit
+  const hasMore = pageFull || !exhausted
+  const enrollments = pageFull ? found.slice(0, limit) : found
+
+  // Resume after the last row this page accounts for. When the page filled,
+  // that is its last match — rows beyond it were never examined. When the
+  // budget ran out first, every scanned row was examined, so resume from the
+  // scan position rather than re-walking the non-matching tail.
+  const nextCursor = pageFull
+    ? enrollments[enrollments.length - 1].did
+    : scanCursor
+
+  return {
+    enrollments,
+    hasMore,
+    nextCursor: hasMore ? nextCursor : undefined,
+  }
+}
+
+/**
+ * Register handler for listing enrollments.
+ *
+ * Paginates over the enrollment store using the DID-ordered cursor convention
+ * already used by the sync subscription. Boundaries are read through the store
+ * (not raw SQL) so the reserved-domain decorator still force-includes the
+ * all-members domain; the per-row reads are issued in parallel to keep a full
+ * page to a single round-trip's worth of latency.
+ *
+ * @param ctx - Application context
+ */
+function registerListEnrollmentsHandler(ctx: AppContext): void {
+  const DEFAULT_LIMIT = 50
+  const MAX_LIMIT = 100
+
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.listEnrollments',
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res })
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const rawLimit = req.query.limit
+        let limit = DEFAULT_LIMIT
+        if (rawLimit !== undefined) {
+          // Express parses `?limit[]=1` into an array, and Number(['1']) is 1,
+          // so non-string input must be rejected before coercion.
+          if (typeof rawLimit !== 'string') {
+            return res.status(400).json({
+              error: 'InvalidRequest',
+              message: `limit must be an integer between 1 and ${MAX_LIMIT}`,
+            })
+          }
+          limit = Number(rawLimit)
+          if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+            return res.status(400).json({
+              error: 'InvalidRequest',
+              message: `limit must be an integer between 1 and ${MAX_LIMIT}`,
+            })
+          }
+        }
+
+        const rawCursor = req.query.cursor
+        if (rawCursor !== undefined && typeof rawCursor !== 'string') {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'cursor must be a string',
+          })
+        }
+
+        const rawBoundary = req.query.boundary
+        if (
+          rawBoundary !== undefined &&
+          (typeof rawBoundary !== 'string' || rawBoundary.length === 0)
+        ) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'boundary must be a non-empty string',
+          })
+        }
+
+        const rawActive = req.query.active
+        if (
+          rawActive !== undefined &&
+          rawActive !== 'true' &&
+          rawActive !== 'false'
+        ) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: "active must be 'true' or 'false'",
+          })
+        }
+        const wantActive =
+          rawActive === undefined ? undefined : rawActive === 'true'
+
+        const filtered = rawBoundary !== undefined || wantActive !== undefined
+        const { enrollments, hasMore, nextCursor } = filtered
+          ? await collectFilteredPage(
+              ctx,
+              limit,
+              (enrollment) =>
+                (rawBoundary === undefined ||
+                  enrollment.boundaries.includes(rawBoundary)) &&
+                (wantActive === undefined || enrollment.active === wantActive),
+              rawCursor,
+            )
+          : await collectPage(ctx, limit, rawCursor)
+
+        res.json({
+          enrollments,
+          // A filtered scan supplies its own cursor, which may point past the
+          // last returned row when the scan budget was spent — including when
+          // the page came back empty.
+          cursor: hasMore
+            ? (nextCursor ?? enrollments[enrollments.length - 1]?.did)
+            : undefined,
+          // A filtered total would need a full scan; the unfiltered count
+          // would misreport the result set, so it is omitted instead.
+          total: filtered
+            ? undefined
+            : await ctx.enrollmentStore.enrollmentCount(),
+        })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.listEnrollments failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list enrollments',
         })
       }
     },

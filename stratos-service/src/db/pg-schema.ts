@@ -20,6 +20,12 @@ export const pgAdminSession = pgTable('admin_session', {
   expiresAt: text('expiresAt').notNull(),
 })
 
+export const pgAdminUser = pgTable('admin_user', {
+  did: text('did').primaryKey(),
+  addedAt: text('addedAt').notNull(),
+  addedBy: text('addedBy'),
+})
+
 export const pgEnrollment = pgTable('enrollment', {
   did: text('did').primaryKey(),
   enrolledAt: text('enrolledAt').notNull(),

@@ -7,6 +7,7 @@ export {
   oauthSession,
   oauthState,
   adminSession,
+  adminUser,
   enrollment,
   enrollmentBoundary,
 } from './schema.js'
@@ -72,6 +73,14 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       did TEXT NOT NULL,
       createdAt TEXT NOT NULL,
       expiresAt TEXT NOT NULL
+    )
+  `)
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS admin_user (
+      did TEXT PRIMARY KEY,
+      addedAt TEXT NOT NULL,
+      addedBy TEXT
     )
   `)
 

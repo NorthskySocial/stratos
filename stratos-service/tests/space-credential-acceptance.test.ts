@@ -356,9 +356,20 @@ describe('space-credential acceptance', () => {
         {} as any,
         ctx.cfg,
         enrollmentStore,
-        // adminSessionStore — the admin path is not exercised here
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        {} as any,
+        // adminSessionStore / adminUserStore — the admin path is not exercised
+        // here, so these return no session and no grant.
+        {
+          create: vi.fn(async () => ''),
+          get: vi.fn(async () => undefined),
+          del: vi.fn(async () => {}),
+          deleteExpired: vi.fn(async () => 0),
+        },
+        {
+          list: vi.fn(async () => []),
+          has: vi.fn(async () => false),
+          add: vi.fn(async () => {}),
+          remove: vi.fn(async () => {}),
+        },
         [],
         // dpopVerifier stub: rejects everything (so the standard path fails
         // exactly as an unauthenticated DPoP request would).

@@ -11,6 +11,7 @@ import {
   type ServiceDb,
 } from '../src/db'
 import { SqliteAdminSessionStore } from '../src/oauth/admin-session-store.js'
+import { SqliteAdminUserStore } from '../src/oauth/admin-user-store.js'
 import {
   ADMIN_SESSION_COOKIE,
   resolveAdminSession,
@@ -208,6 +209,7 @@ describe('admin auth verifier', () => {
   let dataDir: string
   let db: ServiceDb
   let store: SqliteAdminSessionStore
+  let adminUserStore: SqliteAdminUserStore
   let verifiers: ReturnType<typeof createAuthVerifiers>
 
   beforeEach(async () => {
@@ -219,6 +221,7 @@ describe('admin auth verifier', () => {
     db = createServiceDb(join(dataDir, 'service.sqlite'))
     await migrateServiceDb(db)
     store = new SqliteAdminSessionStore(db)
+    adminUserStore = new SqliteAdminUserStore(db)
 
     const cfg = createTestConfig(dataDir)
     cfg.service.publicUrl = PUBLIC_URL
@@ -229,6 +232,7 @@ describe('admin auth verifier', () => {
       cfg,
       {} as never,
       store,
+      adminUserStore,
       [ADMIN_DID],
       {} as never,
       undefined,
@@ -252,6 +256,37 @@ describe('admin auth verifier', () => {
       }),
     )
     expect(result.credentials).toEqual({ type: 'admin', did: ADMIN_DID })
+  })
+
+  it('accepts an admin granted at runtime, not just configured ones', async () => {
+    const grantedDid = 'did:plc:motokokusanagi'
+    await adminUserStore.add(grantedDid, ADMIN_DID)
+    const key = await store.create(grantedDid, 60_000)
+
+    const result = await verifiers.admin(
+      makeAdminCtx({
+        origin: PUBLIC_URL,
+        cookie: `${ADMIN_SESSION_COOKIE}=${key}`,
+      }),
+    )
+
+    expect(result.credentials).toEqual({ type: 'admin', did: grantedDid })
+  })
+
+  it('rejects a session once its runtime grant is revoked', async () => {
+    const grantedDid = 'did:plc:motokokusanagi'
+    await adminUserStore.add(grantedDid, ADMIN_DID)
+    await adminUserStore.remove(grantedDid)
+    const key = await store.create(grantedDid, 60_000)
+
+    await expect(
+      verifiers.admin(
+        makeAdminCtx({
+          origin: PUBLIC_URL,
+          cookie: `${ADMIN_SESSION_COOKIE}=${key}`,
+        }),
+      ),
+    ).rejects.toThrow()
   })
 
   it('accepts a session when no Origin or Referer is present', async () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { push } from 'svelte-spa-router'
   import { listDomains } from '../lib/api/client'
   import Card from '../lib/components/ui/Card.svelte'
   import Chip from '../lib/components/ui/Chip.svelte'
@@ -11,6 +12,10 @@
       .then((res) => (domains = res.domains))
       .catch((err: Error) => (error = err.message))
   })
+
+  function showMembers(domain: string) {
+    void push(`/enrollments?boundary=${encodeURIComponent(domain)}`)
+  }
 </script>
 
 <div class="space-y-6" data-testid="domains-screen">
@@ -26,9 +31,20 @@
     {:else}
       <div class="flex flex-wrap gap-2">
         {#each domains as domain (domain)}
-          <Chip label={domain} testid="domain-chip" />
+          <button
+            class="squish cursor-pointer rounded-full border-none bg-transparent p-0"
+            data-testid="domain-chip"
+            onclick={() => showMembers(domain)}
+            title="Show members holding {domain}"
+            type="button"
+          >
+            <Chip label={domain} />
+          </button>
         {/each}
       </div>
+      <p class="mt-3 text-xs text-muted">
+        Select a domain to see the members holding it.
+      </p>
     {/if}
   </Card>
 </div>
