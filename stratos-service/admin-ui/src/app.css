@@ -126,22 +126,29 @@
   }
 }
 
-body {
-  @apply bg-background font-sans text-foreground antialiased;
-  margin: 0;
-  transition:
-    background 0.25s ease,
-    color 0.25s ease;
-}
+/*
+ * Element defaults belong in the base layer: unlayered rules outrank every
+ * Tailwind layer, so an unlayered `h1, h2` here would beat `font-sans` and
+ * `not-italic` utilities at the call site no matter how specific they are.
+ */
+@layer base {
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    margin: 0;
+    transition:
+      background 0.25s ease,
+      color 0.25s ease;
+  }
 
-h1,
-h2 {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
 
-#app {
-  min-height: 100dvh;
+  #app {
+    min-height: 100dvh;
+  }
 }

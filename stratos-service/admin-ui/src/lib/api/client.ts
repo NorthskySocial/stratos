@@ -14,7 +14,8 @@ export interface WhoamiResponse {
 export interface HealthResponse {
   status: string
   version?: string
-  components?: Record<string, { status: string; [key: string]: unknown }>
+  /** Per-component status strings, e.g. `{ db: 'ok', blobstore: 'ok' }`. */
+  components?: Record<string, string>
 }
 
 export interface ListDomainsResponse {
