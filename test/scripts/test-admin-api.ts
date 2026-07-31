@@ -438,7 +438,8 @@ async function run(): Promise<void> {
     `status=${unauth.status}`,
   )
 
-  // 7. Deactivate and reactivate the target, checking the listing reflects it.
+  // 7. Deactivate and reactivate the target, checking the change is persisted
+  // and visible in the admin listing.
   const deactivated = await adminFetch(
     'zone.stratos.admin.setActive',
     { did: target.did, active: false },
@@ -457,16 +458,32 @@ async function run(): Promise<void> {
     `active=${afterDeactivate.active}`,
   )
 
+  // The listing is the surface an operator actually reads, so assert there
+  // too rather than only on the single-record status.
+  const listedInactive = await adminList(
+    'zone.stratos.admin.listEnrollments',
+    sessionCookie,
+    { active: 'false' },
+  )
+  const inactiveDids = (
+    listedInactive.body as { enrollments?: Array<{ did: string }> }
+  ).enrollments?.map((e) => e.did)
+  assert(
+    inactiveDids?.includes(target.did) === true,
+    'listEnrollments filtered to deactivated includes the target',
+    `dids=[${inactiveDids?.join(', ') ?? ''}]`,
+  )
+
   const reactivated = await adminFetch(
     'zone.stratos.admin.setActive',
     { did: target.did, active: true },
     sessionCookie,
   )
+  const afterReactivate = await enrollmentStatus(target.did)
   assert(
-    reactivated.status === 200 &&
-      (await enrollmentStatus(target.did)).active !== false,
+    reactivated.status === 200 && afterReactivate.active === true,
     'setActive reactivates the target',
-    `status=${reactivated.status}`,
+    `status=${reactivated.status}, active=${afterReactivate.active}`,
   )
 
   // 8. Admin management: the operator is listed, grants are revocable, and
@@ -493,15 +510,15 @@ async function run(): Promise<void> {
     `status=${granted.status}`,
   )
 
-  const selfRevoke = await adminFetch(
+  const configRevoke = await adminFetch(
     'zone.stratos.admin.removeAdmin',
     { did: operator.did },
     sessionCookie,
   )
   assert(
-    selfRevoke.status === 400,
+    configRevoke.status === 400,
     'removeAdmin refuses to revoke a config admin',
-    `status=${selfRevoke.status}`,
+    `status=${configRevoke.status}`,
   )
 
   const revoked = await adminFetch(

@@ -848,7 +848,11 @@ async function collectPage(
   ctx: AppContext,
   limit: number,
   cursor?: string,
-): Promise<{ enrollments: ListedEnrollment[]; hasMore: boolean }> {
+): Promise<{
+  enrollments: ListedEnrollment[]
+  hasMore: boolean
+  nextCursor?: string
+}> {
   const rows = await ctx.enrollmentStore.listEnrollments({
     limit: limit + 1,
     cursor,
@@ -883,18 +887,34 @@ async function collectFilteredPage(
   limit: number,
   matches: (enrollment: ListedEnrollment) => boolean,
   cursor?: string,
-): Promise<{ enrollments: ListedEnrollment[]; hasMore: boolean }> {
+): Promise<{
+  enrollments: ListedEnrollment[]
+  hasMore: boolean
+  nextCursor?: string
+}> {
   const SCAN_CHUNK = 100
+  // A filter matching nothing would otherwise scan the whole table, issuing a
+  // boundary read per row, and starve the connection pool for every other
+  // request. Stop after this many rows and hand back a cursor so the caller
+  // can resume; pagination still reaches every match, one bounded step at a
+  // time.
+  const MAX_ROWS_SCANNED = 1_000
   const found: ListedEnrollment[] = []
   let scanCursor = cursor
+  let scanned = 0
+  let exhausted = false
 
-  while (found.length <= limit) {
+  while (found.length <= limit && scanned < MAX_ROWS_SCANNED) {
     const rows = await ctx.enrollmentStore.listEnrollments({
       limit: SCAN_CHUNK,
       cursor: scanCursor,
     })
-    if (rows.length === 0) break
+    if (rows.length === 0) {
+      exhausted = true
+      break
+    }
     scanCursor = rows[rows.length - 1].did
+    scanned += rows.length
 
     for (const enrollment of await withBoundaries(ctx, rows)) {
       if (!matches(enrollment)) continue
@@ -902,13 +922,30 @@ async function collectFilteredPage(
       if (found.length > limit) break
     }
 
-    if (rows.length < SCAN_CHUNK) break
+    if (rows.length < SCAN_CHUNK) {
+      exhausted = true
+      break
+    }
   }
 
-  const hasMore = found.length > limit
+  // More results may follow either because the page filled, or because the
+  // scan budget ran out before reaching the end of the table.
+  const pageFull = found.length > limit
+  const hasMore = pageFull || !exhausted
+  const enrollments = pageFull ? found.slice(0, limit) : found
+
+  // Resume after the last row this page accounts for. When the page filled,
+  // that is its last match — rows beyond it were never examined. When the
+  // budget ran out first, every scanned row was examined, so resume from the
+  // scan position rather than re-walking the non-matching tail.
+  const nextCursor = pageFull
+    ? enrollments[enrollments.length - 1].did
+    : scanCursor
+
   return {
-    enrollments: hasMore ? found.slice(0, limit) : found,
+    enrollments,
     hasMore,
+    nextCursor: hasMore ? nextCursor : undefined,
   }
 }
 
@@ -993,7 +1030,7 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
           rawActive === undefined ? undefined : rawActive === 'true'
 
         const filtered = rawBoundary !== undefined || wantActive !== undefined
-        const { enrollments, hasMore } = filtered
+        const { enrollments, hasMore, nextCursor } = filtered
           ? await collectFilteredPage(
               ctx,
               limit,
@@ -1007,7 +1044,12 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
 
         res.json({
           enrollments,
-          cursor: hasMore ? enrollments[enrollments.length - 1].did : undefined,
+          // A filtered scan supplies its own cursor, which may point past the
+          // last returned row when the scan budget was spent — including when
+          // the page came back empty.
+          cursor: hasMore
+            ? (nextCursor ?? enrollments[enrollments.length - 1]?.did)
+            : undefined,
           // A filtered total would need a full scan; the unfiltered count
           // would misreport the result set, so it is omitted instead.
           total: filtered
