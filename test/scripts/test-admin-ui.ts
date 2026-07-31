@@ -249,7 +249,23 @@ async function run(): Promise<void> {
     await aekeaChip.waitFor({ state: 'detached', timeout: 15_000 })
     assert(true, 'Boundary removed via the UI disappears', DOMAINS.aekea)
 
-    // 6. Logout returns to the Login screen; a reload stays unauthenticated.
+    // 6. Admins screen lists the operator and marks config admins.
+    await page.click('a[href="#/admins"]')
+    await page.waitForSelector('[data-testid="admins-list"]', {
+      timeout: 15_000,
+    })
+    const adminsText = await page.textContent('[data-testid="admins-list"]')
+    assert(
+      adminsText?.includes(operator.did) === true,
+      'Admins screen lists the signed-in operator',
+    )
+    assert(
+      adminsText?.includes('from config') === true,
+      'Config-provided admins are marked as not revocable',
+    )
+    await screenshot(page, 'admin-ui-04-admins')
+
+    // 7. Logout returns to the Login screen; a reload stays unauthenticated.
     await page.click('[data-testid="logout"]')
     await page.waitForSelector('[data-testid="login-screen"]', {
       timeout: 15_000,

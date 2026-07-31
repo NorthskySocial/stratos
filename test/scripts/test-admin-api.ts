@@ -438,6 +438,90 @@ async function run(): Promise<void> {
     `status=${unauth.status}`,
   )
 
+  // 7. Deactivate and reactivate the target, checking the listing reflects it.
+  const deactivated = await adminFetch(
+    'zone.stratos.admin.setActive',
+    { did: target.did, active: false },
+    sessionCookie,
+  )
+  assert(
+    deactivated.status === 200,
+    'setActive deactivates the target',
+    `status=${deactivated.status}`,
+  )
+
+  const afterDeactivate = await enrollmentStatus(target.did)
+  assert(
+    afterDeactivate.active === false,
+    'enrollment status reports the target as deactivated',
+    `active=${afterDeactivate.active}`,
+  )
+
+  const reactivated = await adminFetch(
+    'zone.stratos.admin.setActive',
+    { did: target.did, active: true },
+    sessionCookie,
+  )
+  assert(
+    reactivated.status === 200 &&
+      (await enrollmentStatus(target.did)).active !== false,
+    'setActive reactivates the target',
+    `status=${reactivated.status}`,
+  )
+
+  // 8. Admin management: the operator is listed, grants are revocable, and
+  // config-provided admins are not.
+  const admins = await adminList('zone.stratos.admin.listAdmins', sessionCookie)
+  const adminsBody = admins.body as {
+    admins?: Array<{ did: string; source: string }>
+  }
+  const operatorEntry = adminsBody.admins?.find((a) => a.did === operator.did)
+  assert(
+    admins.status === 200 && operatorEntry?.source === 'config',
+    'listAdmins reports the operator as a config admin',
+    `status=${admins.status}, source=${operatorEntry?.source}`,
+  )
+
+  const granted = await adminFetch(
+    'zone.stratos.admin.addAdmin',
+    { did: target.did },
+    sessionCookie,
+  )
+  assert(
+    granted.status === 200,
+    'addAdmin grants access to the target',
+    `status=${granted.status}`,
+  )
+
+  const selfRevoke = await adminFetch(
+    'zone.stratos.admin.removeAdmin',
+    { did: operator.did },
+    sessionCookie,
+  )
+  assert(
+    selfRevoke.status === 400,
+    'removeAdmin refuses to revoke a config admin / the caller',
+    `status=${selfRevoke.status}`,
+  )
+
+  const revoked = await adminFetch(
+    'zone.stratos.admin.removeAdmin',
+    { did: target.did },
+    sessionCookie,
+  )
+  assert(
+    revoked.status === 200,
+    'removeAdmin revokes the granted admin',
+    `status=${revoked.status}`,
+  )
+
+  const unauthAdmins = await adminList('zone.stratos.admin.listAdmins', null)
+  assert(
+    unauthAdmins.status === 401,
+    'listAdmins without session cookie is rejected (401)',
+    `status=${unauthAdmins.status}`,
+  )
+
   summary(passed, failed)
   if (failed > 0) Deno.exit(1)
 }
