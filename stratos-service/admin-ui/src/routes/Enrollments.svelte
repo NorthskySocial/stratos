@@ -277,6 +277,16 @@
             value={boundaryFilter}
           >
             <option value="">All domains</option>
+            {#if boundaryFilter && !domains.includes(boundaryFilter)}
+              <!--
+                A filter from the URL may name a domain no longer in the
+                allowed list. Show it so the control cannot read "All domains"
+                while a filter is applied.
+              -->
+              <option value={boundaryFilter}>
+                {boundaryName(boundaryFilter)} (retired)
+              </option>
+            {/if}
             {#each domains as domain (domain)}
               <option value={domain}>{boundaryName(domain)}</option>
             {/each}
