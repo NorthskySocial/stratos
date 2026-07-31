@@ -455,6 +455,45 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
       },
     )
 
+    it('bounds the scan when nothing matches, and stays resumable', async () => {
+      // 5000 members, none matching: without a budget this would scan the
+      // whole table and issue a boundary read per row.
+      const dids = Array.from({ length: 5000 }, (_, i) => `did:plc:z${i}`)
+      const listEnrollments = vi.fn(
+        async (opts?: { limit?: number; cursor?: string }) => {
+          const start = opts?.cursor ? dids.indexOf(opts.cursor) + 1 : 0
+          return dids
+            .slice(start, start + (opts?.limit ?? 100))
+            .map((did) => storedEnrollment(did))
+        },
+      )
+      const { app } = createCtx({
+        enrollmentStore: {
+          listEnrollments,
+          getBoundaries: vi.fn(async () => [`${NERV}/general`]),
+          enrollmentCount: vi.fn(async () => dids.length),
+        } as unknown as Partial<EnrollmentStore>,
+      })
+
+      const res = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/nobody-here`,
+      })
+      const body = res.body as { enrollments: unknown[]; cursor?: string }
+
+      expect(body.enrollments).toEqual([])
+      // Budget is 1000 rows in chunks of 100.
+      expect(listEnrollments).toHaveBeenCalledTimes(10)
+      // A cursor is returned so the remaining rows are still reachable.
+      expect(body.cursor).toBe('did:plc:z999')
+
+      const resumed = await invokeGetRoute(app, ROUTE, {
+        boundary: `${NERV}/nobody-here`,
+        cursor: body.cursor!,
+      })
+      // Resuming continues past the budget rather than restarting from the top.
+      expect((resumed.body as { cursor?: string }).cursor).toBe('did:plc:z1999')
+    })
+
     it.each([[''], [['a']]])('rejects a malformed boundary', async (value) => {
       const { app, enrollmentStore } = createCtx({})
 
