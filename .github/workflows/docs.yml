@@ -17,8 +17,7 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+
 
 concurrency:
   group: pages-${{ github.ref }}
@@ -31,6 +30,7 @@ jobs:
 
     steps:
       - name: Checkout
+        persist-credentials: false
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
@@ -89,6 +89,9 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
 
     steps:
       - name: Deploy to GitHub Pages
