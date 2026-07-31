@@ -56,7 +56,7 @@ function storedEnrollment(
   did: string,
   overrides: Record<string, unknown> = {},
 ) {
-  return {
+  const row: Record<string, unknown> = {
     did,
     enrolledAt: '2026-01-01T00:00:00.000Z',
     pdsEndpoint: 'https://pds.example.com',
@@ -65,6 +65,11 @@ function storedEnrollment(
     isService: false,
     ...overrides,
   }
+  // An explicit `undefined` override means the column is absent entirely.
+  for (const [key, value] of Object.entries(row)) {
+    if (value === undefined) delete row[key]
+  }
+  return row
 }
 
 function createCtx(opts: {
@@ -143,13 +148,16 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
         listEnrollments: vi.fn(async () => [
           storedEnrollment('did:plc:usagi'),
           storedEnrollment('did:plc:motoko', { isService: true }),
+          // Older rows predate the isService column, so the key is absent
+          // rather than false; the handler must still report a boolean.
+          storedEnrollment('did:plc:faye', { isService: undefined }),
         ]),
         getBoundaries: vi.fn(async (did: string) =>
           did === 'did:plc:usagi'
             ? [`${NERV}/general`, `${NERV}/swordsmith`]
             : [`${NERV}/general`],
         ),
-        enrollmentCount: vi.fn(async () => 2),
+        enrollmentCount: vi.fn(async () => 3),
       } as unknown as Partial<EnrollmentStore>,
     })
 
@@ -172,9 +180,16 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
           isService: true,
           boundaries: [`${NERV}/general`],
         },
+        {
+          did: 'did:plc:faye',
+          enrolledAt: '2026-01-01T00:00:00.000Z',
+          active: true,
+          isService: false,
+          boundaries: [`${NERV}/general`],
+        },
       ],
       cursor: undefined,
-      total: 2,
+      total: 3,
     })
   })
 
