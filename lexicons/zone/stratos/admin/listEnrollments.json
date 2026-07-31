@@ -18,6 +18,10 @@
           "cursor": {
             "type": "string",
             "description": "Pagination cursor from a previous response."
+          },
+          "boundary": {
+            "type": "string",
+            "description": "Only return members holding this boundary."
           }
         }
       },
@@ -40,7 +44,7 @@
             },
             "total": {
               "type": "integer",
-              "description": "Total number of enrollments in the service."
+              "description": "Total number of enrollments in the service. Absent when a boundary filter is applied."
             }
           }
         }
