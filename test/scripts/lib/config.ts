@@ -58,7 +58,7 @@ export const DOMAINS = {
 export const RESERVED_DOMAIN = `${SERVICE_DID}/general`
 
 /**
- * The Stratos space type NSID (declared in lexicons/zone/stratos/space/feed.json)
+ * The Stratos space type NSID (declared in lexicons-spaces/zone/stratos/space/feed.json)
  * used for all space URIs in the e2e suite.
  */
 export const SPACE_TYPE = 'zone.stratos.space.feed'

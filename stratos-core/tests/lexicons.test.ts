@@ -20,27 +20,19 @@ function walkJson(dir: string): string[] {
 const files = walkJson(LEXICONS_DIR)
 
 /**
- * Space-type declarations use `"type": "space"`, which is not an atproto
- * Lexicon primary type: `@atproto/lexicon` rejects the document and
- * `XrpcServer` throws if handed one, so these cannot join the runtime
- * registry. The shape is a deliberate decision from the spaces reference
- * spec and is covered by space-type-declaration.test.ts instead.
+ * Space-type declarations live in `lexicons-spaces/`, not here: they use
+ * `"type": "space"` from the spaces reference spec, which is not an atproto
+ * Lexicon primary type, so `@atproto/lexicon` rejects the document and
+ * `XrpcServer` throws if handed one. Keeping them out of `lexicons/` means
+ * everything in this directory is a real, registrable lexicon. They are
+ * covered by space-type-declaration.test.ts.
  */
-function isSpaceTypeDeclaration(file: string): boolean {
-  const doc = JSON.parse(readFileSync(file, 'utf8')) as {
-    defs?: { main?: { type?: string } }
-  }
-  return doc.defs?.main?.type === 'space'
-}
-
-const lexiconFiles = files.filter((f) => !isSpaceTypeDeclaration(f))
-
 describe('lexicon documents', () => {
   it('finds lexicon files on disk', () => {
-    expect(lexiconFiles.length).toBeGreaterThan(0)
+    expect(files.length).toBeGreaterThan(0)
   })
 
-  it.each(lexiconFiles.map((f) => [path.relative(LEXICONS_DIR, f), f]))(
+  it.each(files.map((f) => [path.relative(LEXICONS_DIR, f), f]))(
     '%s is a valid lexicon document',
     (_name, file) => {
       const doc: unknown = JSON.parse(readFileSync(file, 'utf8'))
@@ -50,7 +42,7 @@ describe('lexicon documents', () => {
   )
 
   it('registers every lexicon on disk with the runtime provider', () => {
-    const onDisk = lexiconFiles
+    const onDisk = files
       .map((f) => (JSON.parse(readFileSync(f, 'utf8')) as { id: string }).id)
       .sort()
     const registered = stratosLexicons
