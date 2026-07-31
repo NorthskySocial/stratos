@@ -38,7 +38,13 @@ function invokeGetRoute(
     } as unknown as express.Response
 
     app(req, res, (err?: unknown) => {
-      if (err) return reject(err)
+      if (err) {
+        return reject(
+          err instanceof Error
+            ? err
+            : new Error(`express next() called with: ${String(err)}`),
+        )
+      }
       resolve({ statusCode, body: null })
     })
   })
