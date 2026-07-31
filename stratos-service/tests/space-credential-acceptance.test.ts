@@ -356,7 +356,10 @@ describe('space-credential acceptance', () => {
         {} as any,
         ctx.cfg,
         enrollmentStore,
-        // adminSessionStore — the admin path is not exercised here
+        // adminSessionStore / adminUserStore — the admin path is not
+        // exercised here
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        {} as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         {} as any,
         [],

@@ -265,6 +265,202 @@ function registerAdminBoundaryHandlers(ctx: AppContext): void {
   registerRemoveBoundaryHandler(ctx)
   registerSetBoundariesHandler(ctx)
   registerSetActiveHandler(ctx)
+  registerAdminUserHandlers(ctx)
+}
+
+/**
+ * Register handlers for managing who holds admin access.
+ * @param ctx - Application context
+ */
+function registerAdminUserHandlers(ctx: AppContext): void {
+  registerListAdminsHandler(ctx)
+  registerAddAdminHandler(ctx)
+  registerRemoveAdminHandler(ctx)
+}
+
+/**
+ * Reject anything that is not a syntactically plausible DID, so a typo cannot
+ * be granted admin access and then be impossible to match against a session.
+ * @param did - Candidate DID
+ * @returns Whether the value looks like a DID
+ */
+function looksLikeDid(did: unknown): did is string {
+  return typeof did === 'string' && /^did:[a-z]+:[A-Za-z0-9._:%-]+$/.test(did)
+}
+
+/**
+ * Register handler for listing admins.
+ *
+ * Returns config-provided and runtime-granted admins together, tagged by
+ * source so the caller can tell which ones are revocable.
+ * @param ctx - Application context
+ */
+function registerListAdminsHandler(ctx: AppContext): void {
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.listAdmins',
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const granted = await ctx.adminUserStore.list()
+        const configured = ctx.cfg.adminDids.map((did) => ({
+          did,
+          source: 'config' as const,
+        }))
+        // A DID in both places is shown once, as config: that is the entry
+        // that cannot be revoked.
+        const admins = [
+          ...configured,
+          ...granted
+            .filter((row) => !ctx.cfg.adminDids.includes(row.did))
+            .map((row) => ({
+              did: row.did,
+              source: 'database' as const,
+              addedAt: row.addedAt,
+              addedBy: row.addedBy,
+            })),
+        ]
+
+        res.json({ admins, viewer: adminDid })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.listAdmins failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list admins',
+        })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for granting admin access.
+ * @param ctx - Application context
+ */
+function registerAddAdminHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.addAdmin',
+    adminJsonParser,
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did } = req.body as { did?: unknown }
+        if (!looksLikeDid(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'a valid did is required',
+          })
+        }
+
+        if (ctx.cfg.adminDids.includes(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: `${did} is already an admin through configuration`,
+          })
+        }
+
+        await ctx.adminUserStore.add(did, adminDid)
+        ctx.logger?.info({ adminDid, targetDid: did }, 'admin granted access')
+        res.json({ did })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.addAdmin failed',
+        )
+        res
+          .status(500)
+          .json({ error: 'InternalError', message: 'Failed to add admin' })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for revoking admin access.
+ *
+ * Config-provided admins cannot be revoked here: they are the recovery path if
+ * the database is emptied. Self-revocation is refused so an operator cannot
+ * lock themselves out in one click.
+ * @param ctx - Application context
+ */
+function registerRemoveAdminHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.removeAdmin',
+    adminJsonParser,
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const { did } = req.body as { did?: unknown }
+        if (!looksLikeDid(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'a valid did is required',
+          })
+        }
+
+        if (ctx.cfg.adminDids.includes(did)) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: `${did} is an admin through configuration and must be removed there`,
+          })
+        }
+
+        if (did === adminDid) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: 'you cannot revoke your own admin access',
+          })
+        }
+
+        if (!(await ctx.adminUserStore.has(did))) {
+          return res
+            .status(404)
+            .json({ error: 'NotFound', message: `${did} is not an admin` })
+        }
+
+        await ctx.adminUserStore.remove(did)
+        ctx.logger?.info({ adminDid, targetDid: did }, 'admin revoked access')
+        res.json({ did })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.removeAdmin failed',
+        )
+        res
+          .status(500)
+          .json({ error: 'InternalError', message: 'Failed to remove admin' })
+      }
+    },
+  )
 }
 
 /**
