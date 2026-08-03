@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { WorkerPool } from '../src'
+import { WorkerPool } from '../src/index.js'
 
 describe('WorkerPool', () => {
   let errors: Error[]

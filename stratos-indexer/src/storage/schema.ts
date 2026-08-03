@@ -1,7 +1,4 @@
-import type { Insertable, Kysely, Selectable, Updateable } from 'kysely'
-import type { DatabaseSchema } from '@atproto/bsky'
-
-type DatabaseSchemaType = DatabaseSchema extends Kysely<infer T> ? T : never
+import type { Insertable, Selectable, Updateable } from 'kysely'
 
 export interface StratosSyncCursorTable {
   did: string
@@ -46,8 +43,13 @@ export interface StratosBoundaryTable {
   boundary: string
 }
 
-// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
-export type StratosIndexerSchema = DatabaseSchemaType & {
+/**
+ * The subset of the AppView database this indexer reads and writes. Declared
+ * standalone rather than intersected with `@atproto/bsky`'s schema: bsky pins
+ * kysely 0.22 while this package uses 0.28, so inferring its table map through
+ * `Kysely<infer T>` silently yielded `never` and left every query untyped.
+ */
+export interface StratosIndexerSchema {
   stratos_sync_cursor: StratosSyncCursorTable
   stratos_enrollment: StratosEnrollmentTable
   stratos_boundary: StratosBoundaryTable

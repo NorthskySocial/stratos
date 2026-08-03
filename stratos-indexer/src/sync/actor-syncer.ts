@@ -180,7 +180,11 @@ export class ActorSyncer {
               ? e.error
               : 'unknown'
         this.options.onError?.(
-          new StratosError(`WebSocket error for ${this.did}: ${errorMsg}`),
+          new StratosError(
+            `WebSocket error for ${this.did}: ${errorMsg}`,
+            'ActorSyncStreamError',
+            { cause: e.error instanceof Error ? e.error : undefined },
+          ),
         )
       }
     }

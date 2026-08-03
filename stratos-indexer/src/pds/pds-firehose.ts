@@ -5,8 +5,8 @@ import { AtUri } from '@atproto/syntax'
 import { CID } from 'multiformats/cid'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import type { HandleDedup } from '../util/handle-dedup.js'
+import type { BackgroundQueue } from '@atproto/bsky'
 import {
-  type BackgroundQueue,
   decodeCommitOps,
   ENROLLMENT_COLLECTION,
   jsonToLex,
@@ -327,7 +327,7 @@ async function processCommit(
   const rawOps = message.ops
 
   if (handleDedup.shouldIndex(did)) {
-    background.add(`indexHandle-${did}`, async () => {
+    background.add(async () => {
       await indexingService.indexHandle(did, timestamp)
     })
   }

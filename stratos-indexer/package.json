@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint src tests"
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@atcute/atproto": "^3.1.10",
@@ -13,7 +14,7 @@
     "@atcute/cid": "^2.4.1",
     "@atcute/firehose": "^0.1.0",
     "@atproto/bsky": "^0.0.214",
-    "@atproto/identity": "^0.4.8",
+    "@atproto/identity": "^0.4.12",
     "@atproto/lex-data": "^0.0.9",
     "@atproto/lexicon": "^0.6.1",
     "@atproto/repo": "^0.8.1",

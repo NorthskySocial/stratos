@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "typecheck": "pnpm -r --if-present run typecheck",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "mutation": "pnpm -r run mutation",

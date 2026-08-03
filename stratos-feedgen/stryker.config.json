@@ -13,6 +13,10 @@
     "src/subscription/service-stream.ts",
     "src/upstream/client.ts",
     "src/purge/**/*.ts",
+    "src/enrollment/**/*.ts",
+    "src/api/**/*.ts",
+    "src/auth/**/*.ts",
+    "src/db/**/*.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts"
   ],

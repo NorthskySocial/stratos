@@ -43,10 +43,7 @@ export interface StratosSyncManagerOptions {
   indexingService: IndexingService
   background: BackgroundQueue
   enrollmentCallback: EnrollmentCallback
-  onReferencedActorBackfill: (
-    did: string,
-    opts: BackfillOptions,
-  ) => Promise<void>
+  onReferencedActorBackfill: (did: string, opts: BackfillOptions) => void
   onError?: (err: Error) => void
 }
 
@@ -84,7 +81,6 @@ export class StratosSyncManager {
           console.error({ err: err.message }, 'Sync Manager actor sync error')
         }
       },
-      // eslint-disable-next-line @typescript-eslint/no-misused-promises
       opts.config.pds.enrolledOnly
         ? (did) => opts.onReferencedActorBackfill(did, backfillOpts)
         : undefined,

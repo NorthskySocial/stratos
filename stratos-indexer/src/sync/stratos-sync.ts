@@ -136,9 +136,11 @@ export class StratosServiceSubscription {
             : 'unknown'
       const cause = e.error instanceof Error ? e.error : undefined
       this.onError?.(
-        new StratosError(`Enrollment stream error: ${errorMsg}`, {
-          cause,
-        }),
+        new StratosError(
+          `Enrollment stream error: ${errorMsg}`,
+          'EnrollmentStreamError',
+          { cause },
+        ),
       )
     }
 
