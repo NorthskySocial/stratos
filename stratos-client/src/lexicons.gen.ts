@@ -111,7 +111,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["admins"],
+          "required": ["admins", "viewer"],
           "properties": {
             "admins": {
               "type": "array",
