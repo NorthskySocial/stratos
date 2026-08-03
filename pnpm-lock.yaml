@@ -295,8 +295,8 @@ importers:
         specifier: ^0.0.214
         version: 0.0.214
       '@atproto/identity':
-        specifier: ^0.4.8
-        version: 0.4.11
+        specifier: ^0.4.12
+        version: 0.4.12
       '@atproto/lex-data':
         specifier: ^0.0.9
         version: 0.0.9

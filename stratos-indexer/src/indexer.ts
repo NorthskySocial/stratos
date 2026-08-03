@@ -544,8 +544,8 @@ export class Indexer {
       for (const did of didsList) {
         this.enrolledDids.add(did)
         this.syncManager?.addActor(did)
-        background.add(() => {
-          void indexingService.indexHandle(did, new Date().toISOString())
+        background.add(async () => {
+          await indexingService.indexHandle(did, new Date().toISOString())
         })
       }
 

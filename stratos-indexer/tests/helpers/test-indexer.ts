@@ -1,5 +1,5 @@
-import type { IndexerConfig } from '../../src'
-import { Indexer, loadConfig } from '../../src'
+import type { IndexerConfig } from '../../src/index.js'
+import { Indexer, loadConfig } from '../../src/index.js'
 
 export class TestIndexer {
   public indexer: Indexer

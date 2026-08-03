@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
@@ -12,7 +11,16 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    // stratos-core publishes its `types` as raw `src/*.ts` written against
+    // `moduleResolution: Bundler`. Checking those sources through this
+    // package's NodeNext lens reports extensionless-import errors that are
+    // valid in their own package, so resolve against its built `dist`
+    // instead. This is why CI must run typecheck after build.
+    "paths": {
+      "@northskysocial/stratos-core": ["../stratos-core/dist/index.d.ts"],
+      "@northskysocial/stratos-core/*": ["../stratos-core/dist/*"]
+    }
   },
   "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]
