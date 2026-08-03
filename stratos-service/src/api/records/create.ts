@@ -157,7 +157,7 @@ async function precomputeRecordData(
   const rkey = inputRkey ?? TID.nextStr()
   const uri = AtUri.make(callerDid, collection, rkey)
   const recordBytes = encodeRecord(record as Record<string, unknown>)
-  const recordCid = await computeCid(recordBytes)
+  const recordCid = await computeCid(record as Record<string, unknown>)
   phases.prepareCommitBuild = performance.now() - t0
   return { uri, recordBytes, cid: recordCid }
 }

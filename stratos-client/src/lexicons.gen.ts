@@ -68,6 +68,257 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.admin.addAdmin",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Grant admin access to a DID. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID to grant admin access to."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did"],
+          "properties": {
+            "did": { "type": "string", "format": "did" }
+          }
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listAdmins",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List everyone holding admin access. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["admins", "viewer"],
+          "properties": {
+            "admins": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "#admin" }
+            },
+            "viewer": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID of the requesting admin."
+            }
+          }
+        }
+      }
+    },
+    "admin": {
+      "type": "object",
+      "required": ["did", "source"],
+      "properties": {
+        "did": { "type": "string", "format": "did" },
+        "source": {
+          "type": "string",
+          "description": "Where the grant comes from. Config admins cannot be revoked through the API.",
+          "knownValues": ["config", "database"]
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When access was granted. Absent for config admins."
+        },
+        "addedBy": {
+          "type": "string",
+          "format": "did",
+          "description": "Who granted access. Absent for config admins."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listEnrollments",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List enrollments in this Stratos service. Requires admin authorization.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum number of enrollments to return."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor from a previous response."
+          },
+          "boundary": {
+            "type": "string",
+            "description": "Only return members holding this boundary."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["enrollments"],
+          "properties": {
+            "enrollments": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#enrollment"
+              }
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Cursor for the next page. Absent on the last page."
+            },
+            "total": {
+              "type": "integer",
+              "description": "Total number of enrollments in the service. Absent when a boundary filter is applied."
+            }
+          }
+        }
+      }
+    },
+    "enrollment": {
+      "type": "object",
+      "required": ["did", "enrolledAt", "active", "boundaries"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The enrolled DID."
+        },
+        "enrolledAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the DID was enrolled."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether the enrollment is currently active."
+        },
+        "isService": {
+          "type": "boolean",
+          "description": "Whether this is a service enrollment rather than a user."
+        },
+        "boundaries": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "zone.stratos.boundary.defs#Domain"
+          }
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.removeAdmin",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Revoke admin access from a DID. Config-provided admins cannot be revoked here, and an admin cannot revoke their own access.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did",
+              "description": "The DID to revoke admin access from."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did"],
+          "properties": {
+            "did": { "type": "string", "format": "did" }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "The DID does not hold admin access."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.setActive",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Activate or deactivate an enrolled member. Requires admin authorization. Deactivation is reversible and preserves the member's boundaries.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "active"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did",
+              "description": "The member to update."
+            },
+            "active": {
+              "type": "boolean",
+              "description": "Whether the member's enrollment should be active."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "active"],
+          "properties": {
+            "did": { "type": "string", "format": "did" },
+            "active": { "type": "boolean" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "NotFound", "description": "The DID is not enrolled." }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.boundary.defs",
   "defs": {
     "Domain": {
@@ -747,19 +998,6 @@ export const stratosLexicons: LexiconDoc[] = [
           }
         }
       }
-    }
-  }
-},
-{
-  "lexicon": 1,
-  "id": "zone.stratos.space.feed",
-  "defs": {
-    "main": {
-      "type": "space",
-      "description": "A members-only Stratos post feed",
-      "key": "any",
-      "name": "Stratos Feed",
-      "collections": ["zone.stratos.feed.post"]
     }
   }
 },
