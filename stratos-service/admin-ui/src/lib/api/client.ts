@@ -313,7 +313,7 @@ export interface AdminUser {
 
 export interface ListAdminsResponse {
   admins: AdminUser[]
-  viewer?: string
+  viewer: string
 }
 
 /**
