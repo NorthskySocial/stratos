@@ -70,6 +70,14 @@ const DEFAULT_JITTER_RATIO = 0.2
 const DEFAULT_MAX_QUEUE_SIZE = 1_000
 const DEFAULT_STABILITY_RESET_MS = 30_000
 const WS_OPEN = 1
+/**
+ * Consecutive failures at the SAME sequence before a distinct stall alarm is
+ * raised. The sequence is still retried indefinitely rather than being passed
+ * over: a lost commit is unrecoverable (the feedgen has no backfill path and
+ * serves feeds straight from its index), whereas a stalled actor is observable
+ * and heals on its own once the underlying fault clears.
+ */
+const APPLY_FAILURE_ALARM_THRESHOLD = 3
 
 /**
  * Maintains a single per-actor WebSocket subscription to
@@ -86,6 +94,8 @@ export class ActorSyncer {
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private queue: Uint8Array[] = []
   private draining = false
+  private lastFailedSeq: number | null = null
+  private sameSeqFailures = 0
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
@@ -211,6 +221,8 @@ export class ActorSyncer {
     })
 
     ws.onmessage = (e: MessageEventLike) => {
+      // A superseded socket must not refill a queue that was just cleared.
+      if (this.ws !== ws) return
       this.lastMessageAt = Date.now()
       const buf = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
       this.enqueue(buf)
@@ -276,6 +288,25 @@ export class ActorSyncer {
     }, delay)
   }
 
+  /**
+   * Abandon the current connection without advancing the cursor. Everything
+   * still buffered is discarded rather than applied: the reconnect replays it
+   * from the last durable cursor, so discarding is lossless, while applying it
+   * would carry the cursor past the sequence we just failed on.
+   */
+  private failConnection(): void {
+    this.queue = []
+    if (this.ws) {
+      try {
+        this.ws.close()
+      } catch {
+        // ignore
+      }
+      this.ws = null
+    }
+    this.scheduleReconnect()
+  }
+
   private enqueue(data: Uint8Array): void {
     if (this.queue.length >= this.maxQueueSize) {
       this.deps.onError?.(
@@ -284,15 +315,7 @@ export class ActorSyncer {
           'ACTOR_SYNC_OVERFLOW',
         ),
       )
-      if (this.ws) {
-        try {
-          this.ws.close()
-        } catch {
-          // ignore
-        }
-        this.ws = null
-      }
-      this.scheduleReconnect()
+      this.failConnection()
       return
     }
     this.queue.push(data)
@@ -324,7 +347,13 @@ export class ActorSyncer {
         Uint8Array,
       ]
     } catch (err) {
-      this.deps.onError?.(err as Error)
+      this.deps.onError?.(
+        new StratosError(
+          `undecodable frame header for ${this.config.did}`,
+          'ACTOR_SYNC_FRAME_UNDECODABLE',
+          { cause: err },
+        ),
+      )
       return
     }
     if (header['t'] !== '#commit') return
@@ -332,7 +361,13 @@ export class ActorSyncer {
     try {
       ;[body] = decodeFirst(rest) as [CommitFrameBody, Uint8Array]
     } catch (err) {
-      this.deps.onError?.(err as Error)
+      this.deps.onError?.(
+        new StratosError(
+          `undecodable commit body for ${this.config.did}`,
+          'ACTOR_SYNC_FRAME_UNDECODABLE',
+          { cause: err },
+        ),
+      )
       return
     }
     try {
@@ -342,8 +377,41 @@ export class ActorSyncer {
         time: body.time,
         ops: body.ops,
       })
+      this.lastFailedSeq = null
+      this.sameSeqFailures = 0
     } catch (err) {
-      this.deps.onError?.(err as Error)
+      this.recordApplyFailure(body.seq, err)
+      this.failConnection()
+    }
+  }
+
+  /**
+   * Report an apply failure and, once the same sequence has failed
+   * `APPLY_FAILURE_ALARM_THRESHOLD` times in a row, raise one distinct alarm.
+   * The alarm fires once per stall episode so a wedged actor produces a signal
+   * rather than a stream of noise.
+   */
+  private recordApplyFailure(seq: number, err: unknown): void {
+    if (seq === this.lastFailedSeq) {
+      this.sameSeqFailures++
+    } else {
+      this.lastFailedSeq = seq
+      this.sameSeqFailures = 1
+    }
+    this.deps.onError?.(
+      new StratosError(
+        `commit apply failed for ${this.config.did} at seq ${seq}`,
+        'ACTOR_SYNC_APPLY_FAILED',
+        { cause: err },
+      ),
+    )
+    if (this.sameSeqFailures === APPLY_FAILURE_ALARM_THRESHOLD) {
+      this.deps.onError?.(
+        new StratosError(
+          `actor sync stalled for ${this.config.did} at seq ${seq} after ${this.sameSeqFailures} consecutive apply failures; retrying indefinitely`,
+          'ACTOR_SYNC_STALLED',
+        ),
+      )
     }
   }
 }

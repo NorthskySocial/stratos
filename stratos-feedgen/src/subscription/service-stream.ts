@@ -74,6 +74,7 @@ const DEFAULT_BASE_DELAY_MS = 5_000
 const DEFAULT_MAX_DELAY_MS = 60_000
 const DEFAULT_JITTER_RATIO = 0.2
 const DEFAULT_STABILITY_RESET_MS = 30_000
+const DEFAULT_MAX_QUEUE_SIZE = 1_000
 const WS_OPEN = 1
 
 /**
@@ -90,6 +91,8 @@ export class ServiceStream {
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  private queue: Uint8Array[] = []
+  private draining = false
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
@@ -137,6 +140,8 @@ export class ServiceStream {
       }
       this.ws = null
     }
+    this.queue = []
+    this.draining = false
   }
 
   private async connect(): Promise<void> {
@@ -171,8 +176,10 @@ export class ServiceStream {
     })
 
     ws.onmessage = (e: MessageEventLike) => {
+      // A superseded socket must not refill a queue that was just cleared.
+      if (this.ws !== ws) return
       const buf = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
-      void this.handleMessage(buf)
+      this.enqueue(buf)
     }
 
     ws.onerror = (e: ErrorEventLike) => {
@@ -233,6 +240,52 @@ export class ServiceStream {
       this.reconnectTimer = null
       void this.connect()
     }, delay)
+  }
+
+  /**
+   * Buffer a frame for sequential processing. Enrollment events are
+   * order-sensitive — an `unenroll` overtaking its `enroll` would leave the
+   * pool and the boundary cache disagreeing about whether an actor syncs — so
+   * frames are drained one at a time rather than dispatched concurrently.
+   */
+  private enqueue(data: Uint8Array): void {
+    if (this.queue.length >= DEFAULT_MAX_QUEUE_SIZE) {
+      this.onError?.(
+        new StratosError(
+          'enrollment stream queue overflow; dropping connection',
+          'SERVICE_STREAM_OVERFLOW',
+        ),
+      )
+      this.queue = []
+      if (this.ws) {
+        try {
+          this.ws.close()
+        } catch {
+          // ignore
+        }
+        this.ws = null
+      }
+      this.scheduleReconnect()
+      return
+    }
+    this.queue.push(data)
+    if (!this.draining) {
+      void this.drain()
+    }
+  }
+
+  private async drain(): Promise<void> {
+    if (this.draining) return
+    this.draining = true
+    try {
+      while (this.queue.length > 0 && this.running) {
+        const data = this.queue.shift()
+        if (!data) continue
+        await this.handleMessage(data)
+      }
+    } finally {
+      this.draining = false
+    }
   }
 
   private async handleMessage(data: Uint8Array): Promise<void> {
