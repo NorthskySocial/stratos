@@ -134,7 +134,10 @@ export async function ensureIndexerSchema(db: Database): Promise<void> {
       ON post (creator, "indexedAt" DESC)
     `.execute(rawDb)
   } catch (err) {
-    console.error({ err }, 'failed to initialize stratos indexer tables/indexes')
+    console.error(
+      { err },
+      'failed to initialize stratos indexer tables/indexes',
+    )
     throw err
   }
 }
