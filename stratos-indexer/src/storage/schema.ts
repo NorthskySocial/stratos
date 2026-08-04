@@ -18,8 +18,9 @@ export type StratosSyncCursorUpdate = Updateable<StratosSyncCursorTable>
 export interface StratosEnrollmentTable {
   did: string
   serviceUrl: string
-  createdAt: string
-  updatedAt: string
+  enrolledAt: string
+  lastChecked: string
+  boundaries: string | null
 }
 
 export interface StratosRecordTable {
@@ -44,11 +45,6 @@ export interface PostTable {
   sortAt: GeneratedAlways<string>
 }
 
-export interface StratosBoundaryTable {
-  did: string
-  boundary: string
-}
-
 /**
  * The subset of the AppView database this indexer reads and writes. Declared
  * standalone rather than intersected with `@atproto/bsky`'s schema: bsky pins
@@ -58,7 +54,6 @@ export interface StratosBoundaryTable {
 export interface StratosIndexerSchema {
   stratos_sync_cursor: StratosSyncCursorTable
   stratos_enrollment: StratosEnrollmentTable
-  stratos_boundary: StratosBoundaryTable
   stratos_record: StratosRecordTable
   stratos_record_boundary: StratosRecordBoundaryTable
   post: PostTable
