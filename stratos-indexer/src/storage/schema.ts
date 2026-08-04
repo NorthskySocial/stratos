@@ -1,4 +1,9 @@
-import type { Insertable, Selectable, Updateable } from 'kysely'
+import type {
+  GeneratedAlways,
+  Insertable,
+  Selectable,
+  Updateable,
+} from 'kysely'
 
 export interface StratosSyncCursorTable {
   did: string
@@ -33,9 +38,10 @@ export interface PostTable {
   uri: string
   cid: string
   creator: string
-  content: string
+  text: string
   createdAt: string
   indexedAt: string
+  sortAt: GeneratedAlways<string>
 }
 
 export interface StratosBoundaryTable {

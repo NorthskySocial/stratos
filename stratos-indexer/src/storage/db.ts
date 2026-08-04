@@ -57,9 +57,10 @@ export function createDatabase(cfg: DbConfig): Database {
           uri TEXT PRIMARY KEY,
           cid TEXT NOT NULL,
           creator TEXT NOT NULL,
-          content TEXT NOT NULL,
+          text TEXT NOT NULL,
           createdAt TEXT NOT NULL,
-          indexedAt TEXT NOT NULL
+          indexedAt TEXT NOT NULL,
+          sortAt TEXT GENERATED ALWAYS AS (LEAST("createdAt", "indexedAt")) STORED NOT NULL
         )
       `.execute(rawDb)
       await sql`
