@@ -1,4 +1,5 @@
 import { encode as cborEncode } from '@atcute/cbor'
+import { StratosError } from '@northskysocial/stratos-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServiceStream } from '../src/subscription/service-stream.js'
 
@@ -77,6 +78,25 @@ function encodeEnrollmentFrame(body: {
   out.set(header, 0)
   out.set(bodyBuf, header.length)
   return out
+}
+
+function codesOf(errors: Error[]): string[] {
+  return errors.map((err) => (err as StratosError).code)
+}
+
+/**
+ * A promise the test can hold open, used to keep one handler in flight while
+ * further frames are delivered.
+ */
+function makeGate(): {
+  release: (() => void) | null
+  wait: () => Promise<void>
+} {
+  const gate: { release: (() => void) | null; wait: () => Promise<void> } = {
+    release: null,
+    wait: () => new Promise<void>((resolve) => (gate.release = resolve)),
+  }
+  return gate
 }
 
 function makeMintToken(): { fn: () => Promise<string>; calls: number } {
@@ -560,6 +580,168 @@ describe('ServiceStream', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(FakeWebSocket.instances).toHaveLength(2)
 
+    stream.stop()
+  })
+
+  it('processes frames in delivery order when a handler is slow', async () => {
+    const mint = makeMintToken()
+    const order: string[] = []
+    const gate = makeGate()
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: async (did) => {
+          if (did === 'did:plc:kenshin') await gate.wait()
+          order.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:kenshin', action: 'enroll' }))
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:kaoru', action: 'enroll' }))
+
+    await vi.waitFor(() => expect(gate.release).not.toBeNull())
+    // The second frame must still be queued, not racing the first.
+    expect(order).toEqual([])
+
+    gate.release?.()
+    await vi.waitFor(() =>
+      expect(order).toEqual(['did:plc:kenshin', 'did:plc:kaoru']),
+    )
+    stream.stop()
+  })
+
+  it('keeps an unenroll behind the enroll it follows', async () => {
+    const mint = makeMintToken()
+    const order: string[] = []
+    const gate = makeGate()
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: async (did) => {
+          await gate.wait()
+          order.push(`enroll:${did}`)
+        },
+        onUnenroll: (did) => {
+          order.push(`unenroll:${did}`)
+        },
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:lina', action: 'enroll' }))
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:lina', action: 'unenroll' }))
+
+    await vi.waitFor(() => expect(gate.release).not.toBeNull())
+    gate.release?.()
+    // Unserialized dispatch would let the synchronous unenroll land first and
+    // leave the actor enrolled.
+    await vi.waitFor(() =>
+      expect(order).toEqual(['enroll:did:plc:lina', 'unenroll:did:plc:lina']),
+    )
+    stream.stop()
+  })
+
+  it('drops the connection when the enrollment queue overflows', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const gate = makeGate()
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: async () => {
+          await gate.wait()
+        },
+        onUnenroll: () => {},
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    const frame = encodeEnrollmentFrame({
+      did: 'did:plc:vash',
+      action: 'enroll',
+    })
+    // First frame occupies the drain; the next 1000 fill the queue exactly.
+    ws.send(frame)
+    await vi.waitFor(() => expect(gate.release).not.toBeNull())
+    for (let i = 0; i < 1_000; i++) ws.send(frame)
+    expect(codesOf(errors)).not.toContain('SERVICE_STREAM_OVERFLOW')
+
+    // One past the cap.
+    ws.send(frame)
+    expect(codesOf(errors)).toContain('SERVICE_STREAM_OVERFLOW')
+    expect(ws.readyState).toBe(WS_CLOSED)
+
+    gate.release?.()
+    // The queue is emptied on overflow, so nothing is drained afterwards and
+    // the overflow is the only thing reported.
+    await vi.advanceTimersByTimeAsync(100)
+    expect(codesOf(errors)).toEqual(['SERVICE_STREAM_OVERFLOW'])
+
+    // Reconnect replays every enrollment from scratch, so the drop is lossless.
+    await vi.advanceTimersByTimeAsync(6_000)
+    await vi.waitFor(() =>
+      expect(FakeWebSocket.instances.length).toBeGreaterThan(1),
+    )
+    stream.stop()
+  })
+
+  it('ignores frames from a socket that was already dropped', async () => {
+    const mint = makeMintToken()
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 60_000,
+        maxDelayMs: 60_000,
+        jitterRatio: 0,
+      },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:milly', action: 'enroll' }))
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:milly']))
+
+    ws.close()
+    // A late delivery from the abandoned socket belongs to a connection whose
+    // state has already been torn down.
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:meryl', action: 'enroll' }))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(enrolls).toEqual(['did:plc:milly'])
     stream.stop()
   })
 })
