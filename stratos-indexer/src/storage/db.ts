@@ -29,12 +29,15 @@ export function createDatabase(cfg: DbConfig): Database {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
       const rawDb = (db as any).db as Kysely<Record<string, unknown>>
+      // Postgres folds unquoted identifiers to lower case, while kysely always
+      // emits quoted camelCase — every camelCase column here must stay quoted
+      // or the writes in actor-syncer/cursor-manager fail at runtime.
       await sql`
         CREATE TABLE IF NOT EXISTS stratos_enrollment (
           did TEXT PRIMARY KEY,
-          serviceUrl TEXT NOT NULL,
-          createdAt TEXT NOT NULL,
-          updatedAt TEXT NOT NULL
+          "serviceUrl" TEXT NOT NULL,
+          "createdAt" TEXT NOT NULL,
+          "updatedAt" TEXT NOT NULL
         )
       `.execute(rawDb)
       await sql`
@@ -49,7 +52,7 @@ export function createDatabase(cfg: DbConfig): Database {
         CREATE TABLE IF NOT EXISTS stratos_sync_cursor (
           did TEXT PRIMARY KEY,
           seq INTEGER NOT NULL,
-          updatedAt TEXT NOT NULL
+          "updatedAt" TEXT NOT NULL
         )
       `.execute(rawDb)
       await sql`
@@ -58,9 +61,9 @@ export function createDatabase(cfg: DbConfig): Database {
           cid TEXT NOT NULL,
           creator TEXT NOT NULL,
           text TEXT NOT NULL,
-          createdAt TEXT NOT NULL,
-          indexedAt TEXT NOT NULL,
-          sortAt TEXT GENERATED ALWAYS AS (LEAST("createdAt", "indexedAt")) STORED NOT NULL
+          "createdAt" TEXT NOT NULL,
+          "indexedAt" TEXT NOT NULL,
+          "sortAt" TEXT GENERATED ALWAYS AS (LEAST("createdAt", "indexedAt")) STORED NOT NULL
         )
       `.execute(rawDb)
       await sql`
@@ -68,7 +71,7 @@ export function createDatabase(cfg: DbConfig): Database {
           uri TEXT PRIMARY KEY,
           cid TEXT NOT NULL,
           json TEXT NOT NULL,
-          indexedAt TEXT NOT NULL
+          "indexedAt" TEXT NOT NULL
         )
       `.execute(rawDb)
       await sql`
@@ -86,7 +89,7 @@ export function createDatabase(cfg: DbConfig): Database {
       // Optimized index for actor-based feed queries
       await sql`
         CREATE INDEX IF NOT EXISTS stratos_post_did_indexed_at_idx 
-        ON post (creator, indexedAt DESC)
+        ON post (creator, "indexedAt" DESC)
       `.execute(rawDb)
     } catch (err) {
       console.error(
