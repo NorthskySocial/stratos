@@ -17,18 +17,12 @@ const DID_CACHE_MAX_SIZE = 10_000
  */
 const LEGACY_LOWERCASE_COLUMNS = [
   { table: 'stratos_enrollment', from: 'serviceurl', to: 'serviceUrl' },
-  { table: 'stratos_enrollment', from: 'createdat', to: 'createdAt' },
-  { table: 'stratos_enrollment', from: 'updatedat', to: 'updatedAt' },
+  { table: 'stratos_enrollment', from: 'enrolledat', to: 'enrolledAt' },
+  { table: 'stratos_enrollment', from: 'lastchecked', to: 'lastChecked' },
   { table: 'stratos_sync_cursor', from: 'updatedat', to: 'updatedAt' },
   { table: 'stratos_record', from: 'indexedat', to: 'indexedAt' },
 ] as const
 
-/**
- * Create a new database instance with the given configuration.
- *
- * @param cfg - Database configuration.
- * @returns A new Database instance.
- */
 export function createDatabase(cfg: DbConfig): Database {
   return new Database({
     url: cfg.postgresUrl,
@@ -37,14 +31,14 @@ export function createDatabase(cfg: DbConfig): Database {
   })
 }
 
+/** `Database` keeps its kysely instance off its public type. */
+interface RawDbHolder {
+  db: Kysely<Record<string, unknown>>
+}
+
 /**
  * Rename a legacy lower-cased column to its camelCase form. No-ops when the
  * table is absent, already renamed, or freshly created, so it is safe to rerun.
- *
- * @param db - Raw kysely instance.
- * @param table - Table holding the column.
- * @param from - Existing lower-cased column name.
- * @param to - Target camelCase column name.
  */
 async function renameLegacyColumn(
   db: Kysely<Record<string, unknown>>,
@@ -71,31 +65,24 @@ async function renameLegacyColumn(
 
 /**
  * Create the indexer's tables and indexes, and repair legacy column casing.
- * Must complete before any indexing write runs.
- *
- * @param db - Database instance to initialize.
+ * Safe to rerun; must complete before any indexing write runs.
  */
 export async function ensureIndexerSchema(db: Database): Promise<void> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-    const rawDb = (db as any).db as Kysely<Record<string, unknown>>
+    const { db: rawDb } = db as unknown as RawDbHolder
     // Postgres folds unquoted identifiers to lower case, while kysely always
     // emits quoted camelCase — every camelCase column here must stay quoted
     // or the writes in actor-syncer/cursor-manager fail at runtime.
+    //
+    // stratos_enrollment is shared with the AppView, whose migration declares
+    // these exact columns — see atproto-stratos bsky db/tables/stratos-enrollment.ts.
     await sql`
       CREATE TABLE IF NOT EXISTS stratos_enrollment (
         did TEXT PRIMARY KEY,
         "serviceUrl" TEXT NOT NULL,
-        "createdAt" TEXT NOT NULL,
-        "updatedAt" TEXT NOT NULL
-      )
-    `.execute(rawDb)
-    await sql`
-      CREATE TABLE IF NOT EXISTS stratos_boundary
-      (
-        did      TEXT NOT NULL,
-        boundary TEXT NOT NULL,
-        PRIMARY KEY (did, boundary)
+        "enrolledAt" TEXT NOT NULL,
+        "lastChecked" TEXT NOT NULL,
+        boundaries TEXT
       )
     `.execute(rawDb)
     await sql`
@@ -147,19 +134,11 @@ export async function ensureIndexerSchema(db: Database): Promise<void> {
       ON post (creator, "indexedAt" DESC)
     `.execute(rawDb)
   } catch (err) {
-    console.error(
-      { err },
-      'failed to initialize stratos indexer tables/indexes',
-    )
+    console.error({ err }, 'failed to initialize stratos indexer tables/indexes')
+    throw err
   }
 }
 
-/**
- * Create a new ID resolver instance with the given configuration.
- *
- * @param cfg - Identity configuration.
- * @returns A new IdResolver instance.
- */
 export function createIdResolver(cfg: IdentityConfig): IdResolver {
   const cache = new MemoryCache(DID_CACHE_STALE_TTL, DID_CACHE_MAX_TTL)
 
@@ -184,13 +163,6 @@ export function createIdResolver(cfg: IdentityConfig): IdResolver {
   })
 }
 
-/**
- * Cap the size of a background queue by limiting concurrency and maximum size.
- *
- * @param background - The background queue to cap.
- * @param concurrency - Maximum number of concurrent tasks.
- * @param maxSize - Maximum total number of tasks in the queue.
- */
 function capBackgroundQueue(
   background: BackgroundQueue,
   concurrency: number,
@@ -206,14 +178,6 @@ function capBackgroundQueue(
   }
 }
 
-/**
- * Create an indexing service with the given database, ID resolver, and configuration.
- *
- * @param db - Database instance for indexing operations.
- * @param idResolver - ID resolver for resolving DIDs.
- * @param config - Configuration for the indexing service.
- * @returns A tuple containing the indexing service and the background queue.
- */
 export function createIndexingService(
   db: Database,
   idResolver: IdResolver,

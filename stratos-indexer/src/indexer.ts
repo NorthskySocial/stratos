@@ -436,39 +436,24 @@ export class Indexer {
         background.add(async () => {
           const now = new Date().toISOString()
           try {
-            // Persist enrollment to database
+            const boundariesJson = JSON.stringify(boundaries)
             await rawDb
               .insertInto('stratos_enrollment')
               .values({
                 did,
                 serviceUrl,
-                createdAt: now,
-                updatedAt: now,
+                enrolledAt: now,
+                lastChecked: now,
+                boundaries: boundariesJson,
               })
               .onConflict((oc) =>
                 oc.column('did').doUpdateSet({
                   serviceUrl,
-                  updatedAt: now,
+                  lastChecked: now,
+                  boundaries: boundariesJson,
                 }),
               )
               .execute()
-
-            // Persist boundaries
-            if (boundaries.length > 0) {
-              await rawDb
-                .deleteFrom('stratos_boundary')
-                .where('did', '=', did)
-                .execute()
-              await rawDb
-                .insertInto('stratos_boundary')
-                .values(
-                  boundaries.map((boundary) => ({
-                    did,
-                    boundary,
-                  })),
-                )
-                .execute()
-            }
           } catch (err) {
             console.error(
               { err, did },
@@ -488,10 +473,6 @@ export class Indexer {
           try {
             await rawDb
               .deleteFrom('stratos_enrollment')
-              .where('did', '=', did)
-              .execute()
-            await rawDb
-              .deleteFrom('stratos_boundary')
               .where('did', '=', did)
               .execute()
           } catch (err) {
