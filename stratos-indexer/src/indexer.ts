@@ -9,6 +9,7 @@ import {
   createDatabase,
   createIdResolver,
   createIndexingService,
+  ensureIndexerSchema,
 } from './storage/db.js'
 import { HandleDedup } from './util/handle-dedup.js'
 import { CursorManager } from './storage/cursor-manager.js'
@@ -56,6 +57,7 @@ export class Indexer {
     // Database
     const db = createDatabase(this.config.db)
     this.db = db
+    await ensureIndexerSchema(db)
 
     const idResolver = createIdResolver(this.config.identity)
     const { indexingService, background } = createIndexingService(
