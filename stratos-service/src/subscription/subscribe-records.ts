@@ -337,6 +337,13 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
       throw new AuthRequiredError('Service auth required')
     }
 
+    // Boundary rows outlive deactivation, so a boundaries-only check would keep
+    // a suspended caller streaming. Mirror verifyEnrolled: deny inactive first.
+    const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+    if (!enrollment || !enrollment.active) {
+      throw new AuthRequiredError('Enrollment is missing or deactivated')
+    }
+
     const boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
     if (boundaries.length === 0) {
       throw new AuthRequiredError('Service is not enrolled in any boundary')

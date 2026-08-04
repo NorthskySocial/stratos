@@ -84,8 +84,9 @@ export function registerSpaceCredentialHandlers(
  *   3. Resolve identity: if a `delegationToken` is present, verify it
  *      (its target space MUST equal `space`) and take identity from it; else use
  *      the DPoP-authenticated user (reject anonymous).
- *   4. Map the space URI to its boundary and confirm the user is enrolled in it
- *      (live enrollment-store lookup, no cache) → else {@link NotEnrolled}.
+ *   4. Map the space URI to its boundary, then confirm the user's enrollment is
+ *      present AND active, and that it carries that boundary (live
+ *      enrollment-store lookup, no cache) → else {@link NotEnrolled}.
  *   5. App-axis gating: if the space's `appAccess` is `#allowList`,
  *      require a valid client attestation whose attested `client_id` is listed
  *      (else `AttestationRequired` / `ClientNotAllowed`). `#open` spaces ignore
@@ -124,6 +125,17 @@ async function handleGetSpaceCredential(
 
   // Membership: the user must be enrolled in the boundary for this space.
   const boundary = `${spaceDid}/${skey}`
+
+  // Boundary rows outlive deactivation, so a boundaries-only check would let a
+  // suspended member keep minting credentials. Deny inactive enrollments first,
+  // under the same NotEnrolled shape (no membership-status oracle).
+  const enrollment = await ctx.enrollmentStore.getEnrollment(userDid)
+  if (!enrollment || !enrollment.active) {
+    throw new InvalidRequestError(
+      'User is not enrolled in this space',
+      'NotEnrolled',
+    )
+  }
 
   const boundaries = await ctx.enrollmentStore.getBoundaries(userDid)
   if (!boundaries.includes(boundary)) {

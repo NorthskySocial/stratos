@@ -7,12 +7,16 @@
  * paths an AppView indexer will encounter — including the expiry case that
  * triggers on reconnect when a stale token is reused.
  */
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
-import { createServiceJwt } from '@atproto/xrpc-server'
+import { AuthRequiredError, createServiceJwt } from '@atproto/xrpc-server'
 import type { IdResolver } from '@atproto/identity'
+import type { StoredEnrollment } from '@northskysocial/stratos-core'
 import { verifyServiceAuth } from '../src/infra/auth/index.js'
 import { createSubscribeAuthVerifier } from '../src/infra/auth/verifiers.js'
+import { createSubscribeRecordsHandler } from '../src/subscription/index.js'
+import type { AppContext } from '../src/index.js'
 
 const OUR_DID = 'did:web:stratos.test'
 const LXM = 'zone.stratos.sync.subscribeRecords'
@@ -318,5 +322,91 @@ describe('createSubscribeAuthVerifier (stream auth gate)', () => {
     await expect(verifier(ctx)).rejects.toThrow(
       'Service authorization required',
     )
+  })
+})
+
+/**
+ * Stream admission (deactivation gate).
+ *
+ * A valid service JWT only proves who the caller is. Admission additionally
+ * requires a LIVE enrollment that is still active: boundary rows survive
+ * deactivation, so a boundaries-only check would leave a suspended consumer
+ * streaming indefinitely.
+ */
+describe('subscribeRecords admission (enrollment active gate)', () => {
+  const CONSUMER_DID = 'did:web:jupiter.sailormoon.jp'
+  const BOUNDARY = 'did:web:nerv.tokyo.jp/alpha'
+
+  function enrollmentFor(did: string, active: boolean): StoredEnrollment {
+    return {
+      did,
+      enrolledAt: new Date('1995-10-04').toISOString(),
+      signingKeyDid: 'did:key:zDnaeMakoto',
+      active,
+      isService: true,
+    }
+  }
+
+  function makeCtx(
+    enrollment: StoredEnrollment | null,
+    boundaries: string[],
+  ): AppContext {
+    return {
+      enrollmentStore: {
+        getEnrollment: vi.fn(async () => enrollment),
+        getBoundaries: vi.fn(async () => boundaries),
+        listEnrollments: vi.fn(async () => []),
+      },
+      enrollmentEvents: new EventEmitter(),
+      actorStore: { exists: vi.fn(async () => false) },
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    } as unknown as AppContext
+  }
+
+  const serviceCreds = {
+    credentials: { type: 'service', iss: CONSUMER_DID, did: CONSUMER_DID },
+  }
+
+  /** Drive the generator to its first result (admission runs on first next). */
+  function admit(ctx: AppContext, signal: AbortSignal) {
+    return createSubscribeRecordsHandler(ctx)({}, serviceCreds, signal).next()
+  }
+
+  it('rejects a deactivated caller even though its boundary rows remain', async () => {
+    const ctx = makeCtx(enrollmentFor(CONSUMER_DID, false), [BOUNDARY])
+
+    await expect(admit(ctx, new AbortController().signal)).rejects.toThrow(
+      AuthRequiredError,
+    )
+    await expect(admit(ctx, new AbortController().signal)).rejects.toThrow(
+      'Enrollment is missing or deactivated',
+    )
+  })
+
+  it('rejects a caller with no enrollment row at all', async () => {
+    const ctx = makeCtx(null, [BOUNDARY])
+
+    await expect(admit(ctx, new AbortController().signal)).rejects.toThrow(
+      AuthRequiredError,
+    )
+  })
+
+  it('still rejects an active caller enrolled in no boundary', async () => {
+    const ctx = makeCtx(enrollmentFor(CONSUMER_DID, true), [])
+
+    await expect(admit(ctx, new AbortController().signal)).rejects.toThrow(
+      'Service is not enrolled in any boundary',
+    )
+  })
+
+  it('admits an active caller with boundaries', async () => {
+    const ctx = makeCtx(enrollmentFor(CONSUMER_DID, true), [BOUNDARY])
+    const aborted = AbortSignal.abort()
+
+    // An already-aborted signal makes the delegated stream terminate at once,
+    // so reaching `done` proves admission passed rather than threw.
+    await expect(admit(ctx, aborted)).resolves.toMatchObject({ done: true })
+    expect(ctx.enrollmentStore.getEnrollment).toHaveBeenCalledWith(CONSUMER_DID)
+    expect(ctx.enrollmentStore.getBoundaries).toHaveBeenCalledWith(CONSUMER_DID)
   })
 })
