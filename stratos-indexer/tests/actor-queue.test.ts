@@ -183,9 +183,9 @@ describe('enrollment stream errors', () => {
       const subscription = new StratosServiceSubscription(
         { stratosServiceUrl: 'ws://localhost', syncToken: 'test' },
         {
-          onEnrollmentDiscovered: vi.fn(),
-          onEnrollmentRemoved: vi.fn(),
-        } as never,
+          onEnroll: vi.fn(),
+          onUnenroll: vi.fn(),
+        },
         (err) => errors.push(err),
       )
 
