@@ -9,6 +9,7 @@ import {
   createDatabase,
   createIdResolver,
   createIndexingService,
+  ensureIndexerSchema,
 } from './storage/db.js'
 import { HandleDedup } from './util/handle-dedup.js'
 import { CursorManager } from './storage/cursor-manager.js'
@@ -56,6 +57,7 @@ export class Indexer {
     // Database
     const db = createDatabase(this.config.db)
     this.db = db
+    await ensureIndexerSchema(db)
 
     const idResolver = createIdResolver(this.config.identity)
     const { indexingService, background } = createIndexingService(
@@ -434,39 +436,24 @@ export class Indexer {
         background.add(async () => {
           const now = new Date().toISOString()
           try {
-            // Persist enrollment to database
+            const boundariesJson = JSON.stringify(boundaries)
             await rawDb
               .insertInto('stratos_enrollment')
               .values({
                 did,
                 serviceUrl,
-                createdAt: now,
-                updatedAt: now,
+                enrolledAt: now,
+                lastChecked: now,
+                boundaries: boundariesJson,
               })
               .onConflict((oc) =>
                 oc.column('did').doUpdateSet({
                   serviceUrl,
-                  updatedAt: now,
+                  lastChecked: now,
+                  boundaries: boundariesJson,
                 }),
               )
               .execute()
-
-            // Persist boundaries
-            if (boundaries.length > 0) {
-              await rawDb
-                .deleteFrom('stratos_boundary')
-                .where('did', '=', did)
-                .execute()
-              await rawDb
-                .insertInto('stratos_boundary')
-                .values(
-                  boundaries.map((boundary) => ({
-                    did,
-                    boundary,
-                  })),
-                )
-                .execute()
-            }
           } catch (err) {
             console.error(
               { err, did },
@@ -486,10 +473,6 @@ export class Indexer {
           try {
             await rawDb
               .deleteFrom('stratos_enrollment')
-              .where('did', '=', did)
-              .execute()
-            await rawDb
-              .deleteFrom('stratos_boundary')
               .where('did', '=', did)
               .execute()
           } catch (err) {
@@ -544,8 +527,8 @@ export class Indexer {
       for (const did of didsList) {
         this.enrolledDids.add(did)
         this.syncManager?.addActor(did)
-        background.add(() => {
-          void indexingService.indexHandle(did, new Date().toISOString())
+        background.add(async () => {
+          await indexingService.indexHandle(did, new Date().toISOString())
         })
       }
 

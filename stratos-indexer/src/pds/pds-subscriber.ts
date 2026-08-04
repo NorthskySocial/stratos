@@ -6,7 +6,7 @@ import {
 } from './pds-firehose.js'
 import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import type { CursorManager } from '../storage/cursor-manager.js'
-import { BackgroundQueue } from '@northskysocial/stratos-core'
+import type { BackgroundQueue } from '@atproto/bsky'
 import { HandleDedup } from '../util/handle-dedup.js'
 import { WorkerPool } from '../util/worker-pool.js'
 
