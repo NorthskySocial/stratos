@@ -584,7 +584,7 @@ describe('ActorSyncer', () => {
     syncer.stop()
   })
 
-  it('survives an apply failure with no onError sink wired', async () => {
+  it('keeps consuming undecodable frames with no onError sink wired', async () => {
     const syncer = new ActorSyncer(
       {
         did: DID,
@@ -601,7 +601,14 @@ describe('ActorSyncer', () => {
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const ws = FakeWebSocket.instances[0]
     ws.open()
+    // Garbage header, then a valid header with a garbage body: both decode
+    // catches must tolerate the absent sink.
     ws.send(new Uint8Array([0xff, 0xff, 0xff, 0xff]))
+    const header = cborEncode({ op: 1, t: '#commit' })
+    const badBody = new Uint8Array(header.length + 3)
+    badBody.set(header, 0)
+    badBody.set([0xff, 0xff, 0xff], header.length)
+    ws.send(badBody)
     await vi.advanceTimersByTimeAsync(50)
 
     expect(ws.readyState).toBe(WS_OPEN)
@@ -609,6 +616,38 @@ describe('ActorSyncer', () => {
     await vi.waitFor(async () => {
       expect(await store.getCursor(DID)).toBe(3)
     })
+    syncer.stop()
+  })
+
+  it('stalls on an apply failure with no onError sink wired', async () => {
+    const { calls, indexer: failing } = wrapIndexer(indexer, (seq) => seq === 1)
+    const syncer = new ActorSyncer(
+      {
+        did: DID,
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        baseDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        jitterRatio: 0,
+      },
+      // onError omitted: durability must not depend on a reporting sink being
+      // wired, so the reconnect and the cursor hold regardless.
+      { store, indexer: failing, wsCtor: FakeWebSocket as never, rng: () => 0 },
+    )
+    syncer.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    ws.send(commitFrame(1))
+    ws.send(commitFrame(2))
+
+    await vi.waitFor(() => expect(calls).toEqual([1]))
+    expect(ws.readyState).toBe(WS_CLOSED)
+    expect(await store.getCursor(DID)).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1_500)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    expect(FakeWebSocket.instances[1].url).not.toContain('cursor=')
     syncer.stop()
   })
 

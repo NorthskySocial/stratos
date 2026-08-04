@@ -167,8 +167,10 @@ export class ActorSyncer {
       }
       this.ws = null
     }
+    // `draining` belongs to drain(): clearing it here while a frame is still in
+    // flight would let a later start() launch a second concurrent drain. The
+    // drain loop already exits on `!running` and clears the flag itself.
     this.queue = []
-    this.draining = false
   }
 
   private async connect(): Promise<void> {
@@ -338,6 +340,26 @@ export class ActorSyncer {
     }
   }
 
+  /**
+   * Decode a frame and apply its commit.
+   *
+   * The two failure paths here have deliberately opposite policies.
+   *
+   * An *apply* failure stalls (`failConnection`): it is normally a transient
+   * store fault, so retrying the sequence eventually succeeds, and advancing
+   * past it would drop the commit permanently — the feedgen serves feeds from
+   * its own index and has no backfill path.
+   *
+   * A *decode* failure continues. It cannot be retried, because the frame
+   * decodes identically on replay, so stalling would wedge this actor forever
+   * with no fault that can clear. It also means version skew rather than
+   * corruption — the upstream fails closed on events it cannot decode, so a
+   * frame reaching us undecodable implies a framing/CBOR mismatch that would
+   * hit every actor at once; stalling would take the whole feedgen down on a
+   * protocol change. The accepted cost is that the next successful commit
+   * advances the cursor past the lost frame, so these are reported loudly
+   * under their own code.
+   */
   private async handleFrame(data: Uint8Array): Promise<void> {
     let header: Record<string, unknown>
     let rest: Uint8Array

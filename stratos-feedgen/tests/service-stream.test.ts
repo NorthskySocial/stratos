@@ -619,6 +619,42 @@ describe('ServiceStream', () => {
     stream.stop()
   })
 
+  it('keeps draining across separate deliveries', async () => {
+    const mint = makeMintToken()
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    // A drain that finishes must release its claim, or every frame after the
+    // first batch queues forever and the stream goes quiet without erroring.
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:trigun', action: 'enroll' }))
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:trigun']))
+    // Let the first drain fully settle, so the second frame arrives with no
+    // drain in flight and has to start one of its own.
+    await vi.advanceTimersByTimeAsync(10)
+    ws.send(
+      encodeEnrollmentFrame({ did: 'did:plc:wolfwood', action: 'enroll' }),
+    )
+    await vi.waitFor(() =>
+      expect(enrolls).toEqual(['did:plc:trigun', 'did:plc:wolfwood']),
+    )
+    stream.stop()
+  })
+
   it('keeps an unenroll behind the enroll it follows', async () => {
     const mint = makeMintToken()
     const order: string[] = []
@@ -700,7 +736,9 @@ describe('ServiceStream', () => {
     await vi.advanceTimersByTimeAsync(100)
     expect(codesOf(errors)).toEqual(['SERVICE_STREAM_OVERFLOW'])
 
-    // Reconnect replays every enrollment from scratch, so the drop is lossless.
+    // Reconnect replays every CURRENT enrollment from scratch, which restores
+    // dropped enrolls and boundary sets. A dropped `unenroll` is not restored —
+    // the actor is simply absent from the replay — and waits for reconcile.
     await vi.advanceTimersByTimeAsync(6_000)
     await vi.waitFor(() =>
       expect(FakeWebSocket.instances.length).toBeGreaterThan(1),

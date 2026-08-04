@@ -140,8 +140,10 @@ export class ServiceStream {
       }
       this.ws = null
     }
+    // `draining` belongs to drain(): clearing it here while a handler is still
+    // in flight would let a later start() launch a second concurrent drain.
+    // The drain loop already exits on `!running` and clears the flag itself.
     this.queue = []
-    this.draining = false
   }
 
   private async connect(): Promise<void> {
