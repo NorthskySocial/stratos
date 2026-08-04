@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CursorManager } from '../src'
-import { StratosActorSync, StratosActorSyncOptions } from '../src'
-import { ActorSyncer } from '../src/sync/actor-syncer'
+import type { CursorManager } from '../src/index.js'
+import {
+  StratosActorSync,
+  StratosActorSyncOptions,
+  StratosServiceSubscription,
+} from '../src/index.js'
+import { ActorSyncer } from '../src/sync/actor-syncer.js'
+import { StratosError } from '@northskysocial/stratos-core'
 
 function createTestSync(opts: Partial<StratosActorSyncOptions> = {}) {
   const errors: Error[] = []
@@ -151,5 +156,53 @@ describe('enqueueMessage overflow', () => {
     enqueueFn.call(syncer, new Uint8Array(3))
 
     expect(mockWs.close).toHaveBeenCalled()
+  })
+})
+
+describe('enrollment stream errors', () => {
+  it('reports a coded StratosError preserving the underlying cause', () => {
+    const errors: Error[] = []
+    const sockets: Array<Record<string, unknown>> = []
+
+    class FakeWebSocket {
+      binaryType = ''
+      onerror: ((e: Event & { error?: unknown }) => void) | null = null
+      onmessage: unknown = null
+      onclose: unknown = null
+      addEventListener = vi.fn()
+      close = vi.fn()
+      constructor() {
+        sockets.push(this as unknown as Record<string, unknown>)
+      }
+    }
+
+    const originalWebSocket = globalThis.WebSocket
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+
+    try {
+      const subscription = new StratosServiceSubscription(
+        { stratosServiceUrl: 'ws://localhost', syncToken: 'test' },
+        {
+          onEnroll: vi.fn(),
+          onUnenroll: vi.fn(),
+        },
+        (err) => errors.push(err),
+      )
+
+      subscription.start()
+
+      const socket = sockets[0] as unknown as FakeWebSocket
+      const underlying = new Error('cell games interrupted')
+      socket.onerror?.({ error: underlying } as Event & { error?: unknown })
+
+      expect(errors).toHaveLength(1)
+      const [reported] = errors
+      expect(reported).toBeInstanceOf(StratosError)
+      expect((reported as StratosError).code).toBe('EnrollmentStreamError')
+      expect(reported.message).toContain('cell games interrupted')
+      expect(reported.cause).toBe(underlying)
+    } finally {
+      globalThis.WebSocket = originalWebSocket
+    }
   })
 })

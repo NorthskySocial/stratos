@@ -1,5 +1,6 @@
 import { decodeFirst } from '@atcute/cbor'
 import { Kysely } from 'kysely'
+import type { Insertable } from 'kysely'
 import { extractBoundaries, StratosError } from '@northskysocial/stratos-core'
 import type { CursorManager } from '../storage/cursor-manager.ts'
 import type { PostTable, StratosIndexerSchema } from '../storage/schema.ts'
@@ -180,7 +181,11 @@ export class ActorSyncer {
               ? e.error
               : 'unknown'
         this.options.onError?.(
-          new StratosError(`WebSocket error for ${this.did}: ${errorMsg}`),
+          new StratosError(
+            `WebSocket error for ${this.did}: ${errorMsg}`,
+            'ActorSyncStreamError',
+            { cause: e.error instanceof Error ? e.error : undefined },
+          ),
         )
       }
     }
@@ -504,7 +509,7 @@ async function batchIndexStratosRecords(
           .onConflict((oc) =>
             oc.column('uri').doUpdateSet({
               cid: postRow.cid,
-              content: postRow.content,
+              text: postRow.text,
               indexedAt: postRow.indexedAt,
             }),
           )
@@ -561,13 +566,13 @@ function preparePostRow(
   cid: string,
   record: Record<string, unknown>,
   timestamp: string,
-): PostTable | null {
+): Insertable<PostTable> | null {
   if (record.$type !== STRATOS_POST_COLLECTION) return null
   return {
     uri,
     cid,
     creator: didFromUri(uri),
-    content: (record.text as string) || '',
+    text: (record.text as string) || '',
     createdAt: (record.createdAt as string) || timestamp,
     indexedAt: timestamp,
   }

@@ -4,7 +4,7 @@ import {
   BackfillOptions,
   backfillRepos,
   backfillSingleActor,
-} from '../src/backfill'
+} from '../src/backfill.js'
 
 function makeOpts(overrides?: Partial<BackfillOptions>): BackfillOptions {
   return {
