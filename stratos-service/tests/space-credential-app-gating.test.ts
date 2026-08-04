@@ -124,6 +124,12 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
       },
     },
     enrollmentStore: {
+      getEnrollment: vi.fn(async (did: string) => ({
+        did,
+        enrolledAt: '1995-10-04T00:00:00.000Z',
+        signingKeyDid: 'did:key:zDnaeUsagi',
+        active: true,
+      })),
       getBoundaries: vi.fn(async () => [SPACE_BOUNDARY]),
     },
     authVerifier: { optionalStandard },
