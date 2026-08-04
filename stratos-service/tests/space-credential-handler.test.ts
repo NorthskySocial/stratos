@@ -4,6 +4,8 @@
  * Exercises both identity paths against a mock XRPC server + mock AppContext:
  *   - Interim DPoP path (live): enrolled user gets a credential; non-enrolled
  *     is rejected `NotEnrolled`; a foreign-space URI is rejected `UnknownSpace`.
+ *   - Deactivation gate: a deactivated member is rejected `NotEnrolled` even
+ *     while holding the boundary, and the deny lands on the very next mint.
  *   - Delegation-token path (dormant, real delegation verifier): happy path
  *     issues a credential; every verification failure surfaces as `InvalidToken`.
  * The issued credential is decoded and verified against the service key (and
@@ -14,6 +16,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
 import type { Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
+import { SqliteEnrollmentStore } from '../src/context.js'
+import {
+  closeServiceDb,
+  createServiceDb,
+  migrateServiceDb,
+} from '../src/db/index.js'
 import { registerSpaceCredentialHandlers } from '../src/features/space-credential/index.js'
 import { DELEGATION_TYP } from '../src/infra/auth/delegation-verifier.js'
 import type { NxExStore } from '../src/infra/auth/replay-store.js'
@@ -126,6 +134,8 @@ function atprotoResolver(did: string, keypair: Keypair): IdResolver {
 interface MockCtxOptions {
   signingKey: Keypair
   enrolledBoundaries?: string[]
+  /** Whether the caller's enrollment row is still active. Defaults to true. */
+  enrollmentActive?: boolean
   idResolver?: IdResolver
   cache?: NxExStore
 }
@@ -145,6 +155,12 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
       stratos: { spaceCredentialTtlSeconds: TTL_SECONDS },
     },
     enrollmentStore: {
+      getEnrollment: vi.fn(async (did: string) => ({
+        did,
+        enrolledAt: '1995-10-04T00:00:00.000Z',
+        signingKeyDid: 'did:key:zDnaeUsagi',
+        active: opts.enrollmentActive ?? true,
+      })),
       getBoundaries: vi.fn(async () => opts.enrolledBoundaries ?? []),
     },
     authVerifier: {
@@ -317,6 +333,99 @@ describe('getSpaceCredential — DPoP path', () => {
 
     const res = await invoke(server, { space: 'not-a-space-uri' }, USER_DID)
     expect(res.error?.name).toBe('UnknownSpace')
+  })
+})
+
+// ===========================================================================
+// Deactivation gate
+// ===========================================================================
+
+/**
+ * Deactivation revokes credential issuance.
+ *
+ * Boundary rows survive a deactivation, so a boundaries-only membership check
+ * would let a suspended member keep minting credentials. Both the never-enrolled
+ * and the deactivated caller must get the same `NotEnrolled` shape — the surface
+ * must not become a membership-status oracle.
+ */
+describe('getSpaceCredential — deactivation gate', () => {
+  /** Register the handler against a fresh mock ctx and issue one request. */
+  async function mint(opts: Omit<MockCtxOptions, 'signingKey'>) {
+    const signingKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({ signingKey, ...opts })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+    return invoke(server, { space: SPACE_URI }, USER_DID)
+  }
+
+  it('rejects a deactivated user holding a matching boundary with NotEnrolled', async () => {
+    const res = await mint({
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      enrollmentActive: false,
+    })
+
+    expect(res.error?.name).toBe('NotEnrolled')
+    expect(res.body).toBeUndefined()
+  })
+
+  it('is indistinguishable from a never-enrolled rejection (no status oracle)', async () => {
+    const deactivated = await mint({
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      enrollmentActive: false,
+    })
+    const neverEnrolled = await mint({ enrolledBoundaries: [] })
+
+    expect(deactivated.error).toEqual(neverEnrolled.error)
+  })
+
+  it('rejects a user with no enrollment row with NotEnrolled', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+    })
+    ;(ctx.enrollmentStore.getEnrollment as any) = vi.fn(async () => null)
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+
+    const res = await invoke(server, { space: SPACE_URI }, USER_DID)
+    expect(res.error?.name).toBe('NotEnrolled')
+    expect(res.body).toBeUndefined()
+  })
+
+  it('deactivation is immediate: the NEXT mint after it is rejected', async () => {
+    // Real store, so the deny is driven by an actual deactivation write rather
+    // than a re-stubbed mock — that is what "immediate" has to mean.
+    const db = createServiceDb(':memory:')
+    await migrateServiceDb(db)
+    const store = new SqliteEnrollmentStore(db)
+    await store.enroll({
+      did: USER_DID,
+      enrolledAt: new Date().toISOString(),
+      boundaries: [SPACE_BOUNDARY],
+      signingKeyDid: 'did:key:zDnaeUsagi',
+      active: true,
+    })
+
+    const signingKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({ signingKey })
+    ;(ctx as any).enrollmentStore = store
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+
+    try {
+      const before = await invoke(server, { space: SPACE_URI }, USER_DID)
+      expect(before.error).toBeUndefined()
+      expect(before.body?.credential).toBeTruthy()
+
+      await store.updateEnrollment(USER_DID, { active: false })
+
+      const after = await invoke(server, { space: SPACE_URI }, USER_DID)
+      expect(after.error?.name).toBe('NotEnrolled')
+      expect(after.body).toBeUndefined()
+    } finally {
+      await closeServiceDb(db)
+    }
   })
 })
 
