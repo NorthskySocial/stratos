@@ -379,6 +379,7 @@ export class StratosServer {
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
       autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
+      allowedRedirectOrigins: cfg.allowedRedirectOrigins ?? [],
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,

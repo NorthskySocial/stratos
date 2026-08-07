@@ -61,6 +61,78 @@ describe('handleAuthorize', () => {
     expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
   })
 
+  it('stores the redirect cookie for an allow-listed origin', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+    const authUrl = new URL('https://pds.example.com/oauth/authorize?state=abc')
+    mockOauthClient.authorize.mockResolvedValue(authUrl)
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: { handle: 'alice.test', redirect_uri: 'https://app.example/' },
+    }
+    const res: any = {
+      cookie: vi.fn(),
+      redirect: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.cookie).toHaveBeenCalledWith(
+      'stratos_redirect',
+      'https://app.example/',
+      expect.objectContaining({ httpOnly: true }),
+    )
+    expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
+    expect(res.status).not.toHaveBeenCalled()
+  })
+
+  it('rejects a redirect_uri whose origin is not allow-listed', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: { handle: 'alice.test', redirect_uri: 'https://evil.example/' },
+    }
+    const res: any = {
+      cookie: vi.fn(),
+      redirect: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'InvalidRequest',
+        message: 'redirect_uri origin is not allowed',
+      }),
+    )
+    expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
+  })
+
+  it('rejects every redirect_uri when the allow-list is empty', async () => {
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: { handle: 'alice.test', redirect_uri: 'https://app.example/' },
+    }
+    const res: any = {
+      cookie: vi.fn(),
+      redirect: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.cookie).not.toHaveBeenCalled()
+  })
+
   it('returns 400 if authorize fails with a resolution error', async () => {
     mockOauthClient.authorize.mockRejectedValue(
       new Error('Handle resolution failed'),

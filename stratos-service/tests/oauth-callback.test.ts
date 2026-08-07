@@ -203,6 +203,87 @@ describe('handleCallback', () => {
     )
   })
 
+  it('declines to redirect to a stored origin that is not allow-listed', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: 'did:plc:alice' },
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      cookies: { stratos_redirect: 'https://evil.example/' },
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+      clearCookie: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.redirect).not.toHaveBeenCalled()
+    expect(res.clearCookie).toHaveBeenCalledWith('stratos_redirect')
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, did: 'did:plc:alice' }),
+    )
+  })
+
+  it('redirects to an allow-listed origin with the enrolled flag', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: 'did:plc:alice' },
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      cookies: { stratos_redirect: 'https://app.example/' },
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+      clearCookie: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.redirect).toHaveBeenCalledWith(
+      'https://app.example/?stratos_enrolled=true',
+    )
+    expect(res.json).not.toHaveBeenCalled()
+  })
+
+  it('declines every stored redirect when the allow-list is empty', async () => {
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: 'did:plc:alice' },
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      cookies: { stratos_redirect: 'https://app.example/' },
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+      clearCookie: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.redirect).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true }),
+    )
+  })
+
   it('handles re-enrollment logic correctly', async () => {
     // Test that handleExistingEnrollment is called and it updates/migrates as needed
     const session = { sub: 'did:plc:alice' }

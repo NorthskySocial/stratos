@@ -19,7 +19,10 @@ import {
 import { handleAdminCallback } from '../src/oauth/handlers/admin-callback.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import {
+  envToConfig,
   isAllowedCredentialedOrigin,
+  isAllowedRedirectOrigin,
+  parseEnv,
   passesAdminCsrfCheck,
 } from '../src/config.js'
 import { createTestConfig } from './utils'
@@ -160,6 +163,138 @@ describe('isAllowedCredentialedOrigin', () => {
         devMode: false,
       }),
     ).toBe(false)
+  })
+})
+
+describe('isAllowedRedirectOrigin', () => {
+  const WEBAPP_ORIGIN = 'https://nerv.tokyo.jp'
+
+  it('admits an allow-listed origin', () => {
+    expect(
+      isAllowedRedirectOrigin(`${WEBAPP_ORIGIN}/enrolled?x=1`, {
+        allowedRedirectOrigins: [WEBAPP_ORIGIN],
+        devMode: false,
+      }),
+    ).toBe(true)
+  })
+
+  it('rejects a foreign origin', () => {
+    expect(
+      isAllowedRedirectOrigin('https://seele.example/phish', {
+        allowedRedirectOrigins: [WEBAPP_ORIGIN],
+        devMode: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('rejects a malformed redirect uri', () => {
+    expect(
+      isAllowedRedirectOrigin('not a url', {
+        allowedRedirectOrigins: [WEBAPP_ORIGIN],
+        devMode: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('admits loopback only in dev mode', () => {
+    for (const uri of [
+      'http://localhost:5173/',
+      'http://127.0.0.1:5173/',
+      'http://[::1]:5173/',
+    ]) {
+      expect(
+        isAllowedRedirectOrigin(uri, {
+          allowedRedirectOrigins: [],
+          devMode: true,
+        }),
+      ).toBe(true)
+      expect(
+        isAllowedRedirectOrigin(uri, {
+          allowedRedirectOrigins: [],
+          devMode: false,
+        }),
+      ).toBe(false)
+    }
+  })
+
+  it('rejects everything when the allow-list is empty and not dev', () => {
+    for (const uri of [
+      `${WEBAPP_ORIGIN}/`,
+      'https://seele.example/phish',
+      'https://stratos.test/',
+    ]) {
+      expect(
+        isAllowedRedirectOrigin(uri, {
+          allowedRedirectOrigins: [],
+          devMode: false,
+        }),
+      ).toBe(false)
+    }
+  })
+
+  it('matches on origin, not on a path or host prefix', () => {
+    expect(
+      isAllowedRedirectOrigin('https://nerv.tokyo.jp.seele.example/', {
+        allowedRedirectOrigins: [WEBAPP_ORIGIN],
+        devMode: false,
+      }),
+    ).toBe(false)
+    expect(
+      isAllowedRedirectOrigin('https://nerv.tokyo.jp:8443/', {
+        allowedRedirectOrigins: [WEBAPP_ORIGIN],
+        devMode: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('never admits an opaque origin, even with a literal null entry', () => {
+    expect(
+      isAllowedRedirectOrigin('data:text/html,x', {
+        allowedRedirectOrigins: ['null'],
+        devMode: false,
+      }),
+    ).toBe(false)
+  })
+
+  describe('allow-list entry normalization (env parse path)', () => {
+    let saved: NodeJS.ProcessEnv
+
+    beforeEach(() => {
+      saved = { ...process.env }
+    })
+    afterEach(() => {
+      process.env = saved
+    })
+
+    function configWithAllowList(entries: string) {
+      process.env = {
+        STRATOS_SERVICE_DID: 'did:web:stratos.test',
+        STRATOS_PUBLIC_URL: PUBLIC_URL,
+        STRATOS_ALLOWED_DOMAINS: 'general',
+        STRATOS_ALLOWED_REDIRECT_ORIGINS: entries,
+      } as NodeJS.ProcessEnv
+      return envToConfig(parseEnv())
+    }
+
+    it.each([
+      ['trailing slash', 'https://app.example/'],
+      ['explicit default port', 'https://app.example:443'],
+      ['uppercase', 'HTTPS://App.Example'],
+    ])('normalizes a %s entry to its origin', (_label, entry) => {
+      const config = configWithAllowList(entry)
+      expect(
+        isAllowedRedirectOrigin('https://app.example/path', {
+          allowedRedirectOrigins: config.allowedRedirectOrigins,
+          devMode: false,
+        }),
+      ).toBe(true)
+    })
+
+    it('fails config loading on a malformed entry', () => {
+      expect(() => configWithAllowList('not a url')).toThrow(
+        /STRATOS_ALLOWED_REDIRECT_ORIGINS entry "not a url"/,
+      )
+    })
   })
 })
 

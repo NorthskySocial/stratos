@@ -1,6 +1,40 @@
 import express from 'express'
+import { isAllowedRedirectOrigin } from '../../config.js'
 import { OAUTH_SCOPE } from '../client.js'
 import type { OAuthRoutesConfig } from '../routes.js'
+
+/**
+ * Check a client-supplied `redirect_uri` against the scheme and origin gates.
+ *
+ * @param redirectUri - The raw `redirect_uri` query parameter
+ * @param gates - Permitted URL schemes, allow-listed origins, and dev-mode flag
+ * @returns A client-facing rejection message, or null if the URI is acceptable
+ */
+function rejectRedirectUri(
+  redirectUri: string,
+  gates: {
+    allowedSchemes: string[]
+    allowedRedirectOrigins: string[]
+    devMode: boolean
+  },
+): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(redirectUri)
+  } catch {
+    return 'Invalid redirect_uri'
+  }
+
+  if (!gates.allowedSchemes.includes(parsed.protocol)) {
+    return 'redirect_uri must use https'
+  }
+
+  if (!isAllowedRedirectOrigin(redirectUri, gates)) {
+    return 'redirect_uri origin is not allowed'
+  }
+
+  return null
+}
 
 /**
  * Handles the OAuth authorization flow
@@ -12,7 +46,11 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
   const { oauthClient, logger } = config
 
   const isSecure = config.baseUrl.startsWith('https://')
-  const allowedSchemes = isSecure ? ['https:'] : ['http:', 'https:']
+  const redirectGates = {
+    allowedSchemes: isSecure ? ['https:'] : ['http:', 'https:'],
+    allowedRedirectOrigins: config.allowedRedirectOrigins ?? [],
+    devMode: config.devMode ?? false,
+  }
 
   return async (req: express.Request, res: express.Response) => {
     try {
@@ -27,18 +65,11 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       }
 
       if (redirectUri) {
-        try {
-          const parsed = new URL(redirectUri)
-          if (!allowedSchemes.includes(parsed.protocol)) {
-            return res.status(400).json({
-              error: 'InvalidRequest',
-              message: 'redirect_uri must use https',
-            })
-          }
-        } catch {
+        const rejection = rejectRedirectUri(redirectUri, redirectGates)
+        if (rejection) {
           return res.status(400).json({
             error: 'InvalidRequest',
-            message: 'Invalid redirect_uri',
+            message: rejection,
           })
         }
 
