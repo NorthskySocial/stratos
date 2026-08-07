@@ -359,6 +359,12 @@ export class ActorSyncer {
    * protocol change. The accepted cost is that the next successful commit
    * advances the cursor past the lost frame, so these are reported loudly
    * under their own code.
+   *
+   * A body that decodes but has the wrong *shape* is a decode failure too, and
+   * must be caught here rather than handed to `applyCommit`: a non-array `ops`
+   * would throw inside the apply and be misread as a transient store fault,
+   * stalling the actor forever on a frame that can never succeed, and a
+   * non-numeric `seq` would be written straight to the cursor.
    */
   private async handleFrame(data: Uint8Array): Promise<void> {
     let header: Record<string, unknown>
@@ -379,9 +385,9 @@ export class ActorSyncer {
       return
     }
     if (header['t'] !== '#commit') return
-    let body: CommitFrameBody
+    let decoded: unknown
     try {
-      ;[body] = decodeFirst(rest) as [CommitFrameBody, Uint8Array]
+      ;[decoded] = decodeFirst(rest) as [unknown, Uint8Array]
     } catch (err) {
       this.deps.onError?.(
         new StratosError(
@@ -392,6 +398,16 @@ export class ActorSyncer {
       )
       return
     }
+    if (!isCommitFrameBody(decoded)) {
+      this.deps.onError?.(
+        new StratosError(
+          `malformed commit body for ${this.config.did}`,
+          'ACTOR_SYNC_FRAME_UNDECODABLE',
+        ),
+      )
+      return
+    }
+    const body = decoded
     try {
       await this.deps.indexer.applyCommit({
         did: this.config.did,
@@ -436,6 +452,24 @@ export class ActorSyncer {
       )
     }
   }
+}
+
+/**
+ * Whether a decoded commit body carries the three fields the apply path relies
+ * on. `seq` must be a real number because it becomes the durable cursor, and
+ * `ops` must be iterable because `applyCommit` loops it. Non-object bodies need
+ * no arm of their own: indexing a scalar yields `undefined` and fails the field
+ * checks anyway, so only `null`/`undefined` — which throw on index — have to be
+ * turned away up front.
+ */
+function isCommitFrameBody(value: unknown): value is CommitFrameBody {
+  if (!value) return false
+  const body = value as Record<string, unknown>
+  return (
+    Number.isFinite(body['seq']) &&
+    typeof body['time'] === 'string' &&
+    Array.isArray(body['ops'])
+  )
 }
 
 function buildWsUrl(

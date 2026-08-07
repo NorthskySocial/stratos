@@ -746,6 +746,53 @@ describe('ServiceStream', () => {
     stream.stop()
   })
 
+  it('overflows at the configured maxQueueSize', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const gate = makeGate()
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        maxQueueSize: 2,
+      },
+      {
+        onEnroll: async () => {
+          await gate.wait()
+        },
+        onUnenroll: () => {},
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    const frame = encodeEnrollmentFrame({
+      did: 'did:plc:vash',
+      action: 'enroll',
+    })
+    // First frame occupies the drain; the next two fill the configured cap.
+    ws.send(frame)
+    await vi.waitFor(() => expect(gate.release).not.toBeNull())
+    ws.send(frame)
+    ws.send(frame)
+    expect(codesOf(errors)).not.toContain('SERVICE_STREAM_OVERFLOW')
+
+    // One past the configured cap, far below the 1000-frame default.
+    ws.send(frame)
+    expect(codesOf(errors)).toContain('SERVICE_STREAM_OVERFLOW')
+    expect(ws.readyState).toBe(WS_CLOSED)
+
+    gate.release?.()
+    stream.stop()
+  })
+
   it('ignores frames from a socket that was already dropped', async () => {
     const mint = makeMintToken()
     const enrolls: string[] = []

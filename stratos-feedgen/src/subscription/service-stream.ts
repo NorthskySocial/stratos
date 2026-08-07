@@ -26,6 +26,7 @@ export interface ServiceStreamConfig {
   baseDelayMs?: number
   maxDelayMs?: number
   jitterRatio?: number
+  maxQueueSize?: number
   /**
    * How long a connection must stay open before its backoff counter is reset.
    * Prevents an accept-then-immediately-close loop from reconnecting forever at
@@ -96,6 +97,7 @@ export class ServiceStream {
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
+  private readonly maxQueueSize: number
   private readonly stabilityResetMs: number
   private readonly wsCtor: WebSocketCtor
   private readonly rng: () => number
@@ -109,6 +111,7 @@ export class ServiceStream {
     this.baseDelayMs = config.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
     this.maxDelayMs = config.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
+    this.maxQueueSize = config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
     this.stabilityResetMs =
       config.stabilityResetMs ?? DEFAULT_STABILITY_RESET_MS
     this.wsCtor = deps?.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
@@ -245,29 +248,40 @@ export class ServiceStream {
   }
 
   /**
+   * Abandon the current connection and everything still buffered. Discarding is
+   * lossless for enroll and boundary changes: this stream has no cursor, and
+   * the upstream replays every current enrollment on connect
+   * (`createServiceSubscriptionHandler` in the service's `subscribe-records`),
+   * so the reconnect restores the full set.
+   */
+  private failConnection(): void {
+    this.queue = []
+    if (this.ws) {
+      try {
+        this.ws.close()
+      } catch {
+        // ignore
+      }
+      this.ws = null
+    }
+    this.scheduleReconnect()
+  }
+
+  /**
    * Buffer a frame for sequential processing. Enrollment events are
    * order-sensitive — an `unenroll` overtaking its `enroll` would leave the
    * pool and the boundary cache disagreeing about whether an actor syncs — so
    * frames are drained one at a time rather than dispatched concurrently.
    */
   private enqueue(data: Uint8Array): void {
-    if (this.queue.length >= DEFAULT_MAX_QUEUE_SIZE) {
+    if (this.queue.length >= this.maxQueueSize) {
       this.onError?.(
         new StratosError(
           'enrollment stream queue overflow; dropping connection',
           'SERVICE_STREAM_OVERFLOW',
         ),
       )
-      this.queue = []
-      if (this.ws) {
-        try {
-          this.ws.close()
-        } catch {
-          // ignore
-        }
-        this.ws = null
-      }
-      this.scheduleReconnect()
+      this.failConnection()
       return
     }
     this.queue.push(data)
