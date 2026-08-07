@@ -1,7 +1,8 @@
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
-import { StratosValidator } from '@northskysocial/stratos-core'
+import { canAccessRecord, StratosValidator } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
+import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
 import type { ListRecordsResult, RecordResult } from './types.js'
 
 export interface GetRecordInput {
@@ -52,17 +53,23 @@ export async function getRecord(
       throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 
-    // Check domain boundary if caller is not the owner
-    if (callerDid !== repo) {
-      const boundary = StratosValidator.extractBoundaryDomains(record.value)
-      if (boundary.length > 0 && callerDomains) {
-        const allowed = boundary.some((domain) =>
-          callerDomains.includes(domain),
-        )
-        if (!allowed) {
-          throw new InvalidRequestError('Record not found', 'RecordNotFound')
-        }
-      }
+    const recordBoundaries = StratosValidator.extractBoundaryDomains(
+      record.value,
+    )
+    logDomainlessInvariant(ctx.logger, recordBoundaries, {
+      uri,
+      ownerDid: repo,
+    })
+    const hasAccess = canAccessRecord({
+      recordBoundaries,
+      ownerDid: repo,
+      context: {
+        viewerDid: callerDid ?? null,
+        viewerDomains: callerDomains ?? [],
+      },
+    })
+    if (!hasAccess) {
+      throw new InvalidRequestError('Record not found', 'RecordNotFound')
     }
 
     return {
@@ -106,14 +113,21 @@ export async function listRecords(
 
     const records = list
       .filter((record) => {
-        // Check domain boundary if caller is not the owner
-        if (callerDid !== repo) {
-          const boundary = StratosValidator.extractBoundaryDomains(record.value)
-          if (boundary.length > 0 && callerDomains) {
-            return boundary.some((domain) => callerDomains.includes(domain))
-          }
-        }
-        return true
+        const recordBoundaries = StratosValidator.extractBoundaryDomains(
+          record.value,
+        )
+        logDomainlessInvariant(ctx.logger, recordBoundaries, {
+          uri: record.uri.toString(),
+          ownerDid: repo,
+        })
+        return canAccessRecord({
+          recordBoundaries,
+          ownerDid: repo,
+          context: {
+            viewerDid: callerDid ?? null,
+            viewerDomains: callerDomains ?? [],
+          },
+        })
       })
       .map((record) => ({
         uri: record.uri.toString(),
