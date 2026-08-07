@@ -70,6 +70,14 @@ const DEFAULT_JITTER_RATIO = 0.2
 const DEFAULT_MAX_QUEUE_SIZE = 1_000
 const DEFAULT_STABILITY_RESET_MS = 30_000
 const WS_OPEN = 1
+/**
+ * Consecutive failures at the SAME sequence before a distinct stall alarm is
+ * raised. The sequence is still retried indefinitely rather than being passed
+ * over: a lost commit is unrecoverable (the feedgen has no backfill path and
+ * serves feeds straight from its index), whereas a stalled actor is observable
+ * and heals on its own once the underlying fault clears.
+ */
+const APPLY_FAILURE_ALARM_THRESHOLD = 3
 
 /**
  * Maintains a single per-actor WebSocket subscription to
@@ -86,6 +94,8 @@ export class ActorSyncer {
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private queue: Uint8Array[] = []
   private draining = false
+  private lastFailedSeq: number | null = null
+  private sameSeqFailures = 0
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
@@ -149,16 +159,11 @@ export class ActorSyncer {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    if (this.ws) {
-      try {
-        this.ws.close()
-      } catch {
-        // ignore close errors
-      }
-      this.ws = null
-    }
+    this.detachSocket()
+    // `draining` belongs to drain(): clearing it here while a frame is still in
+    // flight would let a later start() launch a second concurrent drain. The
+    // drain loop already exits on `!running` and clears the flag itself.
     this.queue = []
-    this.draining = false
   }
 
   private async connect(): Promise<void> {
@@ -211,6 +216,8 @@ export class ActorSyncer {
     })
 
     ws.onmessage = (e: MessageEventLike) => {
+      // A superseded socket must not refill a queue that was just cleared.
+      if (this.ws !== ws) return
       this.lastMessageAt = Date.now()
       const buf = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
       this.enqueue(buf)
@@ -234,6 +241,11 @@ export class ActorSyncer {
     }
 
     ws.onclose = () => {
+      // A socket we already gave up on closes on its own schedule, which can be
+      // later than the reconnect that replaced it. Acting on that close would
+      // detach the live socket instead, and every frame it delivered would then
+      // be dropped by the superseded-socket guard in `onmessage`.
+      if (this.ws !== ws) return
       this.ws = null
       this.clearStabilityTimer()
       if (this.running) {
@@ -276,6 +288,36 @@ export class ActorSyncer {
     }, delay)
   }
 
+  /**
+   * Abandon the current connection without advancing the cursor. Everything
+   * still buffered is discarded rather than applied: the reconnect replays it
+   * from the last durable cursor, so discarding is lossless, while applying it
+   * would carry the cursor past the sequence we just failed on.
+   */
+  private failConnection(): void {
+    this.queue = []
+    this.detachSocket()
+    this.scheduleReconnect()
+  }
+
+  /**
+   * Close the current socket and give up ownership of it at once. `close()`
+   * only starts the closing handshake — the close event can land well after the
+   * reconnect that follows — so ownership is dropped here rather than in
+   * `onclose`, and the detached socket's own close is then ignored.
+   */
+  private detachSocket(): void {
+    const ws = this.ws
+    if (!ws) return
+    this.ws = null
+    this.clearStabilityTimer()
+    try {
+      ws.close()
+    } catch {
+      // ignore close errors
+    }
+  }
+
   private enqueue(data: Uint8Array): void {
     if (this.queue.length >= this.maxQueueSize) {
       this.deps.onError?.(
@@ -284,15 +326,7 @@ export class ActorSyncer {
           'ACTOR_SYNC_OVERFLOW',
         ),
       )
-      if (this.ws) {
-        try {
-          this.ws.close()
-        } catch {
-          // ignore
-        }
-        this.ws = null
-      }
-      this.scheduleReconnect()
+      this.failConnection()
       return
     }
     this.queue.push(data)
@@ -315,6 +349,32 @@ export class ActorSyncer {
     }
   }
 
+  /**
+   * Decode a frame and apply its commit.
+   *
+   * The two failure paths here have deliberately opposite policies.
+   *
+   * An *apply* failure stalls (`failConnection`): it is normally a transient
+   * store fault, so retrying the sequence eventually succeeds, and advancing
+   * past it would drop the commit permanently — the feedgen serves feeds from
+   * its own index and has no backfill path.
+   *
+   * A *decode* failure continues. It cannot be retried, because the frame
+   * decodes identically on replay, so stalling would wedge this actor forever
+   * with no fault that can clear. It also means version skew rather than
+   * corruption — the upstream fails closed on events it cannot decode, so a
+   * frame reaching us undecodable implies a framing/CBOR mismatch that would
+   * hit every actor at once; stalling would take the whole feedgen down on a
+   * protocol change. The accepted cost is that the next successful commit
+   * advances the cursor past the lost frame, so these are reported loudly
+   * under their own code.
+   *
+   * A body that decodes but has the wrong *shape* is a decode failure too, and
+   * must be caught here rather than handed to `applyCommit`: a non-array `ops`
+   * would throw inside the apply and be misread as a transient store fault,
+   * stalling the actor forever on a frame that can never succeed, and a
+   * non-numeric `seq` would be written straight to the cursor.
+   */
   private async handleFrame(data: Uint8Array): Promise<void> {
     let header: Record<string, unknown>
     let rest: Uint8Array
@@ -324,17 +384,39 @@ export class ActorSyncer {
         Uint8Array,
       ]
     } catch (err) {
-      this.deps.onError?.(err as Error)
+      this.deps.onError?.(
+        new StratosError(
+          `undecodable frame header for ${this.config.did}`,
+          'ACTOR_SYNC_FRAME_UNDECODABLE',
+          { cause: err },
+        ),
+      )
       return
     }
     if (header['t'] !== '#commit') return
-    let body: CommitFrameBody
+    let decoded: unknown
     try {
-      ;[body] = decodeFirst(rest) as [CommitFrameBody, Uint8Array]
+      ;[decoded] = decodeFirst(rest) as [unknown, Uint8Array]
     } catch (err) {
-      this.deps.onError?.(err as Error)
+      this.deps.onError?.(
+        new StratosError(
+          `undecodable commit body for ${this.config.did}`,
+          'ACTOR_SYNC_FRAME_UNDECODABLE',
+          { cause: err },
+        ),
+      )
       return
     }
+    if (!isCommitFrameBody(decoded)) {
+      this.deps.onError?.(
+        new StratosError(
+          `malformed commit body for ${this.config.did}`,
+          'ACTOR_SYNC_FRAME_UNDECODABLE',
+        ),
+      )
+      return
+    }
+    const body = decoded
     try {
       await this.deps.indexer.applyCommit({
         did: this.config.did,
@@ -342,10 +424,61 @@ export class ActorSyncer {
         time: body.time,
         ops: body.ops,
       })
+      this.lastFailedSeq = null
+      this.sameSeqFailures = 0
     } catch (err) {
-      this.deps.onError?.(err as Error)
+      this.recordApplyFailure(body.seq, err)
+      this.failConnection()
     }
   }
+
+  /**
+   * Report an apply failure and, once the same sequence has failed
+   * `APPLY_FAILURE_ALARM_THRESHOLD` times in a row, raise one distinct alarm.
+   * The alarm fires once per stall episode so a wedged actor produces a signal
+   * rather than a stream of noise.
+   */
+  private recordApplyFailure(seq: number, err: unknown): void {
+    if (seq === this.lastFailedSeq) {
+      this.sameSeqFailures++
+    } else {
+      this.lastFailedSeq = seq
+      this.sameSeqFailures = 1
+    }
+    this.deps.onError?.(
+      new StratosError(
+        `commit apply failed for ${this.config.did} at seq ${seq}`,
+        'ACTOR_SYNC_APPLY_FAILED',
+        { cause: err },
+      ),
+    )
+    if (this.sameSeqFailures === APPLY_FAILURE_ALARM_THRESHOLD) {
+      this.deps.onError?.(
+        new StratosError(
+          `actor sync stalled for ${this.config.did} at seq ${seq} after ${this.sameSeqFailures} consecutive apply failures; retrying indefinitely`,
+          'ACTOR_SYNC_STALLED',
+        ),
+      )
+    }
+  }
+}
+
+/**
+ * Whether a decoded commit body carries the three fields the apply path relies
+ * on. `seq` must be a real number because it becomes the durable cursor, and
+ * `ops` must be iterable because `applyCommit` loops it. Non-object bodies need
+ * no arm of their own: indexing a scalar yields `undefined` and fails the field
+ * checks anyway, so only `null`/`undefined` — which throw on index — have to be
+ * turned away up front.
+ */
+function isCommitFrameBody(value: unknown): value is CommitFrameBody {
+  if (!value) return false
+  const body = value as Record<string, unknown>
+  return (
+    Number.isFinite(body['seq']) &&
+    typeof body['time'] === 'string' &&
+    Array.isArray(body['ops'])
+  )
 }
 
 function buildWsUrl(
