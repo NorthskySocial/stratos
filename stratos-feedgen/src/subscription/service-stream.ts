@@ -26,6 +26,7 @@ export interface ServiceStreamConfig {
   baseDelayMs?: number
   maxDelayMs?: number
   jitterRatio?: number
+  maxQueueSize?: number
   /**
    * How long a connection must stay open before its backoff counter is reset.
    * Prevents an accept-then-immediately-close loop from reconnecting forever at
@@ -74,6 +75,7 @@ const DEFAULT_BASE_DELAY_MS = 5_000
 const DEFAULT_MAX_DELAY_MS = 60_000
 const DEFAULT_JITTER_RATIO = 0.2
 const DEFAULT_STABILITY_RESET_MS = 30_000
+const DEFAULT_MAX_QUEUE_SIZE = 1_000
 const WS_OPEN = 1
 
 /**
@@ -90,9 +92,12 @@ export class ServiceStream {
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  private queue: Uint8Array[] = []
+  private draining = false
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
+  private readonly maxQueueSize: number
   private readonly stabilityResetMs: number
   private readonly wsCtor: WebSocketCtor
   private readonly rng: () => number
@@ -106,6 +111,7 @@ export class ServiceStream {
     this.baseDelayMs = config.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
     this.maxDelayMs = config.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
     this.jitterRatio = config.jitterRatio ?? DEFAULT_JITTER_RATIO
+    this.maxQueueSize = config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
     this.stabilityResetMs =
       config.stabilityResetMs ?? DEFAULT_STABILITY_RESET_MS
     this.wsCtor = deps?.wsCtor ?? (NodeWebSocket as unknown as WebSocketCtor)
@@ -129,14 +135,11 @@ export class ServiceStream {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    if (this.ws) {
-      try {
-        this.ws.close()
-      } catch {
-        // ignore close errors
-      }
-      this.ws = null
-    }
+    this.detachSocket()
+    // `draining` belongs to drain(): clearing it here while a handler is still
+    // in flight would let a later start() launch a second concurrent drain.
+    // The drain loop already exits on `!running` and clears the flag itself.
+    this.queue = []
   }
 
   private async connect(): Promise<void> {
@@ -171,8 +174,10 @@ export class ServiceStream {
     })
 
     ws.onmessage = (e: MessageEventLike) => {
+      // A superseded socket must not refill a queue that was just cleared.
+      if (this.ws !== ws) return
       const buf = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data)
-      void this.handleMessage(buf)
+      this.enqueue(buf)
     }
 
     ws.onerror = (e: ErrorEventLike) => {
@@ -193,6 +198,10 @@ export class ServiceStream {
     }
 
     ws.onclose = () => {
+      // A socket we already gave up on closes on its own schedule, which can be
+      // later than the reconnect that replaced it. Acting on that close would
+      // detach the live socket instead.
+      if (this.ws !== ws) return
       this.ws = null
       this.clearStabilityTimer()
       if (this.running) {
@@ -233,6 +242,74 @@ export class ServiceStream {
       this.reconnectTimer = null
       void this.connect()
     }, delay)
+  }
+
+  /**
+   * Close the current socket and give up ownership of it at once. `close()`
+   * only starts the closing handshake — the close event can land well after the
+   * reconnect that follows — so ownership is dropped here rather than in
+   * `onclose`, and the detached socket's own close is then ignored.
+   */
+  private detachSocket(): void {
+    const ws = this.ws
+    if (!ws) return
+    this.ws = null
+    this.clearStabilityTimer()
+    try {
+      ws.close()
+    } catch {
+      // ignore close errors
+    }
+  }
+
+  /**
+   * Abandon the current connection and everything still buffered. Discarding is
+   * lossless for enroll and boundary changes: this stream has no cursor, and
+   * the upstream replays every current enrollment on connect
+   * (`createServiceSubscriptionHandler` in the service's `subscribe-records`),
+   * so the reconnect restores the full set.
+   */
+  private failConnection(): void {
+    this.queue = []
+    this.detachSocket()
+    this.scheduleReconnect()
+  }
+
+  /**
+   * Buffer a frame for sequential processing. Enrollment events are
+   * order-sensitive — an `unenroll` overtaking its `enroll` would leave the
+   * pool and the boundary cache disagreeing about whether an actor syncs — so
+   * frames are drained one at a time rather than dispatched concurrently.
+   */
+  private enqueue(data: Uint8Array): void {
+    if (this.queue.length >= this.maxQueueSize) {
+      this.onError?.(
+        new StratosError(
+          'enrollment stream queue overflow; dropping connection',
+          'SERVICE_STREAM_OVERFLOW',
+        ),
+      )
+      this.failConnection()
+      return
+    }
+    this.queue.push(data)
+    if (!this.draining) {
+      void this.drain()
+    }
+  }
+
+  private async drain(): Promise<void> {
+    if (this.draining) return
+    this.draining = true
+    try {
+      while (this.queue.length > 0 && this.running) {
+        const data = this.queue.shift()
+        if (!data) continue
+        await this.handleMessage(data)
+      }
+    } finally {
+      this.draining = false
+    }
   }
 
   private async handleMessage(data: Uint8Array): Promise<void> {
