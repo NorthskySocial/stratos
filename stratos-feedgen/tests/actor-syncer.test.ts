@@ -620,6 +620,46 @@ describe('ActorSyncer', () => {
     syncer.stop()
   })
 
+  it('ignores a close event that arrives after the socket was detached', async () => {
+    const { indexer: failing } = wrapIndexer(indexer, (seq) => seq === 1)
+    const syncer = new ActorSyncer(
+      {
+        did: DID,
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        baseDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        jitterRatio: 0,
+      },
+      { store, indexer: failing, wsCtor: FakeWebSocket as never, rng: () => 0 },
+    )
+    syncer.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const first = FakeWebSocket.instances[0]
+    first.open()
+    // The apply failure abandons this socket and schedules the reconnect.
+    first.send(commitFrame(1))
+    await vi.advanceTimersByTimeAsync(1_500)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const second = FakeWebSocket.instances[1]
+    second.open()
+
+    // `close()` only starts the handshake, so the abandoned socket's close can
+    // land here — after its replacement is already live.
+    first.onclose?.()
+
+    // Ownership stayed with the live socket, so no second reconnect fires...
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // ...and its frames are still consumed, rather than being discarded by the
+    // superseded-socket guard against a `ws` the stale close had nulled.
+    second.send(commitFrame(2))
+    await vi.waitFor(async () => {
+      expect(await store.getCursor(DID)).toBe(2)
+    })
+    syncer.stop()
+  })
+
   it('reports the store error as the cause of the apply failure', async () => {
     const errors: Error[] = []
     const diskFull = new Error('SQLITE_FULL: database or disk is full')

@@ -793,6 +793,67 @@ describe('ServiceStream', () => {
     stream.stop()
   })
 
+  it('ignores a close event that arrives after the socket was detached', async () => {
+    const mint = makeMintToken()
+    const enrolls: string[] = []
+    const gate = makeGate()
+    let gated = true
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        jitterRatio: 0,
+        maxQueueSize: 1,
+      },
+      {
+        onEnroll: async (did) => {
+          enrolls.push(did)
+          if (gated) {
+            gated = false
+            await gate.wait()
+          }
+        },
+        onUnenroll: () => {},
+      },
+      () => {},
+      { wsCtor: FakeWebSocket as never, rng: () => 0 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const first = FakeWebSocket.instances[0]
+    first.open()
+
+    const frameFor = (did: string): Uint8Array =>
+      encodeEnrollmentFrame({ did, action: 'enroll' })
+    first.send(frameFor('did:plc:vash'))
+    await vi.waitFor(() => expect(gate.release).not.toBeNull())
+    first.send(frameFor('did:plc:wolfwood'))
+    // Overflow abandons this socket and schedules the reconnect.
+    first.send(frameFor('did:plc:meryl'))
+    gate.release?.()
+
+    await vi.advanceTimersByTimeAsync(1_500)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const second = FakeWebSocket.instances[1]
+    second.open()
+
+    // `close()` only starts the handshake, so the abandoned socket's close can
+    // land here — after its replacement is already live.
+    first.onclose?.()
+
+    // Ownership stayed with the live socket, so no second reconnect fires...
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // ...and its frames are still dispatched, rather than being discarded by
+    // the superseded-socket guard against a `ws` the stale close had nulled.
+    second.send(frameFor('did:plc:milly'))
+    await vi.waitFor(() => expect(enrolls).toContain('did:plc:milly'))
+    stream.stop()
+  })
+
   it('ignores frames from a socket that was already dropped', async () => {
     const mint = makeMintToken()
     const enrolls: string[] = []
