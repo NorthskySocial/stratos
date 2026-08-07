@@ -158,6 +158,9 @@ const envSchema = z
 
     // Admin auth: comma-separated list of admin DIDs (OAuth-authorized operators)
     STRATOS_ADMIN_DIDS: z.string().optional(),
+    // Comma-separated list of origins the enrollment flow may redirect back to
+    // (e.g. the webapp origin). Empty means no external redirect is permitted.
+    STRATOS_ALLOWED_REDIRECT_ORIGINS: z.string().optional(),
     // External allowlist (optional)
     STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
     STRATOS_VALKEY_URL: z.string().url().optional(),
@@ -303,6 +306,7 @@ export interface StratosServiceConfig {
     level: string
   }
   adminDids: string[]
+  allowedRedirectOrigins: string[]
   dpop: {
     requireNonce: boolean
   }
@@ -555,6 +559,32 @@ function loadSpaceAppAccess(
   return validateSpaceAppAccess(raw, serviceDid)
 }
 
+/**
+ * Parse the redirect-origin allow-list, normalizing each entry to
+ * `URL.origin` so operator spellings (trailing slash, explicit default
+ * port, uppercase) match the exact-origin comparison at request time.
+ *
+ * @param raw - Raw comma-separated env value.
+ * @returns Normalized origins.
+ * @throws Error if an entry is not a parseable URL — a malformed entry in a
+ *   security allow-list must surface at startup, not silently never match.
+ */
+function parseAllowedRedirectOrigins(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      try {
+        return new URL(entry).origin
+      } catch {
+        throw new Error(
+          `STRATOS_ALLOWED_REDIRECT_ORIGINS entry "${entry}" is not a valid origin URL`,
+        )
+      }
+    })
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
@@ -638,6 +668,9 @@ export function envToConfig(env: Env): StratosServiceConfig {
       .split(',')
       .map((d) => d.trim())
       .filter((d) => d.length > 0),
+    allowedRedirectOrigins: parseAllowedRedirectOrigins(
+      env.STRATOS_ALLOWED_REDIRECT_ORIGINS,
+    ),
     dpop: {
       requireNonce: env.STRATOS_DPOP_REQUIRE_NONCE,
     },
@@ -685,6 +718,52 @@ export function isAllowedCredentialedOrigin(
   if (config.devMode) {
     const host = originUrl.hostname
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Determine whether the enrollment flow may bounce the browser to a
+ * `redirect_uri`.
+ *
+ * A scheme-only check makes the service an open redirect: any site can be
+ * named and a just-authenticated user is delivered there from a trusted
+ * origin. The destination host must therefore be declared by the operator.
+ * The list defaults to empty, so an unconfigured deployment performs no
+ * external redirect at all; loopback is admitted in dev mode so local
+ * development needs no configuration.
+ *
+ * This is deliberately a separate trust list from
+ * `isAllowedCredentialedOrigin` (admin CSRF), which is same-service-origin.
+ *
+ * @param redirectUri - The full redirect target supplied by the client
+ * @param config - Allow-listed origins and dev-mode flag
+ * @returns true if the browser may be redirected to this URI
+ */
+export function isAllowedRedirectOrigin(
+  redirectUri: string,
+  config: { allowedRedirectOrigins: string[]; devMode: boolean },
+): boolean {
+  let url: URL
+  try {
+    url = new URL(redirectUri)
+  } catch {
+    return false
+  }
+
+  // Opaque origins (data:, blob:, …) serialize as the string 'null'; a
+  // literal 'null' list entry must never admit them.
+  if (url.origin === 'null') return false
+
+  if (config.allowedRedirectOrigins.includes(url.origin)) return true
+
+  if (config.devMode) {
+    // `URL.hostname` renders IPv6 literals bracketed, so match the bracketed form.
+    const host = url.hostname
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') {
       return true
     }
   }

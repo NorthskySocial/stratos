@@ -4,6 +4,7 @@ import type {
   EnrollmentValidationResult,
   Logger,
 } from '@northskysocial/stratos-core'
+import { isAllowedRedirectOrigin } from '../../config.js'
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
 import {
   migrateEnrollmentRkey,
@@ -90,6 +91,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
         did,
         alreadyEnrolled,
         allowedSchemes,
+        allowedRedirectOrigins: config.allowedRedirectOrigins ?? [],
+        devMode,
         enrollBoundaries,
         logger,
       })
@@ -260,12 +263,30 @@ async function handleNewEnrollment(deps: {
   })
 }
 
+/**
+ * Read the `stratos_redirect` cookie as a string.
+ *
+ * Express types `req.cookies` as `any`; narrowing here keeps the redirect
+ * target — attacker-influenced input — typed at every gate downstream.
+ *
+ * @param req - The callback request
+ * @returns The stored redirect target, or undefined if absent or non-string
+ */
+function readRedirectCookie(req: express.Request): string | undefined {
+  const cookies: unknown = (req as { cookies?: unknown }).cookies
+  if (typeof cookies !== 'object' || cookies === null) return undefined
+  const value = (cookies as Record<string, unknown>).stratos_redirect
+  return typeof value === 'string' ? value : undefined
+}
+
 function sendOAuthResponse(deps: {
   req: express.Request
   res: express.Response
   did: string
   alreadyEnrolled: boolean
   allowedSchemes: string[]
+  allowedRedirectOrigins: string[]
+  devMode: boolean
   enrollBoundaries: string[]
   logger: Logger | undefined
 }) {
@@ -275,20 +296,25 @@ function sendOAuthResponse(deps: {
     did,
     alreadyEnrolled,
     allowedSchemes,
+    allowedRedirectOrigins,
+    devMode,
     enrollBoundaries,
     logger,
   } = deps
 
   // Redirect back to the app if a redirect was stored, otherwise return JSON
-  const redirectTo = (
-    req as express.Request & { cookies?: Record<string, string> }
-  ).cookies?.stratos_redirect
+  const redirectTo = readRedirectCookie(req)
   if (redirectTo) {
     res.clearCookie('stratos_redirect')
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const url = new URL(redirectTo)
-      if (allowedSchemes.includes(url.protocol)) {
+      if (
+        allowedSchemes.includes(url.protocol) &&
+        isAllowedRedirectOrigin(redirectTo, {
+          allowedRedirectOrigins,
+          devMode,
+        })
+      ) {
         url.searchParams.set('stratos_enrolled', 'true')
         return res.redirect(url.toString())
       }

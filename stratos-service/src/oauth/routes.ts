@@ -69,6 +69,7 @@ export interface OAuthRoutesConfig {
   serviceDid: string
   defaultBoundaries?: string[]
   autoEnrollDomains?: string[]
+  allowedRedirectOrigins: string[]
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../infra/auth/dpop-verifier.js').DpopVerifier
