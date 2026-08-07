@@ -135,14 +135,7 @@ export class ServiceStream {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    if (this.ws) {
-      try {
-        this.ws.close()
-      } catch {
-        // ignore close errors
-      }
-      this.ws = null
-    }
+    this.detachSocket()
     // `draining` belongs to drain(): clearing it here while a handler is still
     // in flight would let a later start() launch a second concurrent drain.
     // The drain loop already exits on `!running` and clears the flag itself.
@@ -205,6 +198,10 @@ export class ServiceStream {
     }
 
     ws.onclose = () => {
+      // A socket we already gave up on closes on its own schedule, which can be
+      // later than the reconnect that replaced it. Acting on that close would
+      // detach the live socket instead.
+      if (this.ws !== ws) return
       this.ws = null
       this.clearStabilityTimer()
       if (this.running) {
@@ -248,6 +245,24 @@ export class ServiceStream {
   }
 
   /**
+   * Close the current socket and give up ownership of it at once. `close()`
+   * only starts the closing handshake — the close event can land well after the
+   * reconnect that follows — so ownership is dropped here rather than in
+   * `onclose`, and the detached socket's own close is then ignored.
+   */
+  private detachSocket(): void {
+    const ws = this.ws
+    if (!ws) return
+    this.ws = null
+    this.clearStabilityTimer()
+    try {
+      ws.close()
+    } catch {
+      // ignore close errors
+    }
+  }
+
+  /**
    * Abandon the current connection and everything still buffered. Discarding is
    * lossless for enroll and boundary changes: this stream has no cursor, and
    * the upstream replays every current enrollment on connect
@@ -256,14 +271,7 @@ export class ServiceStream {
    */
   private failConnection(): void {
     this.queue = []
-    if (this.ws) {
-      try {
-        this.ws.close()
-      } catch {
-        // ignore
-      }
-      this.ws = null
-    }
+    this.detachSocket()
     this.scheduleReconnect()
   }
 
