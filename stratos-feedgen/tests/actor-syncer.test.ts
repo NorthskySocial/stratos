@@ -123,6 +123,16 @@ function commitFrame(seq: number): Uint8Array {
   })
 }
 
+/** A `#commit` frame whose body is whatever the caller supplies, valid or not. */
+function rawCommitFrame(body: unknown): Uint8Array {
+  const header = cborEncode({ op: 1, t: '#commit' })
+  const bodyBuf = cborEncode(body as never)
+  const out = new Uint8Array(header.length + bodyBuf.length)
+  out.set(header, 0)
+  out.set(bodyBuf, header.length)
+  return out
+}
+
 function codesOf(errors: Error[]): string[] {
   return errors.map((err) => (err as StratosError).code)
 }
@@ -540,6 +550,76 @@ describe('ActorSyncer', () => {
     syncer.stop()
   })
 
+  it('treats a decodable but malformed commit body as an undecodable frame', async () => {
+    const errors: Error[] = []
+    const applied: number[] = []
+    const recording = {
+      applyCommit: async (args: IndexCommitArgs): Promise<void> => {
+        applied.push(args.seq)
+        await indexer.applyCommit(args)
+      },
+    } as unknown as SubscriptionIndexer
+    const syncer = new ActorSyncer(
+      {
+        did: DID,
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        baseDelayMs: 60_000,
+        maxDelayMs: 60_000,
+        jitterRatio: 0,
+      },
+      {
+        store,
+        indexer: recording,
+        wsCtor: FakeWebSocket as never,
+        rng: () => 0,
+        onError: (err) => errors.push(err),
+      },
+    )
+    syncer.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    const time = '2024-02-01T00:00:00.000Z'
+    // `ops` is not iterable. Handing this to applyCommit would throw and be
+    // misread as a transient store fault, stalling the actor forever on a
+    // frame that can never succeed.
+    ws.send(rawCommitFrame({ seq: 1, time, ops: 'nope' }))
+    // `seq` is not a number, and applyCommit writes it straight to the cursor.
+    ws.send(rawCommitFrame({ seq: 'nope', time, ops: [] }))
+    // `time` is absent, and applyCommit stores it as `indexedAt`.
+    ws.send(rawCommitFrame({ seq: 2, ops: [] }))
+    // Not a map. `null` and a bare scalar are distinct hazards: indexing into
+    // `null` throws, and that throw would escape drain() as an unhandled
+    // rejection instead of being reported.
+    ws.send(rawCommitFrame(['not', 'a', 'commit']))
+    ws.send(rawCommitFrame(null))
+    ws.send(rawCommitFrame(42))
+
+    await vi.waitFor(() =>
+      expect(
+        codesOf(errors).filter((c) => c === 'ACTOR_SYNC_FRAME_UNDECODABLE'),
+      ).toHaveLength(6),
+    )
+    for (const err of errors) {
+      expect(err.message).toContain(DID)
+      expect(err.message).toContain('malformed commit body')
+    }
+    // None of them reached the apply path, so no garbage cursor landed.
+    expect(applied).toEqual([])
+    expect(await store.getCursor(DID)).toBeNull()
+    // Deterministic frame faults follow the decode policy: report and continue.
+    expect(ws.readyState).toBe(WS_OPEN)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    ws.send(commitFrame(7))
+    await vi.waitFor(async () => {
+      expect(await store.getCursor(DID)).toBe(7)
+    })
+    syncer.stop()
+  })
+
   it('reports the store error as the cause of the apply failure', async () => {
     const errors: Error[] = []
     const diskFull = new Error('SQLITE_FULL: database or disk is full')
@@ -601,9 +681,11 @@ describe('ActorSyncer', () => {
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const ws = FakeWebSocket.instances[0]
     ws.open()
-    // Garbage header, then a valid header with a garbage body: both decode
-    // catches must tolerate the absent sink.
+    // Garbage header, a valid header with a garbage body, then a body that
+    // decodes but is malformed: all three reject paths must tolerate the
+    // absent sink.
     ws.send(new Uint8Array([0xff, 0xff, 0xff, 0xff]))
+    ws.send(rawCommitFrame({ seq: 1, time: '2024-02-01T00:00:00.000Z' }))
     const header = cborEncode({ op: 1, t: '#commit' })
     const badBody = new Uint8Array(header.length + 3)
     badBody.set(header, 0)
