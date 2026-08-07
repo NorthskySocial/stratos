@@ -2,6 +2,7 @@ import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import type { Logger } from '@northskysocial/stratos-core'
 import type { AdminSessionStore } from './admin-session-store.js'
+import { isEffectiveAdmin, type AdminUserStore } from './admin-user-store.js'
 import { passesAdminCsrfCheck } from '../config.js'
 import { handleAdminAuthorize } from './handlers/admin-authorize.js'
 import { handleAdminCallback } from './handlers/admin-callback.js'
@@ -50,6 +51,7 @@ export const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000
 export interface AdminAuthRoutesConfig {
   oauthClient: NodeOAuthClient
   adminSessionStore: AdminSessionStore
+  adminUserStore: AdminUserStore
   adminDids: string[]
   baseUrl: string
   devMode?: boolean
@@ -58,18 +60,21 @@ export interface AdminAuthRoutesConfig {
 
 /**
  * Resolve the admin DID from the request's session cookie, or null if there is
- * no valid, unexpired session whose DID is still on the allowlist.
+ * no valid, unexpired session whose DID is still an effective admin.
  */
 export async function resolveAdminSession(
   req: express.Request,
-  config: Pick<AdminAuthRoutesConfig, 'adminSessionStore' | 'adminDids'>,
+  config: Pick<
+    AdminAuthRoutesConfig,
+    'adminSessionStore' | 'adminDids' | 'adminUserStore'
+  >,
 ): Promise<string | null> {
   const sessionKey = readAdminSessionCookie(req)
   if (!sessionKey) return null
 
   const session = await config.adminSessionStore.get(sessionKey)
   if (!session) return null
-  if (!config.adminDids.includes(session.did)) return null
+  if (!(await isEffectiveAdmin(session.did, config))) return null
 
   return session.did
 }

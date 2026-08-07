@@ -29,6 +29,19 @@ export interface AdminUserStore {
 }
 
 /**
+ * The effective admin set is the union of the config allowlist (recovery
+ * floor, un-revocable) and the runtime grants in the store. Both the
+ * request-time `.admin` verifier and the `/whoami` session resolver MUST
+ * decide membership through this predicate so the two can never drift.
+ */
+export async function isEffectiveAdmin(
+  did: string,
+  deps: { adminDids: string[]; adminUserStore: Pick<AdminUserStore, 'has'> },
+): Promise<boolean> {
+  return deps.adminDids.includes(did) || (await deps.adminUserStore.has(did))
+}
+
+/**
  * SQLite-backed admin user store.
  */
 export class SqliteAdminUserStore implements AdminUserStore {

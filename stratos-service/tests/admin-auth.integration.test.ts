@@ -11,7 +11,11 @@ import {
   type ServiceDb,
 } from '../src/db'
 import { SqliteAdminSessionStore } from '../src/oauth/admin-session-store.js'
-import { SqliteAdminUserStore } from '../src/oauth/admin-user-store.js'
+import {
+  isEffectiveAdmin,
+  SqliteAdminUserStore,
+  type AdminUserStore,
+} from '../src/oauth/admin-user-store.js'
 import {
   ADMIN_SESSION_COOKIE,
   resolveAdminSession,
@@ -30,6 +34,17 @@ import { createTestConfig } from './utils'
 const ADMIN_DID = 'did:plc:usagi'
 const INTRUDER_DID = 'did:plc:mamoru'
 const PUBLIC_URL = 'https://stratos.test'
+
+/** Store stub for cases that exercise the config allowlist alone. */
+const NO_GRANTED_ADMINS = {
+  has: async () => false,
+} as unknown as AdminUserStore
+
+function grantedAdminStore(granted: string): AdminUserStore {
+  return {
+    has: async (did: string) => did === granted,
+  } as unknown as AdminUserStore
+}
 
 function makeAdminCtx(headers: Record<string, string | undefined>): {
   req: import('node:http').IncomingMessage
@@ -111,6 +126,7 @@ describe('SqliteAdminSessionStore', () => {
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
+      adminUserStore: NO_GRANTED_ADMINS,
     })
     expect(did).toBeNull()
   })
@@ -510,6 +526,7 @@ describe('admin OAuth callback', () => {
       oauthClient: oauthClient as never,
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
+      adminUserStore: NO_GRANTED_ADMINS,
       baseUrl: PUBLIC_URL,
     }
   }
@@ -593,6 +610,7 @@ describe('resolveAdminSession (whoami / logout)', () => {
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
+      adminUserStore: NO_GRANTED_ADMINS,
     })
     expect(did).toBe(ADMIN_DID)
   })
@@ -604,6 +622,7 @@ describe('resolveAdminSession (whoami / logout)', () => {
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
+      adminUserStore: NO_GRANTED_ADMINS,
     })
     expect(did).toBeNull()
   })
@@ -613,7 +632,71 @@ describe('resolveAdminSession (whoami / logout)', () => {
     const did = await resolveAdminSession(req, {
       adminSessionStore: store,
       adminDids: [ADMIN_DID],
+      adminUserStore: NO_GRANTED_ADMINS,
     })
     expect(did).toBeNull()
+  })
+
+  it('resolves a session for a runtime-granted admin not on the allowlist', async () => {
+    const grantedDid = 'did:plc:spike-spiegel'
+    const key = await store.create(grantedDid, 60_000)
+    const req: any = { headers: { cookie: `${ADMIN_SESSION_COOKIE}=${key}` } }
+    const did = await resolveAdminSession(req, {
+      adminSessionStore: store,
+      adminDids: [ADMIN_DID],
+      adminUserStore: grantedAdminStore(grantedDid),
+    })
+    expect(did).toBe(grantedDid)
+  })
+
+  it('returns null for a session DID that is neither allowlisted nor granted', async () => {
+    const key = await store.create(INTRUDER_DID, 60_000)
+    const req: any = { headers: { cookie: `${ADMIN_SESSION_COOKIE}=${key}` } }
+    const did = await resolveAdminSession(req, {
+      adminSessionStore: store,
+      adminDids: [ADMIN_DID],
+      adminUserStore: grantedAdminStore('did:plc:spike-spiegel'),
+    })
+    expect(did).toBeNull()
+  })
+})
+
+describe('isEffectiveAdmin (shared by the .admin verifier and /whoami)', () => {
+  const GRANTED_DID = 'did:plc:faye-valentine'
+
+  it('admits a DID on the config allowlist with no runtime grant', async () => {
+    expect(
+      await isEffectiveAdmin(ADMIN_DID, {
+        adminDids: [ADMIN_DID],
+        adminUserStore: NO_GRANTED_ADMINS,
+      }),
+    ).toBe(true)
+  })
+
+  it('admits a DID granted at runtime but absent from the allowlist', async () => {
+    expect(
+      await isEffectiveAdmin(GRANTED_DID, {
+        adminDids: [ADMIN_DID],
+        adminUserStore: grantedAdminStore(GRANTED_DID),
+      }),
+    ).toBe(true)
+  })
+
+  it('admits a DID that is both allowlisted and granted', async () => {
+    expect(
+      await isEffectiveAdmin(ADMIN_DID, {
+        adminDids: [ADMIN_DID],
+        adminUserStore: grantedAdminStore(ADMIN_DID),
+      }),
+    ).toBe(true)
+  })
+
+  it('rejects a DID in neither set', async () => {
+    expect(
+      await isEffectiveAdmin(INTRUDER_DID, {
+        adminDids: [ADMIN_DID],
+        adminUserStore: grantedAdminStore(GRANTED_DID),
+      }),
+    ).toBe(false)
   })
 })
