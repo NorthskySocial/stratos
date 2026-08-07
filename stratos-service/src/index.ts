@@ -425,6 +425,7 @@ export class StratosServer {
     const adminRoutes = createAdminAuthRoutes({
       oauthClient: ctx.oauthClient,
       adminSessionStore: ctx.adminSessionStore,
+      adminUserStore: ctx.adminUserStore,
       adminDids: cfg.adminDids,
       baseUrl: cfg.service.publicUrl,
       devMode: cfg.stratos.devMode === true,

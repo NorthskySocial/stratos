@@ -18,6 +18,8 @@
     "src/features/pull-sync/**/*.ts",
     "src/infra/auth/**/*.ts",
     "src/infra/signing/**/*.ts",
+    "src/oauth/admin-routes.ts",
+    "src/oauth/admin-user-store.ts",
     "src/oauth/handlers/authorize.ts",
     "src/oauth/handlers/callback.ts",
     "src/oauth/redirect-target.ts",
