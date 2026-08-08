@@ -8,6 +8,7 @@ import type { PostTable, StratosIndexerSchema } from '../storage/schema.ts'
 const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 const INDEX_TRACE_WARN_LAG_MS = 5_000
 const DEFAULT_STABILITY_RESET_MS = 30_000
+const RECONNECT_COOLDOWN_MS = 300_000
 
 export interface ActorQueue {
   pending: Uint8Array[]
@@ -210,9 +211,19 @@ export class ActorSyncer {
 
     this.reconnectAttempts++
     if (this.reconnectAttempts > this.options.reconnectMaxAttempts) {
+      // Abandoning the actor would strand it until a process restart: nothing
+      // else revives a stopped syncer. Back off hard, then start over.
       this.options.onError?.(
-        new Error(`Max reconnect attempts reached for actor ${this.did}`),
+        new StratosError(
+          `Max reconnect attempts reached for actor ${this.did}; cooling down`,
+          'ACTOR_SYNC_COOLDOWN',
+        ),
       )
+      this.reconnectAttempts = 0
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null
+        this.connect()
+      }, RECONNECT_COOLDOWN_MS)
       return
     }
 

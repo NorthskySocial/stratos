@@ -2,7 +2,7 @@ import { decodeFirst } from '@atcute/cbor'
 import { Kysely } from 'kysely'
 import { StratosError } from '@northskysocial/stratos-core'
 import type { CursorManager } from '../storage/cursor-manager.ts'
-import { ActorSyncer } from './actor-syncer.ts'
+import { ActorSyncer, type ActorQueue } from './actor-syncer.ts'
 import type { StratosIndexerSchema } from '../storage/schema.ts'
 
 export interface StratosActorSyncOptions {
@@ -54,6 +54,7 @@ const DEFAULT_ACTOR_SYNC_OPTIONS: StratosActorSyncOptions = {
 const SERVICE_RECONNECT_BASE_DELAY_MS = 1000
 const SERVICE_RECONNECT_MAX_DELAY_MS = 30000
 const SERVICE_STABILITY_RESET_MS = 30000
+const SERVICE_STREAM_MAX_QUEUE = 1_000
 
 // --- Service-level enrollment stream ---
 
@@ -66,6 +67,7 @@ export class StratosServiceSubscription {
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  private queue: ActorQueue = { pending: [], draining: false }
 
   constructor(
     private config: StratosSyncConfig,
@@ -95,6 +97,7 @@ export class StratosServiceSubscription {
   stop(): void {
     this.running = false
     this.clearStabilityTimer()
+    this.resetQueue()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -112,6 +115,8 @@ export class StratosServiceSubscription {
   private connect(): void {
     if (!this.running) return
 
+    this.resetQueue()
+
     const wsUrl = buildWsUrl(this.config.stratosServiceUrl, {
       syncToken: this.config.syncToken,
     })
@@ -124,7 +129,7 @@ export class StratosServiceSubscription {
     })
 
     this.ws.onmessage = (e: MessageEvent) => {
-      void this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
+      this.enqueueMessage(new Uint8Array(e.data as ArrayBuffer))
     }
 
     this.ws.onerror = (e: Event & { error?: unknown }) => {
@@ -147,10 +152,68 @@ export class StratosServiceSubscription {
     this.ws.onclose = () => {
       this.ws = null
       this.clearStabilityTimer()
+      this.resetQueue()
       if (this.running) {
         this.scheduleReconnect()
       }
     }
+  }
+
+  /**
+   * Queue an enrollment frame and start draining if no drain is in flight.
+   * Enrollment events are order-sensitive (enroll → unenroll, boundary
+   * changes), so frames are applied one at a time rather than dispatched
+   * concurrently off the socket callback.
+   * @param data - The raw frame data.
+   * @private
+   */
+  private enqueueMessage(data: Uint8Array): void {
+    const queue = this.queue
+    if (queue.pending.length >= SERVICE_STREAM_MAX_QUEUE) {
+      this.onError?.(
+        new StratosError(
+          'enrollment stream queue overflow',
+          'SERVICE_STREAM_OVERFLOW',
+        ),
+      )
+      this.resetQueue()
+      this.ws?.close()
+      return
+    }
+
+    queue.pending.push(data)
+    if (!queue.draining) {
+      void this.drainQueue(queue)
+    }
+  }
+
+  /**
+   * Apply queued enrollment frames in arrival order.
+   * @param queue - The queue generation this drain owns.
+   * @private
+   */
+  private async drainQueue(queue: ActorQueue): Promise<void> {
+    queue.draining = true
+    try {
+      while (queue.pending.length > 0) {
+        const data = queue.pending.shift()
+        if (!data) continue
+        await this.handleMessage(data)
+      }
+    } finally {
+      queue.draining = false
+    }
+  }
+
+  /**
+   * Abandon the current queue generation. An in-flight drain keeps draining
+   * the object it captured, which is now empty, so a fresh socket never
+   * replays frames the previous one already queued.
+   * @private
+   */
+  private resetQueue(): void {
+    this.queue.pending = []
+    this.queue = { pending: [], draining: false }
   }
 
   /**
