@@ -51,6 +51,7 @@ describe('handleCallback', () => {
       profileRecordWriter: mockProfileRecordWriter,
       logger: mockLogger,
       baseUrl: 'http://localhost:3100',
+      allowedRedirectOrigins: [],
       serviceEndpoint: 'http://localhost:3100',
       serviceDid: 'did:web:localhost%3A3100',
       initRepo: vi.fn(),
@@ -281,6 +282,64 @@ describe('handleCallback', () => {
     expect(res.redirect).not.toHaveBeenCalled()
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
+    )
+  })
+
+  it('returns JSON when the request carries a null cookie jar', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: 'did:plc:spike' },
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      cookies: null,
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+      clearCookie: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.redirect).not.toHaveBeenCalled()
+    expect(res.status).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, did: 'did:plc:spike' }),
+    )
+  })
+
+  it('ignores a redirect cookie that is not a string', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: 'did:plc:faye' },
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      cookies: {
+        stratos_redirect: ['https://app.example/', 'https://app.example/two'],
+      },
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+      clearCookie: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.redirect).not.toHaveBeenCalled()
+    expect(res.clearCookie).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, did: 'did:plc:faye' }),
     )
   })
 

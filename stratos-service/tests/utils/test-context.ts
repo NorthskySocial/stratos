@@ -56,6 +56,8 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
         cooldownJitterMs: 1_000,
       },
       spaceCredentialTtlSeconds: 7_200,
+      spaceAppAccess: { byBoundary: new Map() },
+      clientJwksCacheTtlMs: 300_000,
     },
     enrollment: {
       mode: ENROLLMENT_MODE.OPEN,
@@ -71,11 +73,12 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
       level: 'info',
     },
     adminDids: [],
+    allowedRedirectOrigins: [],
     dpop: {
       requireNonce: false,
     },
     userAgent: {
       repoUrl: 'https://github.com/NorthskySocial/stratos',
     },
-  } as any
+  }
 }

@@ -48,7 +48,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
   const isSecure = config.baseUrl.startsWith('https://')
   const redirectGates = {
     allowedSchemes: isSecure ? ['https:'] : ['http:', 'https:'],
-    allowedRedirectOrigins: config.allowedRedirectOrigins ?? [],
+    allowedRedirectOrigins: config.allowedRedirectOrigins,
     devMode: config.devMode ?? false,
   }
 

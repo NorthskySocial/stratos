@@ -91,7 +91,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
         did,
         alreadyEnrolled,
         allowedSchemes,
-        allowedRedirectOrigins: config.allowedRedirectOrigins ?? [],
+        allowedRedirectOrigins: config.allowedRedirectOrigins,
         devMode,
         enrollBoundaries,
         logger,
