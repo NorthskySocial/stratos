@@ -194,9 +194,13 @@ Authorization: Bearer <service-jwt>
 
 Incremental pull sync of a repo's operation log. Returns record operations after the
 `since` revision, boundary-gated to the caller's enrolled boundaries, with current record
-values inlined by default. When the response reaches the end of the log, `caughtUp` is
-`true` and the repo's current signed commit is included. If `since` predates retained
-history, the `OplogTruncated` error is returned - fall back to full-state recovery below.
+values inlined by default. When the response reaches the end of the log and no concurrent
+write was detected, `caughtUp` is `true` and the repo's current signed commit is included.
+If a write lands during the request, the response instead carries `caughtUp: false` and a
+cursor with no commit — poll again. Under continuous writes `caughtUp` may stay false
+indefinitely, but each poll still delivers ops; it is never falsely `true`. If `since`
+predates retained history, the `OplogTruncated` error is returned - fall back to
+full-state recovery below.
 
 ### Pull Sync: List Record Paths (Full-State Recovery)
 
