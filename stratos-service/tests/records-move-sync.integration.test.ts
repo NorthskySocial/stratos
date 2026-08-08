@@ -292,4 +292,68 @@ describe('Record move sync contract', () => {
       (await pullOpsFor([THIRD_DOMAIN])).filter((o) => o.rkey === rkey),
     ).toHaveLength(0)
   })
+
+  it('batch: emit fires only after the commit is durable', async () => {
+    // Wrap the real transact() so we know — synchronously, at the instant
+    // emit fires — whether the write transaction has actually resolved.
+    // Firing emit before this flag flips true is exactly the bug: subscribers
+    // would wake and find nothing new yet.
+    const originalTransact = actorStore.transact.bind(actorStore)
+    let transactionDurable = false
+    ;(
+      actorStore as unknown as { transact: typeof actorStore.transact }
+    ).transact = (async (...args: Parameters<typeof actorStore.transact>) => {
+      const outcome = await (originalTransact as any)(...args)
+      transactionDurable = true
+      return outcome
+    }) as typeof actorStore.transact
+
+    let durableAtEmitTime = false
+    let seqReadStartedAtEmitTime: Promise<SeqEvent[]> | undefined
+    ctx.sequenceEvents.emit = vi.fn(() => {
+      durableAtEmitTime = transactionDurable
+      // Kick off the log read from inside the listener itself — the same
+      // thing a real subscribeRecords consumer does on wake — and capture
+      // the promise synchronously so we can inspect what it saw.
+      seqReadStartedAtEmitTime = readAllSeqEvents()
+    })
+
+    const batchRkey = 'asuka-langley-post'
+    await applyWritesBatch(ctx, testDid, [
+      {
+        action: 'create',
+        collection,
+        rkey: batchRkey,
+        record: post(NEW_DOMAIN, 'Batch durability check'),
+      },
+    ])
+
+    expect(ctx.sequenceEvents.emit).toHaveBeenCalledTimes(1)
+    expect(durableAtEmitTime).toBe(true)
+
+    const seqEventsAtEmitTime = await seqReadStartedAtEmitTime!
+    const observedForBatchRecord = seqEventsAtEmitTime.some((event) => {
+      const decoded = decodeEvent(event)
+      return decoded.ops.some((op) => op.path === `${collection}/${batchRkey}`)
+    })
+    expect(observedForBatchRecord).toBe(true)
+  })
+
+  it('batch: a rejected commit emits nothing', async () => {
+    const keyVaultError = new Error('key vault offline')
+    ctx.actorSigner.getSignFn = vi.fn().mockRejectedValue(keyVaultError)
+
+    await expect(
+      applyWritesBatch(ctx, testDid, [
+        {
+          action: 'create',
+          collection,
+          rkey: 'misato-katsuragi-post',
+          record: post(NEW_DOMAIN, 'Should never land'),
+        },
+      ]),
+    ).rejects.toThrow('key vault offline')
+
+    expect(ctx.sequenceEvents.emit).not.toHaveBeenCalled()
+  })
 })
