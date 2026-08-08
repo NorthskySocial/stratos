@@ -4,6 +4,7 @@ import type { WebSocket } from 'ws'
 
 import type { AppContext, EnrollmentEvent } from '../context.js'
 import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
+import { SEQUENCE_DB_PAGE_SIZE } from './sequence-paging.js'
 
 const WS_PING_INTERVAL_MS = 30_000
 
@@ -141,12 +142,18 @@ function createActorSubscriptionHandler(ctx: AppContext) {
         }
       }
 
-      const catchUp = await getEventsSince(ctx, did, lastSeq)
-      for (const event of catchUp) {
-        if (signal.aborted) return
-        const message = emitEvent(ctx, event, callerBoundaries, domain)
-        if (message) yield message
-        lastSeq = event.seq
+      // Drain every retained page, not just the first: a single page would
+      // leave the rest of the backlog waiting on the next write signal or the
+      // 30 s timeout, pacing catch-up at one page per wake.
+      while (!signal.aborted) {
+        const catchUp = await getEventsSince(ctx, did, lastSeq)
+        for (const event of catchUp) {
+          if (signal.aborted) return
+          const message = emitEvent(ctx, event, callerBoundaries, domain)
+          if (message) yield message
+          lastSeq = event.seq
+        }
+        if (catchUp.length < SEQUENCE_DB_PAGE_SIZE) break
       }
     }
 
@@ -203,16 +210,21 @@ async function* streamNewEvents(
   let lastSeq = startSeq
   while (!signal.aborted) {
     await waitForSequenceEvent(ctx, did, signal, 30_000)
-    if (signal.aborted) return
 
-    const newEvents = await getEventsSince(ctx, did, lastSeq)
-    for (const event of newEvents) {
-      if (signal.aborted) return
-      const message = emitEvent(ctx, event, callerBoundaries, domain)
-      if (message) {
-        yield message
+    // One wake drains everything currently readable; the 30 s timeout is a
+    // safety net, never the pace at which a backlog is delivered. The drain
+    // loop's own guard covers a wake caused by the abort itself.
+    while (!signal.aborted) {
+      const newEvents = await getEventsSince(ctx, did, lastSeq)
+      for (const event of newEvents) {
+        if (signal.aborted) return
+        const message = emitEvent(ctx, event, callerBoundaries, domain)
+        if (message) {
+          yield message
+        }
+        lastSeq = event.seq
       }
-      lastSeq = event.seq
+      if (newEvents.length < SEQUENCE_DB_PAGE_SIZE) break
     }
   }
 }
@@ -361,7 +373,13 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
 // Helper functions
 
 /**
- * Get latest sequence number for a DID
+ * Get latest sequence number for a DID.
+ *
+ * A read failure propagates and ends the connection. Reporting 0 for a failed
+ * read is not a safe default: it makes any live cursor look "ahead of latest"
+ * and replays the client from sequence 0. Clients reconnect and resume from
+ * their own cursor, which is the protocol's answer to a transient failure.
+ *
  * @param ctx - Application context
  * @param did - Decentralized Identifier (DID) for which to get the latest sequence number
  * @returns Latest sequence number for the DID
@@ -370,36 +388,43 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   // Reading opens (and therefore creates) the actor SQLite file. Skip the read
   // for actors without a store so we never materialize an empty database.
   if (!(await ctx.actorStore.exists(did))) return 0
-  try {
-    return await ctx.actorStore.read(did, async (store) => {
-      return store.sequence.getLatestSeq()
-    })
-  } catch (err) {
-    ctx.logger?.warn({ did, err }, 'getLatestSeq failed')
-    return 0
-  }
+  return await ctx.actorStore.read(did, async (store) => {
+    return store.sequence.getLatestSeq()
+  })
 }
 
 /**
- * Get oldest sequence number for a DID
+ * Get oldest sequence number for a DID. Read failures propagate; see
+ * {@link getLatestSeq}.
+ *
  * @param ctx - Application context
  * @param did - Decentralized Identifier (DID) for which to get the oldest sequence number
  * @returns Oldest sequence number for the DID
  */
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   if (!(await ctx.actorStore.exists(did))) return 0
-  try {
-    return await ctx.actorStore.read(did, async (store) => {
-      return store.sequence.getOldestSeq()
-    })
-  } catch (err) {
-    ctx.logger?.warn({ did, err }, 'getOldestSeq failed')
-    return 0
-  }
+  return await ctx.actorStore.read(did, async (store) => {
+    return store.sequence.getOldestSeq()
+  })
 }
 
 /**
- * Get events since a given sequence number for a DID
+ * Get one page of events after a given sequence number for a DID.
+ *
+ * Returns at most {@link SEQUENCE_DB_PAGE_SIZE} events, so a short page is the
+ * drain loops' signal that the log is exhausted. A store read failure
+ * propagates rather than reporting an empty page, because "no events" and "the
+ * read failed" are different facts and the caller acts on the difference.
+ *
+ * Deliberately NOT `readSequencePage` from sequence-paging.ts: the two readers
+ * disagree on `rev`. Its `rowToSeqEvent` blanks any rev failing
+ * `/^[0-9a-z]{13}$/` because `getSequenceBounds` compares revs for truncation
+ * detection, where a malformed rev yields a wrong OplogTruncated verdict. Here
+ * `rev` is an opaque passthrough copied onto the `#commit` wire frame by
+ * `formatEvent`, and outgoing frames are never lexicon-validated — swapping
+ * readers would silently change emitted bytes. Unification is deferred to
+ * plan 015 (sync-library extraction).
+ *
  * @param ctx - Application context
  * @param did - Decentralized Identifier (DID) for which to get events
  * @param cursor - Sequence number to start from
@@ -413,31 +438,29 @@ async function getEventsSince(
   // Avoid opening (and creating) a SQLite file for actors that have not written
   // yet; the streaming loop polls this until the store appears on first write.
   if (!(await ctx.actorStore.exists(did))) return []
-  try {
-    return await ctx.actorStore.read(did, async (store) => {
-      const rows = await store.sequence.getEventsSince(cursor, 100)
+  return await ctx.actorStore.read(did, async (store) => {
+    const rows = await store.sequence.getEventsSince(
+      cursor,
+      SEQUENCE_DB_PAGE_SIZE,
+    )
 
-      return rows.map((row): SeqEvent => {
-        let rev = ''
-        try {
-          const decoded = cborDecode(row.event) as Record<string, unknown>
-          rev = (decoded.rev as string) ?? ''
-        } catch {
-          // Ignore decode errors
-        }
-        return {
-          seq: row.seq,
-          did: row.did,
-          time: row.sequencedAt,
-          rev,
-          event: row.event,
-        }
-      })
+    return rows.map((row): SeqEvent => {
+      let rev = ''
+      try {
+        const decoded = cborDecode(row.event) as Record<string, unknown>
+        rev = (decoded.rev as string) ?? ''
+      } catch {
+        // Ignore decode errors
+      }
+      return {
+        seq: row.seq,
+        did: row.did,
+        time: row.sequencedAt,
+        rev,
+        event: row.event,
+      }
     })
-  } catch (err) {
-    ctx.logger?.warn({ did, cursor, err }, 'getEventsSince failed')
-    return []
-  }
+  })
 }
 
 /**
