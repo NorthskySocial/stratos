@@ -235,19 +235,46 @@ Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests
 
 ### Mutation testing (validating AI-generated code)
 
-Mutation testing (StrykerJS, via `pnpm --filter <package> mutation`) exists to validate that tests
-actually catch regressions — it is the primary gate for trusting AI-generated code and the tests that
-accompany it. It is **not** CI-enforced; it is a local verification step the agent is responsible for
-running.
+Mutation testing (StrykerJS) exists to validate that tests actually catch regressions — it is the
+primary gate for trusting AI-generated code and the tests that accompany it. It is **not**
+CI-enforced; it is a local verification step the agent is responsible for running.
+
+**Scope the run to the files you changed.** Do not run the whole package config
+(`pnpm --filter <package> mutation`): a full `stratos-service` sweep is 5,600+ mutants and takes
+about three hours, and it reports overwhelmingly on code you did not touch. Scope it instead:
+
+```bash
+cd <package> && pnpm exec stryker run --mutate 'src/a/changed.ts,src/b/changed.ts' \
+  > /tmp/mut.log 2>&1; echo exit=$?
+```
+
+Two traps that make a scoped run lie to you:
+
+- **Repeated `--mutate` flags do not accumulate — the last one silently wins.** Passing
+  `--mutate 'a.ts' --mutate 'b.ts'` mutates only `b.ts` and still reports a healthy score. Use ONE
+  flag with a comma-separated list, then confirm every expected filename appears in the results
+  table before believing the number.
+- The configs set `inPlace: true`, so Stryker rewrites sources on disk while it runs. Never pipe its
+  output into `head`/`grep` — the closed pipe kills it mid-run and leaves mutated files behind.
+  Always redirect to a file. Delete a stale `<package>/reports/stryker-incremental.json` first, or it
+  will serve results from a previous, differently-scoped run.
 
 When a change requires adding or running tests to validate behaviour, you MUST:
 
-- Run mutation testing on the modules you changed and confirm surviving mutants are addressed (or
-  explicitly justified) before considering the work done. A green test suite alone is insufficient.
-- Extend the mutation `mutate` globs in the relevant `stryker.config.json` to cover any new
-  source files/modules you introduced, so the new code is actually under mutation analysis.
-- Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests or review the code and improve it
-  rather than weakening the thresholds.
+- Run scoped mutation testing on the files you changed and address surviving mutants before
+  considering the work done. A green test suite alone is insufficient.
+- Judge survivors **on the lines your change touched**. Pulling a file into `mutate` scope for the
+  first time surfaces its pre-existing survivors too; those are not yours to fix, and they are not a
+  reason to abandon the gate.
+- Check whether the `mutate` globs in `stryker.config.json` already cover a new file you added
+  (broad globs like `src/auth/**/*.ts` usually do) and add an entry only if none matches.
+- Treat surviving mutants in changed code as a signal that the tests are weak — strengthen the tests,
+  or review the code and improve it. Never weaken the thresholds. If a mutant is unkillable because
+  the branch is genuinely unreachable, delete the dead branch rather than testing around it.
+
+Note: `stratos-service`'s package-wide score is currently **below** its `break: 60` threshold
+(pre-existing, dominated by uncovered dead code). A failing full-package run is therefore not by
+itself evidence that your change regressed anything.
 
 ---
 
