@@ -124,6 +124,107 @@ describe('Subscription Handlers', () => {
       })
     }
 
+    /**
+     * Append one event per entry of `boundaries`, so a drained page can mix
+     * in-scope and out-of-scope events.
+     */
+    async function appendEvents(did: string, boundaries: string[]) {
+      await actorStore.transact(did, async (store: any) => {
+        for (const [offset, boundary] of boundaries.entries()) {
+          const index = offset + 1
+          await store.sequence.appendEvent({
+            did,
+            eventType: 'append',
+            event: encodeRecord({
+              rev: `rev${index}`,
+              ops: [
+                {
+                  action: 'create',
+                  path: `zone.stratos.feed.post/${index}`,
+                  record: {
+                    text: `Angel sighting ${index}`,
+                    boundary: { values: [{ value: boundary }] },
+                  },
+                },
+              ],
+            }),
+            invalidated: 0,
+            sequencedAt: new Date().toISOString(),
+          })
+        }
+      })
+    }
+
+    async function collect(generator: any, count: number): Promise<any[]> {
+      const messages: any[] = []
+      for (let i = 0; i < count; i++) {
+        const next = await generator.next()
+        if (next.done) break
+        messages.push(next.value)
+      }
+      return messages
+    }
+
+    function paths(messages: any[]): string[] {
+      return messages.map((message) => message.ops[0].path)
+    }
+
+    /**
+     * `count` in-scope events with a single out-of-scope 'seele' event in the
+     * middle, so a filtered-out event inside a drained page would surface as an
+     * `undefined` frame rather than being silently skipped.
+     */
+    function backlogBoundaries(count: number, boundary: string): string[] {
+      const boundaries = Array.from({ length: count + 1 }, () => boundary)
+      boundaries[Math.floor(count / 2)] = 'seele'
+      return boundaries
+    }
+
+    function sleep(ms: number): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, ms))
+    }
+
+    /**
+     * A ctx whose actor-store reads are counted, so a drain loop that never
+     * exits shows up as reads accruing while the stream should be parked.
+     */
+    function countingCtx() {
+      const counter = { reads: 0 }
+      return {
+        counter,
+        ctx: {
+          ...ctx,
+          actorStore: {
+            exists: (did: string) => actorStore.exists(did),
+            read: (did: string, fn: any) => {
+              counter.reads++
+              return actorStore.read(did, fn)
+            },
+          },
+        },
+      }
+    }
+
+    /**
+     * Assert the stream parked on the wake wait instead of spinning on the
+     * store: a fully drained stream issues no further reads until a new event,
+     * and closes cleanly when the connection aborts.
+     */
+    async function expectParkedOnWake(
+      generator: any,
+      counter: { reads: number },
+      abortController: AbortController,
+    ) {
+      const pending = generator.next()
+      await sleep(60)
+      const readsWhileIdle = counter.reads
+      await sleep(60)
+      expect(counter.reads).toBe(readsWhileIdle)
+
+      abortController.abort()
+      expect((await pending).done).toBe(true)
+    }
+
     it('streams in-boundary actor records to an enrolled service', async () => {
       await enrollService(['nerv'])
       await actorStore.create(testDid)
@@ -291,6 +392,162 @@ describe('Subscription Handlers', () => {
         expect.stringContaining('cursor ahead of latest'),
       )
     })
+
+    // The drain tests are bounded well under the stream's 30 s wake timeout: a
+    // regression that reverts to one page per wake must fail fast rather than
+    // stall CI for half a minute per page.
+    it('drains a backlog larger than one page on connect', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+      await appendEvents(testDid, backlogBoundaries(150, 'nerv'))
+
+      const { ctx: readCountingCtx, counter } = countingCtx()
+      const handler = createSubscribeRecordsHandler(readCountingCtx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      const messages = await collect(generator, 150)
+      // The backlog is exhausted, so the stream must park rather than keep
+      // re-reading the store.
+      await expectParkedOnWake(generator, counter, abortController)
+
+      expect(messages).toHaveLength(150)
+      expect(paths(messages).at(0)).toBe('zone.stratos.feed.post/1')
+      expect(paths(messages).at(-1)).toBe('zone.stratos.feed.post/151')
+      expect(paths(messages)).not.toContain('zone.stratos.feed.post/76')
+    }, 10_000)
+
+    it('drains more than one page per wake', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+
+      const { ctx: readCountingCtx, counter } = countingCtx()
+      const handler = createSubscribeRecordsHandler(readCountingCtx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      // Wait until the stream has actually parked on the wake wait before
+      // appending. If catch-up ever saw the events, the connect drain would
+      // serve them all and this test would silently stop covering the
+      // per-wake multi-page drain it is named for.
+      const parked = new Promise<void>((resolve) =>
+        sequenceEvents.once('newListener', (event) => {
+          if (event === testDid) resolve()
+        }),
+      )
+      const firstPromise = generator.next()
+      await parked
+      await appendEvents(testDid, backlogBoundaries(120, 'nerv'))
+      sequenceEvents.emit(testDid)
+      const first = await firstPromise
+
+      const rest = await collect(generator, 119)
+      await expectParkedOnWake(generator, counter, abortController)
+
+      const messages = [first.value, ...rest]
+      expect(messages).toHaveLength(120)
+      expect(paths(messages).at(0)).toBe('zone.stratos.feed.post/1')
+      expect(paths(messages).at(-1)).toBe('zone.stratos.feed.post/121')
+      expect(paths(messages)).not.toContain('zone.stratos.feed.post/61')
+    }, 10_000)
+
+    it('stops draining a backlog once the connection aborts', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+      await appendEvents(testDid, backlogBoundaries(150, 'nerv'))
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      const first = await generator.next()
+      expect(first.done).toBe(false)
+
+      abortController.abort()
+      const afterAbort = await generator.next()
+      expect(afterAbort.done).toBe(true)
+    }, 10_000)
+
+    it('stops draining a post-wake page once the connection aborts', async () => {
+      await enrollService(['nerv'])
+      await actorStore.create(testDid)
+
+      const handler = createSubscribeRecordsHandler(ctx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      // Park before appending so the page is delivered by the post-wake
+      // drain, not the connect catch-up (see 'drains more than one page per
+      // wake' above).
+      const parked = new Promise<void>((resolve) =>
+        sequenceEvents.once('newListener', (event) => {
+          if (event === testDid) resolve()
+        }),
+      )
+      const firstPromise = generator.next()
+      await parked
+      await appendEvents(testDid, backlogBoundaries(120, 'nerv'))
+      sequenceEvents.emit(testDid)
+      const first = await firstPromise
+      expect(first.done).toBe(false)
+
+      // Aborting mid-page must end the stream, not deliver the page's tail.
+      abortController.abort()
+      const afterAbort = await generator.next()
+      expect(afterAbort.done).toBe(true)
+    }, 10_000)
+
+    it('ends the connection when a sequence read fails instead of replaying from zero', async () => {
+      await enrollService(['nerv'])
+      const failingCtx = {
+        ...ctx,
+        actorStore: {
+          exists: async () => true,
+          read: async () => {
+            throw new Error('MAGI sequence store unreachable')
+          },
+        },
+      }
+
+      const handler = createSubscribeRecordsHandler(failingCtx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid, cursor: 42 },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      await expect(generator.next()).rejects.toThrow(
+        'MAGI sequence store unreachable',
+      )
+      abortController.abort()
+
+      // A swallowed read error used to report latestSeq 0, which made any
+      // live cursor look "ahead of latest" and silently replayed the client
+      // from the start of the log.
+      const resumedFromLatest = ctx.logger.warn.mock.calls.some(
+        ([, message]: [unknown, unknown]) =>
+          typeof message === 'string' &&
+          message.includes('cursor ahead of latest'),
+      )
+      expect(resumedFromLatest).toBe(false)
+    }, 5_000)
 
     it('rejects non-service credentials', async () => {
       const handler = createSubscribeRecordsHandler(ctx) as any
