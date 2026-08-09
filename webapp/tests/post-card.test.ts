@@ -26,7 +26,6 @@ describe('PostCard.svelte', () => {
     const postWithImage = {
       ...mockPost,
       record: {
-        ...mockPost.record,
         embed: {
           $type: 'app.bsky.embed.images',
           images: [

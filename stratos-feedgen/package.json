@@ -15,6 +15,7 @@
     "clean": "rm -rf dist dist-bundle",
     "start": "node dist/bin/main.js",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "mutation": "stryker run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts ."

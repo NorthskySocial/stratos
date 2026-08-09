@@ -18,8 +18,12 @@ const FAYE_DID = 'did:plc:fayevalentine'
 interface TestServerCtx {
   httpServer: HttpServer
   baseUrl: string
-  listPosts: ReturnType<typeof vi.fn<[ListPostsOpts], Promise<ListPostsResult>>>
-  resolveBoundaries: ReturnType<typeof vi.fn<[string], Promise<string[]>>>
+  listPosts: ReturnType<
+    typeof vi.fn<(opts: ListPostsOpts) => Promise<ListPostsResult>>
+  >
+  resolveBoundaries: ReturnType<
+    typeof vi.fn<(did: string) => Promise<string[]>>
+  >
   verifier: ReturnType<typeof vi.fn> & FeedRequestVerifier
 }
 
