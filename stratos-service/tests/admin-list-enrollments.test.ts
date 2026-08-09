@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events'
 import { inspect } from 'node:util'
 import { describe, expect, it, vi } from 'vitest'
 import express from 'express'
-import type { AppContext, EnrollmentEventEmitter } from '../src'
+import type { AppContext } from '../src'
+import type { EnrollmentEventEmitter } from '../src/context-types.js'
 import type { EnrollmentStore } from '../src/oauth'
 import { registerEnrollmentHandlers } from '../src/features'
 
@@ -76,7 +77,10 @@ function storedEnrollment(
 function createCtx(opts: {
   enrollmentStore?: Partial<EnrollmentStore>
   adminAuthFails?: boolean
-}): { app: express.Application; enrollmentStore: EnrollmentStore } {
+}): {
+  app: express.Application
+  enrollmentStore: AppContext['enrollmentStore']
+} {
   const enrollmentStore = {
     isEnrolled: vi.fn(async () => true),
     getEnrollment: vi.fn(),
@@ -90,7 +94,7 @@ function createCtx(opts: {
     listEnrollments: vi.fn(async () => []),
     enrollmentCount: vi.fn(async () => 0),
     ...opts.enrollmentStore,
-  } as unknown as EnrollmentStore
+  } as unknown as AppContext['enrollmentStore']
 
   const app = express()
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
