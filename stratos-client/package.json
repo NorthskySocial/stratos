@@ -29,10 +29,11 @@
     "directory": "stratos-client"
   },
   "scripts": {
-    "build": "pnpm lexgen && tsc",
+    "build": "pnpm lexgen && tsc -p tsconfig.build.json",
     "lexgen": "node scripts/gen-lexicons.mjs",
     "clean": "rm -rf dist",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write .",
     "lint": "eslint .",
     "check:self-contained": "node scripts/check-self-contained.mjs",
