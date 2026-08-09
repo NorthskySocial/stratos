@@ -60,7 +60,7 @@ Each feature is self-contained with its own:
 
 Features in stratos-core follow one of two patterns:
 
-**Port/Domain pattern** (enrollment, hydration, stub, attestation):
+**Port/Domain pattern** (enrollment, hydration):
 
 ```
 stratos-core/src/{feature}/
@@ -92,40 +92,50 @@ stratos-service/src/features/{feature}/
 
 **Core domain modules** (`stratos-core/src/`):
 
-| Module        | Pattern           | Description                                                        |
-| ------------- | ----------------- | ------------------------------------------------------------------ |
-| `enrollment`  | Port/Domain       | OAuth enrollment validation and business logic                     |
-| `hydration`   | Port/Domain       | Boundary-aware record hydration for AppViews and clients           |
-| `stub`        | Port/Domain       | Stub record generation with source field for PDS dual-write        |
-| `attestation` | Port/Domain       | Enrollment attestation signing and verification                    |
-| `record`      | Reader/Transactor | Record metadata read/write operations                              |
-| `repo`        | Reader/Transactor | Repository block storage operations (IPLD blocks)                  |
-| `blob`        | Reader/Transactor | Blob metadata and content read/write operations                    |
-| `mst`         | Utility           | Merkle Search Tree commit builder (`builder.ts`)                   |
-| `validation`  | Utility           | Stratos-specific validation rules for boundaries and records       |
-| `storage`     | Ports             | Storage interface definitions (Reader/Writer ports for all stores) |
-| `db`          | Infrastructure    | Database schema (Drizzle), SQLite + Postgres support, migrations   |
-| `shared`      | Infrastructure    | Shared error types and domain-specific exceptions                  |
+| Module        | Pattern           | Description                                                                                                                                |
+| ------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enrollment`  | Port/Domain       | OAuth enrollment validation and business logic                                                                                             |
+| `hydration`   | Port/Domain       | Boundary-aware record hydration for AppViews and clients                                                                                   |
+| `attestation` | Utility           | Enrollment attestation signing and verification (pure functions in `domain.ts`; no port)                                                   |
+| `record`      | Reader/Transactor | Record metadata read/write operations                                                                                                      |
+| `repo`        | Reader/Transactor | Repository block storage operations (IPLD blocks)                                                                                          |
+| `blob`        | Reader/Transactor | Blob metadata and content read/write operations                                                                                            |
+| `mst`         | Utility           | Merkle Search Tree commit builder (`builder.ts`)                                                                                           |
+| `validation`  | Utility           | Stratos-specific validation rules for boundaries and records                                                                               |
+| `spaces`      | Utility           | Pure parsing, validation, and formatting of space/record `at://` URIs, plus boundary-to-space-URI mapping (`domain.ts`)                    |
+| `atproto`     | Utility           | CBOR record encoding, CID computation/parsing, CAR block reading, commit-op decoding, and boundary extraction (`index.ts`)                 |
+| `config`      | Infrastructure    | Zod schemas for storage backend, logging, and Redis env config, plus comma-list helpers (`parseCommaList`, `commaListSchema`) (`index.ts`) |
+| `lexicons`    | Infrastructure    | `DefaultLexiconProvider` bundling Stratos + embedded `com.atproto.*` lexicons (`index.ts`)                                                 |
+| `storage`     | Ports             | Storage interface definitions (Reader/Writer ports for all stores)                                                                         |
+| `db`          | Infrastructure    | Database schema (Drizzle), SQLite + Postgres support, migrations                                                                           |
+| `shared`      | Infrastructure    | Shared error types and domain-specific exceptions                                                                                          |
 
 **Service feature modules** (`stratos-service/src/features/`):
 
-| Module       | Files                                         | Description                                              |
-| ------------ | --------------------------------------------- | -------------------------------------------------------- |
-| `enrollment` | `adapter.ts`, `handler.ts`, `index.ts`        | Enrollment port implementation and XRPC handlers         |
-| `hydration`  | `adapter.ts`, `handler.ts`, `index.ts`        | Hydration adapter and batch/single record endpoints      |
-| `mst`        | `signer.ts`, `storage-adapter.ts`, `index.ts` | MST signer and storage adapter (no handlers)             |
-| `stub`       | `adapter.ts`, `index.ts`                      | Stub generation adapter for PDS dual-write (no handlers) |
+| Module             | Files                                                                                   | Description                                                                                                                                                                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blob`             | `adapter.ts`, `bloom-manager.ts`, `index.ts`, `init.ts`                                 | Boundary-based blob access checks (`BlobAuthServiceImpl`) and a per-blob Bloom filter over each blob's boundaries for fast boundary-intersection rejection (unknown blobs fall back to the authoritative DB check)                                  |
+| `enrollment`       | `adapter.ts`, `handler.ts`, `index.ts`, `init.ts`, `internal/`, `service-reconciler.ts` | Enrollment port implementation and XRPC handlers                                                                                                                                                                                                    |
+| `hydration`        | `adapter.ts`, `handler.ts`, `index.ts`, `init.ts`                                       | Hydration adapter and batch/single record endpoints                                                                                                                                                                                                 |
+| `mst`              | `index.ts`, `init.ts`, `internal/`                                                      | MST signer and storage adapter (`internal/signer.ts`, `internal/storage-adapter.ts`, `internal/adapters.ts`; no handlers)                                                                                                                           |
+| `pull-sync`        | `handler.ts`, `index.ts`, `oplog.ts`, `recovery.ts`                                     | Serves `listRepoOps` (signed-commit oplog with truncation detection) and its full-state recovery fallback `listRecordPaths` to callers holding either inter-service auth or a space credential                                                      |
+| `repo`             | `index.ts`, `init.ts`                                                                   | Builds the repo write context (write rate limiter, per-repo write locks) consumed by record CRUD                                                                                                                                                    |
+| `space-credential` | `app-access.ts`, `handler.ts`, `index.ts`, `minter.ts`                                  | Mints and serves `zone.stratos.space.getSpaceCredential` — signed, multi-use JWTs granting space access; always requires an active enrollment carrying the space's boundary, plus an opt-in per-space client allow-list (`appAccess`, default open) |
+| `space-read`       | `handler.ts`, `index.ts`                                                                | Serves `zone.stratos.space.getRecord` for space-scoped record reads                                                                                                                                                                                 |
+| `sync`             | `adapter.ts`, `handler.ts`, `index.ts`, `init.ts`                                       | `SyncService` (`getBlob`) implementation and `getBlob`/pull-sync XRPC handler registration                                                                                                                                                          |
 
 **Service infrastructure** (`stratos-service/src/`):
 
-| Module          | Description                                                                                                                                                                                                                                                      |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api/`          | XRPC handlers: `records.ts` (CRUD), `handlers.ts` (getRecord, getRepo, importRepo)                                                                                                                                                                               |
-| `auth/`         | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifier (`verifier.ts`), enrollment auth (`enrollment.ts`)                                                                                                        |
-| `oauth/`        | OAuth client (`client.ts`), enrollment authorization routes (`routes.ts`), admin authorization routes (`admin-routes.ts`), admin web-session store (`admin-session-store.ts`), admin flow handlers (`handlers/admin-authorize.ts`, `handlers/admin-callback.ts`) |
-| `subscription/` | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                                                                                                                           |
-| `blobstore/`    | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                                                                                                                            |
-| `adapters/`     | Storage backend implementations: `sqlite/`, `postgres/`                                                                                                                                                                                                          |
+| Module             | Description                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api/`             | XRPC handler registration (`handlers.ts`; `index.ts` is a barrel); `records/` (record CRUD: `create.ts`, `update.ts`, `delete.ts`, `read.ts`, `batch.ts`, plus `validation.ts`/`util.ts`/`types.ts`); `handlers/` (`describe-repo-handlers.ts`, `repo-read-handlers.ts`, `repo-write-handlers.ts`, `blob-handlers.ts`); root helpers `types.ts`, `util.ts`, `varint.ts` |
+| `infra/auth/`      | DPoP verification (`dpop-verifier.ts`), token introspection (`introspection-client.ts`), auth verifiers (`verifier.ts`, `verifiers.ts`), service JWTs (`jwt.ts`, `jwks-resolver.ts`), space-credential/delegation/client-attestation verifiers, credential-scope resolution (`credential-scope.ts`), replay store (`replay-store.ts`)                                   |
+| `oauth/`           | OAuth client (`client.ts`), enrollment authorization routes (`routes.ts`), admin authorization routes (`admin-routes.ts`), admin web-session store (`admin-session-store.ts`), admin flow handlers (`handlers/admin-authorize.ts`, `handlers/admin-callback.ts`)                                                                                                        |
+| `subscription/`    | WebSocket firehose (`subscribe-records.ts`) for Stratos sync consumers                                                                                                                                                                                                                                                                                                  |
+| `infra/blobstore/` | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                                                                                                                                                                                                                                   |
+| `infra/signing/`   | Per-actor signing seam (`ActorSigner` in `actor-signer.ts`); raw private key material never leaves this module                                                                                                                                                                                                                                                          |
+| `storage/`         | SQLite storage adapters (`sqlite/`: `actor-store.ts`, `enrollment-store.ts`, `sequence-ops.ts`)                                                                                                                                                                                                                                                                         |
+| `infra/storage/`   | Postgres storage adapters (`postgres/`) plus enrollment-store caching wrappers (`cached-enrollment-store.ts`, `redis-cache.ts`, `reserved-domain-enrollment-store.ts`)                                                                                                                                                                                                  |
 
 **Client library** (`stratos-client/src/`):
 
@@ -141,16 +151,24 @@ stratos-service/src/features/{feature}/
 
 **Indexer** (`stratos-indexer/src/`):
 
-| File                | Description                                                   |
-| ------------------- | ------------------------------------------------------------- |
-| `indexer.ts`        | Main Indexer class — health server, lifecycle management      |
-| `config.ts`         | IndexerConfig interface, environment variable loading         |
-| `pds-firehose.ts`   | Connects to the PDS firehose and discovers enrollment records |
-| `stratos-sync.ts`   | Service and actor-level WebSocket subscription handlers       |
-| `record-decoder.ts` | Decodes CBOR records, extracts boundaries                     |
-| `cursor-manager.ts` | Manages PDS and Stratos sync cursors with periodic flush      |
-| `worker-pool.ts`    | Thread pool for concurrent processing                         |
-| `backfill.ts`       | Backfill existing repos on startup                            |
+| File                        | Description                                                                                                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `indexer.ts`                | Main Indexer class — health server, lifecycle management                                                                                                                           |
+| `config.ts`                 | IndexerConfig interface, environment variable loading                                                                                                                              |
+| `index.ts`                  | Package barrel exporting the public indexer API                                                                                                                                    |
+| `backfill.ts`               | Backfill existing repos on startup                                                                                                                                                 |
+| `bin/main.ts`               | CLI entry point with signal handling                                                                                                                                               |
+| `pds/pds-firehose.ts`       | Connects to the PDS firehose and discovers enrollment records                                                                                                                      |
+| `pds/pds-subscriber.ts`     | Wires PDS firehose work into the indexing service, handle dedup, and the worker pool                                                                                               |
+| `storage/cursor-manager.ts` | Manages PDS and Stratos sync cursors with periodic flush                                                                                                                           |
+| `storage/db.ts`             | Kysely Postgres connection setup, DID-resolver cache, legacy lowercase-column migration                                                                                            |
+| `storage/schema.ts`         | Kysely table types for sync cursors, enrollments, indexed records, record boundaries, and posts                                                                                    |
+| `sync/stratos-sync.ts`      | Service and actor-level WebSocket subscription handlers                                                                                                                            |
+| `sync/actor-syncer.ts`      | Decodes per-actor sync frames; upserts every record into the AppView database (`stratos_record` + `stratos_record_boundary`, plus a `post` row for feed posts) and applies deletes |
+| `sync/sync-manager.ts`      | Coordinates the service subscription and per-actor syncers                                                                                                                         |
+| `util/record-decoder.ts`    | Decodes CBOR records, extracts boundaries                                                                                                                                          |
+| `util/worker-pool.ts`       | Thread pool for concurrent processing                                                                                                                                              |
+| `util/handle-dedup.ts`      | TTL cache that skips redundant `indexHandle` calls for recently-seen DIDs                                                                                                          |
 
 **Feed generator** (`stratos-feedgen/src/`):
 
@@ -162,16 +180,21 @@ boundaries, and returns only posts the viewer may see. Outbound calls to the
 upstream Stratos (including the sync WebSocket) use a feedgen-minted service-auth
 JWT (`iss=feedgenDID`, `aud=stratosDID`).
 
-| File / dir      | Description                                                                                    |
-| --------------- | ---------------------------------------------------------------------------------------------- |
-| `server.ts`     | Express app: XRPC handlers, `/health`, `/.well-known/did.json` DID document                    |
-| `api/feed/`     | `getFeed.ts`, `describeFeed.ts` XRPC handlers                                                  |
-| `auth/`         | Inbound service-auth JWT verifier (`verifier.ts`, `identity.ts`)                               |
-| `subscription/` | Background sync workers: `service-stream.ts`, `actor-syncer.ts`, `actor-pool.ts`, `indexer.ts` |
-| `upstream/`     | `UpstreamStratosClient` (`client.ts`) + `mintServiceJwt` (`jwt.ts`) to the upstream Stratos    |
-| `enrollment/`   | Viewer-boundary cache (`manager.ts` + TTL/LRU in `lru.ts`)                                     |
-| `db/`           | Local post/boundary/cursor index (`sqlite.ts`, `postgres.ts`, `schema/`)                       |
-| `feeds/`        | Feed registry and static feed config (`config.ts`, `index.ts`)                                 |
+| File / dir      | Description                                                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server.ts`     | Express app: XRPC handlers, `/health`, `/.well-known/did.json` DID document                                                                           |
+| `config.ts`     | `FeedgenConfig` interface and environment variable loading (`loadFeedgenConfig`)                                                                      |
+| `index.ts`      | Package barrel exporting the public feedgen API                                                                                                       |
+| `bin/`          | CLI entry point (`main.ts`)                                                                                                                           |
+| `api/feed/`     | `getFeed.ts`, `describeFeed.ts` XRPC handlers                                                                                                         |
+| `auth/`         | Inbound service-auth JWT verifier (`verifier.ts`, `identity.ts`)                                                                                      |
+| `subscription/` | Background sync workers: `service-stream.ts`, `actor-syncer.ts`, `actor-pool.ts`, `indexer.ts`                                                        |
+| `upstream/`     | `UpstreamStratosClient` (`client.ts`) + `mintServiceJwt` (`jwt.ts`) to the upstream Stratos                                                           |
+| `enrollment/`   | Viewer-boundary cache (`manager.ts` + TTL/LRU in `lru.ts`)                                                                                            |
+| `db/`           | Local post/boundary/cursor index (`sqlite.ts`, `postgres.ts`, `schema/`)                                                                              |
+| `feeds/`        | Feed registry and static feed config (`config.ts`, `index.ts`)                                                                                        |
+| `purge/`        | Purges a revoked/shrunk viewer's local index and boundary cache (`purger.ts`) and reconciles enrollment state against upstream (`reconcile.ts`)       |
+| `lexicon/`      | Handwritten inline copies of the `zone.stratos.feedgen.*` lexicons (`schemas.ts`), kept in source so the package has no out-of-tree file dependencies |
 
 **Feed generator lexicons** (`lexicons/zone/stratos/feedgen/`): `getFeed`
 (authenticated), `describeFeed` (unauthenticated). Required env vars:
@@ -181,8 +204,9 @@ diagram and auth-flow table.
 
 ### Storage Architecture
 
-Storage interfaces are defined in `stratos-core/src/storage/*.ts` with adapters in
-`stratos-service/src/adapters/` (sqlite and postgres). Each store has a Reader (read-only) and
+Storage interfaces are defined in `stratos-core/src/storage/*.ts` with sqlite adapters in
+`stratos-service/src/storage/sqlite/` and postgres adapters in
+`stratos-service/src/infra/storage/postgres/`. Each store has a Reader (read-only) and
 Writer (extends Reader) variant. Read the interface files directly for method signatures.
 
 Composite interfaces group stores per scope:
@@ -298,7 +322,7 @@ definitions in `stratos-core/src/db/schema/` and Postgres-specific tables in
 
 ## XRPC Handlers
 
-Follow the pattern in `stratos-service/src/api/records.ts` for handler structure.
+Follow the pattern in `stratos-service/src/api/records/create.ts` (a representative handler module) for handler structure.
 
 Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`, `.service` (
 inter-service JWT), `.admin` (OAuth-authorized operator via server-side session cookie; see Admin
@@ -401,10 +425,10 @@ contents. Don't log per-iteration in loops.
 
 ## References
 
-- [Hydration Architecture](../docs/hydration-architecture.md)
-- [Operator Guide](../docs/operator-guide.md)
-- [Client Integration Guide](../stratos-client/README.md)
-- [Client Guide](../docs/client-guide.md)
+- [Hydration Architecture](docs/architecture/hydration.md)
+- [Operator Guide](docs/operator/overview.md)
+- [Client Integration Guide](stratos-client/README.md)
+- [Client Guide](docs/client/getting-started.md)
 - [ATProto Documentation](https://atproto.com/docs)
 
 ### External Repository Research
