@@ -23,7 +23,6 @@
     "kysely": "^0.28.14",
     "multiformats": "^13.4.2",
     "p-queue": "^9.1.0",
-    "partysocket": "^1.1.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
