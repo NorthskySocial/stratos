@@ -56,6 +56,13 @@ jobs:
       - name: Build packages
         run: pnpm run build
 
+      - name: Check generated lexicons are committed
+        run: |
+          git diff --exit-code stratos-client/src/lexicons.gen.ts || {
+            echo "::error::stratos-client/src/lexicons.gen.ts is stale — run: pnpm --filter @northskysocial/stratos-client lexgen"
+            exit 1
+          }
+
       - name: Run typecheck
         run: pnpm run typecheck
 
