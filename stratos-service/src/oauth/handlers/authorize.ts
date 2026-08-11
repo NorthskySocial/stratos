@@ -41,6 +41,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
         })
       }
 
+      let verifiedRedirect: string | undefined
       if (redirectUri) {
         const verdict = await verifyRedirectTarget(
           redirectUri,
@@ -50,7 +51,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
         )
         if (!verdict.allowed) {
           logger?.warn(
-            { clientId, message: verdict.message },
+            { clientId, message: verdict.message, detail: verdict.logDetail },
             'rejected enrollment redirect_uri',
           )
           return res.status(400).json({
@@ -60,12 +61,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
           })
         }
 
-        res.cookie('stratos_redirect', redirectUri, {
-          httpOnly: true,
-          sameSite: 'lax',
-          maxAge: 10 * 60 * 1000,
-          secure: isSecure,
-        })
+        verifiedRedirect = redirectUri
       }
 
       // Start the authorization flow
@@ -73,8 +69,13 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
         { handle, scope: OAUTH_SCOPE },
         'Starting OAuth authorization',
       )
+      // The verified target rides in the OAuth state, which the client stores
+      // server-side and returns only to this callback. A cookie cannot do this
+      // job: cookies are not bound to an origin, so a different host on the
+      // same registrable domain can write one.
       const authUrl = await oauthClient.authorize(handle, {
         scope: OAUTH_SCOPE,
+        state: verifiedRedirect,
       })
 
       // Redirect user to their PDS for authorization
