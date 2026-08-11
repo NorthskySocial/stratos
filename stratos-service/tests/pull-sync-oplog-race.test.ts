@@ -36,6 +36,8 @@ class ScriptedActorStore {
   commitBytes: Uint8Array | null = null
   /** Fired when the commit read happens, to simulate a concurrent write. */
   onCommitRead: () => void = () => {}
+  /** Fired after a sequence page is captured, before it is returned. */
+  onSequenceRead: () => void = () => {}
 
   appendEvent(seq: number, rev: string, rkey: string, cid: string): void {
     this.rows.push({
@@ -68,8 +70,15 @@ class ScriptedActorStore {
       sequence: {
         getOldestSeq: async () => this.rows[0]?.seq ?? 0,
         getLatestSeq: async () => this.rows[this.rows.length - 1]?.seq ?? 0,
-        getEventsSince: async (cursor: number, limit = 100) =>
-          this.rows.filter((row) => row.seq > cursor).slice(0, limit),
+        getEventsSince: async (cursor: number, limit = 100) => {
+          // Capture the page before the hook runs, so a write appended by the
+          // hook lands strictly after this read.
+          const page = this.rows
+            .filter((row) => row.seq > cursor)
+            .slice(0, limit)
+          this.onSequenceRead()
+          return page
+        },
       },
       repo: {
         getRootDetailed: async () => {
@@ -148,6 +157,33 @@ describe('listRepoOps caught-up race', () => {
     expect(res.caughtUp).toBe(false)
     expect(res.ops).toEqual([])
     expect(res.cursor).toBe(cursor)
+  })
+
+  it('stays caughtUp when the write lands after the probe', async () => {
+    const actorStore = new ScriptedActorStore()
+    actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
+    actorStore.root = { cid: 'commitCid', rev: REV.r1 }
+    actorStore.commitBytes = await encodeSignedCommit(REV.r1)
+    // The probe is the only sequence read that happens after the commit read,
+    // and its page is captured before this hook runs. The write therefore lands
+    // strictly past the probe's horizon, where one probe cannot see it. Ops and
+    // commit still agree, so the response is consistent rather than falsely
+    // caught up — the write simply belongs to a later poll.
+    let commitRead = false
+    actorStore.onCommitRead = () => {
+      commitRead = true
+    }
+    actorStore.onSequenceRead = () => {
+      if (commitRead && actorStore.rows.length === 1) {
+        actorStore.appendEvent(2, REV.r2, 'mihoshi', 'cidMihoshi')
+      }
+    }
+
+    const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
+
+    expect(res.caughtUp).toBe(true)
+    expect(res.commit?.rev).toBe(REV.r1)
+    expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
   })
 
   it('returns the commit and caughtUp when no write lands during the commit read', async () => {
