@@ -26,16 +26,21 @@ export class BoundedDidCache extends MemoryCache {
     super(staleTTL, maxTTL)
   }
 
-  override async cacheDid(did: string, doc: DidDocument): Promise<void> {
+  override cacheDid(did: string, doc: DidDocument): Promise<void> {
     // Delete first so a refresh moves the entry to the end of the insertion
     // order. The first key is then always the least recently written one.
     this.cache.delete(did)
-    await super.cacheDid(did, doc)
+    // `MemoryCache.cacheDid` writes to the map before it suspends, so the size
+    // below is already current. Do not await here: the yield would let every
+    // concurrent write land before the first eviction runs, and the cache
+    // would grow by the number of writes in flight.
+    const written = super.cacheDid(did, doc)
     // One write adds at most one entry, so one eviction restores the bound.
     if (this.cache.size > this.maxSize) {
       const [oldest] = this.cache.keys()
       this.cache.delete(oldest)
     }
+    return written
   }
 }
 
@@ -52,7 +57,7 @@ export function createIdResolver(cfg: FeedgenConfig): IdResolver {
   )
 
   // MemoryCache never evicts expired entries on its own — sweep periodically.
-  setInterval(() => {
+  const sweep = setInterval(() => {
     const now = Date.now()
     for (const [did, val] of cache.cache) {
       if (now > val.updatedAt + DID_CACHE_MAX_TTL) {
@@ -60,6 +65,8 @@ export function createIdResolver(cfg: FeedgenConfig): IdResolver {
       }
     }
   }, DID_CACHE_SWEEP_INTERVAL)
+  // The sweep is upkeep. It must never be the reason the process stays alive.
+  sweep.unref()
 
   return new IdResolver({
     plcUrl: cfg.feedgenPlcUrl,

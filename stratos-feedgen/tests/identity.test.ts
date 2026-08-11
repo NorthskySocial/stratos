@@ -178,4 +178,23 @@ describe('createIdResolver', () => {
 
     expect(internalMap(resolver).size).toBe(1)
   })
+
+  it('holds the max size across concurrent writes', async () => {
+    const resolver = createIdResolver(cfg)
+    const cache = didCache(resolver)
+    for (let i = 0; i < DID_CACHE_MAX_SIZE; i++) {
+      await cache.cacheDid(`did:plc:alucard${i}`, doc(`did:plc:alucard${i}`))
+    }
+
+    // Start every write without awaiting any of them. An eviction placed after
+    // a yield lets all 50 writes land before the first eviction runs, so the
+    // map would hold 10,050 entries at this point.
+    const writes = Array.from({ length: 50 }, (_, i) =>
+      cache.cacheDid(`did:plc:seras${i}`, doc(`did:plc:seras${i}`)),
+    )
+    expect(internalMap(resolver).size).toBe(DID_CACHE_MAX_SIZE)
+
+    await Promise.all(writes)
+    expect(internalMap(resolver).size).toBe(DID_CACHE_MAX_SIZE)
+  })
 })
