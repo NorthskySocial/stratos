@@ -20,7 +20,10 @@ import {
   ADMIN_SESSION_COOKIE,
   resolveAdminSession,
 } from '../src/oauth/admin-routes.js'
-import { handleAdminCallback } from '../src/oauth/handlers/admin-callback.js'
+import {
+  handleAdminCallback,
+  type AdminCallbackResponse,
+} from '../src/oauth/handlers/admin-callback.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import {
   envToConfig,
@@ -491,6 +494,21 @@ describe('admin auth verifier', () => {
   })
 })
 
+/**
+ * A response double carrying only the methods the admin callback calls.
+ *
+ * The mock functions stay visible for assertions, and the object satisfies
+ * `AdminCallbackResponse`, so a method the handler starts using fails the build
+ * here rather than at run time.
+ */
+function makeAdminRes() {
+  const cookie = vi.fn()
+  const redirect = vi.fn()
+  const json = vi.fn()
+  const status = vi.fn(() => ({ json }))
+  return { cookie, redirect, status, json } satisfies AdminCallbackResponse
+}
+
 describe('admin OAuth callback', () => {
   let dataDir: string
   let db: ServiceDb
@@ -535,13 +553,8 @@ describe('admin OAuth callback', () => {
     oauthClient.callback.mockResolvedValue({ session: { sub: ADMIN_DID } })
     const handler = handleAdminCallback(makeConfig())
 
-    const req: any = { url: '/admin/oauth/callback?code=foo&state=bar' }
-    const res: any = {
-      cookie: vi.fn(),
-      redirect: vi.fn(),
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-    }
+    const req = { url: '/admin/oauth/callback?code=foo&state=bar' }
+    const res = makeAdminRes()
 
     await handler(req, res)
 
@@ -566,13 +579,8 @@ describe('admin OAuth callback', () => {
     const createSpy = vi.spyOn(store, 'create')
     const handler = handleAdminCallback(makeConfig())
 
-    const req: any = { url: '/admin/oauth/callback?code=foo&state=bar' }
-    const res: any = {
-      cookie: vi.fn(),
-      redirect: vi.fn(),
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-    }
+    const req = { url: '/admin/oauth/callback?code=foo&state=bar' }
+    const res = makeAdminRes()
 
     await handler(req, res)
 
