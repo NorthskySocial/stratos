@@ -27,6 +27,10 @@ describe('Record Read Handlers', () => {
   const otherDid = 'did:plc:rei-ayanami'
   const serviceDid = 'did:web:nerv.tokyo.jp'
   const boundary = 'did:web:nerv.tokyo.jp/engineering'
+  const recordNotFound = {
+    message: 'Record not found',
+    customErrorName: 'RecordNotFound',
+  }
 
   async function createTestCid(data: any) {
     const bytes = new TextEncoder().encode(JSON.stringify(data))
@@ -195,7 +199,7 @@ describe('Record Read Handlers', () => {
           otherDid,
           [],
         ),
-      ).rejects.toThrow('Record not found')
+      ).rejects.toMatchObject(recordNotFound)
 
       await expect(
         getRecord(
@@ -208,7 +212,7 @@ describe('Record Read Handlers', () => {
           otherDid,
           [boundary],
         ),
-      ).rejects.toThrow('Record not found')
+      ).rejects.toMatchObject(recordNotFound)
 
       await expect(
         getRecord(
@@ -220,7 +224,7 @@ describe('Record Read Handlers', () => {
           },
           otherDid,
         ),
-      ).rejects.toThrow('Record not found')
+      ).rejects.toMatchObject(recordNotFound)
     })
 
     it('should deny a domainless record to an unauthenticated caller', async () => {
@@ -232,7 +236,7 @@ describe('Record Read Handlers', () => {
           collection: 'app.bsky.feed.post',
           rkey: 'postNoBoundary',
         }),
-      ).rejects.toThrow('Record not found')
+      ).rejects.toMatchObject(recordNotFound)
     })
 
     it('should still return a domainless record to its owner', async () => {
