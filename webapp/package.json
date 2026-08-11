@@ -10,6 +10,7 @@
     "build:northsky": "vite build --mode northsky",
     "preview": "vite preview",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:docker": "./scripts/e2e-docker.sh"

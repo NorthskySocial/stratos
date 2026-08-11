@@ -162,6 +162,12 @@ test.describe('Alt Text Support', () => {
       record: { embed: { images: Array<{ alt: string }> } }
     } | null = null
 
+    const requireCreatedRecord = () => {
+      if (!createdRecord)
+        throw new Error('record creation was never intercepted')
+      return createdRecord
+    }
+
     // Mock blob upload
     await page.route(
       (url) =>
@@ -250,7 +256,7 @@ test.describe('Alt Text Support', () => {
     await expect.poll(() => createdRecord).toBeTruthy()
 
     // Verify alt text in the created record
-    expect(createdRecord.record.embed.images[0].alt).toBe(testAltText)
+    expect(requireCreatedRecord().record.embed.images[0].alt).toBe(testAltText)
 
     // Verify UI is cleared
     await expect(composer.locator('textarea')).toHaveValue('')
