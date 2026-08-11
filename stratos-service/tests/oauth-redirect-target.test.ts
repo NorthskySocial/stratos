@@ -174,6 +174,37 @@ describe('verifyRedirectTarget', () => {
     })
   })
 
+  it('does not match a declared private-use scheme entry', async () => {
+    // A native client may legally declare "com.example.app:/callback". The URL
+    // parser gives such an entry the opaque origin "null", which must never
+    // match a web target.
+    const fetchUris = vi.fn().mockResolvedValue(['com.example.app:/callback'])
+
+    await expect(
+      verifyRedirectTarget('https://app.example/', CLIENT_ID, gates, fetchUris),
+    ).resolves.toEqual({
+      allowed: false,
+      message: 'redirect_uri origin is not declared by the client_id',
+    })
+  })
+
+  it('refuses a private-use scheme target before reading any document', async () => {
+    const fetchUris = vi.fn()
+
+    await expect(
+      verifyRedirectTarget(
+        'com.example.app:/callback',
+        CLIENT_ID,
+        gates,
+        fetchUris,
+      ),
+    ).resolves.toEqual({
+      allowed: false,
+      message: 'redirect_uri must use https',
+    })
+    expect(fetchUris).not.toHaveBeenCalled()
+  })
+
   it('ignores an unparseable entry in the declared list', async () => {
     const fetchUris = vi
       .fn()
