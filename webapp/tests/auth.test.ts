@@ -63,9 +63,7 @@ describe('auth', () => {
         this.revoke = vi.fn()
         // eslint-disable-next-line @typescript-eslint/no-this-alias
         mockInstance = this
-      } as unknown as (options: {
-        onDelete: (sub: string, cause: string) => void
-      }) => void)
+      } as unknown as typeof BrowserOAuthClient)
     }
 
     const session = await init()

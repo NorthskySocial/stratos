@@ -24,7 +24,9 @@ export function configureAgent(agent: Agent): Agent {
   } else {
     const lex = new Lexicons(stratosLexicons)
     if (agent.api) {
-      agent.api.lex = lex
+      // `lex` is declared readonly, but this branch only runs when the agent
+      // reached us without one, so there is nothing to preserve.
+      Object.assign(agent.api, { lex })
     } else {
       // If agent.api is not yet initialized (e.g., in some test environments),
       // set it via the private property so callers still get a usable lex.
@@ -64,10 +66,19 @@ export function createServiceAgent(
 export function createServiceFetch(
   session: OAuthSession,
   serviceUrl: string,
-): (url: string, init?: RequestInit) => Promise<Response> {
+): (input: URL | RequestInfo, init?: RequestInit) => Promise<Response> {
   // OAuthSession.fetchHandler resolves URLs against tokenSet.aud (the PDS).
   // Wrap it so relative XRPC pathnames resolve against the target service instead.
-  return async (url: string, init?: RequestInit) => {
+  return async (input: URL | RequestInfo, init?: RequestInit) => {
+    if (input instanceof Request) {
+      // session.fetchHandler accepts a URL and a RequestInit. It cannot receive
+      // the method, the headers, the body or the signal of a Request. Reject the
+      // Request to prevent a silent send of an empty GET.
+      throw new TypeError(
+        'createServiceFetch does not accept a Request. Pass a URL or a string with RequestInit.',
+      )
+    }
+    const url = typeof input === 'string' ? input : input.href
     let fullUrl: URL
     try {
       fullUrl = new URL(url)

@@ -19,6 +19,7 @@ const createPost = (overrides: Partial<FeedPost> = {}): FeedPost => ({
   author: 'did:plc:user1',
   authorHandle: 'user1.test',
   boundaries: [],
+  reply: null,
   ...overrides,
 })
 
