@@ -15,6 +15,46 @@ const MAX_CLIENT_METADATA_BYTES = 64 * 1024
 const CLIENT_METADATA_TIMEOUT_MS = 5_000
 
 /**
+ * Read a response body as text, and stop as soon as it passes the byte cap.
+ *
+ * `response.text()` buffers the whole body before the caller can measure it,
+ * and the length of the result counts UTF-16 code units, not bytes. A document
+ * of multi-byte characters can therefore hold about three times the intended
+ * size. Count the bytes of each chunk instead, and release the connection at
+ * the first chunk that goes over.
+ *
+ * @param response - The metadata response
+ * @returns The decoded body
+ * @throws Error if the body exceeds MAX_CLIENT_METADATA_BYTES
+ */
+async function readBoundedText(response: Response): Promise<string> {
+  const body = response.body
+  if (!body) return ''
+
+  const decoder = new TextDecoder()
+  const reader = body.getReader()
+  let read = 0
+  let text = ''
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      read += value.byteLength
+      if (read > MAX_CLIENT_METADATA_BYTES) {
+        throw new Error('client metadata document is too large')
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+
+  return text + decoder.decode()
+}
+
+/**
  * Fetch and parse the client metadata document named by a `client_id`.
  *
  * The caller controls the URL, so the request is constrained: the schema
@@ -50,10 +90,7 @@ export async function fetchClientRedirectUris(
     throw new Error('client metadata document is too large')
   }
 
-  const body = await response.text()
-  if (body.length > MAX_CLIENT_METADATA_BYTES) {
-    throw new Error('client metadata document is too large')
-  }
+  const body = await readBoundedText(response)
 
   const metadata = oauthClientMetadataSchema.parse(JSON.parse(body))
   if (metadata.client_id !== clientId) {
