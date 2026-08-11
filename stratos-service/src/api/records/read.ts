@@ -1,6 +1,10 @@
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
-import { canAccessRecord, StratosValidator } from '@northskysocial/stratos-core'
+import {
+  canAccessRecord,
+  isDomainlessRecord,
+  StratosValidator,
+} from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { logDomainlessInvariant } from '../../shared/domainless-invariant.js'
 import type { ListRecordsResult, RecordResult } from './types.js'
@@ -111,15 +115,15 @@ export async function listRecords(
       reverse,
     })
 
+    let domainlessCount = 0
     const records = list
       .filter((record) => {
         const recordBoundaries = StratosValidator.extractBoundaryDomains(
           record.value,
         )
-        logDomainlessInvariant(ctx.logger, recordBoundaries, {
-          uri: record.uri.toString(),
-          ownerDid: repo,
-        })
+        if (isDomainlessRecord(recordBoundaries)) {
+          domainlessCount += 1
+        }
         return canAccessRecord({
           recordBoundaries,
           ownerDid: repo,
@@ -134,6 +138,13 @@ export async function listRecords(
         cid: record.cid,
         value: record.value,
       }))
+
+    if (domainlessCount > 0) {
+      ctx.logger?.warn(
+        { ownerDid: repo, collection, domainlessCount },
+        'invariant violation: records have no domain; treating as fail-closed inaccessible',
+      )
+    }
 
     return {
       records,
