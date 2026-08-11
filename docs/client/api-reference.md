@@ -197,9 +197,10 @@ Incremental pull sync of a repo's operation log. Returns record operations after
 values inlined by default. When the response reaches the end of the log and no concurrent
 write was detected, `caughtUp` is `true` and the repo's current signed commit is included.
 If a write lands during the request, the response instead carries `caughtUp: false` and a
-cursor with no commit — poll again. Under continuous writes `caughtUp` may stay false
-indefinitely, but each poll still delivers ops; it is never falsely `true`. If `since`
-predates retained history, the `OplogTruncated` error is returned - fall back to
+cursor with no commit. Such a response can carry no ops and repeat the cursor you sent, so
+poll again whenever `caughtUp` is `false`, and do not read an unchanged cursor as a stall.
+Under continuous writes `caughtUp` may stay false indefinitely; it is never falsely `true`.
+If `since` predates retained history, the `OplogTruncated` error is returned - fall back to
 full-state recovery below.
 
 ### Pull Sync: List Record Paths (Full-State Recovery)
