@@ -158,8 +158,9 @@ const envSchema = z
 
     // Admin auth: comma-separated list of admin DIDs (OAuth-authorized operators)
     STRATOS_ADMIN_DIDS: z.string().optional(),
-    // Comma-separated list of origins the enrollment flow may redirect back to
-    // (e.g. the webapp origin). Empty means no external redirect is permitted.
+    // Optional comma-separated list of origins the enrollment flow may redirect
+    // back to. Only needed for a client that publishes no client metadata
+    // document; a client that publishes one proves its own redirect target.
     STRATOS_ALLOWED_REDIRECT_ORIGINS: z.string().optional(),
     // External allowlist (optional)
     STRATOS_ALLOW_LIST_URI: z.string().url().optional(),
@@ -564,7 +565,8 @@ function loadSpaceAppAccess(
  * `URL.origin` so operator spellings (trailing slash, explicit default
  * port, uppercase) match the exact-origin comparison at request time.
  *
- * @param raw - Raw comma-separated env value.
+ * @param raw - Raw comma-separated env value. Optional: a caller that
+ *   publishes a client metadata document needs no entry here.
  * @returns Normalized origins.
  * @throws Error if an entry is not a parseable URL — a malformed entry in a
  *   security allow-list must surface at startup, not silently never match.
@@ -726,22 +728,21 @@ export function isAllowedCredentialedOrigin(
 }
 
 /**
- * Determine whether the enrollment flow may bounce the browser to a
- * `redirect_uri`.
+ * Determine whether an operator has named this redirect origin directly.
  *
- * A scheme-only check makes the service an open redirect: any site can be
- * named and a just-authenticated user is delivered there from a trusted
- * origin. The destination host must therefore be declared by the operator.
- * The list defaults to empty, so an unconfigured deployment performs no
- * external redirect at all; loopback is admitted in dev mode so local
- * development needs no configuration.
+ * This is one of two routes to a permitted redirect, not the only one. A
+ * caller that publishes a client metadata document proves its own target
+ * through `verifyRedirectTarget`, which needs no operator configuration. The
+ * list exists for a caller that publishes no such document, so it stays empty
+ * in most deployments. Loopback is admitted in dev mode so local development
+ * needs no configuration.
  *
  * This is deliberately a separate trust list from
  * `isAllowedCredentialedOrigin` (admin CSRF), which is same-service-origin.
  *
  * @param redirectUri - The full redirect target supplied by the client
  * @param config - Allow-listed origins and dev-mode flag
- * @returns true if the browser may be redirected to this URI
+ * @returns true if the operator has admitted this origin
  */
 export function isAllowedRedirectOrigin(
   redirectUri: string,

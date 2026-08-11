@@ -211,10 +211,38 @@ Enrollment uses OAuth. Redirect the user to start the flow:
 
 ```typescript
 function startEnrollment(stratosEndpoint: string, handle: string) {
-  const url = `${stratosEndpoint}/oauth/authorize?handle=${encodeURIComponent(handle)}`
-  window.location.href = url
+  const url = new URL('/oauth/authorize', stratosEndpoint)
+  url.searchParams.set('handle', handle)
+  // Where Stratos returns the browser after enrollment.
+  url.searchParams.set('redirect_uri', `${window.location.origin}/`)
+  // Your client metadata document. Stratos reads it to confirm you own the
+  // redirect target, so no operator configuration is needed.
+  url.searchParams.set(
+    'client_id',
+    `${window.location.origin}/client-metadata.json`,
+  )
+  window.location.href = url.toString()
 }
 ```
+
+`redirect_uri` and `client_id` are optional. Send neither and the callback answers with JSON instead
+of returning the browser to your app.
+
+To use `redirect_uri`, serve a client metadata document at your `client_id` URL over HTTPS. The
+document must name itself and declare the redirect target's origin:
+
+```json
+{
+  "client_id": "https://app.example/client-metadata.json",
+  "client_uri": "https://app.example",
+  "redirect_uris": ["https://app.example/"]
+}
+```
+
+This is the same document an AT Protocol OAuth client already publishes, so most apps have one.
+Stratos compares origins, so any path on a declared origin is accepted. After enrollment the browser
+returns to your `redirect_uri` with `?stratos_enrolled=true` appended. No token, authorization code,
+or DID is ever placed on that URL.
 
 ## Complete Flow
 

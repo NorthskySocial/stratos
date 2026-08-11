@@ -70,6 +70,7 @@ export interface OAuthRoutesConfig {
   defaultBoundaries?: string[]
   autoEnrollDomains?: string[]
   allowedRedirectOrigins: string[]
+  fetchClientRedirectUris?: (clientId: string) => Promise<string[]>
   logger?: Logger
   devMode?: boolean
   dpopVerifier: import('../infra/auth/dpop-verifier.js').DpopVerifier

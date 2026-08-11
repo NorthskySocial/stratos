@@ -4,7 +4,6 @@ import type {
   EnrollmentValidationResult,
   Logger,
 } from '@northskysocial/stratos-core'
-import { isAllowedRedirectOrigin } from '../../config.js'
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
 import {
   migrateEnrollmentRkey,
@@ -91,8 +90,6 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
         did,
         alreadyEnrolled,
         allowedSchemes,
-        allowedRedirectOrigins: config.allowedRedirectOrigins,
-        devMode,
         enrollBoundaries,
         logger,
       })
@@ -279,14 +276,23 @@ function readRedirectCookie(req: express.Request): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
+/**
+ * Send the browser back to the calling app, or answer with JSON.
+ *
+ * `handleAuthorize` verified the target before writing the cookie, and the
+ * cookie is HttpOnly, Secure, SameSite=Lax, and expires in ten minutes. That
+ * cookie is therefore the integrity boundary, so this function re-checks only
+ * the scheme and does not repeat the client metadata fetch.
+ *
+ * The redirect carries `stratos_enrolled` and nothing else. No token, no
+ * authorization code, and no DID ever rides this URL.
+ */
 function sendOAuthResponse(deps: {
   req: express.Request
   res: express.Response
   did: string
   alreadyEnrolled: boolean
   allowedSchemes: string[]
-  allowedRedirectOrigins: string[]
-  devMode: boolean
   enrollBoundaries: string[]
   logger: Logger | undefined
 }) {
@@ -296,30 +302,28 @@ function sendOAuthResponse(deps: {
     did,
     alreadyEnrolled,
     allowedSchemes,
-    allowedRedirectOrigins,
-    devMode,
     enrollBoundaries,
     logger,
   } = deps
 
-  // Redirect back to the app if a redirect was stored, otherwise return JSON
   const redirectTo = readRedirectCookie(req)
   if (redirectTo) {
     res.clearCookie('stratos_redirect')
     try {
       const url = new URL(redirectTo)
-      if (
-        allowedSchemes.includes(url.protocol) &&
-        isAllowedRedirectOrigin(redirectTo, {
-          allowedRedirectOrigins,
-          devMode,
-        })
-      ) {
+      if (allowedSchemes.includes(url.protocol)) {
         url.searchParams.set('stratos_enrolled', 'true')
         return res.redirect(url.toString())
       }
+      logger?.warn(
+        { origin: url.origin },
+        'stored redirect uses a disallowed scheme; answering with JSON',
+      )
     } catch {
-      // Invalid URL, fall through to JSON response
+      logger?.warn(
+        {},
+        'stored redirect is not a valid URL; answering with JSON',
+      )
     }
   }
 

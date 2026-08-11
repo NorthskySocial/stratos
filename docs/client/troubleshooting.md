@@ -15,11 +15,24 @@ curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=<your-
 2. Verify the AppView has indexed the Stratos content — indexing can lag by a few seconds.
 3. Confirm the post was created successfully by checking the returned AT-URI.
 
-## OAuth Redirect Fails
+## Enrollment Redirect Fails
 
-1. Verify your app's callback URL is listed in the Stratos `redirect_uris` configuration.
-2. Check for CORS errors in the browser console.
-3. Ensure the user's PDS supports ATprotocol OAuth.
+After enrollment, Stratos returns the browser to the `redirect_uri` you sent to
+`/oauth/authorize`. You do not register that URL with the operator. You prove it is yours the same
+way you prove an OAuth redirect: publish a client metadata document and name it with `client_id`.
+
+If the response is `400 InvalidRequest` instead of a redirect:
+
+1. Confirm you sent `client_id` with the authorize request.
+2. Fetch your `client_id` URL and confirm it returns JSON over HTTPS.
+3. Confirm the document's own `client_id` field equals the URL it is served from.
+4. Confirm `redirect_uris` declares a URL on the same origin as your `redirect_uri`.
+5. Check for CORS errors in the browser console.
+6. Ensure the user's PDS supports ATprotocol OAuth.
+
+If your app publishes no client metadata document, ask the operator to add your origin to
+`STRATOS_ALLOWED_REDIRECT_ORIGINS`. Publishing the document is preferred, because it needs no
+operator action.
 
 ## Requests Go to PDS Instead of Stratos
 

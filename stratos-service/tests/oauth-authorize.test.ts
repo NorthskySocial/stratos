@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleAuthorize } from '../src/oauth/handlers/authorize.js'
 import { OAUTH_SCOPE } from '../src/oauth'
 
+const PROOF_REQUIRED =
+  'redirect_uri is not declared by a client_id metadata document and its origin is not allow-listed'
+
 describe('handleAuthorize', () => {
   let mockOauthClient: any
   let mockLogger: any
+  let mockFetchRedirectUris: any
   let config: any
 
   beforeEach(() => {
@@ -17,11 +21,13 @@ describe('handleAuthorize', () => {
       error: vi.fn(),
       debug: vi.fn(),
     }
+    mockFetchRedirectUris = vi.fn()
     config = {
       oauthClient: mockOauthClient,
       logger: mockLogger,
       baseUrl: 'http://localhost:3100',
       allowedRedirectOrigins: [],
+      fetchClientRedirectUris: mockFetchRedirectUris,
     }
   })
 
@@ -96,7 +102,7 @@ describe('handleAuthorize', () => {
     expect(res.status).not.toHaveBeenCalled()
   })
 
-  it('rejects a redirect_uri whose origin is not allow-listed', async () => {
+  it('rejects an unproved redirect_uri and names the fix', async () => {
     config.allowedRedirectOrigins = ['https://app.example']
 
     const handler = handleAuthorize(config)
@@ -116,14 +122,131 @@ describe('handleAuthorize', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         error: 'InvalidRequest',
-        message: 'redirect_uri origin is not allowed',
+        message: PROOF_REQUIRED,
+        hint: expect.stringContaining('client_id'),
       }),
+    )
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      { clientId: undefined, message: PROOF_REQUIRED },
+      'rejected enrollment redirect_uri',
     )
     expect(res.cookie).not.toHaveBeenCalled()
     expect(mockOauthClient.authorize).not.toHaveBeenCalled()
   })
 
-  it('rejects every redirect_uri when the allow-list is empty', async () => {
+  it('rejects an unproved redirect_uri when no logger is configured', async () => {
+    config.logger = undefined
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: { handle: 'alice.test', redirect_uri: 'https://evil.example/' },
+    }
+    const res = makeRes()
+
+    await handler(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.cookie).not.toHaveBeenCalled()
+  })
+
+  it('accepts a redirect_uri declared by the client_id document', async () => {
+    mockFetchRedirectUris.mockResolvedValue(['https://app.example/'])
+    const authUrl = new URL('https://pds.example.com/oauth/authorize?state=abc')
+    mockOauthClient.authorize.mockResolvedValue(authUrl)
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: {
+        handle: 'motoko.test',
+        redirect_uri: 'https://app.example/enrolled',
+        client_id: 'https://app.example/client-metadata.json',
+      },
+    }
+    const res = makeRes()
+
+    await handler(req, res)
+
+    expect(mockFetchRedirectUris).toHaveBeenCalledWith(
+      'https://app.example/client-metadata.json',
+    )
+    expect(res.cookie).toHaveBeenCalledWith(
+      'stratos_redirect',
+      'https://app.example/enrolled',
+      expect.objectContaining({ httpOnly: true }),
+    )
+    expect(res.status).not.toHaveBeenCalled()
+  })
+
+  it('rejects a redirect_uri the client_id document does not declare', async () => {
+    mockFetchRedirectUris.mockResolvedValue(['https://app.example/'])
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: {
+        handle: 'motoko.test',
+        redirect_uri: 'https://evil.example/',
+        client_id: 'https://app.example/client-metadata.json',
+      },
+    }
+    const res = makeRes()
+
+    await handler(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'redirect_uri origin is not declared by the client_id',
+      }),
+    )
+    expect(res.cookie).not.toHaveBeenCalled()
+  })
+
+  it('rejects the redirect when the client_id document cannot be read', async () => {
+    mockFetchRedirectUris.mockRejectedValue(new Error('connection refused'))
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: {
+        handle: 'batou.test',
+        redirect_uri: 'https://app.example/',
+        client_id: 'https://app.example/client-metadata.json',
+      },
+    }
+    const res = makeRes()
+
+    await handler(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('connection refused'),
+      }),
+    )
+    expect(res.cookie).not.toHaveBeenCalled()
+  })
+
+  it('does not read the client_id document for an allow-listed origin', async () => {
+    config.allowedRedirectOrigins = ['https://app.example']
+    const authUrl = new URL('https://pds.example.com/oauth/authorize?state=abc')
+    mockOauthClient.authorize.mockResolvedValue(authUrl)
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: {
+        handle: 'togusa.test',
+        redirect_uri: 'https://app.example/',
+        client_id: 'https://app.example/client-metadata.json',
+      },
+    }
+    const res = makeRes()
+
+    await handler(req, res)
+
+    expect(mockFetchRedirectUris).not.toHaveBeenCalled()
+    expect(res.status).not.toHaveBeenCalled()
+  })
+
+  it('rejects every redirect_uri when nothing proves it', async () => {
     const handler = handleAuthorize(config)
     const req: any = {
       query: { handle: 'alice.test', redirect_uri: 'https://app.example/' },
@@ -268,7 +391,7 @@ describe('handleAuthorize', () => {
     expect(res.status).toHaveBeenCalledWith(400)
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'redirect_uri origin is not allowed',
+        message: PROOF_REQUIRED,
       }),
     )
     expect(res.cookie).not.toHaveBeenCalled()
@@ -292,6 +415,7 @@ describe('handleAuthorize', () => {
       'http://localhost:5173/',
       expect.objectContaining({ httpOnly: true }),
     )
+    expect(mockFetchRedirectUris).not.toHaveBeenCalled()
     expect(res.status).not.toHaveBeenCalled()
     expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
   })

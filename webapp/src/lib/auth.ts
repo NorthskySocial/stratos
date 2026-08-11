@@ -29,27 +29,42 @@ function isLoopback(): boolean {
 }
 
 /**
+ * The base URL this app publishes itself under.
+ *
+ * A loopback development server has no public URL, so it falls back to the
+ * browser origin.
+ *
+ * @returns The app base URL, without a trailing slash.
+ */
+function appBaseUrl(): string {
+  return import.meta.env.VITE_WEBAPP_URL && !isLoopback()
+    ? import.meta.env.VITE_WEBAPP_URL
+    : window.location.origin
+}
+
+/**
+ * The URL of this app's client metadata document.
+ *
+ * Stratos reads this document to confirm that the app owns the enrollment
+ * redirect target it asks for.
+ *
+ * @returns The client metadata document URL.
+ */
+export function getClientId(): string {
+  return `${appBaseUrl()}/client-metadata.json`
+}
+
+/**
  * Build client metadata for local development.
  *
  * @returns OAuth client metadata.
  */
 function buildClientMetadata(): OAuthClientMetadataInput {
-  const origin = window.location.origin
   return {
-    client_id:
-      import.meta.env.VITE_WEBAPP_URL && !isLoopback()
-        ? `${import.meta.env.VITE_WEBAPP_URL}/client-metadata.json`
-        : `${origin}/client-metadata.json`,
+    client_id: getClientId(),
     client_name: 'Stratos',
-    client_uri:
-      import.meta.env.VITE_WEBAPP_URL && !isLoopback()
-        ? import.meta.env.VITE_WEBAPP_URL
-        : origin,
-    redirect_uris: [
-      import.meta.env.VITE_WEBAPP_URL && !isLoopback()
-        ? `${import.meta.env.VITE_WEBAPP_URL}/`
-        : `${origin}/`,
-    ],
+    client_uri: appBaseUrl(),
+    redirect_uris: [`${appBaseUrl()}/`],
     scope: OAUTH_SCOPE,
     response_types: ['code'],
     token_endpoint_auth_method: 'none',

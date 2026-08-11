@@ -1,40 +1,16 @@
 import express from 'express'
-import { isAllowedRedirectOrigin } from '../../config.js'
 import { OAUTH_SCOPE } from '../client.js'
+import { verifyRedirectTarget } from '../redirect-target.js'
 import type { OAuthRoutesConfig } from '../routes.js'
 
 /**
- * Check a client-supplied `redirect_uri` against the scheme and origin gates.
+ * Tells a client developer how to make its own redirect target acceptable.
  *
- * @param redirectUri - The raw `redirect_uri` query parameter
- * @param gates - Permitted URL schemes, allow-listed origins, and dev-mode flag
- * @returns A client-facing rejection message, or null if the URI is acceptable
+ * A rejection here is almost always a client that did not send `client_id`,
+ * so the message names the fix instead of only the failure.
  */
-function rejectRedirectUri(
-  redirectUri: string,
-  gates: {
-    allowedSchemes: string[]
-    allowedRedirectOrigins: string[]
-    devMode: boolean
-  },
-): string | null {
-  let parsed: URL
-  try {
-    parsed = new URL(redirectUri)
-  } catch {
-    return 'Invalid redirect_uri'
-  }
-
-  if (!gates.allowedSchemes.includes(parsed.protocol)) {
-    return 'redirect_uri must use https'
-  }
-
-  if (!isAllowedRedirectOrigin(redirectUri, gates)) {
-    return 'redirect_uri origin is not allowed'
-  }
-
-  return null
-}
+const HOW_TO_PROVE_REDIRECT =
+  'Publish a client metadata document that declares this redirect_uri, then pass its URL as client_id.'
 
 /**
  * Handles the OAuth authorization flow
@@ -56,6 +32,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
     try {
       const handle = req.query.handle as string
       const redirectUri = req.query.redirect_uri as string | undefined
+      const clientId = req.query.client_id as string | undefined
 
       if (!handle) {
         return res.status(400).json({
@@ -65,11 +42,21 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       }
 
       if (redirectUri) {
-        const rejection = rejectRedirectUri(redirectUri, redirectGates)
-        if (rejection) {
+        const verdict = await verifyRedirectTarget(
+          redirectUri,
+          clientId,
+          redirectGates,
+          config.fetchClientRedirectUris,
+        )
+        if (!verdict.allowed) {
+          logger?.warn(
+            { clientId, message: verdict.message },
+            'rejected enrollment redirect_uri',
+          )
           return res.status(400).json({
             error: 'InvalidRequest',
-            message: rejection,
+            message: verdict.message,
+            hint: HOW_TO_PROVE_REDIRECT,
           })
         }
 
