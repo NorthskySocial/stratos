@@ -245,15 +245,22 @@ about three hours, and it reports overwhelmingly on code you did not touch. Scop
 
 ```bash
 cd <package> && pnpm exec stryker run --mutate 'src/a/changed.ts,src/b/changed.ts' \
-  > /tmp/mut.log 2>&1; echo exit=$?
+  > /tmp/mut.log 2>&1
 ```
 
-Two traps that make a scoped run lie to you:
+Do not append `; echo exit=$?`. That reports the status of `echo`, which always succeeds, so a
+Stryker run that broke the threshold looks green. Let the command return its own status.
+
+Three traps that make a scoped run lie to you:
 
 - **Repeated `--mutate` flags do not accumulate — the last one silently wins.** Passing
   `--mutate 'a.ts' --mutate 'b.ts'` mutates only `b.ts` and still reports a healthy score. Use ONE
   flag with a comma-separated list, then confirm every expected filename appears in the results
   table before believing the number.
+- **`--mutate` replaces the configured `mutate` list, including its exclusions.** Stryker merges CLI
+  options over the config file, and an array override wins whole, so `!src/**/index.ts` and
+  `!src/**/*.d.ts` stop applying. Name only the changed source files you mean to mutate; a barrel or
+  a declaration file passed by hand will be mutated.
 - The configs set `inPlace: true`, so Stryker rewrites sources on disk while it runs. Never pipe its
   output into `head`/`grep` — the closed pipe kills it mid-run and leaves mutated files behind.
   Always redirect to a file. Delete a stale `<package>/reports/stryker-incremental.json` first, or it
