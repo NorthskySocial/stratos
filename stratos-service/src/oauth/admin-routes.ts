@@ -14,6 +14,17 @@ import { handleAdminCallback } from './handlers/admin-callback.js'
 export const ADMIN_SESSION_COOKIE = 'stratos_admin_session'
 
 /**
+ * The part of a request the admin session helpers read.
+ *
+ * Both `express.Request` and a raw `IncomingMessage` satisfy this, and it names
+ * the whole contract, so a caller needs no cast to supply one.
+ */
+export type RequestWithHeaders = Pick<
+  import('node:http').IncomingMessage,
+  'headers'
+>
+
+/**
  * Read the opaque admin session id straight from the request's `Cookie`
  * header.
  *
@@ -25,7 +36,7 @@ export const ADMIN_SESSION_COOKIE = 'stratos_admin_session'
  * routes here and the raw `IncomingMessage` admin auth verifier.
  */
 export function readAdminSessionCookie(
-  req: import('node:http').IncomingMessage,
+  req: RequestWithHeaders,
 ): string | undefined {
   const cookieHeader = req.headers?.cookie
   if (!cookieHeader) return undefined
@@ -63,7 +74,7 @@ export interface AdminAuthRoutesConfig {
  * no valid, unexpired session whose DID is still an effective admin.
  */
 export async function resolveAdminSession(
-  req: express.Request,
+  req: RequestWithHeaders,
   config: Pick<
     AdminAuthRoutesConfig,
     'adminSessionStore' | 'adminDids' | 'adminUserStore'
