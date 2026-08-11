@@ -37,6 +37,45 @@ describe('stratos-agent', () => {
     )
   })
 
+  it('createServiceFetch rewrites the origin of a URL input', async () => {
+    const mockFetchHandler = vi.fn().mockResolvedValue(new Response())
+    const mockSession = {
+      fetchHandler: mockFetchHandler,
+    } as unknown as OAuthSession
+
+    const serviceUrl = 'https://stratos.example.com'
+    const fetchFn = createServiceFetch(mockSession, serviceUrl)
+
+    await fetchFn(new URL('https://kusanagi.example.com/xrpc/some.method?a=1'))
+
+    expect(mockFetchHandler).toHaveBeenCalledWith(
+      'https://stratos.example.com/xrpc/some.method?a=1',
+      undefined,
+    )
+  })
+
+  it('createServiceFetch rejects a Request instead of dropping its method and body', async () => {
+    const mockFetchHandler = vi.fn().mockResolvedValue(new Response())
+    const mockSession = {
+      fetchHandler: mockFetchHandler,
+    } as unknown as OAuthSession
+
+    const serviceUrl = 'https://stratos.example.com'
+    const fetchFn = createServiceFetch(mockSession, serviceUrl)
+
+    const request = new Request(
+      'https://kusanagi.example.com/xrpc/some.method',
+      {
+        method: 'POST',
+        headers: { 'x-section': 'nine' },
+        body: 'payload',
+      },
+    )
+
+    await expect(fetchFn(request)).rejects.toThrow(TypeError)
+    expect(mockFetchHandler).not.toHaveBeenCalled()
+  })
+
   it('handles DPoP nonce retry', async () => {
     const mockFetchHandler = vi
       .fn()
