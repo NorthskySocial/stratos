@@ -24,11 +24,16 @@ way you prove an OAuth redirect: publish a client metadata document and name it 
 If the response is `400 InvalidRequest` instead of a redirect:
 
 1. Confirm you sent `client_id` with the authorize request.
-2. Fetch your `client_id` URL and confirm it returns JSON over HTTPS.
-3. Confirm the document's own `client_id` field equals the URL it is served from.
-4. Confirm `redirect_uris` declares a URL on the same origin as your `redirect_uri`.
-5. Check for CORS errors in the browser console.
+2. Confirm the `client_id` URL uses `https`, includes a path, carries no fragment, and names a
+   hostname rather than an IP address.
+3. Fetch your `client_id` URL and confirm it returns JSON over HTTPS.
+4. Confirm the document's own `client_id` field equals the URL it is served from.
+5. Confirm `redirect_uris` declares a URL on the same origin as your `redirect_uri`.
 6. Ensure the user's PDS supports ATprotocol OAuth.
+
+Stratos reads the metadata document from its own server, not from the browser, so a CORS error in
+the browser console is unrelated to this response. The response body gives one fixed message for
+every read failure; the specific cause is in the service log.
 
 If your app publishes no client metadata document, ask the operator to add your origin to
 `STRATOS_ALLOWED_REDIRECT_ORIGINS`. Publishing the document is preferred, because it needs no

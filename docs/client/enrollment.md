@@ -228,16 +228,35 @@ function startEnrollment(stratosEndpoint: string, handle: string) {
 `redirect_uri` and `client_id` are optional. Send neither and the callback answers with JSON instead
 of returning the browser to your app.
 
-To use `redirect_uri`, serve a client metadata document at your `client_id` URL over HTTPS. The
-document must name itself and declare the redirect target's origin:
+To use `redirect_uri`, serve a client metadata document at your `client_id` URL. The `client_id` URL
+must:
+
+- use `https`
+- include a path — `https://app.example` is rejected, `https://app.example/client-metadata.json` is
+  accepted
+- carry no fragment
+- name a hostname, not an IP address
+
+The document must name itself in `client_id` and declare the redirect target's origin:
 
 ```json
 {
   "client_id": "https://app.example/client-metadata.json",
   "client_uri": "https://app.example",
-  "redirect_uris": ["https://app.example/"]
+  "redirect_uris": ["https://app.example/"],
+  "scope": "atproto",
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "application_type": "web",
+  "dpop_bound_access_tokens": true
 }
 ```
+
+Stratos reads only `client_id` and `redirect_uris`. AT Protocol requires the other fields of every
+OAuth client, so a document that omits them satisfies Stratos and is still rejected by the user's
+authorization server. `token_endpoint_auth_method: "none"` marks a public client; a confidential
+client declares its own method and keys.
 
 This is the same document an AT Protocol OAuth client already publishes, so most apps have one.
 Stratos compares origins, so any path on a declared origin is accepted. After enrollment the browser
