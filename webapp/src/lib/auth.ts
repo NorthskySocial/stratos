@@ -32,14 +32,18 @@ function isLoopback(): boolean {
  * The base URL this app publishes itself under.
  *
  * A loopback development server has no public URL, so it falls back to the
- * browser origin.
+ * browser origin. A trailing slash on `VITE_WEBAPP_URL` is removed: the value
+ * is joined to a path to build the `client_id`, and Stratos rejects a document
+ * whose own `client_id` does not equal the URL it was fetched from.
  *
  * @returns The app base URL, without a trailing slash.
  */
-function appBaseUrl(): string {
-  return import.meta.env.VITE_WEBAPP_URL && !isLoopback()
-    ? import.meta.env.VITE_WEBAPP_URL
-    : window.location.origin
+export function appBaseUrl(): string {
+  const configured =
+    import.meta.env.VITE_WEBAPP_URL && !isLoopback()
+      ? import.meta.env.VITE_WEBAPP_URL
+      : window.location.origin
+  return configured.replace(/\/+$/, '')
 }
 
 /**
