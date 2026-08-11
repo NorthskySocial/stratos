@@ -244,26 +244,31 @@ describe('verifyRedirectTarget', () => {
     expect(fetchUris).not.toHaveBeenCalled()
   })
 
-  it('reports why the client_id document could not be read', async () => {
-    const fetchUris = vi.fn().mockRejectedValue(new Error('connection refused'))
+  it('keeps the document read failure in logDetail, not in the message', async () => {
+    const fetchUris = vi
+      .fn()
+      .mockRejectedValue(new Error('client metadata document returned 403'))
 
     await expect(
       verifyRedirectTarget('https://app.example/', CLIENT_ID, gates, fetchUris),
     ).resolves.toEqual({
       allowed: false,
       message:
-        'could not verify redirect_uri against client_id: connection refused',
+        'could not verify redirect_uri against the client_id metadata document',
+      logDetail: 'client metadata document returned 403',
     })
   })
 
-  it('reports a non-Error rejection from the document read', async () => {
-    const fetchUris = vi.fn().mockRejectedValue('offline')
+  it('keeps a non-Error rejection in logDetail too', async () => {
+    const fetchUris = vi.fn().mockRejectedValue('ECONNREFUSED 10.0.0.5:443')
 
     await expect(
       verifyRedirectTarget('https://app.example/', CLIENT_ID, gates, fetchUris),
     ).resolves.toEqual({
       allowed: false,
-      message: 'could not verify redirect_uri against client_id: offline',
+      message:
+        'could not verify redirect_uri against the client_id metadata document',
+      logDetail: 'ECONNREFUSED 10.0.0.5:443',
     })
   })
 
