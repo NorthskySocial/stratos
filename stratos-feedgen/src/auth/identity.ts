@@ -31,10 +31,10 @@ export class BoundedDidCache extends MemoryCache {
     // order. The first key is then always the least recently written one.
     this.cache.delete(did)
     await super.cacheDid(did, doc)
-    while (this.cache.size > this.maxSize) {
-      const oldest = this.cache.keys().next()
-      if (oldest.done) break
-      this.cache.delete(oldest.value)
+    // One write adds at most one entry, so one eviction restores the bound.
+    if (this.cache.size > this.maxSize) {
+      const [oldest] = this.cache.keys()
+      this.cache.delete(oldest)
     }
   }
 }
