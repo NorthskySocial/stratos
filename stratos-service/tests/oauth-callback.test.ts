@@ -253,6 +253,9 @@ describe('handleCallback', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true, did: 'did:plc:alice' }),
     )
+    // With no stored target there is nothing to report. A guard that entered
+    // the redirect branch anyway would warn here.
+    expect(mockLogger.warn).not.toHaveBeenCalled()
   })
 
   it('declines a stored redirect that uses a disallowed scheme', async () => {

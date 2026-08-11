@@ -25,11 +25,12 @@ const CLIENT_METADATA_TIMEOUT_MS = 5_000
  *
  * @param response - The metadata response
  * @returns The decoded body
- * @throws Error if the body exceeds MAX_CLIENT_METADATA_BYTES
+ * @throws Error if the body is absent or exceeds MAX_CLIENT_METADATA_BYTES
  */
 async function readBoundedText(response: Response): Promise<string> {
   const body = response.body
-  if (!body) return ''
+  // A 204 passes the `ok` check and carries no body.
+  if (!body) throw new Error('client metadata document is empty')
 
   const decoder = new TextDecoder()
   const reader = body.getReader()

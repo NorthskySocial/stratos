@@ -66,13 +66,12 @@ describe('fetchClientRedirectUris', () => {
 
     await fetchClientRedirectUris(CLIENT_ID)
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      CLIENT_ID,
-      expect.objectContaining({
-        redirect: 'error',
-        signal: expect.any(AbortSignal),
-      }),
-    )
+    expect(fetchMock).toHaveBeenCalledWith(CLIENT_ID, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      redirect: 'error',
+      signal: expect.any(AbortSignal),
+    })
   })
 
   it.each([
@@ -157,6 +156,41 @@ describe('fetchClientRedirectUris', () => {
     await expect(fetchClientRedirectUris(CLIENT_ID)).resolves.toEqual([
       'https://app.example/',
     ])
+  })
+
+  it('joins a multi-byte character split across two chunks', async () => {
+    // The character sits in the returned value, so a decode that mangles it
+    // changes the result rather than hiding in a field nobody reads.
+    const redirectUri = 'https://app.example/キツネ'
+    const document = JSON.stringify({
+      client_id: CLIENT_ID,
+      redirect_uris: [redirectUri],
+    })
+    const bytes = Buffer.from(document, 'utf8')
+    // Cut inside the three bytes of the first Japanese character. A decoder
+    // that treats each chunk as complete emits a replacement character here.
+    const split = bytes.indexOf(Buffer.from('キ', 'utf8')) + 1
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(bytes.subarray(0, split)))
+        controller.enqueue(new Uint8Array(bytes.subarray(split)))
+        controller.close()
+      },
+    })
+
+    stubFetch(new Response(body))
+
+    await expect(fetchClientRedirectUris(CLIENT_ID)).resolves.toEqual([
+      redirectUri,
+    ])
+  })
+
+  it('rejects a response that carries no body', async () => {
+    stubFetch(new Response(null, { status: 204 }))
+
+    await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow(
+      'client metadata document is empty',
+    )
   })
 
   it('stops reading a body that never ends', async () => {
