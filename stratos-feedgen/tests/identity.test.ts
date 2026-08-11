@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DidPlcResolver } from '@atproto/identity'
+import type { DidDocument, DidPlcResolver } from '@atproto/identity'
 import { MemoryCache } from '@atproto/identity'
 
 import {
+  BoundedDidCache,
   createIdResolver,
   DID_CACHE_MAX_SIZE,
   DID_CACHE_MAX_TTL,
@@ -23,6 +24,12 @@ interface CacheEntry {
   updatedAt: number
 }
 
+function didCache(
+  resolver: ReturnType<typeof createIdResolver>,
+): BoundedDidCache {
+  return resolver.did.cache as BoundedDidCache
+}
+
 function internalMap(
   resolver: ReturnType<typeof createIdResolver>,
 ): Map<string, CacheEntry> {
@@ -30,14 +37,19 @@ function internalMap(
     .cache
 }
 
+/** The eviction order is keyed on the DID alone, so a bare document suffices. */
+function doc(did: string): DidDocument {
+  return { id: did }
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
 
 describe('createIdResolver', () => {
-  it('backs the resolver with an in-memory DID cache', () => {
+  it('backs the resolver with a size-bounded in-memory DID cache', () => {
     const resolver = createIdResolver(cfg)
-    expect(resolver.did.cache).toBeInstanceOf(MemoryCache)
+    expect(resolver.did.cache).toBeInstanceOf(BoundedDidCache)
   })
 
   it('configures the DID resolver with the feedgen PLC URL', () => {
@@ -102,37 +114,68 @@ describe('createIdResolver', () => {
     expect(cache.has('did:plc:faye')).toBe(true)
   })
 
-  it('clears the whole cache when it grows past the max size', () => {
-    vi.useFakeTimers()
+  it('holds the max size while entries are written, before any sweep', async () => {
     const resolver = createIdResolver(cfg)
-    const cache = internalMap(resolver)
-    for (let i = 0; i <= DID_CACHE_MAX_SIZE; i++) {
-      cache.set(`did:plc:faye${i}`, {
-        did: `did:plc:faye${i}`,
-        doc: {},
-        updatedAt: Date.now(),
-      })
+    const cache = didCache(resolver)
+    for (let i = 0; i < DID_CACHE_MAX_SIZE + 50; i++) {
+      await cache.cacheDid(`did:plc:kusanagi${i}`, doc(`did:plc:kusanagi${i}`))
     }
 
-    vi.advanceTimersByTime(DID_CACHE_SWEEP_INTERVAL)
-
-    expect(cache.size).toBe(0)
+    expect(internalMap(resolver).size).toBe(DID_CACHE_MAX_SIZE)
   })
 
-  it('keeps the cache when it is exactly at the max size', () => {
-    vi.useFakeTimers()
+  it('keeps every entry when the writes stop exactly at the max size', async () => {
     const resolver = createIdResolver(cfg)
-    const cache = internalMap(resolver)
+    const cache = didCache(resolver)
     for (let i = 0; i < DID_CACHE_MAX_SIZE; i++) {
-      cache.set(`did:plc:faye${i}`, {
-        did: `did:plc:faye${i}`,
-        doc: {},
-        updatedAt: Date.now(),
-      })
+      await cache.cacheDid(`did:plc:vash${i}`, doc(`did:plc:vash${i}`))
     }
 
-    vi.advanceTimersByTime(DID_CACHE_SWEEP_INTERVAL)
+    expect(internalMap(resolver).size).toBe(DID_CACHE_MAX_SIZE)
+    expect(internalMap(resolver).has('did:plc:vash0')).toBe(true)
+  })
 
-    expect(cache.size).toBe(DID_CACHE_MAX_SIZE)
+  it('evicts the least recently written entry once full', async () => {
+    const resolver = createIdResolver(cfg)
+    const cache = didCache(resolver)
+    for (let i = 0; i < DID_CACHE_MAX_SIZE; i++) {
+      await cache.cacheDid(`did:plc:jigen${i}`, doc(`did:plc:jigen${i}`))
+    }
+
+    await cache.cacheDid('did:plc:goemon', doc('did:plc:goemon'))
+
+    const map = internalMap(resolver)
+    expect(map.size).toBe(DID_CACHE_MAX_SIZE)
+    expect(map.has('did:plc:jigen0')).toBe(false)
+    expect(map.has('did:plc:jigen1')).toBe(true)
+    expect(map.has('did:plc:goemon')).toBe(true)
+  })
+
+  it('refreshing an entry spares it from the next eviction', async () => {
+    const resolver = createIdResolver(cfg)
+    const cache = didCache(resolver)
+    for (let i = 0; i < DID_CACHE_MAX_SIZE; i++) {
+      await cache.cacheDid(`did:plc:tetsuo${i}`, doc(`did:plc:tetsuo${i}`))
+    }
+
+    // Rewriting the oldest entry must move it to the back of the queue, so the
+    // second-oldest is discarded in its place.
+    await cache.cacheDid('did:plc:tetsuo0', doc('did:plc:tetsuo0'))
+    await cache.cacheDid('did:plc:kaneda', doc('did:plc:kaneda'))
+
+    const map = internalMap(resolver)
+    expect(map.size).toBe(DID_CACHE_MAX_SIZE)
+    expect(map.has('did:plc:tetsuo0')).toBe(true)
+    expect(map.has('did:plc:tetsuo1')).toBe(false)
+  })
+
+  it('does not grow the cache when the same DID is written repeatedly', async () => {
+    const resolver = createIdResolver(cfg)
+    const cache = didCache(resolver)
+    for (let i = 0; i < 5; i++) {
+      await cache.cacheDid('did:plc:motoko', doc('did:plc:motoko'))
+    }
+
+    expect(internalMap(resolver).size).toBe(1)
   })
 })
