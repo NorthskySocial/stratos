@@ -21,6 +21,24 @@ import {
 } from './features/space-credential/app-access.js'
 
 /**
+ * A boolean environment variable.
+ *
+ * `z.coerce.boolean()` applies `Boolean(value)`, which makes the string
+ * `"false"` true. Every value except the empty string became true, so an
+ * operator who disabled a flag enabled it. Accept the two spellings and reject
+ * the rest.
+ *
+ * @param defaultValue - Value used when the variable is not set
+ * @returns A schema that maps `"true"` and `"false"` to booleans
+ */
+function booleanEnv(defaultValue: boolean) {
+  return z
+    .enum(['true', 'false'])
+    .default(defaultValue ? 'true' : 'false')
+    .transform((value) => value === 'true')
+}
+
+/**
  * Environment variable schema for stratos service
  */
 const envSchema = z
@@ -168,10 +186,10 @@ const envSchema = z
     STRATOS_ALLOW_LIST_BOOTSTRAP_NAME: z.string().optional(),
 
     // Dev mode (allows Bearer DID auth without DPoP for test scripts)
-    STRATOS_DEV_MODE: z.coerce.boolean().default(false),
+    STRATOS_DEV_MODE: booleanEnv(false),
 
     // DPoP configuration
-    STRATOS_DPOP_REQUIRE_NONCE: z.coerce.boolean().default(true),
+    STRATOS_DPOP_REQUIRE_NONCE: booleanEnv(true),
 
     // User-Agent
     STRATOS_REPO_URL: z.string().default('http://localhost:3100'),
