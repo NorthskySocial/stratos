@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -322,6 +322,48 @@ describe('Record Read Handlers', () => {
       expect(uris).not.toContain(
         `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
       )
+    })
+
+    it('should warn once with the domainless count for a non-owner', async () => {
+      await seedDomainlessRecord('postNoBoundary1')
+      await seedDomainlessRecord('postNoBoundary2')
+      const warn = vi.fn()
+
+      await listRecords(
+        { ...ctx, logger: { warn } },
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+        [boundary],
+      )
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        {
+          ownerDid: testDid,
+          collection: 'app.bsky.feed.post',
+          domainlessCount: 2,
+        },
+        expect.stringContaining('no domain'),
+      )
+    })
+
+    it('should not warn when every record declares a domain', async () => {
+      const warn = vi.fn()
+
+      await listRecords(
+        { ...ctx, logger: { warn } },
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+        [boundary],
+      )
+
+      expect(warn).not.toHaveBeenCalled()
     })
 
     it('should include a domainless record for the owner', async () => {
