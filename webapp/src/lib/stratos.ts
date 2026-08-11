@@ -3,7 +3,7 @@ import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { encode as cborEncode } from '@atcute/cbor'
 import { verifySignature } from '@atproto/crypto'
 import { configureAgent } from './stratos-agent'
-import { getClientId } from './auth'
+import { appBaseUrl, getClientId } from './auth'
 
 export let STRATOS_URL = import.meta.env.VITE_STRATOS_URL
 export let STRATOS_SERVICE_DID = import.meta.env.VITE_STRATOS_SERVICE_DID
@@ -296,7 +296,10 @@ export async function fetchServerDomains(
 export function enrollInStratos(stratosUrl: string, handle: string): void {
   const url = new URL('/oauth/authorize', stratosUrl)
   url.searchParams.set('handle', handle)
-  url.searchParams.set('redirect_uri', window.location.origin + '/')
+  // Build the target from the same helper as the client metadata. Stratos
+  // compares this origin against the redirect_uris the document declares, so
+  // the two must agree.
+  url.searchParams.set('redirect_uri', `${appBaseUrl()}/`)
   // Stratos reads this document to confirm the app owns the redirect target.
   url.searchParams.set('client_id', getClientId())
   window.location.href = url.toString()
