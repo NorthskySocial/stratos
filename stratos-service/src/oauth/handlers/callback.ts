@@ -39,8 +39,9 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
     try {
       const params = new URLSearchParams(req.url.split('?')[1] || '')
 
-      // Complete the OAuth flow
-      const { session } = await oauthClient.callback(params)
+      // Complete the OAuth flow. `state` carries the redirect target that
+      // `handleAuthorize` verified before it started this flow.
+      const { session, state } = await oauthClient.callback(params)
       const did = session.sub
 
       // Validate enrollment eligibility
@@ -85,10 +86,10 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
 
       // Redirect back to the app if a redirect was stored, otherwise return JSON
       sendOAuthResponse({
-        req,
         res,
         did,
         alreadyEnrolled,
+        redirectTo: state,
         allowedSchemes,
         enrollBoundaries,
         logger,
@@ -261,54 +262,38 @@ async function handleNewEnrollment(deps: {
 }
 
 /**
- * Read the `stratos_redirect` cookie as a string.
- *
- * Express types `req.cookies` as `any`; narrowing here keeps the redirect
- * target — attacker-influenced input — typed at every gate downstream.
- *
- * @param req - The callback request
- * @returns The stored redirect target, or undefined if absent or non-string
- */
-function readRedirectCookie(req: express.Request): string | undefined {
-  const cookies: unknown = (req as { cookies?: unknown }).cookies
-  if (typeof cookies !== 'object' || cookies === null) return undefined
-  const value = (cookies as Record<string, unknown>).stratos_redirect
-  return typeof value === 'string' ? value : undefined
-}
-
-/**
  * Send the browser back to the calling app, or answer with JSON.
  *
- * `handleAuthorize` verified the target before writing the cookie, and the
- * cookie is HttpOnly, Secure, SameSite=Lax, and expires in ten minutes. That
- * cookie is therefore the integrity boundary, so this function re-checks only
- * the scheme and does not repeat the client metadata fetch.
+ * The target arrives in the OAuth state, which `handleAuthorize` set only after
+ * `verifyRedirectTarget` accepted it. The OAuth client keeps that value in the
+ * `oauth_state` table, returns it to this callback alone, and deletes the row on
+ * read, so the value is single-use and never passes through the browser. That
+ * chain is the integrity boundary, so this function re-checks only the scheme
+ * and does not repeat the client metadata fetch.
  *
  * The redirect carries `stratos_enrolled` and nothing else. No token, no
  * authorization code, and no DID ever rides this URL.
  */
 function sendOAuthResponse(deps: {
-  req: express.Request
   res: express.Response
   did: string
   alreadyEnrolled: boolean
+  redirectTo: string | null
   allowedSchemes: string[]
   enrollBoundaries: string[]
   logger: Logger | undefined
 }) {
   const {
-    req,
     res,
     did,
     alreadyEnrolled,
+    redirectTo,
     allowedSchemes,
     enrollBoundaries,
     logger,
   } = deps
 
-  const redirectTo = readRedirectCookie(req)
   if (redirectTo) {
-    res.clearCookie('stratos_redirect')
     try {
       const url = new URL(redirectTo)
       if (allowedSchemes.includes(url.protocol)) {

@@ -204,16 +204,41 @@ describe('handleCallback', () => {
     )
   })
 
-  it('redirects to the stored target that authorize already verified', async () => {
+  it('redirects to the target that authorize verified into the OAuth state', async () => {
     mockOauthClient.callback.mockResolvedValue({
       session: { sub: 'did:plc:alice' },
+      state: 'https://app.example/',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
     const req: any = {
       url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      cookies: { stratos_redirect: 'https://app.example/' },
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(res.redirect).toHaveBeenCalledWith(
+      'https://app.example/?stratos_enrolled=true',
+    )
+  })
+
+  it('ignores a stratos_redirect cookie, which a host neighbour could forge', async () => {
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: 'did:plc:alice' },
+      state: null,
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      cookies: { stratos_redirect: 'https://evil.example/' },
     }
     const res: any = {
       status: vi.fn().mockReturnThis(),
@@ -224,23 +249,23 @@ describe('handleCallback', () => {
 
     await handler(req, res)
 
-    expect(res.redirect).toHaveBeenCalledWith(
-      'https://app.example/?stratos_enrolled=true',
+    expect(res.redirect).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, did: 'did:plc:alice' }),
     )
-    expect(res.clearCookie).toHaveBeenCalledWith('stratos_redirect')
   })
 
   it('declines a stored redirect that uses a disallowed scheme', async () => {
     config.baseUrl = 'https://stratos.example'
     mockOauthClient.callback.mockResolvedValue({
       session: { sub: 'did:plc:alice' },
+      state: 'http://evil.example/',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
     const req: any = {
       url: 'https://stratos.example/oauth/callback?code=foo&state=bar',
-      cookies: { stratos_redirect: 'http://evil.example/' },
     }
     const res: any = {
       status: vi.fn().mockReturnThis(),
@@ -264,13 +289,13 @@ describe('handleCallback', () => {
   it('declines a stored redirect that is not a valid URL', async () => {
     mockOauthClient.callback.mockResolvedValue({
       session: { sub: 'did:plc:alice' },
+      state: 'not-a-url',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
     const req: any = {
       url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      cookies: { stratos_redirect: 'not-a-url' },
     }
     const res: any = {
       status: vi.fn().mockReturnThis(),
@@ -293,13 +318,15 @@ describe('handleCallback', () => {
 
   it('puts no credential on the redirect', async () => {
     const did = 'did:plc:alice'
-    mockOauthClient.callback.mockResolvedValue({ session: { sub: did } })
+    mockOauthClient.callback.mockResolvedValue({
+      session: { sub: did },
+      state: 'https://app.example/',
+    })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
     const req: any = {
       url: 'http://localhost:3100/oauth/callback?code=secret-code&state=bar',
-      cookies: { stratos_redirect: 'https://app.example/' },
     }
     const res: any = {
       status: vi.fn().mockReturnThis(),
@@ -315,91 +342,6 @@ describe('handleCallback', () => {
     expect(target.href).not.toContain(did)
     expect(target.href).not.toContain('secret-code')
     expect(target.hash).toBe('')
-  })
-
-  it('redirects to an allow-listed origin with the enrolled flag', async () => {
-    config.allowedRedirectOrigins = ['https://app.example']
-    mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:alice' },
-    })
-    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
-
-    const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      cookies: { stratos_redirect: 'https://app.example/' },
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-      clearCookie: vi.fn(),
-    }
-
-    await handler(req, res)
-
-    expect(res.redirect).toHaveBeenCalledWith(
-      'https://app.example/?stratos_enrolled=true',
-    )
-    expect(res.json).not.toHaveBeenCalled()
-  })
-
-  it('returns JSON when the request carries a null cookie jar', async () => {
-    config.allowedRedirectOrigins = ['https://app.example']
-    mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:spike' },
-    })
-    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
-
-    const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      cookies: null,
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-      clearCookie: vi.fn(),
-    }
-
-    await handler(req, res)
-
-    expect(res.redirect).not.toHaveBeenCalled()
-    expect(res.status).not.toHaveBeenCalled()
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true, did: 'did:plc:spike' }),
-    )
-  })
-
-  it('ignores a redirect cookie that is not a string', async () => {
-    config.allowedRedirectOrigins = ['https://app.example']
-    mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:faye' },
-    })
-    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
-
-    const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      cookies: {
-        stratos_redirect: ['https://app.example/', 'https://app.example/two'],
-      },
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-      clearCookie: vi.fn(),
-    }
-
-    await handler(req, res)
-
-    expect(res.redirect).not.toHaveBeenCalled()
-    expect(res.clearCookie).not.toHaveBeenCalled()
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true, did: 'did:plc:faye' }),
-    )
   })
 
   it('handles re-enrollment logic correctly', async () => {
