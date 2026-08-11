@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import express from 'express'
 import type { AppContext } from '../src'
-import type { EnrollmentEventEmitter } from '../src'
+import type { EnrollmentEventEmitter } from '../src/context-types.js'
 import type { EnrollmentStore } from '../src/oauth'
 import { registerEnrollmentHandlers } from '../src/features'
 
@@ -434,7 +434,7 @@ describe('admin boundary endpoints', () => {
       priorBoundaries?: string[]
     }
 
-    function captureEvents(emitter: import('../src').EnrollmentEventEmitter) {
+    function captureEvents(emitter: EnrollmentEventEmitter) {
       const events: CapturedEvent[] = []
       emitter.on('enrollment', (e) => events.push(e as CapturedEvent))
       return events
@@ -542,7 +542,9 @@ describe('admin boundary endpoints', () => {
       // from the request — is present, proving the handler re-read the store.
       expect(events[0].boundaries).toEqual(effective)
       // And the HTTP response reflects the effective set too.
-      expect(res.body.boundaries).toEqual(effective)
+      expect((res.body as { boundaries: string[] }).boundaries).toEqual(
+        effective,
+      )
     })
 
     it('is idempotent: no event when the boundary set is unchanged', async () => {

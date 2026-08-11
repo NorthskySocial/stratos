@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import {
   discoverStratosEnrollment,
   discoverAllStratosEnrollments,
@@ -43,8 +43,8 @@ describe('stratos logic', () => {
     com: {
       atproto: {
         repo: {
-          listRecords: unknown
-          getRecord: unknown
+          listRecords: Mock
+          getRecord: Mock
         }
       }
     }

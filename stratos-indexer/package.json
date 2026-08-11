@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "lint": "eslint src tests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@atcute/atproto": "^3.1.10",

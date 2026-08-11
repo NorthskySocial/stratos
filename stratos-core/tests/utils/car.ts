@@ -9,7 +9,7 @@ import * as CAR from '@atcute/car'
 export async function collectCarStream(
   roots: CidLink[],
   blocks: Array<{ cid: Uint8Array; data: Uint8Array }>,
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const chunks: Uint8Array[] = []
   for await (const chunk of CAR.writeCarStream(roots, blocks)) {
     chunks.push(chunk)

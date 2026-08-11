@@ -33,7 +33,7 @@ async function buildSignedRecordCar(
   did: string,
   collection: string,
   rkey: string,
-): Promise<{ carBytes: Uint8Array; recordCid: string }> {
+): Promise<{ carBytes: Uint8Array<ArrayBuffer>; recordCid: string }> {
   const recordData = cborEncode({
     text: 'test record',
     createdAt: '2025-01-01T00:00:00Z',
@@ -121,7 +121,7 @@ async function buildP256SignedRecordCar(
   did: string,
   collection: string,
   rkey: string,
-): Promise<{ carBytes: Uint8Array; recordCid: string }> {
+): Promise<{ carBytes: Uint8Array<ArrayBuffer>; recordCid: string }> {
   return buildSignedRecordCar(
     keypair as unknown as Secp256k1Keypair,
     did,

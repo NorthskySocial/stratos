@@ -135,25 +135,33 @@ describe('inspector logic', () => {
   describe('inspectRecord', () => {
     it('combines stub and hydrated record', async () => {
       // Mock resolvePdsEndpoint
-      vi.mocked(global.fetch).mockImplementation((url: string) => {
-        if (url.includes('plc.directory')) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              service: [
-                { id: '#atproto_pds', serviceEndpoint: 'https://pds.com' },
-              ],
-            }),
-          } as Response)
-        }
-        if (url.includes('com.atproto.repo.getRecord')) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ value: 'stub' }),
-          } as Response)
-        }
-        return Promise.reject(new Error('Unknown URL'))
-      })
+      vi.mocked(global.fetch).mockImplementation(
+        (input: string | URL | Request) => {
+          const url =
+            typeof input === 'string'
+              ? input
+              : input instanceof URL
+                ? input.href
+                : input.url
+          if (url.includes('plc.directory')) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({
+                service: [
+                  { id: '#atproto_pds', serviceEndpoint: 'https://pds.com' },
+                ],
+              }),
+            } as Response)
+          }
+          if (url.includes('com.atproto.repo.getRecord')) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({ value: 'stub' }),
+            } as Response)
+          }
+          return Promise.reject(new Error('Unknown URL'))
+        },
+      )
 
       const mockSession = {
         fetchHandler: vi.fn().mockResolvedValue({
