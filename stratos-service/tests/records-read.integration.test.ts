@@ -209,6 +209,18 @@ describe('Record Read Handlers', () => {
           [boundary],
         ),
       ).rejects.toThrow('Record not found')
+
+      await expect(
+        getRecord(
+          ctx,
+          {
+            repo: testDid,
+            collection: 'app.bsky.feed.post',
+            rkey: 'postNoBoundary',
+          },
+          otherDid,
+        ),
+      ).rejects.toThrow('Record not found')
     })
 
     it('should deny a domainless record to an unauthenticated caller', async () => {
@@ -320,6 +332,19 @@ describe('Record Read Handlers', () => {
       const uris = result.records.map((record) => record.uri)
       expect(uris).toContain(`at://${testDid}/app.bsky.feed.post/post1`)
       expect(uris).not.toContain(
+        `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
+      )
+
+      const withoutDomains = await listRecords(
+        ctx,
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+      )
+
+      expect(withoutDomains.records.map((record) => record.uri)).not.toContain(
         `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
       )
     })
