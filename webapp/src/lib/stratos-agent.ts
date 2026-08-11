@@ -70,12 +70,15 @@ export function createServiceFetch(
   // OAuthSession.fetchHandler resolves URLs against tokenSet.aud (the PDS).
   // Wrap it so relative XRPC pathnames resolve against the target service instead.
   return async (input: URL | RequestInfo, init?: RequestInit) => {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url
+    if (input instanceof Request) {
+      // session.fetchHandler accepts a URL and a RequestInit. It cannot receive
+      // the method, the headers, the body or the signal of a Request. Reject the
+      // Request to prevent a silent send of an empty GET.
+      throw new TypeError(
+        'createServiceFetch does not accept a Request. Pass a URL or a string with RequestInit.',
+      )
+    }
+    const url = typeof input === 'string' ? input : input.href
     let fullUrl: URL
     try {
       fullUrl = new URL(url)
