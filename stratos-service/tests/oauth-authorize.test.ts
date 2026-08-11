@@ -5,6 +5,9 @@ import { OAUTH_SCOPE } from '../src/oauth'
 const PROOF_REQUIRED =
   'redirect_uri is not declared by a client_id metadata document and its origin is not allow-listed'
 
+const FETCH_FAILED =
+  'could not verify redirect_uri against the client_id metadata document'
+
 describe('handleAuthorize', () => {
   let mockOauthClient: any
   let mockLogger: any
@@ -71,11 +74,12 @@ describe('handleAuthorize', () => {
 
     expect(mockOauthClient.authorize).toHaveBeenCalledWith('alice.test', {
       scope: OAUTH_SCOPE,
+      state: undefined,
     })
     expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
   })
 
-  it('stores the redirect cookie for an allow-listed origin', async () => {
+  it('carries an allow-listed target in the OAuth state, not a cookie', async () => {
     config.allowedRedirectOrigins = ['https://app.example']
     const authUrl = new URL('https://pds.example.com/oauth/authorize?state=abc')
     mockOauthClient.authorize.mockResolvedValue(authUrl)
@@ -84,20 +88,15 @@ describe('handleAuthorize', () => {
     const req: any = {
       query: { handle: 'alice.test', redirect_uri: 'https://app.example/' },
     }
-    const res: any = {
-      cookie: vi.fn(),
-      redirect: vi.fn(),
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-    }
+    const res = makeRes()
 
     await handler(req, res)
 
-    expect(res.cookie).toHaveBeenCalledWith(
-      'stratos_redirect',
-      'https://app.example/',
-      expect.objectContaining({ httpOnly: true }),
-    )
+    expect(mockOauthClient.authorize).toHaveBeenCalledWith('alice.test', {
+      scope: OAUTH_SCOPE,
+      state: 'https://app.example/',
+    })
+    expect(res.cookie).not.toHaveBeenCalled()
     expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
     expect(res.status).not.toHaveBeenCalled()
   })
@@ -147,6 +146,7 @@ describe('handleAuthorize', () => {
 
     expect(res.status).toHaveBeenCalledWith(400)
     expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
   })
 
   it('accepts a redirect_uri declared by the client_id document', async () => {
@@ -169,11 +169,11 @@ describe('handleAuthorize', () => {
     expect(mockFetchRedirectUris).toHaveBeenCalledWith(
       'https://app.example/client-metadata.json',
     )
-    expect(res.cookie).toHaveBeenCalledWith(
-      'stratos_redirect',
-      'https://app.example/enrolled',
-      expect.objectContaining({ httpOnly: true }),
-    )
+    expect(mockOauthClient.authorize).toHaveBeenCalledWith('motoko.test', {
+      scope: OAUTH_SCOPE,
+      state: 'https://app.example/enrolled',
+    })
+    expect(res.cookie).not.toHaveBeenCalled()
     expect(res.status).not.toHaveBeenCalled()
   })
 
@@ -199,10 +199,13 @@ describe('handleAuthorize', () => {
       }),
     )
     expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
   })
 
-  it('rejects the redirect when the client_id document cannot be read', async () => {
-    mockFetchRedirectUris.mockRejectedValue(new Error('connection refused'))
+  it('keeps the document read failure out of the response and in the log', async () => {
+    mockFetchRedirectUris.mockRejectedValue(
+      new Error('client metadata document returned 403'),
+    )
 
     const handler = handleAuthorize(config)
     const req: any = {
@@ -217,12 +220,43 @@ describe('handleAuthorize', () => {
     await handler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(400)
-    expect(res.json).toHaveBeenCalledWith(
+    const body = res.json.mock.calls[0][0]
+    expect(body.message).toBe(FETCH_FAILED)
+    expect(JSON.stringify(body)).not.toContain('403')
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining('connection refused'),
+        clientId: 'https://app.example/client-metadata.json',
+        detail: 'client metadata document returned 403',
       }),
+      'rejected enrollment redirect_uri',
     )
     expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
+  })
+
+  it('reports a non-Error rejection without leaking it to the caller', async () => {
+    mockFetchRedirectUris.mockRejectedValue('ECONNREFUSED 10.0.0.5:443')
+
+    const handler = handleAuthorize(config)
+    const req: any = {
+      query: {
+        handle: 'batou.test',
+        redirect_uri: 'https://app.example/',
+        client_id: 'https://app.example/client-metadata.json',
+      },
+    }
+    const res = makeRes()
+
+    await handler(req, res)
+
+    const body = res.json.mock.calls[0][0]
+    expect(body.message).toBe(FETCH_FAILED)
+    expect(JSON.stringify(body)).not.toContain('10.0.0.5')
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: 'ECONNREFUSED 10.0.0.5:443' }),
+      'rejected enrollment redirect_uri',
+    )
   })
 
   it('does not read the client_id document for an allow-listed origin', async () => {
@@ -262,6 +296,7 @@ describe('handleAuthorize', () => {
 
     expect(res.status).toHaveBeenCalledWith(400)
     expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
   })
 
   it('rejects a redirect_uri that is not a parsable URL', async () => {
@@ -324,10 +359,9 @@ describe('handleAuthorize', () => {
 
     await handler(req, res)
 
-    expect(res.cookie).toHaveBeenCalledWith(
-      'stratos_redirect',
-      'http://app.example/',
-      expect.objectContaining({ secure: false }),
+    expect(mockOauthClient.authorize).toHaveBeenCalledWith(
+      'spike-spiegel.test',
+      { scope: OAUTH_SCOPE, state: 'http://app.example/' },
     )
     expect(res.status).not.toHaveBeenCalled()
   })
@@ -349,10 +383,9 @@ describe('handleAuthorize', () => {
 
     await handler(req, res)
 
-    expect(res.cookie).toHaveBeenCalledWith(
-      'stratos_redirect',
-      'https://app.example/',
-      expect.objectContaining({ secure: true }),
+    expect(mockOauthClient.authorize).toHaveBeenCalledWith(
+      'faye-valentine.test',
+      { scope: OAUTH_SCOPE, state: 'https://app.example/' },
     )
     expect(res.status).not.toHaveBeenCalled()
   })
@@ -377,6 +410,7 @@ describe('handleAuthorize', () => {
       expect.objectContaining({ message: 'redirect_uri must use https' }),
     )
     expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
   })
 
   it('rejects a loopback redirect_uri when devMode is unset', async () => {
@@ -395,6 +429,7 @@ describe('handleAuthorize', () => {
       }),
     )
     expect(res.cookie).not.toHaveBeenCalled()
+    expect(mockOauthClient.authorize).not.toHaveBeenCalled()
   })
 
   it('accepts a loopback redirect_uri in devMode without an allow-list entry', async () => {
@@ -410,11 +445,10 @@ describe('handleAuthorize', () => {
 
     await handler(req, res)
 
-    expect(res.cookie).toHaveBeenCalledWith(
-      'stratos_redirect',
-      'http://localhost:5173/',
-      expect.objectContaining({ httpOnly: true }),
-    )
+    expect(mockOauthClient.authorize).toHaveBeenCalledWith('usagi.test', {
+      scope: OAUTH_SCOPE,
+      state: 'http://localhost:5173/',
+    })
     expect(mockFetchRedirectUris).not.toHaveBeenCalled()
     expect(res.status).not.toHaveBeenCalled()
     expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())

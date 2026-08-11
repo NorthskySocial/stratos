@@ -69,12 +69,27 @@ export interface RedirectTargetGates {
   devMode: boolean
 }
 
+/**
+ * `message` is returned to the caller. `logDetail` is not: it may describe a
+ * host the caller cannot otherwise see, so it belongs in the service log only.
+ */
 export type RedirectTargetVerdict =
   | { allowed: true }
-  | { allowed: false; message: string }
+  | { allowed: false; message: string; logDetail?: string }
 
 const PROOF_REQUIRED_MESSAGE =
   'redirect_uri is not declared by a client_id metadata document and its origin is not allow-listed'
+
+/**
+ * Returned when the metadata fetch fails for any reason.
+ *
+ * The `client_id` URL is caller-supplied and the schema admits any hostname, so
+ * the real cause can describe an operator-internal host: an HTTP status, or a
+ * parse failure over a document the caller cannot read. One fixed message keeps
+ * `/oauth/authorize` from reporting on the network it can reach.
+ */
+const FETCH_FAILED_MESSAGE =
+  'could not verify redirect_uri against the client_id metadata document'
 
 /**
  * Decide whether the enrollment flow may return the browser to a
@@ -127,10 +142,10 @@ export async function verifyRedirectTarget(
   try {
     declared = await fetchRedirectUris(clientId)
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
     return {
       allowed: false,
-      message: `could not verify redirect_uri against client_id: ${reason}`,
+      message: FETCH_FAILED_MESSAGE,
+      logDetail: err instanceof Error ? err.message : String(err),
     }
   }
 
