@@ -334,13 +334,15 @@ function coalesceCurrentValues(
  * Resolves the `since` start-mapping (returning {@link OplogTruncatedError} when
  * `since` predates retained history), pages the sequence log with fail-closed
  * boundary gating and delete-filtering, coalesces to current-value-only, and —
- * when the log is drained with no concurrent write detected — attaches the
- * repo's current signed commit and marks `caughtUp`. A drained log can still
- * yield `caughtUp: false` (no commit) when a write lands during the request;
- * under continuous writes `caughtUp` may never turn true. Such a response can
- * carry no ops and repeat the cursor the caller sent, so it does not always
- * make progress. A caller must key off `caughtUp` and poll again, and must not
- * read an unchanged cursor as a stall. `caughtUp` is never falsely true.
+ * when the log is drained and the post-commit probe finds no newer sequence row
+ * — attaches the repo's current signed commit and marks `caughtUp`. A drained
+ * log can still yield `caughtUp: false` (no commit) when the probe detects a
+ * write; under continuous writes `caughtUp` may never turn true. Such a
+ * response can carry no ops and repeat the cursor the caller sent, so it does
+ * not always make progress. A caller must key off `caughtUp` and poll again,
+ * and must not read an unchanged cursor as a stall. `caughtUp: true` always
+ * pairs the ops with a commit that matches them; a write committing after the
+ * probe is not detected and arrives on a later poll.
  *
  * @param ctx - Application context
  * @param params - Resolved listRepoOps params
