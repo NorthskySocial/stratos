@@ -337,8 +337,10 @@ function coalesceCurrentValues(
  * when the log is drained with no concurrent write detected — attaches the
  * repo's current signed commit and marks `caughtUp`. A drained log can still
  * yield `caughtUp: false` (no commit) when a write lands during the request;
- * under continuous writes `caughtUp` may never turn true, but every response
- * still advances the cursor and is never falsely caught up.
+ * under continuous writes `caughtUp` may never turn true. Such a response can
+ * carry no ops and repeat the cursor the caller sent, so it does not always
+ * make progress. A caller must key off `caughtUp` and poll again, and must not
+ * read an unchanged cursor as a stall. `caughtUp` is never falsely true.
  *
  * @param ctx - Application context
  * @param params - Resolved listRepoOps params

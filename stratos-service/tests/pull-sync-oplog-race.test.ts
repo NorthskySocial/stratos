@@ -123,6 +123,33 @@ describe('listRepoOps caught-up race', () => {
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
   })
 
+  it('can return no ops and the same cursor the caller sent', async () => {
+    const actorStore = new ScriptedActorStore()
+    actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
+    actorStore.root = { cid: 'commitCid', rev: REV.r1 }
+    actorStore.commitBytes = await encodeSignedCommit(REV.r2)
+    actorStore.onCommitRead = () => {
+      if (actorStore.rows.length === 1) {
+        actorStore.appendEvent(2, REV.r2, 'sasami', 'cidSasami')
+      }
+    }
+
+    // The caller already holds seq 1, so the log drains with no ops and
+    // `lastSeq` stays at the incoming cursor. The response then repeats that
+    // cursor and makes no progress. Pinned here because both the JSDoc and the
+    // client docs once promised that every response advances the cursor.
+    const cursor = encodeSeqCursor(1)
+    const res = await listRepoOps(
+      makeCtx(actorStore),
+      { ...params, cursor },
+      callerBoundaries,
+    )
+
+    expect(res.caughtUp).toBe(false)
+    expect(res.ops).toEqual([])
+    expect(res.cursor).toBe(cursor)
+  })
+
   it('returns the commit and caughtUp when no write lands during the commit read', async () => {
     const actorStore = new ScriptedActorStore()
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
