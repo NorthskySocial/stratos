@@ -18,14 +18,24 @@ function stubFetch(response: unknown) {
   return fetchMock
 }
 
+/**
+ * Build a real Response. The reader streams the body and counts its bytes, so a
+ * stub that replaces `text()` would hide what the size cap does.
+ */
+function textResponse(
+  text: string,
+  init?: { status?: number; contentLength?: number },
+) {
+  const headers = new Headers()
+  headers.set(
+    'content-length',
+    String(init?.contentLength ?? Buffer.byteLength(text)),
+  )
+  return new Response(text, { status: init?.status ?? 200, headers })
+}
+
 function jsonResponse(body: unknown, init?: { status?: number }) {
-  const text = JSON.stringify(body)
-  return {
-    ok: (init?.status ?? 200) < 400,
-    status: init?.status ?? 200,
-    headers: new Headers({ 'content-length': String(text.length) }),
-    text: async () => text,
-  }
+  return textResponse(JSON.stringify(body), init)
 }
 
 afterEach(() => {
@@ -101,12 +111,7 @@ describe('fetchClientRedirectUris', () => {
   })
 
   it('rejects an oversized document by its declared length', async () => {
-    stubFetch({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-length': String(1024 * 1024) }),
-      text: async () => '{}',
-    })
+    stubFetch(textResponse('{}', { contentLength: 1024 * 1024 }))
 
     await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow(
       'too large',
@@ -114,12 +119,28 @@ describe('fetchClientRedirectUris', () => {
   })
 
   it('rejects an oversized document that declares no length', async () => {
-    stubFetch({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      text: async () => 'x'.repeat(64 * 1024 + 1),
+    const response = new Response('x'.repeat(64 * 1024 + 1))
+
+    stubFetch(response)
+
+    await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow(
+      'too large',
+    )
+  })
+
+  it('rejects a document that passes the cap only when counted in UTF-16 units', async () => {
+    // Each of these characters is three bytes in UTF-8 and one UTF-16 code
+    // unit. A count of code units would put this document under the cap.
+    const filler = '　'.repeat(32 * 1024)
+    const body = JSON.stringify({
+      client_id: CLIENT_ID,
+      redirect_uris: ['https://app.example/'],
+      client_name: filler,
     })
+    expect(body.length).toBeLessThan(64 * 1024)
+    expect(Buffer.byteLength(body)).toBeGreaterThan(64 * 1024)
+
+    stubFetch(new Response(body))
 
     await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow(
       'too large',
@@ -131,16 +152,38 @@ describe('fetchClientRedirectUris', () => {
       client_id: CLIENT_ID,
       redirect_uris: ['https://app.example/'],
     }).padEnd(64 * 1024, ' ')
-    stubFetch({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-length': String(body.length) }),
-      text: async () => body,
-    })
+    stubFetch(textResponse(body))
 
     await expect(fetchClientRedirectUris(CLIENT_ID)).resolves.toEqual([
       'https://app.example/',
     ])
+  })
+
+  it('stops reading a body that never ends', async () => {
+    let pushed = 0
+    const chunk = new Uint8Array(16 * 1024)
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pushed += chunk.byteLength
+        controller.enqueue(chunk)
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+
+    stubFetch(new Response(body))
+
+    // Rejecting at all is the point: this stream never ends, so a reader that
+    // buffered the whole body before measuring it would never return.
+    await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow(
+      'too large',
+    )
+    // Bound loosely. The stream queues chunks ahead of the reader, so the exact
+    // total depends on the queuing strategy rather than on the cap.
+    expect(pushed).toBeLessThan(1024 * 1024)
+    expect(cancelled).toBe(true)
   })
 })
 
