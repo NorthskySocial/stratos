@@ -36,10 +36,13 @@ export interface RepoOp {
   rev: string
   collection: string
   rkey: string
-  /** CID of the current record value. ABSENT (not null) for a delete. */
-  cid?: string
-  /** CID of the superseded value. ABSENT (not null) for a create. */
-  prev?: string
+  /** CID of the current record value. Null for a delete. */
+  cid: string | null
+  /**
+   * CID of the superseded value. Null for a create, or when the superseded
+   * value predates the returned window.
+   */
+  prev: string | null
   value?: unknown
 }
 
@@ -70,8 +73,9 @@ export interface ListRepoOpsParams {
 
 export interface ListRepoOpsResult {
   ops: RepoOp[]
+  /** Absent once the response reaches the head of the oplog. */
   cursor?: string
-  caughtUp: boolean
+  /** Included at the head of the oplog, unless the repo has no commits yet. */
   commit?: SignedCommit
 }
 
@@ -162,27 +166,32 @@ export async function readCurrentSignedCommit(
 
 /**
  * Expand a decoded event into per-op `RepoOp` entries, all sharing the event's
- * `rev`. Deletes carry NO `cid` (absent). `prev` is left absent here and
- * derived by the coalescing pass ({@link coalesceCurrentValues}) from the
- * prior op for the same path within the returned window.
+ * `rev`. Deletes carry `cid: null`. `prev` starts as null here and the
+ * coalescing pass ({@link coalesceCurrentValues}) derives it from the prior op
+ * for the same path within the returned window.
  *
  * @param decoded - Event decoded via {@link decodeEvent}
  * @param rev - The shared revision for all ops in this event
  * @returns One expanded op per record op in the event
  */
 function expandEventOps(decoded: DecodedEvent, rev: string): RepoOp[] {
-  return decoded.ops.map((op: RecordOp) => {
+  return decoded.ops.flatMap((op: RecordOp) => {
     const { collection, rkey } = splitPath(op.path)
     const isDelete = op.action === 'delete'
-    return {
-      rev,
-      collection,
-      rkey,
-      // Optional lexicon fields must be ABSENT, never null: the XRPC output
-      // validator rejects explicit nulls on optional properties.
-      ...(isDelete || op.cid == null ? {} : { cid: op.cid }),
-      value: isDelete ? undefined : op.record,
-    }
+    // Fail closed on a malformed non-delete without a cid: `cid: null` on the
+    // wire means delete, so this op cannot be emitted truthfully - drop it.
+    const cid = isDelete ? null : (op.cid ?? undefined)
+    if (cid === undefined) return []
+    return [
+      {
+        rev,
+        collection,
+        rkey,
+        cid,
+        prev: null,
+        value: isDelete ? undefined : op.record,
+      },
+    ]
   })
 }
 
@@ -289,7 +298,7 @@ function coalesceCurrentValues(
   // Track, per path, the last cid we emitted for that path within this window
   // (to derive the true `prev`), and the index of the surviving entry so a
   // later op supersedes it in place.
-  const lastCidForPath = new Map<string, string | undefined>()
+  const lastCidForPath = new Map<string, string | null>()
   const survivorIndex = new Map<string, number>()
   const result: RepoOp[] = []
 
@@ -298,14 +307,15 @@ function coalesceCurrentValues(
     const priorCid = lastCidForPath.get(path)
 
     // `prev`: the actual superseded CID when we've seen the prior op in this
-    // window; otherwise ABSENT - a create has no prev, and an update/delete
-    // whose prior value predates the window cannot name it.
+    // window; otherwise NULL - a create has no prev, a re-create after a
+    // delete supersedes nothing, and an update/delete whose prior value
+    // predates the window cannot name it.
     const entry: RepoOp = {
       rev: op.rev,
       collection: op.collection,
       rkey: op.rkey,
-      ...(op.cid !== undefined ? { cid: op.cid } : {}),
-      ...(priorCid !== undefined ? { prev: priorCid } : {}),
+      cid: op.cid,
+      prev: priorCid ?? null,
       value: op.value,
     }
 
@@ -335,14 +345,15 @@ function coalesceCurrentValues(
  * `since` predates retained history), pages the sequence log with fail-closed
  * boundary gating and delete-filtering, coalesces to current-value-only, and —
  * when the log is drained and the post-commit probe finds no newer sequence row
- * — attaches the repo's current signed commit and marks `caughtUp`. A drained
- * log can still yield `caughtUp: false` (no commit) when the probe detects a
- * write; under continuous writes `caughtUp` may never turn true. Such a
- * response can carry no ops and repeat the cursor the caller sent, so it does
- * not always make progress. A caller must key off `caughtUp` and poll again,
- * and must not read an unchanged cursor as a stall. `caughtUp: true` always
- * pairs the ops with a commit that matches them; a write committing after the
- * probe is not detected and arrives on a later poll.
+ * — reaches the head: the cursor is OMITTED and the repo's current signed
+ * commit is attached. A drained log can still yield a cursor (no commit) when
+ * the probe detects a write; under continuous writes the head may never be
+ * reached. Such a response can carry no ops and repeat the cursor the caller
+ * sent, so it does not always make progress. A caller must poll again while a
+ * cursor is present, and must not read an unchanged cursor as a stall. A
+ * cursor-free response always pairs the ops with a commit that matches them
+ * (unless the repo has no commits yet); a write committing after the probe is
+ * not detected and arrives on a later poll.
  *
  * @param ctx - Application context
  * @param params - Resolved listRepoOps params
@@ -384,9 +395,9 @@ export async function listRepoOps(
     // name a retained event. It is only trusted inside the retained window
     // [oldestRev, newestRev]: below it, the history the caller needs was
     // compacted away; above it (or with no retained log, or undecodable
-    // bounds), it cannot be a rev this repo issued — silently returning
-    // `caughtUp` would let a diverged syncer conclude it is up to date. All
-    // cases fail closed into full-state recovery.
+    // bounds), it cannot be a rev this repo issued — silently returning a
+    // head response would let a diverged syncer conclude it is up to date.
+    // All cases fail closed into full-state recovery.
     if (
       bounds === null ||
       bounds.oldestRev === '' ||
@@ -418,29 +429,20 @@ export async function listRepoOps(
     // the stratos_repo_root row lock (lockRoot's SELECT ... FOR UPDATE
     // NOWAIT), which keeps per-actor seq assignment order aligned with commit
     // order — without (2), a lower seq could commit after a higher one and
-    // slip past the probe. A hit means "not caught up after all": hand back a
-    // cursor; the caller must key off `caughtUp` and simply poll again.
+    // slip past the probe. A hit means "not at the head after all": hand back
+    // a cursor; the caller must simply poll again.
     const probe = await readSequencePage(ctx, did, lastSeq, 1)
     if (probe.length > 0) {
-      return {
-        ops: coalesced,
-        cursor: encodeSeqCursor(lastSeq),
-        caughtUp: false,
-      }
+      return { ops: coalesced, cursor: encodeSeqCursor(lastSeq) }
     }
     return {
       ops: coalesced,
-      caughtUp: true,
-      // `commit` is present when caughtUp EXCEPT for a repo with no root yet
-      // (no writes) — there is nothing to sign and also no ops to sync. The
-      // lexicon documents this no-commit exception.
+      // Head of the oplog: the cursor is omitted. `commit` is present EXCEPT
+      // for a repo with no root yet (no writes) — there is nothing to sign and
+      // also no ops to sync. The lexicon documents this no-commit exception.
       ...(commit ? { commit } : {}),
     }
   }
 
-  return {
-    ops: coalesced,
-    cursor: encodeSeqCursor(lastSeq),
-    caughtUp: false,
-  }
+  return { ops: coalesced, cursor: encodeSeqCursor(lastSeq) }
 }

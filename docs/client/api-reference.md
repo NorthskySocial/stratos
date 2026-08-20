@@ -196,17 +196,20 @@ GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cur
 Authorization: Bearer <service-jwt>
 ```
 
-Incremental pull sync of a repo's operation log. Returns record operations after the
-`since` revision, boundary-gated to the caller's enrolled boundaries, with current record
-values inlined by default. When the response reaches the end of the log and a probe after
-the commit read finds no newer sequence row, `caughtUp` is `true` and the repo's current
-signed commit is included, consistent with the ops returned. If the probe detects a write,
-the response instead carries `caughtUp: false` and a cursor with no commit. Such a response
-can carry no ops and repeat the cursor you sent, so poll again whenever `caughtUp` is
-`false`, and do not read an unchanged cursor as a stall. Under continuous writes `caughtUp`
-may stay false indefinitely. A write that commits after the probe is not detected; it falls
-outside this snapshot and arrives on a later poll. If `since` predates retained history, the
-`OplogTruncated` error is returned - fall back to full-state recovery below.
+Incremental pull sync of a repo's operation log, mirroring `com.atproto.space.listRepoOps`
+semantics. Returns record operations after the `since` revision, boundary-gated to the
+caller's enrolled boundaries, with current record values inlined by default. Each op carries
+required-nullable `cid` and `prev` fields: `cid` null means delete, `prev` null means create
+(or that the superseded value predates the returned window). The response reaches the head
+of the oplog when `cursor` is absent; the repo's current signed commit is then included
+(unless the repo has no commits yet), consistent with the ops returned. If a concurrent
+write is detected, the response instead carries a cursor with no commit. Such a response can
+carry no ops and repeat the cursor you sent, so poll again while a cursor is present, and do
+not read an unchanged cursor as a stall. Under continuous writes the head may never be
+reached. A write that commits after the head probe is not detected; it falls outside this
+snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
+supplied. If `since` predates retained history, the `OplogTruncated` error is returned
+(stricter than upstream, which silently restarts) - fall back to full-state recovery below.
 
 ### Pull Sync: List Record Paths (Full-State Recovery)
 

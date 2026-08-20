@@ -178,27 +178,26 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         callerSet('nerv'),
       )
 
-      expect(res.caughtUp).toBe(true)
+      expect(res.cursor).toBeUndefined()
       expect(res.ops.map((o) => o.rev)).toEqual([
         REV.r1,
         REV.r2,
         REV.r3,
         REV.r3,
       ])
-      // create: cid present, prev ABSENT (optional lexicon fields are omitted,
-      // never null - the XRPC output validator rejects explicit nulls)
+      // create: cid present, prev null (nullable lexicon field; null = create)
       expect(res.ops[0]).toMatchObject({
         collection: 'zone.stratos.feed.post',
         rkey: 'a',
         cid: 'cidA1',
       })
-      expect(res.ops[0].prev).toBeUndefined()
-      // update: cid present (prev absent here since prior value not in-window)
-      expect(res.ops[1]).toMatchObject({ rkey: 'b', cid: 'cidB1' })
-      // delete: cid absent
+      expect(res.ops[0].prev).toBeNull()
+      // update: cid present (prev null here since prior value not in-window)
+      expect(res.ops[1]).toMatchObject({ rkey: 'b', cid: 'cidB1', prev: null })
+      // delete: cid null
       const del = res.ops.find((o) => o.rkey === 'c')!
       expect(del).toMatchObject({ rkey: 'c', rev: REV.r3 })
-      expect(del.cid).toBeUndefined()
+      expect(del.cid).toBeNull()
     })
 
     it('fail-closed: a delete-only event (no boundary in blob) is dropped', async () => {
@@ -317,7 +316,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         callerSet('nerv'),
       )
       expect(res.ops.map((o) => o.rev)).toEqual([REV.r2, REV.r3])
-      expect(res.caughtUp).toBe(true)
+      expect(res.cursor).toBeUndefined()
     })
 
     it('throws OplogTruncated when `since` predates retained history', async () => {
@@ -345,8 +344,8 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
 
     it('throws OplogTruncated when `since` postdates the newest retained rev', async () => {
       // A `since` newer than anything this repo issued (foreign/garbage rev)
-      // must not silently return caughtUp - the syncer would diverge with no
-      // path back to recovery.
+      // must not silently return a head response - the syncer would diverge
+      // with no path back to recovery.
       await actorStore.create(repoDid)
       await appendEvent(repoDid, REV.r1, [
         { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'c1' },
@@ -373,7 +372,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         callerSet('nerv'),
       )
       expect(res.ops).toEqual([])
-      expect(res.caughtUp).toBe(true)
+      expect(res.cursor).toBeUndefined()
     })
 
     it('throws OplogTruncated for `since` against an empty log (unverifiable)', async () => {
@@ -394,7 +393,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       // Simulate a log whose retained history starts at seq 10 (everything
       // earlier compacted away) while the caller resumes from a cursor issued
       // before the compaction. Silently resuming would skip the trimmed ops
-      // and report a false caught-up.
+      // and report a false head.
       const rows = [10, 11, 12].map((seq, i) => ({
         seq,
         did: repoDid,
@@ -430,7 +429,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
                 getEventsSince: async (after: number, limit = 100) =>
                   rows.filter((r) => r.seq > after).slice(0, limit),
               },
-              // No commits yet - the caught-up path tolerates a missing root.
+              // No commits yet - the head path tolerates a missing root.
               repo: { getRootDetailed: async () => null },
             }),
         },
@@ -541,7 +540,7 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         callerSet('gamma'),
       )
       expect(res.ops).toHaveLength(0)
-      expect(res.caughtUp).toBe(true)
+      expect(res.cursor).toBeUndefined()
     })
 
     it('fails closed on an undecodable event (no existence leak)', async () => {
@@ -582,9 +581,9 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
 
       const seen: string[] = []
       let cursor: string | undefined
-      let caughtUp = false
+      let atHead = false
       let guard = 0
-      while (!caughtUp && guard++ < 20) {
+      while (!atHead && guard++ < 20) {
         const res = await listRepoOps(
           ctx,
           { did: repoDid, limit: 2, cursor, excludeValues: false },
@@ -602,7 +601,8 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
           ])
         }
         cursor = res.cursor
-        caughtUp = res.caughtUp
+        // Head of the oplog = cursor absent.
+        atHead = res.cursor === undefined
       }
 
       // Every seeded op appears exactly once; the late one appears too, once.
@@ -613,13 +613,13 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       for (const k of ['p0', 'p1', 'p2', 'p3', 'p4', 'late']) {
         expect(counts[k]).toBe(1)
       }
-      expect(caughtUp).toBe(true)
+      expect(atHead).toBe(true)
     })
   })
 
-  // ── caughtUp signed commit ───────────────────────────────────────────────
+  // ── head-of-oplog signed commit ──────────────────────────────────────────
 
-  describe('caughtUp signed commit', () => {
+  describe('head-of-oplog signed commit', () => {
     it('includes the current signed commit, verifiable against the actor key', async () => {
       const { P256Keypair, verifySignature } = await import('@atproto/crypto')
       const { encode: encodeCbor, fromBytes } = await import('@atcute/cbor')
@@ -670,13 +670,13 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       expect(commit!.did).toBe(repoDid)
       expect(commit!.version).toBe(3)
 
-      // caughtUp response carries the same commit.
+      // The head response carries the same commit.
       const res = await listRepoOps(
         ctx,
         { did: repoDid, limit: 100, excludeValues: false },
         callerSet('nerv'),
       )
-      expect(res.caughtUp).toBe(true)
+      expect(res.cursor).toBeUndefined()
       expect(res.commit).toBeDefined()
       expect(res.commit!.rev).toBe(commit!.rev)
 

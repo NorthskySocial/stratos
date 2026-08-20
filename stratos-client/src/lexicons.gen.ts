@@ -1304,7 +1304,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. When the response reaches the end of the available log AND a probe after the commit read finds no newer sequence row, `caughtUp` is true and the repo's current signed commit is included, consistent with the operations returned. A write the probe detects instead yields `caughtUp` false with a cursor and no commit; that response can carry no operations and repeat the cursor you sent, so poll again on `caughtUp` false and do not read an unchanged cursor as a stall. A write that commits after the probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned so the caller falls back to full-state recovery (listRecordPaths).",
+      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring com.atproto.space.listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. The response reaches the head of the oplog when `cursor` is absent; the repo's current signed commit is then included (unless the repo has no commits yet), consistent with the operations returned. When a concurrent write is detected, a cursor is returned instead of the commit; that response can carry no operations and repeat the cursor you sent, so poll again while a cursor is present and do not read an unchanged cursor as a stall. A write that commits after the head probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned (stricter than upstream, which silently restarts) so the caller falls back to full-state recovery (listRecordPaths).",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -1317,7 +1317,7 @@ export const stratosLexicons: LexiconDoc[] = [
           "since": {
             "type": "string",
             "format": "tid",
-            "description": "A revision (TID). Only operations after this revision are returned. Omit to start from the beginning of retained history."
+            "description": "A revision (TID): the caller's own sync position. Only operations after this revision are returned. Omit to start from the beginning of retained history. Use `cursor` to continue a paginated response."
           },
           "limit": {
             "type": "integer",
@@ -1328,7 +1328,7 @@ export const stratosLexicons: LexiconDoc[] = [
           },
           "cursor": {
             "type": "string",
-            "description": "Opaque pagination cursor from a previous response."
+            "description": "Opaque pagination cursor from a previous response. Takes precedence over `since` when both are supplied."
           },
           "excludeValues": {
             "type": "boolean",
@@ -1341,7 +1341,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["ops", "caughtUp"],
+          "required": ["ops"],
           "properties": {
             "ops": {
               "type": "array",
@@ -1350,16 +1350,12 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "cursor": {
               "type": "string",
-              "description": "Opaque pagination cursor to fetch the next page. Absent when caughtUp is true. Can repeat the cursor you sent when a concurrent write was detected."
-            },
-            "caughtUp": {
-              "type": "boolean",
-              "description": "True when this response reached the end of the available log and a probe after the commit read found no newer sequence row. When true, `commit` is present unless the repo has no commits yet, and the operations and that commit are a consistent pair. A write the probe detects yields false, and under continuous writes this can stay false indefinitely. A write that commits after the probe is not detected; it arrives on a later poll."
+              "description": "Opaque pagination cursor to fetch the next page. Absent once the response reaches the head of the oplog. Can repeat the cursor you sent when a concurrent write was detected."
             },
             "commit": {
               "type": "ref",
               "ref": "#signedCommit",
-              "description": "The repo's current signed MST commit. Present when caughtUp is true, EXCEPT for a repo with no commits yet (no writes) - in that case there is nothing to sign and also no ops to sync."
+              "description": "The repo's current signed MST commit. Included when the response reaches the head of the oplog; omitted on backfill responses and when the repo has no commits yet (no writes) - in that case there is nothing to sign and also no ops to sync."
             }
           }
         }
@@ -1367,7 +1363,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "errors": [
         {
           "name": "OplogTruncated",
-          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. The caller must fall back to full-state recovery."
+          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. The caller must fall back to full-state recovery. Stricter than upstream, which restarts from the beginning of retained history instead of erroring."
         },
         {
           "name": "RepoNotFound",
@@ -1382,7 +1378,8 @@ export const stratosLexicons: LexiconDoc[] = [
     "repoOp": {
       "type": "object",
       "description": "A single record operation in the oplog. `cid` null means delete; `prev` null means create.",
-      "required": ["rev", "collection", "rkey"],
+      "required": ["rev", "collection", "rkey", "cid", "prev"],
+      "nullable": ["cid", "prev"],
       "properties": {
         "rev": {
           "type": "string",
@@ -1396,22 +1393,22 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "rkey": {
           "type": "string",
-          "maxLength": 512,
+          "format": "record-key",
           "description": "The record key."
         },
         "cid": {
           "type": "string",
           "format": "cid",
-          "description": "The CID (string form) of the current record value. Null (absent) for a delete."
+          "description": "The CID (string form) of the current record value. Null for a delete."
         },
         "prev": {
           "type": "string",
           "format": "cid",
-          "description": "The CID (string form) of the record value this operation superseded. Null (absent) for a create."
+          "description": "The CID (string form) of the record value this operation superseded. Null for a create, or when the superseded value predates the returned window."
         },
         "value": {
           "type": "unknown",
-          "description": "The current record value, inlined by default for create/update ops. Omitted when excludeValues is true or for a delete."
+          "description": "The current record value, inlined by default for create/update ops. Omitted when excludeValues is true, for a delete, or when the value has been superseded by a later operation."
         }
       }
     },
