@@ -334,8 +334,15 @@ function coalesceCurrentValues(
  * Resolves the `since` start-mapping (returning {@link OplogTruncatedError} when
  * `since` predates retained history), pages the sequence log with fail-closed
  * boundary gating and delete-filtering, coalesces to current-value-only, and —
- * when the log is drained — attaches the repo's current signed commit and marks
- * `caughtUp`.
+ * when the log is drained and the post-commit probe finds no newer sequence row
+ * — attaches the repo's current signed commit and marks `caughtUp`. A drained
+ * log can still yield `caughtUp: false` (no commit) when the probe detects a
+ * write; under continuous writes `caughtUp` may never turn true. Such a
+ * response can carry no ops and repeat the cursor the caller sent, so it does
+ * not always make progress. A caller must key off `caughtUp` and poll again,
+ * and must not read an unchanged cursor as a stall. `caughtUp: true` always
+ * pairs the ops with a commit that matches them; a write committing after the
+ * probe is not detected and arrives on a later poll.
  *
  * @param ctx - Application context
  * @param params - Resolved listRepoOps params
@@ -403,6 +410,24 @@ export async function listRepoOps(
 
   if (drained) {
     const commit = await readCurrentSignedCommit(ctx, did)
+    // A write may have landed between the final ops page and the commit read
+    // above, leaving a commit that does not correspond to the returned ops.
+    // Probing `seq > lastSeq` detects this only because of two write-path
+    // invariants: (1) every write persists its sequence rows and its root
+    // update in one transaction, and (2) same-actor writers are serialized by
+    // the stratos_repo_root row lock (lockRoot's SELECT ... FOR UPDATE
+    // NOWAIT), which keeps per-actor seq assignment order aligned with commit
+    // order — without (2), a lower seq could commit after a higher one and
+    // slip past the probe. A hit means "not caught up after all": hand back a
+    // cursor; the caller must key off `caughtUp` and simply poll again.
+    const probe = await readSequencePage(ctx, did, lastSeq, 1)
+    if (probe.length > 0) {
+      return {
+        ops: coalesced,
+        cursor: encodeSeqCursor(lastSeq),
+        caughtUp: false,
+      }
+    }
     return {
       ops: coalesced,
       caughtUp: true,
