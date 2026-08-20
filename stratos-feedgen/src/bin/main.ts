@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { IdResolver } from '@atproto/identity'
 import { Secp256k1Keypair } from '@atproto/crypto'
-import { createFeedRequestVerifier } from '../auth/index.js'
+import { createFeedRequestVerifier, createIdResolver } from '../auth/index.js'
 import { type FeedgenConfig, loadFeedgenConfig } from '../config.js'
 import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
@@ -23,7 +22,7 @@ async function main(): Promise<void> {
 
   const keypair = await Secp256k1Keypair.import(cfg.feedgenSigningKey)
   const publicKeyMultibase = keypair.did().slice('did:key:'.length)
-  const idResolver = new IdResolver({ plcUrl: cfg.feedgenPlcUrl })
+  const idResolver = createIdResolver(cfg)
 
   const upstream = new UpstreamStratosClient({
     serviceUrl: cfg.stratosServiceUrl,

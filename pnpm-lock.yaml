@@ -403,6 +403,9 @@ importers:
       '@atproto/oauth-provider':
         specifier: ^0.15.9
         version: 0.15.9
+      '@atproto/oauth-types':
+        specifier: ^0.6.3
+        version: 0.6.3
       '@atproto/syntax':
         specifier: ^0.4.3
         version: 0.4.3

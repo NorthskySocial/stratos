@@ -3,6 +3,28 @@ import type { AdminAuthRoutesConfig } from '../admin-routes.js'
 import { ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_MS } from '../admin-routes.js'
 
 /**
+ * The part of a request this handler reads.
+ *
+ * `express.Request` satisfies it, and the contract is small enough for a caller
+ * to supply one without a cast.
+ */
+export type AdminCallbackRequest = Pick<express.Request, 'url'>
+
+/**
+ * The response methods this handler calls.
+ *
+ * `express.Response` satisfies this. Declaring the methods rather than picking
+ * them from `express.Response` keeps `status()` returning only what the handler
+ * chains onto, so a test double needs no cast either.
+ */
+export interface AdminCallbackResponse {
+  cookie(name: string, value: string, options: express.CookieOptions): unknown
+  redirect(url: string): unknown
+  status(code: number): { json(body: unknown): unknown }
+  json(body: unknown): unknown
+}
+
+/**
  * Completes the admin OAuth flow.
  *
  * Unlike the enrollment callback, this performs no repo init, signing-key
@@ -16,7 +38,7 @@ export const handleAdminCallback = (config: AdminAuthRoutesConfig) => {
   const isSecure = baseUrl.startsWith('https://')
   const adminRedirectUri = `${baseUrl}/admin/oauth/callback`
 
-  return async (req: express.Request, res: express.Response) => {
+  return async (req: AdminCallbackRequest, res: AdminCallbackResponse) => {
     try {
       const params = new URLSearchParams(req.url.split('?')[1] || '')
 

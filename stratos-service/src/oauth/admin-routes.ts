@@ -2,6 +2,7 @@ import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import type { Logger } from '@northskysocial/stratos-core'
 import type { AdminSessionStore } from './admin-session-store.js'
+import { isEffectiveAdmin, type AdminUserStore } from './admin-user-store.js'
 import { passesAdminCsrfCheck } from '../config.js'
 import { handleAdminAuthorize } from './handlers/admin-authorize.js'
 import { handleAdminCallback } from './handlers/admin-callback.js'
@@ -11,6 +12,17 @@ import { handleAdminCallback } from './handlers/admin-callback.js'
  * carries the OAuth token — only the server-side session lookup key.
  */
 export const ADMIN_SESSION_COOKIE = 'stratos_admin_session'
+
+/**
+ * The part of a request the admin session helpers read.
+ *
+ * Both `express.Request` and a raw `IncomingMessage` satisfy this, and it names
+ * the whole contract, so a caller needs no cast to supply one.
+ */
+export type RequestWithHeaders = Pick<
+  import('node:http').IncomingMessage,
+  'headers'
+>
 
 /**
  * Read the opaque admin session id straight from the request's `Cookie`
@@ -24,7 +36,7 @@ export const ADMIN_SESSION_COOKIE = 'stratos_admin_session'
  * routes here and the raw `IncomingMessage` admin auth verifier.
  */
 export function readAdminSessionCookie(
-  req: import('node:http').IncomingMessage,
+  req: RequestWithHeaders,
 ): string | undefined {
   const cookieHeader = req.headers?.cookie
   if (!cookieHeader) return undefined
@@ -50,6 +62,7 @@ export const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000
 export interface AdminAuthRoutesConfig {
   oauthClient: NodeOAuthClient
   adminSessionStore: AdminSessionStore
+  adminUserStore: AdminUserStore
   adminDids: string[]
   baseUrl: string
   devMode?: boolean
@@ -58,18 +71,21 @@ export interface AdminAuthRoutesConfig {
 
 /**
  * Resolve the admin DID from the request's session cookie, or null if there is
- * no valid, unexpired session whose DID is still on the allowlist.
+ * no valid, unexpired session whose DID is still an effective admin.
  */
 export async function resolveAdminSession(
-  req: express.Request,
-  config: Pick<AdminAuthRoutesConfig, 'adminSessionStore' | 'adminDids'>,
+  req: RequestWithHeaders,
+  config: Pick<
+    AdminAuthRoutesConfig,
+    'adminSessionStore' | 'adminDids' | 'adminUserStore'
+  >,
 ): Promise<string | null> {
   const sessionKey = readAdminSessionCookie(req)
   if (!sessionKey) return null
 
   const session = await config.adminSessionStore.get(sessionKey)
   if (!session) return null
-  if (!config.adminDids.includes(session.did)) return null
+  if (!(await isEffectiveAdmin(session.did, config))) return null
 
   return session.did
 }

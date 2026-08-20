@@ -1,6 +1,16 @@
 import express from 'express'
 import { OAUTH_SCOPE } from '../client.js'
+import { verifyRedirectTarget } from '../redirect-target.js'
 import type { OAuthRoutesConfig } from '../routes.js'
+
+/**
+ * Tells a client developer how to make its own redirect target acceptable.
+ *
+ * A rejection here is almost always a client that did not send `client_id`,
+ * so the message names the fix instead of only the failure.
+ */
+const HOW_TO_PROVE_REDIRECT =
+  'Publish a client metadata document that declares this redirect_uri, then pass its URL as client_id.'
 
 /**
  * Handles the OAuth authorization flow
@@ -12,12 +22,17 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
   const { oauthClient, logger } = config
 
   const isSecure = config.baseUrl.startsWith('https://')
-  const allowedSchemes = isSecure ? ['https:'] : ['http:', 'https:']
+  const redirectGates = {
+    allowedSchemes: isSecure ? ['https:'] : ['http:', 'https:'],
+    allowedRedirectOrigins: config.allowedRedirectOrigins,
+    devMode: config.devMode ?? false,
+  }
 
   return async (req: express.Request, res: express.Response) => {
     try {
       const handle = req.query.handle as string
       const redirectUri = req.query.redirect_uri as string | undefined
+      const clientId = req.query.client_id as string | undefined
 
       if (!handle) {
         return res.status(400).json({
@@ -26,28 +41,27 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
         })
       }
 
+      let verifiedRedirect: string | undefined
       if (redirectUri) {
-        try {
-          const parsed = new URL(redirectUri)
-          if (!allowedSchemes.includes(parsed.protocol)) {
-            return res.status(400).json({
-              error: 'InvalidRequest',
-              message: 'redirect_uri must use https',
-            })
-          }
-        } catch {
+        const verdict = await verifyRedirectTarget(
+          redirectUri,
+          clientId,
+          redirectGates,
+          config.fetchClientRedirectUris,
+        )
+        if (!verdict.allowed) {
+          logger?.warn(
+            { clientId, message: verdict.message, detail: verdict.logDetail },
+            'rejected enrollment redirect_uri',
+          )
           return res.status(400).json({
             error: 'InvalidRequest',
-            message: 'Invalid redirect_uri',
+            message: verdict.message,
+            hint: HOW_TO_PROVE_REDIRECT,
           })
         }
 
-        res.cookie('stratos_redirect', redirectUri, {
-          httpOnly: true,
-          sameSite: 'lax',
-          maxAge: 10 * 60 * 1000,
-          secure: isSecure,
-        })
+        verifiedRedirect = redirectUri
       }
 
       // Start the authorization flow
@@ -55,8 +69,13 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
         { handle, scope: OAUTH_SCOPE },
         'Starting OAuth authorization',
       )
+      // The verified target rides in the OAuth state, which the client stores
+      // server-side and returns only to this callback. A cookie cannot do this
+      // job: cookies are not bound to an origin, so a different host on the
+      // same registrable domain can write one.
       const authUrl = await oauthClient.authorize(handle, {
         scope: OAUTH_SCOPE,
+        state: verifiedRedirect,
       })
 
       // Redirect user to their PDS for authorization

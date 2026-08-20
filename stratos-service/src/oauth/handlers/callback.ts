@@ -39,8 +39,9 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
     try {
       const params = new URLSearchParams(req.url.split('?')[1] || '')
 
-      // Complete the OAuth flow
-      const { session } = await oauthClient.callback(params)
+      // Complete the OAuth flow. `state` carries the redirect target that
+      // `handleAuthorize` verified before it started this flow.
+      const { session, state } = await oauthClient.callback(params)
       const did = session.sub
 
       // Validate enrollment eligibility
@@ -85,10 +86,10 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
 
       // Redirect back to the app if a redirect was stored, otherwise return JSON
       sendOAuthResponse({
-        req,
         res,
         did,
         alreadyEnrolled,
+        redirectTo: state,
         allowedSchemes,
         enrollBoundaries,
         logger,
@@ -260,40 +261,54 @@ async function handleNewEnrollment(deps: {
   })
 }
 
+/**
+ * Send the browser back to the calling app, or answer with JSON.
+ *
+ * The target arrives in the OAuth state, which `handleAuthorize` set only after
+ * `verifyRedirectTarget` accepted it. The OAuth client keeps that value in the
+ * `oauth_state` table, returns it to this callback alone, and deletes the row on
+ * read, so the value is single-use and never passes through the browser. That
+ * chain is the integrity boundary, so this function re-checks only the scheme
+ * and does not repeat the client metadata fetch.
+ *
+ * The redirect carries `stratos_enrolled` and nothing else. No token, no
+ * authorization code, and no DID ever rides this URL.
+ */
 function sendOAuthResponse(deps: {
-  req: express.Request
   res: express.Response
   did: string
   alreadyEnrolled: boolean
+  redirectTo: string | null
   allowedSchemes: string[]
   enrollBoundaries: string[]
   logger: Logger | undefined
 }) {
   const {
-    req,
     res,
     did,
     alreadyEnrolled,
+    redirectTo,
     allowedSchemes,
     enrollBoundaries,
     logger,
   } = deps
 
-  // Redirect back to the app if a redirect was stored, otherwise return JSON
-  const redirectTo = (
-    req as express.Request & { cookies?: Record<string, string> }
-  ).cookies?.stratos_redirect
   if (redirectTo) {
-    res.clearCookie('stratos_redirect')
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const url = new URL(redirectTo)
       if (allowedSchemes.includes(url.protocol)) {
         url.searchParams.set('stratos_enrolled', 'true')
         return res.redirect(url.toString())
       }
+      logger?.warn(
+        { origin: url.origin },
+        'stored redirect uses a disallowed scheme; answering with JSON',
+      )
     } catch {
-      // Invalid URL, fall through to JSON response
+      logger?.warn(
+        {},
+        'stored redirect is not a valid URL; answering with JSON',
+      )
     }
   }
 
