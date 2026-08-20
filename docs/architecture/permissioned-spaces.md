@@ -7,8 +7,9 @@ import SpaceDataResidencyAnimation from '../.vitepress/theme/components/SpaceDat
 
 The AT Protocol permissioned data proposal
 ([proposal 0016](https://github.com/bluesky-social/proposals/blob/main/0016-permissioned-data/README.md),
-with a work-in-progress implementation branch at
-[bluesky-social/atproto#5187](https://github.com/bluesky-social/atproto/pull/5187))
+implemented on the `permissioned-data` branch at
+[bluesky-social/atproto#5187](https://github.com/bluesky-social/atproto/pull/5187),
+which now ships an alpha PDS as the GHCR image tagged `pds-spaces-alpha`)
 defines a standard model for private records: a _space_ is a named,
 membership-gated container of records, addressed by an `at://` URI and served
 by a _space authority_ that decides who may read from it. Stratos implements
@@ -68,6 +69,10 @@ The literal `space` segment sits where a collection NSID appears in a public
 `at://` URI. An NSID always contains at least two dots and can never be the
 bare word `space`, so the two URI shapes cannot collide. Parsing is strict:
 canonical form is byte equality, with no case folding and no normalization.
+The alpha implementation registers this same grammar as a dedicated lexicon
+string format, `space-ref`: the three-part form only, with a DID authority
+(never a handle), and a URI naming a record _within_ a space deliberately
+does not qualify. Stratos's parser already enforces those rules.
 The single source of truth for this grammar is
 `stratos-core/src/spaces/domain.ts`, and `stratos-client` re-exports the same
 parser so clients never hand-roll it.
@@ -154,6 +159,15 @@ key (`kid: #atproto`, resolvable from the authority's DID document), so a
 host can verify it without ever contacting the authority. The default
 lifetime is two hours.
 
+The alpha PDS added a third property Stratos does not yet implement:
+sender-constraint. An upstream credential carries a `cnf.jkt` claim binding
+it to the DPoP key that signed the mint request, is presented under the
+`DPoP` authorization scheme with a fresh proof on every request, and the
+delegation tokens and client attestations that feed issuance are single-use.
+A Stratos credential is still bearer-shaped: possession is proof. The
+two-hour lifetime bounds the exposure, and closing this gap is tracked as
+alignment work.
+
 Credential issuance supports two optional inputs:
 
 - A **delegation token**, a space-delegation JWT whose target space must
@@ -219,30 +233,44 @@ stream and serves them back to viewers as hydrated timelines.
 The `zone.stratos.space.*` methods are deliberately shaped as mirrors, not
 approximations:
 
-| Stratos NSID                                        | Proposal counterpart          | Status                         |
-| --------------------------------------------------- | ----------------------------- | ------------------------------ |
-| `zone.stratos.space.getRecord`                      | `com.atproto.space.getRecord` | Spec-shaped mirror             |
-| `zone.stratos.space.getSpaceCredential`             | Space credential issuance     | Spec-shaped mirror             |
-| `zone.stratos.space.feed`                           | Space type declaration        | Standard `type: space` lexicon |
-| `zone.stratos.repo.hydrateRecord(s)`                | none                          | Stratos-specific               |
-| `zone.stratos.sync.subscribeRecords`                | none                          | Stratos-specific               |
-| `zone.stratos.sync.listRepoOps` / `listRecordPaths` | none                          | Stratos-specific pull sync     |
+| Stratos NSID                                        | Proposal counterpart            | Status                         |
+| --------------------------------------------------- | ------------------------------- | ------------------------------ |
+| `zone.stratos.space.getRecord`                      | `com.atproto.space.getRecord`   | Spec-shaped mirror             |
+| `zone.stratos.space.getSpaceCredential`             | Space credential issuance       | Spec-shaped mirror             |
+| `zone.stratos.space.feed`                           | Space type declaration          | Standard `type: space` lexicon |
+| `zone.stratos.repo.hydrateRecord(s)`                | none                            | Stratos-specific               |
+| `zone.stratos.sync.subscribeRecords`                | none                            | Stratos-specific               |
+| `zone.stratos.sync.listRepoOps` / `listRecordPaths` | `com.atproto.space.listRepoOps` | Diverged; see caveats below    |
 
-On the wire, the credential format follows the spec exactly: the
-`atproto-space-credential+jwt` type header, `ES256K` or `ES256` signing, and
-the `kid` fallback rule. The proposal permits either `#atproto_space` or
+On the wire, the credential format follows the spec's bearer shape exactly:
+the `atproto-space-credential+jwt` type header, `ES256K` or `ES256` signing,
+and the `kid` fallback rule. The proposal permits either `#atproto_space` or
 `#atproto` as the key id; Stratos always emits `#atproto`, so verifiers that
 implement the fallback accept its credentials without a dedicated space key
-in the DID document.
+in the DID document. The DPoP sender-constraint the alpha added on top of
+that shape is the one wire-level difference, as covered above.
 
 Some caveats worth stating plainly:
 
-- The proposal text still describes itself as not final. If
-  `com.atproto.space.*` changes shape before a release, the
-  `zone.stratos.space.*` mirrors will track it, and the mirrored NSIDs give
-  us room to version that transition without breaking deployed clients.
+- The proposal is not final, and the alpha PDS moved it: since the mirrors
+  were written, upstream added DPoP sender-constraint to credentials
+  (`cnf.jkt`, single-use delegation tokens), registered the `space-ref`
+  string format, reworked notify registration around service identifiers
+  with an explicit `unregisterNotify`, and added space-scoped blob
+  enumeration (`listBlobs`). The `zone.stratos.space.*` mirrors will track
+  these, and the mirrored NSIDs give us room to version that transition
+  without breaking deployed clients.
+- Pull sync diverged in the other direction. Stratos's
+  `zone.stratos.sync.listRepoOps` detects truncation explicitly
+  (`OplogTruncated`) and falls back to `listRecordPaths`; the alpha's
+  `com.atproto.space.listRepoOps` instead treats the oplog as a transport
+  optimization with no history guarantee — cursor pagination, the signed
+  commit only on the final page, and recovery through `getRepo` (which
+  gained an index-only `excludeValues` mode). Reconciling the two models is
+  open alignment work.
 - Compatibility is mostly outbound. Stratos can consume spec-hosted spaces
-  once they exist; a generic spec client cannot read Stratos data, because
+  as hosts ship them (the alpha PDS is the first); a generic spec client
+  cannot read Stratos data, because
   access is app-gated and commit verification resolves keys through the
   enrollment record rather than the author's DID document.
 - The repo format is MST with durable signed commits. The proposal's
@@ -379,7 +407,9 @@ the caller reaches the head it receives `caughtUp: true` along with the
 current signed commit. If the requested revision predates retained history,
 the endpoint returns `OplogTruncated` and the caller falls back to
 `zone.stratos.sync.listRecordPaths`: enumerate paths and CIDs, diff against
-local state, fetch what is missing.
+local state, fetch what is missing. (The alpha's `com.atproto.space.*`
+counterpart settled on a different recovery model — no truncation
+signal, with `getRepo` as the fallback; see the compatibility notes.)
 
 Portability here means movement between Stratos instances, not a handoff
 to a PDS; the spaces Stratos owns stay Stratos-hosted, as covered above.
