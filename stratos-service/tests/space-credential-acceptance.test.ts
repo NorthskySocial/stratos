@@ -6,13 +6,21 @@
  * the existing per-record boundary gate is UNCHANGED — a credential for S
  * yields records in S ONLY, and only those the gate would release to a member
  * of S. We assert this on the hydration and pull-sync endpoints, plus the
- * verifier-composition routing (DPoP / service paths unchanged; writes reject).
+ * verifier-composition routing (DPoP / service paths unchanged; writes reject)
+ * and DPoP sender-constrained presentation (cnf.jkt binding, proof replay,
+ * Bearer-only-in-dev-mode, fail-closed without a replay store).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes, randomUUID } from 'crypto'
+import {
+  SignJWT,
+  calculateJwkThumbprint,
+  exportJWK,
+  generateKeyPair,
+} from 'jose'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { AuthRequiredError } from '@atproto/xrpc-server'
 import { encodeRecord, spaceUriToBoundary } from '@northskysocial/stratos-core'
@@ -32,6 +40,7 @@ import { registerHydrationHandlers } from '../src/features/index.js'
 import { HydrationServiceImpl } from '../src/features/hydration/adapter.js'
 import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
+import { ReplayStore, type NxExStore } from '../src/infra/auth/replay-store.js'
 import { createMockBlobStore, createTestConfig } from './utils/index.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
 import { decode } from '@atcute/cbor'
@@ -95,14 +104,53 @@ describe('space-credential acceptance', () => {
   // ── helpers ────────────────────────────────────────────────────────────
 
   /** Mint a valid space credential for a space (signed by our service key). */
-  async function credentialFor(spaceUri: string): Promise<string> {
+  async function credentialFor(spaceUri: string, jkt?: string): Promise<string> {
     const { credential } = await mintSpaceCredential({
       signingKey,
       issuerDid: SERVICE_DID,
       spaceUri,
       ttlSeconds: 7_200,
+      ...(jkt ? { jkt } : {}),
     })
     return credential
+  }
+
+  /** In-memory SET-NX-EX store backing a real ReplayStore. First set wins. */
+  class MemoryNxExStore implements NxExStore {
+    private readonly seen = new Set<string>()
+    async setNxEx(key: string): Promise<boolean> {
+      if (this.seen.has(key)) return false
+      this.seen.add(key)
+      return true
+    }
+  }
+
+  /**
+   * A presentation keypair: its RFC 7638 thumbprint (jkt) plus a builder that
+   * signs an ath-bound DPoP presentation proof for a given credential+request.
+   */
+  async function makePresentationKey() {
+    const { privateKey, publicKey } = await generateKeyPair('ES256', {
+      extractable: true,
+    })
+    const jwk = await exportJWK(publicKey)
+    const jkt = await calculateJwkThumbprint(jwk)
+    async function buildProof(
+      credential: string,
+      url = '/x',
+      method = 'GET',
+    ): Promise<string> {
+      return new SignJWT({
+        htm: method,
+        htu: new URL(url, 'https://stratos.test').toString(),
+        ath: createHash('sha256').update(credential).digest('base64url'),
+        jti: randomUUID(),
+      })
+        .setProtectedHeader({ typ: 'dpop+jwt', alg: 'ES256', jwk })
+        .setIssuedAt()
+        .sign(privateKey)
+    }
+    return { jkt, buildProof }
   }
 
   /** A handler-shaped auth carrying a verified space credential. */
@@ -347,8 +395,11 @@ describe('space-credential acceptance', () => {
   // ── verifier composition (routing + regression) ──────────────────────────
 
   describe('verifier composition', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function makeVerifiers(): any {
+    function makeVerifiers(opts?: {
+      devMode?: boolean
+      withoutReplayStore?: boolean
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }): any {
       return createAuthVerifiers(
         SERVICE_DID,
         // idResolver — only used by service/standard paths we don't exercise
@@ -381,22 +432,83 @@ describe('space-credential acceptance', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         undefined,
-        false,
+        opts?.devMode ?? false,
         signingKey,
+        opts?.withoutReplayStore
+          ? undefined
+          : new ReplayStore(new MemoryNxExStore()),
         ctx.logger,
       )
     }
 
-    function ctxWithHeader(authorization?: string) {
+    function ctxWithHeader(
+      authorization?: string,
+      extraHeaders?: Record<string, string>,
+    ) {
       return {
-        req: { headers: authorization ? { authorization } : {}, url: '/x' },
+        req: {
+          method: 'GET',
+          headers: {
+            ...(authorization ? { authorization } : {}),
+            ...(extraHeaders ?? {}),
+          },
+          url: '/x',
+        },
         res: { setHeader: vi.fn() },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any
     }
 
-    it('spaceCredential verifier accepts a valid credential (Bearer)', async () => {
+    it('spaceCredential accepts a BOUND credential presented under DPoP with a valid proof', async () => {
       const verifiers = makeVerifiers()
+      const key = await makePresentationKey()
+      const cred = await credentialFor(SPACE_S, key.jkt)
+      const result = await verifiers.spaceCredential(
+        ctxWithHeader(`DPoP ${cred}`, { dpop: await key.buildProof(cred) }),
+      )
+      expect(result.credentials).toEqual({
+        type: 'space-credential',
+        spaceUri: SPACE_S,
+      })
+    })
+
+    it('spaceCredential REJECTS a proof replay (same jti twice)', async () => {
+      const verifiers = makeVerifiers()
+      const key = await makePresentationKey()
+      const cred = await credentialFor(SPACE_S, key.jkt)
+      const proof = await key.buildProof(cred)
+      await verifiers.spaceCredential(ctxWithHeader(`DPoP ${cred}`, { dpop: proof }))
+      // The same verifiers instance shares one replay store — the second
+      // presentation of the SAME proof must fail.
+      await expect(
+        verifiers.spaceCredential(ctxWithHeader(`DPoP ${cred}`, { dpop: proof })),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
+
+    it('spaceCredential REJECTS a proof signed by a key other than cnf.jkt', async () => {
+      const verifiers = makeVerifiers()
+      const boundKey = await makePresentationKey()
+      const attackerKey = await makePresentationKey()
+      const cred = await credentialFor(SPACE_S, boundKey.jkt)
+      await expect(
+        verifiers.spaceCredential(
+          ctxWithHeader(`DPoP ${cred}`, {
+            dpop: await attackerKey.buildProof(cred),
+          }),
+        ),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
+
+    it('spaceCredential REJECTS a Bearer credential outside dev mode', async () => {
+      const verifiers = makeVerifiers()
+      const cred = await credentialFor(SPACE_S)
+      await expect(
+        verifiers.spaceCredential(ctxWithHeader(`Bearer ${cred}`)),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
+
+    it('dev mode: spaceCredential accepts an UNBOUND credential over Bearer', async () => {
+      const verifiers = makeVerifiers({ devMode: true })
       const cred = await credentialFor(SPACE_S)
       const result = await verifiers.spaceCredential(
         ctxWithHeader(`Bearer ${cred}`),
@@ -407,8 +519,28 @@ describe('space-credential acceptance', () => {
       })
     })
 
+    it('dev mode: spaceCredential REJECTS a BOUND credential over Bearer (no downgrade)', async () => {
+      const verifiers = makeVerifiers({ devMode: true })
+      const key = await makePresentationKey()
+      const cred = await credentialFor(SPACE_S, key.jkt)
+      await expect(
+        verifiers.spaceCredential(ctxWithHeader(`Bearer ${cred}`)),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
+
+    it('fails closed: DPoP presentation REJECTED when no replay store is configured', async () => {
+      const verifiers = makeVerifiers({ withoutReplayStore: true })
+      const key = await makePresentationKey()
+      const cred = await credentialFor(SPACE_S, key.jkt)
+      await expect(
+        verifiers.spaceCredential(
+          ctxWithHeader(`DPoP ${cred}`, { dpop: await key.buildProof(cred) }),
+        ),
+      ).rejects.toBeInstanceOf(AuthRequiredError)
+    })
+
     it('standardOrSpaceCredential routes a credential Bearer to the credential path', async () => {
-      const verifiers = makeVerifiers()
+      const verifiers = makeVerifiers({ devMode: true })
       const cred = await credentialFor(SPACE_S)
       const result = await verifiers.standardOrSpaceCredential(
         ctxWithHeader(`Bearer ${cred}`),
@@ -431,8 +563,10 @@ describe('space-credential acceptance', () => {
       expect(result.credentials).toEqual({ type: 'anonymous' })
     })
 
+    // The three rejection tests below present over dev-mode Bearer so the
+    // failure they observe is the CREDENTIAL check, not the scheme gate.
     it('rejects an expired credential through the composition', async () => {
-      const verifiers = makeVerifiers()
+      const verifiers = makeVerifiers({ devMode: true })
       const iat = Math.floor(Date.now() / 1000) - 10_000
       const { credential } = await mintSpaceCredential({
         signingKey,
@@ -447,7 +581,7 @@ describe('space-credential acceptance', () => {
     })
 
     it('rejects a bad-signature credential through the composition', async () => {
-      const verifiers = makeVerifiers()
+      const verifiers = makeVerifiers({ devMode: true })
       const attacker = await Secp256k1Keypair.create()
       const { credential } = await mintSpaceCredential({
         signingKey: attacker, // wrong signer
@@ -461,7 +595,7 @@ describe('space-credential acceptance', () => {
     })
 
     it('rejects a foreign-space credential (spaceDid ≠ serviceDid)', async () => {
-      const verifiers = makeVerifiers()
+      const verifiers = makeVerifiers({ devMode: true })
       const { credential } = await mintSpaceCredential({
         signingKey,
         issuerDid: SERVICE_DID,

@@ -44,6 +44,7 @@ import {
   type IdentityContext,
 } from './context-types.js'
 import { createAuthVerifiers } from './infra/auth/verifiers.js'
+import { replayStoreFromCache } from './infra/auth/replay-store.js'
 import { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { RedisCache } from './infra/storage/redis-cache.js'
@@ -218,6 +219,10 @@ async function initCoreServices(
     logger,
   )
 
+  const cache = cfg.enrollment.valkeyUrl
+    ? new RedisCache(cfg.enrollment.valkeyUrl)
+    : undefined
+
   const { dpopVerifier, authVerifier, lexiconProvider, xrpcServer } = initAuth(
     cfg,
     idResolver,
@@ -226,12 +231,9 @@ async function initCoreServices(
     adminUserStore,
     enrollmentCtx.allowListProvider,
     signingKey,
+    cache,
     logger,
   )
-
-  const cache = cfg.enrollment.valkeyUrl
-    ? new RedisCache(cfg.enrollment.valkeyUrl)
-    : undefined
 
   const boundaryResolver = cfg.enrollment.valkeyUrl
     ? new MigratingBoundaryResolver({
@@ -307,6 +309,7 @@ async function initIdentity(
  * @param adminUserStore - Store of admins granted at runtime.
  * @param allowListProvider - Optional provider for external allowlists.
  * @param signingKey - This service's signing keypair (space-credential authority).
+ * @param cache - Process cache backing the DPoP-proof replay store, if any.
  * @param logger - Logger instance for logging application events.
  * @returns Initialized authentication components.
  */
@@ -318,6 +321,7 @@ function initAuth(
   adminUserStore: AppContext['adminUserStore'],
   allowListProvider: ExternalAllowListProvider | undefined,
   signingKey: AppContext['signingKey'],
+  cache: AppContext['cache'],
   logger?: AppContext['logger'],
 ) {
   const dpopVerifier = new DpopVerifier({
@@ -342,6 +346,7 @@ function initAuth(
     allowListProvider,
     cfg.stratos.devMode === true,
     signingKey,
+    replayStoreFromCache(cache, logger),
     logger,
   )
 

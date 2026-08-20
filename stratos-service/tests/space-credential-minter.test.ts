@@ -129,6 +129,32 @@ describe('mintSpaceCredential', () => {
     expect(await verifyAgainst(p256.did(), decoded)).toBe(false)
   })
 
+  it('binds the credential to a DPoP key via cnf.jkt when jkt is supplied', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const { credential, payload } = await mintSpaceCredential({
+      signingKey,
+      issuerDid: ISSUER_DID,
+      spaceUri: SPACE_URI,
+      ttlSeconds: 7_200,
+      jkt: 'thumb-rei-ayanami',
+    })
+    expect(payload.cnf).toEqual({ jkt: 'thumb-rei-ayanami' })
+    const decoded = decodeJwt(credential)
+    expect(decoded.payload.cnf).toEqual({ jkt: 'thumb-rei-ayanami' })
+  })
+
+  it('omits cnf entirely when no jkt is supplied (unbound, dev mode only)', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const { credential, payload } = await mintSpaceCredential({
+      signingKey,
+      issuerDid: ISSUER_DID,
+      spaceUri: SPACE_URI,
+      ttlSeconds: 7_200,
+    })
+    expect('cnf' in payload).toBe(false)
+    expect('cnf' in decodeJwt(credential).payload).toBe(false)
+  })
+
   it('generates a unique jti when none is supplied', async () => {
     const signingKey = await Secp256k1Keypair.create()
     const a = await mintSpaceCredential({

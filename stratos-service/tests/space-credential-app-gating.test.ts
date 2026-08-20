@@ -63,8 +63,9 @@ async function invoke(
 ): Promise<InvokeResult> {
   const method = server.methods['zone.stratos.space.getSpaceCredential']
   if (!method) throw new Error('method not registered')
+  // A session jkt so the mint clears the key-binding guard (not under test here).
   const auth = authDid
-    ? { credentials: { type: 'user', did: authDid } }
+    ? { credentials: { type: 'user', did: authDid, jkt: 'thumb-gate' } }
     : { credentials: { type: 'anonymous' } }
   try {
     const result = await method.handler({
@@ -115,6 +116,7 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
     cache: new MemoryCache(),
     jwksResolver: resolverFor(opts.clients, { failFetch: opts.failFetch }),
     cfg: {
+      service: { publicUrl: 'https://stratos.test' },
       stratos: {
         spaceCredentialTtlSeconds: TTL_SECONDS,
         spaceAppAccess: validateSpaceAppAccess(

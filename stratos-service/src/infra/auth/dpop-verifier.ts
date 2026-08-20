@@ -21,6 +21,8 @@ export interface DpopAuthResult {
   scope: string
   pdsEndpoint: string
   tokenType: 'DPoP'
+  /** SHA-256 JWK thumbprint of the proof key (RFC 9449 `jkt`). */
+  jkt: string
 }
 
 /**
@@ -174,6 +176,7 @@ export class DpopVerifier {
       scope: (claims.scope as string) ?? 'atproto',
       pdsEndpoint,
       tokenType: 'DPoP',
+      jkt: dpopProof.jkt,
     }
   }
 

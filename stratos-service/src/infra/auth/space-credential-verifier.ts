@@ -1,14 +1,18 @@
 import type { Keypair } from '@atproto/crypto'
 import * as crypto from '@atproto/crypto'
+import type { DpopProof } from '@atproto/oauth-provider'
 import { parseSpaceUri } from '@northskysocial/stratos-core'
 import { decodeCompactJwt } from './jwt.js'
+import type { VerifyRequestContext } from './dpop-verifier.js'
+import type { SpaceDpopProofChecker } from './space-dpop.js'
+import type { ReplayStore } from './replay-store.js'
 
 /**
  * Space-credential verifier.
  *
  * A **space credential** is a JWT the space authority (this Stratos service)
  * mints (see `features/space-credential/minter.ts`) to grant a member
- * bearer-shaped, **multi-use** access to a single space until the credential
+ * **multi-use**, DPoP-key-bound access to a single space until the credential
  * expires. On the read/sync surface we accept it as an ALTERNATIVE
  * authentication that COMPOSES with — never replaces — the per-record boundary
  * gate: a credential admits the caller to the API surface for its space, and
@@ -26,10 +30,20 @@ import { decodeCompactJwt } from './jwt.js'
  *   - Header `alg` MUST be one of {@link SPACE_CREDENTIAL_ALLOWED_ALGS} (`ES256K`, `ES256`).
  *   - Header `kid` MUST be exactly {@link SPACE_CREDENTIAL_KID} (`"#atproto"`).
  *   - Payload `exp` MUST be present and not in the past (with skew). There is
- *     no `aud` claim and NO `jti` consumption (the credential is multi-use).
+ *     no `aud` claim and NO credential-`jti` consumption (the credential is
+ *     multi-use; single-use applies to the per-request PROOF `jti` instead).
  *   - Payload `sub` MUST parse as an `at://` space URI whose
  *     `spaceDid` equals our configured service DID (we are the authority).
  *   - The signature MUST verify against OUR OWN service signing key.
+ *
+ * Presentation binding ({@link verifyPresentedSpaceCredential}) — the
+ * credential is sender-constrained per RFC 9449:
+ *   - Payload `cnf.jkt` MUST be present (the member's DPoP key thumbprint).
+ *   - The request MUST carry a `DPoP` proof with `ath` over the credential and
+ *     `htm`/`htu` matching the request.
+ *   - The proof key's thumbprint MUST equal `cnf.jkt`.
+ *   - The proof `jti` is consumed single-use (replay store, fail-closed) —
+ *     LAST, so an invalid presentation never burns its nonce.
  *
  * @see verifySpaceCredential
  */
@@ -42,6 +56,14 @@ export const SPACE_CREDENTIAL_ALLOWED_ALGS = ['ES256K', 'ES256'] as const
 export const SPACE_CREDENTIAL_KID = '#atproto'
 /** Default clock-skew tolerance (seconds) for `exp`. */
 export const SPACE_CREDENTIAL_CLOCK_SKEW = 30
+/** Replay-store namespace for presentation-proof `jti` values. */
+export const SPACE_DPOP_REPLAY_KIND = 'space-dpop'
+/**
+ * How long (seconds) a consumed proof `jti` is remembered. Covers the proof's
+ * freshness window plus the checker's clock tolerance, so a proof can never
+ * outlive its replay record.
+ */
+export const SPACE_DPOP_REPLAY_TTL = 300
 
 /**
  * Base class for all space-credential-verification failures. Each distinct
@@ -71,6 +93,14 @@ export class InvalidSpaceCredentialSubError extends SpaceCredentialVerificationE
 export class ForeignSpaceCredentialError extends SpaceCredentialVerificationError {}
 /** Signature did not verify against our own service signing key. */
 export class InvalidSpaceCredentialSignatureError extends SpaceCredentialVerificationError {}
+/** The credential carries no `cnf.jkt` key binding. */
+export class MissingSpaceCredentialCnfError extends SpaceCredentialVerificationError {}
+/** The request's `DPoP` proof was missing or failed validation. */
+export class InvalidSpaceCredentialProofError extends SpaceCredentialVerificationError {}
+/** The proof key's thumbprint did not equal the credential's `cnf.jkt`. */
+export class SpaceCredentialKeyBindingError extends SpaceCredentialVerificationError {}
+/** The proof `jti` was already consumed (or the replay store is unavailable). */
+export class SpaceCredentialProofReplayError extends SpaceCredentialVerificationError {}
 
 interface SpaceCredentialHeader {
   alg?: string
@@ -84,12 +114,15 @@ interface SpaceCredentialClaims {
   iat?: number
   exp?: number
   jti?: string
+  cnf?: { jkt?: unknown }
 }
 
 /** Successful verification result. */
 export interface SpaceCredentialResult {
   /** The target space URI (`sub`), byte-for-byte as presented. */
   spaceUri: string
+  /** The `cnf.jkt` DPoP key binding, when the credential carries one. */
+  cnfJkt?: string
 }
 
 /** Dependencies for {@link verifySpaceCredential}. */
@@ -176,7 +209,76 @@ export async function verifySpaceCredential(
   // 6. signature against OUR OWN service key (no DID resolution).
   await verifyOwnKeySignature(parts, deps.serviceKey)
 
-  return { spaceUri: payload.sub }
+  const cnfJkt = payload.cnf?.jkt
+  return {
+    spaceUri: payload.sub,
+    ...(typeof cnfJkt === 'string' && cnfJkt ? { cnfJkt } : {}),
+  }
+}
+
+/** Dependencies for {@link verifyPresentedSpaceCredential}. */
+export interface PresentedSpaceCredentialDeps
+  extends SpaceCredentialVerifierDeps {
+  /** RFC 9449 proof checker for the space surface (nonce-free). */
+  proofChecker: Pick<SpaceDpopProofChecker, 'check'>
+  /** Single-use store for proof `jti` values (fail-closed). */
+  replayStore: Pick<ReplayStore, 'consumeOnce'>
+}
+
+/**
+ * Verify a space credential presented under the `DPoP` auth scheme.
+ *
+ * Runs {@link verifySpaceCredential} first, then enforces the sender
+ * constraint: `cnf.jkt` presence, a valid `DPoP` proof with `ath` over the
+ * credential, thumbprint equality, and single-use proof-`jti` consumption.
+ * The `jti` is consumed LAST so an invalid presentation never burns its nonce.
+ *
+ * @param token - The raw compact credential JWT (no scheme prefix).
+ * @param req - The request context the proof must bind (`htm`/`htu`).
+ * @param deps - Credential deps plus the proof checker and replay store.
+ * @returns `{ spaceUri, cnfJkt }` on success.
+ * @throws A distinct {@link SpaceCredentialVerificationError} subclass per failure.
+ */
+export async function verifyPresentedSpaceCredential(
+  token: string,
+  req: VerifyRequestContext,
+  deps: PresentedSpaceCredentialDeps,
+): Promise<SpaceCredentialResult> {
+  const result = await verifySpaceCredential(token, deps)
+
+  // 7. cnf.jkt — every presented credential must be key-bound.
+  if (!result.cnfJkt) {
+    throw new MissingSpaceCredentialCnfError(
+      'Space credential has no cnf.jkt key binding',
+    )
+  }
+
+  // 8. DPoP proof — signature, typ, freshness, htm/htu, ath over the credential.
+  let proof: DpopProof
+  try {
+    proof = await deps.proofChecker.check(req, token)
+  } catch (err) {
+    throw new InvalidSpaceCredentialProofError(
+      err instanceof Error ? err.message : 'Invalid DPoP proof',
+    )
+  }
+
+  // 9. key binding — the proof key must be the bound key.
+  if (proof.jkt !== result.cnfJkt) {
+    throw new SpaceCredentialKeyBindingError('DPoP key binding mismatch')
+  }
+
+  // 10. proof jti — consumed LAST so an invalid presentation never burns it.
+  const fresh = await deps.replayStore.consumeOnce(
+    SPACE_DPOP_REPLAY_KIND,
+    proof.jti,
+    SPACE_DPOP_REPLAY_TTL,
+  )
+  if (!fresh) {
+    throw new SpaceCredentialProofReplayError('DPoP proof replay detected')
+  }
+
+  return result
 }
 
 /**

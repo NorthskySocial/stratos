@@ -12,6 +12,12 @@ export interface HandlerAuth {
      * still filtered per-record by the existing boundary gate.
      */
     spaceUri?: string
+    /**
+     * Present for DPoP user auth: the SHA-256 JWK thumbprint of the caller's
+     * DPoP key (RFC 9449 `jkt`). Used to bind minted space credentials to the
+     * requesting key via `cnf.jkt`.
+     */
+    jkt?: string
   }
 }
 
