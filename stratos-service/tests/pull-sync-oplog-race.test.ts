@@ -61,6 +61,28 @@ class ScriptedActorStore {
     })
   }
 
+  /** Append a malformed non-delete op that has no cid. */
+  appendCidlessCreate(seq: number, rev: string, rkey: string): void {
+    this.rows.push({
+      seq,
+      did: REPO_DID,
+      event: encodeRecord({
+        rev,
+        ops: [
+          {
+            action: 'create',
+            path: `zone.stratos.feed.post/${rkey}`,
+            record: {
+              text: 'kagato corrupted it',
+              boundary: { values: [{ value: BOUNDARY }] },
+            },
+          },
+        ],
+      }),
+      sequencedAt: new Date().toISOString(),
+    })
+  }
+
   async exists(): Promise<boolean> {
     return true
   }
@@ -107,7 +129,7 @@ function makeCtx(actorStore: ScriptedActorStore): AppContext {
   return { actorStore } as unknown as AppContext
 }
 
-describe('listRepoOps caught-up race', () => {
+describe('listRepoOps head-of-oplog race', () => {
   const params = { did: REPO_DID, limit: 100, excludeValues: false }
   const callerBoundaries: ReadonlySet<string> = new Set([BOUNDARY])
 
@@ -126,7 +148,6 @@ describe('listRepoOps caught-up race', () => {
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(false)
     expect(res.commit).toBeUndefined()
     expect(res.cursor).toBe(encodeSeqCursor(1))
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
@@ -154,12 +175,11 @@ describe('listRepoOps caught-up race', () => {
       callerBoundaries,
     )
 
-    expect(res.caughtUp).toBe(false)
     expect(res.ops).toEqual([])
     expect(res.cursor).toBe(cursor)
   })
 
-  it('stays caughtUp when the write lands after the probe', async () => {
+  it('stays at the head when the write lands after the probe', async () => {
     const actorStore = new ScriptedActorStore()
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
@@ -167,8 +187,8 @@ describe('listRepoOps caught-up race', () => {
     // The probe is the only sequence read that happens after the commit read,
     // and its page is captured before this hook runs. The write therefore lands
     // strictly past the probe's horizon, where one probe cannot see it. Ops and
-    // commit still agree, so the response is consistent rather than falsely
-    // caught up — the write simply belongs to a later poll.
+    // commit still agree, so the response is consistent rather than a false
+    // head signal — the write simply belongs to a later poll.
     let commitRead = false
     actorStore.onCommitRead = () => {
       commitRead = true
@@ -181,12 +201,12 @@ describe('listRepoOps caught-up race', () => {
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(true)
+    expect(res.cursor).toBeUndefined()
     expect(res.commit?.rev).toBe(REV.r1)
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
   })
 
-  it('returns the commit and caughtUp when no write lands during the commit read', async () => {
+  it('returns the commit and no cursor when no write lands during the commit read', async () => {
     const actorStore = new ScriptedActorStore()
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
@@ -194,7 +214,6 @@ describe('listRepoOps caught-up race', () => {
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(true)
     expect(res.cursor).toBeUndefined()
     expect(res.commit?.rev).toBe(REV.r1)
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
@@ -212,19 +231,33 @@ describe('listRepoOps caught-up race', () => {
       callerBoundaries,
     )
 
-    expect(res.caughtUp).toBe(false)
     expect(res.commit).toBeUndefined()
     expect(res.cursor).toBe(encodeSeqCursor(1))
   })
 
-  it('stays caughtUp with no commit for a repo that has no root yet', async () => {
+  it('signals the head with no commit and no cursor for a repo with no root yet', async () => {
     const actorStore = new ScriptedActorStore()
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(true)
     expect(res.commit).toBeUndefined()
     expect(res.cursor).toBeUndefined()
     expect(res.ops).toEqual([])
+  })
+
+  it('drops a malformed non-delete op without a cid and keeps the rest', async () => {
+    const actorStore = new ScriptedActorStore()
+    // `cid: null` on the wire means delete, so a cid-less create cannot be
+    // emitted truthfully — expandEventOps must fail closed and drop it.
+    actorStore.appendCidlessCreate(1, REV.r1, 'kagato')
+    actorStore.appendEvent(2, REV.r2, 'ryoko', 'cidRyoko')
+    actorStore.root = { cid: 'commitCid', rev: REV.r2 }
+    actorStore.commitBytes = await encodeSignedCommit(REV.r2)
+
+    const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
+
+    expect(res.ops.map((op) => op.rkey)).toEqual(['ryoko'])
+    expect(res.cursor).toBeUndefined()
+    expect(res.commit?.rev).toBe(REV.r2)
   })
 })
