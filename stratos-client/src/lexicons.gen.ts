@@ -1300,7 +1300,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. When the response reaches the end of the available log, `caughtUp` is true and the repo's current signed commit is included. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned so the caller falls back to full-state recovery (listRecordPaths).",
+      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. When the response reaches the end of the available log AND a probe after the commit read finds no newer sequence row, `caughtUp` is true and the repo's current signed commit is included, consistent with the operations returned. A write the probe detects instead yields `caughtUp` false with a cursor and no commit; that response can carry no operations and repeat the cursor you sent, so poll again on `caughtUp` false and do not read an unchanged cursor as a stall. A write that commits after the probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned so the caller falls back to full-state recovery (listRecordPaths).",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -1346,11 +1346,11 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "cursor": {
               "type": "string",
-              "description": "Opaque pagination cursor to fetch the next page. Absent when caughtUp is true."
+              "description": "Opaque pagination cursor to fetch the next page. Absent when caughtUp is true. Can repeat the cursor you sent when a concurrent write was detected."
             },
             "caughtUp": {
               "type": "boolean",
-              "description": "True when this response reached the end of the available log. When true, `commit` is present unless the repo has no commits yet."
+              "description": "True when this response reached the end of the available log and a probe after the commit read found no newer sequence row. When true, `commit` is present unless the repo has no commits yet, and the operations and that commit are a consistent pair. A write the probe detects yields false, and under continuous writes this can stay false indefinitely. A write that commits after the probe is not detected; it arrives on a later poll."
             },
             "commit": {
               "type": "ref",
