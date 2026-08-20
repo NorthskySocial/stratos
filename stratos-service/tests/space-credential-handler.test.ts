@@ -566,6 +566,29 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(res.error?.name).toBe('ProofRequired')
   })
 
+  it('dev mode: the delegation path STILL requires the mint proof', async () => {
+    // Dev mode relaxes only the DPoP-session path (unbound mint). A delegated
+    // mint proves key possession with the mint proof, so its absence must
+    // reject — never fall back to an unbound credential.
+    const signingKey = await Secp256k1Keypair.create()
+    const userKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      idResolver: atprotoResolver(userKey.did(), userKey),
+      cache: new MemoryNxExStore(),
+      devMode: true,
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const res = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(res.error?.name).toBe('ProofRequired')
+  })
+
   it('valid token but user not enrolled → NotEnrolled', async () => {
     const { userKey, server } = await setup(false)
     const token = await mintDelegation({ userKey, iss: userKey.did() })
