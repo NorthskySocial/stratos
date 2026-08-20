@@ -9,8 +9,11 @@ import { DpopVerificationError, DpopVerifier } from './index.js'
 import {
   SPACE_CREDENTIAL_TYP,
   SpaceCredentialVerificationError,
+  verifyPresentedSpaceCredential,
   verifySpaceCredential,
 } from './space-credential-verifier.js'
+import { SpaceDpopProofChecker } from './space-dpop.js'
+import type { ReplayStore } from './replay-store.js'
 import {
   EnrollmentDeniedError,
   type Logger,
@@ -33,7 +36,7 @@ export interface AuthVerifiers {
   /** Standard user auth (OAuth token) */
   standard: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
-  ) => Promise<{ credentials: { type: string; did: string } }>
+  ) => Promise<{ credentials: { type: string; did: string; jkt?: string } }>
   /** Service-to-service auth (inter-service JWT) */
   service: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
@@ -41,21 +44,22 @@ export interface AuthVerifiers {
   /** Optional user auth */
   optionalStandard: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
-  ) => Promise<{ credentials: { type: string; did?: string } }>
+  ) => Promise<{ credentials: { type: string; did?: string; jkt?: string } }>
   /**
-   * Space-credential auth: a multi-use JWT this service minted for a
-   * single space, verified against our OWN signing key (no DID resolution).
-   * Yields the admitted space URI; the caller has no `did`.
+   * Space-credential auth: a multi-use, DPoP-key-bound JWT this service minted
+   * for a single space, verified against our OWN signing key (no DID
+   * resolution) and sender-constrained per request (RFC 9449). Yields the
+   * admitted space URI; the caller has no `did`.
    */
   spaceCredential: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
   ) => Promise<{ credentials: { type: 'space-credential'; spaceUri: string } }>
   /**
    * Composition of {@link standard} and {@link spaceCredential}. A
-   * DPoP session yields `{ type: 'user', did }`; a space credential (a Bearer
-   * JWT whose `typ` is a space credential) yields
-   * `{ type: 'space-credential', spaceUri }`. Anything else is rejected. This
-   * is bound to read/sync endpoints ONLY; writes never accept a credential.
+   * DPoP session yields `{ type: 'user', did }`; a space credential (a JWT
+   * whose `typ` is a space credential, presented under the `DPoP` scheme)
+   * yields `{ type: 'space-credential', spaceUri }`. Anything else is rejected.
+   * This is bound to read/sync endpoints ONLY; writes never accept a credential.
    */
   standardOrSpaceCredential: (
     ctx: import('@atproto/xrpc-server').MethodAuthContext,
@@ -68,7 +72,7 @@ export interface AuthVerifiers {
    * Composition of {@link optionalStandard} and {@link spaceCredential}.
    * Used for read endpoints that were previously anonymous-friendly
    * (the hydration surface): an anonymous request stays anonymous (behaviour
-   * unchanged), a DPoP session yields a user, and a space-credential Bearer JWT
+   * unchanged), a DPoP session yields a user, and a presented space credential
    * yields `{ type: 'space-credential', spaceUri }`.
    */
   optionalStandardOrSpaceCredential: (
@@ -80,8 +84,8 @@ export interface AuthVerifiers {
   }>
   /**
    * Composition of {@link service} and {@link spaceCredential} for the
-   * pull-sync read endpoints. A space-credential Bearer JWT yields
-   * `{ type: 'space-credential', spaceUri }`; any other Bearer is verified as
+   * pull-sync read endpoints. A presented space credential yields
+   * `{ type: 'space-credential', spaceUri }`; any Bearer is verified as
    * inter-service auth and behaves EXACTLY as before.
    */
   serviceOrSpaceCredential: (
@@ -112,6 +116,7 @@ export interface AuthVerifiers {
  * @param allowListProvider - External allowlist provider
  * @param devMode - Development mode flag
  * @param signingKey - This service's signing keypair (space-credential authority)
+ * @param replayStore - Single-use nonce store for DPoP proof `jti` values
  * @param logger
  * @returns Auth verifiers object
  */
@@ -127,6 +132,7 @@ export function createAuthVerifiers(
   allowListProvider: ExternalAllowListProvider | undefined,
   devMode: boolean,
   signingKey: Pick<Keypair, 'did'>,
+  replayStore: ReplayStore | undefined,
   logger?: Logger,
 ): AuthVerifiers {
   const standard = createStandardVerifier({
@@ -141,6 +147,9 @@ export function createAuthVerifiers(
   const spaceCredential = createSpaceCredentialVerifier({
     serviceDid,
     signingKey,
+    proofChecker: new SpaceDpopProofChecker(cfg.service.publicUrl),
+    replayStore,
+    devMode,
     logger,
   })
   const service = createServiceVerifier({ serviceDid, idResolver })
@@ -220,7 +229,7 @@ async function handleDevModeAuth(
 async function verifyDpopAuth(
   ctx: Parameters<AuthVerifiers['standard']>[0],
   deps: StandardVerifierDeps,
-): Promise<{ credentials: { type: string; did: string } }> {
+): Promise<{ credentials: { type: string; did: string; jkt?: string } }> {
   try {
     const result = await deps.dpopVerifier.verify(
       {
@@ -242,7 +251,7 @@ async function verifyDpopAuth(
       logger: deps.logger,
     })
 
-    return { credentials: { type: 'user', did: result.did } }
+    return { credentials: { type: 'user', did: result.did, jkt: result.jkt } }
   } catch (err) {
     if (err instanceof DpopVerificationError && err.code === 'use_dpop_nonce') {
       const nonce = deps.dpopVerifier.nextNonce()
@@ -317,19 +326,32 @@ function createServiceVerifier(deps: {
 }
 
 /**
- * Extract a `Bearer` token whose JWT `typ` header is a space credential, or
- * `null` if the header is absent, not `Bearer`, or the token is not a
- * space-credential JWT. Only a cheap header peek — full verification (signature,
- * `exp`, `sub`) happens in {@link verifySpaceCredential}.
+ * Extract a token whose JWT `typ` header is a space credential, or `null` if
+ * the header is absent, not `DPoP`/`Bearer`, or the token is not a
+ * space-credential JWT. Only a cheap header peek — full verification
+ * (signature, `exp`, `sub`, proof) happens in the credential verifier.
+ *
+ * The spec scheme is `DPoP` (sender-constrained presentation). `Bearer` is
+ * recognized only so dev mode can present unbound credentials; the verifier
+ * rejects a Bearer presentation outside dev mode.
  *
  * @param authHeader - The raw Authorization header value.
- * @returns The bearer token when it looks like a space credential, else null.
+ * @returns The token and its scheme when it looks like a space credential.
  */
 function extractSpaceCredentialToken(
   authHeader: string | undefined,
-): string | null {
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const token = authHeader.slice(7).trim()
+): { token: string; scheme: 'dpop' | 'bearer' } | null {
+  let token: string
+  let scheme: 'dpop' | 'bearer'
+  if (authHeader?.startsWith('DPoP ')) {
+    token = authHeader.slice(5).trim()
+    scheme = 'dpop'
+  } else if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim()
+    scheme = 'bearer'
+  } else {
+    return null
+  }
   const parts = token.split('.')
   if (parts.length !== 3) return null
   try {
@@ -338,7 +360,7 @@ function extractSpaceCredentialToken(
     ) as {
       typ?: string
     }
-    return header?.typ === SPACE_CREDENTIAL_TYP ? token : null
+    return header?.typ === SPACE_CREDENTIAL_TYP ? { token, scheme } : null
   } catch {
     return null
   }
@@ -347,33 +369,89 @@ function extractSpaceCredentialToken(
 /**
  * Creates the space-credential auth verifier.
  *
- * Accepts a `Bearer` JWT whose `typ` is a space credential, verifies it against
- * OUR OWN signing key (no DID resolution), and yields the admitted space URI.
- * The caller has no `did`; downstream scope enforcement maps the space to its
- * boundary and injects a singleton viewer-boundary set so the existing
- * per-record gate still applies.
+ * Accepts a `DPoP`-scheme JWT whose `typ` is a space credential, verifies it
+ * against OUR OWN signing key (no DID resolution), checks the per-request DPoP
+ * proof against the credential's `cnf.jkt` binding (RFC 9449, with single-use
+ * proof `jti`), and yields the admitted space URI. The caller has no `did`;
+ * downstream scope enforcement maps the space to its boundary and injects a
+ * singleton viewer-boundary set so the existing per-record gate still applies.
  *
- * @param deps - Service DID, our signing key, and an optional logger.
+ * Dev-mode carve-out: a `Bearer` presentation is accepted ONLY in dev mode and
+ * ONLY for credentials minted without `cnf` — a bound credential can never be
+ * downgraded to an unproven Bearer presentation.
+ *
+ * Fail-closed: when no replay store is configured, DPoP presentation is
+ * unavailable and the request is rejected (a proof-replay check that cannot
+ * run must not grant access).
+ *
+ * @param deps - Service DID, signing key, proof checker, replay store, and flags.
  * @returns Auth verifier function.
  * @throws AuthRequiredError if the header is missing / not a space credential,
- *   or the credential fails verification.
+ *   or the credential or its proof fails verification.
  */
 function createSpaceCredentialVerifier(deps: {
   serviceDid: string
   signingKey: Pick<Keypair, 'did'>
+  proofChecker: SpaceDpopProofChecker
+  replayStore: ReplayStore | undefined
+  devMode: boolean
   logger?: Logger
 }): AuthVerifiers['spaceCredential'] {
   return async (ctx) => {
     const authHeader = ctx.req?.headers?.authorization
-    const token = extractSpaceCredentialToken(authHeader)
-    if (!token) {
+    const extracted = extractSpaceCredentialToken(authHeader)
+    if (!extracted) {
       throw new AuthRequiredError('Space credential required')
     }
+    const { token, scheme } = extracted
     try {
-      const result = await verifySpaceCredential(token, {
-        serviceKey: deps.signingKey,
-        serviceDid: deps.serviceDid,
-      })
+      let result
+      if (scheme === 'dpop') {
+        if (!deps.replayStore) {
+          deps.logger?.warn(
+            { path: ctx.req?.url },
+            'space credential rejected: no replay store (cache) configured',
+          )
+          throw new AuthRequiredError('Authorization failed')
+        }
+        result = await verifyPresentedSpaceCredential(
+          token,
+          {
+            method: ctx.req?.method || 'GET',
+            url: ctx.req?.url || '/',
+            headers: ctx.req?.headers as Record<
+              string,
+              string | string[] | undefined
+            >,
+          },
+          {
+            serviceKey: deps.signingKey,
+            serviceDid: deps.serviceDid,
+            proofChecker: deps.proofChecker,
+            replayStore: deps.replayStore,
+          },
+        )
+      } else {
+        if (!deps.devMode) {
+          deps.logger?.info(
+            { path: ctx.req?.url },
+            'auth rejected: space credential presented as Bearer outside dev mode',
+          )
+          throw new AuthRequiredError('Authorization failed')
+        }
+        result = await verifySpaceCredential(token, {
+          serviceKey: deps.signingKey,
+          serviceDid: deps.serviceDid,
+        })
+        if (result.cnfJkt) {
+          // A key-bound credential must present its proof even in dev mode.
+          deps.logger?.info(
+            { path: ctx.req?.url },
+            'auth rejected: bound space credential presented without DPoP proof',
+          )
+          throw new AuthRequiredError('Authorization failed')
+        }
+      }
       return {
         credentials: {
           type: 'space-credential' as const,
@@ -387,8 +465,9 @@ function createSpaceCredentialVerifier(deps: {
           'auth rejected: space credential verification failed',
         )
         // Generic message only: the detailed reason (expired / foreign /
-        // malformed / bad signature) stays in the log, matching the sibling
-        // verifiers, so callers cannot probe why a credential was rejected.
+        // malformed / bad signature / bad proof) stays in the log, matching
+        // the sibling verifiers, so callers cannot probe why a credential
+        // was rejected.
         throw new AuthRequiredError('Authorization failed')
       }
       throw err
@@ -398,10 +477,11 @@ function createSpaceCredentialVerifier(deps: {
 
 /**
  * Composes a space-credential verifier with a base verifier. Routing is
- * by JWT `typ`: a `Bearer` whose `typ` is a space credential takes the
- * space-credential path; anything else (no header, DPoP, dev `Bearer did:...`,
- * or inter-service `Bearer`) falls through to `fallback`, which behaves EXACTLY
- * as before. Bound to read/sync endpoints ONLY; write endpoints keep `standard`.
+ * by JWT `typ`: a `DPoP` or `Bearer` token whose `typ` is a space credential
+ * takes the space-credential path; anything else (no header, a DPoP session
+ * token, dev `Bearer did:...`, or inter-service `Bearer`) falls through to
+ * `fallback`, which behaves EXACTLY as before. Bound to read/sync endpoints
+ * ONLY; write endpoints keep `standard`.
  *
  * @param fallback - The base verifier used when the token is not a space credential.
  * @param spaceCredential - The space-credential verifier.
@@ -526,7 +606,9 @@ async function verifyDpop(
   },
   dpopVerifier: DpopVerifier,
 ): Promise<{
-  credentials: { type: 'user'; did: string } | { type: 'anonymous' }
+  credentials:
+    | { type: 'user'; did: string; jkt?: string }
+    | { type: 'anonymous' }
 }> {
   try {
     const result = await dpopVerifier.verify(
@@ -540,7 +622,7 @@ async function verifyDpop(
       },
     )
     return {
-      credentials: { type: 'user', did: result.did },
+      credentials: { type: 'user', did: result.did, jkt: result.jkt },
     }
   } catch (err) {
     if (err instanceof DpopVerificationError) {

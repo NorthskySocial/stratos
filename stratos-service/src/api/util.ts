@@ -171,6 +171,7 @@ export function createXrpcHandler<
       did: string | undefined
       requestId: string
       fullInput?: HandlerInput
+      req?: HandlerContext['req']
     }) => Promise<unknown>
     requireAuth?: boolean
   },
@@ -204,6 +205,7 @@ export function createXrpcHandler<
         did,
         requestId,
         fullInput: input,
+        req: handlerCtx.req,
       })
 
       logRequestSuccess(ctx, {

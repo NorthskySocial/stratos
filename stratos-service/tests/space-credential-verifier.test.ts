@@ -6,20 +6,30 @@
  * resolution). These tests mint real credentials with a local Secp256k1 keypair
  * and assert the verifier accepts a good one and rejects each distinct failure
  * mode with a distinct typed error — including that it is deliberately
- * MULTI-USE (no `jti` consumption).
+ * MULTI-USE (no credential-`jti` consumption). The presentation suite covers
+ * the RFC 9449 sender constraint with fake proof-checker/replay-store seams:
+ * `cnf.jkt` required, thumbprint equality, and the single-use PROOF `jti`
+ * consumed LAST (a failed presentation never burns its nonce).
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { mintSpaceCredential } from '../src/features/space-credential/minter.js'
 import {
   ForeignSpaceCredentialError,
   InvalidSpaceCredentialAlgError,
   InvalidSpaceCredentialKidError,
+  InvalidSpaceCredentialProofError,
   InvalidSpaceCredentialSignatureError,
   InvalidSpaceCredentialSubError,
   InvalidSpaceCredentialTypError,
   MalformedSpaceCredentialError,
+  MissingSpaceCredentialCnfError,
+  SPACE_DPOP_REPLAY_KIND,
+  SPACE_DPOP_REPLAY_TTL,
   SpaceCredentialExpiredError,
+  SpaceCredentialKeyBindingError,
+  SpaceCredentialProofReplayError,
+  verifyPresentedSpaceCredential,
   verifySpaceCredential,
 } from '../src/infra/auth/space-credential-verifier.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
@@ -230,5 +240,144 @@ describe('verifySpaceCredential', () => {
         serviceDid: SERVICE_DID,
       }),
     ).rejects.toBeInstanceOf(InvalidSpaceCredentialSubError)
+  })
+
+  it('surfaces the cnf.jkt binding of a bound credential', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const { credential } = await mintSpaceCredential({
+      signingKey,
+      issuerDid: SERVICE_DID,
+      spaceUri: SPACE_URI,
+      ttlSeconds: 7_200,
+      jkt: 'thumb-asuka',
+    })
+    await expect(
+      verifySpaceCredential(credential, {
+        serviceKey: signingKey,
+        serviceDid: SERVICE_DID,
+      }),
+    ).resolves.toEqual({ spaceUri: SPACE_URI, cnfJkt: 'thumb-asuka' })
+  })
+})
+
+// ===========================================================================
+// Presentation (RFC 9449 sender constraint)
+// ===========================================================================
+describe('verifyPresentedSpaceCredential', () => {
+  const REQ = { method: 'GET', url: '/x', headers: {} }
+
+  /** Mint a credential and build presentation deps with fake proof/replay. */
+  async function setup(opts?: {
+    credJkt?: string
+    proofJkt?: string
+    proofError?: Error
+    replayFresh?: boolean
+  }) {
+    const signingKey = await Secp256k1Keypair.create()
+    const { credential } = await mintSpaceCredential({
+      signingKey,
+      issuerDid: SERVICE_DID,
+      spaceUri: SPACE_URI,
+      ttlSeconds: 7_200,
+      ...(opts?.credJkt === undefined ? {} : { jkt: opts.credJkt }),
+    })
+    const check = opts?.proofError
+      ? vi.fn().mockRejectedValue(opts.proofError)
+      : vi.fn().mockResolvedValue({
+          jti: 'proof-jti-1',
+          jkt: opts?.proofJkt ?? opts?.credJkt ?? 'thumb-rei',
+          htm: 'GET',
+          htu: 'https://stratos.test/x',
+        })
+    const consumeOnce = vi.fn().mockResolvedValue(opts?.replayFresh ?? true)
+    const deps = {
+      serviceKey: signingKey,
+      serviceDid: SERVICE_DID,
+      proofChecker: { check },
+      replayStore: { consumeOnce },
+    }
+    return { credential, deps, check, consumeOnce }
+  }
+
+  it('accepts a bound credential with a matching proof and consumes the proof jti', async () => {
+    const { credential, deps, check, consumeOnce } = await setup({
+      credJkt: 'thumb-rei',
+    })
+    await expect(
+      verifyPresentedSpaceCredential(credential, REQ, deps),
+    ).resolves.toEqual({ spaceUri: SPACE_URI, cnfJkt: 'thumb-rei' })
+    // The proof is checked against THIS request and hash-bound to the token.
+    expect(check).toHaveBeenCalledWith(REQ, credential)
+    expect(consumeOnce).toHaveBeenCalledWith(
+      SPACE_DPOP_REPLAY_KIND,
+      'proof-jti-1',
+      SPACE_DPOP_REPLAY_TTL,
+    )
+  })
+
+  it('rejects an UNBOUND credential (no cnf.jkt) without touching the proof', async () => {
+    const { credential, deps, check, consumeOnce } = await setup()
+    await expect(
+      verifyPresentedSpaceCredential(credential, REQ, deps),
+    ).rejects.toBeInstanceOf(MissingSpaceCredentialCnfError)
+    expect(check).not.toHaveBeenCalled()
+    expect(consumeOnce).not.toHaveBeenCalled()
+  })
+
+  it('rejects when the proof check fails — and does NOT burn the jti', async () => {
+    const { credential, deps, consumeOnce } = await setup({
+      credJkt: 'thumb-rei',
+      proofError: new Error('bad proof'),
+    })
+    await expect(
+      verifyPresentedSpaceCredential(credential, REQ, deps),
+    ).rejects.toBeInstanceOf(InvalidSpaceCredentialProofError)
+    expect(consumeOnce).not.toHaveBeenCalled()
+  })
+
+  it('rejects a proof from a DIFFERENT key — and does NOT burn the jti', async () => {
+    const { credential, deps, consumeOnce } = await setup({
+      credJkt: 'thumb-rei',
+      proofJkt: 'thumb-attacker',
+    })
+    await expect(
+      verifyPresentedSpaceCredential(credential, REQ, deps),
+    ).rejects.toBeInstanceOf(SpaceCredentialKeyBindingError)
+    expect(consumeOnce).not.toHaveBeenCalled()
+  })
+
+  it('rejects a replayed proof jti (consumeOnce false, fail-closed)', async () => {
+    const { credential, deps } = await setup({
+      credJkt: 'thumb-rei',
+      replayFresh: false,
+    })
+    await expect(
+      verifyPresentedSpaceCredential(credential, REQ, deps),
+    ).rejects.toBeInstanceOf(SpaceCredentialProofReplayError)
+  })
+
+  it('runs credential verification FIRST: an expired bound credential never reaches the proof', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const iat = Math.floor(Date.now() / 1000) - 10_000
+    const { credential } = await mintSpaceCredential({
+      signingKey,
+      issuerDid: SERVICE_DID,
+      spaceUri: SPACE_URI,
+      ttlSeconds: 60,
+      iat,
+      jkt: 'thumb-rei',
+    })
+    const check = vi.fn()
+    const consumeOnce = vi.fn()
+    await expect(
+      verifyPresentedSpaceCredential(credential, REQ, {
+        serviceKey: signingKey,
+        serviceDid: SERVICE_DID,
+        proofChecker: { check },
+        replayStore: { consumeOnce },
+      }),
+    ).rejects.toBeInstanceOf(SpaceCredentialExpiredError)
+    expect(check).not.toHaveBeenCalled()
+    expect(consumeOnce).not.toHaveBeenCalled()
   })
 })

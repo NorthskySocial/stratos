@@ -7,7 +7,8 @@ import {
   verifyDelegationToken,
   type DelegationVerifierDeps,
 } from '../../infra/auth/delegation-verifier.js'
-import { ReplayStore, type NxExStore } from '../../infra/auth/replay-store.js'
+import { replayStoreFromCache } from '../../infra/auth/replay-store.js'
+import { SpaceDpopProofChecker } from '../../infra/auth/space-dpop.js'
 import {
   verifyClientAttestation,
   type ClientAttestationVerifierDeps,
@@ -55,6 +56,7 @@ export function registerSpaceCredentialHandlers(
   ctx: AppContext,
 ): void {
   const xrpc = server as unknown as XrpcServerInternal
+  const proofChecker = new SpaceDpopProofChecker(ctx.cfg.service.publicUrl)
 
   xrpc.method(GET_SPACE_CREDENTIAL_METHOD, {
     type: 'procedure',
@@ -66,12 +68,25 @@ export function registerSpaceCredentialHandlers(
         // Both identity paths are resolved explicitly below; the delegation
         // path legitimately arrives with no authenticated DPoP `did`.
         requireAuth: false,
-        handler: async ({ input, auth }) => {
-          return handleGetSpaceCredential(ctx, input, auth?.credentials?.did)
+        handler: async ({ input, auth, req }) => {
+          return handleGetSpaceCredential(
+            ctx,
+            input,
+            auth?.credentials,
+            req,
+            proofChecker,
+          )
         },
       },
     ),
   })
+}
+
+/** Minimal request shape needed to check a mint-time DPoP proof. */
+interface MintRequest {
+  method?: string
+  url?: string
+  headers?: Record<string, string | string[] | undefined>
 }
 
 /**
@@ -91,17 +106,24 @@ export function registerSpaceCredentialHandlers(
  *      require a valid client attestation whose attested `client_id` is listed
  *      (else `AttestationRequired` / `ClientNotAllowed`). `#open` spaces ignore
  *      any attestation supplied.
- *   6. Mint the credential and return `{ credential, expiresAt }`.
+ *   6. Resolve the DPoP key thumbprint to bind (`cnf.jkt`): the session key on
+ *      the DPoP path, or a standalone mint-time proof on the delegation path.
+ *      Outside dev mode an unbound mint is rejected → {@link ProofRequired}.
+ *   7. Mint the credential and return `{ credential, expiresAt }`.
  *
  * @param ctx - Application context.
  * @param input - Request body.
- * @param dpopDid - The DPoP-authenticated user DID, if any.
+ * @param credentials - The caller's resolved auth credentials, if any.
+ * @param req - The underlying request (for mint-time DPoP proof checks).
+ * @param proofChecker - Nonce-free DPoP proof checker.
  * @returns `{ credential, expiresAt }`.
  */
 async function handleGetSpaceCredential(
   ctx: AppContext,
   input: GetSpaceCredentialInput | undefined,
-  dpopDid: string | undefined,
+  credentials: { did?: string; jkt?: string } | undefined,
+  req: MintRequest | undefined,
+  proofChecker: SpaceDpopProofChecker,
 ): Promise<{ credential: string; expiresAt: string }> {
   const space = input?.space
   if (!space) {
@@ -121,7 +143,7 @@ async function handleGetSpaceCredential(
   // Resolve identity via delegation token (dormant) or DPoP session (live).
   const userDid = input?.delegationToken
     ? await resolveDelegationIdentity(ctx, input.delegationToken, space)
-    : requireDpopIdentity(dpopDid)
+    : requireDpopIdentity(credentials?.did)
 
   // Membership: the user must be enrolled in the boundary for this space.
   const boundary = `${spaceDid}/${skey}`
@@ -148,14 +170,65 @@ async function handleGetSpaceCredential(
   // App-axis (client attestation) gating. `#open` spaces are a no-op.
   await enforceAppAccess(ctx, boundary, input?.clientAttestation)
 
+  // Key binding: the delegation path proves key possession with a standalone
+  // mint-time DPoP proof; the DPoP path reuses the session proof's key.
+  const jkt = input?.delegationToken
+    ? await requireMintProofJkt(ctx, proofChecker, req)
+    : credentials?.jkt
+  if (!jkt && ctx.cfg.stratos.devMode !== true) {
+    // Only dev-mode identities (dev Bearer) have no DPoP key. An unbound
+    // credential in production would be freely replayable, so refuse.
+    throw new InvalidRequestError(
+      'A DPoP proof is required to bind the credential',
+      'ProofRequired',
+    )
+  }
+
   const { credential, expiresAt } = await mintSpaceCredential({
     signingKey: ctx.signingKey,
     issuerDid: ctx.serviceDid,
     spaceUri: space,
     ttlSeconds: ctx.cfg.stratos.spaceCredentialTtlSeconds,
+    jkt,
   })
 
   return { credential, expiresAt }
+}
+
+/**
+ * Check the mint-time DPoP proof on the delegation path and return the proof
+ * key's thumbprint. The proof is standalone (no bound token, so no `ath`
+ * claim) — it proves possession of the key the credential will be bound to.
+ *
+ * @param ctx - Application context.
+ * @param proofChecker - Nonce-free DPoP proof checker.
+ * @param req - The underlying request.
+ * @returns The proof key's SHA-256 JWK thumbprint.
+ * @throws InvalidRequestError('ProofRequired') when the proof is missing or
+ *   invalid (the exact reason is logged, not leaked).
+ */
+async function requireMintProofJkt(
+  ctx: AppContext,
+  proofChecker: SpaceDpopProofChecker,
+  req: MintRequest | undefined,
+): Promise<string> {
+  try {
+    const proof = await proofChecker.check({
+      method: req?.method || 'POST',
+      url: req?.url || '/',
+      headers: req?.headers ?? {},
+    })
+    return proof.jkt
+  } catch (err) {
+    ctx.logger?.info(
+      { err: err instanceof Error ? err.message : String(err) },
+      'space-credential mint proof rejected',
+    )
+    throw new InvalidRequestError(
+      'A DPoP proof is required to bind the credential',
+      'ProofRequired',
+    )
+  }
 }
 
 /**
@@ -176,7 +249,7 @@ async function resolveDelegationIdentity(
   token: string,
   requestedSpace: string,
 ): Promise<string> {
-  const replayStore = getReplayStore(ctx)
+  const replayStore = replayStoreFromCache(ctx.cache, ctx.logger)
   if (!replayStore) {
     ctx.logger?.warn(
       'space-credential delegation path unavailable: no replay store (cache) configured',
@@ -251,7 +324,7 @@ async function enforceAppAccess(
     )
   }
 
-  const replayStore = getReplayStore(ctx)
+  const replayStore = replayStoreFromCache(ctx.cache, ctx.logger)
   if (!replayStore) {
     ctx.logger?.warn(
       'client attestation unavailable: no replay store (cache) configured',
@@ -309,18 +382,4 @@ function requireDpopIdentity(dpopDid: string | undefined): string {
     )
   }
   return dpopDid
-}
-
-/**
- * Build a {@link ReplayStore} from the process cache for the dormant delegation
- * path. Returns undefined when no cache is configured (single-instance / no
- * Redis) — in that case the delegation path is unavailable and callers must use
- * the live DPoP path. The cast to {@link NxExStore} is a deliberate seam: the
- * runtime cache is a `RedisCache` exposing `setNxEx`, but the shared `Cache`
- * interface does not declare it.
- */
-function getReplayStore(ctx: AppContext): ReplayStore | undefined {
-  const cache = ctx.cache as (NxExStore & { setNxEx?: unknown }) | undefined
-  if (!cache || typeof cache.setNxEx !== 'function') return undefined
-  return new ReplayStore(cache, ctx.logger)
 }
