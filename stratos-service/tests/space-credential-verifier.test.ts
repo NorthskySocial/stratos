@@ -258,6 +258,44 @@ describe('verifySpaceCredential', () => {
       }),
     ).resolves.toEqual({ spaceUri: SPACE_URI, cnfJkt: 'thumb-asuka' })
   })
+
+  it('omits cnfJkt entirely for an unbound credential', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const { credential } = await mintSpaceCredential({
+      signingKey,
+      issuerDid: SERVICE_DID,
+      spaceUri: SPACE_URI,
+      ttlSeconds: 7_200,
+    })
+    const result = await verifySpaceCredential(credential, {
+      serviceKey: signingKey,
+      serviceDid: SERVICE_DID,
+    })
+    expect('cnfJkt' in result).toBe(false)
+  })
+
+  it('ignores a non-string or empty cnf.jkt (no binding surfaced)', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const iat = Math.floor(Date.now() / 1000)
+    for (const jkt of [42, '']) {
+      const jwt = await signJwt(
+        { typ: 'atproto-space-credential+jwt', alg: 'ES256K', kid: '#atproto' },
+        {
+          iss: SERVICE_DID,
+          sub: SPACE_URI,
+          iat,
+          exp: iat + 3600,
+          cnf: { jkt },
+        },
+        signingKey,
+      )
+      const result = await verifySpaceCredential(jwt, {
+        serviceKey: signingKey,
+        serviceDid: SERVICE_DID,
+      })
+      expect('cnfJkt' in result).toBe(false)
+    }
+  })
 })
 
 // ===========================================================================
