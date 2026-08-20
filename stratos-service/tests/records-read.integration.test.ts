@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -27,6 +27,10 @@ describe('Record Read Handlers', () => {
   const otherDid = 'did:plc:rei-ayanami'
   const serviceDid = 'did:web:nerv.tokyo.jp'
   const boundary = 'did:web:nerv.tokyo.jp/engineering'
+  const recordNotFound = {
+    message: 'Record not found',
+    customErrorName: 'RecordNotFound',
+  }
 
   async function createTestCid(data: any) {
     const bytes = new TextEncoder().encode(JSON.stringify(data))
@@ -77,6 +81,23 @@ describe('Record Read Handlers', () => {
       })
     })
   })
+
+  async function seedDomainlessRecord(rkey: string) {
+    await actorStore.transact(testDid, async (store) => {
+      const record = {
+        $type: 'app.bsky.feed.post',
+        text: 'No boundary declared',
+        createdAt: new Date().toISOString(),
+      }
+      const cid = await createTestCid(record)
+      await store.record.putRecord({
+        uri: `at://${testDid}/app.bsky.feed.post/${rkey}`,
+        cid,
+        value: record,
+        content: new TextEncoder().encode(JSON.stringify(record)),
+      })
+    })
+  }
 
   afterEach(async () => {
     await closeServiceDb(db)
@@ -163,6 +184,79 @@ describe('Record Read Handlers', () => {
       )
       expect(result.value).toBeDefined()
     })
+
+    it('should deny a domainless record to a non-owner', async () => {
+      await seedDomainlessRecord('postNoBoundary')
+
+      await expect(
+        getRecord(
+          ctx,
+          {
+            repo: testDid,
+            collection: 'app.bsky.feed.post',
+            rkey: 'postNoBoundary',
+          },
+          otherDid,
+          [],
+        ),
+      ).rejects.toMatchObject(recordNotFound)
+
+      await expect(
+        getRecord(
+          ctx,
+          {
+            repo: testDid,
+            collection: 'app.bsky.feed.post',
+            rkey: 'postNoBoundary',
+          },
+          otherDid,
+          [boundary],
+        ),
+      ).rejects.toMatchObject(recordNotFound)
+
+      await expect(
+        getRecord(
+          ctx,
+          {
+            repo: testDid,
+            collection: 'app.bsky.feed.post',
+            rkey: 'postNoBoundary',
+          },
+          otherDid,
+        ),
+      ).rejects.toMatchObject(recordNotFound)
+    })
+
+    it('should deny a domainless record to an unauthenticated caller', async () => {
+      await seedDomainlessRecord('postNoBoundary')
+
+      await expect(
+        getRecord(ctx, {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+          rkey: 'postNoBoundary',
+        }),
+      ).rejects.toMatchObject(recordNotFound)
+    })
+
+    it('should still return a domainless record to its owner', async () => {
+      await seedDomainlessRecord('postNoBoundary')
+
+      const result = await getRecord(
+        ctx,
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+          rkey: 'postNoBoundary',
+        },
+        testDid,
+      )
+
+      expect(result.uri).toBe(
+        `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
+      )
+      expect(result.value).toMatchObject({ text: 'No boundary declared' })
+    })
   })
 
   describe('listRecords', () => {
@@ -224,6 +318,100 @@ describe('Record Read Handlers', () => {
       expect(result.records).toHaveLength(1)
       expect(result.records[0].uri).toContain('post1')
       expect(result.records[0].uri).not.toContain('post2')
+    })
+
+    it('should omit a domainless record for a non-owner', async () => {
+      await seedDomainlessRecord('postNoBoundary')
+
+      const result = await listRecords(
+        ctx,
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+        [boundary],
+      )
+
+      const uris = result.records.map((record) => record.uri)
+      expect(uris).toContain(`at://${testDid}/app.bsky.feed.post/post1`)
+      expect(uris).not.toContain(
+        `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
+      )
+
+      const withoutDomains = await listRecords(
+        ctx,
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+      )
+
+      expect(withoutDomains.records.map((record) => record.uri)).not.toContain(
+        `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
+      )
+    })
+
+    it('should warn once with the domainless count for a non-owner', async () => {
+      await seedDomainlessRecord('postNoBoundary1')
+      await seedDomainlessRecord('postNoBoundary2')
+      const warn = vi.fn()
+
+      await listRecords(
+        { ...ctx, logger: { warn } },
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+        [boundary],
+      )
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        {
+          ownerDid: testDid,
+          collection: 'app.bsky.feed.post',
+          domainlessCount: 2,
+        },
+        expect.stringContaining('no domain'),
+      )
+    })
+
+    it('should not warn when every record declares a domain', async () => {
+      const warn = vi.fn()
+
+      await listRecords(
+        { ...ctx, logger: { warn } },
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        otherDid,
+        [boundary],
+      )
+
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it('should include a domainless record for the owner', async () => {
+      await seedDomainlessRecord('postNoBoundary')
+
+      const result = await listRecords(
+        ctx,
+        {
+          repo: testDid,
+          collection: 'app.bsky.feed.post',
+        },
+        testDid,
+      )
+
+      const uris = result.records.map((record) => record.uri)
+      expect(uris).toContain(`at://${testDid}/app.bsky.feed.post/post1`)
+      expect(uris).toContain(
+        `at://${testDid}/app.bsky.feed.post/postNoBoundary`,
+      )
     })
   })
 })

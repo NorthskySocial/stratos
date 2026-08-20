@@ -379,6 +379,7 @@ export class StratosServer {
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
       autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
+      allowedRedirectOrigins: cfg.allowedRedirectOrigins,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
@@ -424,6 +425,7 @@ export class StratosServer {
     const adminRoutes = createAdminAuthRoutes({
       oauthClient: ctx.oauthClient,
       adminSessionStore: ctx.adminSessionStore,
+      adminUserStore: ctx.adminUserStore,
       adminDids: cfg.adminDids,
       baseUrl: cfg.service.publicUrl,
       devMode: cfg.stratos.devMode === true,

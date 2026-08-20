@@ -46,6 +46,7 @@
     "@atproto/lexicon": "^0.6.1",
     "@atproto/oauth-client-node": "^0.3.16",
     "@atproto/oauth-provider": "^0.15.9",
+    "@atproto/oauth-types": "^0.6.3",
     "@atproto/syntax": "^0.4.3",
     "@atproto/xrpc-server": "^0.10.12",
     "@ipld/dag-cbor": "^9.2.5",

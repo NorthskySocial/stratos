@@ -63,6 +63,7 @@ describe('handleCallback PDS Record', () => {
       profileRecordWriter: mockProfileRecordWriter,
       logger: mockLogger,
       baseUrl: 'http://localhost:3100',
+      allowedRedirectOrigins: [],
       serviceEndpoint: 'http://localhost:3100',
       serviceDid: 'did:web:localhost%3A3100',
       initRepo: vi.fn().mockResolvedValue(undefined),

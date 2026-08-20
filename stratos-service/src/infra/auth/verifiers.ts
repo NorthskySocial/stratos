@@ -21,7 +21,10 @@ import { ExternalAllowListProvider } from '../../features/enrollment/internal/al
 import { verifyEnrolled } from '../../features'
 import { readAdminSessionCookie } from '../../oauth/admin-routes.js'
 import type { AdminSessionStore } from '../../oauth/admin-session-store.js'
-import type { AdminUserStore } from '../../oauth/admin-user-store.js'
+import {
+  isEffectiveAdmin,
+  type AdminUserStore,
+} from '../../oauth/admin-user-store.js'
 
 /**
  * Auth verifier collection for different auth scenarios
@@ -597,10 +600,7 @@ function createAdminVerifier(deps: {
       throw new AuthRequiredError('Admin session invalid or expired')
     }
 
-    // Config admins are the recovery floor; granted admins live in the DB.
-    const authorized =
-      deps.adminDids.includes(session.did) ||
-      (await deps.adminUserStore.has(session.did))
+    const authorized = await isEffectiveAdmin(session.did, deps)
     if (!authorized) {
       deps.logger?.warn(
         { did: session.did },
