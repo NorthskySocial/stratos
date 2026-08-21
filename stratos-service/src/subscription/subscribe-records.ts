@@ -388,14 +388,25 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
   // Reading opens (and therefore creates) the actor SQLite file. Skip the read
   // for actors without a store so we never materialize an empty database.
   if (!(await ctx.actorStore.exists(did))) return 0
-  return await ctx.actorStore.read(did, async (store) => {
-    return store.sequence.getLatestSeq()
-  })
+  try {
+    return await ctx.actorStore.read(did, async (store) => {
+      return store.sequence.getLatestSeq()
+    })
+  } catch (err) {
+    // The rethrow ends the connection; the warn keeps the operator informed.
+    ctx.logger?.warn({ did, err }, 'getLatestSeq failed')
+    throw err
+  }
 }
 
 /**
- * Get oldest sequence number for a DID. Read failures propagate; see
- * {@link getLatestSeq}.
+ * Get oldest sequence number for a DID.
+ *
+ * Unlike {@link getLatestSeq}, a read failure here is caught and reported as
+ * 0. The only consumer uses this value to decide whether to send the advisory
+ * `#info OutdatedCursor` frame; a fabricated 0 suppresses that advisory and
+ * nothing else. Hardening it like its siblings would add a third independent
+ * way for a transient blip to kill the connection, with no correctness gain.
  *
  * @param ctx - Application context
  * @param did - Decentralized Identifier (DID) for which to get the oldest sequence number
@@ -403,9 +414,14 @@ async function getLatestSeq(ctx: AppContext, did: string): Promise<number> {
  */
 async function getOldestSeq(ctx: AppContext, did: string): Promise<number> {
   if (!(await ctx.actorStore.exists(did))) return 0
-  return await ctx.actorStore.read(did, async (store) => {
-    return store.sequence.getOldestSeq()
-  })
+  try {
+    return await ctx.actorStore.read(did, async (store) => {
+      return store.sequence.getOldestSeq()
+    })
+  } catch (err) {
+    ctx.logger?.warn({ did, err }, 'getOldestSeq failed')
+    return 0
+  }
 }
 
 /**
@@ -438,29 +454,35 @@ async function getEventsSince(
   // Avoid opening (and creating) a SQLite file for actors that have not written
   // yet; the streaming loop polls this until the store appears on first write.
   if (!(await ctx.actorStore.exists(did))) return []
-  return await ctx.actorStore.read(did, async (store) => {
-    const rows = await store.sequence.getEventsSince(
-      cursor,
-      SEQUENCE_DB_PAGE_SIZE,
-    )
+  try {
+    return await ctx.actorStore.read(did, async (store) => {
+      const rows = await store.sequence.getEventsSince(
+        cursor,
+        SEQUENCE_DB_PAGE_SIZE,
+      )
 
-    return rows.map((row): SeqEvent => {
-      let rev = ''
-      try {
-        const decoded = cborDecode(row.event) as Record<string, unknown>
-        rev = (decoded.rev as string) ?? ''
-      } catch {
-        // Ignore decode errors
-      }
-      return {
-        seq: row.seq,
-        did: row.did,
-        time: row.sequencedAt,
-        rev,
-        event: row.event,
-      }
+      return rows.map((row): SeqEvent => {
+        let rev = ''
+        try {
+          const decoded = cborDecode(row.event) as Record<string, unknown>
+          rev = (decoded.rev as string) ?? ''
+        } catch {
+          // Ignore decode errors
+        }
+        return {
+          seq: row.seq,
+          did: row.did,
+          time: row.sequencedAt,
+          rev,
+          event: row.event,
+        }
+      })
     })
-  })
+  } catch (err) {
+    // The rethrow ends the connection; the warn keeps the operator informed.
+    ctx.logger?.warn({ did, cursor, err }, 'getEventsSince failed')
+    throw err
+  }
 }
 
 /**
