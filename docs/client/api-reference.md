@@ -161,6 +161,20 @@ hash-bound to the credential (`ath`). The record must belong to the requested
 space; records outside it (including records with no space) resolve to
 `RecordNotFound`.
 
+### List Space Blobs
+
+```http
+GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
+Authorization: Bearer <access_token> | Bearer <space-credential>
+Response: { "cids": ["..."], "cursor": "..." }
+```
+
+List the CIDs of blobs referenced by an account's records within a permissioned
+space (spec-shaped mirror of `com.atproto.space.listBlobs`). Same admission
+contract as Get Space Record: standard user auth requires space membership, or
+a space credential for that space. `limit` is 1-1000 (default 500); a `cursor`
+is returned when a page is full.
+
 ### Export Repository
 
 ```http

@@ -90,7 +90,10 @@ describe('zone.stratos.space.listBlobs', () => {
       },
     }
     // Capture the registered handler directly (method-level contract test).
-    const capturedMethods = new Map<string, { type?: string; handler: unknown }>()
+    const capturedMethods = new Map<
+      string,
+      { type?: string; handler: unknown }
+    >()
     const server = {
       method: (name: string, cfgArg: { type?: string; handler: unknown }) =>
         capturedMethods.set(name, cfgArg),
@@ -142,9 +145,7 @@ describe('zone.stratos.space.listBlobs', () => {
     }
     const recordCid = parseCid((await computeCid(record)).toString())
     const blobBytes = new TextEncoder().encode(blobSeed)
-    const blobCid = parseCid(
-      (await computeCid({ seed: blobSeed })).toString(),
-    )
+    const blobCid = parseCid((await computeCid({ seed: blobSeed })).toString())
     const uri = `at://${repoDid}/${COLLECTION}/${rkey}`
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await actorStore.transact(repoDid, async (store: any) => {
@@ -195,19 +196,28 @@ describe('zone.stratos.space.listBlobs', () => {
   })
 
   it('a credential for a DIFFERENT space is refused (fail closed)', async () => {
-    await expect(call({}, credAuth(SPACE_T))).rejects.toThrow(/Not admitted/)
+    // The wire error name must match the `AuthRequired` error the lexicon
+    // declares, not the library default `AuthenticationRequired`.
+    await expect(call({}, credAuth(SPACE_T))).rejects.toMatchObject({
+      errorMessage: expect.stringMatching(/Not admitted/),
+      customErrorName: 'AuthRequired',
+    })
   })
 
   it('a non-member user is refused', async () => {
-    await expect(call({}, userAuth(outsiderDid))).rejects.toThrow(
-      /Not admitted/,
-    )
+    await expect(call({}, userAuth(outsiderDid))).rejects.toMatchObject({
+      errorMessage: expect.stringMatching(/Not admitted/),
+      customErrorName: 'AuthRequired',
+    })
   })
 
   it('an anonymous caller is refused', async () => {
     await expect(
       call({}, { credentials: {} as Record<string, unknown> }),
-    ).rejects.toThrow(/Authentication required/)
+    ).rejects.toMatchObject({
+      errorMessage: expect.stringMatching(/Authentication required/),
+      customErrorName: 'AuthRequired',
+    })
   })
 
   it('registers as a query method', () => {
@@ -276,5 +286,54 @@ describe('zone.stratos.space.listBlobs', () => {
     await call({}, userAuth(memberDid))
     await enrollmentStore.setBoundaries(memberDid, [])
     await expect(call({}, userAuth(memberDid))).rejects.toThrow(/Not admitted/)
+  })
+
+  it('clamps limit to the lexicon declared range 1..1000 (default 500)', async () => {
+    // Params reach the handler without schema validation, so the clamp is the
+    // only guard. A scripted store captures the limit the query receives.
+    const seen: number[] = []
+    const scriptedCtx = {
+      serviceDid: SERVICE_DID,
+      enrollmentStore,
+      actorStore: {
+        exists: async () => true,
+        read: async (_did: string, fn: (store: unknown) => unknown) =>
+          fn({
+            blob: {
+              listBlobsForBoundary: async (query: { limit: number }) => {
+                seen.push(query.limit)
+                return []
+              },
+            },
+          }),
+      },
+      authVerifier: { standardOrSpaceCredential: vi.fn() },
+      logger: { debug: vi.fn(), info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    }
+    const captured = new Map<string, { handler: unknown }>()
+    const scriptedServer = {
+      method: (name: string, cfgArg: { handler: unknown }) =>
+        captured.set(name, cfgArg),
+    }
+    registerSpaceReadHandlers(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      scriptedServer as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      scriptedCtx as any,
+    )
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scripted: any = captured.get('zone.stratos.space.listBlobs')!.handler
+    const invoke = (limit?: number) =>
+      scripted({
+        params: { space: SPACE_S, repo: repoDid, limit },
+        auth: credAuth(SPACE_S),
+        req: {},
+        res: {},
+      })
+
+    await invoke(0)
+    await invoke(5000)
+    await invoke(undefined)
+    expect(seen).toEqual([1, 1000, 500])
   })
 })

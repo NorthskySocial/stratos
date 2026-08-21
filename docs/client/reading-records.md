@@ -271,6 +271,6 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 
 ### Blob gating
 
-Stratos supports blob listing via `com.atproto.sync.listBlobs`. Blob content retrieval via
-`com.atproto.sync.getBlob` is not yet implemented — gate blob download UI behind availability
-checks.
+Stratos supports space-scoped blob listing via `zone.stratos.space.listBlobs` (the caller must be
+admitted to the space). Blob content retrieval via `com.atproto.sync.getBlob` is not yet
+implemented — gate blob download UI behind availability checks.

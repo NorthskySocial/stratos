@@ -251,7 +251,7 @@ URL. Record creation/deletion always has the corresponding action to the PDS rec
 | `com.atproto.repo.deleteRecord`         | Yes (deletes from Stratos)                                                    |
 | `com.atproto.repo.applyWrites`          | Yes (batch writes)                                                            |
 | `com.atproto.sync.getRecord`            | Yes (CAR export for verification)                                             |
-| `com.atproto.sync.listBlobs`            | Yes (lists blob CIDs)                                                         |
+| `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                              |
 | `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                                 |
 | `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                                    |
 | `zone.stratos.sync.subscribeRecords`    | Yes (WebSocket firehose)                                                      |
@@ -400,8 +400,8 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 
 ### Boundary gating: blobs
 
-Stratos supports blob listing via `com.atproto.sync.listBlobs` and blob content retrieval via
-`com.atproto.sync.getBlob`.
+Stratos supports space-scoped blob listing via `zone.stratos.space.listBlobs` and blob content
+retrieval via `com.atproto.sync.getBlob`.
 
 ---
 
@@ -767,8 +767,8 @@ from the URL it receives.
 ### Blob operations
 
 `com.atproto.sync.getBlob` is implemented by Stratos and follows boundary-based access control.
-Blob listing via `com.atproto.sync.listBlobs` is available. For more details, see the
-[Blob support](#6-blob-support) section.
+Space-scoped blob listing via `zone.stratos.space.listBlobs` is available. For more details, see
+the [Blob support](#6-blob-support) section.
 
 ---
 

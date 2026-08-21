@@ -173,7 +173,7 @@ URL.
 | `com.atproto.repo.deleteRecord`      | Yes (deletes from Stratos)        |
 | `com.atproto.repo.applyWrites`       | Yes (batch writes)                |
 | `com.atproto.sync.getRecord`         | Yes (CAR export for verification) |
-| `com.atproto.sync.listBlobs`         | Yes (lists blob CIDs)             |
+| `zone.stratos.space.listBlobs`       | Yes (lists blob CIDs in a space)  |
 | `zone.stratos.sync.getRepo`          | Yes (full repo export as CAR)     |
 | `zone.stratos.repo.importRepo`       | Yes (import repo from CAR)        |
 | `zone.stratos.sync.subscribeRecords` | Yes (WebSocket firehose)          |
