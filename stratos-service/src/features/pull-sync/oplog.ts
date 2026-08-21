@@ -165,23 +165,55 @@ export async function readCurrentSignedCommit(
 }
 
 /**
+ * The `record-key` string format: 1-512 chars from the permitted set, and not
+ * the literal `.` or `..` path segments.
+ */
+const RECORD_KEY_RE = /^[A-Za-z0-9._~:-]{1,512}$/
+
+function isValidRecordKey(rkey: string): boolean {
+  return rkey !== '.' && rkey !== '..' && RECORD_KEY_RE.test(rkey)
+}
+
+/**
  * Expand a decoded event into per-op `RepoOp` entries, all sharing the event's
  * `rev`. Deletes carry `cid: null`. `prev` starts as null here and the
  * coalescing pass ({@link coalesceCurrentValues}) derives it from the prior op
  * for the same path within the returned window.
  *
+ * @param ctx - Application context (for drop diagnostics)
+ * @param did - The repo DID (for drop diagnostics)
  * @param decoded - Event decoded via {@link decodeEvent}
  * @param rev - The shared revision for all ops in this event
  * @returns One expanded op per record op in the event
  */
-function expandEventOps(decoded: DecodedEvent, rev: string): RepoOp[] {
+function expandEventOps(
+  ctx: AppContext,
+  did: string,
+  decoded: DecodedEvent,
+  rev: string,
+): RepoOp[] {
   return decoded.ops.flatMap((op: RecordOp) => {
     const { collection, rkey } = splitPath(op.path)
     const isDelete = op.action === 'delete'
     // Fail closed on a malformed non-delete without a cid: `cid: null` on the
     // wire means delete, so this op cannot be emitted truthfully - drop it.
     const cid = isDelete ? null : (op.cid ?? undefined)
-    if (cid === undefined) return []
+    if (cid === undefined) {
+      ctx.logger?.warn(
+        { did, collection, rev },
+        'pull-sync dropped an op with no cid',
+      )
+      return []
+    }
+    // Fail closed on an invalid record key: the response schema requires the
+    // record-key format, so this op cannot pass output validation - drop it.
+    if (!isValidRecordKey(rkey)) {
+      ctx.logger?.warn(
+        { did, collection, rev },
+        'pull-sync dropped an op with an invalid record key',
+      )
+      return []
+    }
     return [
       {
         rev,
@@ -257,7 +289,7 @@ async function collectOps(
 
       // Emit a whole event's ops atomically (they share one rev); never split a
       // batch across a page boundary.
-      collected.push(...expandEventOps(decoded, event.rev))
+      collected.push(...expandEventOps(ctx, did, decoded, event.rev))
 
       if (collected.length >= limit) {
         hitLimit = true
@@ -384,6 +416,12 @@ export async function listRepoOps(
     // full-state recovery.
     if (bounds === null || bounds.oldestSeq > cursorSeq + 1) {
       throw new OplogTruncatedError('cursor predates retained history')
+    }
+    // A cursor past the newest retained event names a seq this log did not
+    // issue (for example after a log reset). Silently resuming would report a
+    // false caught-up. Fail closed into full-state recovery.
+    if (cursorSeq > bounds.latestSeq) {
+      throw new OplogTruncatedError('cursor is beyond retained history')
     }
     startSeq = cursorSeq
     // A cursor is only ever issued AFTER `since` was located, so continuing

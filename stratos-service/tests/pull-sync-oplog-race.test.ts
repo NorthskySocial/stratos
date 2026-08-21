@@ -16,6 +16,7 @@ const BOUNDARY = 'jurai'
 const REV = {
   r1: '3aaaa000000t1',
   r2: '3bbbb000000t2',
+  r3: '3cccc000000t3',
 }
 
 interface SeqRow {
@@ -259,5 +260,22 @@ describe('listRepoOps head-of-oplog race', () => {
     expect(res.ops.map((op) => op.rkey)).toEqual(['ryoko'])
     expect(res.cursor).toBeUndefined()
     expect(res.commit?.rev).toBe(REV.r2)
+  })
+
+  it('drops ops whose record key fails the record-key format and keeps the rest', async () => {
+    const actorStore = new ScriptedActorStore()
+    // `..` and an empty rkey (a path with a trailing slash) both fail the
+    // record-key format, so these ops cannot pass output validation.
+    actorStore.appendEvent(1, REV.r1, '..', 'cidKagato')
+    actorStore.appendEvent(2, REV.r2, '', 'cidYosho')
+    actorStore.appendEvent(3, REV.r3, 'ryoko', 'cidRyoko')
+    actorStore.root = { cid: 'commitCid', rev: REV.r3 }
+    actorStore.commitBytes = await encodeSignedCommit(REV.r3)
+
+    const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
+
+    expect(res.ops.map((op) => op.rkey)).toEqual(['ryoko'])
+    expect(res.cursor).toBeUndefined()
+    expect(res.commit?.rev).toBe(REV.r3)
   })
 })

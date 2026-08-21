@@ -462,6 +462,29 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
       )
       expect(ok.ops).toHaveLength(3)
     })
+
+    it('throws OplogTruncated when the cursor is beyond retained history', async () => {
+      // A cursor past the newest retained event names a seq this log never
+      // issued (for example after a log reset). Silently resuming would
+      // report a false caught-up.
+      await actorStore.create(repoDid)
+      await appendEvent(repoDid, REV.r1, [
+        { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'cidA1' },
+      ])
+
+      await expect(
+        listRepoOps(
+          ctx,
+          {
+            did: repoDid,
+            cursor: encodeSeqCursor(5),
+            limit: 100,
+            excludeValues: false,
+          },
+          callerSet('nerv'),
+        ),
+      ).rejects.toBeInstanceOf(OplogTruncatedError)
+    })
   })
 
   // ── adversarial boundary gating ──────────────────────────────────────────

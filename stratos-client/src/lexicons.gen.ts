@@ -1363,7 +1363,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "errors": [
         {
           "name": "OplogTruncated",
-          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. The caller must fall back to full-state recovery. Stricter than upstream, which restarts from the beginning of retained history instead of erroring."
+          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. Also returned for an unusable `cursor`: malformed, predating retained history (compacted between pages), or beyond the newest retained event. The caller must fall back to full-state recovery. Stricter than upstream, which restarts from the beginning of retained history instead of erroring."
         },
         {
           "name": "RepoNotFound",
