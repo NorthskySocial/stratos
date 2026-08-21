@@ -1014,7 +1014,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
@@ -1085,7 +1085,7 @@ export const stratosLexicons: LexiconDoc[] = [
           "properties": {
             "space": {
               "type": "string",
-              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
             },
             "delegationToken": {
               "type": "string",
@@ -1158,7 +1158,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
