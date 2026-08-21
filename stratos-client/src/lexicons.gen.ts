@@ -1147,6 +1147,78 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.space.listBlobs",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. Spec-shaped mirror of com.atproto.space.listBlobs (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
+      "parameters": {
+        "type": "params",
+        "required": ["space", "repo"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+          },
+          "repo": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the account whose blobs to list."
+          },
+          "since": {
+            "type": "string",
+            "format": "tid",
+            "description": "Optional revision of the repo to list blobs since."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 500
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["cids"],
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "cids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "cid"
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "RepoNotFound",
+          "description": "The requested account has no repo on this service."
+        },
+        {
+          "name": "UnknownSpace",
+          "description": "The requested space URI is malformed or its space DID does not match this service's DID."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "The caller is not admitted to the requested space (not a member, or the presented credential targets a different space)."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.sync.getBlob",
   "defs": {
     "main": {

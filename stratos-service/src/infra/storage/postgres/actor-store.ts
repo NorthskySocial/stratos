@@ -1034,45 +1034,54 @@ export class PgActorBlobReader {
   }
 
   /**
-   * List blobs based on provided options.
-   * @param opts - Options for listing blobs.
-   * @returns Array of blob CIDs.
+   * List blobs that records reference AND that carry the given boundary.
+   *
+   * Caveat: a boundary association can outlive the record's residence in the
+   * boundary (associations are only removed when the blob itself is deleted),
+   * so a moved record's blob may still be listed here.
+   *
+   * @param opts - Boundary plus the listBlobs paging options.
+   * @returns Blob CIDs in ascending order.
    */
-  async listBlobs(opts: {
+  async listBlobsForBoundary(opts: {
+    boundary: string
     since?: string
     cursor?: string
     limit: number
   }): Promise<string[]> {
-    const { since, cursor, limit } = opts
+    const { boundary, since, cursor, limit } = opts
+
+    const conditions = [eq(pgStratosBlobBoundary.boundary, boundary)]
+    if (cursor) {
+      conditions.push(gt(pgStratosRecordBlob.blobCid, cursor))
+    }
 
     if (since) {
       const res = await this.db
         .selectDistinct({ blobCid: pgStratosRecordBlob.blobCid })
         .from(pgStratosRecordBlob)
         .innerJoin(
+          pgStratosBlobBoundary,
+          eq(pgStratosBlobBoundary.blobCid, pgStratosRecordBlob.blobCid),
+        )
+        .innerJoin(
           pgStratosRecord,
           eq(pgStratosRecord.uri, pgStratosRecordBlob.recordUri),
         )
-        .where(
-          and(
-            gt(pgStratosRecord.repoRev, since),
-            ...(cursor ? [gt(pgStratosRecordBlob.blobCid, cursor)] : []),
-          ),
-        )
+        .where(and(gt(pgStratosRecord.repoRev, since), ...conditions))
         .orderBy(asc(pgStratosRecordBlob.blobCid))
         .limit(limit)
       return res.map((row) => row.blobCid)
     }
 
-    const conditions = []
-    if (cursor) {
-      conditions.push(gt(pgStratosRecordBlob.blobCid, cursor))
-    }
-
     const res = await this.db
       .selectDistinct({ blobCid: pgStratosRecordBlob.blobCid })
       .from(pgStratosRecordBlob)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .innerJoin(
+        pgStratosBlobBoundary,
+        eq(pgStratosBlobBoundary.blobCid, pgStratosRecordBlob.blobCid),
+      )
+      .where(and(...conditions))
       .orderBy(asc(pgStratosRecordBlob.blobCid))
       .limit(limit)
     return res.map((row) => row.blobCid)

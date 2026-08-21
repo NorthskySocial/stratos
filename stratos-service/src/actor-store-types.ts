@@ -153,7 +153,8 @@ export interface ActorBlobReader {
     mimeType?: string
     stream: AsyncIterable<Uint8Array>
   } | null>
-  listBlobs(opts: {
+  listBlobsForBoundary(opts: {
+    boundary: string
     since?: string
     cursor?: string
     limit: number

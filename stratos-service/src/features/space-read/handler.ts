@@ -17,11 +17,26 @@ import { isSpaceCredentialAuth } from '../../infra/auth/credential-scope.js'
  */
 export const GET_SPACE_RECORD_METHOD = 'zone.stratos.space.getRecord'
 
+/**
+ * XRPC method NSID for the space-scoped blob enumeration. Spec-shaped mirror
+ * of `com.atproto.space.listBlobs` (atproto#5187), quarantined under the
+ * `zone.stratos.*` namespace until the spec is finalized.
+ */
+export const LIST_SPACE_BLOBS_METHOD = 'zone.stratos.space.listBlobs'
+
 interface GetSpaceRecordParams {
   space?: string
   repo?: string
   collection?: string
   rkey?: string
+}
+
+interface ListSpaceBlobsParams {
+  space?: string
+  repo?: string
+  since?: string
+  limit?: number
+  cursor?: string
 }
 
 /**
@@ -56,6 +71,41 @@ export function registerSpaceReadHandlers(
       },
     ),
   })
+
+  xrpc.method(LIST_SPACE_BLOBS_METHOD, {
+    type: 'query',
+    auth: ctx.authVerifier.standardOrSpaceCredential,
+    handler: createXrpcHandler<unknown, ListSpaceBlobsParams>(
+      ctx,
+      LIST_SPACE_BLOBS_METHOD,
+      {
+        requireAuth: false,
+        handler: async ({ params, auth }) => {
+          return handleListSpaceBlobs(ctx, params, auth)
+        },
+      },
+    ),
+  })
+}
+
+/**
+ * Parse a space URI and derive its Stratos boundary (fail closed).
+ *
+ * @param ctx - Application context.
+ * @param space - The requested space URI.
+ * @returns The space's Stratos boundary.
+ * @throws InvalidRequestError `UnknownSpace` when the URI is malformed or
+ *   targets another service.
+ */
+function resolveSpaceBoundary(ctx: AppContext, space: string): string {
+  const parsed = parseSpaceUri(space)
+  if (!parsed.ok || parsed.value.spaceDid !== ctx.serviceDid) {
+    throw new InvalidRequestError(
+      'Unknown space: URI must target this service',
+      'UnknownSpace',
+    )
+  }
+  return `${parsed.value.spaceDid}/${parsed.value.skey}`
 }
 
 /**
@@ -85,15 +135,7 @@ async function handleGetSpaceRecord(
     )
   }
 
-  const parsed = parseSpaceUri(space)
-  if (!parsed.ok || parsed.value.spaceDid !== ctx.serviceDid) {
-    throw new InvalidRequestError(
-      'Unknown space: URI must target this service',
-      'UnknownSpace',
-    )
-  }
-  const boundary = `${parsed.value.spaceDid}/${parsed.value.skey}`
-
+  const boundary = resolveSpaceBoundary(ctx, space)
   await assertAdmitted(ctx, space, boundary, auth)
 
   const exists = await ctx.actorStore.exists(repo)
@@ -116,6 +158,48 @@ async function handleGetSpaceRecord(
     }
     return { uri, cid: record.cid, value: record.value }
   })
+}
+
+/**
+ * Core logic for {@link LIST_SPACE_BLOBS_METHOD}.
+ *
+ * Steps:
+ *   1. Require `space` and `repo`.
+ *   2. Resolve the space's boundary → else `UnknownSpace`.
+ *   3. Admission — same fail-closed contract as {@link handleGetSpaceRecord}.
+ *   4. Enumerate blob CIDs that records reference within the boundary. The
+ *      page cursor is the last CID of a full page.
+ */
+async function handleListSpaceBlobs(
+  ctx: AppContext,
+  params: ListSpaceBlobsParams,
+  auth: HandlerAuth | undefined,
+): Promise<{ cids: string[]; cursor?: string }> {
+  const { space, repo, since, cursor } = params
+  if (!space || !repo) {
+    throw new InvalidRequestError(
+      'space and repo are required',
+      'InvalidRequest',
+    )
+  }
+  const limit = params.limit ?? 500
+
+  const boundary = resolveSpaceBoundary(ctx, space)
+  await assertAdmitted(ctx, space, boundary, auth)
+
+  const exists = await ctx.actorStore.exists(repo)
+  if (!exists) {
+    throw new InvalidRequestError('Could not find repo', 'RepoNotFound')
+  }
+
+  const cids = await ctx.actorStore.read(repo, async (store) => {
+    return store.blob.listBlobsForBoundary({ boundary, since, cursor, limit })
+  })
+
+  return {
+    cids,
+    ...(cids.length === limit ? { cursor: cids[cids.length - 1] } : {}),
+  }
 }
 
 /**

@@ -79,6 +79,10 @@ export const pgStratosBlobBoundary = pgTable(
   (table) => [
     primaryKey({ columns: [table.blobCid, table.boundary] }),
     index('stratos_blob_boundary_blob_cid_idx').on(table.blobCid),
+    index('stratos_blob_boundary_boundary_idx').on(
+      table.boundary,
+      table.blobCid,
+    ),
   ],
 )
 
