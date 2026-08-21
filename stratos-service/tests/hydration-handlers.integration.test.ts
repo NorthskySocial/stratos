@@ -57,10 +57,7 @@ describe('Hydration Handlers', () => {
       cborToRecord: (content) => decode(content) as Record<string, unknown>,
     })
 
-    const hydrationCtx = initHydration(actorStore, enrollmentStore, {
-      getBlobMetadata: vi.fn(),
-      putBlobMetadata: vi.fn(),
-    } as any)
+    const hydrationCtx = initHydration(actorStore, enrollmentStore)
 
     ctx = {
       cfg: {
@@ -77,7 +74,6 @@ describe('Hydration Handlers', () => {
       enrollmentStore,
       serviceDid,
       hydrationService: hydrationCtx.hydrationService,
-      syncService: hydrationCtx.syncService,
       boundaryResolver: {
         getBoundaries: vi.fn().mockImplementation(async (did: string) => {
           console.log(`[DEBUG_LOG] Resolving boundaries for: ${did}`)

@@ -15,6 +15,7 @@ import {
   stratosBacklink,
   StratosDb,
   stratosRecord,
+  stratosRecordBoundary,
   StratosRecordReader,
   StratosRecordTransactor,
   stratosRepoBlock,
@@ -269,6 +270,115 @@ describe('Record Transactor', () => {
       // Verify backlink removed
       const backlinksAfter = await db.select().from(stratosBacklink)
       expect(backlinksAfter).toHaveLength(0)
+    })
+  })
+
+  describe('record boundaries', () => {
+    const boundaryRecord = (text: string, ...boundaries: string[]) => ({
+      $type: 'zone.stratos.feed.post',
+      text,
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: boundaries.map((value) => ({ value })),
+      },
+    })
+
+    const boundaryRows = () =>
+      db
+        .select()
+        .from(stratosRecordBoundary)
+        .orderBy(stratosRecordBoundary.boundary)
+
+    it('indexRecord inserts boundary rows for the record', async () => {
+      const uri = new AtUri('at://did:plc:misato/zone.stratos.feed.post/rei')
+      const record = boundaryRecord(
+        'Unit-00',
+        'did:web:nerv.tokyo.jp/engineering',
+        'did:web:nerv.tokyo.jp/pilot',
+      )
+      await transactor.indexRecord(
+        uri,
+        await createCid(record),
+        record,
+        'create',
+        'rev1',
+      )
+
+      expect(await boundaryRows()).toEqual([
+        {
+          recordUri: uri.toString(),
+          boundary: 'did:web:nerv.tokyo.jp/engineering',
+        },
+        { recordUri: uri.toString(), boundary: 'did:web:nerv.tokyo.jp/pilot' },
+      ])
+    })
+
+    it('indexRecord replaces boundary rows on update (move)', async () => {
+      const uri = new AtUri('at://did:plc:misato/zone.stratos.feed.post/asuka')
+      const original = boundaryRecord(
+        'Unit-02',
+        'did:web:nerv.tokyo.jp/engineering',
+      )
+      await transactor.indexRecord(
+        uri,
+        await createCid(original),
+        original,
+        'create',
+        'rev1',
+      )
+
+      const moved = boundaryRecord('Unit-02', 'did:web:nerv.tokyo.jp/pilot')
+      await transactor.indexRecord(
+        uri,
+        await createCid(moved),
+        moved,
+        'update',
+        'rev2',
+      )
+
+      expect(await boundaryRows()).toEqual([
+        { recordUri: uri.toString(), boundary: 'did:web:nerv.tokyo.jp/pilot' },
+      ])
+    })
+
+    it('indexRecord removes boundary rows when the update has none', async () => {
+      const uri = new AtUri('at://did:plc:misato/zone.stratos.feed.post/kaji')
+      const original = boundaryRecord('secret', 'did:web:nerv.tokyo.jp/pilot')
+      await transactor.indexRecord(
+        uri,
+        await createCid(original),
+        original,
+        'create',
+        'rev1',
+      )
+
+      const opened = { $type: 'zone.stratos.feed.post', text: 'public now' }
+      await transactor.indexRecord(
+        uri,
+        await createCid(opened),
+        opened,
+        'update',
+        'rev2',
+      )
+
+      expect(await boundaryRows()).toEqual([])
+    })
+
+    it('deleteRecord removes boundary rows', async () => {
+      const uri = new AtUri('at://did:plc:misato/zone.stratos.feed.post/gendo')
+      const record = boundaryRecord('scenario', 'did:web:nerv.tokyo.jp/seele')
+      await transactor.indexRecord(
+        uri,
+        await createCid(record),
+        record,
+        'create',
+        'rev1',
+      )
+      expect(await boundaryRows()).toHaveLength(1)
+
+      await transactor.deleteRecord(uri)
+
+      expect(await boundaryRows()).toEqual([])
     })
   })
 

@@ -114,21 +114,24 @@ async function createBlobTables(db: StratosPgDb) {
   `)
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS stratos_blob_boundary
+    CREATE INDEX IF NOT EXISTS stratos_record_blob_record_uri_idx ON stratos_record_blob("recordUri")
+  `)
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS stratos_record_boundary
     (
-      "blobCid" TEXT NOT NULL,
-      boundary  TEXT NOT NULL,
-      PRIMARY KEY ("blobCid", boundary)
+      "recordUri" TEXT NOT NULL,
+      boundary    TEXT NOT NULL,
+      PRIMARY KEY ("recordUri", boundary)
     )
   `)
 
   await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS stratos_blob_boundary_blob_cid_idx ON stratos_blob_boundary("blobCid")
+    CREATE INDEX IF NOT EXISTS stratos_record_boundary_boundary_idx ON stratos_record_boundary(boundary, "recordUri")
   `)
 
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS stratos_blob_boundary_boundary_idx ON stratos_blob_boundary(boundary, "blobCid")
-  `)
+  // Pre-release cleanup: boundary residence moved to stratos_record_boundary.
+  await db.execute(sql`DROP TABLE IF EXISTS stratos_blob_boundary`)
 }
 
 async function createBacklinkTables(db: StratosPgDb) {

@@ -95,6 +95,7 @@ export async function deleteRecord(
 
         const ti = performance.now()
         await store.record.deleteRecord(uri.toString())
+        await store.blob.removeRecordBlobAssociations(uri.toString())
         phases.transactPersist = performance.now() - ti
 
         if (deletedDomains.length > 0) {

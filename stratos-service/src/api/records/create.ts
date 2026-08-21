@@ -309,18 +309,15 @@ async function executeTransaction(
       writeResult.rev,
     )
 
-    // Associate blobs with record and boundaries for access control
+    // Associate blobs with the record. Boundary residence lives on the
+    // record row, which indexRecord maintains.
     const blobs = StratosValidator.extractBlobs(record)
+    const boundaries = StratosValidator.extractBoundaryDomains(
+      record as Record<string, unknown>,
+    )
     for (const blobCidStr of blobs) {
       const blobCid = parseCid(blobCidStr)
       await store.blob.associateBlobWithRecord(blobCid, uri.toString())
-
-      const boundaries = StratosValidator.extractBoundaryDomains(
-        record as Record<string, unknown>,
-      )
-      for (const boundary of boundaries) {
-        await store.blob.associateBlobWithBoundary(blobCid, boundary)
-      }
       // Update Bloom filter for fast rejection
       if (ctx.bloomManager) {
         await ctx.bloomManager.updateBloom(blobCid, boundaries)

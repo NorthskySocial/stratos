@@ -24,9 +24,9 @@ import {
   pgSchema as pgActorSchema,
   pgStratosBacklink,
   pgStratosBlob,
-  pgStratosBlobBoundary,
   pgStratosRecord,
   pgStratosRecordBlob,
+  pgStratosRecordBoundary,
   pgStratosRepoBlock,
   pgStratosRepoRoot,
   pgStratosSeq,
@@ -37,6 +37,7 @@ import {
   type StratosPgDb,
   type StratosPgDbOrTx,
   type StratosRecordDescript,
+  StratosValidator,
 } from '@northskysocial/stratos-core'
 import {
   ActorReader,
@@ -447,9 +448,32 @@ export class PgActorRecordTransactor
         await this.removeBacklinksByUri(uriObj)
       }
       await this.addBacklinks(backlinks)
+      await this.replaceRecordBoundaries(uriObj, record)
     }
 
     this.logger?.info({ uri: uriObj.toString() }, 'indexed stratos record')
+  }
+
+  /**
+   * Replaces the boundary rows for a record with the boundaries in its value.
+   *
+   * @param uri - The URI of the record.
+   * @param record - The record content.
+   */
+  async replaceRecordBoundaries(
+    uri: string | AtUri,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const recordUri = uri.toString()
+    await this.db
+      .delete(pgStratosRecordBoundary)
+      .where(eq(pgStratosRecordBoundary.recordUri, recordUri))
+    const boundaries = StratosValidator.extractBoundaryDomains(record)
+    if (boundaries.length === 0) return
+    await this.db
+      .insert(pgStratosRecordBoundary)
+      .values(boundaries.map((boundary) => ({ recordUri, boundary })))
+      .onConflictDoNothing()
   }
 
   /**
@@ -466,6 +490,9 @@ export class PgActorRecordTransactor
       this.db
         .delete(pgStratosBacklink)
         .where(eq(pgStratosBacklink.uri, uriStr)),
+      this.db
+        .delete(pgStratosRecordBoundary)
+        .where(eq(pgStratosRecordBoundary.recordUri, uriStr)),
     ])
 
     this.logger?.info({ uri: uriStr }, 'deleted indexed stratos record')
@@ -1034,11 +1061,9 @@ export class PgActorBlobReader {
   }
 
   /**
-   * List blobs that records reference AND that carry the given boundary.
-   *
-   * Caveat: a boundary association can outlive the record's residence in the
-   * boundary (associations are only removed when the blob itself is deleted),
-   * so a moved record's blob may still be listed here.
+   * List blobs referenced by records that currently reside in the boundary.
+   * Boundary residence is derived from stratos_record_boundary, which follows
+   * the record lifecycle, so moved or deleted records drop out immediately.
    *
    * @param opts - Boundary plus the listBlobs paging options.
    * @returns Blob CIDs in ascending order.
@@ -1051,7 +1076,7 @@ export class PgActorBlobReader {
   }): Promise<string[]> {
     const { boundary, since, cursor, limit } = opts
 
-    const conditions = [eq(pgStratosBlobBoundary.boundary, boundary)]
+    const conditions = [eq(pgStratosRecordBoundary.boundary, boundary)]
     if (cursor) {
       conditions.push(gt(pgStratosRecordBlob.blobCid, cursor))
     }
@@ -1061,8 +1086,8 @@ export class PgActorBlobReader {
         .selectDistinct({ blobCid: pgStratosRecordBlob.blobCid })
         .from(pgStratosRecordBlob)
         .innerJoin(
-          pgStratosBlobBoundary,
-          eq(pgStratosBlobBoundary.blobCid, pgStratosRecordBlob.blobCid),
+          pgStratosRecordBoundary,
+          eq(pgStratosRecordBoundary.recordUri, pgStratosRecordBlob.recordUri),
         )
         .innerJoin(
           pgStratosRecord,
@@ -1078,8 +1103,8 @@ export class PgActorBlobReader {
       .selectDistinct({ blobCid: pgStratosRecordBlob.blobCid })
       .from(pgStratosRecordBlob)
       .innerJoin(
-        pgStratosBlobBoundary,
-        eq(pgStratosBlobBoundary.blobCid, pgStratosRecordBlob.blobCid),
+        pgStratosRecordBoundary,
+        eq(pgStratosRecordBoundary.recordUri, pgStratosRecordBlob.recordUri),
       )
       .where(and(...conditions))
       .orderBy(asc(pgStratosRecordBlob.blobCid))
@@ -1115,19 +1140,6 @@ export class PgActorBlobReader {
       .from(pgStratosRecordBlob)
       .where(eq(pgStratosRecordBlob.blobCid, cid.toString()))
     return res.map((row) => row.recordUri)
-  }
-
-  /**
-   * Retrieve the boundaries associated with a blob by CID.
-   * @param blobCid - The CID of the blob.
-   * @returns Array of boundary strings.
-   */
-  async getBoundariesForBlob(blobCid: Cid): Promise<string[]> {
-    const res = await this.db
-      .select({ boundary: pgStratosBlobBoundary.boundary })
-      .from(pgStratosBlobBoundary)
-      .where(eq(pgStratosBlobBoundary.blobCid, blobCid.toString()))
-    return res.map((row) => row.boundary)
   }
 
   /**
@@ -1225,34 +1237,6 @@ export class PgActorBlobTransactor extends PgActorBlobReader {
     await this.db
       .delete(pgStratosRecordBlob)
       .where(eq(pgStratosRecordBlob.recordUri, recordUri))
-  }
-
-  /**
-   * Associate a blob with a boundary by CID and boundary string.
-   * @param blobCid - The CID of the blob.
-   * @param boundary - The boundary string.
-   */
-  async associateBlobWithBoundary(
-    blobCid: Cid,
-    boundary: string,
-  ): Promise<void> {
-    await this.db
-      .insert(pgStratosBlobBoundary)
-      .values({
-        blobCid: blobCid.toString(),
-        boundary: boundary,
-      })
-      .onConflictDoNothing()
-  }
-
-  /**
-   * Remove all blob boundary associations for a given CID.
-   * @param blobCid - The CID of the blob.
-   */
-  async removeBlobBoundaryAssociations(blobCid: Cid): Promise<void> {
-    await this.db
-      .delete(pgStratosBlobBoundary)
-      .where(eq(pgStratosBlobBoundary.blobCid, blobCid.toString()))
   }
 
   /**

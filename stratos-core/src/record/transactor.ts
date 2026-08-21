@@ -6,9 +6,11 @@ import {
   StratosBacklink,
   StratosDbOrTx,
   stratosRecord,
+  stratosRecordBoundary,
   stratosRepoBlock,
 } from '../db'
 import { Logger } from '../types.js'
+import { StratosValidator } from '../validation/index.js'
 import { getStratosBacklinks, StratosRecordReader } from './reader.js'
 
 /**
@@ -82,6 +84,7 @@ export class StratosRecordTransactor extends StratosRecordReader {
         await this.removeBacklinksByUri(atUri)
       }
       await this.addBacklinks(backlinks)
+      await this.replaceRecordBoundaries(atUri, record)
     }
 
     this.logger?.info({ uri: atUri.toString() }, 'indexed stratos record')
@@ -104,6 +107,9 @@ export class StratosRecordTransactor extends StratosRecordReader {
       this.db
         .delete(stratosBacklink)
         .where(eq(stratosBacklink.uri, uri.toString())),
+      this.db
+        .delete(stratosRecordBoundary)
+        .where(eq(stratosRecordBoundary.recordUri, uri.toString())),
     ])
 
     this.logger?.info({ uri: uri.toString() }, 'deleted indexed stratos record')
@@ -128,6 +134,27 @@ export class StratosRecordTransactor extends StratosRecordReader {
     await this.db
       .insert(stratosBacklink)
       .values(backlinks)
+      .onConflictDoNothing()
+  }
+
+  /**
+   * Replaces the boundary rows for a record with the boundaries in its value.
+   * @param uri - The URI of the record.
+   * @param record - The record content.
+   */
+  async replaceRecordBoundaries(
+    uri: AtUri | string,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const recordUri = uri.toString()
+    await this.db
+      .delete(stratosRecordBoundary)
+      .where(eq(stratosRecordBoundary.recordUri, recordUri))
+    const boundaries = StratosValidator.extractBoundaryDomains(record)
+    if (boundaries.length === 0) return
+    await this.db
+      .insert(stratosRecordBoundary)
+      .values(boundaries.map((boundary) => ({ recordUri, boundary })))
       .onConflictDoNothing()
   }
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
+import { eq } from 'drizzle-orm'
 
 import {
   BlobNotFoundError,
@@ -13,12 +14,12 @@ import {
   createStratosDb,
   migrateStratosDb,
   stratosBlob,
-  stratosBlobBoundary,
   StratosBlobReader,
   StratosBlobTransactor,
   StratosDb,
   stratosRecord,
   stratosRecordBlob,
+  stratosRecordBoundary,
 } from '../src'
 
 // Create a deterministic CID from data
@@ -276,7 +277,7 @@ describe('Blob Reader', () => {
     const BOUNDARY = 'did:example:stratos/tokyo3'
     const OTHER_BOUNDARY = 'did:example:stratos/nerv'
 
-    // Seed one record with the given rev plus one blob per boundary entry.
+    // Seed one record in the boundary plus one blob it references.
     const seedRecordBlob = async (opts: {
       rkey: string
       repoRev: string
@@ -298,8 +299,8 @@ describe('Blob Reader', () => {
         .insert(stratosRecordBlob)
         .values({ blobCid: cid.toString(), recordUri: uri })
       await db
-        .insert(stratosBlobBoundary)
-        .values({ blobCid: cid.toString(), boundary: opts.boundary })
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: uri, boundary: opts.boundary })
       return cid.toString()
     }
 
@@ -408,12 +409,44 @@ describe('Blob Reader', () => {
       await db
         .insert(stratosRecordBlob)
         .values({ blobCid: cid, recordUri: secondUri })
+      await db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: secondUri, boundary: BOUNDARY })
 
       const result = await reader.listBlobsForBoundary({
         boundary: BOUNDARY,
         limit: 10,
       })
       expect(result).toEqual([cid])
+    })
+
+    it('omits a blob whose only in-boundary record moved away', async () => {
+      const movedBlob = await seedRecordBlob({
+        rkey: 'kaji',
+        repoRev: 'rev1',
+        blobSeed: 'kaji blob',
+        boundary: BOUNDARY,
+      })
+      const stayingBlob = await seedRecordBlob({
+        rkey: 'ritsuko',
+        repoRev: 'rev1',
+        blobSeed: 'ritsuko blob',
+        boundary: BOUNDARY,
+      })
+      const movedUri = 'at://did:plc:misato/zone.stratos.feed.post/kaji'
+      await db
+        .delete(stratosRecordBoundary)
+        .where(eq(stratosRecordBoundary.recordUri, movedUri))
+      await db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: movedUri, boundary: OTHER_BOUNDARY })
+
+      const result = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        limit: 10,
+      })
+      expect(result).toEqual([stayingBlob])
+      expect(result).not.toContain(movedBlob)
     })
   })
 
