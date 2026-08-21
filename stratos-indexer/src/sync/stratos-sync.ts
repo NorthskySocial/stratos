@@ -17,6 +17,7 @@ export interface StratosActorSyncOptions {
   reconnectMaxDelayMs: number
   reconnectJitterMs: number
   reconnectMaxAttempts: number
+  reconnectCooldownMs: number
 }
 
 export interface StratosSyncConfig {
@@ -49,6 +50,7 @@ const DEFAULT_ACTOR_SYNC_OPTIONS: StratosActorSyncOptions = {
   reconnectMaxDelayMs: 60000,
   reconnectJitterMs: 500,
   reconnectMaxAttempts: 10,
+  reconnectCooldownMs: 300_000,
 }
 
 const SERVICE_RECONNECT_BASE_DELAY_MS = 1000
@@ -488,6 +490,7 @@ export class StratosActorSync {
       reconnectMaxDelayMs: this.options.reconnectMaxDelayMs,
       reconnectJitterMs: this.options.reconnectJitterMs,
       reconnectMaxAttempts: this.options.reconnectMaxAttempts,
+      reconnectCooldownMs: this.options.reconnectCooldownMs,
       onReferencedActor: this.onReferencedActor,
       onHandleNeeded: this.onHandleNeeded,
       onError: this.onError,
@@ -530,9 +533,13 @@ export class StratosActorSync {
     const now = Date.now()
     const entries = Array.from(this.syncers.entries())
     // Find connections that haven't received a message in a while
+    // A cooling syncer is silent by design and holds no socket. Evicting it
+    // would discard the served cool-down and rebuild it with a fresh attempt
+    // counter, so the cool-down would never complete under connection pressure.
     const idle = entries
       .filter(
         ([, syncer]) =>
+          !syncer.isCoolingDown() &&
           now - syncer.getLastMessageAt() > this.options.idleEvictionMs,
       )
       .sort((a, b) => a[1].getLastMessageAt() - b[1].getLastMessageAt())

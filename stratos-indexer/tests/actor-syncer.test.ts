@@ -53,6 +53,7 @@ function createSyncer(overrides: Partial<ActorSyncerOptions> = {}) {
     reconnectMaxDelayMs: 60_000,
     reconnectJitterMs: 0,
     reconnectMaxAttempts: MAX_ATTEMPTS,
+    reconnectCooldownMs: RECONNECT_COOLDOWN_MS,
     onError: (err) => errors.push(err),
     canStartSync: () => true,
     onSyncStarted: () => {},
@@ -124,6 +125,47 @@ describe('ActorSyncer reconnect cool-down', () => {
 
     vi.advanceTimersByTime(RECONNECT_COOLDOWN_MS * 3)
     expect(FakeWebSocket.instances).toHaveLength(connectionsBeforeStop)
+  })
+
+  it('reports isCoolingDown only while the cool-down timer is pending', () => {
+    const { syncer } = createSyncer()
+    syncer.start()
+    expect(syncer.isCoolingDown()).toBe(false)
+
+    exhaustAttempts()
+    expect(syncer.isCoolingDown()).toBe(true)
+
+    vi.advanceTimersByTime(RECONNECT_COOLDOWN_MS)
+    expect(syncer.isCoolingDown()).toBe(false)
+
+    syncer.stop()
+  })
+
+  it('clears isCoolingDown on stop', () => {
+    const { syncer } = createSyncer()
+    syncer.start()
+
+    exhaustAttempts()
+    expect(syncer.isCoolingDown()).toBe(true)
+
+    syncer.stop()
+    expect(syncer.isCoolingDown()).toBe(false)
+  })
+
+  it('honors a configured cool-down duration', () => {
+    const { syncer } = createSyncer({ reconnectCooldownMs: 5_000 })
+    syncer.start()
+
+    exhaustAttempts()
+    const connectionsBeforeCooldown = FakeWebSocket.instances.length
+
+    vi.advanceTimersByTime(4_999)
+    expect(FakeWebSocket.instances).toHaveLength(connectionsBeforeCooldown)
+
+    vi.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(connectionsBeforeCooldown + 1)
+
+    syncer.stop()
   })
 
   it('restarts the backoff series at the base delay after a cool-down', () => {

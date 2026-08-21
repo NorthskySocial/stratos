@@ -33,6 +33,7 @@ export interface StratosSyncManagerOptions {
       actorSyncReconnectMaxDelayMs: number
       actorSyncReconnectJitterMs: number
       actorSyncReconnectMaxAttempts: number
+      actorSyncReconnectCooldownMs: number
     }
     pds: {
       enrolledOnly: boolean
@@ -96,6 +97,7 @@ export class StratosSyncManager {
         reconnectMaxDelayMs: opts.config.worker.actorSyncReconnectMaxDelayMs,
         reconnectJitterMs: opts.config.worker.actorSyncReconnectJitterMs,
         reconnectMaxAttempts: opts.config.worker.actorSyncReconnectMaxAttempts,
+        reconnectCooldownMs: opts.config.worker.actorSyncReconnectCooldownMs,
       },
       (did) => {
         const background = opts.background as unknown as {
