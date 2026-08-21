@@ -227,16 +227,9 @@ async function performUpdate(
   // Boundary residence lives on the record row, which indexRecord maintains.
   await store.blob.removeRecordBlobAssociations(uri.toString())
   const blobs = StratosValidator.extractBlobs(record)
-  const boundaries = StratosValidator.extractBoundaryDomains(
-    record as Record<string, unknown>,
-  )
   for (const blobCidStr of blobs) {
     const blobCid = parseCid(blobCidStr)
     await store.blob.associateBlobWithRecord(blobCid, uri.toString())
-    // Update Bloom filter for fast rejection
-    if (ctx.bloomManager) {
-      await ctx.bloomManager.updateBloom(blobCid, boundaries)
-    }
   }
 
   return {

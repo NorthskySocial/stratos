@@ -96,7 +96,6 @@ export interface HydrationContext {
  */
 export interface BlobContext {
   blobAuth: BlobAuthService
-  bloomManager: import('./features/blob/bloom-manager.js').BloomManager
 }
 
 /**
