@@ -541,12 +541,177 @@ describe('Subscription Handlers', () => {
       // A swallowed read error used to report latestSeq 0, which made any
       // live cursor look "ahead of latest" and silently replayed the client
       // from the start of the log.
-      const resumedFromLatest = ctx.logger.warn.mock.calls.some(
+      const resumedFromLatest = failingCtx.logger.warn.mock.calls.some(
         ([, message]: [unknown, unknown]) =>
           typeof message === 'string' &&
           message.includes('cursor ahead of latest'),
       )
       expect(resumedFromLatest).toBe(false)
+
+      // The failure must reach the operator log, not just the client, and
+      // must carry enough context to identify the actor.
+      const failureWarn = failingCtx.logger.warn.mock.calls.find(
+        ([, message]: [unknown, unknown]) => message === 'getLatestSeq failed',
+      )
+      expect(failureWarn?.[0]).toMatchObject({
+        did: testDid,
+        err: expect.any(Error),
+      })
+    }, 5_000)
+
+    it('rethrows a sequence read failure untouched when no logger is configured', async () => {
+      await enrollService(['nerv'])
+      const { logger: _logger, ...bareCtx } = ctx
+      const failingCtx = {
+        ...bareCtx,
+        actorStore: {
+          exists: async () => true,
+          read: async () => {
+            throw new Error('MAGI sequence store unreachable')
+          },
+        },
+      }
+
+      const handler = createSubscribeRecordsHandler(failingCtx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid, cursor: 42 },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      // The warn hardening must not replace the store error with a crash on
+      // the missing logger.
+      await expect(generator.next()).rejects.toThrow(
+        'MAGI sequence store unreachable',
+      )
+      abortController.abort()
+    }, 5_000)
+
+    it('keeps the connection when only the oldest-seq probe fails, and warns', async () => {
+      await enrollService(['nerv'])
+      const flakyCtx = {
+        ...ctx,
+        actorStore: {
+          exists: async () => true,
+          read: async (_did: string, fn: (store: unknown) => unknown) =>
+            fn({
+              sequence: {
+                getLatestSeq: async () => 7,
+                getOldestSeq: async () => {
+                  throw new Error('MAGI oldest-seq probe offline')
+                },
+                getEventsSince: async () => [],
+              },
+            }),
+        },
+      }
+
+      const handler = createSubscribeRecordsHandler(flakyCtx) as any
+      const abortController = new AbortController()
+      // Pre-abort so the generator runs the connect sequence and returns
+      // without parking in the live-stream wait.
+      abortController.abort()
+      const generator = handler(
+        { did: testDid, cursor: 0 },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      // A fabricated oldest of 0 suppresses the OutdatedCursor advisory
+      // (cursor 0 is not < 0), so the stream ends cleanly with no frames —
+      // it must not reject.
+      const first = await generator.next()
+      expect(first.done).toBe(true)
+
+      const oldestSeqWarn = flakyCtx.logger.warn.mock.calls.find(
+        ([, message]: [unknown, unknown]) => message === 'getOldestSeq failed',
+      )
+      expect(oldestSeqWarn?.[0]).toMatchObject({
+        did: testDid,
+        err: expect.any(Error),
+      })
+    }, 5_000)
+
+    it('ends the connection and warns when the catch-up page read fails', async () => {
+      await enrollService(['nerv'])
+      const failingCtx = {
+        ...ctx,
+        actorStore: {
+          exists: async () => true,
+          read: async (_did: string, fn: (store: unknown) => unknown) =>
+            fn({
+              sequence: {
+                getLatestSeq: async () => 5,
+                getOldestSeq: async () => 1,
+                getEventsSince: async () => {
+                  throw new Error('MAGI event page unreachable')
+                },
+              },
+            }),
+        },
+      }
+
+      const handler = createSubscribeRecordsHandler(failingCtx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid, cursor: 2 },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      await expect(generator.next()).rejects.toThrow(
+        'MAGI event page unreachable',
+      )
+      abortController.abort()
+
+      const pageReadWarn = failingCtx.logger.warn.mock.calls.find(
+        ([, message]: [unknown, unknown]) =>
+          message === 'getEventsSince failed',
+      )
+      expect(pageReadWarn?.[0]).toMatchObject({
+        did: testDid,
+        cursor: 2,
+        err: expect.any(Error),
+      })
+    }, 5_000)
+
+    it('propagates benign and fatal read failures correctly with no logger', async () => {
+      await enrollService(['nerv'])
+      const { logger: _logger, ...bareCtx } = ctx
+      const failingCtx = {
+        ...bareCtx,
+        actorStore: {
+          exists: async () => true,
+          read: async (_did: string, fn: (store: unknown) => unknown) =>
+            fn({
+              sequence: {
+                getLatestSeq: async () => 7,
+                getOldestSeq: async () => {
+                  throw new Error('MAGI oldest-seq probe offline')
+                },
+                getEventsSince: async () => {
+                  throw new Error('MAGI event page unreachable')
+                },
+              },
+            }),
+        },
+      }
+
+      const handler = createSubscribeRecordsHandler(failingCtx) as any
+      const abortController = new AbortController()
+      const generator = handler(
+        { did: testDid, cursor: 0 },
+        serviceCreds,
+        abortController.signal,
+      )
+
+      // The oldest-seq failure stays benign (no crash on the missing logger)
+      // and the connection then dies on the page-read error, not a TypeError.
+      await expect(generator.next()).rejects.toThrow(
+        'MAGI event page unreachable',
+      )
+      abortController.abort()
     }, 5_000)
 
     it('rejects non-service credentials', async () => {
