@@ -1,10 +1,14 @@
 import type { Keypair } from '@atproto/crypto'
 import * as crypto from '@atproto/crypto'
-import type { DpopProof } from '@atproto/oauth-provider'
 import { parseSpaceUri } from '@northskysocial/stratos-core'
 import { decodeCompactJwt } from './jwt.js'
 import type { VerifyRequestContext } from './dpop-verifier.js'
-import type { SpaceDpopProofChecker } from './space-dpop.js'
+import {
+  SPACE_DPOP_CLOCK_SKEW_SEC,
+  SPACE_DPOP_MAX_PROOF_AGE_SEC,
+  type SpaceDpopProof,
+  type SpaceDpopProofChecker,
+} from './space-dpop.js'
 import type { ReplayStore } from './replay-store.js'
 
 /**
@@ -59,11 +63,12 @@ export const SPACE_CREDENTIAL_CLOCK_SKEW = 30
 /** Replay-store namespace for presentation-proof `jti` values. */
 export const SPACE_DPOP_REPLAY_KIND = 'space-dpop'
 /**
- * How long (seconds) a consumed proof `jti` is remembered. Covers the proof's
- * freshness window plus the checker's clock tolerance, so a proof can never
- * outlive its replay record.
+ * How long (seconds) a consumed proof `jti` is remembered. Derived from the
+ * checker's window — the maximum proof age plus skew on both ends — so a
+ * proof can never outlive its replay record.
  */
-export const SPACE_DPOP_REPLAY_TTL = 300
+export const SPACE_DPOP_REPLAY_TTL =
+  SPACE_DPOP_MAX_PROOF_AGE_SEC + 2 * SPACE_DPOP_CLOCK_SKEW_SEC
 
 /**
  * Base class for all space-credential-verification failures. Each distinct
@@ -217,8 +222,7 @@ export async function verifySpaceCredential(
 }
 
 /** Dependencies for {@link verifyPresentedSpaceCredential}. */
-export interface PresentedSpaceCredentialDeps
-  extends SpaceCredentialVerifierDeps {
+export interface PresentedSpaceCredentialDeps extends SpaceCredentialVerifierDeps {
   /** RFC 9449 proof checker for the space surface (nonce-free). */
   proofChecker: Pick<SpaceDpopProofChecker, 'check'>
   /** Single-use store for proof `jti` values (fail-closed). */
@@ -254,7 +258,7 @@ export async function verifyPresentedSpaceCredential(
   }
 
   // 8. DPoP proof — signature, typ, freshness, htm/htu, ath over the credential.
-  let proof: DpopProof
+  let proof: SpaceDpopProof
   try {
     proof = await deps.proofChecker.check(req, token)
   } catch (err) {

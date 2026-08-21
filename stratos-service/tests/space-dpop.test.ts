@@ -1,11 +1,12 @@
 /**
  * Unit tests for the SpaceDpopProofChecker.
  *
- * The checker wraps `DpopManager` with nonces disabled and enforces the
- * space-surface proof rules: a proof is REQUIRED (missing header rejects),
- * `ath` is REQUIRED and must match when a bound token is supplied, and `ath`
- * is REJECTED on standalone (mint-time) proofs. All failures surface as
- * `SpaceDpopProofError`.
+ * The checker is a standalone RFC 9449 verifier (mirroring the upstream
+ * space-surface rules) and enforces: a proof is REQUIRED (missing header
+ * rejects), `ath` is REQUIRED and must match when a bound token is supplied,
+ * `ath` is REJECTED on standalone (mint-time) proofs, and a `nonce` claim is
+ * IGNORED (the space surface has no nonce round trip). All failures surface
+ * as `SpaceDpopProofError`.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
@@ -30,12 +31,15 @@ async function makeProofKey() {
   })
   const jwk = await exportJWK(publicKey)
   const jkt = await calculateJwkThumbprint(jwk)
-  async function buildProof(opts: { ath?: string } = {}): Promise<string> {
+  async function buildProof(
+    opts: { ath?: string; nonce?: string } = {},
+  ): Promise<string> {
     return new SignJWT({
       htm: 'POST',
       htu: `${SERVICE_ENDPOINT}${PATH}`,
       jti: randomUUID(),
       ...(opts.ath ? { ath: opts.ath } : {}),
+      ...(opts.nonce ? { nonce: opts.nonce } : {}),
     })
       .setProtectedHeader({ typ: 'dpop+jwt', alg: 'ES256', jwk })
       .setIssuedAt()
@@ -62,6 +66,15 @@ describe('SpaceDpopProofChecker', () => {
     expect(proof.jti).toBeTruthy()
   })
 
+  it('ignores a stray "nonce" claim (no OAuth nonce round trip on this surface)', async () => {
+    const key = await makeProofKey()
+    const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
+    const proof = await checker.check(
+      request(await key.buildProof({ nonce: 'server-issued-nonce' })),
+    )
+    expect(proof.jkt).toBe(key.jkt)
+  })
+
   it('rejects a missing DPoP header with "DPoP proof required"', async () => {
     const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
     const err = await checker.check(request()).catch((e) => e)
@@ -74,8 +87,8 @@ describe('SpaceDpopProofChecker', () => {
     const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
     const err = await checker.check(request('not-a-jwt')).catch((e) => e)
     expect(err).toBeInstanceOf(SpaceDpopProofError)
-    // The catch path must carry the manager's reason, not the missing-header
-    // message the fall-through `!proof` branch would produce.
+    // The failure must carry the verification reason, not the missing-header
+    // message.
     expect(err.message).not.toBe('DPoP proof required')
   })
 

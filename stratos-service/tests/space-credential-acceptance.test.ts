@@ -104,7 +104,10 @@ describe('space-credential acceptance', () => {
   // ── helpers ────────────────────────────────────────────────────────────
 
   /** Mint a valid space credential for a space (signed by our service key). */
-  async function credentialFor(spaceUri: string, jkt?: string): Promise<string> {
+  async function credentialFor(
+    spaceUri: string,
+    jkt?: string,
+  ): Promise<string> {
     const { credential } = await mintSpaceCredential({
       signingKey,
       issuerDid: SERVICE_DID,
@@ -472,16 +475,33 @@ describe('space-credential acceptance', () => {
       })
     })
 
+    it('spaceCredential accepts a lowercase "dpop" auth scheme (RFC 9110: schemes are case-insensitive)', async () => {
+      const verifiers = makeVerifiers()
+      const key = await makePresentationKey()
+      const cred = await credentialFor(SPACE_S, key.jkt)
+      const result = await verifiers.spaceCredential(
+        ctxWithHeader(`dpop ${cred}`, { dpop: await key.buildProof(cred) }),
+      )
+      expect(result.credentials).toEqual({
+        type: 'space-credential',
+        spaceUri: SPACE_S,
+      })
+    })
+
     it('spaceCredential REJECTS a proof replay (same jti twice)', async () => {
       const verifiers = makeVerifiers()
       const key = await makePresentationKey()
       const cred = await credentialFor(SPACE_S, key.jkt)
       const proof = await key.buildProof(cred)
-      await verifiers.spaceCredential(ctxWithHeader(`DPoP ${cred}`, { dpop: proof }))
+      await verifiers.spaceCredential(
+        ctxWithHeader(`DPoP ${cred}`, { dpop: proof }),
+      )
       // The same verifiers instance shares one replay store — the second
       // presentation of the SAME proof must fail.
       await expect(
-        verifiers.spaceCredential(ctxWithHeader(`DPoP ${cred}`, { dpop: proof })),
+        verifiers.spaceCredential(
+          ctxWithHeader(`DPoP ${cred}`, { dpop: proof }),
+        ),
       ).rejects.toBeInstanceOf(AuthRequiredError)
     })
 

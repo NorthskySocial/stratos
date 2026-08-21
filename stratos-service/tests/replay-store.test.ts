@@ -31,11 +31,11 @@ describe('replayStoreFromCache', () => {
   it('wraps a setNxEx-capable cache into a working ReplayStore', async () => {
     const store = replayStoreFromCache(new MemoryNxExStore())
     expect(store).toBeInstanceOf(ReplayStore)
-    await expect(store!.consumeOnce('space-dpop', 'jti-rei', 300)).resolves.toBe(
-      true,
-    )
-    await expect(store!.consumeOnce('space-dpop', 'jti-rei', 300)).resolves.toBe(
-      false,
-    )
+    await expect(
+      store!.consumeOnce('space-dpop', 'jti-rei', 300),
+    ).resolves.toBe(true)
+    await expect(
+      store!.consumeOnce('space-dpop', 'jti-rei', 300),
+    ).resolves.toBe(false)
   })
 })

@@ -5,13 +5,15 @@
  * These modules are dormant (wired to nothing yet); the contract these tests
  * pin down IS the deliverable. We mint delegation JWTs with local keypairs and
  * a hand-built header/payload so we can exercise every distinct rejection path
- * — including the ordering guarantee that an invalid token never burns its jti.
+ * — including the two-phase guarantee that verification never burns the jti;
+ * only the explicit `consumeDelegationJti` step does.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
 import type { Keypair } from '@atproto/crypto'
 import {
+  consumeDelegationJti,
   DelegationReplayError,
   DelegationTimingError,
   DELEGATION_REPLAY_KIND,
@@ -167,7 +169,6 @@ function makeDeps(
   return {
     serviceDid: SERVICE_DID,
     idResolver: atprotoResolver(keypair),
-    replayStore: new ReplayStore(new MemoryNxExStore()),
     ...overrides,
   }
 }
@@ -235,15 +236,25 @@ describe('verifyDelegationToken (happy path & replay)', () => {
     expect(result.userDid).toBe(keypair.did())
   })
 
-  it('accepts once, then rejects the second use as a replay', async () => {
+  it('returns the token jti without consuming it', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
-    const deps = makeDeps(keypair) // shared replay store across both calls
+    const jti = freshJti()
+    const token = await mintToken({ keypair, jti })
+
+    const result = await verifyDelegationToken(token, makeDeps(keypair))
+    expect(result.jti).toBe(jti)
+  })
+
+  it('consumeDelegationJti accepts once, then rejects the second use as a replay', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const replayStore = new ReplayStore(new MemoryNxExStore())
     const token = await mintToken({ keypair })
 
-    await expect(verifyDelegationToken(token, deps)).resolves.toMatchObject({
-      userDid: keypair.did(),
-    })
-    await expect(verifyDelegationToken(token, deps)).rejects.toBeInstanceOf(
+    const { jti } = await verifyDelegationToken(token, makeDeps(keypair))
+    await expect(
+      consumeDelegationJti(replayStore, jti),
+    ).resolves.toBeUndefined()
+    await expect(consumeDelegationJti(replayStore, jti)).rejects.toBeInstanceOf(
       DelegationReplayError,
     )
   })
@@ -379,7 +390,6 @@ describe('verifyDelegationToken (distinct rejection per violation)', () => {
       verifyDelegationToken(token, {
         serviceDid: SERVICE_DID,
         idResolver,
-        replayStore: new ReplayStore(new MemoryNxExStore()),
       }),
     ).rejects.toBeInstanceOf(InvalidDelegationSignatureError)
   })
@@ -400,7 +410,6 @@ describe('verifyDelegationToken (distinct rejection per violation)', () => {
       verifyDelegationToken(token, {
         serviceDid: SERVICE_DID,
         idResolver,
-        replayStore: new ReplayStore(new MemoryNxExStore()),
       }),
     ).resolves.toMatchObject({ userDid: iss })
   })
@@ -410,55 +419,47 @@ describe('verifyDelegationToken (distinct rejection per violation)', () => {
 // Redis-down ⇒ reject
 // ===========================================================================
 
-describe('verifyDelegationToken (replay store unavailable)', () => {
-  it('rejects a valid token when the replay store is down (fail closed)', async () => {
-    const keypair = await Secp256k1Keypair.create({ exportable: true })
-    const token = await mintToken({ keypair })
-    const deps = makeDeps(keypair, {
-      replayStore: new ReplayStore(new DownNxExStore()),
-    })
-    await expect(verifyDelegationToken(token, deps)).rejects.toBeInstanceOf(
-      DelegationReplayError,
-    )
+describe('consumeDelegationJti (replay store unavailable)', () => {
+  it('rejects when the replay store is down (fail closed)', async () => {
+    const replayStore = new ReplayStore(new DownNxExStore())
+    await expect(
+      consumeDelegationJti(replayStore, freshJti()),
+    ).rejects.toBeInstanceOf(DelegationReplayError)
   })
 })
 
 // ===========================================================================
-// Ordering proof: consumeOnce runs LAST (invalid token must not burn its jti)
+// Two-phase proof: verification never consumes the jti; consume does
 // ===========================================================================
 
-describe('verifyDelegationToken (consumeOnce runs LAST)', () => {
-  it('an invalid token (bad signature) does NOT consume its jti; a fresh valid token with the same jti still succeeds', async () => {
+describe('verifyDelegationToken / consumeDelegationJti (two-phase)', () => {
+  it('verification (pass OR fail) leaves the jti unconsumed; consumeDelegationJti burns it with the correct TTL', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const mem = new MemoryNxExStore()
     const replayStore = new ReplayStore(mem)
     const sharedJti = freshJti()
+    const replayKey = `replay:${DELEGATION_REPLAY_KIND}:${sharedJti}`
 
-    // 1. Present an otherwise-valid token with a bad signature and the shared jti.
+    // 1. An otherwise-valid token with a bad signature and the shared jti.
     const badToken = await mintToken({
       keypair,
       jti: sharedJti,
       tamperSignature: true,
     })
     await expect(
-      verifyDelegationToken(badToken, makeDeps(keypair, { replayStore })),
+      verifyDelegationToken(badToken, makeDeps(keypair)),
     ).rejects.toBeInstanceOf(InvalidDelegationSignatureError)
+    expect(mem.keys.has(replayKey)).toBe(false)
 
-    // The jti must NOT have been consumed by the rejected token.
-    expect(mem.keys.has(`replay:${DELEGATION_REPLAY_KIND}:${sharedJti}`)).toBe(
-      false,
-    )
-
-    // 2. A fresh, genuinely valid token bearing the SAME jti still succeeds,
-    //    proving consumeOnce only ran after all other checks passed.
+    // 2. A genuinely valid token bearing the SAME jti verifies — and still
+    //    leaves the jti unconsumed.
     const goodToken = await mintToken({ keypair, jti: sharedJti })
-    await expect(
-      verifyDelegationToken(goodToken, makeDeps(keypair, { replayStore })),
-    ).resolves.toMatchObject({ userDid: keypair.did() })
+    const result = await verifyDelegationToken(goodToken, makeDeps(keypair))
+    expect(result.userDid).toBe(keypair.did())
+    expect(mem.keys.has(replayKey)).toBe(false)
 
-    // Now the jti is consumed with the correct TTL.
-    expect(
-      mem.keys.get(`replay:${DELEGATION_REPLAY_KIND}:${sharedJti}`)?.ttl,
-    ).toBe(DELEGATION_REPLAY_TTL)
+    // 3. Only the explicit consume step burns it, with the correct TTL.
+    await consumeDelegationJti(replayStore, result.jti)
+    expect(mem.keys.get(replayKey)?.ttl).toBe(DELEGATION_REPLAY_TTL)
   })
 })

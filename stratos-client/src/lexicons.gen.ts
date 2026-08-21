@@ -1076,7 +1076,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "procedure",
-      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is bearer-shaped and multi-use until it expires; it is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided, otherwise from the DPoP-authenticated user. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
+      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is multi-use until it expires and is bound to the caller's DPoP key (cnf.jkt, RFC 9449): it must be presented under the DPoP auth scheme with a per-request proof signed by that key. It is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided (a standalone DPoP proof in the DPoP header supplies the key to bind), otherwise from the DPoP-authenticated user (the session proof key is bound). Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
       "input": {
         "encoding": "application/json",
         "schema": {
@@ -1136,6 +1136,10 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "ClientNotAllowed",
           "description": "A valid client attestation was supplied but its attested client_id is not in the space's app allow-list."
+        },
+        {
+          "name": "ProofRequired",
+          "description": "No DPoP key was available to bind the credential to: the delegation path requires a standalone DPoP proof in the DPoP header, and unbound credentials are refused outside development mode."
         }
       ]
     }
