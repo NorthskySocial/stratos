@@ -1,6 +1,8 @@
 import { StratosError } from '@northskysocial/stratos-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { CursorManager } from '../src/index.js'
 import { StratosServiceSubscription } from '../src/index.js'
+import { StratosActorSync } from '../src/sync/stratos-sync.js'
 
 const SERVICE_STREAM_MAX_QUEUE = 1_000
 
@@ -173,5 +175,76 @@ describe('StratosServiceSubscription enrollment stream', () => {
     expect(FakeWebSocket.instances.length).toBeGreaterThan(1)
 
     subscription.stop()
+  })
+})
+
+describe('StratosActorSync idle eviction', () => {
+  let originalWebSocket: typeof globalThis.WebSocket
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    FakeWebSocket.instances = []
+    originalWebSocket = globalThis.WebSocket
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  })
+
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket
+    vi.useRealTimers()
+  })
+
+  function createActorSync() {
+    const cursorManager = {
+      getStratosCursor: vi.fn(() => undefined),
+      updateStratosCursor: vi.fn(),
+      removeStratosCursor: vi.fn(),
+    } as unknown as CursorManager
+
+    return new StratosActorSync(
+      {} as never,
+      { stratosServiceUrl: 'http://localhost:2583', syncToken: 'lain-navi' },
+      cursorManager,
+      () => {},
+      undefined,
+      {
+        maxConnections: 2,
+        connectDelayMs: 1,
+        idleEvictionMs: 100,
+        reconnectBaseDelayMs: 1,
+        reconnectMaxDelayMs: 1,
+        reconnectJitterMs: 0,
+        reconnectMaxAttempts: 1,
+        reconnectCooldownMs: 300_000,
+      },
+    )
+  }
+
+  it('spares a cooling syncer and evicts a genuinely idle one instead', () => {
+    const sync = createActorSync()
+    sync.start()
+
+    // Fill both connection slots, then queue a waiter to arm eviction.
+    sync.addActor('did:plc:motoko')
+    vi.advanceTimersByTime(1)
+    sync.addActor('did:plc:batou')
+    vi.advanceTimersByTime(1)
+    sync.addActor('did:plc:togusa')
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    // Exhaust motoko's single reconnect attempt to start its cool-down.
+    FakeWebSocket.instances[0].close()
+    vi.advanceTimersByTime(1)
+    FakeWebSocket.instances.at(-1)!.close()
+
+    // The eviction sweep runs at 10s. Motoko is the oldest-silent syncer,
+    // but it is cooling; the fence must divert eviction to idle batou.
+    vi.advanceTimersByTime(10_000)
+
+    const active = sync.getActiveActors()
+    expect(active).toContain('did:plc:motoko')
+    expect(active).toContain('did:plc:togusa')
+    expect(active).not.toContain('did:plc:batou')
+
+    sync.stop()
   })
 })
