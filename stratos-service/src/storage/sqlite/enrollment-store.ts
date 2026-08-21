@@ -267,8 +267,10 @@ export class SqliteEnrollmentStore
     await this.db
       .delete(enrollmentBoundary)
       .where(
-        eq(enrollmentBoundary.did, did) &&
+        and(
+          eq(enrollmentBoundary.did, did),
           eq(enrollmentBoundary.boundary, boundary),
+        ),
       )
   }
 }
