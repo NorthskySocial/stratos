@@ -147,15 +147,19 @@ Authorization: Bearer <access_token>
 
 ```http
 GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
-Authorization: Bearer <access_token> | Bearer <space-credential>
+Authorization: Bearer <access_token> | DPoP <space-credential>
+DPoP: <proof>   (required when presenting a space credential)
 Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
 Get a single record from a permissioned space (spec-shaped mirror of
 `com.atproto.space.getRecord`). Callable with standard user auth - the caller
 must be a member of the space - or with a space credential for that space (for
-syncing services). The record must belong to the requested space; records
-outside it (including records with no space) resolve to `RecordNotFound`.
+syncing services). A space credential is DPoP-key-bound (`cnf.jkt`): present it
+under the `DPoP` scheme with a per-request proof signed by the bound key and
+hash-bound to the credential (`ath`). The record must belong to the requested
+space; records outside it (including records with no space) resolve to
+`RecordNotFound`.
 
 ### Export Repository
 
@@ -220,6 +224,7 @@ enumerate paths, diff locally, and fetch misses.
 ```http
 POST /xrpc/zone.stratos.space.getSpaceCredential
 Authorization: DPoP <access_token>
+DPoP: <proof>
 Content-Type: application/json
 Body: { "space": "at://<space-did>/space/<type>/<skey>"[, "delegationToken": "<jwt>"][, "clientAttestation": "<jwt>"] }
 Response: { "credential": "<jwt>", "expiresAt": "<datetime>" }
@@ -229,7 +234,12 @@ Issues a multi-use space credential (JWT) for a space the caller is a member of.
 comes from the delegation token when supplied, otherwise from the DPoP session; membership
 is checked live against the enrollment store. Spaces configured with an app allow-list
 additionally require a valid client attestation whose attested `client_id` is listed. The
-credential is then accepted on read/sync endpoints as an alternative to standard auth.
+credential is bound to the caller's DPoP key (`cnf.jkt`, RFC 9449): on the delegation path
+the key comes from a standalone DPoP proof in the `DPoP` header, otherwise from the session
+proof key. When no key is available the request fails with `ProofRequired` (unbound
+credentials are minted only in development mode). The credential is then accepted on
+read/sync endpoints as an alternative to standard auth, presented under the `DPoP` scheme
+with a fresh proof per request.
 
 ## Record Types
 

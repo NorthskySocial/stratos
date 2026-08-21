@@ -177,7 +177,9 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
     idResolver:
       opts.idResolver ??
       ({ did: { resolve: vi.fn() } } as unknown as IdResolver),
-    cache: opts.cache,
+    // Default to a working store: a production mint requires one. Pass an
+    // explicit `cache: undefined` to exercise the no-store rejection paths.
+    cache: 'cache' in opts ? opts.cache : new MemoryNxExStore(),
     cfg: {
       service: { publicUrl: PUBLIC_URL },
       stratos: {
@@ -566,6 +568,49 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(res.error?.name).toBe('ProofRequired')
   })
 
+  it('a request that fails a later gate does NOT burn the token: a retry with the proof succeeds', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+
+    // First presentation fails the mint-proof gate AFTER identity resolution.
+    const first = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(first.error?.name).toBe('ProofRequired')
+
+    // The single-use jti was not consumed: the SAME token still mints.
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const second = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      { req: { method: 'POST', url: MINT_PATH, headers: { dpop: proof } } },
+    )
+    expect(second.error).toBeUndefined()
+    expect(second.body?.credential).toBeTruthy()
+  })
+
+  it('a successful mint burns the token: replaying it → InvalidToken', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const present = async () => {
+      const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+      return invoke(
+        server,
+        { space: SPACE_URI, delegationToken: token },
+        undefined,
+        { req: { method: 'POST', url: MINT_PATH, headers: { dpop: proof } } },
+      )
+    }
+
+    const first = await present()
+    expect(first.error).toBeUndefined()
+
+    const second = await present()
+    expect(second.error?.name).toBe('InvalidToken')
+  })
+
   it('dev mode: the delegation path STILL requires the mint proof', async () => {
     // Dev mode relaxes only the DPoP-session path (unbound mint). A delegated
     // mint proves key possession with the mint proof, so its absence must
@@ -667,7 +712,9 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(res.error?.name).toBe('InvalidToken')
   })
 
-  it('delegation path unavailable when no replay store configured → InvalidToken', async () => {
+  it('production with no replay store → mint refused (InternalServerError)', async () => {
+    // A presented credential is replay-checked; with no store the presentation
+    // verifier fail-closes, so the mint itself must refuse.
     const signingKey = await Secp256k1Keypair.create()
     const userKey = await Secp256k1Keypair.create()
     const ctx = createMockCtx({
@@ -675,6 +722,28 @@ describe('getSpaceCredential — delegation-token path', () => {
       enrolledBoundaries: [SPACE_BOUNDARY],
       idResolver: atprotoResolver(userKey.did(), userKey),
       cache: undefined,
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const res = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(res.error?.name).toBe('InternalServerError')
+  })
+
+  it('dev mode with no replay store: delegation path still rejects → InvalidToken', async () => {
+    // Dev mode skips the mint guard (unbound Bearer presentation works), but
+    // the single-use delegation check still needs a store and fails closed.
+    const signingKey = await Secp256k1Keypair.create()
+    const userKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      idResolver: atprotoResolver(userKey.did(), userKey),
+      cache: undefined,
+      devMode: true,
     })
     const server = createMockXrpcServer()
     registerSpaceCredentialHandlers(server as any, ctx)

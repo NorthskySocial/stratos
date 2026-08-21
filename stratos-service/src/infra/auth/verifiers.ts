@@ -341,17 +341,12 @@ function createServiceVerifier(deps: {
 function extractSpaceCredentialToken(
   authHeader: string | undefined,
 ): { token: string; scheme: 'dpop' | 'bearer' } | null {
-  let token: string
-  let scheme: 'dpop' | 'bearer'
-  if (authHeader?.startsWith('DPoP ')) {
-    token = authHeader.slice(5).trim()
-    scheme = 'dpop'
-  } else if (authHeader?.startsWith('Bearer ')) {
-    token = authHeader.slice(7).trim()
-    scheme = 'bearer'
-  } else {
-    return null
-  }
+  // RFC 9110 section 11.1: the auth scheme is case-insensitive.
+  const match = authHeader ? /^(dpop|bearer) +(.+)$/i.exec(authHeader) : null
+  if (!match) return null
+  const scheme: 'dpop' | 'bearer' =
+    match[1].toLowerCase() === 'dpop' ? 'dpop' : 'bearer'
+  const token = match[2].trim()
   const parts = token.split('.')
   if (parts.length !== 3) return null
   try {

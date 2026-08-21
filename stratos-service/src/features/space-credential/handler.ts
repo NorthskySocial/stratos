@@ -1,9 +1,14 @@
-import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
+import {
+  InternalServerError,
+  InvalidRequestError,
+  Server as XrpcServer,
+} from '@atproto/xrpc-server'
 import { parseSpaceUri } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
 import {
+  consumeDelegationJti,
   verifyDelegationToken,
   type DelegationVerifierDeps,
 } from '../../infra/auth/delegation-verifier.js'
@@ -98,7 +103,10 @@ interface MintRequest {
  *      our configured service DID → else {@link UnknownSpace}.
  *   3. Resolve identity: if a `delegationToken` is present, verify it
  *      (its target space MUST equal `space`) and take identity from it; else use
- *      the DPoP-authenticated user (reject anonymous).
+ *      the DPoP-authenticated user (reject anonymous). The token's single-use
+ *      `jti` is NOT consumed here — it burns in step 7, after every other gate
+ *      has passed, so a rejected attestation or missing mint proof does not
+ *      spend the token.
  *   4. Map the space URI to its boundary, then confirm the user's enrollment is
  *      present AND active, and that it carries that boundary (live
  *      enrollment-store lookup, no cache) → else {@link NotEnrolled}.
@@ -109,7 +117,8 @@ interface MintRequest {
  *   6. Resolve the DPoP key thumbprint to bind (`cnf.jkt`): the session key on
  *      the DPoP path, or a standalone mint-time proof on the delegation path.
  *      Outside dev mode an unbound mint is rejected → {@link ProofRequired}.
- *   7. Mint the credential and return `{ credential, expiresAt }`.
+ *   7. On the delegation path, consume the token's `jti` (single-use burn,
+ *      deliberately LAST). Then mint and return `{ credential, expiresAt }`.
  *
  * @param ctx - Application context.
  * @param input - Request body.
@@ -140,9 +149,25 @@ async function handleGetSpaceCredential(
   }
   const { spaceDid, skey } = parsed.value
 
+  // The presentation verifier rejects every proof when no replay store is
+  // configured, so a production mint would issue an unusable credential.
+  // Dev mode is exempt: it accepts unbound Bearer presentations.
+  if (
+    ctx.cfg.stratos.devMode !== true &&
+    !replayStoreFromCache(ctx.cache, ctx.logger)
+  ) {
+    ctx.logger?.warn(
+      'space-credential mint unavailable: no replay store (cache) configured',
+    )
+    throw new InternalServerError('Space credentials are not available')
+  }
+
   // Resolve identity via delegation token (dormant) or DPoP session (live).
-  const userDid = input?.delegationToken
+  const delegation = input?.delegationToken
     ? await resolveDelegationIdentity(ctx, input.delegationToken, space)
+    : undefined
+  const userDid = delegation
+    ? delegation.userDid
     : requireDpopIdentity(credentials?.did)
 
   // Membership: the user must be enrolled in the boundary for this space.
@@ -182,6 +207,12 @@ async function handleGetSpaceCredential(
       'A DPoP proof is required to bind the credential',
       'ProofRequired',
     )
+  }
+
+  // Burn the single-use delegation token LAST: every other gate has passed,
+  // so a rejected attestation or missing mint proof does not spend it.
+  if (delegation) {
+    await delegation.consume()
   }
 
   const { credential, expiresAt } = await mintSpaceCredential({
@@ -231,8 +262,19 @@ async function requireMintProofJkt(
   }
 }
 
+/** Verified delegation identity plus the deferred single-use burn. */
+interface DelegationIdentity {
+  /** The delegating user's DID. */
+  userDid: string
+  /** Consume the token's `jti`. Call LAST, after every other gate passes. */
+  consume: () => Promise<void>
+}
+
 /**
- * Verify a delegation token and return the delegating user's DID.
+ * Verify a delegation token and return the delegating user's DID plus a
+ * deferred `consume` step. Verification does NOT burn the token's single-use
+ * `jti`; the caller invokes `consume` as its final act so a request that fails
+ * a later gate never spends the token.
  *
  * Every verification failure — and a target-space mismatch — surfaces as
  * a single `InvalidToken` error code (the exact reason is logged, not leaked).
@@ -241,14 +283,14 @@ async function requireMintProofJkt(
  * @param token - The raw delegation JWT.
  * @param requestedSpace - The `space` from the request; the token's target space
  *   MUST equal this.
- * @returns The delegating user's DID.
+ * @returns The delegating user's DID and the deferred `consume` step.
  * @throws InvalidRequestError('InvalidToken') on any failure.
  */
 async function resolveDelegationIdentity(
   ctx: AppContext,
   token: string,
   requestedSpace: string,
-): Promise<string> {
+): Promise<DelegationIdentity> {
   const replayStore = replayStoreFromCache(ctx.cache, ctx.logger)
   if (!replayStore) {
     ctx.logger?.warn(
@@ -263,7 +305,6 @@ async function resolveDelegationIdentity(
   const deps: DelegationVerifierDeps = {
     serviceDid: ctx.serviceDid,
     idResolver: ctx.idResolver,
-    replayStore,
   }
 
   try {
@@ -274,7 +315,23 @@ async function resolveDelegationIdentity(
         'InvalidToken',
       )
     }
-    return result.userDid
+    return {
+      userDid: result.userDid,
+      consume: async () => {
+        try {
+          await consumeDelegationJti(replayStore, result.jti)
+        } catch (err) {
+          ctx.logger?.info(
+            { err: err instanceof Error ? err.message : String(err) },
+            'space-credential delegation token rejected',
+          )
+          throw new InvalidRequestError(
+            'Delegation token could not be verified',
+            'InvalidToken',
+          )
+        }
+      },
+    }
   } catch (err) {
     if (err instanceof InvalidRequestError) throw err
     ctx.logger?.info(
