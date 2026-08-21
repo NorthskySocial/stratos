@@ -84,16 +84,9 @@ export interface EnrollmentContext {
 }
 
 /**
- * Sync context for Stratos service
- */
-export interface SyncContext {
-  syncService: import('./features/sync/adapter.js').SyncService
-}
-
-/**
  * Hydration context for Stratos service
  */
-export interface HydrationContext extends SyncContext {
+export interface HydrationContext {
   boundaryResolver: BoundaryResolver
   hydrationService: HydrationService
 }

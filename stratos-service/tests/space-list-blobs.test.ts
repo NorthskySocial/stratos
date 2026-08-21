@@ -58,6 +58,8 @@ describe('zone.stratos.space.listBlobs', () => {
   let methods: Map<string, { type?: string; handler: unknown }>
   let blobsInS: string[]
   let blobInT: string
+  let reiBlob: string
+  let asukaBlob: string
 
   beforeEach(async () => {
     dataDir = join(
@@ -118,10 +120,13 @@ describe('zone.stratos.space.listBlobs', () => {
     }
 
     await actorStore.create(repoDid)
-    blobsInS = [
-      await seedRecordWithBlob('rei', BOUNDARY_S.value, 'rei blob'),
-      await seedRecordWithBlob('asuka', BOUNDARY_S.value, 'asuka blob'),
-    ].sort()
+    reiBlob = await seedRecordWithBlob('rei', BOUNDARY_S.value, 'rei blob')
+    asukaBlob = await seedRecordWithBlob(
+      'asuka',
+      BOUNDARY_S.value,
+      'asuka blob',
+    )
+    blobsInS = [reiBlob, asukaBlob].sort()
     blobInT = await seedRecordWithBlob('gendo', BOUNDARY_T.value, 'gendo blob')
   })
 
@@ -161,7 +166,6 @@ describe('zone.stratos.space.listBlobs', () => {
         size: blobBytes.length,
       })
       await store.blob.associateBlobWithRecord(blobCid, uri)
-      await store.blob.associateBlobWithBoundary(blobCid, boundary)
     })
     return blobCid.toString()
   }
@@ -350,5 +354,39 @@ describe('zone.stratos.space.listBlobs', () => {
         customErrorName: 'InvalidRequest',
       })
     }
+  })
+
+  it("a moved record's blob leaves the old space (no stale residence)", async () => {
+    const moved: Record<string, unknown> = {
+      $type: COLLECTION,
+      text: 'hello',
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: [{ value: BOUNDARY_T.value }],
+      },
+    }
+    const movedCid = parseCid((await computeCid(moved)).toString())
+    const uri = `at://${repoDid}/${COLLECTION}/rei`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await actorStore.transact(repoDid, async (store: any) => {
+      await store.record.indexRecord(uri, movedCid, moved, 'update', '')
+    })
+
+    const res = await call({}, userAuth(memberDid))
+    expect(res.body.cids).toEqual([asukaBlob])
+    expect(res.body.cids).not.toContain(reiBlob)
+  })
+
+  it("a deleted record's blob leaves the space (no stale residence)", async () => {
+    const uri = `at://${repoDid}/${COLLECTION}/rei`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await actorStore.transact(repoDid, async (store: any) => {
+      await store.record.deleteRecord(uri)
+      await store.blob.removeRecordBlobAssociations(uri)
+    })
+
+    const res = await call({}, userAuth(memberDid))
+    expect(res.body.cids).toEqual([asukaBlob])
+    expect(res.body.cids).not.toContain(reiBlob)
   })
 })

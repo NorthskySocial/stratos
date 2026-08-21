@@ -163,21 +163,24 @@ async function migrateRecordAndBlobTables(db: StratosDb): Promise<void> {
     )
   `)
 
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_record_blob_record_uri_idx ON stratos_record_blob(recordUri)`,
+  )
+
   await db.run(sql`
-    CREATE TABLE IF NOT EXISTS stratos_blob_boundary (
-      blobCid TEXT NOT NULL,
+    CREATE TABLE IF NOT EXISTS stratos_record_boundary (
+      recordUri TEXT NOT NULL,
       boundary TEXT NOT NULL,
-      PRIMARY KEY (blobCid, boundary)
+      PRIMARY KEY (recordUri, boundary)
     )
   `)
 
   await db.run(
-    sql`CREATE INDEX IF NOT EXISTS stratos_blob_boundary_blob_cid_idx ON stratos_blob_boundary(blobCid)`,
+    sql`CREATE INDEX IF NOT EXISTS stratos_record_boundary_boundary_idx ON stratos_record_boundary(boundary, recordUri)`,
   )
 
-  await db.run(
-    sql`CREATE INDEX IF NOT EXISTS stratos_blob_boundary_boundary_idx ON stratos_blob_boundary(boundary, blobCid)`,
-  )
+  // Pre-release cleanup: boundary residence moved to stratos_record_boundary.
+  await db.run(sql`DROP TABLE IF EXISTS stratos_blob_boundary`)
 }
 
 async function migrateMiscTables(db: StratosDb): Promise<void> {

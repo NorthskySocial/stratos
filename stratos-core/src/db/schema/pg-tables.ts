@@ -67,21 +67,23 @@ export const pgStratosRecordBlob = pgTable(
     blobCid: text('blobCid').notNull(),
     recordUri: text('recordUri').notNull(),
   },
-  (table) => [primaryKey({ columns: [table.blobCid, table.recordUri] })],
+  (table) => [
+    primaryKey({ columns: [table.blobCid, table.recordUri] }),
+    index('stratos_record_blob_record_uri_idx').on(table.recordUri),
+  ],
 )
 
-export const pgStratosBlobBoundary = pgTable(
-  'stratos_blob_boundary',
+export const pgStratosRecordBoundary = pgTable(
+  'stratos_record_boundary',
   {
-    blobCid: text('blobCid').notNull(),
+    recordUri: text('recordUri').notNull(),
     boundary: text('boundary').notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.blobCid, table.boundary] }),
-    index('stratos_blob_boundary_blob_cid_idx').on(table.blobCid),
-    index('stratos_blob_boundary_boundary_idx').on(
+    primaryKey({ columns: [table.recordUri, table.boundary] }),
+    index('stratos_record_boundary_boundary_idx').on(
       table.boundary,
-      table.blobCid,
+      table.recordUri,
     ),
   ],
 )
@@ -135,9 +137,10 @@ export type PgStratosBlobInsert = typeof pgStratosBlob.$inferInsert
 export type PgStratosRecordBlob = typeof pgStratosRecordBlob.$inferSelect
 export type PgStratosRecordBlobInsert = typeof pgStratosRecordBlob.$inferInsert
 
-export type PgStratosBlobBoundary = typeof pgStratosBlobBoundary.$inferSelect
-export type PgStratosBlobBoundaryInsert =
-  typeof pgStratosBlobBoundary.$inferInsert
+export type PgStratosRecordBoundary =
+  typeof pgStratosRecordBoundary.$inferSelect
+export type PgStratosRecordBoundaryInsert =
+  typeof pgStratosRecordBoundary.$inferInsert
 
 export type PgStratosBacklink = typeof pgStratosBacklink.$inferSelect
 export type PgStratosBacklinkInsert = typeof pgStratosBacklink.$inferInsert
