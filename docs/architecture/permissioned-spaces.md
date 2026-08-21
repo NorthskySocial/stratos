@@ -423,7 +423,8 @@ Services that need to stay current rather than move data use pull sync.
 `zone.stratos.sync.listRepoOps` returns the operation log after a known
 revision, boundary-gated to the caller and with current values inlined; when
 the caller reaches the head it receives `caughtUp: true` along with the
-current signed commit. A drained log is not always the head: if a write
+current signed commit (a repository with no root yet has no commit to
+return). A drained log is not always the head: if a write
 lands while the head is being read, the response is `caughtUp: false` with
 no commit — possibly with no ops and the caller's own cursor repeated — so
 callers key off `caughtUp` and poll again rather than treating an unchanged
