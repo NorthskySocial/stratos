@@ -74,8 +74,8 @@ string format, `space-ref`: the three-part form only, with a DID authority
 (never a handle), and a URI naming a record _within_ a space deliberately
 does not qualify. Stratos's parser already enforces those rules.
 The single source of truth for this grammar is
-`stratos-core/src/spaces/domain.ts`, and `stratos-client` re-exports the same
-parser so clients never hand-roll it.
+`stratos-core/src/spaces/domain.ts`. `stratos-client` does not yet re-export
+it, so client code that needs the parser imports it from core.
 
 The space key (`skey`) uses atproto record-key syntax and must be 1 to 512
 UTF-8 bytes. Since domain names already satisfy record-key syntax, every
@@ -208,19 +208,20 @@ per actor, or a Postgres schema per actor, depending on the backend.
 
 The user's PDS holds exactly one thing on the happy path: the
 `zone.stratos.actor.enrollment` record, a public pointer that says "this DID
-has private data at this service." The PDS operator, the relay, and the
-public firehose see that pointer and nothing else. Post content, boundary
-names, and even the number of records in a space are not visible outside the
-Stratos service and its authorized consumers.
+has private data at this service." Post content and record counts are not
+visible outside the Stratos service and its authorized consumers. Space
+membership is the deliberate exception: the enrollment record enumerates the
+spaces the user belongs to, so space names ride the public firehose — treat
+them as public metadata, as the compatibility notes below spell out.
 
 Reads reach the data over four paths, all boundary-gated:
 
-| Path                                      | Consumer            | Auth                          |
-| ----------------------------------------- | ------------------- | ----------------------------- |
-| Record CRUD (`zone.stratos.repo.*`)       | The owning user     | OAuth + DPoP                  |
-| Hydration (`hydrateRecord(s)`)            | AppViews, clients   | Service JWT / user auth       |
-| Spec-shaped read (`space.getRecord`)      | Spec clients, hosts | User auth or space credential |
-| Sync (`sync.subscribeRecords`, pull sync) | Indexers, feedgens  | Service JWT                   |
+| Path                                      | Consumer            | Auth                                                    |
+| ----------------------------------------- | ------------------- | ------------------------------------------------------- |
+| Record CRUD (`com.atproto.repo.*`)        | The owning user     | OAuth + DPoP                                            |
+| Hydration (`hydrateRecord(s)`)            | AppViews, clients   | Service JWT, user auth, space credential, or anonymous  |
+| Spec-shaped read (`space.getRecord`)      | Spec clients, hosts | User auth or space credential                           |
+| Sync (`sync.subscribeRecords`, pull sync) | Indexers, feedgens  | Service JWT (pull sync also accepts a space credential) |
 
 The [feed generator](./feed-generator.md) is the reference consumer of the
 sync and hydration paths: it indexes boundary-scoped posts from the sync
@@ -233,22 +234,26 @@ stream and serves them back to viewers as hydrated timelines.
 The `zone.stratos.space.*` methods are deliberately shaped as mirrors, not
 approximations:
 
-| Stratos NSID                                        | Proposal counterpart            | Status                         |
-| --------------------------------------------------- | ------------------------------- | ------------------------------ |
-| `zone.stratos.space.getRecord`                      | `com.atproto.space.getRecord`   | Spec-shaped mirror             |
-| `zone.stratos.space.getSpaceCredential`             | Space credential issuance       | Spec-shaped mirror             |
-| `zone.stratos.space.feed`                           | Space type declaration          | Standard `type: space` lexicon |
-| `zone.stratos.repo.hydrateRecord(s)`                | none                            | Stratos-specific               |
-| `zone.stratos.sync.subscribeRecords`                | none                            | Stratos-specific               |
-| `zone.stratos.sync.listRepoOps` / `listRecordPaths` | `com.atproto.space.listRepoOps` | Diverged; see caveats below    |
+| Stratos NSID                            | Proposal counterpart                                 | Status                         |
+| --------------------------------------- | ---------------------------------------------------- | ------------------------------ |
+| `zone.stratos.space.getRecord`          | `com.atproto.space.getRecord`                        | Spec-shaped mirror             |
+| `zone.stratos.space.getSpaceCredential` | Space credential issuance                            | Spec-shaped mirror             |
+| `zone.stratos.space.feed`               | Space type declaration                               | Standard `type: space` lexicon |
+| `zone.stratos.repo.hydrateRecord(s)`    | none                                                 | Stratos-specific               |
+| `zone.stratos.sync.subscribeRecords`    | none                                                 | Stratos-specific               |
+| `zone.stratos.sync.listRepoOps`         | `com.atproto.space.listRepoOps`                      | Diverged; see caveats below    |
+| `zone.stratos.sync.listRecordPaths`     | `getRepo` / `listRecords` (`excludeValues`) recovery | Diverged; see caveats below    |
 
-On the wire, the credential format follows the spec's bearer shape exactly:
-the `atproto-space-credential+jwt` type header, `ES256K` or `ES256` signing,
-and the `kid` fallback rule. The proposal permits either `#atproto_space` or
-`#atproto` as the key id; Stratos always emits `#atproto`, so verifiers that
-implement the fallback accept its credentials without a dedicated space key
-in the DID document. The DPoP sender-constraint the alpha added on top of
-that shape is the one wire-level difference, as covered above.
+On the wire, the credential format matches the proposal's original bearer
+shape: the `atproto-space-credential+jwt` type header, `ES256K` or `ES256`
+signing, and the `kid` fallback rule (the proposal permits either
+`#atproto_space` or `#atproto` as the key id; Stratos always emits
+`#atproto`). But the alpha's DPoP sender-constraint is not additive: the
+upstream parser makes `cnf.jkt` mandatory and rejects a token without it
+before the `kid` fallback is ever consulted. An upstream verifier therefore
+**rejects** a Stratos credential outright today. Until the sender-constraint
+gap closes (it is tracked as alignment work, as covered above), the shapes
+are compatible on paper but not interoperable on the wire.
 
 Some caveats worth stating plainly:
 
@@ -256,18 +261,22 @@ Some caveats worth stating plainly:
   were written, upstream added DPoP sender-constraint to credentials
   (`cnf.jkt`, single-use delegation tokens), registered the `space-ref`
   string format, reworked notify registration around service identifiers
-  with an explicit `unregisterNotify`, and added space-scoped blob
-  enumeration (`listBlobs`). The `zone.stratos.space.*` mirrors will track
+  with an explicit `unregisterNotify`, added space-scoped blob
+  enumeration (`listBlobs`), began enforcing account availability across
+  the space read endpoints (`RepoTakendown`, `RepoSuspended`,
+  `RepoDeactivated`), and reshuffled the simplified surface under
+  `com.atproto.simplespace.*` (space policies in `simplespace/defs`,
+  `getSpace` moved under it). The `zone.stratos.space.*` mirrors will track
   these, and the mirrored NSIDs give us room to version that transition
   without breaking deployed clients.
-- Pull sync diverged in the other direction. Stratos's
-  `zone.stratos.sync.listRepoOps` detects truncation explicitly
-  (`OplogTruncated`) and falls back to `listRecordPaths`; the alpha's
-  `com.atproto.space.listRepoOps` instead treats the oplog as a transport
-  optimization with no history guarantee — cursor pagination, the signed
-  commit only on the final page, and recovery through `getRepo` (which
-  gained an index-only `excludeValues` mode). Reconciling the two models is
-  open alignment work.
+- Pull sync now shares the alpha's transport model — cursor pagination
+  with the signed commit only at the head — and diverges on two narrower
+  points. Stratos keeps `OplogTruncated` as a stricter extension: it
+  detects a cursor that predates retained history and says so explicitly,
+  where the alpha offers no truncation signal. And the recovery fallbacks
+  differ: Stratos falls back to `listRecordPaths`, the alpha to `getRepo`
+  (which gained an index-only `excludeValues` mode). Reconciling the
+  recovery paths is open alignment work.
 - Compatibility is mostly outbound. Stratos can consume spec-hosted spaces
   as hosts ship them (the alpha PDS is the first); a generic spec client
   cannot read Stratos data, because
@@ -279,8 +288,10 @@ Some caveats worth stating plainly:
   keeps the format behind an internal seam so a later cutover is one
   controlled change rather than a permanent dual format.
 - `getRecord` is the only spec-shaped read today. Listing records within a
-  space and subscribing to a space use Stratos-specific endpoints until the
-  proposal settles their shapes.
+  space and subscribing to a space use Stratos-specific endpoints, even
+  though upstream has now settled both shapes — `com.atproto.space.listRecords`
+  (with `excludeValues` for full-state recovery) and the notify registration
+  flow described above. Mirroring them is open alignment work.
 - The enrollment record on the user's PDS publishes which spaces the user
   belongs to. The proposal never enumerates membership at protocol level,
   so Stratos is more visible than spec-default on exactly this axis. Treat
@@ -374,20 +385,28 @@ different deployments and coexist.
 Stratos stores each actor's data as a standard atproto repository: IPLD
 blocks, an MST, and a signed commit. Portability falls out of that choice.
 
-A user (or a tool acting for them) exports the full repo as a CAR file:
+A user (or a tool acting for them) exports the full repo as a CAR file.
+The endpoint binds standard user auth, which is DPoP-only — a `Bearer`
+header is rejected, so the request carries the `DPoP` scheme plus a proof
+signed by the session's DPoP key:
 
 ```bash
-curl -H "Authorization: Bearer $ACCESS_TOKEN" \
+curl -H "Authorization: DPoP $ACCESS_TOKEN" \
+  -H "DPoP: $DPOP_PROOF" \
   "https://stratos.example.com/xrpc/zone.stratos.sync.getRepo?did=did:plc:ewvi7nxzyoun6zhxrhs64oiz" \
   -o repo.car
 ```
 
 The CAR contains every record block, every MST node, and the signed commit.
-Importing it into another Stratos instance restores the repo:
+Importing it into another Stratos instance restores the repo. The
+`zone.stratos.repo.importRepo` lexicon defines that call, but the service
+does not register the handler yet, so the request below is the intended
+shape, not a working example:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Authorization: DPoP $ACCESS_TOKEN" \
+  -H "DPoP: $DPOP_PROOF" \
   -H "Content-Type: application/vnd.ipld.car" \
   --data-binary @repo.car \
   "https://stratos-two.example.net/xrpc/zone.stratos.repo.importRepo"
@@ -404,7 +423,11 @@ Services that need to stay current rather than move data use pull sync.
 `zone.stratos.sync.listRepoOps` returns the operation log after a known
 revision, boundary-gated to the caller and with current values inlined; when
 the caller reaches the head it receives `caughtUp: true` along with the
-current signed commit. If the requested revision predates retained history,
+current signed commit. A drained log is not always the head: if a write
+lands while the head is being read, the response is `caughtUp: false` with
+no commit — possibly with no ops and the caller's own cursor repeated — so
+callers key off `caughtUp` and poll again rather than treating an unchanged
+cursor as a stall. If the requested revision predates retained history,
 the endpoint returns `OplogTruncated` and the caller falls back to
 `zone.stratos.sync.listRecordPaths`: enumerate paths and CIDs, diff against
 local state, fetch what is missing. (The alpha's `com.atproto.space.*`
