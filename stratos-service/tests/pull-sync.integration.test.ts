@@ -472,18 +472,18 @@ describe('Pull-sync (listRepoOps / listRecordPaths)', () => {
         { action: 'create', path: 'zone.stratos.feed.post/a', cid: 'cidA1' },
       ])
 
-      await expect(
-        listRepoOps(
-          ctx,
-          {
-            did: repoDid,
-            cursor: encodeSeqCursor(5),
-            limit: 100,
-            excludeValues: false,
-          },
-          callerSet('nerv'),
-        ),
-      ).rejects.toBeInstanceOf(OplogTruncatedError)
+      const promise = listRepoOps(
+        ctx,
+        {
+          did: repoDid,
+          cursor: encodeSeqCursor(5),
+          limit: 100,
+          excludeValues: false,
+        },
+        callerSet('nerv'),
+      )
+      await expect(promise).rejects.toBeInstanceOf(OplogTruncatedError)
+      await expect(promise).rejects.toThrow('cursor is beyond retained history')
     })
   })
 
