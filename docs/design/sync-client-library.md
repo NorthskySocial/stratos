@@ -1,13 +1,17 @@
 # Design Document: Shared Stratos Sync-Client Library
 
-**Audited at commit `ef66546`** (branch `advisor/015-sync-library-design`), 2026-08-08.
-Every claim about current behaviour below carries a `file:line` reference at that
-commit. Paths are relative to the `stratos/` repository root unless prefixed with
-`atproto-stratos/`, whose references are at that repository's `99471e537`.
+**Audited at commit `52da35b`** (branch `advisor/015-sync-library-design`),
+2026-08-08; corrected 2026-08-21. Every claim about current behaviour below
+carries a `file:line` reference at that commit. Paths are relative to the
+`stratos/` repository root unless prefixed with `atproto-stratos/`, whose
+references are at that repository's `99471e537`.
 
 > **Re-stamp before executing.** The sync code is under active repair (plans 008,
-> 011, 016 all landed in the days before this audit). If execution starts more
-> than a few weeks out, re-verify section 2 against the tree.
+> 011, 016 all landed in the days before this audit). `6aefc4d` (cool-down
+> eviction fence) has already landed **above** the audited commit and shifts line
+> references into the indexer's `actor-syncer.ts`, `stratos-sync.ts`,
+> `config.ts`, and `sync-manager.ts`. If execution starts more than a few weeks
+> out, re-verify section 2 against the tree.
 
 ---
 
@@ -46,7 +50,7 @@ hand-copied from the first and the copy says so in its own headers:
 ```
 
 The service side of the stream already treats this as a scheduled event:
-`stratos-service/src/subscription/subscribe-records.ts:426` defers a reader
+`stratos-service/src/subscription/subscribe-records.ts:442` defers a reader
 unification to "plan 015 (sync-library extraction)".
 
 The maintenance hazard is not theoretical. Since the copy was taken, the two
@@ -74,7 +78,7 @@ fix; it hid a total data-plane outage in the copy nobody was reading.
 
 The wire format is common and unchanged. The service emits frames through
 `@atproto/xrpc-server`'s `streamMethod`
-(`stratos-service/src/subscription/subscribe-records.ts:683`), whose `Frame.toBytes()`
+(`stratos-service/src/subscription/subscribe-records.ts:705`), whose `Frame.toBytes()`
 is `Buffer.concat([encode(header), encode(body)])`
 (`node_modules/.pnpm/@atproto+xrpc-server@0.10.15/node_modules/@atproto/xrpc-server/dist/stream/frames.js:12-14`).
 Both consumers receive identical bytes. **There is no wire divergence** — only a
@@ -82,51 +86,58 @@ decode divergence, which is section 2.5.
 
 ### 2.2 Drift: per-actor syncer
 
-| Concern                      | `stratos-indexer/src/sync/actor-syncer.ts`                                                                                                                | `stratos-feedgen/src/subscription/actor-syncer.ts`                                                                             |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Reconnect ceiling            | Cap `reconnectMaxAttempts` (default 10, `stratos-sync.ts:51`), then `ACTOR_SYNC_COOLDOWN`, counter reset, 5-min cool-down, resume (`:213-228`) — plan 016 | Unbounded retry, no cap (`:278-289`) — deliberate availability posture                                                         |
-| Backoff curve                | `base * 2^(n-1)`, capped, **additive one-sided** jitter `random() * jitterMs` (`:230-236`); defaults 1 s / 60 s / 500 ms (`stratos-sync.ts:48-50`)        | `base * 2^(n-1)`, capped, **symmetric ±ratio** jitter (`:281-284`); defaults 5 s / 60 s / 0.2 (`:67-69`)                       |
-| Backoff reset                | Stability window, `DEFAULT_STABILITY_RESET_MS = 30_000` (`:10`, armed `:250-257`)                                                                         | Stability window, `DEFAULT_STABILITY_RESET_MS = 30_000` (`:71`, armed `:262-269`), configurable via `stabilityResetMs` (`:50`) |
-| Queue shape                  | `ActorQueue { pending, draining }` (`:13-16`); cap from `maxActorQueueSize` (default 1000, `stratos-sync.ts:42`)                                          | Plain array + `draining` flag (`:95-96`); `DEFAULT_MAX_QUEUE_SIZE = 1_000` (`:70`)                                             |
-| Queue overflow               | Plain `Error` (no code), `closeAndReconnect()` — closes socket, **keeps `pending`** (`:277-283`, `:298-304`)                                              | `ACTOR_SYNC_OVERFLOW`, `failConnection()` — **clears the queue**, detaches, reconnects (`:322-331`, `:297-301`)                |
-| Drain admission control      | Global gate: `canStartSync()` + `drainDelayMs` sleep loop (`:317-322`); `onSyncStarted`/`onSyncFinished` accounting                                       | None — drains as fast as the applier allows (`:338-350`); pacing lives in the pool's connect gate                              |
-| Superseded-socket guard      | **Absent.** `onmessage`/`onclose` do not identity-check the socket (`:171-174`, `:194-201`)                                                               | Present in both (`:220`, `:248`) — plan 008                                                                                    |
-| Frame decode                 | Single-value `decodeFirst(data) as unknown as XrpcFrame`, reads `.t` off the tuple (`:446-456`) — **broken**, see 2.5                                     | Two-value destructure of header then body (`:382-385`, `:399`) — correct                                                       |
-| Commit body shape validation | None — `frame as unknown as StratosSyncCommit` (`:450`)                                                                                                   | `isCommitFrameBody` guards `seq`/`time`/`ops` before apply (`:410-418`, `:474-482`)                                            |
-| Decode-failure policy        | `return null`, frame silently ignored (`:453-455`); a thrown decode also swallowed at `:352-354`                                                          | Continue, but reported under `ACTOR_SYNC_FRAME_UNDECODABLE`, with the rationale documented (`:352-377`, `:386-418`)            |
-| Apply-failure policy         | **Swallow and continue** (`:346-355`); a later success writes a cursor past the failed seq (`:401-418`) — see 2.6                                         | `failConnection()`: clear queue, detach, reconnect from the durable cursor, retry the seq forever (`:429-432`)                 |
-| Apply-failure alarm          | None                                                                                                                                                      | `APPLY_FAILURE_ALARM_THRESHOLD = 3` (`:80`) → one `ACTOR_SYNC_STALLED` per stall episode (`:441-463`)                          |
-| Cursor durability            | In-memory `CursorManager`, periodic flush on a timer (`storage/cursor-manager.ts:26-30`, `:57-60`, `:100-110`)                                            | Written inside `applyCommit` in the same store call sequence (`subscription/indexer.ts:61`), read back on connect (`:186`)     |
-| Upstream auth                | `syncToken` as a **query parameter** (`:156-160`), no `Authorization` header (`:162`) — rejected today, see 2.5                                           | Freshly minted service-auth JWT as `Authorization: Bearer` on the upgrade (`:202-204`)                                         |
-| Consumer coupling            | Kysely + the AppView schema baked in (`:2`, `:90`, `:493-565`)                                                                                            | `SubscriptionIndexer` + `Pick<FeedgenStore,'getCursor'>` ports (`:53-59`)                                                      |
-| Fork-only extras             | Referenced-DID discovery `onReferencedActor`, `onHandleNeeded` (`:380-386`, `:463-484`)                                                                   | `setConnectGate` for pool-level connect pacing (`:145-147`, `:171-179`); `getLastConnectUrl` test seam (`:137-139`)            |
-| WebSocket implementation     | Global `WebSocket` (`:162`), untyped/uninjectable                                                                                                         | Injectable `wsCtor`, defaults to `ws` (`:104`, `:120`) — testable without a network                                            |
+> **Effective-value note (correction).** The indexer columns in 2.2 and 2.4
+> originally cited `DEFAULT_ACTOR_SYNC_OPTIONS` (`stratos-sync.ts:40-52`). Those
+> module defaults are dead configuration: `sync-manager.ts:87-99` passes all
+> eleven fields from `config.worker.*`, so the env schema in
+> `stratos-indexer/src/config.ts` decides every value. Rows below cite the
+> effective value first and name the dead default where the two disagree.
+
+| Concern                      | `stratos-indexer/src/sync/actor-syncer.ts`                                                                                                                                                             | `stratos-feedgen/src/subscription/actor-syncer.ts`                                                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reconnect ceiling            | Cap `reconnectMaxAttempts` (effective 20, `config.ts:69-73`; dead module default 10, `stratos-sync.ts:51`), then `ACTOR_SYNC_COOLDOWN`, counter reset, 5-min cool-down, resume (`:213-228`) — plan 016 | Unbounded retry, no cap (`:278-289`) — deliberate availability posture                                                                                                                              |
+| Backoff curve                | `base * 2^(n-1)`, capped, **additive one-sided** jitter `random() * jitterMs` (`:230-236`); effective 1 s / 60 s / 1 000 ms (`config.ts:54-68`; dead defaults at `stratos-sync.ts:48-50`)              | `base * 2^(n-1)`, capped, **symmetric ±ratio** jitter (`:281-284`); defaults 5 s / 60 s / 0.2 (`:67-69`)                                                                                            |
+| Backoff reset                | Stability window, `DEFAULT_STABILITY_RESET_MS = 30_000` (`:10`, armed `:250-257`)                                                                                                                      | Stability window, `DEFAULT_STABILITY_RESET_MS = 30_000` (`:71`, armed `:262-269`), configurable via `stabilityResetMs` (`:50`)                                                                      |
+| Queue shape                  | `ActorQueue { pending, draining }` (`:13-16`); cap from `maxActorQueueSize` (effective **10**, `ACTOR_SYNC_QUEUE_PER_ACTOR`, `config.ts:36`; dead default 1000, `stratos-sync.ts:42`)                  | Plain array + `draining` flag (`:95-96`); `DEFAULT_MAX_QUEUE_SIZE = 1_000` (`:70`)                                                                                                                  |
+| Queue overflow               | Plain `Error` (no code), `closeAndReconnect()` — closes socket, **keeps `pending`** (`:277-283`, `:298-304`)                                                                                           | `ACTOR_SYNC_OVERFLOW`, `failConnection()` — **clears the queue**, detaches, reconnects (`:322-331`, `:297-301`)                                                                                     |
+| Drain admission control      | Global gate: `canStartSync()` + `drainDelayMs` sleep loop (`:317-322`); `onSyncStarted`/`onSyncFinished` accounting                                                                                    | None — drains as fast as the applier allows (`:338-350`); pacing lives in the pool's connect gate                                                                                                   |
+| Superseded-socket guard      | **Absent.** `onmessage`/`onclose` do not identity-check the socket (`:171-174`, `:194-201`)                                                                                                            | Present in both (`:220`, `:248`) — plan 008                                                                                                                                                         |
+| Frame decode                 | Single-value `decodeFirst(data) as unknown as XrpcFrame`, reads `.t` off the tuple (`:446-456`) — **broken**, see 2.5                                                                                  | Two-value destructure of header then body (`:382-385`, `:399`) — correct for `#commit` frames; `op` is never inspected, so an `ErrorFrame` is discarded in silence (`:396`; see invariant 5's note) |
+| Commit body shape validation | None — `frame as unknown as StratosSyncCommit` (`:450`)                                                                                                                                                | `isCommitFrameBody` guards `seq`/`time`/`ops` before apply (`:410-418`, `:474-482`)                                                                                                                 |
+| Decode-failure policy        | `return null`, frame silently ignored (`:453-455`); a thrown decode also swallowed at `:352-354`                                                                                                       | Continue, but reported under `ACTOR_SYNC_FRAME_UNDECODABLE`, with the rationale documented (`:352-377`, `:386-418`)                                                                                 |
+| Apply-failure policy         | **Swallow and continue** (`:346-355`); a later success writes a cursor past the failed seq (`:401-418`) — see 2.6                                                                                      | `failConnection()`: clear queue, detach, reconnect from the durable cursor, retry the seq forever (`:429-432`)                                                                                      |
+| Apply-failure alarm          | None                                                                                                                                                                                                   | `APPLY_FAILURE_ALARM_THRESHOLD = 3` (`:80`) → one `ACTOR_SYNC_STALLED` per stall episode (`:441-463`)                                                                                               |
+| Cursor durability            | In-memory `CursorManager`, periodic flush on a timer (`storage/cursor-manager.ts:26-30`, `:57-60`, `:100-110`)                                                                                         | Written inside `applyCommit` in the same store call sequence (`subscription/indexer.ts:61`), read back on connect (`stratos-feedgen/src/subscription/actor-syncer.ts:186`)                          |
+| Upstream auth                | `syncToken` as a **query parameter** (`:156-160`), no `Authorization` header (`:162`) — rejected today, see 2.5                                                                                        | Freshly minted service-auth JWT as `Authorization: Bearer` on the upgrade (`:202-204`)                                                                                                              |
+| Consumer coupling            | Kysely + the AppView schema baked in (`:2`, `:90`, `:493-565`)                                                                                                                                         | `SubscriptionIndexer` + `Pick<FeedgenStore,'getCursor'>` ports (`:53-59`)                                                                                                                           |
+| Fork-only extras             | Referenced-DID discovery `onReferencedActor`, `onHandleNeeded` (`:380-386`, `:463-484`)                                                                                                                | `setConnectGate` for pool-level connect pacing (`:145-147`, `:171-179`); `getLastConnectUrl` test seam (`:137-139`)                                                                                 |
+| WebSocket implementation     | Global `WebSocket` (`:162`), untyped/uninjectable                                                                                                                                                      | Injectable `wsCtor`, defaults to `ws` (`:104`, `:120`) — testable without a network                                                                                                                 |
 
 ### 2.3 Drift: service-level enrollment stream
 
-| Concern                 | `stratos-indexer/src/sync/stratos-sync.ts`                                                                                  | `stratos-feedgen/src/subscription/service-stream.ts`                                                            |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Message ordering        | Serialized queue + drain, generation-swapped on reset (`:170-217`) — plan 016                                               | Serialized queue + drain (`:284-313`) — plan 008                                                                |
-| Queue cap / overflow    | `SERVICE_STREAM_MAX_QUEUE = 1_000` (`:57`); overflow → `SERVICE_STREAM_OVERFLOW`, `resetQueue()`, `ws.close()` (`:172-182`) | `DEFAULT_MAX_QUEUE_SIZE = 1_000` (`:78`); overflow → `SERVICE_STREAM_OVERFLOW`, `failConnection()` (`:285-294`) |
-| Backoff curve           | `1000 * 2^attempt`, cap 30 s, **no jitter** (`:54-55`, `:226-229`) — first retry at 2 s                                     | `5000 * 2^(attempt-1)`, cap 60 s, ±20 % jitter (`:74-76`, `:234-245`) — first retry at 5 s                      |
-| Backoff reset           | 30 s stability window (`:56`, `:242-249`)                                                                                   | 30 s stability window, configurable (`:77`, `:218-225`)                                                         |
-| Superseded-socket guard | **Absent** (`:131-133`, `:152-159`)                                                                                         | Present (`:178`, `:204`)                                                                                        |
-| Callbacks               | `onEnroll` / `onUnenroll`, **synchronous** (`:35-38`, `:280-283`)                                                           | `onEnroll` / `onUnenroll` / `onBoundariesChanged?`, all **awaited** (`:7-21`, `:326-344`)                       |
-| `boundaries` action     | Folded into `onEnroll` with the after-set (`:276-280`)                                                                      | Routed to `onBoundariesChanged` so a consumer can diff and purge (`:336-343`)                                   |
-| Frame decode            | Single-value `decodeFirst(data)`, reads `.t` off the tuple (`:269`) — **broken**, see 2.5                                   | Two-value destructure (`:319-324`) — correct                                                                    |
-| Upstream auth           | `syncToken` query parameter (`:120-124`)                                                                                    | Minted service-auth JWT `Authorization: Bearer` (`:161-163`)                                                    |
+| Concern                 | `stratos-indexer/src/sync/stratos-sync.ts`                                                                                  | `stratos-feedgen/src/subscription/service-stream.ts`                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Message ordering        | Serialized queue + drain, generation-swapped on reset (`:170-217`) — plan 016                                               | Serialized queue + drain (`:284-313`) — plan 008                                                                  |
+| Queue cap / overflow    | `SERVICE_STREAM_MAX_QUEUE = 1_000` (`:57`); overflow → `SERVICE_STREAM_OVERFLOW`, `resetQueue()`, `ws.close()` (`:172-182`) | `DEFAULT_MAX_QUEUE_SIZE = 1_000` (`:78`); overflow → `SERVICE_STREAM_OVERFLOW`, `failConnection()` (`:285-294`)   |
+| Backoff curve           | `1000 * 2^attempt`, cap 30 s, **no jitter** (`:54-55`, `:226-229`) — first retry at 2 s                                     | `5000 * 2^(attempt-1)`, cap 60 s, ±20 % jitter (`:74-76`, `:234-245`) — first retry at 5 s                        |
+| Backoff reset           | 30 s stability window (`:56`, `:242-249`)                                                                                   | 30 s stability window, configurable (`:77`, `:218-225`)                                                           |
+| Superseded-socket guard | **Absent** (`:131-133`, `:152-159`)                                                                                         | Present (`:178`, `:204`)                                                                                          |
+| Callbacks               | `onEnroll` / `onUnenroll`, **synchronous** (`:35-38`, `:280-283`)                                                           | `onEnroll` / `onUnenroll` / `onBoundariesChanged?`, all **awaited** (`:7-21`, `:326-344`)                         |
+| `boundaries` action     | Folded into `onEnroll` with the after-set (`:276-280`)                                                                      | Routed to `onBoundariesChanged` so a consumer can diff and purge (`:336-343`)                                     |
+| Frame decode            | Single-value `decodeFirst(data)`, reads `.t` off the tuple (`:269`) — **broken**, see 2.5                                   | Two-value destructure (`:319-324`) — correct, though `op` is never inspected here either (see invariant 5's note) |
+| Upstream auth           | `syncToken` query parameter (`:120-124`)                                                                                    | Minted service-auth JWT `Authorization: Bearer` (`:161-163`)                                                      |
 
 ### 2.4 Drift: pool and dependencies
 
-| Concern        | `stratos-indexer` `StratosActorSync` (`stratos-sync.ts:296-556`)                                                                 | `stratos-feedgen` `ActorPool` (`actor-pool.ts`)                                        |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Connection cap | `maxConnections` 500 (`:45`), FIFO `waitingActors`, timer-paced promotion (`:462-521`)                                           | `DEFAULT_MAX_CONNECTIONS = 500` (`:46`), FIFO `waiting` + `requested` set (`:113-123`) |
-| Connect pacing | `connectTimer` promoting one actor every `connectDelayMs` (`:466-470`)                                                           | Per-syncer async `connectGate` acquiring a spaced slot (`:247-254`)                    |
-| Idle eviction  | Gated on waiters (`:528`), 30 min (`:47`), evicts ≤10 % of cap per sweep (`:543-547`)                                            | Gated on waiters (`:167`), 15 min (`:48`), evicts ≤ waiter count (`:179-190`)          |
-| Seeding        | Actors arrive via PDS firehose / enrollment callbacks                                                                            | `seedFromStore(configuredBoundaries)` from persisted enrollments (`:199-208`)          |
-| bsky wiring    | `IndexingService`, `BackgroundQueue`, `indexHandle` scheduling, known-DID TTL cache (`sync-manager.ts:9,12,100-107`; `:297-303`) | None                                                                                   |
-| Observability  | `console.log` stats timer (`:332-345`)                                                                                           | `getStats()` returning counts (`:149-155`); logging left to the caller                 |
-| Package deps   | `kysely`, `@atproto/bsky` (`stratos-indexer/package.json`)                                                                       | Neither (`stratos-feedgen/package.json`)                                               |
+| Concern        | `stratos-indexer` `StratosActorSync` (`stratos-sync.ts:296-556`)                                                                          | `stratos-feedgen` `ActorPool` (`actor-pool.ts`)                                        |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Connection cap | `maxConnections` effective **20** (`config.ts:43`; dead default 500, `:45`), FIFO `waitingActors`, timer-paced promotion (`:462-521`)     | `DEFAULT_MAX_CONNECTIONS = 500` (`:46`), FIFO `waiting` + `requested` set (`:113-123`) |
+| Connect pacing | `connectTimer` promoting one actor every `connectDelayMs` (`:466-470`)                                                                    | Per-syncer async `connectGate` acquiring a spaced slot (`:247-254`)                    |
+| Idle eviction  | Gated on waiters (`:528`), effective **60 s** (`config.ts:49-53`; dead default 30 min, `:47`), evicts ≤10 % of cap per sweep (`:543-547`) | Gated on waiters (`:167`), 15 min (`:48`), evicts ≤ waiter count (`:179-190`)          |
+| Seeding        | Actors arrive via PDS firehose / enrollment callbacks                                                                                     | `seedFromStore(configuredBoundaries)` from persisted enrollments (`:199-208`)          |
+| bsky wiring    | `IndexingService`, `BackgroundQueue`, `indexHandle` scheduling, known-DID TTL cache (`sync-manager.ts:9,12,100-107`; `:297-303`)          | None                                                                                   |
+| Observability  | `console.log` stats timer (`:332-345`)                                                                                                    | `getStats()` returning counts (`:149-155`); logging left to the caller                 |
+| Package deps   | `kysely`, `@atproto/bsky` (`stratos-indexer/package.json`)                                                                                | Neither (`stratos-feedgen/package.json`)                                               |
 
 ### 2.5 Finding: the indexer's Stratos sync path does not run
 
@@ -201,7 +212,7 @@ migration at `…add-stratos-tables.ts:58,67`) and read by the AppView
 (`atproto-stratos/packages/bsky/src/stratos/store.ts:182,237`) — so a revival's
 writes are not confined to tables only the indexer touches.
 
-**Consequences at `ef66546`:** zero Stratos posts indexed by the standalone
+**Consequences at `52da35b`:** zero Stratos posts indexed by the standalone
 indexer; `updateStratosCursor` is called from exactly two places
 (`actor-syncer.ts:417` inside the unreachable `processCommit`, and
 `stratos-sync.ts:399` when an actor is added with an explicit cursor), so the
@@ -238,7 +249,7 @@ these posts (per (c)) — so verbatim text rendering to end users appears
 blocked. Timeline and author feeds join `post` via `feed_item`
 (`atproto-stratos/packages/bsky/src/data-plane/server/routes/feeds.ts:16`),
 which the Stratos path also never writes, so feeds are not the reachable
-surface — search is. And `search.ts:37` carries a
+surface — search is. And `search.ts:36` carries a
 `@TODO post search endpoint still falls back to search service`, so whether
 this dataplane implementation is the live production search path is
 deployment-dependent and was not established here. The crucial point for
@@ -266,14 +277,23 @@ Answers to Step 1b's four facts:
 1. **Cursor advance on skip: yes** (`:346-355` + `:417`, above). The cursor is
    also only flushed periodically (`storage/cursor-manager.ts:26-30`, `:100-110`),
    which widens replay on crash but does not change the skip.
-2. **Heal path: no.** `stratos-indexer/src/backfill.ts` exists but cannot repair a
-   Stratos-side hole. It pages `com.atproto.repo.listRecords` against
-   `opts.repoProvider` (`:152-169`) — the user's **PDS**, which holds stubs, not
-   the private Stratos records. It is also only ever invoked for referenced-actor
-   discovery and startup seeding, and the options object built in
-   `sync-manager.ts:64-71` sets `repoProvider: ''` with the comment "This will be
-   set by the caller if needed". There is no `zone.stratos.sync.getRepo` or
-   resync call anywhere in `stratos-indexer/src`.
+2. **Heal path: server-side yes, client-side no.** The service ships a
+   pull-sync surface: `zone.stratos.sync.listRepoOps` serves a signed-commit
+   oplog, and its lexicon documents the fallback contract — when `since`
+   predates retained history, `OplogTruncated` is returned "so the caller falls
+   back to full-state recovery (listRecordPaths)"
+   (`lexicons/zone/stratos/sync/listRepoOps.json:7`; handlers in
+   `stratos-service/src/features/pull-sync/handler.ts`, `oplog.ts`,
+   `recovery.ts`). No consumer calls either endpoint. On the client side,
+   `stratos-indexer/src/backfill.ts` cannot repair a Stratos-side hole: it pages
+   `com.atproto.repo.listRecords` against `opts.repoProvider` (`:152-169`) — the
+   user's **PDS**, which holds stubs, not the private Stratos records — it is
+   only ever invoked for referenced-actor discovery and startup seeding, and the
+   options object built in `sync-manager.ts:64-71` sets `repoProvider: ''` with
+   the comment "This will be set by the caller if needed". There is no
+   pull-sync, `zone.stratos.sync.getRepo`, or resync call anywhere in
+   `stratos-indexer/src`. A heal path exists; what is missing is a client for
+   it — and the shared library is the obvious home for that client.
 3. **Indexed row as source of truth: yes, for the AppView's design** — the Stratos
    feed endpoints read `stratos_post`/`stratos_post_boundary` directly with no
    upstream re-hydration (`atproto-stratos/packages/bsky/src/stratos/store.ts:77-135`).
@@ -285,8 +305,9 @@ Answers to Step 1b's four facts:
 
 **One-sentence finding:** an `applyCommit` failure in the indexer would lose the
 failed commit permanently — the cursor advances past it on the next success and
-no backfill or resync path can recover it — but the code that would do so is
-unreachable at `ef66546` because the stream neither authenticates nor decodes.
+no backfill or resync **client** exists to recover it (the service-side
+pull-sync surface has no consumer) — but the code that would do so is
+unreachable at `52da35b` because the stream neither authenticates nor decodes.
 
 ### 2.7 Third-copy search
 
@@ -382,7 +403,7 @@ Rejected alternative — `stratos-core/src/sync/`:
 Dependencies of the new package: `@atcute/cbor`,
 `@northskysocial/stratos-core` (for `StratosError` only), and `ws` **as a
 runtime dependency**. Note that `ws` is currently only a _devDependency_ of the
-feedgen (`stratos-feedgen/package.json:45`) while being imported by shipped code
+feedgen (`stratos-feedgen/package.json:46`) while being imported by shipped code
 (`src/subscription/actor-syncer.ts:5`, `service-stream.ts:5`) that `pnpm start`
 runs unbundled from `dist/`; the extraction should declare it properly rather
 than inherit the mistake.
@@ -424,24 +445,26 @@ the feedgen's copy is the better seed.
 
 Defaults below are the values a unified library should ship. Where the two forks
 disagree, the recommended default and the loser are both named, because adopting
-one silently changes the other service's behaviour (section 6).
+one silently changes the other service's behaviour (section 6). Indexer values
+are the **effective** env-schema values (see the section 2.2 note); the dead
+module default is named where the two disagree.
 
-| Knob                          | Type                      | Recommended default | Indexer today                                                                                                 | Feedgen today                                     | Note                                                                          |
-| ----------------------------- | ------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `reconnect.maxAttempts`       | `number \| 'unbounded'`   | `'unbounded'`       | 10 (`stratos-sync.ts:51`)                                                                                     | unbounded (`actor-syncer.ts:278-289`)             | Indexer keeps `10` + cool-down by config; see 4.4 for why not a give-up       |
-| `reconnect.cooldownMs`        | `number`                  | `300_000`           | `RECONNECT_COOLDOWN_MS` (`actor-syncer.ts:11`)                                                                | n/a (never reaches a cap)                         | Only consulted when `maxAttempts` is numeric                                  |
-| `reconnect.baseDelayMs`       | `number`                  | `5_000`             | 1 000 (`stratos-sync.ts:48`)                                                                                  | 5 000 (`actor-syncer.ts:67`)                      | Service stream: 1 000 vs 5 000 (`stratos-sync.ts:54`, `service-stream.ts:74`) |
-| `reconnect.maxDelayMs`        | `number`                  | `60_000`            | 60 000 actor / 30 000 service (`:49`, `:55`)                                                                  | 60 000 both (`:68`, `:75`)                        |                                                                               |
-| `reconnect.jitter`            | `{ ratio: number }`       | `{ ratio: 0.2 }`    | additive `random()*500 ms` actor, **none** service (`actor-syncer.ts:235`, `stratos-sync.ts:226-229`)         | symmetric ±20 % (`:283`)                          | Symmetric ratio is the only shape that de-synchronises a thundering herd      |
-| `reconnect.stabilityResetMs`  | `number`                  | `30_000`            | 30 000 (`actor-syncer.ts:10`, `stratos-sync.ts:56`)                                                           | 30 000 (`:71`, `:77`)                             | Agreed; but see the backlog-burst risk in section 6                           |
-| `actorQueue.maxSize`          | `number`                  | `1_000`             | 1 000 (`stratos-sync.ts:42`)                                                                                  | 1 000 (`actor-syncer.ts:70`)                      | Agreed                                                                        |
-| `serviceQueue.maxSize`        | `number`                  | `1_000`             | `SERVICE_STREAM_MAX_QUEUE` (`stratos-sync.ts:57`)                                                             | `DEFAULT_MAX_QUEUE_SIZE` (`service-stream.ts:78`) | Agreed                                                                        |
-| `queue.overflowPolicy`        | `'drop-connection'`       | `'drop-connection'` | actor: close-but-keep-pending (`actor-syncer.ts:298-304`); service: clear + close (`stratos-sync.ts:172-182`) | clear + detach + reconnect (`:322-331`)           | See the backpressure open question in section 6                               |
-| `applyFailure.alarmThreshold` | `number`                  | `3`                 | none                                                                                                          | `APPLY_FAILURE_ALARM_THRESHOLD` (`:80`)           | Gates an **alarm**, never a skip                                              |
-| `drain.admission`             | `(() => boolean) \| null` | `null`              | `canStartSync` + `drainDelayMs` (`actor-syncer.ts:317-322`)                                                   | none                                              | Indexer-only global concurrency gate; preserved as an optional hook           |
-| `pool.maxConnections`         | `number`                  | `500`               | 500 (`stratos-sync.ts:45`)                                                                                    | 500 (`actor-pool.ts:46`)                          | Agreed                                                                        |
-| `pool.connectDelayMs`         | `number`                  | `10`                | 10 (`stratos-sync.ts:46`)                                                                                     | 10 (`actor-pool.ts:47`)                           | Agreed                                                                        |
-| `pool.idleEvictionMs`         | `number` (`0` disables)   | `900_000`           | 1 800 000 (`stratos-sync.ts:47`)                                                                              | 900 000 (`actor-pool.ts:48`)                      | Both gate eviction on waiters existing                                        |
+| Knob                          | Type                     | Recommended default | Indexer today                                                                                                                       | Feedgen today                                     | Note                                                                          |
+| ----------------------------- | ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `reconnect.maxAttempts`       | `number \| 'unbounded'`  | `'unbounded'`       | 20 (`config.ts:69-73`; dead default 10, `stratos-sync.ts:51`)                                                                       | unbounded (`actor-syncer.ts:278-289`)             | Indexer keeps `20` + cool-down by config; see 4.4 for why not a give-up       |
+| `reconnect.cooldownMs`        | `number`                 | `300_000`           | 300 000 — made configurable by `6aefc4d` as `ACTOR_SYNC_RECONNECT_COOLDOWN_MS` (was `RECONNECT_COOLDOWN_MS`, `actor-syncer.ts:11`)  | n/a (never reaches a cap)                         | Only consulted when `maxAttempts` is numeric                                  |
+| `reconnect.baseDelayMs`       | `number`                 | `5_000`             | 1 000 (`config.ts:54-58`; dead default agrees, `stratos-sync.ts:48`)                                                                | 5 000 (`actor-syncer.ts:67`)                      | Service stream: 1 000 vs 5 000 (`stratos-sync.ts:54`, `service-stream.ts:74`) |
+| `reconnect.maxDelayMs`        | `number`                 | `60_000`            | 60 000 actor (`config.ts:59-63`) / 30 000 service (`stratos-sync.ts:55`)                                                            | 60 000 both (`:68`, `:75`)                        |                                                                               |
+| `reconnect.jitter`            | `{ ratio: number }`      | `{ ratio: 0.2 }`    | additive `random()*1000 ms` actor (`config.ts:64-68`; shape at `actor-syncer.ts:235`), **none** service (`stratos-sync.ts:226-229`) | symmetric ±20 % (`:283`)                          | Symmetric ratio is the only shape that de-synchronises a thundering herd      |
+| `reconnect.stabilityResetMs`  | `number`                 | `30_000`            | 30 000 (`actor-syncer.ts:10`, `stratos-sync.ts:56`)                                                                                 | 30 000 (`:71`, `:77`)                             | Agreed; but see the backlog-burst risk in section 6                           |
+| `actorQueue.maxSize`          | `number`                 | `1_000`             | **10** (`config.ts:36`; dead default 1 000, `stratos-sync.ts:42`)                                                                   | 1 000 (`actor-syncer.ts:70`)                      | Feedgen 1 000 vs indexer 10 — see R2                                          |
+| `serviceQueue.maxSize`        | `number`                 | `1_000`             | `SERVICE_STREAM_MAX_QUEUE` (`stratos-sync.ts:57`)                                                                                   | `DEFAULT_MAX_QUEUE_SIZE` (`service-stream.ts:78`) | Agreed                                                                        |
+| `queue.overflowPolicy`        | `'drop-connection'`      | `'drop-connection'` | actor: close-but-keep-pending (`actor-syncer.ts:298-304`); service: clear + close (`stratos-sync.ts:172-182`)                       | clear + detach + reconnect (`:322-331`)           | See the backpressure open question in section 6                               |
+| `applyFailure.alarmThreshold` | `number`                 | `3`                 | none                                                                                                                                | `APPLY_FAILURE_ALARM_THRESHOLD` (`:80`)           | Gates an **alarm**, never a skip                                              |
+| `drain.admission`             | `DrainAdmission \| null` | `null`              | `canStartSync` + `drainDelayMs` (`actor-syncer.ts:317-322`; effective delay 5 ms, `config.ts:42`)                                   | none                                              | An interface, not a predicate — see below                                     |
+| `pool.maxConnections`         | `number`                 | `500`               | **20** (`config.ts:43`; dead default 500, `stratos-sync.ts:45`)                                                                     | 500 (`actor-pool.ts:46`)                          | Feedgen 500 vs indexer 20 — see R1                                            |
+| `pool.connectDelayMs`         | `number`                 | `10`                | **200** (`config.ts:44-48`; dead default 10, `stratos-sync.ts:46`)                                                                  | 10 (`actor-pool.ts:47`)                           | Feedgen 10 ms vs indexer 200 ms — see R1                                      |
+| `pool.idleEvictionMs`         | `number` (`0` disables)  | `900_000`           | **60 000** (`config.ts:49-53`; dead default 1 800 000, `stratos-sync.ts:47`)                                                        | 900 000 (`actor-pool.ts:48`)                      | Both gate eviction on waiters existing                                        |
 
 Error codes stay as named, stable strings — `ACTOR_SYNC_OVERFLOW`,
 `ACTOR_SYNC_APPLY_FAILED`, `ACTOR_SYNC_STALLED`, `ACTOR_SYNC_FRAME_UNDECODABLE`,
@@ -449,6 +472,25 @@ Error codes stay as named, stable strings — `ACTOR_SYNC_OVERFLOW`,
 The indexer's uncoded plain `Error` for queue overflow
 (`actor-syncer.ts:278-280`) is the only one that changes, gaining
 `ACTOR_SYNC_OVERFLOW`.
+
+**`drain.admission` is an interface, not a predicate.** The indexer's
+`canStartSync` is not a stateless function: it is a closure over live counters
+(`stratos-sync.ts:508-510`) that stay current only because the syncer fires
+`onGlobalPendingChange` on every enqueue and dequeue (`actor-syncer.ts:286`,
+`:326`), `onSyncStarted` when a drain begins (`:328`), and `onSyncFinished` when
+it ends (`:332`). A bare `() => boolean` cannot carry that contract. The library
+should define:
+
+```ts
+interface DrainAdmission {
+  canStart(): boolean
+  onStarted(): void
+  onFinished(): void
+  onPendingChange(delta: number): void
+}
+```
+
+with `null` meaning no gate — the feedgen's posture today.
 
 ### 4.4 Non-negotiable invariants
 
@@ -461,8 +503,9 @@ turns them off.
    today only in the feedgen (`actor-syncer.ts:297-301`); the indexer's
    `closeAndReconnect` deliberately leaves `pending` intact (`:298-304`).
 2. **A failed sequence is retried indefinitely — no skip, no cap.** Neither
-   consumer has a repo-resync path (section 2.6, fact 2), so a skipped commit is
-   unrecoverable, while a stalled actor is observable via
+   consumer ships a resync client today (section 2.6, fact 2 — the service's
+   pull-sync surface has no consumer), so a skipped commit is unrecoverable
+   until such a client exists, while a stalled actor is observable via
    `ACTOR_SYNC_STALLED` and self-heals when the fault clears.
    **Reconciling this with the indexer's `reconnectMaxAttempts`:** they are not
    in conflict once separated. The apply-failure retry is unbounded, always. The
@@ -487,6 +530,15 @@ turns them off.
    be rejected before `applyCommit` (`:410-418`, `:474-482`), or a non-array
    `ops` is misread as a transient store fault and a non-numeric `seq` reaches
    the cursor.
+   One boundary case is **not** a decode failure: an `ErrorFrame`. On a handler
+   throw the service emits a frame with `op: -1`
+   (`@atproto/xrpc-server@0.10.15/dist/server.js:375`), and
+   `subscribe-records.ts` throws `AuthRequiredError` on four paths (`:344`,
+   `:349`, `:356`, `:361`). The frame decodes cleanly, but neither consumer
+   inspects `op` — the feedgen checks only `header['t'] !== '#commit'`
+   (`stratos-feedgen/src/subscription/actor-syncer.ts:396`;
+   `service-stream.ts:319-324`) — so an auth rejection is discarded in silence.
+   The library's decoder must surface `op: -1` as a coded error.
 
 ### 4.5 What the library owns, and what stays consumer-side
 
@@ -494,9 +546,10 @@ turns them off.
 (enrollment events), the frame decoder, and `ActorPool`.
 
 Including the pool is a judgement call, so here is the justification against
-section 2.4: the two pools agree on everything structural — connection cap
-(500/500), FIFO waiting list, connect-delay pacing (10 ms/10 ms), and
-waiter-gated idle eviction. They differ only in what surrounds them: bsky's
+section 2.4: the two pools agree on everything structural — a connection cap, a
+FIFO waiting list, connect-delay pacing, and waiter-gated idle eviction — though
+not on the effective numbers (20 vs 500 connections, 200 ms vs 10 ms pacing;
+section 2.4). They differ only in what surrounds them: bsky's
 `IndexingService`/`BackgroundQueue`/known-DID cache, and where seeding comes
 from. Those are composition, not pool mechanics. So the library ships the pool
 with a syncer factory and an eviction policy, and each service keeps:
@@ -559,8 +612,9 @@ port. Whichever plan owns the revival should adopt the library rather than
 repair the fork, since repairing decode + auth + guards + apply policy inside a
 doomed file is throwaway work. Concretely: a `CursorStore` adapter over
 `CursorManager`, a commit applier wrapping `batchIndexStratosRecords`, the
-existing enrollment callbacks, `reconnect.maxAttempts: 10` +
-`reconnect.cooldownMs: 300_000` to preserve plan 016's behaviour, and the
+existing enrollment callbacks, `reconnect.maxAttempts: 20` +
+`reconnect.cooldownMs: 300_000` to preserve the effective plan-016 behaviour
+(`config.ts:69-73`), and the
 `drain.admission` hook wired to `canStartSync`. The `StratosActorSync` bsky
 wiring moves to a consumer-side composition around the library's pool.
 _Verify:_ `pnpm --filter @northskysocial/stratos-indexer test` green; the revival
@@ -584,11 +638,17 @@ unused after step 2 indefinitely without affecting either service.
 the two forks disagree is a behavioural change for one of them. Explicitly:
 
 - Indexer actor reconnect base delay 1 s → 5 s, and its one-sided additive
-  jitter (`actor-syncer.ts:235`) becomes symmetric ±20 %.
+  jitter (effective `random()*1000 ms`, `config.ts:64-68`) becomes symmetric
+  ±20 %.
 - Indexer service-stream backoff changes from `1000 * 2^attempt` with no jitter
   (`stratos-sync.ts:226-229`) to `5000 * 2^(n-1)` with jitter: the first retry
   moves from 2 s to ~5 s, and the cap from 30 s to 60 s.
-- Indexer idle eviction 30 min → 15 min.
+- Indexer idle eviction 60 s → 15 min (`config.ts:49-53`) — a 15× lengthening,
+  not the shortening the dead 30-min default suggests.
+- Four further indexer values shift because the recommended defaults match the
+  dead module defaults, not the effective env schema: queue bound 10 → 1 000,
+  max connections 20 → 500, connect pacing 200 ms → 10 ms, reconnect cap 20 →
+  `'unbounded'` (`config.ts:36`, `:43`, `:44-48`, `:69-73`).
 - Indexer actor-queue overflow starts clearing pending frames (invariant 1)
   instead of draining them (`actor-syncer.ts:298-304`).
   _Mitigation:_ pin the indexer's existing values in its config at step 4 and
@@ -597,9 +657,10 @@ the two forks disagree is a behavioural change for one of them. Explicitly:
 
 **R2 — Backlog burst against a bounded queue.** Plan 011 changed the service to
 drain its **entire** retained backlog per wake instead of one 100-event page
-(`stratos-service/src/subscription/subscribe-records.ts:148-157`, `:217-228`). A
-consumer reconnecting with a large retained backlog can now routinely exceed the
-1 000-frame bound. The feedgen drops the connection on overflow
+(`stratos-service/src/subscription/subscribe-records.ts:148-157`, `:217-228`).
+At the indexer's effective 10-frame bound (`config.ts:36`) essentially every
+reconnect with a backlog overflows; the feedgen's 1 000-frame bound is exceeded
+only by large retained backlogs. The feedgen drops the connection on overflow
 (`actor-syncer.ts:322-331`); the indexer's actor syncer closes the socket but
 keeps draining what it has (`:298-304`), which is accidentally more resilient.
 Worse, if overflow lands inside the 30 s stability window the backoff counter
@@ -634,8 +695,9 @@ list because it is a testing concern, but it is a real deliverable of step 2.
 deliberately left as named values so the library can turn them into
 configuration: `APPLY_FAILURE_ALARM_THRESHOLD`
 (`stratos-feedgen/src/subscription/actor-syncer.ts:80`), `RECONNECT_COOLDOWN_MS`
-(`stratos-indexer/src/sync/actor-syncer.ts:11`), and the overflow codes. Section
-4.3 does exactly that. The exception is the section 4.4 invariants, which are
+(`stratos-indexer/src/sync/actor-syncer.ts:11`; converted to configuration by
+`6aefc4d` as `ACTOR_SYNC_RECONNECT_COOLDOWN_MS`), and the overflow codes.
+Section 4.3 does exactly that. The exception is the section 4.4 invariants, which are
 correctness properties, not knobs — a reviewer should reject any config surface
 that can disable them.
 
@@ -672,11 +734,12 @@ The indexer's actor syncer swallows an `applyCommit` failure and continues
 (`stratos-indexer/src/sync/actor-syncer.ts:346-355`), and the next commit that
 succeeds writes a higher cursor (`:401-418`, cursor at `:417`), so the failed
 sequence falls behind the cursor and is never replayed on reconnect (`:155`) —
-a permanent, invisible hole, with no heal path
-(`stratos-indexer/src/backfill.ts:152-169` reads the user's **PDS** via
+a permanent, invisible hole, with no heal **client** (the service's pull-sync
+surface — section 2.6, fact 2 — has no consumer;
+`stratos-indexer/src/backfill.ts:152-169` reads the user's **PDS** via
 `com.atproto.repo.listRecords`, not Stratos, and `sync-manager.ts:64-71`
 constructs it with `repoProvider: ''`). **But the code path is unreachable at
-`ef66546`**: the stream neither authenticates
+`52da35b`**: the stream neither authenticates
 (`stratos-service/src/infra/auth/verifiers.ts:632-634` requires a `Bearer`
 header; `actor-syncer.ts:156-162` sends a query parameter and no headers) nor
 decodes (`actor-syncer.ts:448` reads `.t` off the `[value, remainder]` tuple
@@ -688,17 +751,19 @@ so `processCommit` is never called.
 
 Arguing from Step 1b's four facts:
 
-| Fact                             | Answer                    | Evidence                                                                                                                                                                                                         |
-| -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cursor advances past a skip      | Yes                       | `actor-syncer.ts:346-355` + `:417`                                                                                                                                                                               |
-| A heal path exists               | **No**                    | `backfill.ts:152-169` pages the PDS, not Stratos; `sync-manager.ts:65` passes `repoProvider: ''`; no `getRepo`/resync anywhere in the package                                                                    |
-| Indexed rows are source of truth | Yes by design, moot today | `atproto-stratos/packages/bsky/src/stratos/store.ts:77-135` reads indexed rows with no re-hydration — but of `stratos_post`, which this indexer never writes (`actor-syncer.ts:493-565`, `storage/db.ts:95-120`) |
-| The path is live                 | **No**                    | `verifiers.ts:632-634` vs `actor-syncer.ts:156-162`; `actor-syncer.ts:448` vs `@atcute/cbor` `decode.d.ts:1`                                                                                                     |
+| Fact                             | Answer                    | Evidence                                                                                                                                                                                                                                                         |
+| -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor advances past a skip      | Yes                       | `actor-syncer.ts:346-355` + `:417`                                                                                                                                                                                                                               |
+| A heal path exists               | **Server-side only**      | `listRepoOps`/`listRecordPaths` exist (`stratos-service/src/features/pull-sync/`) with no consumer; `backfill.ts:152-169` pages the PDS, not Stratos; `sync-manager.ts:65` passes `repoProvider: ''`; no pull-sync/`getRepo`/resync call anywhere in the package |
+| Indexed rows are source of truth | Yes by design, moot today | `atproto-stratos/packages/bsky/src/stratos/store.ts:77-135` reads indexed rows with no re-hydration — but of `stratos_post`, which this indexer never writes (`actor-syncer.ts:493-565`, `storage/db.ts:95-120`)                                                 |
+| The path is live                 | **No**                    | `verifiers.ts:632-634` vs `actor-syncer.ts:156-162`; `actor-syncer.ts:448` vs `@atcute/cbor` `decode.d.ts:1`                                                                                                                                                     |
 
-**The fact that drove the rating is the absence of a heal path**, exactly as on
-the feedgen side. A lost commit cannot be recovered by any code in the
-repository, which is what makes this class of defect P1 rather than merely
-annoying.
+**The fact that drove the rating is the absence of a heal client**, exactly as
+on the feedgen side. A lost commit cannot be recovered by the consumers as they
+stand — the service's pull-sync surface (section 2.6, fact 2) has no caller —
+which is what makes this class of defect P1 rather than merely annoying.
+Building that client, a natural deliverable of the extracted library, is what
+would downgrade it.
 
 The fourth fact — the path is dead — reduces **present** exposure to zero, and
 that is worth stating plainly rather than dressing up: no data is being lost
@@ -772,7 +837,7 @@ guessed at here.
 - `plans/008-feedgen-sync-durability.md` — the feedgen's apply-failure fix
   (`0b464db`, `a98cb6d`, `37a3fa7`, `5b804a1`)
 - `plans/016-indexer-sync-resilience.md` — the indexer's cool-down and
-  service-stream serialization (`ef66546`)
-- `plans/011` — full-backlog drain per wake in the service stream (`74c792a`)
+  service-stream serialization (`52da35b`)
+- `plans/011` — full-backlog drain per wake in the service stream (`0caf319`)
 - `docs/design/blob-support.md` — design-doc conventions followed here
 - `docs/design/mutation-testing.md` — the mutation gate referenced in section 5
