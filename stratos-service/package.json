@@ -20,7 +20,6 @@
     "mutation": "stryker run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts .",
-    "codegen": "lex gen-server ./src/lexicon ../lexicons --yes",
     "generate:version": "tsx scripts/generate-version.ts"
   },
   "dependencies": {
@@ -71,7 +70,6 @@
   },
   "devDependencies": {
     "@atcute/cbor": "^2.3.2",
-    "@atproto/lex-cli": "^0.9.8",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",

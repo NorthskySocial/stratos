@@ -470,9 +470,6 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@atproto/lex-cli':
-        specifier: ^0.9.8
-        version: 0.9.8
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.0.0(jiti@2.7.0))
@@ -808,11 +805,6 @@ packages:
 
   '@atproto/lex-cbor@0.0.9':
     resolution: {integrity: sha512-szkS569j1eZsIxZKh2VZHVq7pSpewy1wHh8c6nVYekHfYcJhFkevQq/DjTeatZ7YZKNReGYthQulgaZq2ytfWQ==}
-
-  '@atproto/lex-cli@0.9.8':
-    resolution: {integrity: sha512-0ebVyp12i3S8oE77+BxahbTmyrXcqeC9GTx2HGa/PA9KjnThapkGkgVQjIWw74DNQprzbg9EkiQsaKU2xFYhmA==}
-    engines: {node: '>=18.7.0'}
-    hasBin: true
 
   '@atproto/lex-client@0.0.12':
     resolution: {integrity: sha512-ef4jQQ7SOtBsXr+Gf1UHuBfCiAGYZxO5PCCXl3eT4ObO83SROtIf7pyO06jBQI/IZChSVsXqXsgakR0aru6lYQ==}
@@ -3069,9 +3061,6 @@ packages:
       vitest:
         optional: true
 
-  '@ts-morph/common@0.25.0':
-    resolution: {integrity: sha512-kMnZz+vGGHi4GoHnLmMhGNjm44kGtKUXGnOvrKmMwAuvNjM/PgKVGfUnL7IDvK7Jb2QQ82jq3Zmp04Gy+r3Dkg==}
-
   '@tsconfig/svelte@5.0.8':
     resolution: {integrity: sha512-UkNnw1/oFEfecR8ypyHIQuWYdkPvHiwcQ78sh+ymIiYoF+uc5H1UBetbjyqT+vgGJ3qQN6nhucJviX6HesWtKQ==}
 
@@ -3669,9 +3658,6 @@ packages:
   cockatiel@3.2.1:
     resolution: {integrity: sha512-gfrHV6ZPkquExvMh9IOkKsBzNDk6sDuZ6DdBGUBkvFnTCqCxzpuq48RySgP0AnaqQkw2zynOFj9yly6T1Q2G5Q==}
     engines: {node: '>=16'}
-
-  code-block-writer@13.0.3:
-    resolution: {integrity: sha512-Oofo0pq3IKnsFtuHqSF7TqBfr71aeyZDVJ0HpmqB7FBM2qEigL0iPONSCZSO9pE9dZTAxANe5XHG9Uy0YMv8cg==}
 
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
@@ -6064,9 +6050,6 @@ packages:
     peerDependencies:
       typescript: '>=4.8.4'
 
-  ts-morph@24.0.0:
-    resolution: {integrity: sha512-2OAOg/Ob5yx9Et7ZX4CvTCc0UFoZHwLEJ+dpDPSUi5TgwwlTlX47w+iFRrEwzUZwYACjq83cgjS/Da50Ga37uw==}
-
   tsc-alias@1.8.17:
     resolution: {integrity: sha512-EIduCZHqbNwPm8BZYfq1aD7BQ697A4h6uSGMOFQfYGoQwfrYFTKwYfy9Bv42YxHkduVBcn9Zx0DkX111DKskyg==}
     engines: {node: '>=16.20.2'}
@@ -6424,9 +6407,6 @@ packages:
   yargs@17.7.2:
     resolution: {integrity: sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w==}
     engines: {node: '>=12'}
-
-  yesno@0.4.0:
-    resolution: {integrity: sha512-tdBxmHvbXPBKYIg81bMCB7bVeDmHkRzk5rVJyYYXurwKkHq/MCd8rz4HSJUP7hW0H2NlXiq8IFiWvYKEHhlotA==}
 
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
@@ -6820,17 +6800,6 @@ snapshots:
     dependencies:
       '@atproto/lex-data': 0.0.9
       tslib: 2.8.1
-
-  '@atproto/lex-cli@0.9.8':
-    dependencies:
-      '@atproto/lexicon': 0.6.2
-      '@atproto/syntax': 0.4.3
-      chalk: 4.1.2
-      commander: 9.5.0
-      prettier: 3.8.1
-      ts-morph: 24.0.0
-      yesno: 0.4.0
-      zod: 3.25.76
 
   '@atproto/lex-client@0.0.12':
     dependencies:
@@ -9571,12 +9540,6 @@ snapshots:
       vite: 6.4.1(@types/node@25.2.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
       vitest: 4.0.18(@types/node@25.2.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
-  '@ts-morph/common@0.25.0':
-    dependencies:
-      minimatch: 9.0.5
-      path-browserify: 1.0.1
-      tinyglobby: 0.2.15
-
   '@tsconfig/svelte@5.0.8': {}
 
   '@types/aria-query@5.0.4': {}
@@ -10310,8 +10273,6 @@ snapshots:
   cluster-key-slot@1.1.2: {}
 
   cockatiel@3.2.1: {}
-
-  code-block-writer@13.0.3: {}
 
   color-convert@2.0.1:
     dependencies:
@@ -12897,11 +12858,6 @@ snapshots:
     dependencies:
       typescript: 5.9.3
 
-  ts-morph@24.0.0:
-    dependencies:
-      '@ts-morph/common': 0.25.0
-      code-block-writer: 13.0.3
-
   tsc-alias@1.8.17:
     dependencies:
       chokidar: 3.6.0
@@ -13213,8 +13169,6 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
-
-  yesno@0.4.0: {}
 
   yocto-queue@0.1.0: {}
 
