@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { LexiconDoc } from '@atproto/lexicon'
 import * as schemas from '../src/lexicon/schemas.js'
@@ -15,7 +15,10 @@ function exportNameFor(fileBaseName: string): string {
   return `${fileBaseName}Lexicon`
 }
 
-const jsonFiles = readdirSync(lexiconDir)
+// Recurse to match the client generator's collectJsonFiles walk, so a
+// nested lexicon cannot escape this gate.
+const jsonFiles = readdirSync(lexiconDir, { recursive: true })
+  .map(String)
   .filter((entry) => entry.endsWith('.json'))
   .sort()
 
@@ -29,7 +32,7 @@ if (jsonFiles.length === 0) {
 
 describe('feedgen inline lexicon copies match source-of-truth JSON', () => {
   for (const fileName of jsonFiles) {
-    const baseName = fileName.replace(/\.json$/, '')
+    const baseName = basename(fileName, '.json')
     const exportName = exportNameFor(baseName)
 
     it(`${exportName} matches lexicons/zone/stratos/feedgen/${fileName}`, () => {
@@ -48,7 +51,7 @@ describe('feedgen inline lexicon copies match source-of-truth JSON', () => {
 
 describe('every inline lexicon copy has a source-of-truth JSON file', () => {
   const sourceBaseNames = new Set(
-    jsonFiles.map((fileName) => fileName.replace(/\.json$/, '')),
+    jsonFiles.map((fileName) => basename(fileName, '.json')),
   )
   // Match on value shape, not export name, so unrelated exports that merely
   // end in "Lexicon" never synthesize a case demanding a nonexistent file.
