@@ -338,3 +338,47 @@ describe('enrollment isService migration', () => {
     expect(enrollment?.pdsEndpoint).toBe('https://pds.example.com')
   })
 })
+
+describe('SqliteEnrollmentStore removeBoundary', () => {
+  const RYOKO_DID = 'did:plc:ryokohakubi'
+  const AYEKA_DID = 'did:plc:ayekajurai'
+
+  let testDir: string
+  let store: SqliteEnrollmentStore
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-enrollment-boundary-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    const db = createServiceDb(join(testDir, 'service.sqlite'))
+    await migrateServiceDb(db)
+    store = new SqliteEnrollmentStore(db)
+
+    for (const did of [RYOKO_DID, AYEKA_DID]) {
+      await store.enroll({
+        did,
+        enrolledAt: '2025-02-01T00:00:00Z',
+        pdsEndpoint: 'https://pds.jurai.example.com',
+        signingKeyDid: 'did:key:zDnaeJuraiKey',
+        active: true,
+        boundaries: ['galaxy-police', 'jurai-royals'],
+      })
+    }
+  })
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('removes only the named boundary of the named DID', async () => {
+    await store.removeBoundary(RYOKO_DID, 'galaxy-police')
+
+    expect(await store.getBoundaries(RYOKO_DID)).toEqual(['jurai-royals'])
+    expect((await store.getBoundaries(AYEKA_DID)).toSorted()).toEqual([
+      'galaxy-police',
+      'jurai-royals',
+    ])
+  })
+})
