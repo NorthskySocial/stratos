@@ -259,7 +259,7 @@ describe('uploadBlob handler logic', () => {
         })
       })
 
-      // Verify blob is tracked via metadata (listBlobs only returns record-associated blobs)
+      // Verify blob is tracked via metadata.
       const metadata = await actorStore.read(did, async (store) => {
         return store.blob.getBlobMetadata(cid)
       })

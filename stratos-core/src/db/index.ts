@@ -174,6 +174,10 @@ async function migrateRecordAndBlobTables(db: StratosDb): Promise<void> {
   await db.run(
     sql`CREATE INDEX IF NOT EXISTS stratos_blob_boundary_blob_cid_idx ON stratos_blob_boundary(blobCid)`,
   )
+
+  await db.run(
+    sql`CREATE INDEX IF NOT EXISTS stratos_blob_boundary_boundary_idx ON stratos_blob_boundary(boundary, blobCid)`,
+  )
 }
 
 async function migrateMiscTables(db: StratosDb): Promise<void> {

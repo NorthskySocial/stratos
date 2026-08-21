@@ -101,18 +101,24 @@ export class StratosBlobReader {
   }
 
   /**
-   * Lists blobs in the database that are associated with records.
-   * @param opts - Options for listing blobs.
-   * @returns A promise that resolves with an array of CID objects of blobs associated with records.
+   * Lists blobs that records reference AND that carry the given boundary.
+   *
+   * Caveat: a boundary association can outlive the record's residence in the
+   * boundary (associations are only removed when the blob itself is deleted),
+   * so a moved record's blob may still be listed here.
+   *
+   * @param opts - Boundary plus the listBlobs paging options.
+   * @returns Blob CIDs in ascending order.
    */
-  async listBlobs(opts: {
+  async listBlobsForBoundary(opts: {
+    boundary: string
     since?: string
     cursor?: string
     limit: number
   }): Promise<string[]> {
-    const { since, cursor, limit } = opts
+    const { boundary, since, cursor, limit } = opts
 
-    const conditions = []
+    const conditions = [eq(stratosBlobBoundary.boundary, boundary)]
     if (cursor) {
       conditions.push(gt(stratosRecordBlob.blobCid, cursor))
     }
@@ -122,15 +128,14 @@ export class StratosBlobReader {
         .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
         .from(stratosRecordBlob)
         .innerJoin(
+          stratosBlobBoundary,
+          eq(stratosBlobBoundary.blobCid, stratosRecordBlob.blobCid),
+        )
+        .innerJoin(
           stratosRecord,
           eq(stratosRecord.uri, stratosRecordBlob.recordUri),
         )
-        .where(
-          and(
-            gt(stratosRecord.repoRev, since),
-            ...(cursor ? [gt(stratosRecordBlob.blobCid, cursor)] : []),
-          ),
-        )
+        .where(and(gt(stratosRecord.repoRev, since), ...conditions))
         .orderBy(asc(stratosRecordBlob.blobCid))
         .limit(limit)
       return res.map((row: { blobCid: string }) => row.blobCid)
@@ -139,7 +144,11 @@ export class StratosBlobReader {
     const res = await this.db
       .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
       .from(stratosRecordBlob)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .innerJoin(
+        stratosBlobBoundary,
+        eq(stratosBlobBoundary.blobCid, stratosRecordBlob.blobCid),
+      )
+      .where(and(...conditions))
       .orderBy(asc(stratosRecordBlob.blobCid))
       .limit(limit)
     return res.map((row: { blobCid: string }) => row.blobCid)
