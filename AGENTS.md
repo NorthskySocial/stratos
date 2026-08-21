@@ -96,7 +96,7 @@ stratos-service/src/features/{feature}/
 | ------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `enrollment`  | Port/Domain       | OAuth enrollment validation and business logic                                                                                             |
 | `hydration`   | Port/Domain       | Boundary-aware record hydration for AppViews and clients                                                                                   |
-| `attestation` | Utility           | Enrollment attestation signing and verification (pure functions in `domain.ts`; no port)                                                   |
+| `attestation` | Utility           | Deterministic attestation payload construction (`createAttestationPayload` in `domain.ts`; callers sign and verify; no port)               |
 | `record`      | Reader/Transactor | Record metadata read/write operations                                                                                                      |
 | `repo`        | Reader/Transactor | Repository block storage operations (IPLD blocks)                                                                                          |
 | `blob`        | Reader/Transactor | Blob metadata and content read/write operations                                                                                            |
@@ -135,7 +135,10 @@ stratos-service/src/features/{feature}/
 | `infra/blobstore/` | Blob storage backends: disk (`disk.ts`), S3 (`s3.ts`)                                                                                                                                                                                                                                                                                                                   |
 | `infra/signing/`   | Per-actor signing seam (`ActorSigner` in `actor-signer.ts`); raw private key material never leaves this module                                                                                                                                                                                                                                                          |
 | `storage/`         | SQLite storage adapters (`sqlite/`: `actor-store.ts`, `enrollment-store.ts`, `sequence-ops.ts`)                                                                                                                                                                                                                                                                         |
-| `infra/storage/`   | Postgres storage adapters (`postgres/`) plus enrollment-store caching wrappers (`cached-enrollment-store.ts`, `redis-cache.ts`, `reserved-domain-enrollment-store.ts`)                                                                                                                                                                                                  |
+| `infra/storage/`   | Postgres storage adapters (`postgres/`); `cached-enrollment-store.ts` (enrollment read cache); `reserved-domain-enrollment-store.ts` (decorator that force-includes the reserved all-members domain — invariant chokepoint, no cache); `redis-cache.ts` (general-purpose `RedisCache implements Cache`, also used by the space-credential `ReplayStore`)                |
+| `db/`              | Service-level Drizzle schema and connections: `schema.ts` (sqlite tables `oauth_session`, `oauth_state`, `admin_session`, `admin_user`, `enrollment`, `enrollment_boundary`), `pg-schema.ts` (Postgres twins), `pg.ts`, `index.ts`                                                                                                                                      |
+| `shared/`          | Cross-feature service utilities: `rate-limiter.ts` and `repo-write-lock.ts` (consumed by the `repo` feature's write context), `domainless-invariant.ts`, `user-agent.ts`                                                                                                                                                                                                |
+| `bin/`             | Service entry point (`stratos.ts`)                                                                                                                                                                                                                                                                                                                                      |
 
 **Client library** (`stratos-client/src/`):
 
@@ -326,7 +329,8 @@ Follow the pattern in `stratos-service/src/api/records/create.ts` (a representat
 
 Auth verifier options: `ctx.authVerifier.standard` (OAuth), `.optionalStandard`, `.service` (
 inter-service JWT), `.admin` (OAuth-authorized operator via server-side session cookie; see Admin
-Authorization below).
+Authorization below), `.spaceCredential` (space-credential JWT), and the fallback compositions
+`.standardOrSpaceCredential`, `.optionalStandardOrSpaceCredential`, `.serviceOrSpaceCredential`.
 
 ---
 
