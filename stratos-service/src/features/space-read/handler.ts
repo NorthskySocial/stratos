@@ -4,7 +4,10 @@ import {
   Server as XrpcServer,
 } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
-import { parseSpaceUri, StratosValidator } from '@northskysocial/stratos-core'
+import {
+  spaceUriToBoundary,
+  StratosValidator,
+} from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import type { HandlerAuth, XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
@@ -98,14 +101,14 @@ export function registerSpaceReadHandlers(
  *   targets another service.
  */
 function resolveSpaceBoundary(ctx: AppContext, space: string): string {
-  const parsed = parseSpaceUri(space)
-  if (!parsed.ok || parsed.value.spaceDid !== ctx.serviceDid) {
+  const boundary = spaceUriToBoundary(space, ctx.serviceDid)
+  if (!boundary.ok) {
     throw new InvalidRequestError(
       'Unknown space: URI must target this service',
       'UnknownSpace',
     )
   }
-  return `${parsed.value.spaceDid}/${parsed.value.skey}`
+  return boundary.value
 }
 
 /**
@@ -182,7 +185,9 @@ async function handleListSpaceBlobs(
       'InvalidRequest',
     )
   }
-  const limit = params.limit ?? 500
+  // The lexicon declares limit 1..1000 (default 500). Params reach this
+  // handler without schema validation, so clamp here.
+  const limit = Math.min(Math.max(params.limit ?? 500, 1), 1000)
 
   const boundary = resolveSpaceBoundary(ctx, space)
   await assertAdmitted(ctx, space, boundary, auth)
@@ -217,22 +222,24 @@ async function assertAdmitted(
   boundary: string,
   auth: HandlerAuth | undefined,
 ): Promise<void> {
+  // The custom error name matches the `AuthRequired` error that both space
+  // lexicons declare; the library default is `AuthenticationRequired`.
   if (isSpaceCredentialAuth(auth)) {
     // A credential admits exactly its own space; anything else is refused
     // (the generic reason is deliberate — no cross-space probing).
     if (auth?.credentials?.spaceUri !== space) {
-      throw new AuthRequiredError('Not admitted to this space')
+      throw new AuthRequiredError('Not admitted to this space', 'AuthRequired')
     }
     return
   }
 
   const userDid = auth?.credentials?.did
   if (!userDid) {
-    throw new AuthRequiredError('Authentication required')
+    throw new AuthRequiredError('Authentication required', 'AuthRequired')
   }
   // Live membership check (same freshness contract as credential issuance).
   const boundaries = await ctx.enrollmentStore.getBoundaries(userDid)
   if (!boundaries.includes(boundary)) {
-    throw new AuthRequiredError('Not admitted to this space')
+    throw new AuthRequiredError('Not admitted to this space', 'AuthRequired')
   }
 }
