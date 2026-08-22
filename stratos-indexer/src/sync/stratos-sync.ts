@@ -2,7 +2,7 @@ import { decodeFirst } from '@atcute/cbor'
 import { Kysely } from 'kysely'
 import { StratosError } from '@northskysocial/stratos-core'
 import type { CursorManager } from '../storage/cursor-manager.ts'
-import { ActorSyncer } from './actor-syncer.ts'
+import { ActorSyncer, type ActorQueue } from './actor-syncer.ts'
 import type { StratosIndexerSchema } from '../storage/schema.ts'
 
 export interface StratosActorSyncOptions {
@@ -17,6 +17,7 @@ export interface StratosActorSyncOptions {
   reconnectMaxDelayMs: number
   reconnectJitterMs: number
   reconnectMaxAttempts: number
+  reconnectCooldownMs: number
 }
 
 export interface StratosSyncConfig {
@@ -49,11 +50,13 @@ const DEFAULT_ACTOR_SYNC_OPTIONS: StratosActorSyncOptions = {
   reconnectMaxDelayMs: 60000,
   reconnectJitterMs: 500,
   reconnectMaxAttempts: 10,
+  reconnectCooldownMs: 300_000,
 }
 
 const SERVICE_RECONNECT_BASE_DELAY_MS = 1000
 const SERVICE_RECONNECT_MAX_DELAY_MS = 30000
 const SERVICE_STABILITY_RESET_MS = 30000
+const SERVICE_STREAM_MAX_QUEUE = 1_000
 
 // --- Service-level enrollment stream ---
 
@@ -66,6 +69,7 @@ export class StratosServiceSubscription {
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  private queue: ActorQueue = { pending: [], draining: false }
 
   constructor(
     private config: StratosSyncConfig,
@@ -95,6 +99,7 @@ export class StratosServiceSubscription {
   stop(): void {
     this.running = false
     this.clearStabilityTimer()
+    this.resetQueue()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -112,22 +117,25 @@ export class StratosServiceSubscription {
   private connect(): void {
     if (!this.running) return
 
+    this.resetQueue()
+
     const wsUrl = buildWsUrl(this.config.stratosServiceUrl, {
       syncToken: this.config.syncToken,
     })
 
-    this.ws = new WebSocket(wsUrl)
-    this.ws.binaryType = 'arraybuffer'
+    const ws = new WebSocket(wsUrl)
+    this.ws = ws
+    ws.binaryType = 'arraybuffer'
 
-    this.ws.addEventListener('open', () => {
+    ws.addEventListener('open', () => {
       this.armStabilityReset()
     })
 
-    this.ws.onmessage = (e: MessageEvent) => {
-      void this.handleMessage(new Uint8Array(e.data as ArrayBuffer))
+    ws.onmessage = (e: MessageEvent) => {
+      this.enqueueMessage(new Uint8Array(e.data as ArrayBuffer))
     }
 
-    this.ws.onerror = (e: Event & { error?: unknown }) => {
+    ws.onerror = (e: Event & { error?: unknown }) => {
       const errorMsg =
         e.error instanceof Error
           ? e.error.message
@@ -144,13 +152,74 @@ export class StratosServiceSubscription {
       )
     }
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      // A close event from a replaced socket must not tear down the
+      // active socket, its queue, or schedule an extra reconnect.
+      if (this.ws !== ws) return
       this.ws = null
       this.clearStabilityTimer()
+      this.resetQueue()
       if (this.running) {
         this.scheduleReconnect()
       }
     }
+  }
+
+  /**
+   * Queue an enrollment frame and start draining if no drain is in flight.
+   * Enrollment events are order-sensitive (enroll → unenroll, boundary
+   * changes), so frames are applied one at a time rather than dispatched
+   * concurrently off the socket callback.
+   * @param data - The raw frame data.
+   * @private
+   */
+  private enqueueMessage(data: Uint8Array): void {
+    const queue = this.queue
+    if (queue.pending.length >= SERVICE_STREAM_MAX_QUEUE) {
+      this.onError?.(
+        new StratosError(
+          'enrollment stream queue overflow',
+          'SERVICE_STREAM_OVERFLOW',
+        ),
+      )
+      this.resetQueue()
+      this.ws?.close()
+      return
+    }
+
+    queue.pending.push(data)
+    if (!queue.draining) {
+      void this.drainQueue(queue)
+    }
+  }
+
+  /**
+   * Apply queued enrollment frames in arrival order.
+   * @param queue - The queue generation this drain owns.
+   * @private
+   */
+  private async drainQueue(queue: ActorQueue): Promise<void> {
+    queue.draining = true
+    try {
+      while (queue.pending.length > 0) {
+        const data = queue.pending.shift()
+        if (!data) continue
+        await this.handleMessage(data)
+      }
+    } finally {
+      queue.draining = false
+    }
+  }
+
+  /**
+   * Abandon the current queue generation. An in-flight drain keeps draining
+   * the object it captured, which is now empty, so a fresh socket never
+   * replays frames the previous one already queued.
+   * @private
+   */
+  private resetQueue(): void {
+    this.queue.pending = []
+    this.queue = { pending: [], draining: false }
   }
 
   /**
@@ -425,6 +494,7 @@ export class StratosActorSync {
       reconnectMaxDelayMs: this.options.reconnectMaxDelayMs,
       reconnectJitterMs: this.options.reconnectJitterMs,
       reconnectMaxAttempts: this.options.reconnectMaxAttempts,
+      reconnectCooldownMs: this.options.reconnectCooldownMs,
       onReferencedActor: this.onReferencedActor,
       onHandleNeeded: this.onHandleNeeded,
       onError: this.onError,
@@ -467,9 +537,13 @@ export class StratosActorSync {
     const now = Date.now()
     const entries = Array.from(this.syncers.entries())
     // Find connections that haven't received a message in a while
+    // A cooling syncer is silent by design and holds no socket. Evicting it
+    // would discard the served cool-down and rebuild it with a fresh attempt
+    // counter, so the cool-down would never complete under connection pressure.
     const idle = entries
       .filter(
         ([, syncer]) =>
+          !syncer.isCoolingDown() &&
           now - syncer.getLastMessageAt() > this.options.idleEvictionMs,
       )
       .sort((a, b) => a[1].getLastMessageAt() - b[1].getLastMessageAt())

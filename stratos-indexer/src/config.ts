@@ -71,6 +71,11 @@ const envSchema = z
       .int()
       .positive()
       .default(20),
+    ACTOR_SYNC_RECONNECT_COOLDOWN_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(300000),
     BACKGROUND_QUEUE_CONCURRENCY: z.coerce
       .number()
       .int()
@@ -158,6 +163,8 @@ export interface WorkerConfig {
   actorSyncReconnectJitterMs: number
   /** Max attempts to reconnect an actor before giving up */
   actorSyncReconnectMaxAttempts: number
+  /** Cool-down before a fresh reconnect series after attempts are exhausted */
+  actorSyncReconnectCooldownMs: number
   /** Concurrency for the @atproto/bsky background indexer queue */
   backgroundQueueConcurrency: number
   /** Max size of the background indexer queue */
@@ -201,6 +208,7 @@ export function loadConfig(): IndexerConfig {
       actorSyncReconnectMaxDelayMs: env.ACTOR_SYNC_RECONNECT_MAX_DELAY_MS,
       actorSyncReconnectJitterMs: env.ACTOR_SYNC_RECONNECT_JITTER_MS,
       actorSyncReconnectMaxAttempts: env.ACTOR_SYNC_RECONNECT_MAX_ATTEMPTS,
+      actorSyncReconnectCooldownMs: env.ACTOR_SYNC_RECONNECT_COOLDOWN_MS,
       backgroundQueueConcurrency: env.BACKGROUND_QUEUE_CONCURRENCY,
       backgroundQueueMaxSize: env.BACKGROUND_QUEUE_MAX_SIZE,
     },
