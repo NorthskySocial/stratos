@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PARENT_BOUNDARY_CACHE_MAX,
+  parentBoundaryCache,
   resolveParentBoundaries,
 } from '../src/api/records/validation.js'
 import type { AppContext } from '../src/context.js'
@@ -40,6 +41,7 @@ function fakeCtx(): { ctx: AppContext; readCount: () => number } {
 
 describe('resolveParentBoundaries cache', () => {
   afterEach(() => {
+    parentBoundaryCache.clear()
     vi.useRealTimers()
   })
 
@@ -55,16 +57,22 @@ describe('resolveParentBoundaries cache', () => {
 
   it('deletes an expired entry rather than skipping it, forcing a re-read', async () => {
     vi.useFakeTimers()
-    const parentUri = 'at://did:plc:shinji/zone.stratos.feed.post/reply-ttl-2'
+    const expiredUri = 'at://did:plc:shinji/zone.stratos.feed.post/reply-ttl-2'
+    const freshUri = 'at://did:plc:rei/zone.stratos.feed.post/reply-ttl-3'
     const { ctx, readCount } = fakeCtx()
 
-    await resolveParentBoundaries(ctx, replyRecord(parentUri))
+    await resolveParentBoundaries(ctx, replyRecord(expiredUri))
     // Advance exactly to the TTL boundary: entries this old must be treated
     // as expired (a `<=` off-by-one here would keep serving from cache).
     vi.advanceTimersByTime(60_000)
-    await resolveParentBoundaries(ctx, replyRecord(parentUri))
+    await resolveParentBoundaries(ctx, replyRecord(freshUri))
+    await resolveParentBoundaries(ctx, replyRecord(expiredUri))
 
-    expect(readCount()).toBe(2)
+    expect(readCount()).toBe(3)
+    // The expired entry must be deleted and reinserted as the newest entry.
+    // An overwrite in place keeps it in the oldest slot, so the size-cap
+    // eviction would remove a live entry first.
+    expect([...parentBoundaryCache.keys()]).toEqual([freshUri, expiredUri])
   })
 
   it('evicts the oldest entry once the cache exceeds its size cap', async () => {

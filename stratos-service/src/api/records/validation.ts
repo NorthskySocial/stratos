@@ -12,8 +12,9 @@ import {
 import { MissingBlockError } from '@atcute/mst'
 import type { AppContext } from '../../context.js'
 
-// Cache the boundaries in case a post gets _really_ popular
-const parentBoundaryCache = new Map<
+// Cache the boundaries in case a post gets _really_ popular.
+// Exported for tests: they clear the cache and check its insertion order.
+export const parentBoundaryCache = new Map<
   string,
   { boundaries: string[] | undefined; cachedAt: number }
 >()
