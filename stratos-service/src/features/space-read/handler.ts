@@ -38,7 +38,7 @@ interface ListSpaceBlobsParams {
   space?: string
   repo?: string
   since?: string
-  limit?: number
+  limit?: unknown
   cursor?: string
 }
 
@@ -185,9 +185,7 @@ async function handleListSpaceBlobs(
       'InvalidRequest',
     )
   }
-  // The lexicon declares limit 1..1000 (default 500). Params reach this
-  // handler without schema validation, so clamp here.
-  const limit = Math.min(Math.max(params.limit ?? 500, 1), 1000)
+  const limit = parseLimit(params.limit)
 
   const boundary = resolveSpaceBoundary(ctx, space)
   await assertAdmitted(ctx, space, boundary, auth)
@@ -205,6 +203,31 @@ async function handleListSpaceBlobs(
     cids,
     ...(cids.length === limit ? { cursor: cids[cids.length - 1] } : {}),
   }
+}
+
+/**
+ * Parse and clamp `limit` to the lexicon-declared range 1..1000 (default 500).
+ *
+ * The lexicon declares `limit` as an integer, but params reach the handler
+ * without schema validation, so the raw query value can be a string or not an
+ * integer at all.
+ *
+ * @param raw - The raw `limit` param.
+ * @returns The clamped integer limit.
+ * @throws InvalidRequestError when the value is not an integer.
+ */
+function parseLimit(raw: unknown): number {
+  if (raw === undefined) return 500
+  const value =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && /^-?\d+$/.test(raw)
+        ? Number(raw)
+        : NaN
+  if (!Number.isInteger(value)) {
+    throw new InvalidRequestError('limit must be an integer', 'InvalidRequest')
+  }
+  return Math.min(Math.max(value, 1), 1000)
 }
 
 /**
