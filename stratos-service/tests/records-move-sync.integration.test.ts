@@ -300,13 +300,13 @@ describe('Record move sync contract', () => {
     // would wake and find nothing new yet.
     const originalTransact = actorStore.transact.bind(actorStore)
     let transactionDurable = false
-    ;(
-      actorStore as unknown as { transact: typeof actorStore.transact }
-    ).transact = (async (...args: Parameters<typeof actorStore.transact>) => {
-      const outcome = await (originalTransact as any)(...args)
+    const wrappedTransact: typeof actorStore.transact = async (did, fn) => {
+      const outcome = await originalTransact(did, fn)
       transactionDurable = true
       return outcome
-    }) as typeof actorStore.transact
+    }
+    ;(actorStore as { transact: typeof actorStore.transact }).transact =
+      wrappedTransact
 
     let durableAtEmitTime = false
     let seqReadStartedAtEmitTime: Promise<SeqEvent[]> | undefined
