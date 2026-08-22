@@ -23,15 +23,14 @@
     "generate:version": "tsx scripts/generate-version.ts"
   },
   "dependencies": {
-    "@atcute/atproto": "^3.1.10",
-    "@atcute/car": "^5.1.1",
-    "@atcute/cbor": "^2.3.2",
-    "@atcute/cid": "^2.4.1",
-    "@atcute/client": "^4.2.1",
-    "@atcute/lexicons": "^1.2.9",
-    "@atcute/mst": "^0.1.2",
-    "@atcute/repo": "^0.1.2",
-    "@atcute/uint8array": "^1.1.1",
+    "@atcute/atproto": "^4.0.4",
+    "@atcute/car": "^6.0.2",
+    "@atcute/cbor": "^2.3.6",
+    "@atcute/cid": "^2.4.2",
+    "@atcute/client": "^5.1.1",
+    "@atcute/mst": "^1.0.3",
+    "@atcute/repo": "^1.0.2",
+    "@atcute/uint8array": "^1.1.5",
     "@atproto/api": "^0.18.20",
     "@atproto/aws": "^0.2.31",
     "@atproto/common": "^0.5.11",
@@ -67,7 +66,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@atcute/cbor": "^2.3.2",
+    "@atcute/cbor": "^2.3.6",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
