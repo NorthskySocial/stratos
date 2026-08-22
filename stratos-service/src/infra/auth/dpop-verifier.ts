@@ -129,12 +129,13 @@ export class DpopVerifier {
 
   constructor(config: DpopVerifierConfig) {
     this.config = config
-    // The package no longer exports DpopManager. OAuthVerifier exposes
-    // one; the issuer and keyset only serve token decoding, which this
-    // class does not use.
-    this.dpopManager =
-      config.dpopManager ??
-      new OAuthVerifier({
+    if (config.dpopManager) {
+      this.dpopManager = config.dpopManager
+    } else {
+      // Delegate to OAuthVerifier.checkDpopProof, which adds a jti
+      // replay check on top of the proof validation. The issuer and
+      // keyset only serve token decoding, which this class does not use.
+      const verifier = new OAuthVerifier({
         issuer: config.serviceEndpoint,
         keyset: [],
         dpopSecret: config.dpopSecret as
@@ -142,7 +143,13 @@ export class DpopVerifier {
           | Uint8Array<ArrayBuffer>
           | false,
         dpopRotationInterval: config.dpopRotationInterval,
-      }).dpopManager
+      })
+      this.dpopManager = {
+        nextNonce: () => verifier.nextDpopNonce(),
+        checkProof: (method, url, headers, token) =>
+          verifier.checkDpopProof(method, url, headers, token),
+      }
+    }
   }
 
   /**

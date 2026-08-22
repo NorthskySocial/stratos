@@ -12,6 +12,7 @@ import {
   jsonToLex,
   parseCid,
   parseEnrollmentRecord,
+  StratosError,
 } from '@northskysocial/stratos-core'
 import { fromUint8Array } from '@atcute/car'
 import type { CursorManager } from '../storage/cursor-manager.js'
@@ -175,7 +176,13 @@ export class PdsFirehose {
       },
       onError: (err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err)
-        this.opts.onError?.(new Error(`pds firehose stream error: ${detail}`))
+        this.opts.onError?.(
+          new StratosError(
+            `pds firehose stream error: ${detail}`,
+            'PdsFirehoseStreamError',
+            { cause: err },
+          ),
+        )
       },
     })
 
