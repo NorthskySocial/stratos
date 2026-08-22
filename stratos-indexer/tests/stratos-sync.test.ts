@@ -176,6 +176,39 @@ describe('StratosServiceSubscription enrollment stream', () => {
 
     subscription.stop()
   })
+
+  it('ignores a late close event from a replaced socket', () => {
+    vi.useFakeTimers()
+    const { subscription } = createSubscription()
+    stubHandler(subscription, () => new Promise<void>(() => {}))
+
+    subscription.start()
+    const staleSocket = FakeWebSocket.instances[0]
+    // A real socket delivers its close event asynchronously. Detach the
+    // callback so stop() cannot fire it, then fire it late by hand.
+    const staleClose = staleSocket.onclose
+    staleSocket.onclose = null
+
+    subscription.stop()
+    subscription.start()
+    const activeSocket = FakeWebSocket.instances[1]
+    activeSocket.open()
+
+    // The first frame is shifted into the stalled handler; one stays pending.
+    activeSocket.deliver(frameFor(0))
+    activeSocket.deliver(frameFor(1))
+    expect(pendingFrames(subscription)).toHaveLength(1)
+
+    staleClose?.()
+
+    // The active socket, its queue, and the timer set must be untouched.
+    expect(subscription.isConnected()).toBe(true)
+    expect(pendingFrames(subscription)).toHaveLength(1)
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    subscription.stop()
+  })
 })
 
 describe('StratosActorSync idle eviction', () => {
