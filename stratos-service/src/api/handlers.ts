@@ -29,7 +29,6 @@ export enum HANDLER_METHOD {
   LIST_RECORDS = 'com.atproto.repo.listRecords',
   DESCRIBE_REPO = 'com.atproto.repo.describeRepo',
   APPLY_WRITES = 'com.atproto.repo.applyWrites',
-  LIST_BLOBS = 'com.atproto.sync.listBlobs',
   STRATOS_GET_BLOB = 'zone.stratos.sync.getBlob',
   SYNC_GET_REPO = 'zone.stratos.sync.getRepo',
   STRATOS_UPLOAD_BLOB = 'zone.stratos.repo.uploadBlob',

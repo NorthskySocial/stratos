@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { CID, Cid } from '@atproto/lex-data'
 import { sha256 } from 'multiformats/hashes/sha2'
+import { eq } from 'drizzle-orm'
 
 import {
   BlobNotFoundError,
@@ -18,6 +19,7 @@ import {
   StratosDb,
   stratosRecord,
   stratosRecordBlob,
+  stratosRecordBoundary,
 } from '../src'
 
 // Create a deterministic CID from data
@@ -271,29 +273,180 @@ describe('Blob Reader', () => {
     })
   })
 
-  describe('listBlobs', () => {
-    it('should list blobs with pagination', async () => {
-      const cid1 = await createCid('blob1')
-      const cid2 = await createCid('blob2')
-      const uri = 'at://did:plc:test/zone.stratos.feed.post/1'
+  describe('listBlobsForBoundary', () => {
+    const BOUNDARY = 'did:example:stratos/tokyo3'
+    const OTHER_BOUNDARY = 'did:example:stratos/nerv'
 
+    // Seed one record in the boundary plus one blob it references.
+    const seedRecordBlob = async (opts: {
+      rkey: string
+      repoRev: string
+      blobSeed: string
+      boundary: string
+    }): Promise<string> => {
+      const cid = await createCid(opts.blobSeed)
+      const uri = `at://did:plc:misato/zone.stratos.feed.post/${opts.rkey}`
       await db.insert(stratosRecord).values({
         uri,
-        cid: 'record-cid',
+        cid: `record-${opts.rkey}`,
         collection: 'zone.stratos.feed.post',
-        rkey: '1',
+        rkey: opts.rkey,
+        repoRev: opts.repoRev,
+        indexedAt: new Date().toISOString(),
+        takedownRef: null,
+      })
+      await db
+        .insert(stratosRecordBlob)
+        .values({ blobCid: cid.toString(), recordUri: uri })
+      await db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: uri, boundary: opts.boundary })
+      return cid.toString()
+    }
+
+    it('returns only blobs that carry the boundary, ascending', async () => {
+      const inBoundary1 = await seedRecordBlob({
+        rkey: 'rei',
+        repoRev: 'rev1',
+        blobSeed: 'rei blob',
+        boundary: BOUNDARY,
+      })
+      const inBoundary2 = await seedRecordBlob({
+        rkey: 'asuka',
+        repoRev: 'rev1',
+        blobSeed: 'asuka blob',
+        boundary: BOUNDARY,
+      })
+      await seedRecordBlob({
+        rkey: 'gendo',
+        repoRev: 'rev1',
+        blobSeed: 'gendo blob',
+        boundary: OTHER_BOUNDARY,
+      })
+
+      const result = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        limit: 10,
+      })
+      expect(result).toEqual([inBoundary1, inBoundary2].sort())
+    })
+
+    it('filters by record repoRev when since is given', async () => {
+      await seedRecordBlob({
+        rkey: 'old',
+        repoRev: 'rev1',
+        blobSeed: 'old blob',
+        boundary: BOUNDARY,
+      })
+      const newer = await seedRecordBlob({
+        rkey: 'new',
+        repoRev: 'rev3',
+        blobSeed: 'new blob',
+        boundary: BOUNDARY,
+      })
+
+      const result = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        since: 'rev2',
+        limit: 10,
+      })
+      expect(result).toEqual([newer])
+    })
+
+    it('pages with cursor as an exclusive lower bound', async () => {
+      const cids = [
+        await seedRecordBlob({
+          rkey: 'shinji',
+          repoRev: 'rev1',
+          blobSeed: 'shinji blob',
+          boundary: BOUNDARY,
+        }),
+        await seedRecordBlob({
+          rkey: 'kaworu',
+          repoRev: 'rev1',
+          blobSeed: 'kaworu blob',
+          boundary: BOUNDARY,
+        }),
+        await seedRecordBlob({
+          rkey: 'toji',
+          repoRev: 'rev1',
+          blobSeed: 'toji blob',
+          boundary: BOUNDARY,
+        }),
+      ].sort()
+
+      const firstPage = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        limit: 2,
+      })
+      expect(firstPage).toEqual(cids.slice(0, 2))
+
+      const secondPage = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        cursor: firstPage[1],
+        limit: 2,
+      })
+      expect(secondPage).toEqual(cids.slice(2))
+    })
+
+    it('deduplicates a blob referenced by multiple records', async () => {
+      const cid = await seedRecordBlob({
+        rkey: 'pen2',
+        repoRev: 'rev1',
+        blobSeed: 'pen pen blob',
+        boundary: BOUNDARY,
+      })
+      const secondUri = 'at://did:plc:misato/zone.stratos.feed.post/pen2b'
+      await db.insert(stratosRecord).values({
+        uri: secondUri,
+        cid: 'record-pen2b',
+        collection: 'zone.stratos.feed.post',
+        rkey: 'pen2b',
         repoRev: 'rev1',
         indexedAt: new Date().toISOString(),
         takedownRef: null,
       })
+      await db
+        .insert(stratosRecordBlob)
+        .values({ blobCid: cid, recordUri: secondUri })
+      await db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: secondUri, boundary: BOUNDARY })
 
-      await db.insert(stratosRecordBlob).values([
-        { blobCid: cid1.toString(), recordUri: uri },
-        { blobCid: cid2.toString(), recordUri: uri },
-      ])
+      const result = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        limit: 10,
+      })
+      expect(result).toEqual([cid])
+    })
 
-      const result = await reader.listBlobs({ limit: 10 })
-      expect(result).toHaveLength(2)
+    it('omits a blob whose only in-boundary record moved away', async () => {
+      const movedBlob = await seedRecordBlob({
+        rkey: 'kaji',
+        repoRev: 'rev1',
+        blobSeed: 'kaji blob',
+        boundary: BOUNDARY,
+      })
+      const stayingBlob = await seedRecordBlob({
+        rkey: 'ritsuko',
+        repoRev: 'rev1',
+        blobSeed: 'ritsuko blob',
+        boundary: BOUNDARY,
+      })
+      const movedUri = 'at://did:plc:misato/zone.stratos.feed.post/kaji'
+      await db
+        .delete(stratosRecordBoundary)
+        .where(eq(stratosRecordBoundary.recordUri, movedUri))
+      await db
+        .insert(stratosRecordBoundary)
+        .values({ recordUri: movedUri, boundary: OTHER_BOUNDARY })
+
+      const result = await reader.listBlobsForBoundary({
+        boundary: BOUNDARY,
+        limit: 10,
+      })
+      expect(result).toEqual([stayingBlob])
+      expect(result).not.toContain(movedBlob)
     })
   })
 

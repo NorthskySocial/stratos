@@ -12,7 +12,8 @@
 //   4. Credential-authed read: the credential (no user identity) admits reads
 //      of records in ITS space, and fails closed on records outside it.
 //   5. Syncer flow: listRepoOps with a credential returns boundary-gated ops
-//      and a signed caught-up commit; an out-of-space credential sees nothing.
+//      and a signed head-of-oplog commit; an out-of-space credential sees
+//      nothing.
 //   6. Writes never accept a credential (read/sync capability only).
 //   7. Revocation: losing the boundary invalidates future credential issuance.
 //   8. Migration anchors: single-boundary records, no post records on the
@@ -211,13 +212,14 @@ async function run(): Promise<void> {
     `status=${sync.status}, ops=${sync.body.ops?.length ?? 0}`,
   )
   assert(
-    sync.body.caughtUp === true &&
+    sync.body.cursor === undefined &&
       sync.body.commit !== undefined &&
       sync.body.commit.did === rei.did &&
       typeof sync.body.commit.rev === 'string' &&
-      sync.body.commit.sig !== undefined,
-    'Caught-up response carries a signed commit (did/rev/sig)',
-    `caughtUp=${sync.body.caughtUp}, commit.did=${sync.body.commit?.did}`,
+      typeof sync.body.commit.sig === 'string' &&
+      sync.body.commit.sig.length > 0,
+    'Head response (no cursor) carries a signed commit (did/rev/sig)',
+    `cursor=${sync.body.cursor}, commit.did=${sync.body.commit?.did}`,
   )
 
   // Boundary gating: an aekea credential sees NOTHING of Rei's swordsmith

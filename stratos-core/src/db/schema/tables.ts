@@ -81,21 +81,28 @@ export const stratosRecordBlob = sqliteTable(
     blobCid: text('blobCid').notNull(),
     recordUri: text('recordUri').notNull(),
   },
-  (table) => [primaryKey({ columns: [table.blobCid, table.recordUri] })],
+  (table) => [
+    primaryKey({ columns: [table.blobCid, table.recordUri] }),
+    index('stratos_record_blob_record_uri_idx').on(table.recordUri),
+  ],
 )
 
 /**
- * Stratos blob-boundary association table
+ * Stratos record-boundary association table. Rows follow the record lifecycle:
+ * indexRecord replaces them and deleteRecord removes them.
  */
-export const stratosBlobBoundary = sqliteTable(
-  'stratos_blob_boundary',
+export const stratosRecordBoundary = sqliteTable(
+  'stratos_record_boundary',
   {
-    blobCid: text('blobCid').notNull(),
+    recordUri: text('recordUri').notNull(),
     boundary: text('boundary').notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.blobCid, table.boundary] }),
-    index('stratos_blob_boundary_blob_cid_idx').on(table.blobCid),
+    primaryKey({ columns: [table.recordUri, table.boundary] }),
+    index('stratos_record_boundary_boundary_idx').on(
+      table.boundary,
+      table.recordUri,
+    ),
   ],
 )
 
@@ -149,8 +156,9 @@ export type StratosBlobInsert = typeof stratosBlob.$inferInsert
 export type StratosRecordBlob = typeof stratosRecordBlob.$inferSelect
 export type StratosRecordBlobInsert = typeof stratosRecordBlob.$inferInsert
 
-export type StratosBlobBoundary = typeof stratosBlobBoundary.$inferSelect
-export type StratosBlobBoundaryInsert = typeof stratosBlobBoundary.$inferInsert
+export type StratosRecordBoundary = typeof stratosRecordBoundary.$inferSelect
+export type StratosRecordBoundaryInsert =
+  typeof stratosRecordBoundary.$inferInsert
 
 export type StratosBacklink = typeof stratosBacklink.$inferSelect
 export type StratosBacklinkInsert = typeof stratosBacklink.$inferInsert

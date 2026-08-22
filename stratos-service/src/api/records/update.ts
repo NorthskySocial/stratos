@@ -223,24 +223,13 @@ async function performUpdate(
     writeResult.rev,
   )
 
-  // Update blob associations and Bloom filter for getBlob access control
-  // Note: For simplicity, we add new associations.
-  // In a more complete implementation, we'd remove old ones first.
+  // Replace blob associations so removed blobs drop out of the index.
+  // Boundary residence lives on the record row, which indexRecord maintains.
+  await store.blob.removeRecordBlobAssociations(uri.toString())
   const blobs = StratosValidator.extractBlobs(record)
   for (const blobCidStr of blobs) {
     const blobCid = parseCid(blobCidStr)
     await store.blob.associateBlobWithRecord(blobCid, uri.toString())
-
-    const boundaries = StratosValidator.extractBoundaryDomains(
-      record as Record<string, unknown>,
-    )
-    for (const boundary of boundaries) {
-      await store.blob.associateBlobWithBoundary(blobCid, boundary)
-    }
-    // Update Bloom filter for fast rejection
-    if (ctx.bloomManager) {
-      await ctx.bloomManager.updateBloom(blobCid, boundaries)
-    }
   }
 
   return {

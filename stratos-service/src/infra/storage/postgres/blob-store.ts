@@ -9,7 +9,6 @@ import {
   parseCid,
   pgStratosBlob,
   pgStratosRecordBlob,
-  pgStratosBlobBoundary,
   type StratosPgDb,
   type StratosPgDbOrTx,
 } from '@northskysocial/stratos-core'
@@ -107,17 +106,6 @@ export class PgBlobMetadataReader implements BlobMetadataReader {
     })
   }
 
-  async getBoundariesForBlob(blobCid: CID): Promise<string[]> {
-    return this.withDb(async (db) => {
-      const rows = await db
-        .select({ boundary: pgStratosBlobBoundary.boundary })
-        .from(pgStratosBlobBoundary)
-        .where(eq(pgStratosBlobBoundary.blobCid, blobCid.toString()))
-
-      return rows.map((row) => row.boundary)
-    })
-  }
-
   protected async withDb<T>(fn: (db: StratosPgDb) => Promise<T>): Promise<T> {
     if (!this.schemaName) {
       return fn(this.db as StratosPgDb)
@@ -193,24 +181,5 @@ export class PgBlobMetadataWriter
       .update(pgStratosBlob)
       .set({ takedownRef: null })
       .where(eq(pgStratosBlob.cid, cid.toString()))
-  }
-
-  async associateBlobWithBoundary(
-    blobCid: CID,
-    boundary: string,
-  ): Promise<void> {
-    await this.db
-      .insert(pgStratosBlobBoundary)
-      .values({
-        blobCid: blobCid.toString(),
-        boundary,
-      })
-      .onConflictDoNothing()
-  }
-
-  async removeBlobBoundaryAssociations(blobCid: CID): Promise<void> {
-    await this.db
-      .delete(pgStratosBlobBoundary)
-      .where(eq(pgStratosBlobBoundary.blobCid, blobCid.toString()))
   }
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getBlobHandler, listBlobsHandler } from '../src/api/handlers/index.js'
+import { getBlobHandler } from '../src/api/handlers/index.js'
 import { AppContext } from '../src'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { parseCid } from '@northskysocial/stratos-core'
@@ -158,87 +158,6 @@ describe('blob-handlers', () => {
       ).rejects.toThrow(
         new InvalidRequestError('Blob not found', 'BlobNotFound'),
       )
-    })
-  })
-
-  describe('listBlobsHandler', () => {
-    it('throws error if DID is missing', async () => {
-      const handler = listBlobsHandler(mockCtx as AppContext)
-      await expect(
-        handler({
-          params: {},
-          input: undefined,
-          req: {} as any,
-        }),
-      ).rejects.toThrow(new InvalidRequestError('did is required'))
-    })
-
-    it('throws RepoNotFound if actor store does not exist', async () => {
-      const did = 'did:example:alice'
-      mockActorStore.exists.mockResolvedValue(false)
-
-      const handler = listBlobsHandler(mockCtx as AppContext)
-      await expect(
-        handler({
-          params: { did },
-          input: undefined,
-          req: {} as any,
-        }),
-      ).rejects.toThrow(
-        new InvalidRequestError('Could not find repo', 'RepoNotFound'),
-      )
-    })
-
-    it('returns list of CIDs and cursor on success', async () => {
-      const did = 'did:example:alice'
-      const cids = ['cid1', 'cid2']
-
-      mockActorStore.exists.mockResolvedValue(true)
-      mockActorStore.read.mockImplementation(async (did: string, fn: any) => {
-        return fn({
-          blob: {
-            listBlobs: vi.fn().mockResolvedValue(cids),
-          },
-        })
-      })
-
-      const handler = listBlobsHandler(mockCtx as AppContext)
-      const result = await handler({
-        params: { did, limit: 2 },
-        input: undefined,
-        req: {} as any,
-      })
-
-      expect(result.body).toEqual({
-        cids,
-        cursor: 'cid2',
-      })
-    })
-
-    it('returns undefined cursor if less than limit', async () => {
-      const did = 'did:example:alice'
-      const cids = ['cid1']
-
-      mockActorStore.exists.mockResolvedValue(true)
-      mockActorStore.read.mockImplementation(async (did: string, fn: any) => {
-        return fn({
-          blob: {
-            listBlobs: vi.fn().mockResolvedValue(cids),
-          },
-        })
-      })
-
-      const handler = listBlobsHandler(mockCtx as AppContext)
-      const result = await handler({
-        params: { did, limit: 2 },
-        input: undefined,
-        req: {} as any,
-      })
-
-      expect(result.body).toEqual({
-        cids,
-        cursor: undefined,
-      })
     })
   })
 })

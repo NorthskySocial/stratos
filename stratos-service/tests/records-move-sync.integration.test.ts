@@ -212,13 +212,13 @@ describe('Record move sync contract', () => {
     expect(observed).toHaveLength(0)
   })
 
-  it('pull: old-domain-only observer sees a removal (cid absent)', async () => {
+  it('pull: old-domain-only observer sees a removal (cid null)', async () => {
     await performMove()
     const ops = await pullOpsFor([OLD_DOMAIN])
     const forRecord = ops.filter((o) => o.rkey === rkey)
     expect(forRecord).toHaveLength(1)
     expect(forRecord[0]).toMatchObject({ rkey })
-    expect(forRecord[0].cid).toBeUndefined()
+    expect(forRecord[0].cid).toBeNull()
   })
 
   it('pull: new-domain observer sees the record present (cid present)', async () => {
@@ -226,7 +226,7 @@ describe('Record move sync contract', () => {
     const ops = await pullOpsFor([NEW_DOMAIN])
     const forRecord = ops.filter((o) => o.rkey === rkey)
     expect(forRecord).toHaveLength(1)
-    expect(forRecord[0].cid).toBeDefined()
+    expect(typeof forRecord[0].cid).toBe('string')
   })
 
   it('pull: third-party observer sees nothing', async () => {
@@ -282,12 +282,12 @@ describe('Record move sync contract', () => {
       (o) => o.rkey === rkey,
     )
     expect(oldPull).toHaveLength(1)
-    expect(oldPull[0].cid).toBeUndefined()
+    expect(oldPull[0].cid).toBeNull()
     const newPull = (await pullOpsFor([NEW_DOMAIN])).filter(
       (o) => o.rkey === rkey,
     )
     expect(newPull).toHaveLength(1)
-    expect(newPull[0].cid).toBeDefined()
+    expect(typeof newPull[0].cid).toBe('string')
     expect(
       (await pullOpsFor([THIRD_DOMAIN])).filter((o) => o.rkey === rkey),
     ).toHaveLength(0)

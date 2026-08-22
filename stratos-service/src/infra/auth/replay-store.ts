@@ -82,3 +82,18 @@ export class ReplayStore {
 function replayKey(kind: string, jti: string): string {
   return `replay:${kind}:${jti}`
 }
+
+/**
+ * Build a {@link ReplayStore} from the process cache, or `undefined` when no
+ * cache is configured (single-instance / no Redis). The structural check is a
+ * deliberate seam: the runtime cache is a `RedisCache` exposing `setNxEx`, but
+ * the shared `Cache` interface does not declare it.
+ */
+export function replayStoreFromCache(
+  cache: unknown,
+  logger?: Logger,
+): ReplayStore | undefined {
+  const store = cache as (NxExStore & { setNxEx?: unknown }) | undefined
+  if (!store || typeof store.setNxEx !== 'function') return undefined
+  return new ReplayStore(store, logger)
+}

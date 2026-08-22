@@ -242,23 +242,23 @@ URL. Record creation/deletion always has the corresponding action to the PDS rec
 
 ### Routing applies to
 
-| Operation                               | Routes to Stratos?                                                    |
-| --------------------------------------- | --------------------------------------------------------------------- |
-| `com.atproto.repo.getRecord`            | Yes (reads private records)                                           |
-| `com.atproto.repo.listRecords`          | Yes (lists private collections)                                       |
-| `com.atproto.repo.describeRepo`         | Yes (describes private repo)                                          |
-| `com.atproto.repo.createRecord`         | Yes (writes to Stratos)                                               |
-| `com.atproto.repo.deleteRecord`         | Yes (deletes from Stratos)                                            |
-| `com.atproto.repo.applyWrites`          | Yes (batch writes)                                                    |
-| `com.atproto.sync.getRecord`            | Yes (CAR export for verification)                                     |
-| `com.atproto.sync.listBlobs`            | Yes (lists blob CIDs)                                                 |
-| `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                         |
-| `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                            |
-| `zone.stratos.sync.subscribeRecords`    | Yes (WebSocket firehose)                                              |
-| `zone.stratos.sync.listRepoOps`         | Yes (pull oplog; falls back to `listRecordPaths` on `OplogTruncated`) |
-| `zone.stratos.sync.listRecordPaths`     | Yes (full-state recovery enumeration)                                 |
-| `zone.stratos.space.getSpaceCredential` | Yes (mints a space credential accepted on read/sync endpoints)        |
-| `com.atproto.sync.getBlob`              | Yes (downloads blob content)                                          |
+| Operation                               | Routes to Stratos?                                                            |
+| --------------------------------------- | ----------------------------------------------------------------------------- |
+| `com.atproto.repo.getRecord`            | Yes (reads private records)                                                   |
+| `com.atproto.repo.listRecords`          | Yes (lists private collections)                                               |
+| `com.atproto.repo.describeRepo`         | Yes (describes private repo)                                                  |
+| `com.atproto.repo.createRecord`         | Yes (writes to Stratos)                                                       |
+| `com.atproto.repo.deleteRecord`         | Yes (deletes from Stratos)                                                    |
+| `com.atproto.repo.applyWrites`          | Yes (batch writes)                                                            |
+| `com.atproto.sync.getRecord`            | Yes (CAR export for verification)                                             |
+| `zone.stratos.space.listBlobs`          | Yes (lists blob CIDs in a space)                                              |
+| `zone.stratos.sync.getRepo`             | Yes (full repo export as CAR)                                                 |
+| `zone.stratos.repo.importRepo`          | Yes (import repo from CAR)                                                    |
+| `zone.stratos.sync.subscribeRecords`    | Yes (WebSocket firehose)                                                      |
+| `zone.stratos.sync.listRepoOps`         | Yes (pull oplog; falls back to `listRecordPaths` on `OplogTruncated`)         |
+| `zone.stratos.sync.listRecordPaths`     | Yes (full-state recovery enumeration)                                         |
+| `zone.stratos.space.getSpaceCredential` | Yes (mints a DPoP-key-bound space credential accepted on read/sync endpoints) |
+| `com.atproto.sync.getBlob`              | Yes (downloads blob content)                                                  |
 
 ---
 
@@ -400,8 +400,8 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 
 ### Boundary gating: blobs
 
-Stratos supports blob listing via `com.atproto.sync.listBlobs` and blob content retrieval via
-`com.atproto.sync.getBlob`.
+Stratos supports space-scoped blob listing via `zone.stratos.space.listBlobs` and blob content
+retrieval via `com.atproto.sync.getBlob`.
 
 ---
 
@@ -767,8 +767,8 @@ from the URL it receives.
 ### Blob operations
 
 `com.atproto.sync.getBlob` is implemented by Stratos and follows boundary-based access control.
-Blob listing via `com.atproto.sync.listBlobs` is available. For more details, see the
-[Blob support](#6-blob-support) section.
+Space-scoped blob listing via `zone.stratos.space.listBlobs` is available. For more details, see
+the [Blob support](#6-blob-support) section.
 
 ---
 

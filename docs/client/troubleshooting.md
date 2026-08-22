@@ -191,6 +191,5 @@ from the URL it receives.
 
 ### Blob operations
 
-`com.atproto.sync.getBlob` is not yet implemented by Stratos. Blob listing via
-`com.atproto.sync.listBlobs` is available. Gate blob download/display UI behind availability checks
-until `getBlob` is supported.
+Stratos serves blob content via `com.atproto.sync.getBlob` and space-scoped blob listing via
+`zone.stratos.space.listBlobs`.

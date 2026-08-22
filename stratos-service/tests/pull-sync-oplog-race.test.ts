@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import {
   computeCid,
@@ -9,6 +9,7 @@ import type { AppContext } from '../src/context.js'
 import {
   encodeSeqCursor,
   listRepoOps,
+  OplogTruncatedError,
 } from '../src/features/pull-sync/index.js'
 
 const REPO_DID = 'did:plc:tenchi-masaki'
@@ -16,6 +17,10 @@ const BOUNDARY = 'jurai'
 const REV = {
   r1: '3aaaa000000t1',
   r2: '3bbbb000000t2',
+  r3: '3cccc000000t3',
+  r4: '3dddd000000t4',
+  r5: '3eeee000000t5',
+  r6: '3ffff000000t6',
 }
 
 interface SeqRow {
@@ -52,6 +57,28 @@ class ScriptedActorStore {
             cid,
             record: {
               text: 'washu built it',
+              boundary: { values: [{ value: BOUNDARY }] },
+            },
+          },
+        ],
+      }),
+      sequencedAt: new Date().toISOString(),
+    })
+  }
+
+  /** Append a malformed non-delete op that has no cid. */
+  appendCidlessCreate(seq: number, rev: string, rkey: string): void {
+    this.rows.push({
+      seq,
+      did: REPO_DID,
+      event: encodeRecord({
+        rev,
+        ops: [
+          {
+            action: 'create',
+            path: `zone.stratos.feed.post/${rkey}`,
+            record: {
+              text: 'kagato corrupted it',
               boundary: { values: [{ value: BOUNDARY }] },
             },
           },
@@ -107,7 +134,7 @@ function makeCtx(actorStore: ScriptedActorStore): AppContext {
   return { actorStore } as unknown as AppContext
 }
 
-describe('listRepoOps caught-up race', () => {
+describe('listRepoOps head-of-oplog race', () => {
   const params = { did: REPO_DID, limit: 100, excludeValues: false }
   const callerBoundaries: ReadonlySet<string> = new Set([BOUNDARY])
 
@@ -126,7 +153,6 @@ describe('listRepoOps caught-up race', () => {
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(false)
     expect(res.commit).toBeUndefined()
     expect(res.cursor).toBe(encodeSeqCursor(1))
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
@@ -154,12 +180,11 @@ describe('listRepoOps caught-up race', () => {
       callerBoundaries,
     )
 
-    expect(res.caughtUp).toBe(false)
     expect(res.ops).toEqual([])
     expect(res.cursor).toBe(cursor)
   })
 
-  it('stays caughtUp when the write lands after the probe', async () => {
+  it('stays at the head when the write lands after the probe', async () => {
     const actorStore = new ScriptedActorStore()
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
@@ -167,8 +192,8 @@ describe('listRepoOps caught-up race', () => {
     // The probe is the only sequence read that happens after the commit read,
     // and its page is captured before this hook runs. The write therefore lands
     // strictly past the probe's horizon, where one probe cannot see it. Ops and
-    // commit still agree, so the response is consistent rather than falsely
-    // caught up — the write simply belongs to a later poll.
+    // commit still agree, so the response is consistent rather than a false
+    // head signal — the write simply belongs to a later poll.
     let commitRead = false
     actorStore.onCommitRead = () => {
       commitRead = true
@@ -181,12 +206,12 @@ describe('listRepoOps caught-up race', () => {
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(true)
+    expect(res.cursor).toBeUndefined()
     expect(res.commit?.rev).toBe(REV.r1)
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
   })
 
-  it('returns the commit and caughtUp when no write lands during the commit read', async () => {
+  it('returns the commit and no cursor when no write lands during the commit read', async () => {
     const actorStore = new ScriptedActorStore()
     actorStore.appendEvent(1, REV.r1, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r1 }
@@ -194,7 +219,6 @@ describe('listRepoOps caught-up race', () => {
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(true)
     expect(res.cursor).toBeUndefined()
     expect(res.commit?.rev).toBe(REV.r1)
     expect(res.ops.map((op) => op.rev)).toEqual([REV.r1])
@@ -212,19 +236,76 @@ describe('listRepoOps caught-up race', () => {
       callerBoundaries,
     )
 
-    expect(res.caughtUp).toBe(false)
     expect(res.commit).toBeUndefined()
     expect(res.cursor).toBe(encodeSeqCursor(1))
   })
 
-  it('stays caughtUp with no commit for a repo that has no root yet', async () => {
+  it('signals the head with no commit and no cursor for a repo with no root yet', async () => {
     const actorStore = new ScriptedActorStore()
 
     const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
 
-    expect(res.caughtUp).toBe(true)
     expect(res.commit).toBeUndefined()
     expect(res.cursor).toBeUndefined()
     expect(res.ops).toEqual([])
+  })
+
+  it('fails closed with OplogTruncated on a non-delete op without a cid', async () => {
+    const actorStore = new ScriptedActorStore()
+    // `cid: null` on the wire means delete, so a cid-less create cannot be
+    // emitted truthfully. A silent drop would yield a head response that
+    // omits a persisted op — a permanent sync gap — so the whole page must
+    // signal truncation and push the caller into full-state recovery.
+    actorStore.appendCidlessCreate(1, REV.r1, 'kagato')
+    actorStore.appendEvent(2, REV.r2, 'ryoko', 'cidRyoko')
+    actorStore.root = { cid: 'commitCid', rev: REV.r2 }
+    actorStore.commitBytes = await encodeSignedCommit(REV.r2)
+    const warn = vi.fn()
+    const ctx = {
+      ...makeCtx(actorStore),
+      logger: { warn },
+    } as unknown as AppContext
+
+    await expect(
+      listRepoOps(ctx, params, callerBoundaries),
+    ).rejects.toMatchObject({
+      name: 'OplogTruncatedError',
+      message: 'oplog contains an op with no cid',
+    })
+    expect(warn).toHaveBeenCalledWith(
+      { did: REPO_DID, collection: 'zone.stratos.feed.post', rev: REV.r1 },
+      'pull-sync found an op with no cid',
+    )
+  })
+
+  it('fails closed with OplogTruncated on an op whose record key fails the record-key format', async () => {
+    // `.`, `..`, and an empty rkey (a path with a trailing slash) fail the
+    // record-key format, so these ops cannot pass output validation. An
+    // invalid character in the prefix or the suffix must also fail: the
+    // format anchors the full key, not a substring.
+    const invalidRkeys = ['..', '', '.', 'evil rkey', 'ayeka!']
+    for (const rkey of invalidRkeys) {
+      const actorStore = new ScriptedActorStore()
+      actorStore.appendEvent(1, REV.r1, rkey, 'cidKagato')
+      actorStore.root = { cid: 'commitCid', rev: REV.r1 }
+      actorStore.commitBytes = await encodeSignedCommit(REV.r1)
+      const warn = vi.fn()
+      const ctx = {
+        ...makeCtx(actorStore),
+        logger: { warn },
+      } as unknown as AppContext
+
+      await expect(
+        listRepoOps(ctx, params, callerBoundaries),
+        `rkey ${JSON.stringify(rkey)} must signal truncation`,
+      ).rejects.toMatchObject({
+        name: 'OplogTruncatedError',
+        message: 'oplog contains an op with an invalid record key',
+      })
+      expect(warn).toHaveBeenCalledWith(
+        { did: REPO_DID, collection: 'zone.stratos.feed.post', rev: REV.r1 },
+        'pull-sync found an op with an invalid record key',
+      )
+    }
   })
 })

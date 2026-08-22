@@ -8,11 +8,22 @@
  *     while holding the boundary, and the deny lands on the very next mint.
  *   - Delegation-token path (dormant, real delegation verifier): happy path
  *     issues a credential; every verification failure surfaces as `InvalidToken`.
+ *   - Key binding: the DPoP path binds the session key's `jkt` into `cnf.jkt`;
+ *     the delegation path requires a REAL standalone DPoP proof (jose-built,
+ *     ES256, embedded JWK) and binds the proof key. An unbound mint is refused
+ *     outside dev mode (`ProofRequired`).
  * The issued credential is decoded and verified against the service key (and
  * asserted to FAIL against another key), with the full spec claim set checked
  * including the absence of `aud`, and `exp - iat` equal to the configured TTL.
  */
+import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  SignJWT,
+  calculateJwkThumbprint,
+  exportJWK,
+  generateKeyPair,
+} from 'jose'
 import { Secp256k1Keypair, verifySignature } from '@atproto/crypto'
 import type { Keypair } from '@atproto/crypto'
 import type { IdResolver } from '@atproto/identity'
@@ -29,6 +40,8 @@ import type { AppContext } from '../src/index.js'
 import { makeSpaceUri } from './helpers/space-uri.js'
 
 const SERVICE_DID = 'did:web:stratos.test'
+const PUBLIC_URL = 'https://stratos.test'
+const MINT_PATH = '/xrpc/zone.stratos.space.getSpaceCredential'
 const TTL_SECONDS = 7_200
 const SPACE_URI = makeSpaceUri(
   SERVICE_DID,
@@ -39,9 +52,6 @@ const SPACE_URI = makeSpaceUri(
 const SPACE_BOUNDARY = `${SERVICE_DID}/myspace`
 const USER_DID = 'did:plc:abcabcabcabcabcabcabcabc'
 
-// ---------------------------------------------------------------------------
-// Mock XRPC server (records registered methods; invoked directly).
-// ---------------------------------------------------------------------------
 interface MockXrpcServer {
   methods: Record<string, { type: string; auth?: unknown; handler: Function }>
   method: (
@@ -65,22 +75,34 @@ interface InvokeResult {
   error?: { name: string; message: string }
 }
 
+interface InvokeOptions {
+  /** DPoP session key thumbprint carried on the caller's auth credentials. */
+  jkt?: string
+  /** Request shape (method/url/headers) for mint-time DPoP proof checks. */
+  req?: {
+    method?: string
+    url?: string
+    headers?: Record<string, string | string[] | undefined>
+  }
+}
+
 async function invoke(
   server: MockXrpcServer,
   input: Record<string, unknown>,
   authDid?: string,
+  opts?: InvokeOptions,
 ): Promise<InvokeResult> {
   const method = server.methods['zone.stratos.space.getSpaceCredential']
   if (!method) throw new Error('method not registered')
   const auth = authDid
-    ? { credentials: { type: 'user', did: authDid } }
+    ? { credentials: { type: 'user', did: authDid, jkt: opts?.jkt } }
     : { credentials: { type: 'anonymous' } }
   try {
     const result = await method.handler({
       input: { body: input, encoding: 'application/json' },
       params: {},
       auth,
-      req: { headers: {} },
+      req: opts?.req ?? { headers: {} },
     })
     return { body: result.body }
   } catch (err) {
@@ -97,10 +119,6 @@ async function invoke(
     return { error: { name, message: e.message } }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Mock AppContext.
-// ---------------------------------------------------------------------------
 
 /** In-memory NX-EX store (first set wins) so the delegation replay check works. */
 class MemoryNxExStore implements NxExStore {
@@ -136,6 +154,8 @@ interface MockCtxOptions {
   enrolledBoundaries?: string[]
   /** Whether the caller's enrollment row is still active. Defaults to true. */
   enrollmentActive?: boolean
+  /** Dev-mode flag; only dev mode may mint UNBOUND (no cnf) credentials. */
+  devMode?: boolean
   idResolver?: IdResolver
   cache?: NxExStore
 }
@@ -150,9 +170,15 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
     idResolver:
       opts.idResolver ??
       ({ did: { resolve: vi.fn() } } as unknown as IdResolver),
-    cache: opts.cache,
+    // Default to a working store: a production mint requires one. Pass an
+    // explicit `cache: undefined` to exercise the no-store rejection paths.
+    cache: 'cache' in opts ? opts.cache : new MemoryNxExStore(),
     cfg: {
-      stratos: { spaceCredentialTtlSeconds: TTL_SECONDS },
+      service: { publicUrl: PUBLIC_URL },
+      stratos: {
+        spaceCredentialTtlSeconds: TTL_SECONDS,
+        ...(opts.devMode === undefined ? {} : { devMode: opts.devMode }),
+      },
     },
     enrollmentStore: {
       getEnrollment: vi.fn(async (did: string) => ({
@@ -170,9 +196,6 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
   } as unknown as AppContext
 }
 
-// ---------------------------------------------------------------------------
-// Delegation-token minting (real delegation shape, signed by the user key).
-// ---------------------------------------------------------------------------
 const b64url = (v: unknown): string =>
   Buffer.from(JSON.stringify(v)).toString('base64url')
 
@@ -214,9 +237,21 @@ async function mintDelegation(opts: DelegationMintOpts): Promise<string> {
   return `${signingInput}.${Buffer.from(sig).toString('base64url')}`
 }
 
-// ---------------------------------------------------------------------------
-// Credential decode/verify helpers.
-// ---------------------------------------------------------------------------
+async function makeMintProof(
+  htu: string,
+): Promise<{ proof: string; jkt: string }> {
+  const { privateKey, publicKey } = await generateKeyPair('ES256', {
+    extractable: true,
+  })
+  const jwk = await exportJWK(publicKey)
+  const jkt = await calculateJwkThumbprint(jwk)
+  const proof = await new SignJWT({ htm: 'POST', htu, jti: randomUUID() })
+    .setProtectedHeader({ typ: 'dpop+jwt', alg: 'ES256', jwk })
+    .setIssuedAt()
+    .sign(privateKey)
+  return { proof, jkt }
+}
+
 function decodeCredential(jwt: string) {
   const parts = jwt.split('.')
   return {
@@ -239,11 +274,8 @@ async function verifyCredentialAgainst(
   )
 }
 
-// ===========================================================================
-// DPoP (interim, live) path
-// ===========================================================================
 describe('getSpaceCredential — DPoP path', () => {
-  it('issues a credential to an enrolled DPoP-authed user (verifies; no aud; TTL)', async () => {
+  it('issues a credential BOUND to the session DPoP key (verifies; no aud; TTL)', async () => {
     const signingKey = await Secp256k1Keypair.create()
     const ctx = createMockCtx({
       signingKey,
@@ -252,7 +284,9 @@ describe('getSpaceCredential — DPoP path', () => {
     const server = createMockXrpcServer()
     registerSpaceCredentialHandlers(server as any, ctx)
 
-    const res = await invoke(server, { space: SPACE_URI }, USER_DID)
+    const res = await invoke(server, { space: SPACE_URI }, USER_DID, {
+      jkt: 'thumb-misato',
+    })
     expect(res.error).toBeUndefined()
     expect(res.body?.credential).toBeTruthy()
 
@@ -265,6 +299,7 @@ describe('getSpaceCredential — DPoP path', () => {
     expect(payload.iss).toBe(SERVICE_DID)
     expect(payload.sub).toBe(SPACE_URI)
     expect('aud' in payload).toBe(false)
+    expect(payload.cnf).toEqual({ jkt: 'thumb-misato' })
     expect(payload.exp - payload.iat).toBe(TTL_SECONDS)
     expect(res.body!.expiresAt).toBe(new Date(payload.exp * 1000).toISOString())
 
@@ -334,11 +369,37 @@ describe('getSpaceCredential — DPoP path', () => {
     const res = await invoke(server, { space: 'not-a-space-uri' }, USER_DID)
     expect(res.error?.name).toBe('UnknownSpace')
   })
-})
 
-// ===========================================================================
-// Deactivation gate
-// ===========================================================================
+  it('rejects a jkt-less session outside dev mode with ProofRequired', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+
+    const res = await invoke(server, { space: SPACE_URI }, USER_DID)
+    expect(res.error?.name).toBe('ProofRequired')
+    expect(res.body).toBeUndefined()
+  })
+
+  it('dev mode: mints an UNBOUND credential (no cnf) for a jkt-less session', async () => {
+    const signingKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      devMode: true,
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+
+    const res = await invoke(server, { space: SPACE_URI }, USER_DID)
+    expect(res.error).toBeUndefined()
+    const { payload } = decodeCredential(res.body!.credential!)
+    expect('cnf' in payload).toBe(false)
+  })
+})
 
 /**
  * Deactivation revokes credential issuance.
@@ -414,13 +475,17 @@ describe('getSpaceCredential — deactivation gate', () => {
     registerSpaceCredentialHandlers(server as any, ctx)
 
     try {
-      const before = await invoke(server, { space: SPACE_URI }, USER_DID)
+      const before = await invoke(server, { space: SPACE_URI }, USER_DID, {
+        jkt: 'thumb-shinji',
+      })
       expect(before.error).toBeUndefined()
       expect(before.body?.credential).toBeTruthy()
 
       await store.updateEnrollment(USER_DID, { active: false })
 
-      const after = await invoke(server, { space: SPACE_URI }, USER_DID)
+      const after = await invoke(server, { space: SPACE_URI }, USER_DID, {
+        jkt: 'thumb-shinji',
+      })
       expect(after.error?.name).toBe('NotEnrolled')
       expect(after.body).toBeUndefined()
     } finally {
@@ -429,9 +494,6 @@ describe('getSpaceCredential — deactivation gate', () => {
   })
 })
 
-// ===========================================================================
-// Delegation-token (dormant) path
-// ===========================================================================
 describe('getSpaceCredential — delegation-token path', () => {
   async function setup(enrolled: boolean) {
     const signingKey = await Secp256k1Keypair.create()
@@ -447,23 +509,103 @@ describe('getSpaceCredential — delegation-token path', () => {
     return { signingKey, userKey, ctx, server }
   }
 
-  it('happy path: valid token for enrolled user issues a credential', async () => {
+  it('happy path: valid token + mint proof issues a credential bound to the proof key', async () => {
     const { signingKey, userKey, server } = await setup(true)
     const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const { proof, jkt } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
 
-    const res = await invoke(server, {
-      space: SPACE_URI,
-      delegationToken: token,
-    })
+    const res = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      { req: { method: 'POST', url: MINT_PATH, headers: { dpop: proof } } },
+    )
     expect(res.error).toBeUndefined()
     expect(res.body?.credential).toBeTruthy()
     const { payload } = decodeCredential(res.body!.credential!)
     expect(payload.iss).toBe(SERVICE_DID)
     expect(payload.sub).toBe(SPACE_URI)
     expect('aud' in payload).toBe(false)
+    expect(payload.cnf).toEqual({ jkt })
     expect(
       await verifyCredentialAgainst(signingKey.did(), res.body!.credential!),
     ).toBe(true)
+  })
+
+  it('rejects a valid token WITHOUT a mint-time DPoP proof → ProofRequired', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const res = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(res.error?.name).toBe('ProofRequired')
+  })
+
+  it('a request that fails a later gate does NOT burn the token: a retry with the proof succeeds', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+
+    // First presentation fails the mint-proof gate AFTER identity resolution.
+    const first = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(first.error?.name).toBe('ProofRequired')
+
+    // The single-use jti was not consumed: the SAME token still mints.
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+    const second = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      { req: { method: 'POST', url: MINT_PATH, headers: { dpop: proof } } },
+    )
+    expect(second.error).toBeUndefined()
+    expect(second.body?.credential).toBeTruthy()
+  })
+
+  it('a successful mint burns the token: replaying it → InvalidToken', async () => {
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const present = async () => {
+      const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+      return invoke(
+        server,
+        { space: SPACE_URI, delegationToken: token },
+        undefined,
+        { req: { method: 'POST', url: MINT_PATH, headers: { dpop: proof } } },
+      )
+    }
+
+    const first = await present()
+    expect(first.error).toBeUndefined()
+
+    const second = await present()
+    expect(second.error?.name).toBe('InvalidToken')
+  })
+
+  it('dev mode: the delegation path STILL requires the mint proof', async () => {
+    // Dev mode relaxes only the DPoP-session path (unbound mint). A delegated
+    // mint proves key possession with the mint proof, so its absence must
+    // reject — never fall back to an unbound credential.
+    const signingKey = await Secp256k1Keypair.create()
+    const userKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      idResolver: atprotoResolver(userKey.did(), userKey),
+      cache: new MemoryNxExStore(),
+      devMode: true,
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const res = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(res.error?.name).toBe('ProofRequired')
   })
 
   it('valid token but user not enrolled → NotEnrolled', async () => {
@@ -544,7 +686,9 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(res.error?.name).toBe('InvalidToken')
   })
 
-  it('delegation path unavailable when no replay store configured → InvalidToken', async () => {
+  it('production with no replay store → mint refused (InternalServerError)', async () => {
+    // A presented credential is replay-checked; with no store the presentation
+    // verifier fail-closes, so the mint itself must refuse.
     const signingKey = await Secp256k1Keypair.create()
     const userKey = await Secp256k1Keypair.create()
     const ctx = createMockCtx({
@@ -552,6 +696,28 @@ describe('getSpaceCredential — delegation-token path', () => {
       enrolledBoundaries: [SPACE_BOUNDARY],
       idResolver: atprotoResolver(userKey.did(), userKey),
       cache: undefined,
+    })
+    const server = createMockXrpcServer()
+    registerSpaceCredentialHandlers(server as any, ctx)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const res = await invoke(server, {
+      space: SPACE_URI,
+      delegationToken: token,
+    })
+    expect(res.error?.name).toBe('InternalServerError')
+  })
+
+  it('dev mode with no replay store: delegation path still rejects → InvalidToken', async () => {
+    // Dev mode skips the mint guard (unbound Bearer presentation works), but
+    // the single-use delegation check still needs a store and fails closed.
+    const signingKey = await Secp256k1Keypair.create()
+    const userKey = await Secp256k1Keypair.create()
+    const ctx = createMockCtx({
+      signingKey,
+      enrolledBoundaries: [SPACE_BOUNDARY],
+      idResolver: atprotoResolver(userKey.did(), userKey),
+      cache: undefined,
+      devMode: true,
     })
     const server = createMockXrpcServer()
     registerSpaceCredentialHandlers(server as any, ctx)

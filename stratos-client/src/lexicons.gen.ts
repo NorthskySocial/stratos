@@ -1014,7 +1014,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "properties": {
           "space": {
             "type": "string",
-            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
           },
           "repo": {
             "type": "string",
@@ -1076,7 +1076,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "procedure",
-      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is bearer-shaped and multi-use until it expires; it is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided, otherwise from the DPoP-authenticated user. Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
+      "description": "Issue a space credential (JWT) for a space the caller is a member of. The credential is multi-use until it expires and is bound to the caller's DPoP key (cnf.jkt, RFC 9449): it must be presented under the DPoP auth scheme with a per-request proof signed by that key. It is signed by the space authority's signing key so any repo host can verify it without contacting the authority. Identity is resolved from a delegation token when provided (a standalone DPoP proof in the DPoP header supplies the key to bind), otherwise from the DPoP-authenticated user (the session proof key is bound). Membership is checked live against the enrollment store. App-axis (client attestation) gating is enforced here: spaces configured with an app allow-list require a valid client attestation whose attested client_id is listed; spaces that are open ignore any attestation supplied.",
       "input": {
         "encoding": "application/json",
         "schema": {
@@ -1085,7 +1085,7 @@ export const stratosLexicons: LexiconDoc[] = [
           "properties": {
             "space": {
               "type": "string",
-              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Its space DID must equal this service's DID."
+              "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
             },
             "delegationToken": {
               "type": "string",
@@ -1136,6 +1136,82 @@ export const stratosLexicons: LexiconDoc[] = [
         {
           "name": "ClientNotAllowed",
           "description": "A valid client attestation was supplied but its attested client_id is not in the space's app allow-list."
+        },
+        {
+          "name": "ProofRequired",
+          "description": "No DPoP key was available to bind the credential to: the delegation path requires a standalone DPoP proof in the DPoP header, and unbound credentials are refused outside development mode."
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.space.listBlobs",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List the CIDs of blobs referenced by an account's records within a permissioned space, optionally since some revision of that repo. Spec-shaped mirror of com.atproto.space.listBlobs (atproto#5187): callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services). Blobs behind permissioned records are never enumerated by an unauthenticated endpoint.",
+      "parameters": {
+        "type": "params",
+        "required": ["space", "repo"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+          },
+          "repo": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the account whose blobs to list."
+          },
+          "since": {
+            "type": "string",
+            "format": "tid",
+            "description": "Optional revision of the repo to list blobs since."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 500
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["cids"],
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "cids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "cid"
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "RepoNotFound",
+          "description": "The requested account has no repo on this service."
+        },
+        {
+          "name": "UnknownSpace",
+          "description": "The requested space URI is malformed or its space DID does not match this service's DID."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "The caller is not admitted to the requested space (not a member, or the presented credential targets a different space)."
         }
       ]
     }
@@ -1300,7 +1376,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. When the response reaches the end of the available log AND a probe after the commit read finds no newer sequence row, `caughtUp` is true and the repo's current signed commit is included, consistent with the operations returned. A write the probe detects instead yields `caughtUp` false with a cursor and no commit; that response can carry no operations and repeat the cursor you sent, so poll again on `caughtUp` false and do not read an unchanged cursor as a stall. A write that commits after the probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned so the caller falls back to full-state recovery (listRecordPaths).",
+      "description": "Incremental pull sync of a repo's operation log (oplog), mirroring com.atproto.space.listRepoOps semantics. Returns record operations after the `since` revision, with current record values inlined by default. Boundary-gated: the caller only observes operations for records within its enrolled boundaries. The response reaches the head of the oplog when `cursor` is absent; the repo's current signed commit is then included (unless the repo has no commits yet), consistent with the operations returned. When a concurrent write is detected, a cursor is returned instead of the commit; that response can carry no operations and repeat the cursor you sent, so poll again while a cursor is present and do not read an unchanged cursor as a stall. A write that commits after the head probe is not detected; it falls outside this snapshot and arrives on a later poll. Callers must authenticate with a signed service JWT via the Authorization: Bearer header. The oplog is a droppable transport optimization; if `since` predates retained history the OplogTruncated error is returned (stricter than upstream, which silently restarts) so the caller falls back to full-state recovery (listRecordPaths).",
       "parameters": {
         "type": "params",
         "required": ["did"],
@@ -1313,7 +1389,7 @@ export const stratosLexicons: LexiconDoc[] = [
           "since": {
             "type": "string",
             "format": "tid",
-            "description": "A revision (TID). Only operations after this revision are returned. Omit to start from the beginning of retained history."
+            "description": "A revision (TID): the caller's own sync position. Only operations after this revision are returned. Omit to start from the beginning of retained history. Use `cursor` to continue a paginated response."
           },
           "limit": {
             "type": "integer",
@@ -1324,7 +1400,7 @@ export const stratosLexicons: LexiconDoc[] = [
           },
           "cursor": {
             "type": "string",
-            "description": "Opaque pagination cursor from a previous response."
+            "description": "Opaque pagination cursor from a previous response. Takes precedence over `since` when both are supplied."
           },
           "excludeValues": {
             "type": "boolean",
@@ -1337,7 +1413,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["ops", "caughtUp"],
+          "required": ["ops"],
           "properties": {
             "ops": {
               "type": "array",
@@ -1346,16 +1422,12 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "cursor": {
               "type": "string",
-              "description": "Opaque pagination cursor to fetch the next page. Absent when caughtUp is true. Can repeat the cursor you sent when a concurrent write was detected."
-            },
-            "caughtUp": {
-              "type": "boolean",
-              "description": "True when this response reached the end of the available log and a probe after the commit read found no newer sequence row. When true, `commit` is present unless the repo has no commits yet, and the operations and that commit are a consistent pair. A write the probe detects yields false, and under continuous writes this can stay false indefinitely. A write that commits after the probe is not detected; it arrives on a later poll."
+              "description": "Opaque pagination cursor to fetch the next page. Absent once the response reaches the head of the oplog. Can repeat the cursor you sent when a concurrent write was detected."
             },
             "commit": {
               "type": "ref",
               "ref": "#signedCommit",
-              "description": "The repo's current signed MST commit. Present when caughtUp is true, EXCEPT for a repo with no commits yet (no writes) - in that case there is nothing to sign and also no ops to sync."
+              "description": "The repo's current signed MST commit. Included when the response reaches the head of the oplog; omitted on backfill responses and when the repo has no commits yet (no writes) - in that case there is nothing to sign and also no ops to sync."
             }
           }
         }
@@ -1363,7 +1435,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "errors": [
         {
           "name": "OplogTruncated",
-          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. The caller must fall back to full-state recovery."
+          "description": "The requested `since` revision falls outside retained history: it predates the oldest retained event (compacted), postdates the newest (not a rev this repo issued), or there is no retained log to check it against. Also returned for an unusable `cursor`: malformed, predating retained history (compacted between pages), or beyond the newest retained event. The caller must fall back to full-state recovery. Stricter than upstream, which restarts from the beginning of retained history instead of erroring."
         },
         {
           "name": "RepoNotFound",
@@ -1378,7 +1450,8 @@ export const stratosLexicons: LexiconDoc[] = [
     "repoOp": {
       "type": "object",
       "description": "A single record operation in the oplog. `cid` null means delete; `prev` null means create.",
-      "required": ["rev", "collection", "rkey"],
+      "required": ["rev", "collection", "rkey", "cid", "prev"],
+      "nullable": ["cid", "prev"],
       "properties": {
         "rev": {
           "type": "string",
@@ -1392,22 +1465,22 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "rkey": {
           "type": "string",
-          "maxLength": 512,
+          "format": "record-key",
           "description": "The record key."
         },
         "cid": {
           "type": "string",
           "format": "cid",
-          "description": "The CID (string form) of the current record value. Null (absent) for a delete."
+          "description": "The CID (string form) of the current record value. Null for a delete."
         },
         "prev": {
           "type": "string",
           "format": "cid",
-          "description": "The CID (string form) of the record value this operation superseded. Null (absent) for a create."
+          "description": "The CID (string form) of the record value this operation superseded. Null for a create, or when the superseded value predates the returned window."
         },
         "value": {
           "type": "unknown",
-          "description": "The current record value, inlined by default for create/update ops. Omitted when excludeValues is true or for a delete."
+          "description": "The current record value, inlined by default for create/update ops. Omitted when excludeValues is true, for a delete, or when the value has been superseded by a later operation."
         }
       }
     },
