@@ -16,7 +16,7 @@
     "test:e2e:docker": "./scripts/e2e-docker.sh"
   },
   "dependencies": {
-    "@atcute/cbor": "^2.3.2",
+    "@atcute/cbor": "^2.3.6",
     "@atproto/api": "^0.15.8",
     "@atproto/crypto": "^0.4.0",
     "@atproto/lexicon": "^0.6.2",

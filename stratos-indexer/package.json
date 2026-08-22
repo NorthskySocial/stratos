@@ -8,11 +8,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@atcute/atproto": "^3.1.10",
-    "@atcute/car": "^5.1.1",
-    "@atcute/cbor": "^2.3.2",
-    "@atcute/cid": "^2.4.1",
-    "@atcute/firehose": "^0.1.0",
+    "@atcute/atproto": "^4.0.4",
+    "@atcute/car": "^6.0.2",
+    "@atcute/cbor": "^2.3.6",
+    "@atcute/cid": "^2.4.2",
+    "@atcute/firehose": "^1.1.0",
     "@atproto/bsky": "^0.0.214",
     "@atproto/identity": "^0.4.12",
     "@atproto/lex-data": "^0.0.9",

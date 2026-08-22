@@ -21,7 +21,7 @@
     "lint": "eslint --ext .ts ."
   },
   "dependencies": {
-    "@atcute/cbor": "^2.3.2",
+    "@atcute/cbor": "^2.3.6",
     "@atproto/crypto": "^0.4.5",
     "@atproto/identity": "^0.4.11",
     "@atproto/lexicon": "^0.6.1",
