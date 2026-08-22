@@ -133,6 +133,21 @@ export async function createActorStore(did: string): Promise<void> {
     `)
 
     await sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS stratos_record_boundary (
+        "recordUri" TEXT NOT NULL,
+        boundary TEXT NOT NULL,
+        PRIMARY KEY ("recordUri", boundary)
+      )
+    `)
+
+    await sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS stratos_signing_key (
+        did TEXT PRIMARY KEY,
+        key BYTEA NOT NULL
+      )
+    `)
+
+    await sql.unsafe(`
       CREATE TABLE IF NOT EXISTS stratos_backlink (
         uri TEXT NOT NULL,
         path TEXT NOT NULL,
