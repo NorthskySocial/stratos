@@ -40,10 +40,6 @@ const SPACE_URI = makeSpaceUri(
 )
 const AUD = `${SERVICE_DID}#atproto_space_host`
 
-// ---------------------------------------------------------------------------
-// In-memory NX-EX store + replay store helpers
-// ---------------------------------------------------------------------------
-
 /**
  * A minimal in-memory `NxExStore` that mimics `SET NX EX` semantics: the first
  * set for a key succeeds, subsequent sets fail. TTL is recorded but not expired
@@ -69,10 +65,6 @@ class DownNxExStore implements NxExStore {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Token minting (hand-built compact JWT so we control typ/alg/kid/payload)
-// ---------------------------------------------------------------------------
-
 const b64url = (obj: unknown): string =>
   Buffer.from(JSON.stringify(obj)).toString('base64url')
 
@@ -86,7 +78,8 @@ interface MintOpts {
   aud?: string
   iat?: number
   exp?: number
-  jti?: string
+  /** `unknown` so a test can mint a malformed, non-string jti. */
+  jti?: unknown
   /** If set, corrupt the signature after signing. */
   tamperSignature?: boolean
 }
@@ -122,10 +115,6 @@ async function mintToken(opts: MintOpts): Promise<string> {
   }
   return `${signingInput}.${sigStr}`
 }
-
-// ---------------------------------------------------------------------------
-// Mock IdResolver returning a DID doc with a chosen set of verification methods
-// ---------------------------------------------------------------------------
 
 interface VmSpec {
   /** Fragment (e.g. '#atproto', '#atproto_pns'). */
@@ -173,10 +162,6 @@ function makeDeps(
   }
 }
 
-// ===========================================================================
-// ReplayStore
-// ===========================================================================
-
 describe('ReplayStore.consumeOnce', () => {
   it('returns true exactly once per (kind, jti), false thereafter', async () => {
     const store = new ReplayStore(new MemoryNxExStore())
@@ -212,10 +197,6 @@ describe('ReplayStore.consumeOnce', () => {
     expect(logger.error).toHaveBeenCalled()
   })
 })
-
-// ===========================================================================
-// verifyDelegationToken — happy path & single-use
-// ===========================================================================
 
 describe('verifyDelegationToken (happy path & replay)', () => {
   it('accepts a valid delegation token and returns userDid + spaceUri', async () => {
@@ -259,10 +240,6 @@ describe('verifyDelegationToken (happy path & replay)', () => {
     )
   })
 })
-
-// ===========================================================================
-// verifyDelegationToken — each violation → its distinct error
-// ===========================================================================
 
 describe('verifyDelegationToken (distinct rejection per violation)', () => {
   it('rejects a structurally malformed token', async () => {
@@ -394,6 +371,22 @@ describe('verifyDelegationToken (distinct rejection per violation)', () => {
     ).rejects.toBeInstanceOf(InvalidDelegationSignatureError)
   })
 
+  it('rejects a non-string jti', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const token = await mintToken({ keypair, jti: { not: 'a-string' } })
+    await expect(
+      verifyDelegationToken(token, makeDeps(keypair)),
+    ).rejects.toBeInstanceOf(DelegationReplayError)
+  })
+
+  it('rejects an empty-string jti', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const token = await mintToken({ keypair, jti: '' })
+    await expect(
+      verifyDelegationToken(token, makeDeps(keypair)),
+    ).rejects.toBeInstanceOf(DelegationReplayError)
+  })
+
   it('accepts a signature made by the #atproto key when other methods also exist', async () => {
     // Sanity mirror of the above: signing with #atproto succeeds even though a
     // second method is present.
@@ -415,10 +408,6 @@ describe('verifyDelegationToken (distinct rejection per violation)', () => {
   })
 })
 
-// ===========================================================================
-// Redis-down ⇒ reject
-// ===========================================================================
-
 describe('consumeDelegationJti (replay store unavailable)', () => {
   it('rejects when the replay store is down (fail closed)', async () => {
     const replayStore = new ReplayStore(new DownNxExStore())
@@ -427,10 +416,6 @@ describe('consumeDelegationJti (replay store unavailable)', () => {
     ).rejects.toBeInstanceOf(DelegationReplayError)
   })
 })
-
-// ===========================================================================
-// Two-phase proof: verification never consumes the jti; consume does
-// ===========================================================================
 
 describe('verifyDelegationToken / consumeDelegationJti (two-phase)', () => {
   it('verification (pass OR fail) leaves the jti unconsumed; consumeDelegationJti burns it with the correct TTL', async () => {

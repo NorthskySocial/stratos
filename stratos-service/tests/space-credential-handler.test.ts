@@ -52,9 +52,6 @@ const SPACE_URI = makeSpaceUri(
 const SPACE_BOUNDARY = `${SERVICE_DID}/myspace`
 const USER_DID = 'did:plc:abcabcabcabcabcabcabcabc'
 
-// ---------------------------------------------------------------------------
-// Mock XRPC server (records registered methods; invoked directly).
-// ---------------------------------------------------------------------------
 interface MockXrpcServer {
   methods: Record<string, { type: string; auth?: unknown; handler: Function }>
   method: (
@@ -122,10 +119,6 @@ async function invoke(
     return { error: { name, message: e.message } }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Mock AppContext.
-// ---------------------------------------------------------------------------
 
 /** In-memory NX-EX store (first set wins) so the delegation replay check works. */
 class MemoryNxExStore implements NxExStore {
@@ -203,9 +196,6 @@ function createMockCtx(opts: MockCtxOptions): AppContext {
   } as unknown as AppContext
 }
 
-// ---------------------------------------------------------------------------
-// Delegation-token minting (real delegation shape, signed by the user key).
-// ---------------------------------------------------------------------------
 const b64url = (v: unknown): string =>
   Buffer.from(JSON.stringify(v)).toString('base64url')
 
@@ -247,9 +237,6 @@ async function mintDelegation(opts: DelegationMintOpts): Promise<string> {
   return `${signingInput}.${Buffer.from(sig).toString('base64url')}`
 }
 
-// ---------------------------------------------------------------------------
-// Mint-time DPoP proof (real ES256 proof with an embedded JWK; no `ath`).
-// ---------------------------------------------------------------------------
 async function makeMintProof(
   htu: string,
 ): Promise<{ proof: string; jkt: string }> {
@@ -265,9 +252,6 @@ async function makeMintProof(
   return { proof, jkt }
 }
 
-// ---------------------------------------------------------------------------
-// Credential decode/verify helpers.
-// ---------------------------------------------------------------------------
 function decodeCredential(jwt: string) {
   const parts = jwt.split('.')
   return {
@@ -290,9 +274,6 @@ async function verifyCredentialAgainst(
   )
 }
 
-// ===========================================================================
-// DPoP (interim, live) path
-// ===========================================================================
 describe('getSpaceCredential — DPoP path', () => {
   it('issues a credential BOUND to the session DPoP key (verifies; no aud; TTL)', async () => {
     const signingKey = await Secp256k1Keypair.create()
@@ -420,10 +401,6 @@ describe('getSpaceCredential — DPoP path', () => {
   })
 })
 
-// ===========================================================================
-// Deactivation gate
-// ===========================================================================
-
 /**
  * Deactivation revokes credential issuance.
  *
@@ -517,9 +494,6 @@ describe('getSpaceCredential — deactivation gate', () => {
   })
 })
 
-// ===========================================================================
-// Delegation-token (dormant) path
-// ===========================================================================
 describe('getSpaceCredential — delegation-token path', () => {
   async function setup(enrolled: boolean) {
     const signingKey = await Secp256k1Keypair.create()

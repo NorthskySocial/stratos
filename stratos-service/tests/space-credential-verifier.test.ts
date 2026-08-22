@@ -298,9 +298,6 @@ describe('verifySpaceCredential', () => {
   })
 })
 
-// ===========================================================================
-// Presentation (RFC 9449 sender constraint)
-// ===========================================================================
 describe('verifyPresentedSpaceCredential', () => {
   const REQ = { method: 'GET', url: '/x', headers: {} }
 

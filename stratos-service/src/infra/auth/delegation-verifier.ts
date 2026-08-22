@@ -210,9 +210,9 @@ export async function verifyDelegationToken(
   }
   await verifyAtprotoSignature(parts, payload.iss, deps.idResolver)
 
-  // 8. jti — presence only; consumption is the caller's final act
-  if (!payload.jti) {
-    throw new DelegationReplayError('Missing jti claim')
+  // 8. jti — a non-empty string; consumption is the caller's final act
+  if (typeof payload.jti !== 'string' || payload.jti.length === 0) {
+    throw new DelegationReplayError('Missing or malformed jti claim')
   }
 
   return { userDid: payload.iss, spaceUri: payload.sub, jti: payload.jti }
