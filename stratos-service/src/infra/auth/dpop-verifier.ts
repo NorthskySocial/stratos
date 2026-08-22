@@ -4,10 +4,7 @@
  * Verifies DPoP-bound access tokens.
  * Follows RFC 9449 for DPoP proof validation.
  */
-import {
-  type DpopProof,
-  OAuthVerifier,
-} from '@atproto/oauth-provider/verifier'
+import { type DpopProof, OAuthVerifier } from '@atproto/oauth-provider/verifier'
 import jwt from 'jsonwebtoken'
 import type {
   EnrollmentStoreReader,
