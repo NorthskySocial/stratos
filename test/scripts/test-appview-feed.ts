@@ -20,6 +20,7 @@
  *   - Unauthenticated timeline is denied
  */
 
+import { DOMAINS } from './lib/config.ts'
 import { createRecord } from './lib/stratos.ts'
 import type { CreateRecordResponse } from './lib/stratos.ts'
 import { loadState } from './lib/state.ts'
@@ -151,7 +152,7 @@ async function createTestPosts(users: {
   const reiPost1 = await createRecord(rei.did, 'zone.stratos.feed.post', {
     $type: 'zone.stratos.feed.post',
     text: 'Rei forging a new katana at the Spirit Forge',
-    boundary: { values: [{ value: 'swordsmith' }] },
+    boundary: { values: [{ value: DOMAINS.swordsmith }] },
     createdAt: new Date().toISOString(),
   })
   pass('Rei post 1 created', reiPost1.uri)
@@ -159,7 +160,7 @@ async function createTestPosts(users: {
   const reiPost2 = await createRecord(rei.did, 'zone.stratos.feed.post', {
     $type: 'zone.stratos.feed.post',
     text: 'The blade of the Zanpakutō glows with inner fire',
-    boundary: { values: [{ value: 'swordsmith' }] },
+    boundary: { values: [{ value: DOMAINS.swordsmith }] },
     createdAt: new Date().toISOString(),
   })
   pass('Rei post 2 created', reiPost2.uri)
@@ -168,7 +169,7 @@ async function createTestPosts(users: {
   const sakuraPost = await createRecord(sakura.did, 'zone.stratos.feed.post', {
     $type: 'zone.stratos.feed.post',
     text: 'Sakura polishing the sacred Hōgyoku blade',
-    boundary: { values: [{ value: 'swordsmith' }] },
+    boundary: { values: [{ value: DOMAINS.swordsmith }] },
     createdAt: new Date().toISOString(),
   })
   pass('Sakura post created', sakuraPost.uri)
@@ -180,7 +181,7 @@ async function createTestPosts(users: {
     {
       $type: 'zone.stratos.feed.post',
       text: 'Kaoruko arranging flowers in the Aekea garden pavilion',
-      boundary: { values: [{ value: 'aekea' }] },
+      boundary: { values: [{ value: DOMAINS.aekea }] },
       createdAt: new Date().toISOString(),
     },
   )
