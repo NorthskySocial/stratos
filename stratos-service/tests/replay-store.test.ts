@@ -1,7 +1,3 @@
-/**
- * Unit tests for `replayStoreFromCache` — the structural seam that adapts the
- * process cache into a ReplayStore only when it exposes `setNxEx`.
- */
 import { describe, expect, it } from 'vitest'
 import {
   ReplayStore,
@@ -9,7 +5,6 @@ import {
   type NxExStore,
 } from '../src/infra/auth/replay-store.js'
 
-/** In-memory SET-NX-EX store. First set of a key wins. */
 class MemoryNxExStore implements NxExStore {
   private readonly seen = new Set<string>()
   async setNxEx(key: string): Promise<boolean> {
