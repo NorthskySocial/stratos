@@ -381,7 +381,7 @@ export async function applyWritesBatch(
     ops,
   )
   const mstOps: MstWriteOp[] = buildMstOps(precomputed)
-  const result: Promise<CommitResult> = buildCommitWithRetry(
+  const result = await buildCommitWithRetry(
     ctx,
     callerDid,
     sequenceTrace,

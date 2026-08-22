@@ -1,6 +1,7 @@
 import {
   DefaultLexiconProvider,
   type LexiconProvider,
+  StratosError,
 } from '@northskysocial/stratos-core'
 import type { IndexerConfig } from './config.js'
 import type { Database } from '@atproto/bsky'
@@ -122,7 +123,13 @@ export class Indexer {
       onReferencedActorBackfill: (did: string, opts: BackfillOptions) =>
         this.backfillReferencedActor(did, opts),
       onError: (err: Error) =>
-        console.error({ err: err.message }, 'sync manager error'),
+        console.error(
+          {
+            err: err.message,
+            code: err instanceof StratosError ? err.code : undefined,
+          },
+          'sync manager error',
+        ),
     })
 
     await this.runAllBackfills(indexingService, background, backfillOpts)

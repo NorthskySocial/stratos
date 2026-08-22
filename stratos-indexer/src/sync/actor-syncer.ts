@@ -33,6 +33,7 @@ export interface ActorSyncerOptions {
   reconnectMaxDelayMs: number
   reconnectJitterMs: number
   reconnectMaxAttempts: number
+  reconnectCooldownMs: number
   onReferencedActor?: (did: string) => void
   onHandleNeeded?: (did: string) => void
   onError?: (err: Error) => void
@@ -81,6 +82,7 @@ export class ActorSyncer {
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private intentionallyClosed = false
+  private coolingDown = false
   private queue: ActorQueue = { pending: [], draining: false }
   private lastMessageAt = Date.now()
 
@@ -119,6 +121,17 @@ export class ActorSyncer {
   }
 
   /**
+   * Check if the syncer is serving its reconnect cool-down.
+   * A cooling syncer receives no messages by design; idle eviction must not
+   * mistake that silence for a stale connection.
+   *
+   * @returns True while the cool-down timer is pending.
+   */
+  public isCoolingDown(): boolean {
+    return this.coolingDown
+  }
+
+  /**
    * Start the actor synchronization process.
    * Initiates the WebSocket connection and begins processing messages.
    */
@@ -133,6 +146,7 @@ export class ActorSyncer {
    */
   public stop(): void {
     this.intentionallyClosed = true
+    this.coolingDown = false
     this.clearStabilityTimer()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
@@ -210,9 +224,30 @@ export class ActorSyncer {
 
     this.reconnectAttempts++
     if (this.reconnectAttempts > this.options.reconnectMaxAttempts) {
+      // Abandoning the actor would strand it until a process restart: nothing
+      // else revives a stopped syncer. Back off hard, then start over.
       this.options.onError?.(
-        new Error(`Max reconnect attempts reached for actor ${this.did}`),
+        new StratosError(
+          `Max reconnect attempts reached for actor ${this.did}; cooling down`,
+          'ACTOR_SYNC_COOLDOWN',
+        ),
       )
+      this.reconnectAttempts = 0
+      this.coolingDown = true
+      // Jitter spreads the resumes so cooled actors do not reconnect in
+      // lockstep after a shared outage.
+      const cooldownDelay =
+        this.options.reconnectCooldownMs +
+        Math.random() * this.options.reconnectJitterMs
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null
+        this.coolingDown = false
+        console.info(
+          { did: this.did },
+          'actor sync cool-down ended; resuming connection attempts',
+        )
+        this.connect()
+      }, cooldownDelay)
       return
     }
 

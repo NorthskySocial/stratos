@@ -1,6 +1,9 @@
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import type { AppContext } from '../context.js'
-import { type SeqEvent } from './index.js'
+// Import from the module, not the './index.js' barrel. subscribe-records
+// imports SEQUENCE_DB_PAGE_SIZE from this file, and the barrel re-exports
+// subscribe-records, so the barrel path closes an import cycle.
+import { type SeqEvent } from './subscribe-records.js'
 
 /**
  * The database page size used when reading from the actor sequence store.
