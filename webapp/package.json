@@ -16,13 +16,13 @@
     "test:e2e:docker": "./scripts/e2e-docker.sh"
   },
   "dependencies": {
-    "@atcute/cbor": "^2.3.2",
-    "@atproto/api": "^0.15.8",
-    "@atproto/crypto": "^0.4.0",
-    "@atproto/lexicon": "^0.6.2",
-    "@atproto/oauth-client-browser": "^0.3.17",
-    "@atproto/oauth-types": "^0.6.3",
-    "@atproto/syntax": "^0.3.0"
+    "@atcute/cbor": "^2.3.6",
+    "@atproto/api": "^0.20.41",
+    "@atproto/crypto": "^0.5.4",
+    "@atproto/lexicon": "^0.7.11",
+    "@atproto/oauth-client-browser": "^0.5.3",
+    "@atproto/oauth-types": "^0.7.5",
+    "@atproto/syntax": "^0.7.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
