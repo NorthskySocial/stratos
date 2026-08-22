@@ -12,12 +12,14 @@ import {
 import { MissingBlockError } from '@atcute/mst'
 import type { AppContext } from '../../context.js'
 
-// Cache the boundaries in case a post gets _really_ popular
-const parentBoundaryCache = new Map<
+// Cache the boundaries in case a post gets _really_ popular.
+// Exported for tests: they clear the cache and check its insertion order.
+export const parentBoundaryCache = new Map<
   string,
   { boundaries: string[] | undefined; cachedAt: number }
 >()
 const PARENT_BOUNDARY_TTL_MS = 60_000
+export const PARENT_BOUNDARY_CACHE_MAX = 1000
 
 /**
  * Validates that the caller has permission to write domains in the given collection.
@@ -143,8 +145,11 @@ export async function resolveParentBoundaries(
 
   const cacheKey = reply.parent.uri
   const cached = parentBoundaryCache.get(cacheKey)
-  if (cached && Date.now() - cached.cachedAt < PARENT_BOUNDARY_TTL_MS) {
-    return cached.boundaries
+  if (cached) {
+    if (Date.now() - cached.cachedAt < PARENT_BOUNDARY_TTL_MS) {
+      return cached.boundaries
+    }
+    parentBoundaryCache.delete(cacheKey)
   }
 
   const boundaries = await ctx.actorStore.read(
@@ -158,6 +163,12 @@ export async function resolveParentBoundaries(
     },
   )
 
+  if (parentBoundaryCache.size >= PARENT_BOUNDARY_CACHE_MAX) {
+    const oldestKey = parentBoundaryCache.keys().next().value
+    if (oldestKey !== undefined) {
+      parentBoundaryCache.delete(oldestKey)
+    }
+  }
   parentBoundaryCache.set(cacheKey, { boundaries, cachedAt: Date.now() })
   return boundaries
 }

@@ -1,6 +1,7 @@
 import express from 'express'
 import type { AdminAuthRoutesConfig } from '../admin-routes.js'
 import { ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_MS } from '../admin-routes.js'
+import { isEffectiveAdmin } from '../admin-user-store.js'
 
 /**
  * The part of a request this handler reads.
@@ -30,11 +31,19 @@ export interface AdminCallbackResponse {
  * Unlike the enrollment callback, this performs no repo init, signing-key
  * creation, attestation, or PDS record write. It only:
  *  1. completes the token exchange and reads the authenticated DID,
- *  2. enforces the admin DID allowlist (revoking the OAuth session on miss),
+ *  2. enforces effective-admin membership — the config allowlist or a
+ *     runtime grant (revoking the OAuth session on miss),
  *  3. establishes an opaque server-side web session via an HttpOnly cookie.
  */
 export const handleAdminCallback = (config: AdminAuthRoutesConfig) => {
-  const { oauthClient, adminSessionStore, adminDids, baseUrl, logger } = config
+  const {
+    oauthClient,
+    adminSessionStore,
+    adminDids,
+    adminUserStore,
+    baseUrl,
+    logger,
+  } = config
   const isSecure = baseUrl.startsWith('https://')
   const adminRedirectUri = `${baseUrl}/admin/oauth/callback`
 
@@ -54,9 +63,9 @@ export const handleAdminCallback = (config: AdminAuthRoutesConfig) => {
       })
       const did = session.sub
 
-      if (!adminDids.includes(did)) {
+      if (!(await isEffectiveAdmin(did, { adminDids, adminUserStore }))) {
         await oauthClient.revoke(did)
-        logger?.warn({ did }, 'admin login rejected: DID not in allowlist')
+        logger?.warn({ did }, 'admin login rejected: DID is not an admin')
         return res.status(403).json({
           error: 'NotAdmin',
           message: 'This account is not authorized for admin access',

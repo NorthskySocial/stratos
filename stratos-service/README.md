@@ -94,9 +94,11 @@ pnpm test
 ## Admin UI
 
 A Svelte 5 admin interface lives in `admin-ui/` and is served by the service at
-`/admin` (built output in `dist/admin-ui`, produced by `pnpm build`). Auth is
-the admin OAuth session cookie (`STRATOS_ADMIN_DIDS` allowlist); the UI holds
-no credential.
+`/admin` (built output in `dist/admin-ui`, produced by `pnpm build`). Admin
+access uses an admin OAuth session cookie that holds only an opaque session
+key; the service authorizes the session DID against the `STRATOS_ADMIN_DIDS`
+config list and runtime grants in the `admin_user` table. The UI holds no
+credential.
 
 ### Development
 

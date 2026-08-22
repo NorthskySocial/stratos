@@ -25,7 +25,6 @@
     "src/oauth/redirect-target.ts",
     "src/subscription/**/*.ts",
     "src/storage/sqlite/enrollment-store.ts",
-    "src/infra/storage/sqlite/enrollment-store.ts",
     "src/infra/storage/postgres/enrollment-store.ts",
     "src/infra/storage/cached-enrollment-store.ts",
     "src/infra/storage/reserved-domain-enrollment-store.ts",

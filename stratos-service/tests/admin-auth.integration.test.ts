@@ -574,6 +574,26 @@ describe('admin OAuth callback', () => {
     expect(session?.did).toBe(ADMIN_DID)
   })
 
+  it('establishes a session for a runtime-granted admin not on the allowlist', async () => {
+    const grantedDid = 'did:plc:faye-valentine'
+    oauthClient.callback.mockResolvedValue({ session: { sub: grantedDid } })
+    const handler = handleAdminCallback({
+      ...makeConfig(),
+      adminUserStore: grantedAdminStore(grantedDid),
+    })
+
+    const req = { url: '/admin/oauth/callback?code=foo&state=bar' }
+    const res = makeAdminRes()
+
+    await handler(req, res)
+
+    expect(oauthClient.revoke).not.toHaveBeenCalled()
+    expect(res.redirect).toHaveBeenCalledWith('/admin')
+    const issuedKey = res.cookie.mock.calls[0][1]
+    const session = await store.get(issuedKey)
+    expect(session?.did).toBe(grantedDid)
+  })
+
   it('refuses a non-allowlisted DID and revokes its OAuth session', async () => {
     oauthClient.callback.mockResolvedValue({ session: { sub: INTRUDER_DID } })
     const createSpy = vi.spyOn(store, 'create')
