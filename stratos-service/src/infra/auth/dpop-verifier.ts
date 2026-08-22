@@ -29,8 +29,9 @@ export interface DpopAuthResult {
 }
 
 /**
- * DPoP proof checker seam. Matches the surface of the internal
- * `DpopManager` class, which @atproto/oauth-provider no longer exports.
+ * DPoP proof checker seam. The default implementation delegates to
+ * `OAuthVerifier`, which validates the proof and rejects replayed
+ * `jti` values.
  */
 export interface DpopProofChecker {
   nextNonce(): string | undefined
