@@ -152,7 +152,7 @@ Three independent breaks, any one of which is sufficient:
 `createSubscribeAuthVerifier` requires an inter-service JWT and documents that
 "the master sync token, query-parameter tokens, and anonymous access have been
 removed" (`stratos-service/src/infra/auth/verifiers.ts:619-620`); it throws
-`AuthRequiredError` unless `authorization` starts with `Bearer `
+`AuthRequiredError` unless `authorization` starts with `'Bearer '`
 (`:632-634`). The indexer sends `syncToken` as a query parameter and constructs
 a bare `new WebSocket(wsUrl)` with no headers, for both the actor stream
 (`stratos-indexer/src/sync/actor-syncer.ts:156-162`) and the service stream
@@ -268,9 +268,9 @@ The indexer shares the feedgen's pre-008 shape, as the fork direction predicts.
   write at `:412` and only then calls `updateStratosCursor(this.did, commit.seq)`
   at `:417`. A throw at `:412` correctly skips the cursor write for _that_
   commit — but the loop continues, and the next commit that succeeds (or that
-  has no indexable ops, which skips the write entirely at `:411`) writes its own,
-  higher `seq`. The failed sequence is then behind the cursor and is never
-  replayed on reconnect (`:155`).
+  has no indexable ops — the batch write at `:411` is skipped, while the cursor
+  write at `:417` runs unconditionally) writes its own, higher `seq`. The failed
+  sequence is then behind the cursor and is never replayed on reconnect (`:155`).
 
 Answers to Step 1b's four facts:
 
@@ -430,7 +430,12 @@ Two deliberate decisions inside the port list:
   A consumer that needs apply + cursor in one transaction can still do so by
   making `setCursor` a no-op and keeping the write inside `applyCommit`; the
   invariant holds either way because the library's failure path never calls
-  `setCursor`.
+  `setCursor`. Two consequences the port contract must state: `applyCommit`
+  must be idempotent per `(did, seq)`, because a crash — or a `setCursor`
+  failure — between a successful apply and the cursor persist re-delivers that
+  commit on reconnect. And a `setCursor` failure follows the apply-failure
+  path (clear the queue, drop the connection, resume from the durable cursor);
+  advancing in memory past an unpersisted cursor would hide the re-delivery.
 - **`onBoundariesChanged` is optional.** The indexer folds `boundaries` into
   `onEnroll` with the after-set (`stratos-sync.ts:276-280`); the feedgen routes
   it separately (`service-stream.ts:336-343`). Optional preserves both without a
@@ -471,7 +476,8 @@ Error codes stay as named, stable strings — `ACTOR_SYNC_OVERFLOW`,
 `ACTOR_SYNC_COOLDOWN`, `SERVICE_STREAM_OVERFLOW` — since operators alert on them.
 The indexer's uncoded plain `Error` for queue overflow
 (`actor-syncer.ts:278-280`) is the only one that changes, gaining
-`ACTOR_SYNC_OVERFLOW`.
+`ACTOR_SYNC_OVERFLOW`. The decoder's `ErrorFrame` surfacing (invariant 5)
+adds one new code, `SYNC_STREAM_ERROR_FRAME`.
 
 **`drain.admission` is an interface, not a predicate.** The indexer's
 `canStartSync` is not a stateless function: it is a closure over live counters
@@ -538,7 +544,13 @@ turns them off.
    inspects `op` — the feedgen checks only `header['t'] !== '#commit'`
    (`stratos-feedgen/src/subscription/actor-syncer.ts:396`;
    `service-stream.ts:319-324`) — so an auth rejection is discarded in silence.
-   The library's decoder must surface `op: -1` as a coded error.
+   The library's decoder must surface `op: -1` as a coded error
+   (`SYNC_STREAM_ERROR_FRAME`, carrying the frame body's `error` and `message`)
+   through the observation sink, then drop the connection through the normal
+   backoff path — an auth rejection becomes visible, escalating reconnect
+   noise instead of silence, and never reaches `applyCommit` or the cursor.
+   The step-2 test list must include this case: an auth-rejection `ErrorFrame`
+   surfaces the coded error and applies nothing.
 
 ### 4.5 What the library owns, and what stays consumer-side
 
@@ -612,10 +624,19 @@ port. Whichever plan owns the revival should adopt the library rather than
 repair the fork, since repairing decode + auth + guards + apply policy inside a
 doomed file is throwaway work. Concretely: a `CursorStore` adapter over
 `CursorManager`, a commit applier wrapping `batchIndexStratosRecords`, the
-existing enrollment callbacks, `reconnect.maxAttempts: 20` +
-`reconnect.cooldownMs: 300_000` to preserve the effective plan-016 behaviour
-(`config.ts:69-73`), and the
-`drain.admission` hook wired to `canStartSync`. The `StratosActorSync` bsky
+existing enrollment callbacks, and — per R1's mitigation — the full effective
+env-schema value set pinned in the indexer's config so the migration changes
+no behaviour: `reconnect.maxAttempts: 20` + `reconnect.cooldownMs: 300_000`
+(the plan-016 pair, `config.ts:69-73`), `reconnect.baseDelayMs: 1_000`,
+`actorQueue.maxSize: 10`, `pool.maxConnections: 20`,
+`pool.connectDelayMs: 200`, and `pool.idleEvictionMs: 60_000`
+(`config.ts:36`, `:43`, `:44-48`, `:49-53`, `:54-58`). Relax them, if at all,
+in a separate commit; only the overflow policy changes, because it is
+invariant 1. The `drain.admission` hook is a full `DrainAdmission`
+implementation over the existing counters, not a predicate: `canStart()` from
+`canStartSync` (`stratos-sync.ts:508-510`), `onStarted()`/`onFinished()` from
+`onSyncStarted`/`onSyncFinished`, and `onPendingChange(delta)` from
+`onGlobalPendingChange`. The `StratosActorSync` bsky
 wiring moves to a consumer-side composition around the library's pool.
 _Verify:_ `pnpm --filter @northskysocial/stratos-indexer test` green; the revival
 plan's own acceptance test (an actual frame from a running service reaching
@@ -682,8 +703,14 @@ its `onEnroll`/`onUnenroll` are synchronous (`:35-38`, `:280-283`). The feedgen'
 are awaited and genuinely async (`service-stream.ts:326-344`), so a unified
 library makes it live. **Invariant to add and test at step 2:** a drain must not
 observe or dispatch a frame from a superseded generation; a generation token
-checked after each `await` is the minimal fix. The step-2 test list must include
-a case that resets the queue while a callback is suspended.
+checked after each `await` — before dispatching the next frame and before any
+post-await write the drain performs, the cursor above all — is the minimal fix.
+The loop-side check cannot reach into a consumer callback that is already
+suspended; what the library can and must guarantee is that nothing the drain
+does after that callback resolves acts for a superseded generation. The step-2
+test list must include a case that resets the queue while a callback is
+suspended and asserts both halves: no further old-generation frame is
+dispatched, and the resumed frame's completion writes no cursor.
 
 **R4 — WebSocket test-fake duplication.** Each fork has its own fake
 (`stratos-indexer/tests/actor-syncer.test.ts` defines `FakeWebSocket`; the
