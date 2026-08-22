@@ -87,7 +87,7 @@ function getClient(): BrowserOAuthClient {
     handleResolver: HANDLE_RESOLVER,
     responseMode: 'query',
     ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
-    onDelete: (_sub, _cause) => {
+    onSessionDeleted: (_sub, _cause) => {
       currentSession = null
       sessionDeletedCallback?.()
     },
