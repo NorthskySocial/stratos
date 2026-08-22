@@ -20,7 +20,6 @@
     "mutation": "stryker run",
     "format": "prettier --write .",
     "lint": "eslint --ext .ts .",
-    "codegen": "lex gen-server ./src/lexicon ../lexicons --yes",
     "generate:version": "tsx scripts/generate-version.ts"
   },
   "dependencies": {
@@ -56,8 +55,6 @@
     "cors": "^2.8.6",
     "drizzle-orm": "1.0.0-beta.18-7eb39f0",
     "express": "^5.2.1",
-    "express-async-errors": "^3.1.1",
-    "http-terminator": "^3.2.0",
     "ioredis": "^5.5.0",
     "jose": "^6.1.3",
     "jsonwebtoken": "^9.0.3",
@@ -71,7 +68,6 @@
   },
   "devDependencies": {
     "@atcute/cbor": "^2.3.2",
-    "@atproto/lex-cli": "^0.9.8",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",

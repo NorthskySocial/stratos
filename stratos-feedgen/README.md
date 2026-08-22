@@ -84,9 +84,10 @@ flowchart TD
 
 ### Moderation labels
 
-The feed gen can subscribe to one or more labeler DIDs (`FEEDGEN_LABELERS`), caches labels in a local `label` table, and attaches them to `postView.labels` at serialization time — merging self-labels (extracted from `recordJson`) with external labels filtered by the `atproto-accept-labelers` request header. The response carries an `atproto-content-labelers` header listing the labelers actually consulted.
-
-Clients are responsible for acting on labels (blur, hide, warn) using `labelValueDefinition` metadata fetched separately. The feed gen never filters posts based on labels — it only annotates.
+Not yet implemented. The planned design (labeler subscription via a
+`FEEDGEN_LABELERS` env var, a local `label` table, label merging on
+`postView.labels` honoring `atproto-accept-labelers`) is recorded here as
+intent only — the current feedgen neither fetches nor serves labels.
 
 ## Lexicons
 

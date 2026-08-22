@@ -56,6 +56,21 @@ jobs:
       - name: Build packages
         run: pnpm run build
 
+      - name: Check generated lexicons are committed
+        run: |
+          git diff --exit-code stratos-client/src/lexicons.gen.ts || {
+            echo "::error::stratos-client/src/lexicons.gen.ts is stale — run: pnpm --filter @northskysocial/stratos-client lexgen"
+            exit 1
+          }
+          # git diff does not see untracked files. Fail if the generator
+          # emits a new file or the bundle is deleted from git.
+          untracked="$(git status --porcelain stratos-client/src/)"
+          if [ -n "$untracked" ]; then
+            echo "$untracked"
+            echo "::error::stratos-client/src/ has untracked or changed generated output — run: pnpm --filter @northskysocial/stratos-client lexgen and commit the result"
+            exit 1
+          fi
+
       - name: Run typecheck
         run: pnpm run typecheck
 
