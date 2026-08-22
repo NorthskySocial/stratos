@@ -4,7 +4,10 @@
  * Verifies DPoP-bound access tokens.
  * Follows RFC 9449 for DPoP proof validation.
  */
-import { DpopManager, type DpopProof } from '@atproto/oauth-provider'
+import {
+  type DpopProof,
+  OAuthVerifier,
+} from '@atproto/oauth-provider/verifier'
 import jwt from 'jsonwebtoken'
 import type {
   EnrollmentStoreReader,
@@ -26,6 +29,20 @@ export interface DpopAuthResult {
 }
 
 /**
+ * DPoP proof checker seam. Matches the surface of the internal
+ * `DpopManager` class, which @atproto/oauth-provider no longer exports.
+ */
+export interface DpopProofChecker {
+  nextNonce(): string | undefined
+  checkProof(
+    httpMethod: string,
+    httpUrl: Readonly<URL>,
+    httpHeaders: Record<string, undefined | string | string[]>,
+    accessToken?: string,
+  ): Promise<null | DpopProof>
+}
+
+/**
  * Configuration for DPoP verifier
  */
 export interface DpopVerifierConfig {
@@ -38,7 +55,7 @@ export interface DpopVerifierConfig {
   /** Optional allowlist provider */
   allowListProvider?: ExternalAllowListProvider
   /** Optional DPoP manager for testing */
-  dpopManager?: DpopManager
+  dpopManager?: DpopProofChecker
   /** DPoP secret for nonce generation (false to disable, undefined for random) */
   dpopSecret?: Uint8Array<ArrayBuffer> | string | false
   /** DPoP nonce rotation interval in ms */
@@ -107,20 +124,25 @@ export interface VerifyResponseContext {
  * 5. Checking the user is enrolled
  */
 export class DpopVerifier {
-  private readonly dpopManager: DpopManager
+  private readonly dpopManager: DpopProofChecker
   private readonly config: DpopVerifierConfig
 
   constructor(config: DpopVerifierConfig) {
     this.config = config
+    // The package no longer exports DpopManager. OAuthVerifier exposes
+    // one; the issuer and keyset only serve token decoding, which this
+    // class does not use.
     this.dpopManager =
       config.dpopManager ??
-      new DpopManager({
+      new OAuthVerifier({
+        issuer: config.serviceEndpoint,
+        keyset: [],
         dpopSecret: config.dpopSecret as
           | string
           | Uint8Array<ArrayBuffer>
           | false,
         dpopRotationInterval: config.dpopRotationInterval,
-      })
+      }).dpopManager
   }
 
   /**
