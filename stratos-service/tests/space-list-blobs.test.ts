@@ -323,7 +323,7 @@ describe('zone.stratos.space.listBlobs', () => {
     )
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const scripted: any = captured.get('zone.stratos.space.listBlobs')!.handler
-    const invoke = (limit?: number) =>
+    const invoke = (limit?: unknown) =>
       scripted({
         params: { space: SPACE_S, repo: repoDid, limit },
         auth: credAuth(SPACE_S),
@@ -334,6 +334,21 @@ describe('zone.stratos.space.listBlobs', () => {
     await invoke(0)
     await invoke(5000)
     await invoke(undefined)
-    expect(seen).toEqual([1, 1000, 500])
+    // A raw query value arrives as a string; an integer string is accepted.
+    await invoke('200')
+    expect(seen).toEqual([1, 1000, 500, 200])
+  })
+
+  it('rejects a non-integer limit (InvalidRequest)', async () => {
+    // '+5' and '5e2' would coerce via Number(); ['5'] via String(). All three
+    // must fail the strict integer-string gate, not sneak through coercion.
+    for (const bad of ['invalid', 2.5, '2.5', '', '+5', '5e2', ['5']]) {
+      await expect(
+        call({ limit: bad }, userAuth(memberDid)),
+      ).rejects.toMatchObject({
+        errorMessage: expect.stringMatching(/limit must be an integer/),
+        customErrorName: 'InvalidRequest',
+      })
+    }
   })
 })

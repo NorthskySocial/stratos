@@ -165,7 +165,8 @@ space; records outside it (including records with no space) resolve to
 
 ```http
 GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
-Authorization: Bearer <access_token> | Bearer <space-credential>
+Authorization: Bearer <access_token> | DPoP <space-credential>
+DPoP: <proof>   (required when presenting a space credential)
 Response: { "cids": ["..."], "cursor": "..." }
 ```
 

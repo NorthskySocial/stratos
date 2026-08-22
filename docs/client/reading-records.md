@@ -272,5 +272,4 @@ if (error.name === 'RepoNotFound' && stratosActive) {
 ### Blob gating
 
 Stratos supports space-scoped blob listing via `zone.stratos.space.listBlobs` (the caller must be
-admitted to the space). Blob content retrieval via `com.atproto.sync.getBlob` is not yet
-implemented — gate blob download UI behind availability checks.
+admitted to the space) and blob content retrieval via `com.atproto.sync.getBlob`.
