@@ -28,12 +28,23 @@ export interface HandlerInput {
 
 export type HandlerParams = Record<string, unknown>
 
+/**
+ * Minimal view of the underlying HTTP request that the XRPC layer gives to
+ * handlers. The runtime value is the live Express request. Handlers must
+ * depend only on this shape.
+ */
+export interface HandlerRequest {
+  method?: string
+  url?: string
+  headers?: Record<string, string | string[] | undefined>
+  auth?: HandlerAuth
+}
+
 export interface HandlerContext {
   input?: HandlerInput
   params: HandlerParams
   auth?: HandlerAuth
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  req?: any // Support for access to underlying request
+  req?: HandlerRequest
 }
 
 export interface HandlerResponse {

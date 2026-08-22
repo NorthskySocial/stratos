@@ -47,9 +47,7 @@ function extractDid(handlerCtx: HandlerContext): string | undefined {
   if (auth?.credentials?.did) {
     return auth.credentials.did
   }
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (handlerCtx.req?.auth?.credentials?.did) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-member-access
     return handlerCtx.req.auth.credentials.did
   }
   return undefined
