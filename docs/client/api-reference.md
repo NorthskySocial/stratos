@@ -208,8 +208,13 @@ carry no ops and repeat the cursor you sent, so poll again while a cursor is pre
 not read an unchanged cursor as a stall. Under continuous writes the head may never be
 reached. A write that commits after the head probe is not detected; it falls outside this
 snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
-supplied. If `since` predates retained history, the `OplogTruncated` error is returned
-(stricter than upstream, which silently restarts) - fall back to full-state recovery below.
+supplied. The `OplogTruncated` error (stricter than upstream, which silently restarts) means
+the oplog cannot serve your position truthfully - fall back to full-state recovery below. It
+is returned when the cursor is malformed, predates retained history (compaction passed it),
+or names a seq beyond retained history (e.g. after a log reset); when `since` falls outside
+the retained `[oldest, newest]` rev window or that window cannot be verified; and when a
+retained op cannot be emitted truthfully (a non-delete op without a cid, or a record key
+that fails the record-key format).
 
 ### Pull Sync: List Record Paths (Full-State Recovery)
 

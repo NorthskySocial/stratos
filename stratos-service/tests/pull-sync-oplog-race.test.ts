@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import {
   computeCid,
@@ -9,6 +9,7 @@ import type { AppContext } from '../src/context.js'
 import {
   encodeSeqCursor,
   listRepoOps,
+  OplogTruncatedError,
 } from '../src/features/pull-sync/index.js'
 
 const REPO_DID = 'did:plc:tenchi-masaki'
@@ -249,41 +250,62 @@ describe('listRepoOps head-of-oplog race', () => {
     expect(res.ops).toEqual([])
   })
 
-  it('drops a malformed non-delete op without a cid and keeps the rest', async () => {
+  it('fails closed with OplogTruncated on a non-delete op without a cid', async () => {
     const actorStore = new ScriptedActorStore()
     // `cid: null` on the wire means delete, so a cid-less create cannot be
-    // emitted truthfully — expandEventOps must fail closed and drop it.
+    // emitted truthfully. A silent drop would yield a head response that
+    // omits a persisted op — a permanent sync gap — so the whole page must
+    // signal truncation and push the caller into full-state recovery.
     actorStore.appendCidlessCreate(1, REV.r1, 'kagato')
     actorStore.appendEvent(2, REV.r2, 'ryoko', 'cidRyoko')
     actorStore.root = { cid: 'commitCid', rev: REV.r2 }
     actorStore.commitBytes = await encodeSignedCommit(REV.r2)
+    const warn = vi.fn()
+    const ctx = {
+      ...makeCtx(actorStore),
+      logger: { warn },
+    } as unknown as AppContext
 
-    const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
-
-    expect(res.ops.map((op) => op.rkey)).toEqual(['ryoko'])
-    expect(res.cursor).toBeUndefined()
-    expect(res.commit?.rev).toBe(REV.r2)
+    await expect(
+      listRepoOps(ctx, params, callerBoundaries),
+    ).rejects.toMatchObject({
+      name: 'OplogTruncatedError',
+      message: 'oplog contains an op with no cid',
+    })
+    expect(warn).toHaveBeenCalledWith(
+      { did: REPO_DID, collection: 'zone.stratos.feed.post', rev: REV.r1 },
+      'pull-sync found an op with no cid',
+    )
   })
 
-  it('drops ops whose record key fails the record-key format and keeps the rest', async () => {
-    const actorStore = new ScriptedActorStore()
+  it('fails closed with OplogTruncated on an op whose record key fails the record-key format', async () => {
     // `.`, `..`, and an empty rkey (a path with a trailing slash) fail the
     // record-key format, so these ops cannot pass output validation. An
     // invalid character in the prefix or the suffix must also fail: the
     // format anchors the full key, not a substring.
-    actorStore.appendEvent(1, REV.r1, '..', 'cidKagato')
-    actorStore.appendEvent(2, REV.r2, '', 'cidYosho')
-    actorStore.appendEvent(3, REV.r3, '.', 'cidTokimi')
-    actorStore.appendEvent(4, REV.r4, 'evil rkey', 'cidWashu')
-    actorStore.appendEvent(5, REV.r5, 'ayeka!', 'cidAyeka')
-    actorStore.appendEvent(6, REV.r6, 'ryoko', 'cidRyoko')
-    actorStore.root = { cid: 'commitCid', rev: REV.r6 }
-    actorStore.commitBytes = await encodeSignedCommit(REV.r6)
+    const invalidRkeys = ['..', '', '.', 'evil rkey', 'ayeka!']
+    for (const rkey of invalidRkeys) {
+      const actorStore = new ScriptedActorStore()
+      actorStore.appendEvent(1, REV.r1, rkey, 'cidKagato')
+      actorStore.root = { cid: 'commitCid', rev: REV.r1 }
+      actorStore.commitBytes = await encodeSignedCommit(REV.r1)
+      const warn = vi.fn()
+      const ctx = {
+        ...makeCtx(actorStore),
+        logger: { warn },
+      } as unknown as AppContext
 
-    const res = await listRepoOps(makeCtx(actorStore), params, callerBoundaries)
-
-    expect(res.ops.map((op) => op.rkey)).toEqual(['ryoko'])
-    expect(res.cursor).toBeUndefined()
-    expect(res.commit?.rev).toBe(REV.r6)
+      await expect(
+        listRepoOps(ctx, params, callerBoundaries),
+        `rkey ${JSON.stringify(rkey)} must signal truncation`,
+      ).rejects.toMatchObject({
+        name: 'OplogTruncatedError',
+        message: 'oplog contains an op with an invalid record key',
+      })
+      expect(warn).toHaveBeenCalledWith(
+        { did: REPO_DID, collection: 'zone.stratos.feed.post', rev: REV.r1 },
+        'pull-sync found an op with an invalid record key',
+      )
+    }
   })
 })
