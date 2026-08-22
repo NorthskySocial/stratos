@@ -266,36 +266,6 @@ export const atprotoLexicons: LexiconDoc[] = [
   },
   {
     lexicon: 1,
-    id: 'com.atproto.sync.listBlobs',
-    defs: {
-      main: {
-        type: 'query',
-        parameters: {
-          type: 'params',
-          required: ['did'],
-          properties: {
-            did: { type: 'string' },
-            since: { type: 'string' },
-            limit: { type: 'integer' },
-            cursor: { type: 'string' },
-          },
-        },
-        output: {
-          encoding: 'application/json',
-          schema: {
-            type: 'object',
-            required: ['cids'],
-            properties: {
-              cursor: { type: 'string' },
-              cids: { type: 'array', items: { type: 'string' } },
-            },
-          },
-        },
-      },
-    },
-  },
-  {
-    lexicon: 1,
     id: 'com.atproto.sync.getRecord',
     defs: {
       main: {

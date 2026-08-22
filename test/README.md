@@ -380,7 +380,7 @@ Stratos** (Reading A: Stratos is the repo host).
 | 3   | Foreign / malformed space URIs rejected         | merged `at://…/space/…` addressing enforced                |
 | 4   | Credential-authed read of a member record       | credential admits the space, not a user identity           |
 | 5   | Credential fails closed on out-of-space records | no cross-space leakage                                     |
-| 6   | Pull sync (`listRepoOps`) with a credential     | syncer flow: boundary-gated ops + signed caught-up commit  |
+| 6   | Pull sync (`listRepoOps`) with a credential     | syncer flow: boundary-gated ops + signed head commit       |
 | 7   | Writes never accept a credential                | credentials are read/sync capabilities; writes stay bound  |
 | 8   | Revocation invalidates future credentials       | boundary removal → `NotEnrolled`                           |
 | 9   | Migration anchors                               | single-boundary records, no PDS post records, `signingKey` |

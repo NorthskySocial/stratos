@@ -25,9 +25,13 @@ import type { ReplayStore } from './replay-store.js'
  *   - Payload `iat`/`exp` MUST be present and currently valid (with skew).
  *   - The signature MUST verify against the issuer DID document's `#atproto`
  *     verification method **only** (no other method is accepted).
- *   - FINALLY the `jti` is consumed exactly once (replay protection).
+ *   - The `jti` MUST be present. Verification does NOT consume it; the caller
+ *     consumes it via {@link consumeDelegationJti} as its LAST step, after
+ *     every other gate on the request has passed. A request that fails a later
+ *     gate therefore never burns the token.
  *
  * @see verifyDelegationToken
+ * @see consumeDelegationJti
  */
 
 /** Required JWT `typ` header value for a space-delegation token. */
@@ -111,6 +115,11 @@ export interface DelegationResult {
   userDid: string
   /** The target space URI (`sub`), byte-for-byte as presented. */
   spaceUri: string
+  /**
+   * The token's single-use nonce. NOT yet consumed — the caller must pass it
+   * to {@link consumeDelegationJti} after every other gate has passed.
+   */
+  jti: string
 }
 
 /** Dependencies for {@link verifyDelegationToken}. */
@@ -119,8 +128,6 @@ export interface DelegationVerifierDeps {
   serviceDid: string
   /** Identity resolver for resolving the issuer DID document. */
   idResolver: IdResolver
-  /** Single-use nonce store (consumed LAST). */
-  replayStore: ReplayStore
   /** Clock-skew tolerance in seconds (default {@link DEFAULT_CLOCK_SKEW}). */
   clockSkewSeconds?: number
 }
@@ -128,14 +135,15 @@ export interface DelegationVerifierDeps {
 /**
  * Verify a space-delegation JWT.
  *
- * Runs the checks in the exact order documented on this module. The `jti`
- * consumption is performed **last, and only after every other check has
- * passed**, so an invalid token never burns its nonce — a later, genuinely
- * valid token bearing the same `jti` can still succeed.
+ * Runs the checks in the exact order documented on this module. The `jti` is
+ * validated for presence but NOT consumed — the caller consumes it with
+ * {@link consumeDelegationJti} as its final act, so a request that fails a
+ * later gate (attestation, mint proof) never burns the token, and a later,
+ * genuinely valid presentation of the same `jti` can still succeed.
  *
  * @param token - The raw compact JWT (no `Bearer ` prefix).
  * @param deps - Verifier dependencies.
- * @returns `{ userDid, spaceUri }` on success.
+ * @returns `{ userDid, spaceUri, jti }` on success.
  * @throws A distinct {@link DelegationVerificationError} subclass per failure.
  */
 export async function verifyDelegationToken(
@@ -202,20 +210,37 @@ export async function verifyDelegationToken(
   }
   await verifyAtprotoSignature(parts, payload.iss, deps.idResolver)
 
-  // 8. jti — consumed LAST so an invalid token never burns its nonce
-  if (!payload.jti) {
-    throw new DelegationReplayError('Missing jti claim')
+  // 8. jti — a non-empty string; consumption is the caller's final act
+  if (typeof payload.jti !== 'string' || payload.jti.length === 0) {
+    throw new DelegationReplayError('Missing or malformed jti claim')
   }
-  const fresh = await deps.replayStore.consumeOnce(
+
+  return { userDid: payload.iss, spaceUri: payload.sub, jti: payload.jti }
+}
+
+/**
+ * Consume a verified delegation token's `jti` exactly once.
+ *
+ * Call this LAST, after every other gate on the request has passed, so a
+ * request that fails a later gate never burns the token.
+ *
+ * @param replayStore - Single-use nonce store.
+ * @param jti - The `jti` returned by {@link verifyDelegationToken}.
+ * @throws DelegationReplayError if the `jti` was already consumed, or the
+ *   store is unavailable (fail closed).
+ */
+export async function consumeDelegationJti(
+  replayStore: ReplayStore,
+  jti: string,
+): Promise<void> {
+  const fresh = await replayStore.consumeOnce(
     DELEGATION_REPLAY_KIND,
-    payload.jti,
+    jti,
     DELEGATION_REPLAY_TTL,
   )
   if (!fresh) {
     throw new DelegationReplayError('Delegation token replay detected')
   }
-
-  return { userDid: payload.iss, spaceUri: payload.sub }
 }
 
 /**

@@ -9,10 +9,10 @@ import {
  * Space-credential minter.
  *
  * A **space credential** is a JWT by which the space authority (this Stratos
- * service) grants a member bearer-shaped, **multi-use** access to a space until
- * the credential expires. Because it is signed by the authority's own signing
- * key, any repo host can verify it against the authority's published DID
- * document without ever contacting the authority.
+ * service) grants a member **multi-use**, DPoP-key-bound access to a space
+ * until the credential expires. Because it is signed by the authority's own
+ * signing key, any repo host can verify it against the authority's published
+ * DID document without ever contacting the authority.
  *
  * Spec shape (minted EXACTLY as below):
  *   - Header `typ` = {@link SPACE_CREDENTIAL_TYP} (`atproto-space-credential+jwt`).
@@ -26,6 +26,11 @@ import {
  *   - Payload `iat` = issuance time (unix seconds).
  *   - Payload `exp` = `iat + ttlSeconds` (2h default).
  *   - Payload `jti` = a unique nonce.
+ *   - Payload `cnf.jkt` = the SHA-256 JWK thumbprint of the member's DPoP key
+ *     (RFC 9449). The credential is sender-constrained: it must be presented
+ *     under the `DPoP` auth scheme with a per-request proof signed by that key.
+ *     Omitted only when no `jkt` input is supplied (dev-mode identities have no
+ *     DPoP key); an unbound credential is accepted only in dev mode.
  *   - **No `aud` claim** — a space credential is not audience-bound; that is what
  *     makes it multi-use across any repo host.
  *
@@ -59,6 +64,8 @@ export interface SpaceCredentialPayload {
   iat: number
   exp: number
   jti: string
+  /** DPoP key binding (RFC 9449). Absent only for dev-mode unbound mints. */
+  cnf?: { jkt: string }
 }
 
 /** Inputs to {@link mintSpaceCredential}. */
@@ -78,6 +85,11 @@ export interface MintSpaceCredentialInput {
   iat?: number
   /** Unique nonce (`jti`). Defaults to a fresh random value. */
   jti?: string
+  /**
+   * SHA-256 JWK thumbprint of the member's DPoP key → `cnf.jkt`. When absent,
+   * the credential is minted unbound (dev mode only).
+   */
+  jkt?: string
 }
 
 /** Result of minting a space credential. */
@@ -119,6 +131,9 @@ export async function mintSpaceCredential(
     iat,
     exp,
     jti,
+  }
+  if (input.jkt) {
+    payload.cnf = { jkt: input.jkt }
   }
 
   const signingInput = `${b64urlJson(header)}.${b64urlJson(payload)}`

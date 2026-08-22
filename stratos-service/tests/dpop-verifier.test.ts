@@ -64,6 +64,7 @@ describe('DpopVerifier', () => {
       scope: 'atproto',
       pdsEndpoint: 'https://pds.example.com',
       tokenType: 'DPoP',
+      jkt: 'test-jkt',
     })
   })
 

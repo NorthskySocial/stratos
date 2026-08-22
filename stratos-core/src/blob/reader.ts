@@ -2,10 +2,10 @@ import { and, asc, eq, gt, isNull } from 'drizzle-orm'
 import type { Cid } from '@atproto/lex-data'
 import {
   stratosBlob,
-  stratosBlobBoundary,
   StratosDbOrTx,
   stratosRecord,
   stratosRecordBlob,
+  stratosRecordBoundary,
 } from '../db'
 import { BlobNotFoundError, BlobStore, Logger, StatusAttr } from '../types.js'
 
@@ -101,18 +101,22 @@ export class StratosBlobReader {
   }
 
   /**
-   * Lists blobs in the database that are associated with records.
-   * @param opts - Options for listing blobs.
-   * @returns A promise that resolves with an array of CID objects of blobs associated with records.
+   * Lists blobs referenced by records that currently reside in the boundary.
+   * Boundary residence is derived from stratos_record_boundary, which follows
+   * the record lifecycle, so moved or deleted records drop out immediately.
+   *
+   * @param opts - Boundary plus the listBlobs paging options.
+   * @returns Blob CIDs in ascending order.
    */
-  async listBlobs(opts: {
+  async listBlobsForBoundary(opts: {
+    boundary: string
     since?: string
     cursor?: string
     limit: number
   }): Promise<string[]> {
-    const { since, cursor, limit } = opts
+    const { boundary, since, cursor, limit } = opts
 
-    const conditions = []
+    const conditions = [eq(stratosRecordBoundary.boundary, boundary)]
     if (cursor) {
       conditions.push(gt(stratosRecordBlob.blobCid, cursor))
     }
@@ -122,15 +126,14 @@ export class StratosBlobReader {
         .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
         .from(stratosRecordBlob)
         .innerJoin(
+          stratosRecordBoundary,
+          eq(stratosRecordBoundary.recordUri, stratosRecordBlob.recordUri),
+        )
+        .innerJoin(
           stratosRecord,
           eq(stratosRecord.uri, stratosRecordBlob.recordUri),
         )
-        .where(
-          and(
-            gt(stratosRecord.repoRev, since),
-            ...(cursor ? [gt(stratosRecordBlob.blobCid, cursor)] : []),
-          ),
-        )
+        .where(and(gt(stratosRecord.repoRev, since), ...conditions))
         .orderBy(asc(stratosRecordBlob.blobCid))
         .limit(limit)
       return res.map((row: { blobCid: string }) => row.blobCid)
@@ -139,7 +142,11 @@ export class StratosBlobReader {
     const res = await this.db
       .selectDistinct({ blobCid: stratosRecordBlob.blobCid })
       .from(stratosRecordBlob)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .innerJoin(
+        stratosRecordBoundary,
+        eq(stratosRecordBoundary.recordUri, stratosRecordBlob.recordUri),
+      )
+      .where(and(...conditions))
       .orderBy(asc(stratosRecordBlob.blobCid))
       .limit(limit)
     return res.map((row: { blobCid: string }) => row.blobCid)
@@ -187,18 +194,5 @@ export class StratosBlobReader {
       .where(eq(stratosBlob.cid, cid.toString()))
       .limit(1)
     return res.length > 0
-  }
-
-  /**
-   * Retrieves the boundaries associated with a blob from the database.
-   * @param blobCid - CID of the blob to retrieve boundaries for.
-   * @returns A promise that resolves with an array of boundaries associated with the blob.
-   */
-  async getBoundariesForBlob(blobCid: Cid): Promise<string[]> {
-    const res = await this.db
-      .select({ boundary: stratosBlobBoundary.boundary })
-      .from(stratosBlobBoundary)
-      .where(eq(stratosBlobBoundary.blobCid, blobCid.toString()))
-    return res.map((row) => row.boundary)
   }
 }

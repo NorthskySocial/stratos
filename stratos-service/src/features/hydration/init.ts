@@ -9,16 +9,13 @@ import {
   EnrollmentBoundaryResolver,
 } from '../enrollment'
 import { type HydrationContext } from '../../context-types.js'
-import { SyncServiceImpl } from '../sync'
 import { ActorStoreRecordResolver, HydrationServiceImpl } from './adapter.js'
 import { type ActorStore } from '../../actor-store-types.js'
-import { type BloomManager } from '../blob'
 
 /**
  * Initialize hydration context
  * @param actorStore - Actor store
  * @param enrollmentStore - Enrollment store reader
- * @param bloomManager - Bloom manager
  * @param cache - Optional cache for boundary resolution
  * @param logger - Optional logger for invariant reporting
  * @returns Hydration context
@@ -26,7 +23,6 @@ import { type BloomManager } from '../blob'
 export function initHydration(
   actorStore: ActorStore,
   enrollmentStore: EnrollmentStoreReader,
-  bloomManager: BloomManager,
   cache?: Cache,
   logger?: Logger,
 ): HydrationContext {
@@ -44,15 +40,8 @@ export function initHydration(
     logger,
   )
 
-  const syncService = new SyncServiceImpl(
-    actorStore,
-    bloomManager,
-    boundaryResolver,
-  )
-
   return {
     boundaryResolver,
     hydrationService,
-    syncService,
   }
 }

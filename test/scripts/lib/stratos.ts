@@ -373,10 +373,11 @@ export interface RepoOpsResponse {
     rev: string
     collection: string
     rkey: string
-    cid?: string
+    cid: string | null
+    prev: string | null
     value?: Record<string, unknown>
   }>
-  caughtUp: boolean
+  /** Absent once the response reaches the head of the oplog. */
   cursor?: string
   commit?: {
     did: string

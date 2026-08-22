@@ -147,15 +147,34 @@ Authorization: Bearer <access_token>
 
 ```http
 GET /xrpc/zone.stratos.space.getRecord?space=<at-uri>&repo=<did>&collection=<nsid>&rkey=<rkey>
-Authorization: Bearer <access_token> | Bearer <space-credential>
+Authorization: Bearer <access_token> | DPoP <space-credential>
+DPoP: <proof>   (required when presenting a space credential)
 Response: { "uri": "...", "cid": "...", "value": { ... } }
 ```
 
 Get a single record from a permissioned space (spec-shaped mirror of
 `com.atproto.space.getRecord`). Callable with standard user auth - the caller
 must be a member of the space - or with a space credential for that space (for
-syncing services). The record must belong to the requested space; records
-outside it (including records with no space) resolve to `RecordNotFound`.
+syncing services). A space credential is DPoP-key-bound (`cnf.jkt`): present it
+under the `DPoP` scheme with a per-request proof signed by the bound key and
+hash-bound to the credential (`ath`). The record must belong to the requested
+space; records outside it (including records with no space) resolve to
+`RecordNotFound`.
+
+### List Space Blobs
+
+```http
+GET /xrpc/zone.stratos.space.listBlobs?space=<at-uri>&repo=<did>[&since=<rev>][&limit=<n>][&cursor=<cursor>]
+Authorization: Bearer <access_token> | DPoP <space-credential>
+DPoP: <proof>   (required when presenting a space credential)
+Response: { "cids": ["..."], "cursor": "..." }
+```
+
+List the CIDs of blobs referenced by an account's records within a permissioned
+space (spec-shaped mirror of `com.atproto.space.listBlobs`). Same admission
+contract as Get Space Record: standard user auth requires space membership, or
+a space credential for that space. `limit` is 1-1000 (default 500); a `cursor`
+is returned when a page is full.
 
 ### Export Repository
 
@@ -192,17 +211,25 @@ GET /xrpc/zone.stratos.sync.listRepoOps?did=<did>[&since=<rev>][&limit=<n>][&cur
 Authorization: Bearer <service-jwt>
 ```
 
-Incremental pull sync of a repo's operation log. Returns record operations after the
-`since` revision, boundary-gated to the caller's enrolled boundaries, with current record
-values inlined by default. When the response reaches the end of the log and a probe after
-the commit read finds no newer sequence row, `caughtUp` is `true` and the repo's current
-signed commit is included, consistent with the ops returned. If the probe detects a write,
-the response instead carries `caughtUp: false` and a cursor with no commit. Such a response
-can carry no ops and repeat the cursor you sent, so poll again whenever `caughtUp` is
-`false`, and do not read an unchanged cursor as a stall. Under continuous writes `caughtUp`
-may stay false indefinitely. A write that commits after the probe is not detected; it falls
-outside this snapshot and arrives on a later poll. If `since` predates retained history, the
-`OplogTruncated` error is returned - fall back to full-state recovery below.
+Incremental pull sync of a repo's operation log, mirroring `com.atproto.space.listRepoOps`
+semantics. Returns record operations after the `since` revision, boundary-gated to the
+caller's enrolled boundaries, with current record values inlined by default. Each op carries
+required-nullable `cid` and `prev` fields: `cid` null means delete, `prev` null means create
+(or that the superseded value predates the returned window). The response reaches the head
+of the oplog when `cursor` is absent; the repo's current signed commit is then included
+(unless the repo has no commits yet), consistent with the ops returned. If a concurrent
+write is detected, the response instead carries a cursor with no commit. Such a response can
+carry no ops and repeat the cursor you sent, so poll again while a cursor is present, and do
+not read an unchanged cursor as a stall. Under continuous writes the head may never be
+reached. A write that commits after the head probe is not detected; it falls outside this
+snapshot and arrives on a later poll. `cursor` takes precedence over `since` when both are
+supplied. The `OplogTruncated` error (stricter than upstream, which silently restarts) means
+the oplog cannot serve your position truthfully - fall back to full-state recovery below. It
+is returned when the cursor is malformed, predates retained history (compaction passed it),
+or names a seq beyond retained history (e.g. after a log reset); when `since` falls outside
+the retained `[oldest, newest]` rev window or that window cannot be verified; and when a
+retained op cannot be emitted truthfully (a non-delete op without a cid, or a record key
+that fails the record-key format).
 
 ### Pull Sync: List Record Paths (Full-State Recovery)
 
@@ -220,6 +247,7 @@ enumerate paths, diff locally, and fetch misses.
 ```http
 POST /xrpc/zone.stratos.space.getSpaceCredential
 Authorization: DPoP <access_token>
+DPoP: <proof>
 Content-Type: application/json
 Body: { "space": "at://<space-did>/space/<type>/<skey>"[, "delegationToken": "<jwt>"][, "clientAttestation": "<jwt>"] }
 Response: { "credential": "<jwt>", "expiresAt": "<datetime>" }
@@ -229,7 +257,12 @@ Issues a multi-use space credential (JWT) for a space the caller is a member of.
 comes from the delegation token when supplied, otherwise from the DPoP session; membership
 is checked live against the enrollment store. Spaces configured with an app allow-list
 additionally require a valid client attestation whose attested `client_id` is listed. The
-credential is then accepted on read/sync endpoints as an alternative to standard auth.
+credential is bound to the caller's DPoP key (`cnf.jkt`, RFC 9449): on the delegation path
+the key comes from a standalone DPoP proof in the `DPoP` header, otherwise from the session
+proof key. When no key is available the request fails with `ProofRequired` (unbound
+credentials are minted only in development mode). The credential is then accepted on
+read/sync endpoints as an alternative to standard auth, presented under the `DPoP` scheme
+with a fresh proof per request.
 
 ## Record Types
 

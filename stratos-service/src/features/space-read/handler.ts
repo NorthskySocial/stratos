@@ -4,7 +4,10 @@ import {
   Server as XrpcServer,
 } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
-import { parseSpaceUri, StratosValidator } from '@northskysocial/stratos-core'
+import {
+  spaceUriToBoundary,
+  StratosValidator,
+} from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import type { HandlerAuth, XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
@@ -17,11 +20,26 @@ import { isSpaceCredentialAuth } from '../../infra/auth/credential-scope.js'
  */
 export const GET_SPACE_RECORD_METHOD = 'zone.stratos.space.getRecord'
 
+/**
+ * XRPC method NSID for the space-scoped blob enumeration. Spec-shaped mirror
+ * of `com.atproto.space.listBlobs` (atproto#5187), quarantined under the
+ * `zone.stratos.*` namespace until the spec is finalized.
+ */
+export const LIST_SPACE_BLOBS_METHOD = 'zone.stratos.space.listBlobs'
+
 interface GetSpaceRecordParams {
   space?: string
   repo?: string
   collection?: string
   rkey?: string
+}
+
+interface ListSpaceBlobsParams {
+  space?: string
+  repo?: string
+  since?: string
+  limit?: unknown
+  cursor?: string
 }
 
 /**
@@ -56,6 +74,41 @@ export function registerSpaceReadHandlers(
       },
     ),
   })
+
+  xrpc.method(LIST_SPACE_BLOBS_METHOD, {
+    type: 'query',
+    auth: ctx.authVerifier.standardOrSpaceCredential,
+    handler: createXrpcHandler<unknown, ListSpaceBlobsParams>(
+      ctx,
+      LIST_SPACE_BLOBS_METHOD,
+      {
+        requireAuth: false,
+        handler: async ({ params, auth }) => {
+          return handleListSpaceBlobs(ctx, params, auth)
+        },
+      },
+    ),
+  })
+}
+
+/**
+ * Parse a space URI and derive its Stratos boundary (fail closed).
+ *
+ * @param ctx - Application context.
+ * @param space - The requested space URI.
+ * @returns The space's Stratos boundary.
+ * @throws InvalidRequestError `UnknownSpace` when the URI is malformed or
+ *   targets another service.
+ */
+function resolveSpaceBoundary(ctx: AppContext, space: string): string {
+  const boundary = spaceUriToBoundary(space, ctx.serviceDid)
+  if (!boundary.ok) {
+    throw new InvalidRequestError(
+      'Unknown space: URI must target this service',
+      'UnknownSpace',
+    )
+  }
+  return boundary.value
 }
 
 /**
@@ -85,15 +138,7 @@ async function handleGetSpaceRecord(
     )
   }
 
-  const parsed = parseSpaceUri(space)
-  if (!parsed.ok || parsed.value.spaceDid !== ctx.serviceDid) {
-    throw new InvalidRequestError(
-      'Unknown space: URI must target this service',
-      'UnknownSpace',
-    )
-  }
-  const boundary = `${parsed.value.spaceDid}/${parsed.value.skey}`
-
+  const boundary = resolveSpaceBoundary(ctx, space)
   await assertAdmitted(ctx, space, boundary, auth)
 
   const exists = await ctx.actorStore.exists(repo)
@@ -119,6 +164,73 @@ async function handleGetSpaceRecord(
 }
 
 /**
+ * Core logic for {@link LIST_SPACE_BLOBS_METHOD}.
+ *
+ * Steps:
+ *   1. Require `space` and `repo`.
+ *   2. Resolve the space's boundary → else `UnknownSpace`.
+ *   3. Admission — same fail-closed contract as {@link handleGetSpaceRecord}.
+ *   4. Enumerate blob CIDs that records reference within the boundary. The
+ *      page cursor is the last CID of a full page.
+ */
+async function handleListSpaceBlobs(
+  ctx: AppContext,
+  params: ListSpaceBlobsParams,
+  auth: HandlerAuth | undefined,
+): Promise<{ cids: string[]; cursor?: string }> {
+  const { space, repo, since, cursor } = params
+  if (!space || !repo) {
+    throw new InvalidRequestError(
+      'space and repo are required',
+      'InvalidRequest',
+    )
+  }
+  const limit = parseLimit(params.limit)
+
+  const boundary = resolveSpaceBoundary(ctx, space)
+  await assertAdmitted(ctx, space, boundary, auth)
+
+  const exists = await ctx.actorStore.exists(repo)
+  if (!exists) {
+    throw new InvalidRequestError('Could not find repo', 'RepoNotFound')
+  }
+
+  const cids = await ctx.actorStore.read(repo, async (store) => {
+    return store.blob.listBlobsForBoundary({ boundary, since, cursor, limit })
+  })
+
+  return {
+    cids,
+    ...(cids.length === limit ? { cursor: cids[cids.length - 1] } : {}),
+  }
+}
+
+/**
+ * Parse and clamp `limit` to the lexicon-declared range 1..1000 (default 500).
+ *
+ * The lexicon declares `limit` as an integer, but params reach the handler
+ * without schema validation, so the raw query value can be a string or not an
+ * integer at all.
+ *
+ * @param raw - The raw `limit` param.
+ * @returns The clamped integer limit.
+ * @throws InvalidRequestError when the value is not an integer.
+ */
+function parseLimit(raw: unknown): number {
+  if (raw === undefined) return 500
+  const value =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && /^-?\d+$/.test(raw)
+        ? Number(raw)
+        : NaN
+  if (!Number.isInteger(value)) {
+    throw new InvalidRequestError('limit must be an integer', 'InvalidRequest')
+  }
+  return Math.min(Math.max(value, 1), 1000)
+}
+
+/**
  * Assert the caller is admitted to the requested space (fail closed).
  *
  * @param ctx - Application context.
@@ -133,22 +245,24 @@ async function assertAdmitted(
   boundary: string,
   auth: HandlerAuth | undefined,
 ): Promise<void> {
+  // The custom error name matches the `AuthRequired` error that both space
+  // lexicons declare; the library default is `AuthenticationRequired`.
   if (isSpaceCredentialAuth(auth)) {
     // A credential admits exactly its own space; anything else is refused
     // (the generic reason is deliberate — no cross-space probing).
     if (auth?.credentials?.spaceUri !== space) {
-      throw new AuthRequiredError('Not admitted to this space')
+      throw new AuthRequiredError('Not admitted to this space', 'AuthRequired')
     }
     return
   }
 
   const userDid = auth?.credentials?.did
   if (!userDid) {
-    throw new AuthRequiredError('Authentication required')
+    throw new AuthRequiredError('Authentication required', 'AuthRequired')
   }
   // Live membership check (same freshness contract as credential issuance).
   const boundaries = await ctx.enrollmentStore.getBoundaries(userDid)
   if (!boundaries.includes(boundary)) {
-    throw new AuthRequiredError('Not admitted to this space')
+    throw new AuthRequiredError('Not admitted to this space', 'AuthRequired')
   }
 }

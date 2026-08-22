@@ -77,12 +77,16 @@ describe('HTTP repro: credential-authed pull sync', () => {
     const body = await sync.text()
     expect(sync.status, body).toBe(200)
     const parsed = JSON.parse(body) as {
-      ops: unknown[]
-      caughtUp: boolean
+      ops: { cid: string | null; prev: string | null }[]
+      cursor?: string
       commit?: unknown
     }
     expect(parsed.ops.length).toBe(1)
-    expect(parsed.caughtUp).toBe(true)
+    // Head of the oplog: no cursor, commit present. The op passed lexicon
+    // output validation with required-nullable cid/prev on the wire.
+    expect(parsed.cursor).toBeUndefined()
+    expect(typeof parsed.ops[0].cid).toBe('string')
+    expect(parsed.ops[0].prev).toBeNull()
     expect(parsed.commit).toBeDefined()
   }, 30_000)
 })
