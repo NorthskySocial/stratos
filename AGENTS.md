@@ -207,8 +207,8 @@ diagram and auth-flow table.
 
 ### Storage Architecture
 
-Storage interfaces are defined in `stratos-core/src/storage/*.ts` with sqlite adapters in
-`stratos-service/src/storage/sqlite/` and postgres adapters in
+Storage interfaces are defined in `stratos-core/src/storage/*.ts` with SQLite adapters in
+`stratos-service/src/storage/sqlite/` and Postgres adapters in
 `stratos-service/src/infra/storage/postgres/`. Each store has a Reader (read-only) and
 Writer (extends Reader) variant. Read the interface files directly for method signatures.
 
