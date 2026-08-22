@@ -104,6 +104,13 @@ function getEnvVars(state: TestState): Record<string, string> {
     )
   }
 
+  if (isAppview()) {
+    // The e2e compose overlay hardcodes these values inside the container.
+    // Record the same values so state and test scripts match the service.
+    envVars['STRATOS_PUBLIC_URL'] = 'https://stratos.test'
+    envVars['STRATOS_SERVICE_DID'] = 'did:web:stratos.test'
+  }
+
   return envVars
 }
 
