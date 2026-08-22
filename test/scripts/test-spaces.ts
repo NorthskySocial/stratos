@@ -216,7 +216,8 @@ async function run(): Promise<void> {
       sync.body.commit !== undefined &&
       sync.body.commit.did === rei.did &&
       typeof sync.body.commit.rev === 'string' &&
-      sync.body.commit.sig !== undefined,
+      typeof sync.body.commit.sig === 'string' &&
+      sync.body.commit.sig.length > 0,
     'Head response (no cursor) carries a signed commit (did/rev/sig)',
     `cursor=${sync.body.cursor}, commit.did=${sync.body.commit?.did}`,
   )

@@ -13,10 +13,11 @@ import {
 } from '../../subscription/sequence-paging.js'
 
 /**
- * Distinct error signalling that the requested `since` revision is unknown or
- * predates retained history (compacted). The caller must fall back to
- * full-state recovery (listRecordPaths). Mapped to the `OplogTruncated` XRPC
- * error name by the handler.
+ * Distinct error signalling that the oplog cannot serve the requested window
+ * truthfully: the `since`/cursor position is unknown or compacted, or a
+ * retained op cannot be emitted. The caller must fall back to full-state
+ * recovery (listRecordPaths). Mapped to the `OplogTruncated` XRPC error name
+ * by the handler.
  */
 export class OplogTruncatedError extends Error {
   constructor(message = 'since revision predates retained history') {
@@ -180,11 +181,12 @@ function isValidRecordKey(rkey: string): boolean {
  * coalescing pass ({@link coalesceCurrentValues}) derives it from the prior op
  * for the same path within the returned window.
  *
- * @param ctx - Application context (for drop diagnostics)
- * @param did - The repo DID (for drop diagnostics)
+ * @param ctx - Application context (for diagnostics)
+ * @param did - The repo DID (for diagnostics)
  * @param decoded - Event decoded via {@link decodeEvent}
  * @param rev - The shared revision for all ops in this event
  * @returns One expanded op per record op in the event
+ * @throws OplogTruncatedError when a persisted op cannot be emitted truthfully
  */
 function expandEventOps(
   ctx: AppContext,
@@ -196,23 +198,29 @@ function expandEventOps(
     const { collection, rkey } = splitPath(op.path)
     const isDelete = op.action === 'delete'
     // Fail closed on a malformed non-delete without a cid: `cid: null` on the
-    // wire means delete, so this op cannot be emitted truthfully - drop it.
+    // wire means delete, so this op cannot be emitted truthfully. A silent
+    // drop would let the page reach a head response that omits a persisted op
+    // - a permanent sync gap. Signal truncation instead: the caller falls
+    // back to full-state recovery and resumes past this event.
     const cid = isDelete ? null : (op.cid ?? undefined)
     if (cid === undefined) {
       ctx.logger?.warn(
         { did, collection, rev },
-        'pull-sync dropped an op with no cid',
+        'pull-sync found an op with no cid',
       )
-      return []
+      throw new OplogTruncatedError('oplog contains an op with no cid')
     }
     // Fail closed on an invalid record key: the response schema requires the
-    // record-key format, so this op cannot pass output validation - drop it.
+    // record-key format, so this op cannot pass output validation. Same
+    // reasoning as above - truncation, not a silent drop.
     if (!isValidRecordKey(rkey)) {
       ctx.logger?.warn(
         { did, collection, rev },
-        'pull-sync dropped an op with an invalid record key',
+        'pull-sync found an op with an invalid record key',
       )
-      return []
+      throw new OplogTruncatedError(
+        'oplog contains an op with an invalid record key',
+      )
     }
     return [
       {
@@ -391,7 +399,8 @@ function coalesceCurrentValues(
  * @param params - Resolved listRepoOps params
  * @param callerBoundaries - The caller's enrolled boundaries
  * @returns The page result
- * @throws OplogTruncatedError when `since` is unknown/compacted
+ * @throws OplogTruncatedError when `since`/cursor is unknown or compacted, or
+ *   a retained op cannot be emitted truthfully
  */
 export async function listRepoOps(
   ctx: AppContext,
