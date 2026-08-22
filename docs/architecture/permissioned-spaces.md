@@ -155,9 +155,12 @@ credential. Decoded, the credential looks like this:
 Two details matter. The credential carries no `aud` claim, which is what
 makes it multi-use: it works against any repo host serving the space, not one
 predetermined audience. And it is signed by the space authority's own signing
-key (`kid: #atproto`, resolvable from the authority's DID document), so a
-host can verify it without ever contacting the authority. The default
-lifetime is two hours.
+key (`kid: #atproto`), so a host that resolves that key from the authority's
+DID document could verify it without contacting the authority. Today the only
+verifier is Stratos itself, and as the authority it takes the shortcut that
+implies: it requires the literal `kid` value and checks the signature against
+its local service key, with no DID resolution. The default lifetime is two
+hours.
 
 The alpha PDS added a third property Stratos does not yet implement:
 sender-constraint. An upstream credential carries a `cnf.jkt` claim binding
