@@ -52,8 +52,8 @@
   "devDependencies": {
     "@atcute/cbor": "^2.3.6",
     "@atcute/mst": "^1.0.3",
-    "@atproto/crypto": "^0.4.5",
-    "@atproto/lexicon": "^0.6.1",
+    "@atproto/crypto": "^0.5.4",
+    "@atproto/lexicon": "^0.7.11",
     "@northskysocial/stratos-core": "workspace:*",
     "@types/node": "^25.2.1",
     "typescript": "^5.9.3",
