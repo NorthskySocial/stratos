@@ -12,7 +12,7 @@ import {
 } from '../src/lib/auth'
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
 
-// We need a variable for onDelete captured from constructor
+// We need a variable for onSessionDeleted captured from constructor
 let capturedOnDelete: ((sub: string, cause: string) => void) | null = null
 let mockInstance: unknown = null
 
@@ -23,7 +23,7 @@ vi.mock('@atproto/oauth-client-browser', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     options: any,
   ) {
-    capturedOnDelete = options.onDelete
+    capturedOnDelete = options.onSessionDeleted
     this.init = vi.fn().mockResolvedValue({ session: null })
     this.signIn = vi.fn().mockResolvedValue(undefined)
     this.revoke = vi.fn().mockResolvedValue(undefined)
@@ -55,9 +55,9 @@ describe('auth', () => {
     } else {
       vi.mocked(BrowserOAuthClient).mockImplementationOnce(function (
         this: { init: unknown; signIn: unknown; revoke: unknown },
-        options: { onDelete: (sub: string, cause: string) => void },
+        options: { onSessionDeleted: (sub: string, cause: string) => void },
       ) {
-        capturedOnDelete = options.onDelete
+        capturedOnDelete = options.onSessionDeleted
         this.init = mockInit
         this.signIn = vi.fn()
         this.revoke = vi.fn()
