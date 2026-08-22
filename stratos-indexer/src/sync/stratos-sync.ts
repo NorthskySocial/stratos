@@ -123,18 +123,19 @@ export class StratosServiceSubscription {
       syncToken: this.config.syncToken,
     })
 
-    this.ws = new WebSocket(wsUrl)
-    this.ws.binaryType = 'arraybuffer'
+    const ws = new WebSocket(wsUrl)
+    this.ws = ws
+    ws.binaryType = 'arraybuffer'
 
-    this.ws.addEventListener('open', () => {
+    ws.addEventListener('open', () => {
       this.armStabilityReset()
     })
 
-    this.ws.onmessage = (e: MessageEvent) => {
+    ws.onmessage = (e: MessageEvent) => {
       this.enqueueMessage(new Uint8Array(e.data as ArrayBuffer))
     }
 
-    this.ws.onerror = (e: Event & { error?: unknown }) => {
+    ws.onerror = (e: Event & { error?: unknown }) => {
       const errorMsg =
         e.error instanceof Error
           ? e.error.message
@@ -151,7 +152,10 @@ export class StratosServiceSubscription {
       )
     }
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      // A close event from a replaced socket must not tear down the
+      // active socket, its queue, or schedule an extra reconnect.
+      if (this.ws !== ws) return
       this.ws = null
       this.clearStabilityTimer()
       this.resetQueue()
