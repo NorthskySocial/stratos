@@ -1,6 +1,6 @@
 {
   "name": "@northskysocial/stratos-client",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Client library for Stratos private namespace service",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -37,11 +37,13 @@
     "format": "prettier --write .",
     "lint": "eslint .",
     "check:self-contained": "node scripts/check-self-contained.mjs",
-    "postbuild": "node scripts/check-self-contained.mjs"
+    "check:exports": "node scripts/check-exports.mjs",
+    "postbuild": "node scripts/check-self-contained.mjs && node scripts/check-exports.mjs"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.4",
     "@atcute/car": "^6.0.2",
+    "@atcute/cbor": "^2.3.6",
     "@atcute/cid": "^2.4.2",
     "@atcute/client": "^5.1.1",
     "@atcute/crypto": "^2.4.4",
@@ -50,7 +52,6 @@
     "@atcute/repo": "^1.0.2"
   },
   "devDependencies": {
-    "@atcute/cbor": "^2.3.6",
     "@atcute/mst": "^1.0.3",
     "@atproto/crypto": "^0.5.4",
     "@atproto/lexicon": "^0.7.11",
