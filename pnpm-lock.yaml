@@ -72,6 +72,9 @@ importers:
       '@atcute/car':
         specifier: ^6.0.2
         version: 6.0.2(@atcute/cbor@2.3.6(@atcute/cid@2.4.2))(@atcute/cid@2.4.2)
+      '@atcute/cbor':
+        specifier: ^2.3.6
+        version: 2.3.6(@atcute/cid@2.4.2)
       '@atcute/cid':
         specifier: ^2.4.2
         version: 2.4.2
@@ -91,9 +94,6 @@ importers:
         specifier: ^1.0.2
         version: 1.0.2(@atcute/cbor@2.3.6(@atcute/cid@2.4.2))(@atcute/cid@2.4.2)(@atcute/lexicons@2.1.0)
     devDependencies:
-      '@atcute/cbor':
-        specifier: ^2.3.6
-        version: 2.3.6(@atcute/cid@2.4.2)
       '@atcute/mst':
         specifier: ^1.0.3
         version: 1.0.3(@atcute/cbor@2.3.6(@atcute/cid@2.4.2))(@atcute/cid@2.4.2)
