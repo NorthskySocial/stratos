@@ -474,7 +474,7 @@ describe('stratos-validation', () => {
             $type: 'blob',
             ref: {
               $link:
-                'bafybeig6xv5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+                'bafkreic2b545qkwlmlk4zv5ffieyptk2xnr7xpoz6dist6lfggdrn5rlrm',
             },
             mimeType: 'image/png',
             size: 999,
@@ -485,7 +485,7 @@ describe('stratos-validation', () => {
               $type: 'blob',
               ref: {
                 $link:
-                  'bafybeicvpx5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+                  'bafkreieaexcoxldrbo56cxq76uejbt4kzgfeuotbpidsmkisgcv4q5owsa',
               },
               mimeType: 'image/webp',
               size: 444,
@@ -503,10 +503,10 @@ describe('stratos-validation', () => {
         'bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzvev6wt667vyrp7k4p72e',
       )
       expect(blobs).toContain(
-        'bafybeig6xv5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+        'bafkreic2b545qkwlmlk4zv5ffieyptk2xnr7xpoz6dist6lfggdrn5rlrm',
       )
       expect(blobs).toContain(
-        'bafybeicvpx5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+        'bafkreieaexcoxldrbo56cxq76uejbt4kzgfeuotbpidsmkisgcv4q5owsa',
       )
     })
 
@@ -644,6 +644,111 @@ describe('stratos-validation', () => {
           },
           mimeType: 'image/png',
           size: 5,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a $link ref whose $type is not blob', () => {
+      const record = {
+        image: {
+          $type: 'file',
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          mimeType: 'image/png',
+          size: 5,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a $link that holds a CID object instead of a string', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: { $link: parseCid(cidStr) },
+          mimeType: 'image/png',
+          size: 5,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should return each blob CID once when the record repeats it', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const blob = {
+        $type: 'blob',
+        ref: { $link: cidStr },
+        mimeType: 'image/png',
+        size: 2048,
+      }
+      const record = { avatar: blob, banner: blob }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([cidStr])
+    })
+
+    it('should dedupe a wire blob against its lex twin', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        wire: {
+          $type: 'blob',
+          ref: { $link: cidStr },
+          mimeType: 'image/png',
+          size: 2048,
+        },
+        lex: { ref: parseCid(cidStr), mimeType: 'image/png', size: 2048 },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([cidStr])
+    })
+
+    it('should skip a wire blob whose $link does not parse as a CID', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: { $link: 'not-a-cid-from-the-hikawa-shrine' },
+          mimeType: 'image/png',
+          size: 1,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a wire blob without a mimeType', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          size: 1,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a wire blob without a numeric size', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          mimeType: 'image/png',
+          size: 'big',
         },
       }
 

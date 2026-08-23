@@ -39,7 +39,7 @@ import {
 import { adminGetBoundaries, adminSetBoundaries } from './lib/admin.ts'
 import { DOMAINS, PDS_URL, SERVICE_DID, SPACES } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { assert, fail, finish, info, pass, section } from './lib/log.ts'
+import { assert, fail, finish, info, pass, section, skip } from './lib/log.ts'
 
 const POST_COLLECTION = 'zone.stratos.feed.post'
 
@@ -258,39 +258,45 @@ async function run(): Promise<void> {
     'Sakura holds the swordsmith boundary pre-revocation',
     `[${sakuraBefore?.join(', ') ?? ''}]`,
   )
-  const sakuraCredBefore = await getSpaceCredential(
-    sakura.did,
-    SPACES.swordsmith,
-  )
-  assert(
-    sakuraCredBefore.status === 200,
-    'Sakura (member) obtains a credential pre-revocation',
-    `status=${sakuraCredBefore.status}`,
-  )
-  try {
-    const revoke = await adminSetBoundaries(
-      sakura.did,
-      (sakuraBefore ?? []).filter((b) => b !== DOMAINS.swordsmith),
-      adminCookie,
-    )
-    assert(
-      revoke.status === 200,
-      'Admin API revokes the swordsmith boundary',
-      `status=${revoke.status}`,
-    )
-    const sakuraCredAfter = await getSpaceCredential(
+  if (sakuraBefore === null) {
+    // Without the pre-revocation read there is nothing safe to restore —
+    // mutating membership here would strip all of Sakura's boundaries.
+    skip('Revocation round-trip', 'pre-revocation boundary read failed')
+  } else {
+    const sakuraCredBefore = await getSpaceCredential(
       sakura.did,
       SPACES.swordsmith,
     )
     assert(
-      sakuraCredAfter.status === 400 &&
-        sakuraCredAfter.body.error === 'NotEnrolled',
-      'Post-revocation credential issuance denied (NotEnrolled)',
-      `status=${sakuraCredAfter.status}, error=${sakuraCredAfter.body.error}`,
+      sakuraCredBefore.status === 200,
+      'Sakura (member) obtains a credential pre-revocation',
+      `status=${sakuraCredBefore.status}`,
     )
-  } finally {
-    // Restore so later phases see the original membership.
-    await adminSetBoundaries(sakura.did, sakuraBefore ?? [], adminCookie)
+    try {
+      const revoke = await adminSetBoundaries(
+        sakura.did,
+        sakuraBefore.filter((b) => b !== DOMAINS.swordsmith),
+        adminCookie,
+      )
+      assert(
+        revoke.status === 200,
+        'Admin API revokes the swordsmith boundary',
+        `status=${revoke.status}`,
+      )
+      const sakuraCredAfter = await getSpaceCredential(
+        sakura.did,
+        SPACES.swordsmith,
+      )
+      assert(
+        sakuraCredAfter.status === 400 &&
+          sakuraCredAfter.body.error === 'NotEnrolled',
+        'Post-revocation credential issuance denied (NotEnrolled)',
+        `status=${sakuraCredAfter.status}, error=${sakuraCredAfter.body.error}`,
+      )
+    } finally {
+      // Restore so later phases see the original membership.
+      await adminSetBoundaries(sakura.did, sakuraBefore, adminCookie)
+    }
   }
 
   // ── 8. Migration-path anchors ────────────────────────────────────────────

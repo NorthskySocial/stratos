@@ -309,10 +309,12 @@ export async function listPdsRecords(
   pdsUrl: string,
   repo: string,
   collection: string,
+  signal?: AbortSignal,
 ): Promise<PdsListRecordsResponse> {
   const params = new URLSearchParams({ repo, collection })
   const res = await fetch(
     `${pdsUrl}/xrpc/com.atproto.repo.listRecords?${params}`,
+    { signal },
   )
 
   if (!res.ok) {

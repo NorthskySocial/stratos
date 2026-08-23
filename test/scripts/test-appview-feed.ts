@@ -306,9 +306,16 @@ async function runBoundaryFilterTests(
   if (fuyuko?.did) {
     try {
       const timeline = await getTimeline(fuyuko.did, {
-        boundary: 'swordsmith',
+        boundary: DOMAINS.swordsmith,
       })
       const uris = timeline.feed.map((f: FeedViewPost) => f.post.uri)
+      // Require matches first — an empty feed would make the exclusion
+      // check below pass vacuously.
+      assertTrue(
+        timeline.feed.length >= 1,
+        'Boundary filter returns matching posts',
+        `got ${timeline.feed.length} posts`,
+      )
       assertFalse(
         uris.includes(kaorukoPost.uri),
         'Boundary filter excludes non-matching posts',

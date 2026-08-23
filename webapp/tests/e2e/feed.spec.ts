@@ -14,12 +14,9 @@ const NOW = new Date().toISOString()
 
 // The agent validates XRPC responses against the lexicons, so every cid must
 // parse as a real CID. These are sha-256 dag-cbor CIDs of short label strings.
-const PUBLIC_CID =
-  'bafyreih2yrnyeilpckwrcq4e3jz6lynnzzp34yin2ayyzle42jitk6mamy'
-const TOKYO3_CID =
-  'bafyreidcjvtwxnvdosbs5dpbsd6usjywbcy5ecg4orv6cpfyban26ecpny'
-const JUUBAN_CID =
-  'bafyreieofcdccn6pwxz55peoltrspr3ptrlslnfwj4rzzb6fhjqeic4imm'
+const PUBLIC_CID = 'bafyreih2yrnyeilpckwrcq4e3jz6lynnzzp34yin2ayyzle42jitk6mamy'
+const TOKYO3_CID = 'bafyreidcjvtwxnvdosbs5dpbsd6usjywbcy5ecg4orv6cpfyban26ecpny'
+const JUUBAN_CID = 'bafyreieofcdccn6pwxz55peoltrspr3ptrlslnfwj4rzzb6fhjqeic4imm'
 const ENROLLMENT_CID =
   'bafyreibhsg6uhfhpx4igepz42ma5yv7tp7yy74via2zmae2ah2c3yywfga'
 

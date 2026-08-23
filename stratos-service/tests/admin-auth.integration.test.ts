@@ -654,7 +654,10 @@ describe('isolateAdminOAuthStores (admin/enrollment session isolation)', () => {
   })
 
   it('keeps an admin login from overwriting the enrollment session of the same DID', async () => {
-    await enrollmentStores.sessionStore.set(ADMIN_DID, savedSession('repo-write'))
+    await enrollmentStores.sessionStore.set(
+      ADMIN_DID,
+      savedSession('repo-write'),
+    )
     await adminStores.sessionStore.set(ADMIN_DID, savedSession('identity-only'))
 
     const enrollment = await enrollmentStores.sessionStore.get(ADMIN_DID)
@@ -665,7 +668,10 @@ describe('isolateAdminOAuthStores (admin/enrollment session isolation)', () => {
   })
 
   it('keeps an admin-side revoke from deleting the enrollment session', async () => {
-    await enrollmentStores.sessionStore.set(ADMIN_DID, savedSession('repo-write'))
+    await enrollmentStores.sessionStore.set(
+      ADMIN_DID,
+      savedSession('repo-write'),
+    )
     await adminStores.sessionStore.set(ADMIN_DID, savedSession('identity-only'))
 
     await adminStores.sessionStore.del(ADMIN_DID)
@@ -677,7 +683,10 @@ describe('isolateAdminOAuthStores (admin/enrollment session isolation)', () => {
   })
 
   it('hides an enrollment-only session from the admin client', async () => {
-    await enrollmentStores.sessionStore.set(ADMIN_DID, savedSession('repo-write'))
+    await enrollmentStores.sessionStore.set(
+      ADMIN_DID,
+      savedSession('repo-write'),
+    )
     expect(await adminStores.sessionStore.get(ADMIN_DID)).toBeUndefined()
   })
 
