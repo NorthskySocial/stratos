@@ -104,11 +104,33 @@ const extractRkey = (uri: string): string => {
 
 interface ListRecordsResponse {
   records: Array<GetRecordResponse>
+  cursor?: string
+}
+
+const listEnrollmentPage = async (
+  rpc: Client,
+  did: string,
+  cursor: string | undefined,
+): Promise<ListRecordsResponse | null> => {
+  const res = (await rpc.get('com.atproto.repo.listRecords', {
+    params: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      repo: did as any,
+      collection: ENROLLMENT_COLLECTION,
+      limit: 100,
+      ...(cursor !== undefined ? { cursor } : {}),
+    },
+  })) as XRPCResponse<ListRecordsResponse>
+  return res.ok ? res.data : null
 }
 
 /**
  * discovers all Stratos enrollments by listing enrollment records
- * from the user's PDS via com.atproto.repo.listRecords.
+ * from the user's PDS via com.atproto.repo.listRecords. the function
+ * follows the response cursor until the PDS reports no more pages.
+ *
+ * the result is all-or-nothing: when any page request fails, the
+ * function returns an empty array.
  *
  * @param did the DID to check for enrollments
  * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
@@ -121,25 +143,29 @@ export const discoverEnrollments = async (
   const rpc = new Client({ handler: toHandler(pdsUrlOrHandler) })
 
   try {
-    const res = (await rpc.get('com.atproto.repo.listRecords', {
-      params: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        repo: did as any,
-        collection: ENROLLMENT_COLLECTION,
-        limit: 100,
-      },
-    })) as XRPCResponse<ListRecordsResponse>
-
-    if (!res.ok) return []
-
     const enrollments: Array<StratosEnrollment> = []
-    for (const record of res.data.records) {
-      const enrollment = parseEnrollmentRecord(
-        record.value,
-        extractRkey(record.uri),
-      )
-      if (enrollment) enrollments.push(enrollment)
+    // guards against a malformed server that repeats a cursor forever
+    const seenCursors = new Set<string>()
+    let cursor: string | undefined
+
+    for (;;) {
+      const page = await listEnrollmentPage(rpc, did, cursor)
+      if (!page) return []
+
+      for (const record of page.records) {
+        const enrollment = parseEnrollmentRecord(
+          record.value,
+          extractRkey(record.uri),
+        )
+        if (enrollment) enrollments.push(enrollment)
+      }
+
+      const next = page.cursor
+      if (!next || seenCursors.has(next) || page.records.length === 0) break
+      seenCursors.add(next)
+      cursor = next
     }
+
     return enrollments
   } catch {
     return []
