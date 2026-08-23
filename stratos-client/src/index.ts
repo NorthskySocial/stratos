@@ -12,6 +12,8 @@ export type {
 
 export {
   ENROLLMENT_COLLECTION,
+  discoverEnrollment,
+  discoverEnrollments,
   getEnrollmentByServiceDid,
   parseEnrollmentRecord,
 } from './discovery.js'
@@ -20,13 +22,20 @@ export {
   resolveServiceUrl,
   findEnrollmentByService,
   serviceDIDToRkey,
+  type ServiceFetchHandlerOptions,
 } from './routing.js'
 export {
   verifyCidIntegrity,
+  verifyRecordCid,
   resolveServiceSigningKey,
   resolveUserSigningKey,
   fetchAndVerifyRecord,
+  verifyStratosRecord,
 } from './verification.js'
+export {
+  verifyEnrollmentAttestation,
+  type AttestationResult,
+} from './attestation.js'
 export {
   STRATOS_SCOPES,
   buildCollectionScope,
