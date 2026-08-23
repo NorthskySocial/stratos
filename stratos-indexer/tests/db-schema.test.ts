@@ -182,6 +182,21 @@ describe('ensureIndexerSchema enrollment repair', () => {
     )
   })
 
+  it('is idempotent across a second run on a repaired legacy layout', async () => {
+    const { db, fake } = createFakeDb({
+      stratos_enrollment: ['did', 'serviceurl', 'createdat', 'updatedat'],
+    })
+
+    await ensureIndexerSchema(db)
+    // the fake throws on a duplicate rename, so a second run
+    // proves that each repair statement is idempotent
+    await ensureIndexerSchema(db)
+
+    expect(fake.columns('stratos_enrollment')).toEqual(
+      [...TARGET_ENROLLMENT_COLUMNS].sort(),
+    )
+  })
+
   it('leaves the current layout untouched apart from the idempotent boundaries add', async () => {
     const { db, fake } = createFakeDb({
       stratos_enrollment: [...TARGET_ENROLLMENT_COLUMNS],
@@ -239,10 +254,18 @@ describe('ensureIndexerSchema enrollment repair', () => {
 
     await ensureIndexerSchema(db)
 
-    const columns = fake.columns('stratos_enrollment')
-    expect(columns).toContain('createdat')
-    expect(columns).toContain('enrolledAt')
-    expect(columns).toContain('boundaries')
+    // the repair keeps the relic column and touches nothing else —
+    // assert the exact residual set the repair guarantees
+    expect(fake.columns('stratos_enrollment')).toEqual(
+      [
+        'boundaries',
+        'createdat',
+        'did',
+        'enrolledAt',
+        'lastChecked',
+        'serviceUrl',
+      ].sort(),
+    )
   })
 
   it('fails startup when the boundaries repair fails', async () => {
