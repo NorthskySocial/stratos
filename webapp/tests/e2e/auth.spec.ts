@@ -23,14 +23,17 @@ test.describe('Authentication', () => {
     ).toBeVisible()
   })
 
-  test('should mock successful login and show feed', async ({ page }) => {
+  test('renders the authenticated home for an injected mock session', async ({
+    page,
+  }) => {
     // Listen for console logs
     page.on('console', (msg) =>
       console.log(`[BROWSER] ${msg.type()}: ${msg.text()}`),
     )
 
-    // We'll mock the OAuth flow by manually setting a mock session in localStorage
-    // and mocking the necessary API calls that App.svelte makes on startup.
+    // This does NOT exercise the OAuth flow. It injects a session through the
+    // dev-only __MOCK_SESSION__ seam and mocks the startup API calls, then
+    // asserts the authenticated layout renders instead of the login screen.
 
     await page.route(
       '**/xrpc/com.atproto.repo.describeRepo?repo=did%3Aplc%3Amock',
@@ -43,7 +46,7 @@ test.describe('Authentication', () => {
             did: 'did:plc:mock',
             didDoc: {},
             collections: [],
-            name: 'mock',
+            handleIsCorrect: true,
           }),
         })
       },
@@ -51,7 +54,19 @@ test.describe('Authentication', () => {
 
     // Mock Stratos discovery
     await page.route(
-      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=zone.stratos.actor.enrollment',
+      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=zone.stratos.actor.enrollment**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ records: [] }),
+        })
+      },
+    )
+
+    // Mock the public-post fallback that lists app.bsky.feed.post records
+    await page.route(
+      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=app.bsky.feed.post**',
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -123,19 +138,32 @@ test.describe('Authentication', () => {
         __MOCK_SESSION__?: {
           sub: string
           handle?: string
+          fetchHandler?: (
+            url: string,
+            init: Parameters<typeof fetch>[1],
+          ) => Promise<Response>
         }
       }
       ;(window as unknown as CustomWindow).__MOCK_SESSION__ = {
         sub: 'did:plc:mock',
         handle: 'mock.bsky.social',
+        fetchHandler: async (
+          url: string,
+          init: Parameters<typeof fetch>[1],
+        ) => {
+          return await fetch(url, init)
+        },
       }
     })
 
     await page.goto('/')
 
-    // Verify UI shows handle
+    // The authenticated layout renders: handle, composer, and sign-out.
     await expect(page.getByText('@mock.bsky.social').first()).toBeVisible({
       timeout: 10000,
     })
+    await expect(page.locator('.composer')).toBeVisible()
+    await expect(page.locator('button.sign-out')).toBeVisible()
+    await expect(page.getByText('Private data for ATProto')).not.toBeVisible()
   })
 })

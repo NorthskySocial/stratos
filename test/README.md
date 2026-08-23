@@ -118,29 +118,6 @@ deno run -A scripts/run-all.ts
 Runs all five stages in order. On any stage failure the remaining stages (except teardown) are
 skipped.
 
-### Direct mode (bypass OAuth)
-
-If you cannot use Playwright browser automation (e.g., headless environment, PDS OAuth issues), use
-`--direct` to bypass OAuth enrollment:
-
-```bash
-deno run -A scripts/run-all.ts --direct
-```
-
-This mode:
-
-1. Skips Stage 2 (OAuth enrollment via Playwright)
-2. Instead runs `direct-enroll.ts` which:
-   - Inserts enrollment rows directly into `service.sqlite`
-   - Creates actor store directories and databases under `test-data/actors/`
-   - Authenticates via `Bearer <did>` header (enrollment check falls back to database lookup)
-
-Direct mode is useful when:
-
-- Playwright/Chromium setup is unavailable
-- PDS OAuth flow is broken or changed
-- You need faster iteration on boundary/record tests
-
 ### PostgreSQL mode
 
 Run the full E2E suite against PostgreSQL instead of SQLite:
@@ -149,19 +126,11 @@ Run the full E2E suite against PostgreSQL instead of SQLite:
 deno run -A scripts/run-all.ts --postgres
 ```
 
-Or combine with direct mode:
-
-```bash
-deno run -A scripts/run-all.ts --direct --postgres
-```
-
 This mode:
 
 1. Starts a `postgres:16-alpine` container alongside Stratos via `docker-compose.postgres.yml`
    overlay
 2. Configures the Stratos container with `STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
-3. Boundary configuration and direct enrollment connect to PostgreSQL at `localhost:5432` instead of
-   `service.sqlite`
 
 The PostgreSQL compose overlay (`docker-compose.postgres.yml`) adds:
 
@@ -178,7 +147,7 @@ If running individual scripts with PostgreSQL, set the environment variable:
 
 ```bash
 export STRATOS_E2E_BACKEND=postgres
-deno run -A scripts/configure-boundaries.ts
+deno run -A scripts/setup.ts
 ```
 
 ### Individual stages
@@ -268,19 +237,18 @@ Enrollment Summary
 
 ### Stage 3 — Configure Boundaries (`configure-boundaries.ts`)
 
-Adjusts per-user boundaries in the Stratos service database.
-
-By default, OAuth enrollment assigns all configured domains (`swordsmith` + `aekea`) to every user.
-This stage narrows them to create the asymmetric test scenario.
+Assigns per-user boundaries through the admin API to create the asymmetric test scenario.
 
 **What it does:**
 
-1. Opens `test-data/service.sqlite` directly from the host (bind-mounted volume).
-2. Replaces each user's `enrollment_boundary` rows:
+1. Logs in as the admin operator via the real OAuth flow (headless Chromium) and captures the
+   admin session cookie. The cookie is persisted to `test-state.json` for later phases.
+2. Sets each user's boundaries via `zone.stratos.admin.setBoundaries`:
    - Rei → `[swordsmith]`
    - Sakura → `[swordsmith]`
    - kaoruko → `[aekea]`
-3. Reads back and verifies the boundaries match expectations.
+3. Verifies three surfaces per user: the mutation response, the admin read-back
+   (`listEnrollments`), and the rewritten enrollment record on the user's PDS.
 
 **Expected output:**
 
@@ -418,15 +386,15 @@ Teardown
     ├── deno.json                      # Deno config (isolates from project tsconfig)
     ├── setup.ts                       # Stage 1: PDS accounts + start Stratos
     ├── test-enrollment.ts             # Stage 2: OAuth enrollment via Playwright
-    ├── test-auto-enrollment.ts        # Stage 2b: Verify auto-enrollment logic
-    ├── direct-enroll.ts               # Stage 2 alternative: Direct DB enrollment (--direct mode)
-    ├── configure-boundaries.ts        # Stage 3: Per-user boundary assignment
+    ├── configure-boundaries.ts        # Stage 3: Boundary assignment via the admin API
     ├── test-posts.ts                  # Stage 4: CRUD + boundary access tests
     ├── teardown.ts                    # Stage 5: Cleanup
-    ├── run-all.ts                     # Orchestrator (all stages, supports --direct flag)
+    ├── run-all.ts                     # Orchestrator (all stages)
     └── lib/
+        ├── admin.ts                   # Admin API fetch helpers + PDS boundary polling
+        ├── admin-login.ts             # Admin OAuth login via Playwright
+        ├── backend.ts                 # Storage backend / appview env switches
         ├── config.ts                  # Test constants and user definitions
-        ├── db.ts                      # Direct SQLite access (enrollment + actor store creation)
         ├── log.ts                     # Colored test output helpers
         ├── pds.ts                     # PDS admin API (invite codes, accounts)
         ├── state.ts                   # Test state persistence between stages
@@ -445,10 +413,9 @@ If you see **"Cannot GET /oauth/authorize"**, `USE_OAUTH` is not set to `true` i
 var gates whether Stratos registers OAuth routes at all.
 
 **Boundary configuration fails**
-Ensure the container has written to `test-data/service.sqlite` (the SQLite DB is created on first
-request, not on startup). Verify the bind mount: `ls -la test-data/`.
+The stage needs a working admin OAuth login (the operator DID is injected into
+`STRATOS_ADMIN_DIDS` at setup). Inspect `test-data/screenshots/` for the login flow captures.
 
 **"No valid session for user" on API calls**
 The `Bearer <did>` auth validates against OAuth sessions first, then falls back to enrollment check.
-If using `--direct` mode, ensure enrollment rows exist in `service.sqlite`. Re-run enrollment (or
-`direct-enroll.ts`) if authentication fails.
+Re-run `test-enrollment.ts` if authentication fails.

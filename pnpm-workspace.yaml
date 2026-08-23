@@ -5,6 +5,9 @@ packages:
   - 'stratos-indexer'
   - 'stratos-feedgen'
   - 'webapp'
+# The e2e docker containers install into the bind-mounted node_modules with a
+# different pnpm store. The next host run must purge without a TTY prompt.
+confirmModulesPurge: false
 allowBuilds:
   core-js: true
   cpu-features: true

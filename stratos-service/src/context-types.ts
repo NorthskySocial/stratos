@@ -34,6 +34,12 @@ import { type MstContext } from './features'
 export interface IdentityContext {
   idResolver: IdResolver
   oauthClient: NodeOAuthClient
+  /**
+   * OAuth client for the admin login flow. Shares client metadata with
+   * `oauthClient` but stores sessions under a separate key space, so an admin
+   * login cannot overwrite the same DID's enrollment OAuth session.
+   */
+  adminOauthClient: NodeOAuthClient
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string

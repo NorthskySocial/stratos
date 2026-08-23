@@ -24,7 +24,10 @@ import {
 import { getServiceDidWithFragment } from './config.js'
 import { createStorageContext } from './storage-context.js'
 import { createIdResolver } from './identity-resolver.js'
-import { createOAuthClientContext } from './oauth/client-factory.js'
+import {
+  createAdminOAuthClientContext,
+  createOAuthClientContext,
+} from './oauth/client-factory.js'
 import { DpopVerifier } from './infra/auth'
 import {
   type OAuthSessionStoreBackend,
@@ -281,16 +284,23 @@ async function initIdentity(
 ) {
   const idResolver = createIdResolver(cfg, fetchWithUserAgent, logger)
   const signingKey = await loadSigningKey(cfg)
+  const stores = oauthStores as {
+    sessionStore: OAuthSessionStoreBackend
+    stateStore: OAuthStateStoreBackend
+  }
   const oauthClient = await createOAuthClientContext(
     cfg,
-    oauthStores as {
-      sessionStore: OAuthSessionStoreBackend
-      stateStore: OAuthStateStoreBackend
-    },
+    stores,
     idResolver,
     fetchWithUserAgent,
   )
-  return { idResolver, signingKey, oauthClient }
+  const adminOauthClient = await createAdminOAuthClientContext(
+    cfg,
+    stores,
+    idResolver,
+    fetchWithUserAgent,
+  )
+  return { idResolver, signingKey, oauthClient, adminOauthClient }
 }
 
 /**

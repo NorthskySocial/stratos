@@ -56,7 +56,8 @@
     }
   }
 
-  if (typeof window !== 'undefined' && (window as unknown as CustomWindow).__MOCK_SESSION__) {
+  // Test-only seam. Vite removes this block from production builds.
+  if (import.meta.env.DEV && typeof window !== 'undefined' && (window as unknown as CustomWindow).__MOCK_SESSION__) {
     const customWindow = window as unknown as CustomWindow
     const mockSession = {
       sub: customWindow.__MOCK_SESSION__!.sub,
@@ -127,7 +128,7 @@
         if (profile) {
           handle = profile.data.handle
           await discoverAndLoad()
-        } else if ((window as unknown as CustomWindow).__MOCK_SESSION__) {
+        } else if (import.meta.env.DEV && (window as unknown as CustomWindow).__MOCK_SESSION__) {
           // If we have a mock session but describeRepo failed (expected in E2E), proceed anyway
           handle = (window as unknown as CustomWindow).__MOCK_SESSION__!.handle || 'mock.bsky.social'
           await discoverAndLoad()
@@ -284,7 +285,7 @@
       activeFeed = null
     })
 
-    if (initialStartupDone && session && (window as unknown as CustomWindow).__MOCK_SESSION__) {
+    if (import.meta.env.DEV && initialStartupDone && session && (window as unknown as CustomWindow).__MOCK_SESSION__) {
       await discoverAndLoad()
     } else {
       await startup()

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { jsonToLex } from '@atproto/lexicon'
 import {
+  parseCid,
   StratosConfig,
   StratosValidationError,
   StratosValidator,
@@ -472,7 +474,7 @@ describe('stratos-validation', () => {
             $type: 'blob',
             ref: {
               $link:
-                'bafybeig6xv5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+                'bafkreic2b545qkwlmlk4zv5ffieyptk2xnr7xpoz6dist6lfggdrn5rlrm',
             },
             mimeType: 'image/png',
             size: 999,
@@ -483,7 +485,7 @@ describe('stratos-validation', () => {
               $type: 'blob',
               ref: {
                 $link:
-                  'bafybeicvpx5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+                  'bafkreieaexcoxldrbo56cxq76uejbt4kzgfeuotbpidsmkisgcv4q5owsa',
               },
               mimeType: 'image/webp',
               size: 444,
@@ -501,10 +503,10 @@ describe('stratos-validation', () => {
         'bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzvev6wt667vyrp7k4p72e',
       )
       expect(blobs).toContain(
-        'bafybeig6xv5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+        'bafkreic2b545qkwlmlk4zv5ffieyptk2xnr7xpoz6dist6lfggdrn5rlrm',
       )
       expect(blobs).toContain(
-        'bafybeicvpx5nwuj7vjndjshyr2u6x7v7uv7uv7uv7uv7uv7uv7uv7uv7uv',
+        'bafkreieaexcoxldrbo56cxq76uejbt4kzgfeuotbpidsmkisgcv4q5owsa',
       )
     })
 
@@ -526,6 +528,251 @@ describe('stratos-validation', () => {
       expect(StratosValidator.extractBlobs(null)).toEqual([])
       expect(StratosValidator.extractBlobs(undefined)).toEqual([])
       expect(StratosValidator.extractBlobs({ foo: null })).toEqual([])
+    })
+
+    // The XRPC server runs jsonToLex on JSON bodies before handlers run.
+    // A blob then arrives as a BlobRef instance without the $type marker.
+    it('should extract blobs from a lex-converted body', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const wire = {
+        $type: 'zone.stratos.feed.post',
+        text: 'Rei forges a katana at the Hikawa shrine',
+        embed: {
+          $type: 'zone.stratos.embed.images',
+          images: [
+            {
+              image: {
+                $type: 'blob',
+                ref: { $link: cidStr },
+                mimeType: 'image/png',
+                size: 2048,
+              },
+            },
+          ],
+        },
+      }
+
+      const lex = jsonToLex(wire)
+      expect(StratosValidator.extractBlobs(lex)).toEqual([cidStr])
+    })
+
+    it('should extract a blob whose ref is a parsed CID object', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        avatar: {
+          ref: parseCid(cidStr),
+          mimeType: 'image/jpeg',
+          size: 512,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([cidStr])
+    })
+
+    it('should skip a lex lookalike whose ref is not a CID and still recurse', () => {
+      const nestedCid =
+        'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
+      const record = {
+        lookalike: {
+          ref: { some: 'object' },
+          mimeType: 'image/png',
+          size: 2048,
+          inner: {
+            $type: 'blob',
+            ref: { $link: nestedCid },
+            mimeType: 'image/jpeg',
+            size: 1,
+          },
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([nestedCid])
+    })
+
+    it('should not extract a CID ref that lacks blob fields', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = { subject: { ref: parseCid(cidStr) } }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    // extractBlobs runs inside the write transaction. A malformed blob
+    // shape must not throw, and a near-miss shape must not associate.
+    it('should skip a blob whose ref is a string', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: 'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          mimeType: 'image/png',
+          size: 1,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a blob whose ref is null', () => {
+      const record = {
+        image: { $type: 'blob', ref: null, mimeType: 'image/png', size: 1 },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a blob whose $link is not a string', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: { $link: 123 },
+          mimeType: 'image/png',
+          size: 1,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a $link ref without the blob $type marker', () => {
+      const record = {
+        image: {
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          mimeType: 'image/png',
+          size: 5,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a $link ref whose $type is not blob', () => {
+      const record = {
+        image: {
+          $type: 'file',
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          mimeType: 'image/png',
+          size: 5,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a $link that holds a CID object instead of a string', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: { $link: parseCid(cidStr) },
+          mimeType: 'image/png',
+          size: 5,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should return each blob CID once when the record repeats it', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const blob = {
+        $type: 'blob',
+        ref: { $link: cidStr },
+        mimeType: 'image/png',
+        size: 2048,
+      }
+      const record = { avatar: blob, banner: blob }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([cidStr])
+    })
+
+    it('should dedupe a wire blob against its lex twin', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        wire: {
+          $type: 'blob',
+          ref: { $link: cidStr },
+          mimeType: 'image/png',
+          size: 2048,
+        },
+        lex: { ref: parseCid(cidStr), mimeType: 'image/png', size: 2048 },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([cidStr])
+    })
+
+    it('should skip a wire blob whose $link does not parse as a CID', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: { $link: 'not-a-cid-from-the-hikawa-shrine' },
+          mimeType: 'image/png',
+          size: 1,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a wire blob without a mimeType', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          size: 1,
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a wire blob without a numeric size', () => {
+      const record = {
+        image: {
+          $type: 'blob',
+          ref: {
+            $link:
+              'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe',
+          },
+          mimeType: 'image/png',
+          size: 'big',
+        },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a CID ref whose mimeType is not a string', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        image: { ref: parseCid(cidStr), mimeType: 42, size: 5 },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
+    })
+
+    it('should skip a CID ref whose size is not a number', () => {
+      const cidStr =
+        'bafkreib3v5ekyzf6xqbxfnbvnbncnmedhqfhtwtvjm7ck4uc4d2sh6nzoe'
+      const record = {
+        image: { ref: parseCid(cidStr), mimeType: 'image/png', size: 'big' },
+      }
+
+      expect(StratosValidator.extractBlobs(record)).toEqual([])
     })
   })
 })

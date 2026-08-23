@@ -34,10 +34,11 @@ services:
       STRATOS_PUBLIC_URL: https://stratos.test
       STRATOS_SERVICE_DID: did:web:stratos.test
       STRATOS_OAUTH_CLIENT_ID: https://stratos.test/client-metadata.json
-      # AppView enrolled as a service. The signingKey lets Stratos verify the
-      # AppView's inter-service JWTs without resolving its (non-resolvable)
-      # did:web over the network.
-      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:appview.test","signingKey":"did:key:zQ3shqu5PGsBcRm7NU1uXcmLsfuNV4LvTTuChtYJbiXnjQaE5","boundaries":["swordsmith","aekea"]}]'
+      # AppView and e2e feedgen enrolled as services. The signingKey lets
+      # Stratos verify each service's inter-service JWTs without resolving
+      # its (non-resolvable) did:web over the network. This overlay replaces
+      # the base-file value per-key, so the feedgen entry repeats here.
+      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:appview.test","signingKey":"did:key:zQ3shqu5PGsBcRm7NU1uXcmLsfuNV4LvTTuChtYJbiXnjQaE5","boundaries":["swordsmith","aekea"]},{"did":"did:web:feedgen.test","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]}]'
     depends_on:
       postgres:
         condition: service_healthy

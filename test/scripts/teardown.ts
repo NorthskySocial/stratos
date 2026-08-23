@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run -A
 // Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
-import { TEST_ROOT } from './lib/config.ts'
-import { fail, info, pass, section, warn } from './lib/log.ts'
+import { TEST_DATA_DIR, TEST_ROOT } from './lib/config.ts'
+import { fail, finish, info, pass, section } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
 import { stopNgrok } from './lib/ngrok.ts'
@@ -20,7 +20,7 @@ async function deleteTestAccounts() {
       await deleteAccount(user.did)
       pass(`Deleted ${name} (${user.did})`)
     } catch (err) {
-      warn(`Failed to delete ${name}: ${err}`)
+      fail(`Failed to delete ${name}`, String(err))
     }
   }
 }
@@ -43,7 +43,7 @@ async function stopDockerCompose() {
       pass('Container stopped')
     } else {
       const stderr = new TextDecoder().decode(result.stderr)
-      warn(`Docker compose down returned non-zero: ${stderr}`)
+      fail('Docker compose stop returned non-zero', stderr)
     }
   } catch (err) {
     fail('Failed to stop container', String(err))
@@ -51,15 +51,19 @@ async function stopDockerCompose() {
 }
 
 async function cleanUpTestData() {
+  if (Deno.env.get('STRATOS_E2E_KEEP_ARTIFACTS') === 'true') {
+    info(`Keeping ${TEST_DATA_DIR} for debugging — the run had failures`)
+    return
+  }
   info('Removing test-data directory...')
   try {
-    // await Deno.remove(TEST_DATA_DIR, { recursive: true })
+    await Deno.remove(TEST_DATA_DIR, { recursive: true })
     pass('test-data removed')
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) {
       info('test-data directory already absent')
     } else {
-      warn(`Could not remove test-data: ${err}`)
+      fail('Could not remove test-data', String(err))
     }
   }
 }
@@ -70,7 +74,7 @@ async function run() {
   await deleteTestAccounts()
   await stopDockerCompose()
   await cleanUpTestData()
-  info('Teardown complete')
+  finish()
 }
 
 run().catch((err) => {

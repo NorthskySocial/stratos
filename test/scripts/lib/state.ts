@@ -21,6 +21,8 @@ export interface TestState {
   stratosRunning: boolean
   ngrokUrl?: string
   serviceDid?: string
+  /** Admin session cookie captured by configure-boundaries.ts for later phases. */
+  adminSessionCookie?: string
 }
 
 export function emptyState(): TestState {

@@ -23,38 +23,14 @@ import {
   type UserState,
 } from './lib/state.ts'
 import { DOMAINS } from './lib/config.ts'
-import { fail, pass, section, summary } from './lib/log.ts'
-
-let passed = 0
-let failed = 0
-
-function assertTrue(
-  condition: unknown,
-  testName: string,
-  detail?: string,
-): void {
-  if (condition) {
-    pass(testName, detail)
-    passed++
-  } else {
-    fail(testName, detail)
-    failed++
-  }
-}
-
-function assertFalse(
-  condition: unknown,
-  testName: string,
-  detail?: string,
-): void {
-  if (!condition) {
-    pass(testName, detail)
-    passed++
-  } else {
-    fail(testName, detail)
-    failed++
-  }
-}
+import {
+  assert as assertTrue,
+  assertFalse,
+  fail,
+  finish,
+  pass,
+  section,
+} from './lib/log.ts'
 
 async function testListRecords(
   rei: UserState,
@@ -77,7 +53,6 @@ async function testListRecords(
     )
   } catch (err) {
     fail('Sakura listRecords failed', String(err))
-    failed++
   }
 
   // kaoruko (aekea) should NOT see the post
@@ -94,7 +69,6 @@ async function testListRecords(
     )
   } catch (err) {
     fail('kaoruko listRecords failed', String(err))
-    failed++
   }
 
   // Unauthenticated should see nothing
@@ -107,7 +81,6 @@ async function testListRecords(
     )
   } catch (err) {
     fail('Unauthenticated listRecords failed', String(err))
-    failed++
   }
 }
 
@@ -139,7 +112,6 @@ async function testKaorukoPost(
     await saveState(state)
   } catch (err) {
     fail('kaoruko create aekea post failed', String(err))
-    failed++
     kaorukoPostRkey = ''
   }
 
@@ -161,7 +133,6 @@ async function testKaorukoPost(
       )
     } else {
       fail("Rei should NOT see kaoruko's aekea post")
-      failed++
     }
 
     try {
@@ -177,7 +148,6 @@ async function testKaorukoPost(
       )
     } catch (err) {
       fail('kaoruko read own aekea post failed', String(err))
-      failed++
     }
   }
   return kaorukoPostRkey
@@ -194,7 +164,6 @@ async function testDeletion(
   try {
     await deleteRecord(rei.did, 'zone.stratos.feed.post', postRkey)
     pass("Rei's swordsmith post deleted")
-    passed++
 
     const result = await tryGetRecord(
       rei.did,
@@ -205,17 +174,14 @@ async function testDeletion(
     assertFalse(result.ok, "Rei's post no longer retrievable after delete")
   } catch (err) {
     fail("Delete Rei's post failed", String(err))
-    failed++
   }
 
   if (kaorukoPostRkey) {
     try {
       await deleteRecord(kaoruko.did, 'zone.stratos.feed.post', kaorukoPostRkey)
       pass("kaoruko's aekea post deleted")
-      passed++
     } catch (err) {
       fail("Delete kaoruko's post failed", String(err))
-      failed++
     }
   }
 }
@@ -306,7 +272,6 @@ async function testSharedBoundaryAccess(
     )
   } catch (err) {
     fail("Sakura get Rei's post failed (should have access)", String(err))
-    failed++
   }
 }
 
@@ -342,7 +307,6 @@ async function testOwnerAccess(
     )
   } catch (err) {
     fail('Rei get own post failed', String(err))
-    failed++
   }
 }
 
@@ -387,7 +351,6 @@ async function run() {
     await saveState(state)
   } catch (err) {
     fail('Rei create post failed', String(err))
-    failed++
     Deno.exit(1)
   }
 
@@ -399,8 +362,7 @@ async function run() {
   const kaorukoPostRkey = await testKaorukoPost(state, rei, kaoruko)
   await testDeletion(rei, kaoruko, postRkey, kaorukoPostRkey)
 
-  summary(passed, failed)
-  if (failed > 0) Deno.exit(1)
+  finish()
 }
 
 run().catch((err) => {

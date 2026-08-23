@@ -24,6 +24,11 @@ if [ "${1:-}" = "--" ]; then
   shift
 fi
 
+# Run the webapp container as the host user so the bind mount stays writable.
+E2E_UID="$(id -u)"
+E2E_GID="$(id -g)"
+export E2E_UID E2E_GID
+
 cleanup() {
   docker compose -f "${COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
 }
