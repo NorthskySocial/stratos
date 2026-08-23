@@ -13,24 +13,7 @@
 import { enrollmentStatus, listPdsRecords } from './lib/stratos.ts'
 import { loadState, type UserState } from './lib/state.ts'
 import { PDS_URL } from './lib/config.ts'
-import { fail, info, pass, section, summary } from './lib/log.ts'
-
-let passed = 0
-let failed = 0
-
-function assertTrue(
-  condition: unknown,
-  testName: string,
-  detail?: string,
-): void {
-  if (condition) {
-    pass(testName, detail)
-    passed++
-  } else {
-    fail(testName, detail)
-    failed++
-  }
-}
+import { assert as assertTrue, fail, finish, section, skip } from './lib/log.ts'
 
 const TID_REGEX = /^[a-z2-7]{13}$/
 const SERVICE_DID_RKEY_REGEX = /^did:(web|plc):/
@@ -61,7 +44,6 @@ async function testEnrollmentStatus(
       }
     } catch (err) {
       fail(`${user.name} enrollment status check failed`, String(err))
-      failed++
     }
   }
 }
@@ -95,7 +77,6 @@ async function testPdsRkeys(testUsers: (UserState & { name: string })[]) {
       }
     } catch (err) {
       fail(`${user.name} PDS listRecords failed`, String(err))
-      failed++
     }
   }
 }
@@ -111,6 +92,13 @@ async function testPdsServiceUrl(testUsers: (UserState & { name: string })[]) {
         'zone.stratos.actor.enrollment',
       )
 
+      // Guard the loop below: zero records must not pass silently.
+      assertTrue(
+        pdsRecords.records.length > 0,
+        `${user.name} has enrollment record(s) to check`,
+        `count=${pdsRecords.records.length}`,
+      )
+
       for (const record of pdsRecords.records) {
         const value = record.value as Record<string, unknown>
         assertTrue(
@@ -121,7 +109,6 @@ async function testPdsServiceUrl(testUsers: (UserState & { name: string })[]) {
       }
     } catch (err) {
       fail(`${user.name} PDS record service check failed`, String(err))
-      failed++
     }
   }
 }
@@ -143,29 +130,24 @@ async function testStatusMatchPds(testUsers: (UserState & { name: string })[]) {
         assertTrue(
           pdsRkeys.includes(status.enrollmentRkey),
           `${user.name} status rkey matches a PDS record`,
-          `statusRkey=${status.enrollmentRkey}, pdsRkeys=[${pdsRkeys.join(', ')}]`,
+          `statusRkey=${status.enrollmentRkey}, pdsRkeys=[${pdsRkeys.join(
+            ', ',
+          )}]`,
         )
       } else {
-        info(
-          `${user.name}: skipping rkey match (statusRkey=${status.enrollmentRkey}, pdsRecords=${pdsRecords.records.length})`,
+        skip(
+          `${user.name} rkey match`,
+          `statusRkey=${status.enrollmentRkey}, pdsRecords=${pdsRecords.records.length}`,
         )
       }
     } catch (err) {
       fail(`${user.name} rkey match check failed`, String(err))
-      failed++
     }
   }
 }
 
 async function run() {
   section('Phase: Multi-Enrollment Verification')
-
-  if (Deno.env.get('STRATOS_E2E_DIRECT') === 'true') {
-    info(
-      'Direct mode: PDS enrollment records (and their rkeys) are only written by the OAuth enrollment flow — skipping.',
-    )
-    return
-  }
 
   const state = await loadState()
   const rei = state.users.rei
@@ -188,8 +170,7 @@ async function run() {
   await testPdsServiceUrl(testUsers)
   await testStatusMatchPds(testUsers)
 
-  summary(passed, failed)
-  if (failed > 0) Deno.exit(1)
+  finish()
 }
 
 run().catch((err) => {

@@ -87,6 +87,27 @@ export async function createSession(
   return (await res.json()) as CreateSessionResponse
 }
 
+/** Mint an inter-service JWT via the PDS getServiceAuth endpoint */
+export async function getServiceAuth(
+  accessJwt: string,
+  aud: string,
+  lxm: string,
+): Promise<string> {
+  const params = new URLSearchParams({ aud, lxm })
+  const res = await fetch(
+    `${PDS_URL}/xrpc/com.atproto.server.getServiceAuth?${params}`,
+    { headers: { Authorization: `Bearer ${accessJwt}` } },
+  )
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to get service auth: ${res.status} ${body}`)
+  }
+
+  const data = (await res.json()) as { token: string }
+  return data.token
+}
+
 /** Check if an account already exists by trying to create a session */
 export async function accountExists(
   handle: string,

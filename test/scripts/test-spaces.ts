@@ -20,38 +20,28 @@
 //      user's PDS (no stubs), a did:key signingKey on the enrollment, and a
 //      durable signed-commit proof for the record.
 
+import { fromUint8Array } from 'npm:@atcute/car@^6.0.2'
+import { decode, toCidLink } from 'npm:@atcute/cbor@^2.3.6'
+
 import {
   createRecord,
   createRecordWithCredential,
   deleteRecord,
   enrollmentStatus,
   getRecord,
+  getRepoCar,
   getSpaceCredential,
   getSpaceRecord,
-  getRepoCar,
   hydrateRecordWithCredential,
   listPdsRecords,
   listRepoOpsWithCredential,
 } from './lib/stratos.ts'
-import { getBoundaries, setBoundaries } from './lib/backend.ts'
+import { adminGetBoundaries, adminSetBoundaries } from './lib/admin.ts'
 import { DOMAINS, PDS_URL, SERVICE_DID, SPACES } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { fail, info, pass, section, summary } from './lib/log.ts'
+import { assert, fail, finish, info, pass, section } from './lib/log.ts'
 
 const POST_COLLECTION = 'zone.stratos.feed.post'
-
-let passed = 0
-let failed = 0
-
-function assert(condition: unknown, name: string, detail?: string): void {
-  if (condition) {
-    pass(name, detail)
-    passed++
-  } else {
-    fail(name, detail)
-    failed++
-  }
-}
 
 function post(text: string, domain: string) {
   return {
@@ -253,8 +243,21 @@ async function run(): Promise<void> {
   )
 
   // ── 7. Revocation invalidates future issuance ────────────────────────────
+  // Revocation goes through the admin API with the session captured by
+  // configure-boundaries.ts, so this test exercises the same path an
+  // operator uses.
   section('Test 7: revocation → credential issuance denied')
-  const sakuraBefore = await getBoundaries(sakura.did)
+  const adminCookie = state.adminSessionCookie
+  if (!adminCookie) {
+    fail('No admin session in state — run configure-boundaries.ts first')
+    Deno.exit(1)
+  }
+  const sakuraBefore = await adminGetBoundaries(sakura.did, adminCookie)
+  assert(
+    sakuraBefore !== null && sakuraBefore.includes(DOMAINS.swordsmith),
+    'Sakura holds the swordsmith boundary pre-revocation',
+    `[${sakuraBefore?.join(', ') ?? ''}]`,
+  )
   const sakuraCredBefore = await getSpaceCredential(
     sakura.did,
     SPACES.swordsmith,
@@ -265,9 +268,15 @@ async function run(): Promise<void> {
     `status=${sakuraCredBefore.status}`,
   )
   try {
-    await setBoundaries(
+    const revoke = await adminSetBoundaries(
       sakura.did,
-      sakuraBefore.filter((b) => b !== DOMAINS.swordsmith),
+      (sakuraBefore ?? []).filter((b) => b !== DOMAINS.swordsmith),
+      adminCookie,
+    )
+    assert(
+      revoke.status === 200,
+      'Admin API revokes the swordsmith boundary',
+      `status=${revoke.status}`,
     )
     const sakuraCredAfter = await getSpaceCredential(
       sakura.did,
@@ -281,7 +290,7 @@ async function run(): Promise<void> {
     )
   } finally {
     // Restore so later phases see the original membership.
-    await setBoundaries(sakura.did, sakuraBefore)
+    await adminSetBoundaries(sakura.did, sakuraBefore ?? [], adminCookie)
   }
 
   // ── 8. Migration-path anchors ────────────────────────────────────────────
@@ -321,12 +330,37 @@ async function run(): Promise<void> {
 
   // 8d. Durable signed-commit proof exists for the repo (MST v3 today;
   // re-derivable state at the LtHash cutover). The full-repo CAR carries the
-  // signed commit, MST nodes, and record blocks.
+  // signed commit, MST nodes, and record blocks — parse it and assert both.
   const proof = await getRepoCar(rei.did, rei.did)
   assert(
-    proof.status === 200 && proof.bytes > 0,
+    proof.status === 200 && proof.car.byteLength > 0,
     'Repo CAR (signed commit + MST + records) is served',
-    `status=${proof.status}, bytes=${proof.bytes}`,
+    `status=${proof.status}, bytes=${proof.car.byteLength}`,
+  )
+  const carBlocks = new Map<string, Record<string, unknown>>()
+  for (const { cid, bytes } of fromUint8Array(proof.car)) {
+    carBlocks.set(
+      toCidLink(cid).$link,
+      decode(bytes) as Record<string, unknown>,
+    )
+  }
+  const recordBlock = carBlocks.get(created.cid)
+  assert(
+    recordBlock !== undefined &&
+      recordBlock.text === 'a members-only transmission',
+    "Repo CAR contains the created record's block (matched by CID)",
+    `cid=${created.cid}, blocks=${carBlocks.size}`,
+  )
+  const commitBlock = [...carBlocks.values()].find(
+    (block) =>
+      block.did === rei.did &&
+      typeof block.rev === 'string' &&
+      block.sig !== undefined,
+  )
+  assert(
+    commitBlock !== undefined,
+    'Repo CAR contains a signed commit for Rei (did/rev/sig)',
+    `rev=${commitBlock?.rev}`,
   )
 
   // ── Cleanup ──────────────────────────────────────────────────────────────
@@ -335,9 +369,7 @@ async function run(): Promise<void> {
   const aekeaRkey = aekeaPost.uri.split('/').pop() as string
   await deleteRecord(kaoruko.did, POST_COLLECTION, aekeaRkey).catch(() => {})
 
-  section('Spaces Phase Summary')
-  summary(passed, failed)
-  if (failed > 0) Deno.exit(1)
+  finish()
 }
 
 run().catch((err) => {
