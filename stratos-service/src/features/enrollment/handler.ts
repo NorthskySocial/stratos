@@ -61,9 +61,9 @@ function registerEnrollmentStatus(server: XrpcServer, ctx: AppContext): void {
               logger: ctx.logger,
             })
             // If verifyEnrolled doesn't throw, they are eligible
-            return { did, enrolled: true, active: false }
+            return { did, enrolled: false, eligible: true }
           } catch {
-            return { did, enrolled: false }
+            return { did, enrolled: false, eligible: false }
           }
         }
 

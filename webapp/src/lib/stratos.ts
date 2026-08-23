@@ -48,8 +48,10 @@ export interface StratosEnrollment {
 
 export interface StratosServiceStatus {
   enrolled: boolean
+  eligible?: boolean
   enrolledAt?: string
   active?: boolean
+  enrollmentRkey?: string
 }
 
 /**
