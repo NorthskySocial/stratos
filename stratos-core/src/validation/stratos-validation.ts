@@ -1,5 +1,6 @@
 import { AtUri } from '@atproto/syntax'
 import { Lexicons } from '@atproto/lexicon'
+import { parseCid } from '../atproto'
 import { stratosLexicons } from '../lexicons'
 import { StratosConfig, StratosValidationError } from '../types.js'
 import { PostValidator } from './post-validator.js'
@@ -128,26 +129,63 @@ export class StratosValidator {
         return
       }
 
-      // Check if it's a blob object
-      if (
-        '$type' in val &&
-        val.$type === 'blob' &&
-        'ref' in val &&
-        typeof val.ref === 'object' &&
-        val.ref !== null &&
-        '$link' in val.ref &&
-        typeof val.ref.$link === 'string'
-      ) {
-        blobs.push(val.ref.$link)
-      } else {
-        // Otherwise recurse
-        for (const key in val) {
-          traverse((val as Record<string, unknown>)[key])
-        }
+      const cid = StratosValidator.blobCidOf(val)
+      if (cid !== undefined) {
+        blobs.push(cid)
+        return
+      }
+
+      for (const key in val) {
+        traverse((val as Record<string, unknown>)[key])
       }
     }
     traverse(record)
     return blobs
+  }
+
+  /**
+   * Returns the CID string when the value is a blob object, in JSON wire
+   * form or in lex form. Returns undefined for all other values.
+   *
+   * @param val - The object to inspect
+   * @returns The blob CID string, or undefined
+   */
+  private static blobCidOf(val: object): string | undefined {
+    if (
+      '$type' in val &&
+      val.$type === 'blob' &&
+      'ref' in val &&
+      typeof val.ref === 'object' &&
+      val.ref !== null &&
+      '$link' in val.ref &&
+      typeof val.ref.$link === 'string'
+    ) {
+      return val.ref.$link
+    }
+
+    // The XRPC server converts JSON bodies to lex form before handlers run.
+    // A blob then arrives as a BlobRef instance: ref holds a CID object and
+    // the $type marker is gone. Match the shape, not the class, because the
+    // package store holds more than one @atproto copy and instanceof fails
+    // across copies.
+    if (
+      'ref' in val &&
+      typeof val.ref === 'object' &&
+      val.ref !== null &&
+      !('$link' in val.ref) &&
+      'mimeType' in val &&
+      typeof val.mimeType === 'string' &&
+      'size' in val &&
+      typeof val.size === 'number'
+    ) {
+      try {
+        return parseCid(val.ref as Parameters<typeof parseCid>[0]).toString()
+      } catch {
+        return undefined
+      }
+    }
+
+    return undefined
   }
 
   /**
