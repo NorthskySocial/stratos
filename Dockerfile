@@ -7,7 +7,7 @@
 # --- Build stage ---
 FROM node:24-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
 
@@ -17,6 +17,7 @@ COPY stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
 COPY stratos-indexer/package.json ./stratos-indexer/
 COPY stratos-client/package.json ./stratos-client/
+COPY stratos-feedgen/package.json ./stratos-feedgen/
 COPY webapp/package.json ./webapp/
 
 # Install all dependencies (including devDependencies for tsc)
@@ -54,7 +55,7 @@ RUN node -e " \
 # --- Production stage for Stratos Service ---
 FROM node:24-alpine AS stratos
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
 
@@ -113,6 +114,7 @@ COPY --from=builder /app/stratos-indexer/ ./stratos-indexer/
 # Copy package.json for other workspace members to satisfy Deno workspace requirements
 COPY --from=builder /app/stratos-service/package.json ./stratos-service/
 COPY --from=builder /app/stratos-client/package.json ./stratos-client/
+COPY --from=builder /app/stratos-feedgen/package.json ./stratos-feedgen/
 COPY --from=builder /app/webapp/package.json ./webapp/
 
 # Copy workspace files for Deno to resolve dependencies correctly.
