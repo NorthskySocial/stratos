@@ -77,7 +77,8 @@ export interface ResolveSigningKeyOptions {
   /**
    * keeps each resolved key between calls, with the service DID as the map
    * key. the function reads the map before it fetches, and writes to the map
-   * after a successful fetch.
+   * after a successful fetch. verifyStratosRecord also deletes an entry when
+   * verification fails with the cached key, then resolves it again.
    */
   cache?: Map<string, import('@atcute/crypto').PublicKey>
 }

@@ -524,6 +524,10 @@ const verified2 = await fetchAndVerifyRecord(
 const verified3 = await fetchAndVerifyRecord(serviceUrl, did, collection, rkey)
 ```
 
+`verifyStratosRecord` keeps resolved service keys in a cache; when verification fails with a cached
+key, it drops the entry and re-resolves once before retrying, so service key rotation self-heals
+without a reload.
+
 ### Trust model
 
 Record commits are signed with the user's per-enrollment P-256 key. Clients can verify a record was
