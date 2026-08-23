@@ -14,8 +14,9 @@ const DID_CACHE_MAX_SIZE = 10_000
  * Maps every historical column layout forward to the shared AppView schema:
  * unquoted DDL that Postgres folded to lower case, and the quoted
  * createdAt/updatedAt intermediate that predates enrolledAt/lastChecked.
- * Each rename no-ops once the target column exists, so entries that share a
- * target are order-independent.
+ * Each rename no-ops when the source column is absent or the target column
+ * exists, so shared-target entries cannot error. If two source columns for
+ * one target coexist, the earlier entry wins and the later column stays.
  */
 const LEGACY_COLUMN_RENAMES = [
   { table: 'stratos_enrollment', from: 'serviceurl', to: 'serviceUrl' },

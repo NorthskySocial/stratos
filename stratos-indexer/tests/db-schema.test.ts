@@ -193,7 +193,8 @@ describe('ensureIndexerSchema enrollment repair', () => {
       [...TARGET_ENROLLMENT_COLUMNS].sort(),
     )
     const enrollmentRenames = fake.statements.filter(
-      (sql) => sql.includes('RENAME COLUMN') && sql.includes('stratos_enrollment'),
+      (sql) =>
+        sql.includes('RENAME COLUMN') && sql.includes('stratos_enrollment'),
     )
     expect(enrollmentRenames).toEqual([])
     const boundariesAdd = fake.statements.find((sql) =>
@@ -227,7 +228,13 @@ describe('ensureIndexerSchema enrollment repair', () => {
 
   it('does not rename when the old and new column names coexist', async () => {
     const { db, fake } = createFakeDb({
-      stratos_enrollment: ['did', 'serviceUrl', 'createdat', 'enrolledAt', 'lastChecked'],
+      stratos_enrollment: [
+        'did',
+        'serviceUrl',
+        'createdat',
+        'enrolledAt',
+        'lastChecked',
+      ],
     })
 
     await ensureIndexerSchema(db)
@@ -243,9 +250,7 @@ describe('ensureIndexerSchema enrollment repair', () => {
       stratos_enrollment: [...TARGET_ENROLLMENT_COLUMNS],
     })
     fake.failOn = (sql) => sql.includes('ADD COLUMN IF NOT EXISTS boundaries')
-    const consoleError = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => {})
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     await expect(ensureIndexerSchema(db)).rejects.toThrow('injected failure')
 
