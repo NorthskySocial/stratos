@@ -201,8 +201,11 @@ Response: { "imported": <count> }
 GET /xrpc/zone.stratos.enrollment.status?did=<user-did>
 ```
 
-Unauthenticated: returns `{ enrolled: true/false }`.  
-Authenticated: also returns boundaries, signing key, enrollment rkey, and a fresh attestation.
+Unauthenticated, enrolled DID: returns `{ did, enrolled: true, active, enrolledAt, signingKey, enrollmentRkey }`.  
+Unauthenticated, not-enrolled DID: returns `{ did, enrolled: false, eligible }` — `eligible: true`
+means the DID may enroll but has not yet done so (no enrollment row, no PDS enrollment record,
+record writes are denied).  
+Authenticated: also returns boundaries and a fresh attestation for enrolled DIDs.
 
 ### Pull Sync: List Repo Operations
 
