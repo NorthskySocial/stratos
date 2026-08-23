@@ -10,6 +10,8 @@ import { serviceDIDToRkey } from './routing.js'
 
 export const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 
+const MAX_ENROLLMENT_PAGES = 10
+
 interface GetRecordResponse {
   uri: string
   value: unknown
@@ -127,7 +129,8 @@ const listEnrollmentPage = async (
 /**
  * discovers all Stratos enrollments by listing enrollment records
  * from the user's PDS via com.atproto.repo.listRecords. the function
- * follows the response cursor until the PDS reports no more pages.
+ * follows the response cursor until the PDS reports no more pages, up
+ * to MAX_ENROLLMENT_PAGES pages.
  *
  * the result is all-or-nothing: when any page request fails, the
  * function returns an empty array.
@@ -148,7 +151,10 @@ export const discoverEnrollments = async (
     const seenCursors = new Set<string>()
     let cursor: string | undefined
 
-    for (;;) {
+    // a user holds one enrollment per service, so 10 pages (1000
+    // records) exceed any real repo; the cap stops a hostile server
+    // that mints a fresh cursor on every page
+    for (let pageCount = 0; pageCount < MAX_ENROLLMENT_PAGES; pageCount++) {
       const page = await listEnrollmentPage(rpc, did, cursor)
       if (!page) return []
 
