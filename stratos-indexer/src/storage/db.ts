@@ -11,13 +11,19 @@ const DID_CACHE_SWEEP_INTERVAL = 60 * 1000 // sweep every 60s
 const DID_CACHE_MAX_SIZE = 10_000
 
 /**
- * Columns created by pre-quoting builds of this file, which declared them
- * unquoted and so had Postgres fold them to lower case. Kysely emits quoted
- * camelCase, so those tables must be renamed forward or every write fails.
+ * Maps every historical column layout forward to the shared AppView schema:
+ * unquoted DDL that Postgres folded to lower case, and the quoted
+ * createdAt/updatedAt intermediate that predates enrolledAt/lastChecked.
+ * Each rename no-ops once the target column exists, so entries that share a
+ * target are order-independent.
  */
-const LEGACY_LOWERCASE_COLUMNS = [
+const LEGACY_COLUMN_RENAMES = [
   { table: 'stratos_enrollment', from: 'serviceurl', to: 'serviceUrl' },
+  { table: 'stratos_enrollment', from: 'createdat', to: 'enrolledAt' },
+  { table: 'stratos_enrollment', from: 'createdAt', to: 'enrolledAt' },
   { table: 'stratos_enrollment', from: 'enrolledat', to: 'enrolledAt' },
+  { table: 'stratos_enrollment', from: 'updatedat', to: 'lastChecked' },
+  { table: 'stratos_enrollment', from: 'updatedAt', to: 'lastChecked' },
   { table: 'stratos_enrollment', from: 'lastchecked', to: 'lastChecked' },
   { table: 'stratos_sync_cursor', from: 'updatedat', to: 'updatedAt' },
   { table: 'stratos_record', from: 'indexedat', to: 'indexedAt' },
@@ -37,8 +43,8 @@ interface RawDbHolder {
 }
 
 /**
- * Rename a legacy lower-cased column to its camelCase form. No-ops when the
- * table is absent, already renamed, or freshly created, so it is safe to rerun.
+ * Rename a legacy column to its current name. No-ops when the table is
+ * absent, already renamed, or freshly created, so it is safe to rerun.
  */
 async function renameLegacyColumn(
   db: Kysely<Record<string, unknown>>,
@@ -119,9 +125,16 @@ export async function ensureIndexerSchema(db: Database): Promise<void> {
       )
     `.execute(rawDb)
 
-    for (const { table, from, to } of LEGACY_LOWERCASE_COLUMNS) {
+    for (const { table, from, to } of LEGACY_COLUMN_RENAMES) {
       await renameLegacyColumn(rawDb, table, from, to)
     }
+
+    // Legacy bootstraps predate the boundaries column, and CREATE TABLE
+    // IF NOT EXISTS cannot add it to an existing table.
+    await sql`
+      ALTER TABLE stratos_enrollment
+      ADD COLUMN IF NOT EXISTS boundaries TEXT
+    `.execute(rawDb)
 
     // Optimized index for boundary-based hydration
     await sql`
