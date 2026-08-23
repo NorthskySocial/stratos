@@ -15,6 +15,10 @@ services:
       # Lets pnpm proceed non-interactively if it ever needs to touch the
       # mounted node_modules.
       CI: 'true'
+      # Arbitrary host UIDs have no passwd entry in this image, so $HOME is
+      # not writable. Give corepack a writable cache location.
+      HOME: /tmp
+      COREPACK_HOME: /tmp/corepack
     volumes:
       - ..:/workspace
     # Keep the pnpm version in sync with the host. A version mismatch makes
