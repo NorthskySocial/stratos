@@ -9,11 +9,18 @@ export default tseslint.config(
       'dist/',
       'node_modules/',
       'tests/**',
-      'scripts/**',
       'src/lexicons.gen.ts',
+      '.stryker-tmp/',
+      'reports/',
     ],
   },
   js.configs.recommended,
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({
     ...config,
     files: ['**/*.ts', '**/*.tsx'],
