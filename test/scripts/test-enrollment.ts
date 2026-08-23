@@ -109,8 +109,11 @@ async function verifyEnrollmentResponse(
 ): Promise<{ success: boolean; did?: string; error?: string }> {
   await page.waitForTimeout(1_000)
 
-  const bodyText =
-    (await page.textContent('pre')) ?? (await page.textContent('body'))
+  // textContent waits for its selector and throws when it never appears,
+  // so the body fallback needs a catch, not a null-coalesce.
+  const bodyText = await page
+    .textContent('pre', { timeout: 2_000 })
+    .catch(() => page.textContent('body'))
   dim(`${label}: Response body: ${bodyText?.substring(0, 200)}`)
 
   if (!bodyText) {

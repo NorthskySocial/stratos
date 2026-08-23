@@ -57,7 +57,7 @@ export async function adminLogin(
     const authorizeUrl = `${baseUrl}/admin/oauth/authorize?handle=${encodeURIComponent(
       handle,
     )}`
-    info(`Operator: starting admin OAuth at ${authorizeUrl}`)
+    info(`Operator: starting admin OAuth at ${baseUrl}/admin/oauth/authorize`)
     await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
     await handleNgrokInterstitial(page)
 

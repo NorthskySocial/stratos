@@ -143,6 +143,12 @@ async function waitForPost(
   return null
 }
 
+interface FeedgenUsers {
+  rei: { did: string; handle: string; password: string }
+  sakura: { handle: string; password: string }
+  kaoruko: { handle: string; password: string }
+}
+
 async function run() {
   section('Phase 4f: Feedgen — describeFeed & getFeed')
 
@@ -164,104 +170,11 @@ async function run() {
   const tmpDir = await Deno.makeTempDir({ prefix: 'feedgen-e2e-' })
   const feedgen = startFeedgen(`${tmpDir}/feedgen.sqlite`)
 
+  // finish() calls Deno.exit, which skips finally blocks. Early aborts in
+  // exerciseFeedgen therefore return instead, so the child process and the
+  // temp dir are cleaned up before the summary runs.
   try {
-    if (!(await waitForHealth(30_000))) {
-      fail('feedgen /health did not become ready within 30s')
-      finish()
-    }
-    pass('feedgen healthy', FEEDGEN_URL)
-
-    section('Fresh boundary-scoped post to index')
-    const text = 'Totosai reforges Tessaiga at the swordsmith village'
-    let createdUri = ''
-    let createdCid = ''
-    try {
-      const created = await createRecord(rei.did, COLLECTION, {
-        $type: COLLECTION,
-        text,
-        boundary: { values: [{ value: DOMAINS.swordsmith }] },
-        createdAt: new Date().toISOString(),
-      })
-      createdUri = created.uri
-      createdCid = created.cid
-      pass('createRecord as rei (swordsmith boundary)', created.uri)
-    } catch (err) {
-      fail('createRecord as rei (swordsmith boundary)', String(err))
-      finish()
-    }
-
-    section('describeFeed lists the configured feeds (unauthenticated)')
-    const describeRes = await fetch(
-      `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.describeFeed`,
-    )
-    assert(describeRes.status === 200, 'describeFeed responds 200')
-    const describe = (await describeRes.json()) as DescribeFeedBody
-    assert(
-      describe.did === FEEDGEN_DID,
-      'describeFeed.did is the feedgen DID',
-      describe.did,
-    )
-    for (const id of ['swordsmith', 'aekea']) {
-      const entry = describe.feeds?.find((f) => f.id === id)
-      assert(
-        entry !== undefined && entry.boundary === DOMAINS[id as 'swordsmith'],
-        `describeFeed lists feed "${id}" with its boundary`,
-        entry?.boundary,
-      )
-    }
-
-    section('getFeed returns the hydrated post to a boundary member')
-    const sakuraJwt = await mintViewerJwt(sakura.handle, sakura.password)
-    const post = await waitForPost(sakuraJwt, 'swordsmith', createdUri, 30_000)
-    assert(
-      post !== null,
-      'shared-boundary viewer sees the fresh post',
-      createdUri,
-    )
-    if (post) {
-      assert(
-        post.cid === createdCid,
-        'postView.cid matches the create',
-        post.cid,
-      )
-      assert(
-        post.author?.did === rei.did,
-        'postView.author.did is the author',
-        post.author?.did,
-      )
-      assert(
-        post.record?.['text'] === text,
-        'postView.record is the hydrated record body',
-      )
-      assert(
-        !Number.isNaN(Date.parse(post.indexedAt)),
-        'postView.indexedAt is a datetime',
-        post.indexedAt,
-      )
-    }
-
-    section('Declared errors: BoundaryMismatch and UnknownFeed')
-    const kaorukoJwt = await mintViewerJwt(kaoruko.handle, kaoruko.password)
-    const mismatch = await getFeed(kaorukoJwt, 'swordsmith')
-    assert(
-      mismatch.status === 400 && mismatch.body['error'] === 'BoundaryMismatch',
-      'viewer without the boundary gets BoundaryMismatch',
-      `status=${mismatch.status} error=${mismatch.body['error']}`,
-    )
-    const unknown = await getFeed(sakuraJwt, 'yorozuya')
-    assert(
-      unknown.status === 400 && unknown.body['error'] === 'UnknownFeed',
-      'unconfigured feed id gets UnknownFeed',
-      `status=${unknown.status} error=${unknown.body['error']}`,
-    )
-
-    section('getFeed requires service-auth')
-    const anon = await getFeed(null, 'swordsmith')
-    assert(
-      anon.status === 401,
-      'unauthenticated getFeed is rejected with 401',
-      `status=${anon.status}`,
-    )
+    await exerciseFeedgen({ rei, sakura, kaoruko })
   } finally {
     info('stopping feedgen')
     try {
@@ -274,6 +187,102 @@ async function run() {
   }
 
   finish()
+}
+
+async function exerciseFeedgen({ rei, sakura, kaoruko }: FeedgenUsers) {
+  if (!(await waitForHealth(30_000))) {
+    fail('feedgen /health did not become ready within 30s')
+    return
+  }
+  pass('feedgen healthy', FEEDGEN_URL)
+
+  section('Fresh boundary-scoped post to index')
+  const text = 'Totosai reforges Tessaiga at the swordsmith village'
+  let createdUri = ''
+  let createdCid = ''
+  try {
+    const created = await createRecord(rei.did, COLLECTION, {
+      $type: COLLECTION,
+      text,
+      boundary: { values: [{ value: DOMAINS.swordsmith }] },
+      createdAt: new Date().toISOString(),
+    })
+    createdUri = created.uri
+    createdCid = created.cid
+    pass('createRecord as rei (swordsmith boundary)', created.uri)
+  } catch (err) {
+    fail('createRecord as rei (swordsmith boundary)', String(err))
+    return
+  }
+
+  section('describeFeed lists the configured feeds (unauthenticated)')
+  const describeRes = await fetch(
+    `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.describeFeed`,
+  )
+  assert(describeRes.status === 200, 'describeFeed responds 200')
+  const describe = (await describeRes.json()) as DescribeFeedBody
+  assert(
+    describe.did === FEEDGEN_DID,
+    'describeFeed.did is the feedgen DID',
+    describe.did,
+  )
+  for (const id of ['swordsmith', 'aekea']) {
+    const entry = describe.feeds?.find((f) => f.id === id)
+    assert(
+      entry !== undefined && entry.boundary === DOMAINS[id as 'swordsmith'],
+      `describeFeed lists feed "${id}" with its boundary`,
+      entry?.boundary,
+    )
+  }
+
+  section('getFeed returns the hydrated post to a boundary member')
+  const sakuraJwt = await mintViewerJwt(sakura.handle, sakura.password)
+  const post = await waitForPost(sakuraJwt, 'swordsmith', createdUri, 30_000)
+  assert(
+    post !== null,
+    'shared-boundary viewer sees the fresh post',
+    createdUri,
+  )
+  if (post) {
+    assert(post.cid === createdCid, 'postView.cid matches the create', post.cid)
+    assert(
+      post.author?.did === rei.did,
+      'postView.author.did is the author',
+      post.author?.did,
+    )
+    assert(
+      post.record?.['text'] === text,
+      'postView.record is the hydrated record body',
+    )
+    assert(
+      !Number.isNaN(Date.parse(post.indexedAt)),
+      'postView.indexedAt is a datetime',
+      post.indexedAt,
+    )
+  }
+
+  section('Declared errors: BoundaryMismatch and UnknownFeed')
+  const kaorukoJwt = await mintViewerJwt(kaoruko.handle, kaoruko.password)
+  const mismatch = await getFeed(kaorukoJwt, 'swordsmith')
+  assert(
+    mismatch.status === 400 && mismatch.body['error'] === 'BoundaryMismatch',
+    'viewer without the boundary gets BoundaryMismatch',
+    `status=${mismatch.status} error=${mismatch.body['error']}`,
+  )
+  const unknown = await getFeed(sakuraJwt, 'yorozuya')
+  assert(
+    unknown.status === 400 && unknown.body['error'] === 'UnknownFeed',
+    'unconfigured feed id gets UnknownFeed',
+    `status=${unknown.status} error=${unknown.body['error']}`,
+  )
+
+  section('getFeed requires service-auth')
+  const anon = await getFeed(null, 'swordsmith')
+  assert(
+    anon.status === 401,
+    'unauthenticated getFeed is rejected with 401',
+    `status=${anon.status}`,
+  )
 }
 
 run().catch((err) => {

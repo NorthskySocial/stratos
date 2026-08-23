@@ -107,8 +107,16 @@ export async function adminSetBoundaries(
 }
 
 /** Read the boundaries recorded on the user's PDS enrollment record. */
-export async function readPdsBoundaries(did: string): Promise<string[] | null> {
-  const result = await listPdsRecords(PDS_URL, did, ENROLLMENT_COLLECTION)
+export async function readPdsBoundaries(
+  did: string,
+  signal?: AbortSignal,
+): Promise<string[] | null> {
+  const result = await listPdsRecords(
+    PDS_URL,
+    did,
+    ENROLLMENT_COLLECTION,
+    signal,
+  )
   const record = result.records[0]
   if (!record) return null
   const value = record.value as { boundaries?: Array<{ value?: string }> }
@@ -128,7 +136,17 @@ export async function waitForPdsBoundaries(
   const deadline = Date.now() + timeoutMs
   let last: string[] | null = null
   while (Date.now() < deadline) {
-    last = await readPdsBoundaries(did)
+    // Bound each read by the remaining budget so a hung fetch cannot
+    // stall the poll past its deadline.
+    const remaining = deadline - Date.now()
+    try {
+      last = await readPdsBoundaries(did, AbortSignal.timeout(remaining))
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        return last
+      }
+      throw err
+    }
     if (last && last.length === want.size && last.every((b) => want.has(b))) {
       return last
     }

@@ -111,6 +111,11 @@ async function run() {
       skip(`Phase "${phase.name}"`, 'prior phase failed')
       continue
     }
+    if (failureCount() > 0) {
+      // Keep test-data (screenshots, logs) for debugging a failed run.
+      // Teardown reads this and skips the test-data removal.
+      Deno.env.set('STRATOS_E2E_KEEP_ARTIFACTS', 'true')
+    }
 
     await runPhase(phase)
   }

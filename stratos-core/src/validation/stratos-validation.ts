@@ -115,10 +115,10 @@ export class StratosValidator {
    * Recursively extracts all blob CIDs from a record.
    *
    * @param record - The record to extract blobs from
-   * @returns An array of blob CIDs found in the record
+   * @returns An array of unique blob CIDs found in the record
    */
   static extractBlobs(record: unknown): string[] {
-    const blobs: string[] = []
+    const blobs = new Set<string>()
     const traverse = (val: unknown) => {
       if (!val || typeof val !== 'object') return
       if (val instanceof Uint8Array) return
@@ -131,7 +131,7 @@ export class StratosValidator {
 
       const cid = StratosValidator.blobCidOf(val)
       if (cid !== undefined) {
-        blobs.push(cid)
+        blobs.add(cid)
         return
       }
 
@@ -140,7 +140,7 @@ export class StratosValidator {
       }
     }
     traverse(record)
-    return blobs
+    return [...blobs]
   }
 
   /**
@@ -152,15 +152,22 @@ export class StratosValidator {
    */
   private static blobCidOf(val: object): string | undefined {
     if (
-      '$type' in val &&
-      val.$type === 'blob' &&
-      'ref' in val &&
-      typeof val.ref === 'object' &&
-      val.ref !== null &&
-      '$link' in val.ref &&
-      typeof val.ref.$link === 'string'
+      !('ref' in val) ||
+      typeof val.ref !== 'object' ||
+      val.ref === null ||
+      !('mimeType' in val) ||
+      typeof val.mimeType !== 'string' ||
+      !('size' in val) ||
+      typeof val.size !== 'number'
     ) {
-      return val.ref.$link
+      return undefined
+    }
+
+    if ('$link' in val.ref) {
+      // JSON wire form: a $type marker and a $link string identify the blob.
+      if (!('$type' in val) || val.$type !== 'blob') return undefined
+      if (typeof val.ref.$link !== 'string') return undefined
+      return StratosValidator.normalizeBlobCid(val.ref.$link)
     }
 
     // The XRPC server converts JSON bodies to lex form before handlers run.
@@ -168,24 +175,20 @@ export class StratosValidator {
     // the $type marker is gone. Match the shape, not the class, because the
     // package store holds more than one @atproto copy and instanceof fails
     // across copies.
-    if (
-      'ref' in val &&
-      typeof val.ref === 'object' &&
-      val.ref !== null &&
-      !('$link' in val.ref) &&
-      'mimeType' in val &&
-      typeof val.mimeType === 'string' &&
-      'size' in val &&
-      typeof val.size === 'number'
-    ) {
-      try {
-        return parseCid(val.ref as Parameters<typeof parseCid>[0]).toString()
-      } catch {
-        return undefined
-      }
-    }
+    return StratosValidator.normalizeBlobCid(val.ref)
+  }
 
-    return undefined
+  /**
+   * Parses a CID and returns its canonical string form. Both wire and lex
+   * blob forms then index the same string. Returns undefined when the CID
+   * does not parse.
+   */
+  private static normalizeBlobCid(ref: unknown): string | undefined {
+    try {
+      return parseCid(ref as Parameters<typeof parseCid>[0]).toString()
+    } catch {
+      return undefined
+    }
   }
 
   /**

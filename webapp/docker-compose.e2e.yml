@@ -10,7 +10,7 @@ services:
     working_dir: /workspace/webapp
     # Run as the host user. A root install into the bind mount leaves
     # root-owned files that break pnpm on the host.
-    user: '1000:1000'
+    user: '${E2E_UID:-1000}:${E2E_GID:-1000}'
     environment:
       # Lets pnpm proceed non-interactively if it ever needs to touch the
       # mounted node_modules.
