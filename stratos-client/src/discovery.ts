@@ -92,6 +92,86 @@ export const parseEnrollmentRecord = (
   }
 }
 
+const toHandler = (pdsUrlOrHandler: string | FetchHandler): FetchHandler =>
+  typeof pdsUrlOrHandler === 'string'
+    ? simpleFetchHandler({ service: pdsUrlOrHandler })
+    : pdsUrlOrHandler
+
+const extractRkey = (uri: string): string => {
+  const parts = uri.split('/')
+  return parts[parts.length - 1]
+}
+
+interface ListRecordsResponse {
+  records: Array<GetRecordResponse>
+}
+
+/**
+ * discovers all Stratos enrollments by listing enrollment records
+ * from the user's PDS via com.atproto.repo.listRecords.
+ *
+ * @param did the DID to check for enrollments
+ * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
+ * @returns all valid enrollments, empty array when none exist
+ */
+export const discoverEnrollments = async (
+  did: string,
+  pdsUrlOrHandler: string | FetchHandler,
+): Promise<Array<StratosEnrollment>> => {
+  const rpc = new Client({ handler: toHandler(pdsUrlOrHandler) })
+
+  try {
+    const res = (await rpc.get('com.atproto.repo.listRecords', {
+      params: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        repo: did as any,
+        collection: ENROLLMENT_COLLECTION,
+        limit: 100,
+      },
+    })) as XRPCResponse<ListRecordsResponse>
+
+    if (!res.ok) return []
+
+    const enrollments: Array<StratosEnrollment> = []
+    for (const record of res.data.records) {
+      const enrollment = parseEnrollmentRecord(
+        record.value,
+        extractRkey(record.uri),
+      )
+      if (enrollment) enrollments.push(enrollment)
+    }
+    return enrollments
+  } catch {
+    return []
+  }
+}
+
+/**
+ * discovers a single Stratos enrollment from the user's PDS.
+ *
+ * a user can enroll with more than one service. this function sorts the
+ * enrollments by createdAt, then by rkey, and returns the first one. the
+ * sort makes the result stable: two callers always get the same enrollment,
+ * and a new enrollment does not change the result for an existing user.
+ *
+ * to see every enrollment, call discoverEnrollments instead.
+ *
+ * @param did the DID to check for enrollment
+ * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
+ * @returns the oldest enrollment if any exist, null otherwise
+ */
+export const discoverEnrollment = async (
+  did: string,
+  pdsUrlOrHandler: string | FetchHandler,
+): Promise<StratosEnrollment | null> => {
+  const enrollments = await discoverEnrollments(did, pdsUrlOrHandler)
+  const sorted = [...enrollments].sort(
+    (a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || a.rkey.localeCompare(b.rkey),
+  )
+  return sorted[0] ?? null
+}
+
 /**
  * discovers a specific Stratos enrollment by the service's DID.
  * uses com.atproto.repo.getRecord with the service DID as the rkey
@@ -107,12 +187,7 @@ export const getEnrollmentByServiceDid = async (
   pdsUrlOrHandler: string | FetchHandler,
   serviceDid: string,
 ): Promise<StratosEnrollment | null> => {
-  const handler =
-    typeof pdsUrlOrHandler === 'string'
-      ? simpleFetchHandler({ service: pdsUrlOrHandler })
-      : pdsUrlOrHandler
-
-  const rpc = new Client({ handler })
+  const rpc = new Client({ handler: toHandler(pdsUrlOrHandler) })
   const rkey = serviceDIDToRkey(serviceDid)
 
   try {

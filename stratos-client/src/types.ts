@@ -74,6 +74,12 @@ export interface ResolveSigningKeyOptions {
    * defaults to global fetch.
    */
   fetchFn?: typeof fetch
+  /**
+   * keeps each resolved key between calls, with the service DID as the map
+   * key. the function reads the map before it fetches, and writes to the map
+   * after a successful fetch.
+   */
+  cache?: Map<string, import('@atcute/crypto').PublicKey>
 }
 
 /**
