@@ -7,8 +7,6 @@
 //   3. the enrolled target user appears on the Enrollments screen
 //   4. a boundary toggled via the UI (add + remove) is reflected on screen
 //   5. logout returns to the Login screen and the session stays dead on reload
-//
-// Skips cleanly under --direct (no real OAuth session available).
 
 import { type Browser, chromium, type Page } from 'npm:playwright@1.58.2'
 import {
@@ -18,23 +16,10 @@ import {
   STRATOS_URL,
 } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { dim, fail, info, pass, section, summary } from './lib/log.ts'
+import { assert, dim, fail, finish, section } from './lib/log.ts'
 
 const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
   .pathname
-
-let passed = 0
-let failed = 0
-
-function assert(condition: unknown, name: string, detail?: string): void {
-  if (condition) {
-    pass(name, detail)
-    passed++
-  } else {
-    fail(name, detail)
-    failed++
-  }
-}
 
 async function getBaseUrl(): Promise<string> {
   const state = await loadState()
@@ -103,11 +88,6 @@ async function completePdsLogin(page: Page, password: string): Promise<void> {
 
 async function run(): Promise<void> {
   section('Admin UI: SPA Smoke Tests')
-
-  if (Deno.env.get('STRATOS_E2E_DIRECT') === 'true') {
-    info('Direct mode: admin UI phase requires a real OAuth login — skipping.')
-    return
-  }
 
   const state = await loadState()
   const operator = state.users[ADMIN_OPERATOR_KEY]
@@ -279,9 +259,6 @@ async function run(): Promise<void> {
     assert(true, 'Reload after logout stays unauthenticated')
   } catch (err) {
     await screenshot(page, 'admin-ui-error')
-    // fail() only prints; assert() owns the counter, so increment it here or
-    // the phase would exit 0 on any thrown error (e.g. a selector timeout).
-    failed++
     fail(
       'Admin UI flow threw',
       err instanceof Error ? err.message : String(err),
@@ -291,8 +268,7 @@ async function run(): Promise<void> {
     await browser.close()
   }
 
-  summary(passed, failed)
-  if (failed > 0) Deno.exit(1)
+  finish()
 }
 
 run().catch((err) => {

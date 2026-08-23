@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run -A
 // Teardown — deletes test accounts, stops Stratos container, and cleans up test data.
 
-import { TEST_ROOT } from './lib/config.ts'
-import { fail, info, pass, section, warn } from './lib/log.ts'
+import { TEST_DATA_DIR, TEST_ROOT } from './lib/config.ts'
+import { fail, finish, info, pass, section, warn } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
 import { stopNgrok } from './lib/ngrok.ts'
@@ -53,7 +53,7 @@ async function stopDockerCompose() {
 async function cleanUpTestData() {
   info('Removing test-data directory...')
   try {
-    // await Deno.remove(TEST_DATA_DIR, { recursive: true })
+    await Deno.remove(TEST_DATA_DIR, { recursive: true })
     pass('test-data removed')
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) {
@@ -70,7 +70,7 @@ async function run() {
   await deleteTestAccounts()
   await stopDockerCompose()
   await cleanUpTestData()
-  info('Teardown complete')
+  finish()
 }
 
 run().catch((err) => {

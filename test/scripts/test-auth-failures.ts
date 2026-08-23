@@ -2,23 +2,20 @@
 import { type Browser, chromium, type Page } from 'npm:playwright@1.58.2'
 import { STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { dim, fail, info, pass, section, summary } from './lib/log.ts'
-
-const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
-  .pathname
-
-async function screenshot(page: Page, name: string) {
-  try {
-    await Deno.mkdir(SCREENSHOT_DIR, { recursive: true })
-    await page.screenshot({
-      path: `${SCREENSHOT_DIR}/${name}.png`,
-      fullPage: true,
-    })
-    dim(`Screenshot saved: test-data/screenshots/${name}.png`)
-  } catch {
-    dim(`Failed to save screenshot: ${name}.png`)
-  }
-}
+import {
+  fillSignInForm,
+  handleNgrokInterstitial,
+  screenshot,
+} from './lib/oauth-flow.ts'
+import {
+  assert as assertTrue,
+  dim,
+  fail,
+  finish,
+  info,
+  section,
+  warn,
+} from './lib/log.ts'
 
 async function getAuthorizeUrl(handle: string) {
   const state = await loadState()
@@ -26,44 +23,9 @@ async function getAuthorizeUrl(handle: string) {
   return `${baseUrl}/oauth/authorize?handle=${encodeURIComponent(handle)}`
 }
 
-async function handleNgrok(page: Page) {
-  const ngrokButton = await page.$(
-    'button:has-text("Visit Site"), button:has-text("Visit the site")',
-  )
-  if (ngrokButton || page.url().includes('ngrok-free.app')) {
-    if (ngrokButton) {
-      await ngrokButton.click()
-      try {
-        await page.waitForNavigation({
-          waitUntil: 'networkidle',
-          timeout: 15_000,
-        })
-      } catch {
-        fail('Failed to navigate to PDS after ngrok click')
-      }
-    }
-  }
-}
-
-async function fillPdsLoginForm(page: Page, handle: string) {
-  await page.waitForSelector('input[type="password"]', { timeout: 15_000 })
-
-  const usernameInput = await page.$(
-    'input[name="username"], input[name="identifier"]',
-  )
-  if (usernameInput) {
-    const val = await usernameInput.inputValue()
-    if (!val) {
-      await usernameInput.fill(handle)
-    }
-  }
-
-  await page.fill('input[type="password"]', 'totally-wrong-password-12345')
-  dim('Submitting with invalid password...')
-  await page.keyboard.press('Enter')
-}
-
-async function verifyPdsError(page: Page) {
+async function verifyLoginRejected(page: Page) {
+  // Soft signal: the PDS error wording is not ours to assert, so a missing
+  // message only warns. The hard assertions below prove the Stratos outcome.
   const errorSelector =
     'text=/Invalid username or password|Authentication failed|Invalid identifier or password|Wrong identifier or password/i'
   try {
@@ -74,21 +36,68 @@ async function verifyPdsError(page: Page) {
     const errorEl = await page.$(errorSelector)
     const errorText = errorEl ? await errorEl.textContent() : null
     await screenshot(page, 'auth-fail-02-error-displayed')
-    pass(
-      'PDS displayed error message for invalid password',
-      errorText ?? undefined,
-    )
-    return true
-  } catch (err) {
-    await screenshot(page, 'auth-fail-02-timeout-no-error')
-    if (err instanceof Error) {
-      dim(err.message)
-    }
-    fail(
-      'PDS did not display expected error message for invalid password within timeout',
-    )
-    return false
+    dim(`PDS error message: ${errorText ?? '(no text)'}`)
+  } catch {
+    await screenshot(page, 'auth-fail-02-no-error-message')
+    warn('PDS error message not found within timeout (wording may differ)')
   }
+
+  // A rejected login keeps the sign-in form on screen. An accepted login
+  // replaces it with the consent page, which has no password input.
+  const passwordInput = await page.$('input[type="password"]')
+  assertTrue(
+    passwordInput !== null,
+    'PDS did not accept the invalid password',
+    `url=${page.url()}`,
+  )
+
+  const bodyText = (await page.textContent('body')) ?? ''
+  assertTrue(
+    !page.url().includes('/oauth/callback') &&
+      !bodyText.includes('"success":true'),
+    'OAuth flow did not reach the Stratos callback',
+    `url=${page.url()}`,
+  )
+}
+
+async function testStratosRejectsInvalidTokens() {
+  section('Stratos XRPC: Invalid Token Rejection')
+
+  const state = await loadState()
+  const baseUrl = state.ngrokUrl || STRATOS_URL
+  const url = `${baseUrl}/xrpc/com.atproto.repo.createRecord`
+  const body = JSON.stringify({
+    repo: 'did:plc:auth-failure-probe',
+    collection: 'zone.stratos.feed.post',
+    record: { $type: 'zone.stratos.feed.post', text: 'should never land' },
+  })
+
+  const noAuth = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  })
+  await noAuth.body?.cancel()
+  assertTrue(
+    noAuth.status === 401,
+    'createRecord without Authorization header returns 401',
+    `status=${noAuth.status}`,
+  )
+
+  const badBearer = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer not-a-did-token',
+    },
+    body,
+  })
+  await badBearer.body?.cancel()
+  assertTrue(
+    badBearer.status === 401,
+    'createRecord with a non-DID bearer token returns 401',
+    `status=${badBearer.status}`,
+  )
 }
 
 async function testInvalidPassword() {
@@ -111,9 +120,6 @@ async function testInvalidPassword() {
   })
   const page = await context.newPage()
 
-  let passed = 0
-  let failed = 0
-
   try {
     info(`Attempting login for ${rei.handle} with INVALID password...`)
     const authorizeUrl = await getAuthorizeUrl(rei.handle)
@@ -126,24 +132,27 @@ async function testInvalidPassword() {
     dim(`Current URL: ${page.url()}`)
     await screenshot(page, 'auth-fail-01-after-redirect')
 
-    await handleNgrok(page)
-    await fillPdsLoginForm(page, rei.handle)
+    await handleNgrokInterstitial(page, 'auth-fail')
+    await fillSignInForm(
+      page,
+      rei.handle,
+      'totally-wrong-password-12345',
+      'auth-fail',
+    )
+    dim('Submitting with invalid password...')
+    await page.keyboard.press('Enter')
 
-    if (await verifyPdsError(page)) {
-      passed++
-    } else {
-      failed++
-    }
+    await verifyLoginRejected(page)
   } catch (err) {
     await screenshot(page, 'auth-fail-unexpected-error')
     fail('Test failed with error', String(err))
-    failed++
   } finally {
     await browser.close()
   }
 
-  summary(passed, failed)
-  if (failed > 0) Deno.exit(1)
+  await testStratosRejectsInvalidTokens()
+
+  finish()
 }
 
 testInvalidPassword()

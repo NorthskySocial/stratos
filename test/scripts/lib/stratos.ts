@@ -238,6 +238,67 @@ export async function deleteRecord(
   }
 }
 
+export interface UploadBlobResponse {
+  blob: {
+    $type: 'blob'
+    ref: { $link: string }
+    mimeType: string
+    size: number
+  }
+}
+
+/** Upload a blob to Stratos (requires auth) */
+export async function uploadBlob(
+  callerDid: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  mimeType: string,
+): Promise<UploadBlobResponse> {
+  const baseUrl = await getBaseUrl()
+  const res = await fetch(`${baseUrl}/xrpc/com.atproto.repo.uploadBlob`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': mimeType,
+      Authorization: `Bearer ${callerDid}`,
+    },
+    body: bytes,
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    throw new Error(`uploadBlob failed: ${res.status} ${errBody}`)
+  }
+
+  return (await res.json()) as UploadBlobResponse
+}
+
+/**
+ * Fetch a blob via `zone.stratos.sync.getBlob`. Returns the status plus
+ * either the blob bytes (success) or the XRPC error name (denial), so
+ * callers can assert both paths.
+ */
+export async function getBlob(
+  callerDid: string | null,
+  did: string,
+  cid: string,
+): Promise<{ status: number; bytes: Uint8Array; error?: string }> {
+  const baseUrl = await getBaseUrl()
+  const params = new URLSearchParams({ did, cid })
+  const headers: Record<string, string> = {}
+  if (callerDid) headers['Authorization'] = `Bearer ${callerDid}`
+  const res = await fetch(
+    `${baseUrl}/xrpc/zone.stratos.sync.getBlob?${params}`,
+    { headers },
+  )
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    return { status: res.status, bytes: new Uint8Array(0), error: body.error }
+  }
+
+  const buf = await res.arrayBuffer()
+  return { status: res.status, bytes: new Uint8Array(buf) }
+}
+
 interface PdsListRecordsResponse {
   records: Array<{ uri: string; cid: string; value: Record<string, unknown> }>
   cursor?: string
@@ -437,14 +498,14 @@ export async function createRecordWithCredential(
 
 /**
  * Fetch the full repo CAR (`zone.stratos.sync.getRepo`): all record blocks,
- * MST nodes, and the signed commit. Returns status + CAR byte length.
+ * MST nodes, and the signed commit. Returns status + CAR bytes.
  * (The per-record proof endpoint `com.atproto.sync.getRecord` is documented
  * but not registered by the service - see the enum-only HANDLER_METHOD entry.)
  */
 export async function getRepoCar(
   callerDid: string,
   did: string,
-): Promise<{ status: number; bytes: number }> {
+): Promise<{ status: number; car: Uint8Array }> {
   const baseUrl = await getBaseUrl()
   const params = new URLSearchParams({ did })
   const res = await fetch(
@@ -454,5 +515,5 @@ export async function getRepoCar(
     },
   )
   const buf = await res.arrayBuffer().catch(() => new ArrayBuffer(0))
-  return { status: res.status, bytes: buf.byteLength }
+  return { status: res.status, car: new Uint8Array(buf) }
 }
