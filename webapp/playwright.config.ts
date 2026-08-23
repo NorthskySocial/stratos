@@ -26,12 +26,11 @@ export default defineConfig({
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL,
 
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'on',
-
-    /* Screenshot and video on failure */
-    screenshot: 'on',
-    video: 'on',
+    /* Keep traces, screenshots, and videos only when a test fails, so the
+     * report of a green run does not fill with failure-style artifacts. */
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
 
   /* Configure projects for major browsers */
