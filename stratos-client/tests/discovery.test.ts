@@ -216,6 +216,31 @@ describe('Enrollment Discovery', () => {
       expect(result).toHaveLength(2)
     })
 
+    it('should stop after the page cap when every page mints a fresh cursor', async () => {
+      let pageNumber = 0
+      const mockGet = vi.fn().mockImplementation(() => {
+        pageNumber++
+        return Promise.resolve({
+          ok: true,
+          data: {
+            records: [
+              enrollmentRecord(`did:web:angel-${pageNumber}.tokyo3.jp`),
+            ],
+            cursor: `magi-${pageNumber}`,
+          },
+        })
+      })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:gendo',
+        'https://pds.nerv',
+      )
+
+      expect(mockGet).toHaveBeenCalledTimes(10)
+      expect(result).toHaveLength(10)
+    })
+
     it('should stop when a page carries a cursor but no records', async () => {
       const mockGet = vi.fn().mockResolvedValue({
         ok: true,
