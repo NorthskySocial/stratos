@@ -423,7 +423,10 @@ export class StratosServer {
     cfg: StratosServiceConfig,
   ) {
     const adminRoutes = createAdminAuthRoutes({
-      oauthClient: ctx.oauthClient,
+      // The isolated admin client: its sessions live under a separate key
+      // space, so an admin login cannot overwrite the same DID's repo-write
+      // enrollment session.
+      oauthClient: ctx.adminOauthClient,
       adminSessionStore: ctx.adminSessionStore,
       adminUserStore: ctx.adminUserStore,
       adminDids: cfg.adminDids,

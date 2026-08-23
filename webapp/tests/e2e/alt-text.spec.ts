@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { TEST_PNG } from './fixtures/test-image'
+
 const STRATOS_URL = 'https://stratos.example.com'
 const APPVIEW_URL = 'https://appview.example.com'
 
@@ -229,7 +231,7 @@ test.describe('Alt Text Support', () => {
     await fileChooser.setFiles({
       name: 'test.png',
       mimeType: 'image/png',
-      buffer: Buffer.from('mock image data'),
+      buffer: TEST_PNG,
     })
 
     // Verify preview and alt text input visibility
@@ -245,14 +247,7 @@ test.describe('Alt Text Support', () => {
     // Post
     await page.locator('button:has-text("Post")').click()
 
-    // Wait for record creation mock to be called
-    await page.waitForFunction(
-      () =>
-        (window as unknown as { recordCreated?: boolean }).recordCreated ||
-        true,
-    ) // Simple wait
-
-    // Wait a bit for the async call to complete
+    // Wait for the record-creation mock to receive the request.
     await expect.poll(() => createdRecord).toBeTruthy()
 
     // Verify alt text in the created record

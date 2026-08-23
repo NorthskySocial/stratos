@@ -4,4 +4,5 @@ declare module 'jsr:*' {
 }
 declare module 'npm:*' {
   export const chromium: any
+  export const WebSocket: any
 }

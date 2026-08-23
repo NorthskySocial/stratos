@@ -66,6 +66,11 @@ services:
       STRATOS_OAUTH_CLIENT_URI: ${STRATOS_OAUTH_CLIENT_URI:-http://127.0.0.1:3100}
       STRATOS_OAUTH_REDIRECT_URI: ${STRATOS_OAUTH_REDIRECT_URI:-http://127.0.0.1:3100/oauth/callback}
       STRATOS_ADMIN_DIDS: ${STRATOS_ADMIN_DIDS:-}
+      # The e2e feedgen enrolled as a service. The signingKey lets Stratos
+      # verify the feedgen's inter-service JWTs without a network resolution
+      # of its non-resolvable did:web. Bare boundary names are qualified
+      # against the service DID at config load.
+      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:feedgen.test","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]}]'
     depends_on:
       ssl-init:
         condition: service_completed_successfully

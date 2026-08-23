@@ -25,7 +25,17 @@ import { createRecord } from './lib/stratos.ts'
 import type { CreateRecordResponse } from './lib/stratos.ts'
 import { loadState } from './lib/state.ts'
 import type { TestState, UserState } from './lib/state.ts'
-import { fail, info, pass, section, summary } from './lib/log.ts'
+import {
+  assert as assertTrue,
+  assertFalse,
+  fail,
+  failureCount,
+  finish,
+  info,
+  pass,
+  section,
+  skip,
+} from './lib/log.ts'
 import type { FeedViewPost } from './lib/appview.ts'
 import {
   enrollWithAppview,
@@ -38,37 +48,6 @@ import {
   waitForAppviewHealthy,
   waitForIndexing,
 } from './lib/appview.ts'
-
-let passed = 0
-let failed = 0
-
-function assertTrue(
-  condition: unknown,
-  testName: string,
-  detail?: string,
-): void {
-  if (condition) {
-    pass(testName, detail)
-    passed++
-  } else {
-    fail(testName, detail)
-    failed++
-  }
-}
-
-function assertFalse(
-  condition: unknown,
-  testName: string,
-  detail?: string,
-): void {
-  if (!condition) {
-    pass(testName, detail)
-    passed++
-  } else {
-    fail(testName, detail)
-    failed++
-  }
-}
 
 async function run() {
   section('AppView Feed E2E Tests')
@@ -92,13 +71,10 @@ async function run() {
   await runUnauthenticatedTests()
   await runBoundaryFilterTests(state, posts)
 
-  section('AppView Feed Test Results')
-  summary(passed, failed)
-
-  if (failed > 0) {
+  if (failureCount() > 0) {
     await logFinalDiagnostics()
-    Deno.exit(1)
   }
+  finish()
 }
 
 async function validateUserState(state: TestState) {
@@ -106,7 +82,7 @@ async function validateUserState(state: TestState) {
   if (!rei?.did || !sakura?.did || !kaoruko?.did) {
     fail(
       'Missing user state',
-      'Run setup.ts + direct-enroll.ts + configure-boundaries.ts first',
+      'Run setup.ts + test-enrollment.ts + configure-boundaries.ts first',
     )
     Deno.exit(1)
   }
@@ -234,7 +210,6 @@ async function runTimelineTests(
     )
   } catch (err) {
     fail('Rei timeline test failed', String(err))
-    failed++
   }
 
   section('Test 2: Timeline — aekea viewer sees aekea posts only')
@@ -249,7 +224,6 @@ async function runTimelineTests(
     )
   } catch (err) {
     fail('Kaoruko timeline test failed', String(err))
-    failed++
   }
 }
 
@@ -269,7 +243,6 @@ async function runAuthorFeedTests(users: {
     )
   } catch (err) {
     fail('Rei author feed test failed', String(err))
-    failed++
   }
 
   section('Test 4: Author feed — cross-boundary viewer gets empty')
@@ -278,7 +251,6 @@ async function runAuthorFeedTests(users: {
     assertTrue(feed.feed.length === 0, "Kaoruko cannot see Rei's posts")
   } catch (err) {
     fail('Cross-boundary author feed test failed', String(err))
-    failed++
   }
 }
 
@@ -297,7 +269,6 @@ async function runGetPostTests(
     )
   } catch (err) {
     fail('Same-boundary getPost test failed', String(err))
-    failed++
   }
 
   section('Test 6: getPost — cross-boundary denied')
@@ -312,7 +283,6 @@ async function runGetPostTests(
     }
   } catch (err) {
     fail('Cross-boundary getPost test failed', String(err))
-    failed++
   }
 }
 
@@ -323,7 +293,6 @@ async function runUnauthenticatedTests() {
     assertFalse(result.ok, 'Unauthenticated timeline is rejected')
   } catch (err) {
     fail('Unauthenticated timeline test failed', String(err))
-    failed++
   }
 }
 
@@ -336,16 +305,26 @@ async function runBoundaryFilterTests(
   const { kaorukoPost } = posts
   if (fuyuko?.did) {
     try {
-      const timeline = await getTimeline(fuyuko.did, { boundary: 'swordsmith' })
+      const timeline = await getTimeline(fuyuko.did, {
+        boundary: DOMAINS.swordsmith,
+      })
       const uris = timeline.feed.map((f: FeedViewPost) => f.post.uri)
+      // Require matches first — an empty feed would make the exclusion
+      // check below pass vacuously.
+      assertTrue(
+        timeline.feed.length >= 1,
+        'Boundary filter returns matching posts',
+        `got ${timeline.feed.length} posts`,
+      )
       assertFalse(
         uris.includes(kaorukoPost.uri),
         'Boundary filter excludes non-matching posts',
       )
     } catch (err) {
       fail('Boundary filter test failed', String(err))
-      failed++
     }
+  } else {
+    skip('Boundary filter test', 'fuyuko not in state')
   }
 }
 

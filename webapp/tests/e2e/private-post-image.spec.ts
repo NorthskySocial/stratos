@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { TEST_PNG } from './fixtures/test-image'
+
 const STRATOS_URL = 'https://stratos.example.com'
 const APPVIEW_URL = 'https://appview.example.com'
 
@@ -278,7 +280,7 @@ test.describe('Private Post with Image', () => {
     await fileChooser.setFiles({
       name: 'test.png',
       mimeType: 'image/png',
-      buffer: Buffer.from('mock image data'),
+      buffer: TEST_PNG,
     })
 
     // Verify preview

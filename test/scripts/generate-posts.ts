@@ -7,7 +7,7 @@ import { createRecord } from './lib/stratos.ts'
 import type { UserState } from './lib/state.ts'
 import { loadState, saveState } from './lib/state.ts'
 import { DOMAINS } from './lib/config.ts'
-import { fail, info, pass, section, summary } from './lib/log.ts'
+import { fail, finish, info, pass, section } from './lib/log.ts'
 
 // Standalone posts per domain
 
@@ -141,9 +141,6 @@ const AEKEA_THREADS: ThreadDef[] = [
   },
 ]
 
-let passed = 0
-let failed = 0
-
 interface PostRef {
   uri: string
   cid: string
@@ -169,10 +166,8 @@ async function generatePosts(
       const rkey = result.uri.split('/').pop()!
       results.push({ uri: result.uri, cid: result.cid, rkey })
       pass(`${name}: created post`, text.substring(0, 50))
-      passed++
     } catch (err) {
       fail(`${name}: create post failed`, String(err))
-      failed++
     }
   }
 
@@ -190,7 +185,6 @@ async function generateThread(
     const user = users[line.user]
     if (!user) {
       fail(`Thread "${thread.label}"`, `missing user "${line.user}" in state`)
-      failed++
       continue
     }
 
@@ -227,13 +221,11 @@ async function generateThread(
         `${user.handle.split('.')[0]}: reply in "${thread.label}"`,
         line.text.substring(0, 50),
       )
-      passed++
     } catch (err) {
       fail(
         `${user.handle.split('.')[0]}: reply in "${thread.label}" failed`,
         String(err),
       )
-      failed++
     }
   }
 
@@ -298,8 +290,7 @@ async function run() {
   }
   await saveState(state)
 
-  summary(passed, failed)
-  if (failed > 0) Deno.exit(1)
+  finish()
 }
 
 run().catch((err) => {

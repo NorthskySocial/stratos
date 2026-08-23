@@ -10,24 +10,22 @@ import {
 import { STRATOS_URL, TEST_USERS } from './lib/config.ts'
 import { enrollmentStatus } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
-import { dim, error, fail, info, pass, section, warn } from './lib/log.ts'
-
-const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
-  .pathname
-
-async function screenshotOnFailure(page: Page, name: string) {
-  try {
-    await Deno.mkdir(SCREENSHOT_DIR, { recursive: true })
-    await page.screenshot({
-      path: `${SCREENSHOT_DIR}/${name}.png`,
-      fullPage: true,
-    })
-    dim(`Screenshot saved: test-data/screenshots/${name}.png`)
-  } catch {
-    // best effort
-    dim(`Failed to save screenshot: ${name}.png`)
-  }
-}
+import {
+  fillSignInForm,
+  handleNgrokInterstitial,
+  screenshot,
+  submitSignInAndConsent,
+} from './lib/oauth-flow.ts'
+import {
+  dim,
+  error,
+  fail,
+  failureCount,
+  finish,
+  info,
+  pass,
+  section,
+} from './lib/log.ts'
 
 /**
  * Drive the PDS OAuth sign-in + consent flow for one user.
@@ -41,31 +39,29 @@ async function screenshotOnFailure(page: Page, name: string) {
  *   6. PDS redirects back to /oauth/callback → Stratos enrolls user
  *   7. Final page shows JSON with {success: true}
  */
-async function getAuthorizeUrl(handle: string) {
-  const state = await loadState()
-  const baseUrl = state.ngrokUrl || STRATOS_URL
-  return `${baseUrl}/oauth/authorize?handle=${encodeURIComponent(handle)}`
-}
-
 async function enrollUser(
   browser: Browser,
   handle: string,
   password: string,
   label: string,
 ): Promise<{ success: boolean; did?: string; error?: string }> {
+  const state = await loadState()
+  const baseUrl = state.ngrokUrl || STRATOS_URL
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
   })
   const page = await context.newPage()
 
   try {
-    await navigateToOAuth(page, context, handle, label)
+    await navigateToOAuth(page, context, handle, label, baseUrl)
     await handleNgrokInterstitial(page, label)
     await fillSignInForm(page, handle, password, label)
-    await submitSignInAndConsent(page, label)
+    await submitSignInAndConsent(page, label, (url) =>
+      url.includes(`${baseUrl}/oauth/callback`),
+    )
     return await verifyEnrollmentResponse(page, label)
   } catch (err) {
-    await screenshotOnFailure(page, `${label}-error`)
+    await screenshot(page, `${label}-error`)
     return {
       success: false,
       error: err instanceof Error ? err.message : String(err),
@@ -80,9 +76,12 @@ async function navigateToOAuth(
   context: BrowserContext,
   handle: string,
   label: string,
+  baseUrl: string,
 ) {
   info(`${label}: Navigating to OAuth authorize...`)
-  const authorizeUrl = await getAuthorizeUrl(handle)
+  const authorizeUrl = `${baseUrl}/oauth/authorize?handle=${encodeURIComponent(
+    handle,
+  )}`
 
   // Set a custom header to skip ngrok browser warning
   await context.setExtraHTTPHeaders({
@@ -93,169 +92,62 @@ async function navigateToOAuth(
   await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
 
   dim(`${label}: Current URL: ${page.url()}`)
-  await screenshotOnFailure(page, `${label}-01-after-redirect`)
+  await screenshot(page, `${label}-01-after-redirect`)
 
   const content = await page.content()
   if (content.toLowerCase().includes('failed to resolve identity')) {
-    error(`${label}: Page contains 'Failed to resolve identity' error`)
+    error(`${label}: Page contains 'Failed to resolve identity' error`, {
+      error: page.url(),
+    })
     throw new Error('Failed to resolve identity')
   }
-}
-
-async function handleNgrokInterstitial(page: Page, label: string) {
-  const ngrokButton = await page.$(
-    'button:has-text("Visit Site"), button:has-text("Visit the site")',
-  )
-  if (!ngrokButton && !page.url().includes('ngrok-free.app')) {
-    return
-  }
-
-  const body = await page.textContent('body')
-  const isNgrokPage =
-    body?.includes('ngrok') &&
-    (body?.includes('browser') ||
-      body?.includes('Visit') ||
-      body?.includes('visit'))
-
-  if (!isNgrokPage) {
-    return
-  }
-
-  dim(`${label}: Ngrok interstitial detected, searching for Visit button...`)
-  if (ngrokButton) {
-    await ngrokButton.click()
-  } else {
-    const buttons = await page.$$('button')
-    if (buttons.length > 0) {
-      await buttons[0].click()
-    } else {
-      await page.click('text=/Visit Site/i').catch(() => {})
-    }
-  }
-
-  try {
-    await page.waitForNavigation({
-      waitUntil: 'networkidle',
-      timeout: 30_000,
-    })
-  } catch {
-    dim(
-      `${label}: Navigation after ngrok click timed out or didn't happen, continuing...`,
-    )
-  }
-  dim(`${label}: After ngrok interstitial URL: ${page.url()}`)
-  await screenshotOnFailure(page, `${label}-01b-after-ngrok`)
-}
-
-async function fillSignInForm(
-  page: Page,
-  handle: string,
-  password: string,
-  label: string,
-) {
-  await page.waitForSelector('input[name="password"], input[type="password"]', {
-    timeout: 15_000,
-  })
-
-  dim(`${label}: Sign-in form detected`)
-
-  const usernameInput =
-    (await page.$('input[name="username"]:not([readonly]):not([disabled])')) ??
-    (await page.$('input[name="identifier"]:not([readonly]):not([disabled])'))
-  if (usernameInput) {
-    info(`${label}: Username field found, filling handle...`)
-    await usernameInput.fill(handle)
-  }
-
-  const passwordInput =
-    (await page.$('input[name="password"]')) ??
-    (await page.$('input[type="password"]'))
-  if (!passwordInput) {
-    throw new Error('Could not find password input on sign-in page')
-  }
-  await passwordInput.fill(password)
-}
-
-async function submitSignInAndConsent(page: Page, label: string) {
-  dim(`${label}: Credentials entered, submitting...`)
-  await screenshotOnFailure(page, `${label}-02-credentials-filled`)
-
-  const signInButton =
-    (await page.$('button[type="submit"]')) ??
-    (await page.$('button:has-text("Sign in")'))
-
-  if (signInButton) {
-    await signInButton.click()
-  } else {
-    await page.keyboard.press('Enter')
-  }
-
-  await page.waitForURL(
-    (url: URL) => {
-      const s = url.toString()
-      return (
-        s.includes('/oauth/callback') ||
-        s.includes('authorize') ||
-        s.includes('consent')
-      )
-    },
-    { timeout: 15_000 },
-  )
-
-  dim(`${label}: After sign-in URL: ${page.url()}`)
-  await screenshotOnFailure(page, `${label}-03-after-signin`)
-
-  if (!page.url().includes('/oauth/callback')) {
-    await page.waitForTimeout(1_000)
-
-    const acceptButton =
-      (await page.$('button:has-text("Accept")')) ??
-      (await page.$('button:has-text("Authorize")')) ??
-      (await page.$('button:has-text("Allow")')) ??
-      (await page.$('button[type="submit"]'))
-
-    if (acceptButton) {
-      dim(`${label}: Clicking authorize/accept button...`)
-      await acceptButton.click()
-    } else {
-      warn(`${label}: No authorize button found, trying submit...`)
-      await page.keyboard.press('Enter')
-    }
-
-    const state = await loadState()
-    const baseUrl = state.ngrokUrl || STRATOS_URL
-    await page.waitForURL((url: URL) => url.toString().includes(baseUrl), {
-      timeout: 15_000,
-    })
-  }
-
-  dim(`${label}: Final URL: ${page.url()}`)
-  await screenshotOnFailure(page, `${label}-04-final`)
 }
 
 async function verifyEnrollmentResponse(
   page: Page,
   label: string,
-): Promise<{ success: boolean; did?: string }> {
+): Promise<{ success: boolean; did?: string; error?: string }> {
   await page.waitForTimeout(1_000)
 
-  const bodyText = await page.textContent('body')
+  // textContent waits for its selector and throws when it never appears,
+  // so the body fallback needs a catch, not a null-coalesce.
+  const bodyText = await page
+    .textContent('pre', { timeout: 2_000 })
+    .catch(() => page.textContent('body'))
   dim(`${label}: Response body: ${bodyText?.substring(0, 200)}`)
 
-  if (
-    bodyText?.includes('"success":true') ||
-    bodyText?.includes('"enrolled"')
-  ) {
-    try {
-      const preText = (await page.textContent('pre')) ?? bodyText
-      const json = JSON.parse(preText!)
-      return { success: true, did: json.did }
-    } catch {
-      return { success: true }
+  if (!bodyText) {
+    await screenshot(page, `${label}-05-bad-response`)
+    return { success: false, error: 'Callback returned an empty page' }
+  }
+
+  let json: {
+    success?: boolean
+    did?: string
+    error?: string
+    message?: string
+  }
+  try {
+    json = JSON.parse(bodyText)
+  } catch {
+    await screenshot(page, `${label}-05-bad-response`)
+    return {
+      success: false,
+      error: `Callback body is not JSON: ${bodyText.substring(0, 200)}`,
     }
   }
 
-  return { success: true }
+  if (json.success !== true || typeof json.did !== 'string') {
+    await screenshot(page, `${label}-05-bad-response`)
+    return {
+      success: false,
+      error: json.error
+        ? `${json.error}: ${json.message ?? ''}`
+        : `Callback did not report success: ${bodyText.substring(0, 200)}`,
+    }
+  }
+
+  return { success: true, did: json.did }
 }
 
 async function checkEnrollmentStatus(did: string) {
@@ -281,15 +173,11 @@ async function run() {
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   })
 
-  let passed = 0
-  let failed = 0
-
   try {
     for (const [key, userDef] of Object.entries(TEST_USERS)) {
       const userState = state.users[key]
       if (!userState) {
         fail(`No state for user ${key} — skipping`)
-        failed++
         continue
       }
 
@@ -299,9 +187,8 @@ async function run() {
       // rkey). Only an existing enrollment record (enrollmentRkey present)
       // means OAuth has actually run and we can safely skip it.
       if (status?.enrolled && status.enrollmentRkey) {
-        warn(`${userDef.name} (${userState.did}) already enrolled — skipping`)
+        pass(`${userDef.name} already enrolled — OAuth skipped`, userState.did)
         userState.enrolled = true
-        passed++
         continue
       }
 
@@ -315,20 +202,30 @@ async function run() {
 
       if (!result.success) {
         fail(`${userDef.name} enrollment failed`, result.error)
-        failed++
+        continue
+      }
+
+      if (result.did !== userState.did) {
+        fail(
+          `${userDef.name} callback DID mismatch`,
+          `expected ${userState.did}, got ${result.did}`,
+        )
         continue
       }
 
       const finalStatus = await checkEnrollmentStatus(userState.did)
-      if (finalStatus?.enrolled) {
+      // Require the enrollment record rkey — `enrolled` alone also covers
+      // eligible-but-not-enrolled DIDs (see the skip check above).
+      if (finalStatus?.enrolled && finalStatus.enrollmentRkey) {
         userState.enrolled = true
         pass(`${userDef.name} enrolled successfully`, userState.did)
-        passed++
       } else {
         fail(
-          `${userDef.name} enrollment — OAuth succeeded but status shows not enrolled`,
+          `${userDef.name} enrollment — OAuth succeeded but no enrollment record`,
+          `enrolled=${finalStatus?.enrolled ?? 'unknown'}, rkey=${
+            finalStatus?.enrollmentRkey ?? 'none'
+          }`,
         )
-        failed++
       }
     }
   } finally {
@@ -337,13 +234,10 @@ async function run() {
 
   await saveState(state)
 
-  section('Enrollment Summary')
-  info(`${passed} enrolled, ${failed} failed`)
-
-  if (failed > 0) {
+  if (failureCount() > 0) {
     info('Check test-data/screenshots/ for debugging screenshots')
-    Deno.exit(1)
   }
+  finish()
 }
 
 run().catch((err) => {
