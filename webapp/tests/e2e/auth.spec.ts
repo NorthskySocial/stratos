@@ -23,14 +23,17 @@ test.describe('Authentication', () => {
     ).toBeVisible()
   })
 
-  test('should mock successful login and show feed', async ({ page }) => {
+  test('renders the authenticated home for an injected mock session', async ({
+    page,
+  }) => {
     // Listen for console logs
     page.on('console', (msg) =>
       console.log(`[BROWSER] ${msg.type()}: ${msg.text()}`),
     )
 
-    // We'll mock the OAuth flow by manually setting a mock session in localStorage
-    // and mocking the necessary API calls that App.svelte makes on startup.
+    // This does NOT exercise the OAuth flow. It injects a session through the
+    // dev-only __MOCK_SESSION__ seam and mocks the startup API calls, then
+    // asserts the authenticated layout renders instead of the login screen.
 
     await page.route(
       '**/xrpc/com.atproto.repo.describeRepo?repo=did%3Aplc%3Amock',
@@ -133,9 +136,12 @@ test.describe('Authentication', () => {
 
     await page.goto('/')
 
-    // Verify UI shows handle
+    // The authenticated layout renders: handle, composer, and sign-out.
     await expect(page.getByText('@mock.bsky.social').first()).toBeVisible({
       timeout: 10000,
     })
+    await expect(page.locator('.composer')).toBeVisible()
+    await expect(page.locator('button.sign-out')).toBeVisible()
+    await expect(page.getByText('Private data for ATProto')).not.toBeVisible()
   })
 })

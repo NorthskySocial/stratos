@@ -8,17 +8,22 @@ services:
   webapp:
     image: node:24-bookworm-slim
     working_dir: /workspace/webapp
+    # Run as the host user. A root install into the bind mount leaves
+    # root-owned files that break pnpm on the host.
+    user: '1000:1000'
     environment:
       # Lets pnpm proceed non-interactively if it ever needs to touch the
       # mounted node_modules.
       CI: 'true'
     volumes:
       - ..:/workspace
+    # Keep the pnpm version in sync with the host. A version mismatch makes
+    # each side purge and rebuild the mounted node_modules.
+    # `corepack enable` needs root, so invoke pnpm through corepack instead.
     command: >
-      sh -c "corepack enable &&
-             corepack prepare pnpm@10.28.2 --activate &&
-             pnpm install --frozen-lockfile &&
-             pnpm run dev"
+      sh -c "corepack prepare pnpm@11.21.0 --activate &&
+             corepack pnpm install --frozen-lockfile &&
+             corepack pnpm run dev"
     ports:
       - '5173:5173'
     healthcheck:

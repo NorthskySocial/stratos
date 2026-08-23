@@ -245,14 +245,7 @@ test.describe('Alt Text Support', () => {
     // Post
     await page.locator('button:has-text("Post")').click()
 
-    // Wait for record creation mock to be called
-    await page.waitForFunction(
-      () =>
-        (window as unknown as { recordCreated?: boolean }).recordCreated ||
-        true,
-    ) // Simple wait
-
-    // Wait a bit for the async call to complete
+    // Wait for the record-creation mock to receive the request.
     await expect.poll(() => createdRecord).toBeTruthy()
 
     // Verify alt text in the created record
