@@ -8,7 +8,11 @@ import {
   migrateSqliteDb,
   SqliteFeedgenStore,
 } from '../src/db/index.js'
-import { Purger, reconcileEnrollments } from '../src/purge/index.js'
+import {
+  createReconcileScheduler,
+  Purger,
+  reconcileEnrollments,
+} from '../src/purge/index.js'
 import type { ResolveEnrollmentsResult } from '../src/upstream/index.js'
 
 const SPIKE = 'did:plc:spikespiegel' // will be reported unenrolled
@@ -250,5 +254,90 @@ describe('reconcileEnrollments', () => {
       await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
     ).toBeNull()
     expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual(['crew'])
+  })
+})
+
+describe('reconcile on reconnect', () => {
+  it('purges an actor whose unenroll was missed during a disconnect gap', async () => {
+    // The stream missed SPIKE's unenroll: the local snapshot still holds him,
+    // but upstream says he is gone. The reconnect trigger must purge him.
+    await store.upsertEnrolledActor(actor(SPIKE, ['crew']))
+    await store.upsertPost(post(SPIKE, '1', ['crew']))
+    await store.upsertCursor(SPIKE, 1, '2024-01-01T00:00:00.000Z')
+
+    const client = {
+      resolveEnrollments: vi.fn(async (did: string) => ({
+        did,
+        enrolled: false,
+        boundaries: [],
+      })),
+    }
+    const removedFromPool: string[] = []
+    const purger = new Purger({
+      store,
+      actorPool: { removeActor: (did) => removedFromPool.push(did) },
+      audit: () => {},
+    })
+    const purgeActor = vi.spyOn(purger, 'purgeActor')
+
+    const trigger = createReconcileScheduler(async () => {
+      await reconcileEnrollments(
+        { store, purger, client, log: () => {} },
+        new Set(['crew']),
+      )
+    })
+    trigger()
+
+    await vi.waitFor(async () =>
+      expect(await store.getEnrolledActor(SPIKE)).toBeNull(),
+    )
+    expect(purgeActor).toHaveBeenCalledWith(SPIKE, 'reconcile-unenroll')
+    expect(removedFromPool).toEqual([SPIKE])
+    expect(
+      await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/1`),
+    ).toBeNull()
+    expect(await store.getCursor(SPIKE)).toBeNull()
+  })
+
+  it('never purges actors upstream still reports enrolled', async () => {
+    // Safety property: reconciliation diffs against authoritative per-DID
+    // resolves, never against the replay stream, so an active actor survives
+    // no matter when the trigger fires relative to replay.
+    await store.upsertEnrolledActor(actor(VASH, ['crew']))
+    await store.upsertEnrolledActor(actor(FAYE, ['crew', 'bounty']))
+    await store.upsertPost(post(VASH, '1', ['crew']))
+
+    const boundaries: Record<string, string[]> = {
+      [VASH]: ['crew'],
+      [FAYE]: ['crew', 'bounty'],
+    }
+    const client = {
+      resolveEnrollments: vi.fn(async (did: string) => ({
+        did,
+        enrolled: true,
+        boundaries: boundaries[did],
+      })),
+    }
+    const purger = new Purger({ store, audit: () => {} })
+    const purgeActor = vi.spyOn(purger, 'purgeActor')
+
+    const runs: unknown[] = []
+    const trigger = createReconcileScheduler(async () => {
+      const summary = await reconcileEnrollments(
+        { store, purger, client, log: () => {} },
+        new Set(['crew', 'bounty']),
+      )
+      runs.push(summary)
+    })
+    trigger()
+
+    await vi.waitFor(() => expect(runs).toHaveLength(1))
+    expect(client.resolveEnrollments).toHaveBeenCalledTimes(2)
+    expect(purgeActor).not.toHaveBeenCalled()
+    expect(await store.getEnrolledActor(VASH)).not.toBeNull()
+    expect(await store.getEnrolledActor(FAYE)).not.toBeNull()
+    expect(
+      await store.getPost(`at://${VASH}/zone.stratos.feed.post/1`),
+    ).not.toBeNull()
   })
 })

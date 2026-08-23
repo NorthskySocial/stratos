@@ -692,10 +692,358 @@ describe('ServiceStream', () => {
     stream.stop()
   })
 
+  it('drops the connection when an enroll handler fails, then retries via replay', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const enrolls: string[] = []
+    let failNext = true
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 1000,
+        jitterRatio: 0,
+      },
+      {
+        onEnroll: async (did) => {
+          if (failNext) {
+            failNext = false
+            throw new Error('sqlite is busy')
+          }
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const first = FakeWebSocket.instances[0]
+    first.open()
+
+    const frame = encodeEnrollmentFrame({
+      did: 'did:plc:shinji',
+      action: 'enroll',
+      boundaries: ['nerv'],
+    })
+    first.send(frame)
+
+    // The event was NOT applied, so the connection must go down for a retry.
+    await vi.waitFor(() =>
+      expect(codesOf(errors)).toContain('SERVICE_STREAM_HANDLER_FAILED'),
+    )
+    const failed = errors.find(
+      (err) => (err as StratosError).code === 'SERVICE_STREAM_HANDLER_FAILED',
+    )
+    expect(failed?.message).toContain('enrollment enroll handler failed')
+    expect((failed?.cause as Error).message).toBe('sqlite is busy')
+    expect(first.readyState).toBe(WS_CLOSED)
+    expect(enrolls).toEqual([])
+
+    // Reconnect; the server snapshot replay resends the enroll frame.
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const second = FakeWebSocket.instances[1]
+    second.open()
+    second.send(frame)
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:shinji']))
+    stream.stop()
+  })
+
+  it('drops the connection when an unenroll handler fails', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 1000,
+        jitterRatio: 0,
+      },
+      {
+        onEnroll: () => {},
+        onUnenroll: async () => {
+          throw new Error('purge failed')
+        },
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(
+      encodeEnrollmentFrame({ did: 'did:plc:misato', action: 'unenroll' }),
+    )
+
+    await vi.waitFor(() =>
+      expect(codesOf(errors)).toContain('SERVICE_STREAM_HANDLER_FAILED'),
+    )
+    expect(ws.readyState).toBe(WS_CLOSED)
+
+    // A reconnect is scheduled: reconcile-on-reconnect covers the unenroll.
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    stream.stop()
+  })
+
+  it('fires onSessionEstablished on every open, initial and reconnect', async () => {
+    const mint = makeMintToken()
+    let sessions = 0
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 1000,
+        jitterRatio: 0,
+      },
+      {
+        onEnroll: () => {},
+        onUnenroll: () => {},
+        onSessionEstablished: () => {
+          sessions++
+        },
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+    await vi.waitFor(() => expect(sessions).toBe(1))
+
+    FakeWebSocket.instances[0].close()
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    FakeWebSocket.instances[1].open()
+    await vi.waitFor(() => expect(sessions).toBe(2))
+    stream.stop()
+  })
+
+  it('routes an onSessionEstablished rejection to onError without killing the stream', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+        onSessionEstablished: async () => {
+          throw new Error('reconcile blew up')
+        },
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    await vi.waitFor(() =>
+      expect(errors.map((e) => e.message)).toContain('reconcile blew up'),
+    )
+    expect(stream.isConnected()).toBe(true)
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:sakura', action: 'enroll' }))
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:sakura']))
+    stream.stop()
+  })
+
+  it('survives an onSessionEstablished rejection even without an onError sink', async () => {
+    const mint = makeMintToken()
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+        onSessionEstablished: async () => {
+          throw new Error('reconcile blew up')
+        },
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:ranma', action: 'enroll' }))
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:ranma']))
+    expect(stream.isConnected()).toBe(true)
+    stream.stop()
+  })
+
+  it('ignores frames that are not #enrollment messages', async () => {
+    const mint = makeMintToken()
+    const errors: Error[] = []
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      (err) => {
+        errors.push(err)
+      },
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    // A header-only frame of another type must be skipped silently — decoding
+    // past the header would misread it (there is no body to decode).
+    ws.send(cborEncode({ op: 1, t: '#info' }))
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:akane', action: 'enroll' }))
+
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:akane']))
+    expect(errors).toEqual([])
+    stream.stop()
+  })
+
+  it('defaults a missing boundaries field to an empty set', async () => {
+    const mint = makeMintToken()
+    const enrolls: Array<{ did: string; boundaries: string[] }> = []
+    const changes: Array<{ did: string; boundaries: string[] }> = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: (did, boundaries) => {
+          enrolls.push({ did, boundaries })
+        },
+        onUnenroll: () => {},
+        onBoundariesChanged: (did, boundaries) => {
+          changes.push({ did, boundaries })
+        },
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    const frameWithoutBoundaries = (action: string): Uint8Array => {
+      const header = cborEncode({ op: 1, t: '#enrollment' })
+      const body = cborEncode({
+        $type: 'zone.stratos.sync.subscribeRecords#enrollment',
+        did: 'did:plc:ryoga',
+        action,
+        time: new Date().toISOString(),
+      })
+      const out = new Uint8Array(header.length + body.length)
+      out.set(header, 0)
+      out.set(body, header.length)
+      return out
+    }
+    ws.send(frameWithoutBoundaries('enroll'))
+    ws.send(frameWithoutBoundaries('boundaries'))
+
+    await vi.waitFor(() => {
+      expect(enrolls).toEqual([{ did: 'did:plc:ryoga', boundaries: [] }])
+      expect(changes).toEqual([{ did: 'did:plc:ryoga', boundaries: [] }])
+    })
+    stream.stop()
+  })
+
+  it('drops the connection on handler failure even without an onError sink', async () => {
+    const mint = makeMintToken()
+    const stream = new ServiceStream(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: mint.fn,
+        baseDelayMs: 1000,
+        maxDelayMs: 1000,
+        jitterRatio: 0,
+      },
+      {
+        onEnroll: async () => {
+          throw new Error('sqlite is busy')
+        },
+        onUnenroll: () => {},
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:tenchi', action: 'enroll' }))
+
+    // Error reporting is optional; the retry-via-reconnect behavior is not.
+    await vi.waitFor(() => expect(ws.readyState).toBe(WS_CLOSED))
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    stream.stop()
+  })
+
+  it('skips a malformed frame and keeps consuming even without an onError sink', async () => {
+    const mint = makeMintToken()
+    const enrolls: string[] = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: (did) => {
+          enrolls.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.send(new Uint8Array([0xff, 0xff, 0xff, 0xff]))
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:ryoko', action: 'enroll' }))
+
+    await vi.waitFor(() => expect(enrolls).toEqual(['did:plc:ryoko']))
+    expect(stream.isConnected()).toBe(true)
+    stream.stop()
+  })
+
   it('drops the connection when the enrollment queue overflows', async () => {
     const mint = makeMintToken()
     const errors: Error[] = []
     const gate = makeGate()
+    let sessions = 0
     const stream = new ServiceStream(
       { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
       {
@@ -703,6 +1051,9 @@ describe('ServiceStream', () => {
           await gate.wait()
         },
         onUnenroll: () => {},
+        onSessionEstablished: () => {
+          sessions++
+        },
       },
       (err) => {
         errors.push(err)
@@ -738,11 +1089,15 @@ describe('ServiceStream', () => {
 
     // Reconnect replays every CURRENT enrollment from scratch, which restores
     // dropped enrolls and boundary sets. A dropped `unenroll` is not restored —
-    // the actor is simply absent from the replay — and waits for reconcile.
+    // the actor is simply absent from the replay — so the reopen must fire
+    // onSessionEstablished, the hook the reconcile purge hangs off.
     await vi.advanceTimersByTimeAsync(6_000)
     await vi.waitFor(() =>
       expect(FakeWebSocket.instances.length).toBeGreaterThan(1),
     )
+    expect(sessions).toBe(1)
+    FakeWebSocket.instances[1].open()
+    await vi.waitFor(() => expect(sessions).toBe(2))
     stream.stop()
   })
 
