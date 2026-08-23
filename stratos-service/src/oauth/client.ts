@@ -309,6 +309,54 @@ export function createPgOAuthStores(db: ServicePgDb): {
 }
 
 /**
+ * Key prefix for the admin OAuth flow's sessions and states.
+ *
+ * The OAuth client keys sessions by DID, so the enrollment flow and the admin
+ * flow collide on the same key. Without the prefix, an admin login overwrites
+ * the user's repo-write enrollment session with an identity-only session, and
+ * PDS enrollment sync fails silently from then on. A DID always starts with
+ * `did:`, so prefixed keys cannot collide with enrollment keys.
+ */
+export const ADMIN_OAUTH_KEY_PREFIX = 'admin:'
+
+interface KeyedStore<Value> {
+  get(key: string): Promise<Value | undefined>
+  set(key: string, value: Value): Promise<void>
+  del(key: string): Promise<void>
+}
+
+function withKeyPrefix<Value>(
+  store: KeyedStore<Value>,
+  prefix: string,
+): KeyedStore<Value> {
+  return {
+    get: (key) => store.get(prefix + key),
+    set: (key, value) => store.set(prefix + key, value),
+    del: (key) => store.del(prefix + key),
+  }
+}
+
+/**
+ * Wrap the shared OAuth stores in the admin key space.
+ *
+ * The admin OAuth client persists to the same tables as the enrollment client,
+ * but under `admin:`-prefixed keys, so the two flows cannot read or delete
+ * each other's sessions.
+ */
+export function isolateAdminOAuthStores(stores: {
+  sessionStore: OAuthSessionStoreBackend
+  stateStore: OAuthStateStoreBackend
+}): {
+  sessionStore: OAuthSessionStoreBackend
+  stateStore: OAuthStateStoreBackend
+} {
+  return {
+    sessionStore: withKeyPrefix(stores.sessionStore, ADMIN_OAUTH_KEY_PREFIX),
+    stateStore: withKeyPrefix(stores.stateStore, ADMIN_OAUTH_KEY_PREFIX),
+  }
+}
+
+/**
  * Create an OAuth client for Stratos service
  */
 export async function createOAuthClient(

@@ -3,6 +3,10 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
+import {
+  NodeOAuthClient,
+  type NodeSavedSession,
+} from '@atproto/oauth-client-node'
 
 import {
   closeServiceDb,
@@ -24,6 +28,14 @@ import {
   handleAdminCallback,
   type AdminCallbackResponse,
 } from '../src/oauth/handlers/admin-callback.js'
+import {
+  createSqliteOAuthStores,
+  isolateAdminOAuthStores,
+} from '../src/oauth/client.js'
+import {
+  createAdminOAuthClientContext,
+  createOAuthClientContext,
+} from '../src/oauth/client-factory.js'
 import { createAuthVerifiers } from '../src/infra/auth/verifiers.js'
 import {
   envToConfig,
@@ -610,6 +622,106 @@ describe('admin OAuth callback', () => {
     expect(res.status).toHaveBeenCalledWith(403)
     expect(res.cookie).not.toHaveBeenCalled()
     expect(createSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('isolateAdminOAuthStores (admin/enrollment session isolation)', () => {
+  let dataDir: string
+  let db: ServiceDb
+  let enrollmentStores: ReturnType<typeof createSqliteOAuthStores>
+  let adminStores: ReturnType<typeof isolateAdminOAuthStores>
+
+  // The stores persist sessions as JSON, so a labeled plain object is enough
+  // to tell an enrollment session from an admin session on read-back.
+  const savedSession = (label: string) =>
+    ({ tokenSet: { access_token: label } }) as unknown as NodeSavedSession
+
+  beforeEach(async () => {
+    dataDir = join(
+      tmpdir(),
+      `stratos-oauth-isolation-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(dataDir, { recursive: true })
+    db = createServiceDb(join(dataDir, 'service.sqlite'))
+    await migrateServiceDb(db)
+    enrollmentStores = createSqliteOAuthStores(db)
+    adminStores = isolateAdminOAuthStores(enrollmentStores)
+  })
+
+  afterEach(async () => {
+    await closeServiceDb(db)
+    await rm(dataDir, { recursive: true, force: true })
+  })
+
+  it('keeps an admin login from overwriting the enrollment session of the same DID', async () => {
+    await enrollmentStores.sessionStore.set(ADMIN_DID, savedSession('repo-write'))
+    await adminStores.sessionStore.set(ADMIN_DID, savedSession('identity-only'))
+
+    const enrollment = await enrollmentStores.sessionStore.get(ADMIN_DID)
+    expect(enrollment).toEqual(savedSession('repo-write'))
+    expect(await adminStores.sessionStore.get(ADMIN_DID)).toEqual(
+      savedSession('identity-only'),
+    )
+  })
+
+  it('keeps an admin-side revoke from deleting the enrollment session', async () => {
+    await enrollmentStores.sessionStore.set(ADMIN_DID, savedSession('repo-write'))
+    await adminStores.sessionStore.set(ADMIN_DID, savedSession('identity-only'))
+
+    await adminStores.sessionStore.del(ADMIN_DID)
+
+    expect(await adminStores.sessionStore.get(ADMIN_DID)).toBeUndefined()
+    expect(await enrollmentStores.sessionStore.get(ADMIN_DID)).toEqual(
+      savedSession('repo-write'),
+    )
+  })
+
+  it('hides an enrollment-only session from the admin client', async () => {
+    await enrollmentStores.sessionStore.set(ADMIN_DID, savedSession('repo-write'))
+    expect(await adminStores.sessionStore.get(ADMIN_DID)).toBeUndefined()
+  })
+
+  it('isolates the state stores of the two flows', async () => {
+    await enrollmentStores.stateStore.set('state-key', 'enrollment-state')
+    await adminStores.stateStore.set('state-key', 'admin-state')
+
+    expect(await enrollmentStores.stateStore.get('state-key')).toBe(
+      'enrollment-state',
+    )
+    expect(await adminStores.stateStore.get('state-key')).toBe('admin-state')
+
+    await adminStores.stateStore.del('state-key')
+    expect(await adminStores.stateStore.get('state-key')).toBeUndefined()
+    expect(await enrollmentStores.stateStore.get('state-key')).toBe(
+      'enrollment-state',
+    )
+  })
+
+  it('builds an admin client with the same metadata as the enrollment client', async () => {
+    const cfg = createTestConfig(dataDir)
+    cfg.service.publicUrl = PUBLIC_URL
+    // Client construction never touches identity resolution or the network.
+    const idResolver = {
+      handle: { resolve: async () => null },
+    } as never
+    const enrollmentClient = await createOAuthClientContext(
+      cfg,
+      enrollmentStores,
+      idResolver,
+      fetch,
+    )
+    const adminClient = await createAdminOAuthClientContext(
+      cfg,
+      enrollmentStores,
+      idResolver,
+      fetch,
+    )
+
+    expect(adminClient).toBeInstanceOf(NodeOAuthClient)
+    expect(adminClient.clientMetadata).toEqual(enrollmentClient.clientMetadata)
+    expect(adminClient.clientMetadata.redirect_uris).toContain(
+      `${PUBLIC_URL}/admin/oauth/callback`,
+    )
   })
 })
 
