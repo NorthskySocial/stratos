@@ -46,7 +46,7 @@ test.describe('Authentication', () => {
             did: 'did:plc:mock',
             didDoc: {},
             collections: [],
-            name: 'mock',
+            handleIsCorrect: true,
           }),
         })
       },
@@ -54,7 +54,19 @@ test.describe('Authentication', () => {
 
     // Mock Stratos discovery
     await page.route(
-      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=zone.stratos.actor.enrollment',
+      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=zone.stratos.actor.enrollment**',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ records: [] }),
+        })
+      },
+    )
+
+    // Mock the public-post fallback that lists app.bsky.feed.post records
+    await page.route(
+      '**/xrpc/com.atproto.repo.listRecords?repo=did%3Aplc%3Amock&collection=app.bsky.feed.post**',
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -126,11 +138,21 @@ test.describe('Authentication', () => {
         __MOCK_SESSION__?: {
           sub: string
           handle?: string
+          fetchHandler?: (
+            url: string,
+            init: Parameters<typeof fetch>[1],
+          ) => Promise<Response>
         }
       }
       ;(window as unknown as CustomWindow).__MOCK_SESSION__ = {
         sub: 'did:plc:mock',
         handle: 'mock.bsky.social',
+        fetchHandler: async (
+          url: string,
+          init: Parameters<typeof fetch>[1],
+        ) => {
+          return await fetch(url, init)
+        },
       }
     })
 
