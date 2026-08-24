@@ -16,6 +16,8 @@ export interface PdsSyncWorkerConfig {
   backoffBaseMs: number
   backoffCapMs: number
   maxAttempts: number
+  /** Jobs claimed per tick; volume is admin-mutation-scale. */
+  claimLimit: number
 }
 
 /**
@@ -27,11 +29,11 @@ export interface PdsSyncWorkerDeps {
   logger?: Logger
 }
 
-/** Jobs claimed per tick; volume is admin-mutation-scale. */
-const CLAIM_LIMIT = 10
-
 /** Max random jitter added to each backoff delay. */
 const BACKOFF_JITTER_MS = 1_000
+
+/** The unit of work an attempt fences itself against. */
+type AttemptJob = Pick<PdsSyncJob, 'did' | 'attemptCount' | 'generation'>
 
 /**
  * Durable retry worker for PDS enrollment-record sync jobs.
@@ -39,12 +41,16 @@ const BACKOFF_JITTER_MS = 1_000
  * A ticker executes due `'pending'` jobs with capped exponential backoff.
  * Terminal failures (expired/revoked OAuth sessions, attempt exhaustion) are
  * marked `'failed'` and surfaced via an error log plus the observability
- * endpoint; only a fresh admin mutation revives them.
+ * endpoint; a fresh admin mutation or an operator requeue revives them.
+ *
+ * Every attempt carries the generation it started from and fences all of its
+ * queue writes on it, so a mutation that lands mid-attempt keeps its own job
+ * rather than being cleared by the attempt it superseded.
  */
 export class PdsEnrollmentSyncWorker {
   private timer?: NodeJS.Timeout
   private ticking = false
-  private inFlight = new Set<string>()
+  private inFlight = new Map<string, Promise<'ok' | 'deferred'>>()
 
   constructor(
     private deps: PdsSyncWorkerDeps,
@@ -71,12 +77,14 @@ export class PdsEnrollmentSyncWorker {
   }
 
   /**
-   * Record durable sync intent for an actor. Called before any PDS network
-   * I/O so a crash between the local commit and the PDS write leaves a
-   * pending row, not silence.
+   * Record durable sync intent for an actor. Called before the local mutation
+   * commits, so a crash in between leaves a pending row rather than silence;
+   * the job re-derives boundaries when it runs, so replaying it is harmless.
+   *
+   * @returns The generation to pass to the matching {@link kick}.
    */
-  async enqueue(did: string): Promise<void> {
-    await this.deps.queue.upsertPending(did)
+  async enqueue(did: string): Promise<number> {
+    return this.deps.queue.upsertPending(did)
   }
 
   /**
@@ -84,8 +92,19 @@ export class PdsEnrollmentSyncWorker {
    * PDS record was written (or the job was obsolete); `'deferred'` when the
    * attempt failed and the queue's retry/terminal bookkeeping was applied.
    */
-  async kick(did: string): Promise<'ok' | 'deferred'> {
-    return this.attempt({ did, attemptCount: 0 })
+  async kick(did: string, generation: number): Promise<'ok' | 'deferred'> {
+    return this.attempt({ did, attemptCount: 0, generation })
+  }
+
+  /**
+   * Drop an actor's job and wait for any attempt already in flight to settle.
+   * Unenrollment calls this before it deletes the PDS enrollment record, so a
+   * late write cannot resurrect a record that nothing is left to clean up.
+   */
+  async cancel(did: string): Promise<void> {
+    await this.deps.queue.remove(did)
+    const inFlight = this.inFlight.get(did)
+    if (inFlight) await inFlight.catch(() => undefined)
   }
 
   private async tick(): Promise<void> {
@@ -94,7 +113,7 @@ export class PdsEnrollmentSyncWorker {
     try {
       const due = await this.deps.queue.listDue(
         new Date().toISOString(),
-        CLAIM_LIMIT,
+        this.config.claimLimit,
       )
       for (const job of due) {
         await this.attempt(job)
@@ -106,16 +125,31 @@ export class PdsEnrollmentSyncWorker {
     }
   }
 
-  private async attempt(
-    job: Pick<PdsSyncJob, 'did' | 'attemptCount'>,
-  ): Promise<'ok' | 'deferred'> {
+  private async attempt(job: AttemptJob): Promise<'ok' | 'deferred'> {
     const { did } = job
     if (this.inFlight.has(did)) return 'deferred'
-    this.inFlight.add(did)
+    const running = this.execute(job)
+    this.inFlight.set(did, running)
+    try {
+      return await running
+    } finally {
+      this.inFlight.delete(did)
+    }
+  }
+
+  private async execute(job: AttemptJob): Promise<'ok' | 'deferred'> {
+    const { did } = job
     try {
       const result = await this.deps.sync(did)
-      await this.deps.queue.remove(did)
-      if (result === 'ok') {
+      const cleared = await this.deps.queue.removeIfCurrent(did, job.generation)
+      if (!cleared) {
+        // A mutation landed while this attempt was writing. Its job survives
+        // and the ticker converges on the newer boundary set.
+        this.deps.logger?.info(
+          { did, generation: job.generation },
+          'pds sync: superseded mid-attempt, newer job retained',
+        )
+      } else if (result === 'ok') {
         this.deps.logger?.info(
           { did, attemptCount: job.attemptCount },
           'pds sync: enrollment record written',
@@ -125,16 +159,11 @@ export class PdsEnrollmentSyncWorker {
     } catch (err) {
       await this.recordFailure(job, err)
       return 'deferred'
-    } finally {
-      this.inFlight.delete(did)
     }
   }
 
-  private async recordFailure(
-    job: Pick<PdsSyncJob, 'did' | 'attemptCount'>,
-    err: unknown,
-  ): Promise<void> {
-    const { did } = job
+  private async recordFailure(job: AttemptJob, err: unknown): Promise<void> {
+    const { did, generation } = job
     const lastError = err instanceof Error ? err.message : String(err)
     const attemptCount = job.attemptCount + 1
 
@@ -143,9 +172,9 @@ export class PdsEnrollmentSyncWorker {
       attemptCount >= this.config.maxAttempts
 
     if (terminal) {
-      await this.deps.queue.markFailed(did, lastError)
+      await this.deps.queue.markFailed(did, generation, lastError)
       // Operator signal: the PDS record stays stale until the user
-      // re-authorizes OAuth and an admin mutation revives the job.
+      // re-authorizes OAuth and the job is revived.
       this.deps.logger?.error(
         { did, attemptCount, lastError },
         'pds sync: terminal failure, enrollment record not updated',
@@ -156,7 +185,13 @@ export class PdsEnrollmentSyncWorker {
     const nextAttemptAt = new Date(
       Date.now() + this.backoffDelayMs(attemptCount),
     ).toISOString()
-    await this.deps.queue.markRetry(did, attemptCount, nextAttemptAt, lastError)
+    await this.deps.queue.markRetry(
+      did,
+      generation,
+      attemptCount,
+      nextAttemptAt,
+      lastError,
+    )
     this.deps.logger?.warn(
       { did, attemptCount, nextAttemptAt, lastError },
       'pds sync: attempt failed, retry scheduled',

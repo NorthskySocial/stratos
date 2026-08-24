@@ -17,18 +17,20 @@ const CONFIG: PdsSyncWorkerConfig = {
   backoffBaseMs: 30_000,
   backoffCapMs: 3_600_000,
   maxAttempts: 3,
+  claimLimit: 10,
 }
 
 /**
  * In-memory queue implementing the store contract closely enough to observe
- * the worker's scheduling decisions.
+ * the worker's scheduling decisions, including generation fencing.
  */
 class FakeQueue implements PdsSyncQueueStore {
   jobs = new Map<string, PdsSyncJob>()
 
-  async upsertPending(did: string): Promise<void> {
+  async upsertPending(did: string): Promise<number> {
     const now = new Date().toISOString()
     const existing = this.jobs.get(did)
+    const generation = (existing?.generation ?? 0) + 1
     this.jobs.set(did, {
       did,
       status: 'pending',
@@ -37,7 +39,9 @@ class FakeQueue implements PdsSyncQueueStore {
       firstQueuedAt: existing?.firstQueuedAt ?? now,
       updatedAt: now,
       lastError: null,
+      generation,
     })
+    return generation
   }
 
   async listDue(now: string, limit: number): Promise<PdsSyncJob[]> {
@@ -49,12 +53,13 @@ class FakeQueue implements PdsSyncQueueStore {
 
   async markRetry(
     did: string,
+    generation: number,
     attemptCount: number,
     nextAttemptAt: string,
     lastError: string,
   ): Promise<void> {
     const job = this.jobs.get(did)
-    if (!job) return
+    if (!job || job.generation !== generation) return
     this.jobs.set(did, {
       ...job,
       status: 'pending',
@@ -65,9 +70,13 @@ class FakeQueue implements PdsSyncQueueStore {
     })
   }
 
-  async markFailed(did: string, lastError: string): Promise<void> {
+  async markFailed(
+    did: string,
+    generation: number,
+    lastError: string,
+  ): Promise<void> {
     const job = this.jobs.get(did)
-    if (!job) return
+    if (!job || job.generation !== generation) return
     this.jobs.set(did, {
       ...job,
       status: 'failed',
@@ -76,8 +85,34 @@ class FakeQueue implements PdsSyncQueueStore {
     })
   }
 
+  async removeIfCurrent(did: string, generation: number): Promise<boolean> {
+    const job = this.jobs.get(did)
+    if (!job || job.generation !== generation) return false
+    this.jobs.delete(did)
+    return true
+  }
+
   async remove(did: string): Promise<void> {
     this.jobs.delete(did)
+  }
+
+  async requeueFailed(): Promise<number> {
+    const now = new Date().toISOString()
+    let requeued = 0
+    for (const [did, job] of this.jobs) {
+      if (job.status !== 'failed') continue
+      this.jobs.set(did, {
+        ...job,
+        status: 'pending',
+        attemptCount: 0,
+        nextAttemptAt: now,
+        updatedAt: now,
+        lastError: null,
+        generation: job.generation + 1,
+      })
+      requeued += 1
+    }
+    return requeued
   }
 
   async list(): Promise<PdsSyncJob[]> {
@@ -89,6 +124,16 @@ function terminalError(): Error {
   const err = new Error('The session was deleted by another process')
   err.name = 'TokenRefreshError'
   return err
+}
+
+/** Mirror the handler: record intent, then run the inline attempt. */
+function syncNow(
+  worker: PdsEnrollmentSyncWorker,
+  did: string = USAGI,
+): Promise<'ok' | 'deferred'> {
+  return worker
+    .enqueue(did)
+    .then((generation) => worker.kick(did, generation))
 }
 
 describe('PdsEnrollmentSyncWorker', () => {
@@ -108,10 +153,10 @@ describe('PdsEnrollmentSyncWorker', () => {
     const sync = vi.fn().mockResolvedValue('ok')
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
 
-    await worker.enqueue(USAGI)
+    const generation = await worker.enqueue(USAGI)
     expect(queue.jobs.get(USAGI)?.status).toBe('pending')
 
-    await expect(worker.kick(USAGI)).resolves.toBe('ok')
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('ok')
     expect(queue.jobs.has(USAGI)).toBe(false)
   })
 
@@ -119,8 +164,8 @@ describe('PdsEnrollmentSyncWorker', () => {
     const sync = vi.fn().mockResolvedValue('obsolete')
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
 
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('ok')
+    const generation = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('ok')
     expect(queue.jobs.has(USAGI)).toBe(false)
   })
 
@@ -129,8 +174,8 @@ describe('PdsEnrollmentSyncWorker', () => {
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
     const start = Date.now()
 
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('deferred')
+    const generation = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('deferred')
 
     const job = queue.jobs.get(USAGI)
     expect(job?.status).toBe('pending')
@@ -145,11 +190,11 @@ describe('PdsEnrollmentSyncWorker', () => {
     const sync = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'))
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
 
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
+    const generation = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, generation)
 
     // Force the retry due now; the immediate start tick picks it up.
-    await queue.markRetry(USAGI, 1, new Date().toISOString(), 'ECONNREFUSED')
+    await queue.markRetry(USAGI, generation, 1, new Date().toISOString(), 'ECONNREFUSED')
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 
@@ -168,9 +213,9 @@ describe('PdsEnrollmentSyncWorker', () => {
       { ...CONFIG, backoffCapMs: 45_000, maxAttempts: 12 },
     )
 
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
-    await queue.markRetry(USAGI, 5, new Date().toISOString(), 'flaky')
+    const generation = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, generation)
+    await queue.markRetry(USAGI, generation, 5, new Date().toISOString(), 'flaky')
 
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
@@ -186,8 +231,8 @@ describe('PdsEnrollmentSyncWorker', () => {
     const sync = vi.fn().mockRejectedValue(terminalError())
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
 
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('deferred')
+    const generation = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('deferred')
 
     const job = queue.jobs.get(USAGI)
     expect(job?.status).toBe('failed')
@@ -200,12 +245,12 @@ describe('PdsEnrollmentSyncWorker', () => {
       { ...CONFIG, maxAttempts: 2 },
     )
 
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
+    const generation = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, generation)
     expect(queue.jobs.get(USAGI)?.status).toBe('pending')
 
     // Make the retry due now, then let the ticker exhaust the budget.
-    await queue.markRetry(USAGI, 1, new Date().toISOString(), 'still down')
+    await queue.markRetry(USAGI, generation, 1, new Date().toISOString(), 'still down')
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 
@@ -234,12 +279,12 @@ describe('PdsEnrollmentSyncWorker', () => {
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
 
     // First mutation fails inline.
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('deferred')
+    const firstGeneration = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, firstGeneration)).resolves.toBe('deferred')
 
     // Second mutation on the same actor resets the row and succeeds inline.
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('ok')
+    const secondGeneration = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, secondGeneration)).resolves.toBe('ok')
     expect(queue.jobs.has(USAGI)).toBe(false)
 
     // No stale retry remains for the ticker to replay.
@@ -260,13 +305,82 @@ describe('PdsEnrollmentSyncWorker', () => {
     })
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
 
-    await worker.enqueue(USAGI)
-    const first = worker.kick(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('deferred')
+    const generation = await worker.enqueue(USAGI)
+    const first = worker.kick(USAGI, generation)
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('deferred')
 
     release()
     await expect(first).resolves.toBe('ok')
     expect(sync).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the job of a mutation that supersedes an in-flight attempt', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sync = vi.fn().mockImplementation(async () => {
+      await gate
+      return 'ok'
+    })
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    // Mutation A starts and blocks inside the PDS write.
+    const first = await worker.enqueue(USAGI)
+    const inFlight = worker.kick(USAGI, first)
+
+    // Mutation B commits while A is still writing, so B's row supersedes A's.
+    const second = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, second)).resolves.toBe('deferred')
+
+    release()
+    await expect(inFlight).resolves.toBe('ok')
+
+    // A must not clear B's job on its way out.
+    const job = queue.jobs.get(USAGI)
+    expect(job?.generation).toBe(second)
+    expect(job?.status).toBe('pending')
+
+    // And the ticker converges on B's state.
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sync).toHaveBeenCalledTimes(2)
+    expect(queue.jobs.has(USAGI)).toBe(false)
+    worker.stop()
+  })
+
+  it('cancel drops the job and waits for an in-flight attempt to settle', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let settled = false
+    const sync = vi.fn().mockImplementation(async () => {
+      await gate
+      settled = true
+      return 'ok'
+    })
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    const generation = await worker.enqueue(USAGI)
+    const inFlight = worker.kick(USAGI, generation)
+
+    const cancelled = worker.cancel(USAGI)
+    release()
+    await cancelled
+
+    expect(settled).toBe(true)
+    expect(queue.jobs.has(USAGI)).toBe(false)
+    await inFlight
+  })
+
+  it('cancel resolves when nothing is in flight', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    await expect(worker.cancel(USAGI)).resolves.toBeUndefined()
+    expect(queue.jobs.has(USAGI)).toBe(false)
   })
 
   it('logs the write only when a record was actually written', async () => {
@@ -281,8 +395,8 @@ describe('PdsEnrollmentSyncWorker', () => {
       CONFIG,
     )
 
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
+    const generation = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, generation)
     expect(logger.info).toHaveBeenCalledWith(
       { did: USAGI, attemptCount: 0 },
       'pds sync: enrollment record written',
@@ -290,8 +404,8 @@ describe('PdsEnrollmentSyncWorker', () => {
 
     logger.info.mockClear()
     sync.mockResolvedValue('obsolete')
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
+    const obsoleteGeneration = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, obsoleteGeneration)
     expect(logger.info).not.toHaveBeenCalled()
   })
 
@@ -301,8 +415,8 @@ describe('PdsEnrollmentSyncWorker', () => {
     const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
     const start = Date.now()
 
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
+    const generation = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, generation)
 
     const job = queue.jobs.get(USAGI)
     expect(Date.parse(job!.nextAttemptAt) - start).toBe(30_500)
@@ -390,8 +504,8 @@ describe('PdsEnrollmentSyncWorker', () => {
       { ...CONFIG, maxAttempts: 2 },
     )
 
-    await worker.enqueue(USAGI)
-    await worker.kick(USAGI)
+    const generation = await worker.enqueue(USAGI)
+    await worker.kick(USAGI, generation)
     expect(logger.warn).toHaveBeenCalledWith(
       {
         did: USAGI,
@@ -402,7 +516,7 @@ describe('PdsEnrollmentSyncWorker', () => {
       'pds sync: attempt failed, retry scheduled',
     )
 
-    await queue.markRetry(USAGI, 1, new Date().toISOString(), 'still down')
+    await queue.markRetry(USAGI, generation, 1, new Date().toISOString(), 'still down')
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 

@@ -135,9 +135,10 @@ function createMockStore(
 class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
   jobs = new Map<string, PdsSyncJob>()
 
-  async upsertPending(did: string): Promise<void> {
+  async upsertPending(did: string): Promise<number> {
     const now = new Date().toISOString()
     const existing = this.jobs.get(did)
+    const generation = (existing?.generation ?? 0) + 1
     this.jobs.set(did, {
       did,
       status: 'pending',
@@ -146,7 +147,9 @@ class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
       firstQueuedAt: existing?.firstQueuedAt ?? now,
       updatedAt: now,
       lastError: null,
+      generation,
     })
+    return generation
   }
 
   async listDue(now: string, limit: number): Promise<PdsSyncJob[]> {
@@ -157,23 +160,54 @@ class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
 
   async markRetry(
     did: string,
+    generation: number,
     attemptCount: number,
     nextAttemptAt: string,
     lastError: string,
   ): Promise<void> {
     const job = this.jobs.get(did)
-    if (!job) return
+    if (!job || job.generation !== generation) return
     this.jobs.set(did, { ...job, attemptCount, nextAttemptAt, lastError })
   }
 
-  async markFailed(did: string, lastError: string): Promise<void> {
+  async markFailed(
+    did: string,
+    generation: number,
+    lastError: string,
+  ): Promise<void> {
     const job = this.jobs.get(did)
-    if (!job) return
+    if (!job || job.generation !== generation) return
     this.jobs.set(did, { ...job, status: 'failed', lastError })
+  }
+
+  async removeIfCurrent(did: string, generation: number): Promise<boolean> {
+    const job = this.jobs.get(did)
+    if (!job || job.generation !== generation) return false
+    this.jobs.delete(did)
+    return true
   }
 
   async remove(did: string): Promise<void> {
     this.jobs.delete(did)
+  }
+
+  async requeueFailed(): Promise<number> {
+    const now = new Date().toISOString()
+    let requeued = 0
+    for (const [did, job] of this.jobs) {
+      if (job.status !== 'failed') continue
+      this.jobs.set(did, {
+        ...job,
+        status: 'pending',
+        attemptCount: 0,
+        nextAttemptAt: now,
+        updatedAt: now,
+        lastError: null,
+        generation: job.generation + 1,
+      })
+      requeued += 1
+    }
+    return requeued
   }
 
   async list(): Promise<PdsSyncJob[]> {
@@ -232,6 +266,7 @@ function createCtx(opts: {
       backoffBaseMs: 30_000,
       backoffCapMs: 3_600_000,
       maxAttempts: 12,
+      claimLimit: 10,
     },
   )
 

@@ -48,7 +48,7 @@ describe('SqlitePdsSyncQueueStore', () => {
     await store.upsertPending(USAGI)
     const [before] = await store.list()
 
-    await store.markFailed(USAGI, 'invalid_grant')
+    await store.markFailed(USAGI, 1, 'invalid_grant')
     const [failed] = await store.list()
     expect(failed.status).toBe('failed')
 
@@ -64,7 +64,7 @@ describe('SqlitePdsSyncQueueStore', () => {
     await store.upsertPending(USAGI)
     const future = new Date(Date.now() + 60_000).toISOString()
 
-    await store.markRetry(USAGI, 1, future, 'ECONNREFUSED')
+    await store.markRetry(USAGI, 1, 1, future, 'ECONNREFUSED')
 
     const dueNow = await store.listDue(new Date().toISOString(), 10)
     expect(dueNow).toHaveLength(0)
@@ -80,11 +80,11 @@ describe('SqlitePdsSyncQueueStore', () => {
 
   it('listDue excludes failed jobs and honors the limit in nextAttemptAt order', async () => {
     await store.upsertPending(USAGI)
-    await store.markRetry(USAGI, 1, '2020-01-01T00:00:02Z', 'later')
+    await store.markRetry(USAGI, 1, 1, '2020-01-01T00:00:02Z', 'later')
     await store.upsertPending(REI)
-    await store.markRetry(REI, 1, '2020-01-01T00:00:01Z', 'sooner')
+    await store.markRetry(REI, 1, 1, '2020-01-01T00:00:01Z', 'sooner')
     await store.upsertPending(AMI)
-    await store.markFailed(AMI, 'invalid_grant')
+    await store.markFailed(AMI, 1, 'invalid_grant')
 
     const due = await store.listDue('2020-01-01T00:00:02Z', 1)
     expect(due.map((j) => j.did)).toEqual([REI])

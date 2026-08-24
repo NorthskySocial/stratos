@@ -65,6 +65,7 @@ export const pgEnrollmentPdsSync = pgTable(
     firstQueuedAt: text('firstQueuedAt').notNull(),
     updatedAt: text('updatedAt').notNull(),
     lastError: text('lastError'),
+    generation: integer('generation').notNull().default(0),
   },
   (table) => [
     index('enrollment_pds_sync_due_idx').on(table.status, table.nextAttemptAt),
