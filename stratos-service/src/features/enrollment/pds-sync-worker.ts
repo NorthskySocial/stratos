@@ -66,10 +66,8 @@ export class PdsEnrollmentSyncWorker {
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer)
-      this.timer = undefined
-    }
+    clearInterval(this.timer)
+    this.timer = undefined
   }
 
   /**

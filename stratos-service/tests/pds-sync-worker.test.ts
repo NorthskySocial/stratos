@@ -394,6 +394,8 @@ describe('classifyPdsSyncError', () => {
       'transient',
     ],
     ['non-Error value', 'a string', 'transient'],
+    ['null', null, 'transient'],
+    ['undefined', undefined, 'transient'],
   ])('classifies %s as %s', (_label, err, expected) => {
     expect(classifyPdsSyncError(err)).toBe(expected)
   })
