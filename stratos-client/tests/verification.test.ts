@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
@@ -13,7 +13,12 @@ import {
   NodeStore,
   OverlayBlockStore,
 } from '@atcute/mst'
-import { P256PublicKey, parseDidKey, Secp256k1PublicKey } from '@atcute/crypto'
+import {
+  P256PublicKey,
+  parseDidKey,
+  type PublicKey,
+  Secp256k1PublicKey,
+} from '@atcute/crypto'
 import { buildCommit } from '@northskysocial/stratos-core'
 import { collectCarStream } from '@northskysocial/stratos-core/tests'
 
@@ -22,6 +27,7 @@ import {
   resolveServiceSigningKey,
   resolveUserSigningKey,
   verifyCidIntegrity,
+  verifyStratosRecord,
 } from '../src/index.js'
 
 const TEST_DID = 'did:plc:testverify' as const
@@ -604,6 +610,252 @@ describe('user-signature verification', () => {
     )
 
     expect(result.level).toBe('service-signature')
+  })
+})
+
+describe('verifyStratosRecord', () => {
+  const SERVICE_DID = 'did:web:nerv.tokyo.jp'
+  const USER_DID = 'did:plc:shinji'
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const didDocFetchFor = (keypair: Secp256k1Keypair) => {
+    const publicKeyMultibase = keypair.did().slice('did:key:'.length)
+    return vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            '@context': [
+              'https://www.w3.org/ns/did/v1',
+              'https://w3id.org/security/multikey/v1',
+            ],
+            id: SERVICE_DID,
+            verificationMethod: [
+              {
+                id: `${SERVICE_DID}#atproto`,
+                type: 'Multikey',
+                controller: SERVICE_DID,
+                publicKeyMultibase,
+              },
+            ],
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    )
+  }
+
+  it('verifies with a cached key without fetching', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const publicKey = await keypairToPublicKey(keypair)
+    const { carBytes } = await buildSignedRecordCar(
+      keypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const cache = new Map<string, PublicKey>([[SERVICE_DID, publicKey]])
+    const fetchFn = vi.fn<typeof fetch>()
+
+    const result = await verifyStratosRecord(
+      carBytes,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      SERVICE_DID,
+      { cache, fetchFn },
+    )
+
+    expect(result.level).toBe('service-signature')
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('drops a stale cached key, re-resolves, and retries once', async () => {
+    const oldKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const newKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const oldPublicKey = await keypairToPublicKey(oldKeypair)
+    const { carBytes } = await buildSignedRecordCar(
+      newKeypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const cache = new Map<string, PublicKey>([[SERVICE_DID, oldPublicKey]])
+    const fetchFn = didDocFetchFor(newKeypair)
+
+    const result = await verifyStratosRecord(
+      carBytes,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      SERVICE_DID,
+      { cache, fetchFn },
+    )
+
+    expect(result.level).toBe('service-signature')
+    expect(result.record).toEqual({
+      text: 'test record',
+      createdAt: '2025-01-01T00:00:00Z',
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(cache.get(SERVICE_DID)).not.toBe(oldPublicKey)
+  })
+
+  it('propagates the failure of a freshly resolved key without a retry', async () => {
+    const signingKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const serviceKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const { carBytes } = await buildSignedRecordCar(
+      signingKeypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const cache = new Map<string, PublicKey>()
+    const fetchFn = didDocFetchFor(serviceKeypair)
+
+    await expect(
+      verifyStratosRecord(
+        carBytes,
+        USER_DID,
+        TEST_COLLECTION,
+        TEST_RKEY,
+        SERVICE_DID,
+        { cache, fetchFn },
+      ),
+    ).rejects.toThrow(/signature/)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('rethrows the verification error when re-resolution fails', async () => {
+    const signingKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const staleKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const stalePublicKey = await keypairToPublicKey(staleKeypair)
+    const { carBytes } = await buildSignedRecordCar(
+      signingKeypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const cache = new Map<string, PublicKey>([[SERVICE_DID, stalePublicKey]])
+    const fetchFn = vi.fn<typeof fetch>(async () => {
+      throw new Error('MAGI system offline')
+    })
+
+    await expect(
+      verifyStratosRecord(
+        carBytes,
+        USER_DID,
+        TEST_COLLECTION,
+        TEST_RKEY,
+        SERVICE_DID,
+        { cache, fetchFn },
+      ),
+    ).rejects.toThrow(/signature/)
+    expect(cache.has(SERVICE_DID)).toBe(false)
+  })
+
+  it('throws and keeps the re-resolved key when the retry also fails', async () => {
+    const recordKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const staleKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const rotatedKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const stalePublicKey = await keypairToPublicKey(staleKeypair)
+    const { carBytes } = await buildSignedRecordCar(
+      recordKeypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const cache = new Map<string, PublicKey>([[SERVICE_DID, stalePublicKey]])
+    const fetchFn = didDocFetchFor(rotatedKeypair)
+
+    await expect(
+      verifyStratosRecord(
+        carBytes,
+        USER_DID,
+        TEST_COLLECTION,
+        TEST_RKEY,
+        SERVICE_DID,
+        { cache, fetchFn },
+      ),
+    ).rejects.toThrow(/signature/)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(cache.get(SERVICE_DID)).toBeDefined()
+    expect(cache.get(SERVICE_DID)).not.toBe(stalePublicKey)
+  })
+
+  it('falls back to cid-integrity when the key cannot be resolved', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const { carBytes } = await buildSignedRecordCar(
+      keypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const cache = new Map<string, PublicKey>()
+    const fetchFn = vi.fn<typeof fetch>(async () => {
+      throw new Error('MAGI system offline')
+    })
+
+    const result = await verifyStratosRecord(
+      carBytes,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      SERVICE_DID,
+      { cache, fetchFn },
+    )
+
+    expect(result.level).toBe('cid-integrity')
+  })
+
+  it('uses the default cache and fetch when no options are given', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const { carBytes } = await buildSignedRecordCar(
+      keypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new Error('MAGI system offline'),
+    )
+
+    const result = await verifyStratosRecord(
+      carBytes,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+      SERVICE_DID,
+    )
+
+    expect(result.level).toBe('cid-integrity')
+  })
+
+  it('returns cid-integrity when no serviceDid is given', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const { carBytes } = await buildSignedRecordCar(
+      keypair,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    const result = await verifyStratosRecord(
+      carBytes,
+      USER_DID,
+      TEST_COLLECTION,
+      TEST_RKEY,
+    )
+
+    expect(result.level).toBe('cid-integrity')
   })
 })
 
