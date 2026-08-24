@@ -669,6 +669,22 @@ describe('admin boundary endpoints', () => {
         'admin.listPdsSyncStatus failed',
       )
     })
+
+    it('still answers 500 without a logger when the queue read fails', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      pdsSyncQueue.list = vi.fn().mockRejectedValue(new Error('db closed'))
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to list PDS sync status',
+      })
+    })
   })
 
   describe('POST /xrpc/zone.stratos.admin.requeuePdsSync', () => {
@@ -718,6 +734,25 @@ describe('admin boundary endpoints', () => {
       )
       expect(res.statusCode).toBe(200)
       expect(res.body).toEqual({ requeued: 1 })
+    })
+
+    it('still answers 500 without a logger when the queue write fails', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      pdsSyncQueue.requeueFailed = vi
+        .fn()
+        .mockRejectedValue(new Error('db closed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to requeue PDS sync jobs',
+      })
     })
 
     it('reports zero when no job has failed', async () => {
@@ -794,6 +829,26 @@ describe('admin boundary endpoints', () => {
         { err: 'queue write failed', did: 'did:plc:usagi' },
         'pds sync attempt failed inline; job remains queued',
       )
+    })
+
+    it('degrades to deferred without a logger', async () => {
+      const { app, ctx } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      ctx.pdsSyncWorker.kick = vi
+        .fn()
+        .mockRejectedValue(new Error('queue write failed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.addBoundary',
+        {
+          did: 'did:plc:usagi',
+          boundary: 'did:web:nerv.tokyo.jp/bees',
+        },
+      )
+
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
     })
   })
 
