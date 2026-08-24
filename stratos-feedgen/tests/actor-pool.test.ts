@@ -181,6 +181,36 @@ describe('ActorPool', () => {
     expect(findSyncer('did:plc:genestarwind').stopped).toBe(true)
   })
 
+  it('stop() still drains the rest when a syncer rejects and no onError is set', async () => {
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          if (config.did === 'did:plc:melfina') {
+            syncer.drainAndStop = async (): Promise<void> => {
+              throw new Error('drain wedged')
+            }
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+    pool.addActor('did:plc:melfina')
+    pool.addActor('did:plc:aishaclanclan')
+
+    await expect(pool.stop()).resolves.toBeUndefined()
+    expect(findSyncer('did:plc:aishaclanclan').stopped).toBe(true)
+  })
+
   it('seedFromStore adds only actors with matching boundaries', async () => {
     const now = new Date().toISOString()
     await store.upsertEnrolledActor({
