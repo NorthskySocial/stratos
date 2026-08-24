@@ -1,11 +1,9 @@
 import express, { type Request, type Response } from 'express'
-import { Agent } from '@atproto/api'
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
 import { type Enrollment } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
-import { serviceDIDToRkey } from '../../oauth'
 import { verifyEnrolled } from './internal/auth.js'
 
 /**
@@ -24,6 +22,7 @@ export function registerEnrollmentHandlers(
   registerAdminBoundaryHandlers(ctx)
   registerListEnrollmentsHandler(ctx)
   registerListDomainsHandler(ctx)
+  registerListPdsSyncStatusHandler(ctx)
 }
 
 /**
@@ -193,6 +192,17 @@ function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
           ctx.logger?.warn(
             { err: err instanceof Error ? err.message : String(err), did },
             'failed to revoke OAuth session during unenrollment',
+          )
+        }
+
+        // 5. Drop any queued PDS sync job — the enrollment record it would
+        // rewrite was just deleted
+        try {
+          await ctx.pdsSyncQueue.remove(did!)
+        } catch (err) {
+          ctx.logger?.warn(
+            { err: err instanceof Error ? err.message : String(err), did },
+            'failed to remove queued PDS sync job during unenrollment',
           )
         }
 
@@ -589,16 +599,7 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
-        let pdsSync: 'ok' | 'failed' = 'ok'
-        try {
-          await updatePdsEnrollmentRecord(ctx, did, boundaries)
-        } catch (err) {
-          pdsSync = 'failed'
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to update PDS enrollment record after addBoundary',
-          )
-        }
+        const pdsSync = await syncPdsEnrollmentRecord(ctx, did)
 
         ctx.logger?.info(
           { adminDid, targetDid: did, boundary, pdsSync },
@@ -666,16 +667,7 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
-        let pdsSync: 'ok' | 'failed' = 'ok'
-        try {
-          await updatePdsEnrollmentRecord(ctx, did, boundaries)
-        } catch (err) {
-          pdsSync = 'failed'
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to update PDS enrollment record after removeBoundary',
-          )
-        }
+        const pdsSync = await syncPdsEnrollmentRecord(ctx, did)
 
         ctx.logger?.info(
           { adminDid, targetDid: did, boundary, pdsSync },
@@ -757,16 +749,7 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
 
         emitBoundaryChangeEvent(ctx, did, effectiveBoundaries, priorBoundaries)
 
-        let pdsSync: 'ok' | 'failed' = 'ok'
-        try {
-          await updatePdsEnrollmentRecord(ctx, did, effectiveBoundaries)
-        } catch (err) {
-          pdsSync = 'failed'
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to update PDS enrollment record after setBoundaries',
-          )
-        }
+        const pdsSync = await syncPdsEnrollmentRecord(ctx, did)
 
         ctx.logger?.info(
           {
@@ -1095,6 +1078,42 @@ function registerListDomainsHandler(ctx: AppContext): void {
 }
 
 /**
+ * Register handler for listing PDS enrollment-record sync jobs.
+ *
+ * Surfaces the durable sync queue so an operator can see which actors' PDS
+ * records are still behind (`pending`) or need intervention (`failed`).
+ * @param ctx - Application context
+ */
+function registerListPdsSyncStatusHandler(ctx: AppContext): void {
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res })
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const jobs = await ctx.pdsSyncQueue.list()
+        res.json({ jobs })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.listPdsSyncStatus failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list PDS sync status',
+        })
+      }
+    },
+  )
+}
+
+/**
  * Emit a service-stream `boundaries` change event.
  *
  * Fired whenever an enrolled actor's boundary set is mutated in place (admin
@@ -1143,42 +1162,18 @@ function boundarySetsEqual(a: string[], b: string[]): boolean {
 }
 
 /**
- * Update the PDS enrollment record with new boundaries
+ * Bring the actor's PDS enrollment record in sync with the stored boundary
+ * set. Durable intent is enqueued BEFORE the inline attempt so a crash between
+ * the local mutation and the PDS write still converges via the worker.
  * @param ctx - Application context
  * @param did - DID of the enrollment
- * @param boundaries - New boundaries to set
+ * @returns 'ok' when the PDS record is current, 'deferred' when the worker
+ * will retry in the background
  */
-async function updatePdsEnrollmentRecord(
+async function syncPdsEnrollmentRecord(
   ctx: AppContext,
   did: string,
-  boundaries: string[],
-): Promise<void> {
-  const enrollment = await ctx.enrollmentStore.getEnrollment(did)
-  if (!enrollment?.signingKeyDid) return
-
-  const attestation = await ctx.createAttestation(
-    did,
-    boundaries,
-    enrollment.signingKeyDid,
-  )
-
-  const rkey = serviceDIDToRkey(ctx.serviceDid)
-  const oauthSession = await ctx.oauthClient.restore(did)
-  const agent = new Agent(oauthSession)
-
-  await agent.com.atproto.repo.putRecord({
-    repo: did,
-    collection: 'zone.stratos.actor.enrollment',
-    rkey,
-    record: {
-      service: ctx.cfg.service.publicUrl,
-      boundaries: boundaries.map((value) => ({ value })),
-      signingKey: enrollment.signingKeyDid,
-      attestation: {
-        sig: attestation.sig,
-        signingKey: attestation.signingKey,
-      },
-      createdAt: new Date().toISOString(),
-    },
-  })
+): Promise<'ok' | 'deferred'> {
+  await ctx.pdsSyncWorker.enqueue(did)
+  return ctx.pdsSyncWorker.kick(did)
 }

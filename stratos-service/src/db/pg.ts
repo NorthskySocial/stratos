@@ -298,6 +298,38 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     'enrollment_add_isService',
     sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "isService" BOOLEAN NOT NULL DEFAULT FALSE`,
   )
+
+  await migratePdsSyncTables(db)
+}
+
+/**
+ * Create the durable PDS sync queue table and its due-jobs index.
+ * @param db - ServicePgDb instance
+ */
+async function migratePdsSyncTables(db: ServicePgDb): Promise<void> {
+  await executeMigrationStep(
+    db,
+    'enrollment_pds_sync',
+    sql`
+      CREATE TABLE IF NOT EXISTS "enrollment_pds_sync" (
+        "did" TEXT PRIMARY KEY,
+        "status" TEXT NOT NULL,
+        "attemptCount" INTEGER NOT NULL DEFAULT 0,
+        "nextAttemptAt" TEXT NOT NULL,
+        "firstQueuedAt" TEXT NOT NULL,
+        "updatedAt" TEXT NOT NULL,
+        "lastError" TEXT
+      )
+    `,
+  )
+
+  await executeMigrationStep(
+    db,
+    'enrollment_pds_sync_due_idx',
+    sql`
+      CREATE INDEX IF NOT EXISTS "enrollment_pds_sync_due_idx" ON "enrollment_pds_sync"("status", "nextAttemptAt")
+    `,
+  )
 }
 
 /**
