@@ -237,6 +237,83 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.admin.listPdsSyncStatus",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List queued PDS enrollment-record sync jobs. Shows which members' PDS records are still behind this service's boundary state. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["jobs"],
+          "properties": {
+            "jobs": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#job"
+              }
+            }
+          }
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "required": [
+        "did",
+        "status",
+        "attemptCount",
+        "nextAttemptAt",
+        "firstQueuedAt",
+        "updatedAt",
+        "generation"
+      ],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The member whose PDS enrollment record is behind."
+        },
+        "status": {
+          "type": "string",
+          "knownValues": ["pending", "failed"],
+          "description": "A 'pending' job is retried by the worker. A 'failed' job is terminal until a fresh admin mutation or a requeue revives it."
+        },
+        "attemptCount": {
+          "type": "integer",
+          "description": "Number of attempts made so far."
+        },
+        "nextAttemptAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the worker may next attempt this job."
+        },
+        "firstQueuedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When sync intent was first recorded for this member."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the job was last written."
+        },
+        "lastError": {
+          "type": "string",
+          "description": "Message from the most recent failed attempt. Absent when no attempt has failed."
+        },
+        "generation": {
+          "type": "integer",
+          "description": "Fencing token. Every fresh sync intent increases it. An attempt writes its bookkeeping only while its own generation is still current, so a superseded attempt cannot clear or delay a newer job."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.admin.removeAdmin",
   "defs": {
     "main": {
@@ -272,6 +349,29 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The DID does not hold admin access."
         }
       ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.requeuePdsSync",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Move every terminally failed PDS enrollment-record sync job back to 'pending'. Use this after a fault that every attempt saw alike, such as a signing key rotation or clock skew, which marks many jobs failed at once. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["requeued"],
+          "properties": {
+            "requeued": {
+              "type": "integer",
+              "description": "Number of jobs moved from 'failed' back to 'pending'."
+            }
+          }
+        }
+      }
     }
   }
 },

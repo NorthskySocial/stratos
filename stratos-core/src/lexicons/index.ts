@@ -6,6 +6,8 @@ import zoneStratosAdminAddAdmin from '../../../lexicons/zone/stratos/admin/addAd
 import zoneStratosAdminListAdmins from '../../../lexicons/zone/stratos/admin/listAdmins.json' with { type: 'json' }
 import zoneStratosAdminRemoveAdmin from '../../../lexicons/zone/stratos/admin/removeAdmin.json' with { type: 'json' }
 import zoneStratosAdminSetActive from '../../../lexicons/zone/stratos/admin/setActive.json' with { type: 'json' }
+import zoneStratosAdminListPdsSyncStatus from '../../../lexicons/zone/stratos/admin/listPdsSyncStatus.json' with { type: 'json' }
+import zoneStratosAdminRequeuePdsSync from '../../../lexicons/zone/stratos/admin/requeuePdsSync.json' with { type: 'json' }
 import zoneStratosEmbedImages from '../../../lexicons/zone/stratos/embed/images.json' with { type: 'json' }
 import zoneStratosBoundaryDefs from '../../../lexicons/zone/stratos/boundary/defs.json' with { type: 'json' }
 import zoneStratosDefs from '../../../lexicons/zone/stratos/defs.json' with { type: 'json' }
@@ -38,6 +40,8 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosAdminListAdmins as LexiconDoc,
   zoneStratosAdminRemoveAdmin as LexiconDoc,
   zoneStratosAdminSetActive as LexiconDoc,
+  zoneStratosAdminListPdsSyncStatus as LexiconDoc,
+  zoneStratosAdminRequeuePdsSync as LexiconDoc,
   zoneStratosEmbedImages as LexiconDoc,
   zoneStratosBoundaryDefs as LexiconDoc,
   zoneStratosDefs as LexiconDoc,
