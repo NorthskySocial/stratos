@@ -203,9 +203,11 @@ GET /xrpc/zone.stratos.enrollment.status?did=<user-did>
 
 Unauthenticated, enrolled DID: returns `{ did, enrolled: true, active, enrolledAt, signingKey, enrollmentRkey }`.  
 Unauthenticated, not-enrolled DID: returns `{ did, enrolled: false, eligible }` — `eligible: true`
-means the DID may enroll but has not yet done so (no enrollment row, no PDS enrollment record,
-record writes are denied).  
-Authenticated: also returns boundaries and a fresh attestation for enrolled DIDs.
+means the DID may enroll but has not yet done so (no enrollment row, record writes are denied).
+`eligible` is omitted when the eligibility check cannot complete (for example, DID resolution
+fails); do not treat an absent `eligible` as a denial.  
+Authenticated: also returns boundaries for enrolled DIDs, plus a fresh attestation when the DID
+has at least one boundary.
 
 ### Pull Sync: List Repo Operations
 

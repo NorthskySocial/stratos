@@ -37,6 +37,8 @@ async function invokeMethod(
 function createCtx(opts: {
   getEnrollment: (did: string) => Promise<any | null>
   isEligible?: boolean
+  resolveThrows?: boolean
+  allowedPdsEndpoints?: string[]
 }): AppContext {
   const app = express()
   ;(app as any)._router = (app as any)._router || express.Router()
@@ -61,7 +63,7 @@ function createCtx(opts: {
     cfg: {
       enrollment: {
         mode: opts.isEligible ? 'open' : 'closed',
-        allowedPdsEndpoints: [],
+        allowedPdsEndpoints: opts.allowedPdsEndpoints ?? [],
         autoEnrollDomains: ['example.com'],
       },
       stratos: {
@@ -71,8 +73,11 @@ function createCtx(opts: {
     },
     idResolver: {
       did: {
-        resolve: async () =>
-          opts.isEligible
+        resolve: async () => {
+          if (opts.resolveThrows) {
+            throw new Error('PLC directory timeout')
+          }
+          return opts.isEligible
             ? {
                 service: [
                   {
@@ -81,7 +86,8 @@ function createCtx(opts: {
                   },
                 ],
               }
-            : null,
+            : null
+        },
       },
     } as any,
     logger: {
@@ -127,6 +133,27 @@ describe('Enrollment status eligibility', () => {
     // enrollment row, cannot write records, and has no PDS enrollment record.
     expect(res.body.enrolled).toBe(false)
     expect(res.body.eligible).toBe(true)
+  })
+
+  it('omits eligible when the eligibility check itself fails', async () => {
+    const xrpc = createMockXrpcServer()
+    // Closed mode with a PDS allowlist forces DID resolution, which throws.
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      isEligible: false,
+      resolveThrows: true,
+      allowedPdsEndpoints: ['https://pds.example.com'],
+    })
+
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
+      did: 'did:plc:misato-nerv',
+    })
+
+    // A failed check is not a denial: the endpoint must not report an
+    // authoritative eligible: false when the PLC or PDS is unreachable.
+    expect(res.body.enrolled).toBe(false)
+    expect(res.body.eligible).toBeUndefined()
   })
 
   it('reports enrolled: true with active: false for a deactivated enrollment row', async () => {

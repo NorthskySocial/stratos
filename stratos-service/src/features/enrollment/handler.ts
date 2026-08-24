@@ -1,7 +1,10 @@
 import express, { type Request, type Response } from 'express'
 import { Agent } from '@atproto/api'
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
-import { type Enrollment } from '@northskysocial/stratos-core'
+import {
+  type Enrollment,
+  EnrollmentDeniedError,
+} from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
@@ -60,10 +63,16 @@ function registerEnrollmentStatus(server: XrpcServer, ctx: AppContext): void {
               allowListProvider: ctx.allowListProvider,
               logger: ctx.logger,
             })
-            // If verifyEnrolled doesn't throw, they are eligible
             return { did, enrolled: false, eligible: true }
-          } catch {
-            return { did, enrolled: false, eligible: false }
+          } catch (err) {
+            if (
+              err instanceof EnrollmentDeniedError &&
+              err.reason !== 'VerificationFailed'
+            ) {
+              return { did, enrolled: false, eligible: false }
+            }
+            // The check failed; omit eligible rather than claim a denial.
+            return { did, enrolled: false }
           }
         }
 

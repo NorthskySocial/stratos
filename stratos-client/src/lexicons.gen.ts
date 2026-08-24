@@ -468,7 +468,7 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "eligible": {
               "type": "boolean",
-              "description": "Whether the DID is eligible to enroll. Only included when the DID is not enrolled."
+              "description": "Whether the DID is eligible to enroll. Only included when the DID is not enrolled. Omitted when the eligibility check cannot complete."
             },
             "active": {
               "type": "boolean",

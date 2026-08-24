@@ -44,6 +44,7 @@ export type EnrollmentDenialReason =
   | 'DidNotResolved'
   | 'PdsEndpointNotFound'
   | 'ServiceClosed'
+  | 'VerificationFailed'
 
 /**
  * Error thrown when a boundary is not allowed
