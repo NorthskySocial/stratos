@@ -217,9 +217,6 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     }
   }
 
-  // Startup already reconciled moments before the first open; only later
-  // opens (reconnects) can hide a missed unenroll behind them.
-  let firstOpen = true
   const serviceStream = new ServiceStream(
     {
       stratosServiceUrl: cfg.stratosServiceUrl,
@@ -239,11 +236,12 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
         // purgeActor invalidates the boundary cache as part of the purge.
         await purger.purgeActor(did)
       },
+      // Every open triggers a reconcile: a reconnect can hide a missed
+      // unenroll, and the startup reconcile can itself run against a
+      // degraded upstream (per-actor resolve failures are only counted).
+      // The scheduler coalesces, so a healthy boot pays one bounded extra
+      // run.
       onSessionEstablished: () => {
-        if (firstOpen) {
-          firstOpen = false
-          return
-        }
         triggerReconcile()
       },
     },

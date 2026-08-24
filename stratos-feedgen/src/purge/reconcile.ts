@@ -53,6 +53,13 @@ const DEFAULT_BATCH_SIZE = 25
  * Only boundaries the feedgen actually tracks (`configuredBoundaries`) are
  * considered for the shrink case: a boundary the feedgen never synced can't
  * hold derived state to purge.
+ *
+ * Race guard: reconcile runs concurrently with live frame dispatch on the
+ * same connection, so a resolve can report `enrolled: false` moments before
+ * the live `enroll` frame for a re-enrolled actor is applied. Before any
+ * purge, the actor's `enrolled_actor` row is re-read; a row written at or
+ * after run start (or already deleted) means live state is fresher, and the
+ * purge is skipped. A skipped purge is safe — the next reconcile converges.
  */
 export async function reconcileEnrollments(
   deps: ReconcileDeps,
@@ -70,6 +77,7 @@ export async function reconcileEnrollments(
   const log = deps.log ?? defaultLog
   const onError = deps.onError ?? defaultOnError
 
+  const runStartedAt = new Date().toISOString()
   const all = await deps.store.listEnrolledActors()
   const actors = maxActors > 0 ? all.slice(0, maxActors) : all
 
@@ -107,7 +115,13 @@ export async function reconcileEnrollments(
         onError(entry.actor.did, entry.error)
         continue
       }
-      await reconcileActor(deps, configuredBoundaries, entry, summary)
+      await reconcileActor(
+        deps,
+        configuredBoundaries,
+        entry,
+        summary,
+        runStartedAt,
+      )
     }
   }
 
@@ -127,10 +141,12 @@ async function reconcileActor(
   configuredBoundaries: Set<string>,
   entry: { actor: EnrolledActor; fresh: ResolveEnrollmentsResult },
   summary: ReconcileSummary,
+  runStartedAt: string,
 ): Promise<void> {
   const { actor, fresh } = entry
 
   if (!fresh.enrolled) {
+    if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
     const counts = await deps.purger.purgeActor(actor.did, 'reconcile-unenroll')
     summary.unenrolled++
     summary.postsPurged += counts.posts
@@ -144,6 +160,7 @@ async function reconcileActor(
     (b) => configuredBoundaries.has(b) && !freshSet.has(b),
   )
   if (lost.length > 0) {
+    if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
     summary.shrunk++
     for (const boundary of lost) {
       const counts = await deps.purger.purgeActorBoundary(
@@ -168,6 +185,22 @@ async function reconcileActor(
       lastSeenAt: new Date().toISOString(),
     })
   }
+}
+
+/**
+ * Whether a live enroll/boundary frame wrote the actor's row at or after run
+ * start, or a live unenroll already removed it. In both cases the fresh
+ * upstream snapshot for this actor is stale and the purge must be skipped —
+ * `lastSeenAt` is only written by the live frame path and by reconcile
+ * itself, so it is a reliable touched-since marker.
+ */
+async function touchedSinceRunStart(
+  store: FeedgenStore,
+  did: string,
+  runStartedAt: string,
+): Promise<boolean> {
+  const current = await store.getEnrolledActor(did)
+  return current === null || current.lastSeenAt >= runStartedAt
 }
 
 function defaultLog(summary: ReconcileSummary): void {
