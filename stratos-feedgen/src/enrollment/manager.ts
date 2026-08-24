@@ -5,12 +5,19 @@ import {
 import type { UpstreamStratosClient } from '../upstream/index.js'
 import { TtlLru } from './lru.js'
 
+export type BoundaryCacheEvent = 'hit' | 'miss'
+
 export interface EnrollmentManagerOptions {
   client: Pick<UpstreamStratosClient, 'resolveEnrollments'>
   ttlMs?: number
   max?: number
   /** Injectable clock for tests. */
   now?: () => number
+  /**
+   * Observability hook. `miss` fires only for a fresh upstream fetch — joining
+   * an in-flight fetch counts as neither, so hits + misses ≈ upstream calls.
+   */
+  onCacheEvent?: (event: BoundaryCacheEvent) => void
 }
 
 /** A single in-flight boundary fetch, identified for invalidation racing. */
@@ -37,9 +44,11 @@ export class EnrollmentManager {
   private readonly client: Pick<UpstreamStratosClient, 'resolveEnrollments'>
   private readonly cache: TtlLru<string, string[]>
   private readonly inflight = new Map<string, InflightFetch>()
+  private readonly onCacheEvent?: (event: BoundaryCacheEvent) => void
 
   constructor(opts: EnrollmentManagerOptions) {
     this.client = opts.client
+    this.onCacheEvent = opts.onCacheEvent
     this.cache = new TtlLru<string, string[]>({
       ttlMs: opts.ttlMs ?? DEFAULT_BOUNDARY_CACHE_TTL_MS,
       max: opts.max ?? DEFAULT_BOUNDARY_CACHE_MAX,
@@ -49,11 +58,15 @@ export class EnrollmentManager {
 
   async getBoundaries(did: string): Promise<string[]> {
     const cached = this.cache.get(did)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) {
+      this.onCacheEvent?.('hit')
+      return cached
+    }
 
     const existing = this.inflight.get(did)
     if (existing !== undefined) return existing.promise
 
+    this.onCacheEvent?.('miss')
     const entry: InflightFetch = { promise: undefined as never }
     entry.promise = this.fetchAndCache(did, entry)
     this.inflight.set(did, entry)

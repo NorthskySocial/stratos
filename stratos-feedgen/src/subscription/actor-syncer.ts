@@ -48,6 +48,8 @@ export interface ActorSyncerConfig {
    * the base delay without ever escalating.
    */
   stabilityResetMs?: number
+  /** Observability hook: reconnects are otherwise invisible to metrics. */
+  onReconnectScheduled?: () => void
 }
 
 export interface ActorSyncerDeps {
@@ -94,6 +96,7 @@ export class ActorSyncer {
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private queue: Uint8Array[] = []
   private draining = false
+  private drainPromise: Promise<void> = Promise.resolve()
   private lastFailedSeq: number | null = null
   private sameSeqFailures = 0
   private readonly baseDelayMs: number
@@ -164,6 +167,18 @@ export class ActorSyncer {
     // flight would let a later start() launch a second concurrent drain. The
     // drain loop already exits on `!running` and clears the flag itself.
     this.queue = []
+  }
+
+  /**
+   * Stop and wait for the frame in flight (if any) to finish applying. Cursors
+   * are durable per applied commit, so awaiting this drain is what guarantees
+   * the last `applyCommit` → `upsertCursor` completes before the DB closes.
+   * `stop()` itself stays a synchronous signal to avoid reintroducing the
+   * double-drain race its comment guards against.
+   */
+  async drainAndStop(): Promise<void> {
+    this.stop()
+    await this.drainPromise
   }
 
   private async connect(): Promise<void> {
@@ -277,6 +292,7 @@ export class ActorSyncer {
 
   private scheduleReconnect(): void {
     if (!this.running || this.reconnectTimer) return
+    this.config.onReconnectScheduled?.()
     this.reconnectAttempt++
     const exp = this.baseDelayMs * Math.pow(2, this.reconnectAttempt - 1)
     const capped = Math.min(exp, this.maxDelayMs)
@@ -331,7 +347,7 @@ export class ActorSyncer {
     }
     this.queue.push(data)
     if (!this.draining) {
-      void this.drain()
+      this.drainPromise = this.drain()
     }
   }
 

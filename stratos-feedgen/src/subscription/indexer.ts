@@ -22,8 +22,16 @@ export interface IndexCommitArgs {
  * persists `zone.stratos.feed.post` records via the feedgen store. Skips
  * records in any other collection.
  */
+export interface SubscriptionIndexerHooks {
+  /** Observability hook fired per upserted post; keeps metrics out of this module. */
+  onPostIndexed?: () => void
+}
+
 export class SubscriptionIndexer {
-  constructor(private store: FeedgenStore) {}
+  constructor(
+    private store: FeedgenStore,
+    private hooks?: SubscriptionIndexerHooks,
+  ) {}
 
   /**
    * Apply a single decoded commit to the store. All ops belonging to the
@@ -57,6 +65,7 @@ export class SubscriptionIndexer {
         blobRefs,
         boundaries,
       })
+      this.hooks?.onPostIndexed?.()
     }
     await this.store.upsertCursor(did, seq, time)
   }

@@ -1,0 +1,105 @@
+import type { Server as HttpServer } from 'node:http'
+import type { Logger } from '@northskysocial/stratos-core'
+
+export interface ShutdownDeps {
+  httpServer: HttpServer
+  serviceStream?: { stop: () => void } | null
+  actorPool?: { stop: () => Promise<void> } | null
+  store: { close: () => Promise<void> }
+  logger: Logger
+  /** In-flight HTTP drain deadline before open sockets are destroyed. */
+  drainTimeoutMs?: number
+  exit?: (code: number) => void
+}
+
+export type ShutdownHandler = (signal: string) => Promise<void>
+
+const DEFAULT_DRAIN_TIMEOUT_MS = 15_000
+
+/**
+ * Build the shutdown sequence: stop accepting connections and drain in-flight
+ * requests (destroying stragglers at the deadline), stop the sync streams,
+ * await the actor pool's in-flight commit applies — cursors are durable
+ * per-commit, so awaiting the drain IS the cursor flush — then close the DB.
+ * A second signal exits immediately as an operator escape hatch.
+ */
+export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
+  const drainTimeoutMs = deps.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
+  const exit = deps.exit ?? ((code: number): void => process.exit(code))
+  let shuttingDown = false
+
+  return async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      deps.logger.warn({ signal }, 'second shutdown signal; forcing exit')
+      exit(1)
+      return
+    }
+    shuttingDown = true
+    deps.logger.info({ signal }, 'shutdown started')
+    try {
+      await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
+      deps.serviceStream?.stop()
+      await deps.actorPool?.stop()
+      await deps.store.close()
+      deps.logger.info({ signal }, 'shutdown complete')
+      exit(0)
+    } catch (err) {
+      deps.logger.error({ err }, 'shutdown failed')
+      exit(1)
+    }
+  }
+}
+
+export function installShutdownHandlers(deps: ShutdownDeps): void {
+  const handler = createShutdownHandler(deps)
+  process.on('SIGTERM', () => void handler('SIGTERM'))
+  process.on('SIGINT', () => void handler('SIGINT'))
+}
+
+/** Log the fatal error, then exit non-zero: state after a panic is unknown. */
+export function createPanicHandler(
+  logger: Logger,
+  exit: (code: number) => void = (code): void => process.exit(code),
+): (err: unknown) => void {
+  return (err: unknown): void => {
+    logger.error({ err }, 'unrecoverable error; exiting')
+    exit(1)
+  }
+}
+
+export function installPanicHandlers(logger: Logger): void {
+  const handler = createPanicHandler(logger)
+  process.on('unhandledRejection', handler)
+  process.on('uncaughtException', handler)
+}
+
+async function drainHttpServer(
+  server: HttpServer,
+  timeoutMs: number,
+  logger: Logger,
+): Promise<void> {
+  const closed = new Promise<void>((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()))
+  })
+  // Idle keep-alive sockets are not in-flight work; without this the drain
+  // always runs to the deadline when any client used keep-alive.
+  server.closeIdleConnections()
+  let timer!: ReturnType<typeof setTimeout>
+  const deadline = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs)
+    timer.unref()
+  })
+  try {
+    const winner = await Promise.race([closed, deadline])
+    if (winner === 'timeout') {
+      logger.warn(
+        { timeoutMs },
+        'drain deadline expired; destroying open connections',
+      )
+      server.closeAllConnections()
+      await closed
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
