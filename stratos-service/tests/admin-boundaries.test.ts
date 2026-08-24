@@ -650,6 +650,95 @@ describe('admin boundary endpoints', () => {
         }),
       )
     })
+
+    it('returns 500 when the queue read fails', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      pdsSyncQueue.list = vi.fn().mockRejectedValue(new Error('db closed'))
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to list PDS sync status',
+      })
+    })
+  })
+
+  describe('POST /xrpc/zone.stratos.admin.requeuePdsSync', () => {
+    it('revives every failed job and reports the count', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      const usagi = await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.markFailed('did:plc:usagi', usagi, 'invalid_grant')
+      const rei = await pdsSyncQueue.upsertPending('did:plc:rei')
+      await pdsSyncQueue.markFailed('did:plc:rei', rei, 'invalid_grant')
+      await pdsSyncQueue.upsertPending('did:plc:ami')
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toEqual({ requeued: 2 })
+      expect((await pdsSyncQueue.list()).map((j) => j.status)).toEqual([
+        'pending',
+        'pending',
+        'pending',
+      ])
+      expect(ctx.logger?.info).toHaveBeenCalledWith(
+        expect.objectContaining({ requeued: 2 }),
+        'admin requeued PDS sync jobs',
+      )
+    })
+
+    it('reports zero when no job has failed', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toEqual({ requeued: 0 })
+    })
+
+    it('rejects unauthenticated requests', async () => {
+      const { app } = createCtx({ adminAuthFails: true })
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(401)
+      expect(res.body).toEqual({
+        error: 'AuthRequired',
+        message: 'Admin auth required',
+      })
+    })
+
+    it('returns 500 when the queue write fails', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      pdsSyncQueue.requeueFailed = vi
+        .fn()
+        .mockRejectedValue(new Error('db closed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to requeue PDS sync jobs',
+      })
+    })
   })
 
   // An in-place boundary change must emit a `boundaries` event on

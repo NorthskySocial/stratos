@@ -538,6 +538,12 @@ describe('Unenroll endpoint', () => {
       did,
       enrollmentRkey: 'rkey-123',
     })
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }
 
     const ctx = {
       enrollmentStore: {
@@ -549,6 +555,9 @@ describe('Unenroll endpoint', () => {
       profileRecordWriter: {
         deleteEnrollmentRecord: deleteRecordSpy,
       },
+      actorStore: {
+        deleteSigningKey: vi.fn().mockRejectedValue(new Error('key gone')),
+      },
       oauthClient: {
         revoke: revokeSpy,
       },
@@ -558,12 +567,7 @@ describe('Unenroll endpoint', () => {
       authVerifier: {
         standard: vi.fn(),
       },
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      },
+      logger,
       app: {
         get: vi.fn(),
         post: vi.fn(),
@@ -585,6 +589,59 @@ describe('Unenroll endpoint', () => {
     expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
     expect(revokeSpy).toHaveBeenCalledWith(did)
+    expect(logger.warn).toHaveBeenCalledWith(
+      { err: 'key gone', did },
+      'failed to delete signing key during unenrollment',
+    )
+    expect(logger.warn).toHaveBeenCalledWith(
+      { err: 'OAuth Error', did },
+      'failed to revoke OAuth session during unenrollment',
+    )
+  })
+
+  it('unenrolls without a logger when teardown steps fail', async () => {
+    const did = 'did:plc:testuser'
+    const server = createMockXrpcServer()
+
+    const ctx = {
+      enrollmentStore: {
+        getEnrollment: vi.fn().mockRejectedValue(new Error('store down')),
+      },
+      enrollmentService: {
+        unenroll: vi.fn().mockResolvedValue(undefined),
+      },
+      profileRecordWriter: {
+        deleteEnrollmentRecord: vi.fn(),
+      },
+      actorStore: {
+        deleteSigningKey: vi.fn().mockRejectedValue(new Error('key gone')),
+      },
+      oauthClient: {
+        revoke: vi.fn().mockRejectedValue(new Error('OAuth Error')),
+      },
+      pdsSyncWorker: {
+        cancel: vi.fn().mockRejectedValue(new Error('queue down')),
+      },
+      authVerifier: {
+        standard: vi.fn(),
+      },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
+    } as unknown as AppContext
+
+    registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
+
+    const res = await invokeMethod(
+      server,
+      'zone.stratos.enrollment.unenroll',
+      {},
+      { credentials: { type: 'user', did } },
+    )
+
+    expect((res as any).body.success).toBe(true)
   })
 
   it('requires authentication', async () => {
