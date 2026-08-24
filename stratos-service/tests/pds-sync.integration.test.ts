@@ -132,9 +132,15 @@ describe('PDS enrollment sync (sqlite integration)', () => {
 
     worker.start()
     try {
-      await vi.waitFor(async () => {
-        expect(await queue.list()).toHaveLength(0)
-      })
+      // Generous budget: a mutation run instruments every source file, which
+      // slows the tick loop well past waitFor's 1s default. A dry-run failure
+      // there aborts the whole mutation run.
+      await vi.waitFor(
+        async () => {
+          expect(await queue.list()).toHaveLength(0)
+        },
+        { timeout: 15_000, interval: 20 },
+      )
     } finally {
       worker.stop()
     }
@@ -185,9 +191,15 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     const worker = createWorker()
     worker.start()
     try {
-      await vi.waitFor(async () => {
-        expect(await queue.list()).toHaveLength(0)
-      })
+      // Generous budget: a mutation run instruments every source file, which
+      // slows the tick loop well past waitFor's 1s default. A dry-run failure
+      // there aborts the whole mutation run.
+      await vi.waitFor(
+        async () => {
+          expect(await queue.list()).toHaveLength(0)
+        },
+        { timeout: 15_000, interval: 20 },
+      )
     } finally {
       worker.stop()
     }
