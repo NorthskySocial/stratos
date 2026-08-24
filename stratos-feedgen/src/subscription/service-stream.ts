@@ -104,6 +104,7 @@ export class ServiceStream {
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
   private queue: Uint8Array[] = []
   private draining = false
+  private drainDone: Promise<void> = Promise.resolve()
   private readonly baseDelayMs: number
   private readonly maxDelayMs: number
   private readonly jitterRatio: number
@@ -138,7 +139,12 @@ export class ServiceStream {
     void this.connect()
   }
 
-  stop(): void {
+  /**
+   * Stop the stream and return a promise that settles once the in-flight
+   * frame dispatch has finished. Callers await it before closing shared
+   * resources (the store).
+   */
+  stop(): Promise<void> {
     this.running = false
     this.clearStabilityTimer()
     if (this.reconnectTimer) {
@@ -150,6 +156,7 @@ export class ServiceStream {
     // in flight would let a later start() launch a second concurrent drain.
     // The drain loop already exits on `!running` and clears the flag itself.
     this.queue = []
+    return this.drainDone
   }
 
   private async connect(): Promise<void> {
@@ -313,7 +320,8 @@ export class ServiceStream {
     }
     this.queue.push(data)
     if (!this.draining) {
-      void this.drain()
+      // drain() never rejects; the promise is what stop() awaits.
+      this.drainDone = this.drain()
     }
   }
 

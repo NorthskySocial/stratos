@@ -87,11 +87,14 @@ describe('createShutdownHandler', () => {
     const events: string[] = []
     const lines: CapturedLine[] = []
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    const requestReceived = deferred()
+    const releaseResponse = deferred()
     const { httpServer, baseUrl } = await listen((_req, res) => {
-      setTimeout(() => {
+      requestReceived.resolve()
+      void releaseResponse.promise.then(() => {
         res.statusCode = 200
         res.end('ok')
-      }, 50)
+      })
     })
     const poolDrain = deferred()
     const handler = createShutdownHandler({
@@ -118,13 +121,15 @@ describe('createShutdownHandler', () => {
     })
 
     const inflight = httpGet(`${baseUrl}/slow`)
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await requestReceived.promise
     clearTimeoutSpy.mockClear()
     const done = handler('SIGTERM')
-    setTimeout(() => poolDrain.resolve(), 20)
+    releaseResponse.resolve()
 
     const res = await inflight
     expect(res.status).toBe(200)
+    await vi.waitFor(() => expect(events).toContain('pool.stop.start'))
+    poolDrain.resolve()
     await done
     expect(events).toEqual([
       'serviceStream.stop',
@@ -146,8 +151,10 @@ describe('createShutdownHandler', () => {
 
   it('destroys sockets still open at the drain deadline and exits 0', async () => {
     const lines: CapturedLine[] = []
+    const requestReceived = deferred()
     const { httpServer, baseUrl } = await listen(() => {
       // Never respond: the request outlives the drain deadline.
+      requestReceived.resolve()
     })
     const exit = vi.fn()
     const storeClose = vi.fn(async () => {})
@@ -161,7 +168,7 @@ describe('createShutdownHandler', () => {
 
     const stuck = httpGet(`${baseUrl}/never`)
     stuck.catch(() => {})
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await requestReceived.promise
     await handler('SIGTERM')
 
     await expect(stuck).rejects.toThrow()
@@ -171,6 +178,67 @@ describe('createShutdownHandler', () => {
     expect(warns).toHaveLength(1)
     expect(warns[0]?.msg).toBe(
       'drain deadline expired; destroying open connections',
+    )
+    expect(warns[0]?.obj['timeoutMs']).toBe(50)
+  })
+
+  it('awaits the service stream drain before closing the store', async () => {
+    const events: string[] = []
+    const streamDrain = deferred()
+    const { httpServer } = await listen((_req, res) => res.end())
+    const exit = vi.fn()
+    const handler = createShutdownHandler({
+      httpServer,
+      serviceStream: {
+        stop: () => {
+          events.push('stream.stop')
+          return streamDrain.promise.then(() => {
+            events.push('stream.drained')
+          })
+        },
+      },
+      store: {
+        close: async () => {
+          events.push('store.close')
+        },
+      },
+      logger: nullLogger,
+      exit,
+    })
+
+    const done = handler('SIGTERM')
+    await vi.waitFor(() => expect(events).toContain('stream.stop'))
+    streamDrain.resolve()
+    await done
+
+    expect(events).toEqual(['stream.stop', 'stream.drained', 'store.close'])
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it('continues shutdown when the service stream drain misses the deadline', async () => {
+    const lines: CapturedLine[] = []
+    const { httpServer } = await listen((_req, res) => res.end())
+    const exit = vi.fn()
+    const storeClose = vi.fn(async () => {})
+    const handler = createShutdownHandler({
+      httpServer,
+      serviceStream: {
+        stop: () => new Promise<void>(() => {}),
+      },
+      store: { close: storeClose },
+      logger: captureLogger(lines),
+      drainTimeoutMs: 50,
+      exit,
+    })
+
+    await handler('SIGTERM')
+
+    expect(storeClose).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledWith(0)
+    const warns = lines.filter((l) => l.level === 'warn')
+    expect(warns).toHaveLength(1)
+    expect(warns[0]?.msg).toBe(
+      'service stream drain deadline expired; continuing shutdown',
     )
     expect(warns[0]?.obj['timeoutMs']).toBe(50)
   })
@@ -255,7 +323,7 @@ describe('createShutdownHandler', () => {
     })
 
     const done = handler('SIGTERM')
-    setTimeout(() => applyGate.resolve(), 20)
+    applyGate.resolve()
     await done
 
     expect(events).toEqual(['upsertCursor', 'store.close'])

@@ -106,7 +106,15 @@ export class ActorPool {
     this.waiting = []
     this.requested.clear()
     // Await in-flight commit applies so the caller can close the DB safely.
-    await Promise.all(syncers.map((syncer) => syncer.drainAndStop()))
+    // allSettled: one failing syncer must not abandon the drain of the rest.
+    const results = await Promise.allSettled(
+      syncers.map((syncer) => syncer.drainAndStop()),
+    )
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        this.deps.onError?.(result.reason as Error)
+      }
+    }
   }
 
   /**

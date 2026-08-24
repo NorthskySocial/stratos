@@ -31,6 +31,8 @@ export interface FeedgenConfig {
   boundaryCacheMax: number
   /** Pino log level. */
   logLevel: string
+  /** Bearer token required on `/metrics`. Unset: the endpoint is open. */
+  metricsToken?: string
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
@@ -99,8 +101,14 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
-    logLevel: env['FEEDGEN_LOG_LEVEL'] ?? DEFAULT_LOG_LEVEL,
+    logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
+    metricsToken: nonEmpty(env['FEEDGEN_METRICS_TOKEN']),
   }
+}
+
+/** Treat an empty env var the same as an unset one. */
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === undefined || value === '' ? undefined : value
 }
 
 function parsePositiveInt(
