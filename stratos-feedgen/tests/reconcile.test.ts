@@ -299,6 +299,136 @@ describe('reconcile on reconnect', () => {
     expect(await store.getCursor(SPIKE)).toBeNull()
   })
 
+  it('skips the purge when a live enroll for the actor lands mid-reconcile', async () => {
+    // Race: the resolve snapshot says SPIKE unenrolled, but before reconcile
+    // acts on it the live stream applies his re-enroll (fresh row write).
+    // Purging now would destroy live state that nothing re-adds until the
+    // next reconnect.
+    await store.upsertEnrolledActor(actor(SPIKE, ['crew']))
+    await store.upsertPost(post(SPIKE, '1', ['crew']))
+
+    const client = {
+      resolveEnrollments: vi.fn(async (did: string) => {
+        // Simulate the live enroll frame applied while the resolve is in
+        // flight: the enroll path upserts the row with a current lastSeenAt.
+        await store.upsertEnrolledActor({
+          did: SPIKE,
+          boundaries: ['crew'],
+          enrolledAt: '2024-01-01T00:00:00.000Z',
+          lastSeenAt: new Date().toISOString(),
+        })
+        return { did, enrolled: false, boundaries: [] }
+      }),
+    }
+    const purger = new Purger({ store, audit: () => {} })
+    const purgeActor = vi.spyOn(purger, 'purgeActor')
+
+    const summary = await reconcileEnrollments(
+      { store, purger, client, log: () => {} },
+      new Set(['crew']),
+    )
+
+    expect(purgeActor).not.toHaveBeenCalled()
+    expect(summary.unenrolled).toBe(0)
+    expect(await store.getEnrolledActor(SPIKE)).not.toBeNull()
+    expect(
+      await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/1`),
+    ).not.toBeNull()
+  })
+
+  it('treats a row written in the same millisecond as run start as touched', async () => {
+    // The live enroll frame and the reconcile run start can share one
+    // millisecond, so an equal timestamp must count as touched or the purge
+    // wrongly proceeds.
+    vi.useFakeTimers({ now: new Date('2026-08-24T12:00:00.000Z') })
+    try {
+      await store.upsertEnrolledActor(actor(SPIKE, ['crew']))
+
+      const client = {
+        resolveEnrollments: vi.fn(async (did: string) => {
+          await store.upsertEnrolledActor({
+            did: SPIKE,
+            boundaries: ['crew'],
+            enrolledAt: '2024-01-01T00:00:00.000Z',
+            lastSeenAt: new Date().toISOString(),
+          })
+          return { did, enrolled: false, boundaries: [] }
+        }),
+      }
+      const purger = new Purger({ store, audit: () => {} })
+      const purgeActor = vi.spyOn(purger, 'purgeActor')
+
+      const summary = await reconcileEnrollments(
+        { store, purger, client, log: () => {} },
+        new Set(['crew']),
+      )
+
+      expect(purgeActor).not.toHaveBeenCalled()
+      expect(summary.unenrolled).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips the boundary purge when a live boundary change lands mid-reconcile', async () => {
+    // Race variant: the resolve snapshot says FAYE lost 'bounty', but the
+    // live stream re-granted it while the resolve was in flight.
+    await store.upsertEnrolledActor(actor(FAYE, ['crew', 'bounty']))
+    await store.upsertPost(post(FAYE, '1', ['bounty']))
+
+    const client = {
+      resolveEnrollments: vi.fn(async (did: string) => {
+        await store.upsertEnrolledActor({
+          did: FAYE,
+          boundaries: ['crew', 'bounty'],
+          enrolledAt: '2024-01-01T00:00:00.000Z',
+          lastSeenAt: new Date().toISOString(),
+        })
+        return { did, enrolled: true, boundaries: ['crew'] }
+      }),
+    }
+    const purger = new Purger({ store, audit: () => {} })
+    const purgeActorBoundary = vi.spyOn(purger, 'purgeActorBoundary')
+
+    const summary = await reconcileEnrollments(
+      { store, purger, client, log: () => {} },
+      new Set(['crew', 'bounty']),
+    )
+
+    expect(purgeActorBoundary).not.toHaveBeenCalled()
+    expect(summary.shrunk).toBe(0)
+    expect(
+      await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
+    ).not.toBeNull()
+    expect((await store.getEnrolledActor(FAYE))!.boundaries.sort()).toEqual([
+      'bounty',
+      'crew',
+    ])
+  })
+
+  it('skips the purge when a live unenroll already removed the actor mid-reconcile', async () => {
+    // The live unenroll frame won the race and fully purged SPIKE; a second
+    // purge for a missing row must be skipped rather than re-run or crash.
+    await store.upsertEnrolledActor(actor(SPIKE, ['crew']))
+
+    const client = {
+      resolveEnrollments: vi.fn(async (did: string) => {
+        await store.deleteEnrolledActor(SPIKE)
+        return { did, enrolled: false, boundaries: [] }
+      }),
+    }
+    const purger = new Purger({ store, audit: () => {} })
+    const purgeActor = vi.spyOn(purger, 'purgeActor')
+
+    const summary = await reconcileEnrollments(
+      { store, purger, client, log: () => {} },
+      new Set(['crew']),
+    )
+
+    expect(purgeActor).not.toHaveBeenCalled()
+    expect(summary.unenrolled).toBe(0)
+  })
+
   it('never purges actors upstream still reports enrolled', async () => {
     // Safety property: reconciliation diffs against authoritative per-DID
     // resolves, never against the replay stream, so an active actor survives

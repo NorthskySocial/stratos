@@ -1209,6 +1209,35 @@ describe('ServiceStream', () => {
     stream.stop()
   })
 
+  it('does not fire onSessionEstablished when the socket opens after stop()', async () => {
+    const mint = makeMintToken()
+    let sessions = 0
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: () => {},
+        onUnenroll: () => {},
+        onSessionEstablished: () => {
+          sessions++
+        },
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+
+    // Shutdown lands while the connect handshake is still in flight; the
+    // late open must not fire the session hook against torn-down state.
+    stream.stop()
+    ws.open()
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessions).toBe(0)
+  })
+
   it('ignores frames from a socket that was already dropped', async () => {
     const mint = makeMintToken()
     const enrolls: string[] = []

@@ -178,6 +178,9 @@ export class ServiceStream {
     this.ws = ws
 
     ws.addEventListener('open', () => {
+      // A socket that opens after stop() or after being superseded must not
+      // arm timers or fire session hooks against torn-down state.
+      if (this.ws !== ws) return
       this.armStabilityReset()
       void Promise.resolve()
         .then(() => this.callbacks.onSessionEstablished?.())
