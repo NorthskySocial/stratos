@@ -195,6 +195,7 @@ describe('/metrics endpoint', () => {
 
     const missing = await fetch(`${ctx.baseUrl}/metrics`)
     expect(missing.status).toBe(401)
+    expect(await missing.json()).toEqual({ error: 'Unauthorized' })
 
     const wrongLength = await fetch(`${ctx.baseUrl}/metrics`, {
       headers: { authorization: 'Bearer wrong' },

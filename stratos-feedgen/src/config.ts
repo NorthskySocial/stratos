@@ -108,7 +108,7 @@ export function loadFeedgenConfig(
 
 /** Treat an empty env var the same as an unset one. */
 function nonEmpty(value: string | undefined): string | undefined {
-  return value === undefined || value === '' ? undefined : value
+  return value === '' ? undefined : value
 }
 
 function parsePositiveInt(
