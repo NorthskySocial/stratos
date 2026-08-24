@@ -335,6 +335,84 @@ describe('PdsEnrollmentSyncWorker', () => {
     expect(sync).not.toHaveBeenCalled()
   })
 
+  it('logs and keeps ticking when the queue read fails', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const sync = vi.fn().mockResolvedValue('ok')
+    vi.spyOn(queue, 'listDue').mockRejectedValueOnce(new Error('db locked'))
+    const worker = new PdsEnrollmentSyncWorker(
+      {
+        queue,
+        sync,
+        logger: logger as unknown as PdsSyncWorkerDeps['logger'],
+      },
+      CONFIG,
+    )
+
+    await worker.enqueue(USAGI)
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      { err: expect.any(Error) },
+      'pds sync: tick failed',
+    )
+    expect(sync).not.toHaveBeenCalled()
+
+    // The ticker survives the failed read and picks the job up next tick.
+    await vi.advanceTimersByTimeAsync(CONFIG.tickMs)
+    expect(sync).toHaveBeenCalledWith(USAGI)
+    worker.stop()
+  })
+
+  it('survives a failed queue read when no logger is set', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    vi.spyOn(queue, 'listDue').mockRejectedValueOnce(new Error('db locked'))
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(CONFIG.tickMs)
+
+    expect(sync).toHaveBeenCalledWith(USAGI)
+    worker.stop()
+  })
+
+  it('logs the retry schedule and then the terminal failure', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const sync = vi.fn().mockRejectedValue(new Error('still down'))
+    const worker = new PdsEnrollmentSyncWorker(
+      {
+        queue,
+        sync,
+        logger: logger as unknown as PdsSyncWorkerDeps['logger'],
+      },
+      { ...CONFIG, maxAttempts: 2 },
+    )
+
+    await worker.enqueue(USAGI)
+    await worker.kick(USAGI)
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        did: USAGI,
+        attemptCount: 1,
+        nextAttemptAt: expect.any(String),
+        lastError: 'still down',
+      },
+      'pds sync: attempt failed, retry scheduled',
+    )
+
+    await queue.markRetry(USAGI, 1, new Date().toISOString(), 'still down')
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(logger.error).toHaveBeenCalledWith(
+      { did: USAGI, attemptCount: 2, lastError: 'still down' },
+      'pds sync: terminal failure, enrollment record not updated',
+    )
+    worker.stop()
+  })
+
   it('skips a tick while the previous tick is still running', async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
