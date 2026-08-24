@@ -41,6 +41,8 @@ export interface ServiceStreamConfig {
    * the base delay without ever escalating.
    */
   stabilityResetMs?: number
+  /** Observability hook: reconnects are otherwise invisible to metrics. */
+  onReconnectScheduled?: () => void
 }
 
 interface EnrollmentMessage {
@@ -247,6 +249,7 @@ export class ServiceStream {
 
   private scheduleReconnect(): void {
     if (!this.running || this.reconnectTimer) return
+    this.config.onReconnectScheduled?.()
     this.reconnectAttempt++
     const exp = this.baseDelayMs * Math.pow(2, this.reconnectAttempt - 1)
     const capped = Math.min(exp, this.maxDelayMs)

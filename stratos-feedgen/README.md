@@ -124,8 +124,63 @@ tests/
 | `FEEDGEN_SIGNING_KEY` | yes      | Private signing key for this feed generator's service identity (hex secp256k1) |
 | `STRATOS_SERVICE_URL` | yes      | Base URL of the upstream Stratos service                                       |
 | `STRATOS_SERVICE_DID` | yes      | DID of the upstream Stratos service                                            |
+| `FEEDGEN_LOG_LEVEL`   | no       | Pino log level (default `info`)                                                |
 
 Additional configuration (DB path, port, S3 cache settings, feed definitions, labeler DIDs) is added as the corresponding subsystems land.
+
+## Observability
+
+### Logging
+
+Structured JSON logs via pino. Every request logs one completion line with
+`requestId`, `viewerDid` (when authenticated), `endpoint`, `status`, and
+`durationMs`. An inbound `X-Request-Id` header (sanitized, max 64 chars) is
+honored and echoed on the response; otherwise a UUID is generated. `/health`
+and `/metrics` requests are counted in metrics but not logged.
+
+### `/metrics`
+
+Prometheus text format. Feedgen-specific metrics:
+
+| Metric                                  | Type      | Labels            |
+| --------------------------------------- | --------- | ----------------- |
+| `feedgen_requests_total`                | counter   | `endpoint,status` |
+| `feedgen_request_duration_seconds`      | histogram | `endpoint`        |
+| `feedgen_subscriptions_open`            | gauge     | `kind`            |
+| `feedgen_subscription_reconnects_total` | counter   | `kind`            |
+| `feedgen_index_posts_total`             | counter   |                   |
+| `feedgen_boundary_cache_hits_total`     | counter   |                   |
+| `feedgen_boundary_cache_misses_total`   | counter   |                   |
+
+`kind` is `service` (enrollment stream) or `actor` (per-actor syncers).
+Process defaults (`process_resident_memory_bytes`, `process_open_fds`,
+event-loop lag, …) are included. Blob-cache metrics land with the blob cache
+itself (WP9); no blob cache exists yet.
+
+### `/health`
+
+Returns `{ok, version, serviceStreamConnected, actorPoolSize}`. `ok` is
+independent of subscription state: with `FEEDGEN_SUBSCRIBE_ENROLLMENTS=false`
+the stream fields read `false`/`0` by design.
+
+### Shutdown semantics
+
+On SIGTERM/SIGINT the feedgen stops accepting connections and drains in-flight
+HTTP requests (15 s deadline, then open sockets are destroyed), stops the
+service stream, waits for in-flight actor commit applies to finish (cursors
+are durable per applied commit, so this is the cursor flush), then closes the
+DB and exits 0. A second signal exits 1 immediately.
+`unhandledRejection`/`uncaughtException` log the error and exit 1.
+
+### Manual soak test
+
+Run locally with sqlite, seeded posts, and `FEEDGEN_SUBSCRIBE_ENROLLMENTS=false`.
+Drive ~50 req/s for 5 minutes against `getFeed` with a static service JWT, e.g.
+`autocannon -R 50 -d 300 -H "authorization=Bearer $JWT" "$BASE/xrpc/zone.stratos.feedgen.getFeed?feed=<id>"`.
+Record before/after RSS (`ps -o rss= -p <pid>`) and FD count
+(`ls /proc/<pid>/fd | wc -l`), and cross-check
+`process_resident_memory_bytes` / `process_open_fds` from `/metrics`.
+Pass: RSS growth < 50 MB and no FD growth.
 
 ## Build & test
 

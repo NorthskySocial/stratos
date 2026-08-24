@@ -33,6 +33,9 @@ class FakeSyncer {
   stop(): void {
     this.stopped = true
   }
+  async drainAndStop(): Promise<void> {
+    this.stop()
+  }
   setConnectGate(_gate: (() => Promise<void>) | null): void {
     // ignored in tests
   }

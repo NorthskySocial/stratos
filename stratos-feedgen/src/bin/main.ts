@@ -1,10 +1,21 @@
 #!/usr/bin/env node
 import { Secp256k1Keypair } from '@atproto/crypto'
+import type { Logger } from '@northskysocial/stratos-core'
 import { createFeedRequestVerifier, createIdResolver } from '../auth/index.js'
 import { type FeedgenConfig, loadFeedgenConfig } from '../config.js'
 import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
 import { loadFeedRegistry } from '../feeds/index.js'
+import {
+  installPanicHandlers,
+  installShutdownHandlers,
+} from '../lifecycle/shutdown.js'
+import { createLogger } from '../logger.js'
+import {
+  createFeedgenMetrics,
+  type FeedgenMetrics,
+  type SubscriptionStatus,
+} from '../metrics.js'
 import {
   createReconcileScheduler,
   Purger,
@@ -21,6 +32,9 @@ import { UpstreamStratosClient } from '../upstream/index.js'
 
 async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
+  const logger = createLogger(cfg.logLevel)
+  installPanicHandlers(logger)
+
   const feeds = loadFeedRegistry()
   const port = parsePort(process.env['FEEDGEN_PORT']) ?? 3000
 
@@ -35,10 +49,20 @@ async function main(): Promise<void> {
     keypair,
   })
 
+  const subscriptionStatus: SubscriptionStatus = {
+    serviceStream: null,
+    actorPool: null,
+  }
+  const metrics = createFeedgenMetrics(subscriptionStatus)
+
   const enrollmentManager = new EnrollmentManager({
     client: upstream,
     ttlMs: cfg.boundaryCacheTtlMs,
     max: cfg.boundaryCacheMax,
+    onCacheEvent: (event) => {
+      if (event === 'hit') metrics.boundaryCacheHits.inc()
+      else metrics.boundaryCacheMisses.inc()
+    },
   })
 
   const store = await createFeedgenStore(cfg)
@@ -57,13 +81,18 @@ async function main(): Promise<void> {
     store,
     enrollmentManager,
     verifier,
+    logger,
+    metrics,
+    subscriptionStatus,
   })
 
   const httpServer = await server.listen(port)
-  console.log(`stratos-feedgen listening on :${port}`)
+  logger.info({ port }, 'stratos-feedgen listening')
 
   const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
-  const indexer = new SubscriptionIndexer(store)
+  const indexer = new SubscriptionIndexer(store, {
+    onPostIndexed: () => metrics.indexPostsTotal.inc(),
+  })
 
   const subscribeEnrollments =
     process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
@@ -75,28 +104,22 @@ async function main(): Promise<void> {
         indexer,
         enrollmentManager,
         configuredBoundaries,
+        logger,
+        metrics,
       })
     : null
   const serviceStream = subscription?.serviceStream ?? null
   const actorPool = subscription?.actorPool ?? null
+  subscriptionStatus.serviceStream = serviceStream
+  subscriptionStatus.actorPool = actorPool
 
-  const shutdown = (signal: NodeJS.Signals): void => {
-    console.log(`received ${signal}, shutting down`)
-    serviceStream?.stop()
-    const poolStop = actorPool ? actorPool.stop() : Promise.resolve()
-    httpServer.close()
-    poolStop
-      .then(() => store.close())
-      .then(
-        () => process.exit(0),
-        (err: unknown) => {
-          console.error('error closing store', err)
-          process.exit(1)
-        },
-      )
-  }
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  installShutdownHandlers({
+    httpServer,
+    serviceStream,
+    actorPool,
+    store,
+    logger,
+  })
 }
 
 interface StartSubscriptionDeps {
@@ -106,6 +129,8 @@ interface StartSubscriptionDeps {
   indexer: SubscriptionIndexer
   enrollmentManager: EnrollmentManager
   configuredBoundaries: Set<string>
+  logger: Logger
+  metrics: FeedgenMetrics
 }
 
 /**
@@ -117,7 +142,8 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream: ServiceStream
   actorPool: ActorPool
 }> {
-  const { cfg, upstream, store, indexer, enrollmentManager } = deps
+  const { cfg, upstream, store, indexer, enrollmentManager, logger, metrics } =
+    deps
   const { configuredBoundaries } = deps
 
   const pool = new ActorPool(
@@ -130,12 +156,14 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       idleEvictionMs: parseIntEnv(
         process.env['FEEDGEN_ACTOR_SYNC_IDLE_EVICTION_MS'],
       ),
+      onReconnectScheduled: () =>
+        metrics.reconnectsTotal.inc({ kind: 'actor' }),
     },
     {
       store,
       indexer,
       onError: (err) => {
-        console.error('actor pool error:', err)
+        logger.error({ err }, 'actor pool error')
       },
     },
   )
@@ -145,6 +173,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     store,
     enrollmentCache: enrollmentManager,
     actorPool: pool,
+    audit: (entry) => logger.info({ ...entry }, 'feedgen purge'),
   })
 
   // Reconciliation: catch enroll/unenroll (and boundary-shrink) changes
@@ -153,23 +182,26 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // via batching so upstream resolves don't fan out unbounded on large
   // tenants.
   const runReconcile = async (): Promise<void> => {
-    const summary = await reconcileEnrollments(
-      { store, purger, client: upstream },
+    await reconcileEnrollments(
+      {
+        store,
+        purger,
+        client: upstream,
+        log: (summary) =>
+          logger.info({ ...summary }, 'enrollment reconciliation completed'),
+        onError: (did, err) =>
+          logger.error({ did, err }, 'reconcile resolve failed'),
+      },
       configuredBoundaries,
       {
         batchSize: parseIntEnv(process.env['FEEDGEN_RECONCILE_BATCH_SIZE']),
         maxActors: parseIntEnv(process.env['FEEDGEN_RECONCILE_MAX_ACTORS']),
       },
     )
-    console.log(
-      `enrollment reconciliation examined ${summary.examined} actors ` +
-        `(${summary.unenrolled} unenrolled, ${summary.shrunk} shrunk, ` +
-        `${summary.postsPurged} posts purged, ${summary.errors} errors)`,
-    )
   }
   await runReconcile()
   const triggerReconcile = createReconcileScheduler(runReconcile, (err) => {
-    console.error('reconnect reconciliation failed:', err)
+    logger.error({ err }, 'reconnect reconciliation failed')
   })
 
   // Seed only AFTER reconciliation so the snapshot already reflects
@@ -177,7 +209,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // whose boundaries were revoked would enter the live pool from the stale
   // snapshot and keep syncing until the next restart.
   const seeded = await pool.seedFromStore(configuredBoundaries)
-  console.log(`actor pool seeded with ${seeded} actors`)
+  logger.info({ seeded }, 'actor pool seeded')
 
   // Apply an actor's current boundary set: purge derived state for any
   // configured boundary the actor left, refresh the enrolled-actor snapshot,
@@ -221,6 +253,8 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     {
       stratosServiceUrl: cfg.stratosServiceUrl,
       mintToken: () => upstream.mintServiceAuthToken(),
+      onReconnectScheduled: () =>
+        metrics.reconnectsTotal.inc({ kind: 'service' }),
     },
     {
       onEnroll: async (did, boundaries) => {
@@ -246,11 +280,11 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       },
     },
     (err) => {
-      console.error('service stream error:', err)
+      logger.error({ err }, 'service stream error')
     },
   )
   serviceStream.start()
-  console.log('service enrollment subscription started')
+  logger.info({}, 'service enrollment subscription started')
 
   return { serviceStream, actorPool: pool }
 }
@@ -274,6 +308,7 @@ function parseIntEnv(value: string | undefined): number | undefined {
 }
 
 main().catch((err: unknown) => {
-  console.error('fatal:', err)
+  // Config/startup can fail before the configured logger exists.
+  createLogger('info').error({ err }, 'fatal startup error')
   process.exit(1)
 })

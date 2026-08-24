@@ -15,6 +15,7 @@ type SyncerCtor = (
 interface SyncerLike {
   start: () => void
   stop: () => void
+  drainAndStop: () => Promise<void>
   setConnectGate: (gate: (() => Promise<void>) | null) => void
   getLastMessageAt: () => number
 }
@@ -32,6 +33,8 @@ export interface ActorPoolConfig {
   syncerMaxDelayMs?: number
   syncerJitterRatio?: number
   syncerMaxQueueSize?: number
+  /** Observability hook, passed to every syncer this pool starts. */
+  onReconnectScheduled?: () => void
 }
 
 export interface ActorPoolDeps {
@@ -98,12 +101,12 @@ export class ActorPool {
       clearInterval(this.evictionTimer)
       this.evictionTimer = null
     }
-    for (const syncer of this.active.values()) {
-      syncer.stop()
-    }
+    const syncers = [...this.active.values()]
     this.active.clear()
     this.waiting = []
     this.requested.clear()
+    // Await in-flight commit applies so the caller can close the DB safely.
+    await Promise.all(syncers.map((syncer) => syncer.drainAndStop()))
   }
 
   /**
@@ -217,6 +220,7 @@ export class ActorPool {
         maxDelayMs: this.config.syncerMaxDelayMs,
         jitterRatio: this.config.syncerJitterRatio,
         maxQueueSize: this.config.syncerMaxQueueSize,
+        onReconnectScheduled: this.config.onReconnectScheduled,
       },
       {
         store: this.deps.store,

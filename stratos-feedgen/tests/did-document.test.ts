@@ -110,4 +110,11 @@ describe('loadFeedgenConfig public URL derivation', () => {
     })
     expect(cfg.feedgenPublicUrl).toBe('https://feeds.example.com')
   })
+
+  it('defaults the log level to info and honors FEEDGEN_LOG_LEVEL', () => {
+    expect(loadFeedgenConfig({ ...baseEnv }).logLevel).toBe('info')
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_LOG_LEVEL: 'debug' }).logLevel,
+    ).toBe('debug')
+  })
 })
