@@ -367,6 +367,29 @@ describe('PdsEnrollmentSyncWorker', () => {
     worker.stop()
   })
 
+  it('survives being superseded when no logger is set', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sync = vi.fn().mockImplementation(async () => {
+      await gate
+      return 'ok'
+    })
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    const first = await worker.enqueue(USAGI)
+    const inFlight = worker.kick(USAGI, first)
+    const second = await worker.enqueue(USAGI)
+
+    release()
+    await expect(inFlight).resolves.toBe('ok')
+
+    const job = queue.jobs.get(USAGI)
+    expect(job?.generation).toBe(second)
+    expect(job?.status).toBe('pending')
+  })
+
   it('cancel drops the job and waits for an in-flight attempt to settle', async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
