@@ -7,8 +7,9 @@ import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
 import { loadFeedRegistry } from '../feeds/index.js'
 import {
+  createShutdownHandler,
   installPanicHandlers,
-  installShutdownHandlers,
+  type ShutdownHandler,
 } from '../lifecycle/shutdown.js'
 import { createLogger } from '../logger.js'
 import {
@@ -34,6 +35,16 @@ async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
   const logger = createLogger(cfg.logLevel)
   installPanicHandlers(logger)
+
+  // Listeners are installed before the long async startup so a signal that
+  // arrives mid-startup exits instead of being ignored. The placeholder is
+  // swapped for the full drain sequence once everything is wired.
+  let shutdown: ShutdownHandler = async (signal: string): Promise<void> => {
+    logger.info({ signal }, 'shutdown signal during startup; exiting')
+    process.exit(0)
+  }
+  process.on('SIGTERM', () => void shutdown('SIGTERM'))
+  process.on('SIGINT', () => void shutdown('SIGINT'))
 
   const feeds = loadFeedRegistry()
   const port = parsePort(process.env['FEEDGEN_PORT']) ?? 3000
@@ -83,6 +94,7 @@ async function main(): Promise<void> {
     verifier,
     logger,
     metrics,
+    metricsToken: cfg.metricsToken,
     subscriptionStatus,
   })
 
@@ -113,7 +125,7 @@ async function main(): Promise<void> {
   subscriptionStatus.serviceStream = serviceStream
   subscriptionStatus.actorPool = actorPool
 
-  installShutdownHandlers({
+  shutdown = createShutdownHandler({
     httpServer,
     serviceStream,
     actorPool,

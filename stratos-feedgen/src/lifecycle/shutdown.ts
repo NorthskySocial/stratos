@@ -3,7 +3,7 @@ import type { Logger } from '@northskysocial/stratos-core'
 
 export interface ShutdownDeps {
   httpServer: HttpServer
-  serviceStream?: { stop: () => void } | null
+  serviceStream?: { stop: () => void | Promise<void> } | null
   actorPool?: { stop: () => Promise<void> } | null
   store: { close: () => Promise<void> }
   logger: Logger
@@ -18,7 +18,8 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 15_000
 
 /**
  * Build the shutdown sequence: stop accepting connections and drain in-flight
- * requests (destroying stragglers at the deadline), stop the sync streams,
+ * requests (destroying stragglers at the deadline), stop the service stream
+ * and await its in-flight frame dispatch (bounded by the same deadline),
  * await the actor pool's in-flight commit applies — cursors are durable
  * per-commit, so awaiting the drain IS the cursor flush — then close the DB.
  * A second signal exits immediately as an operator escape hatch.
@@ -38,7 +39,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
     deps.logger.info({ signal }, 'shutdown started')
     try {
       await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
-      deps.serviceStream?.stop()
+      await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
       await deps.actorPool?.stop()
       await deps.store.close()
       deps.logger.info({ signal }, 'shutdown complete')
@@ -84,21 +85,48 @@ async function drainHttpServer(
   // Idle keep-alive sockets are not in-flight work; without this the drain
   // always runs to the deadline when any client used keep-alive.
   server.closeIdleConnections()
+  if ((await raceDeadline(closed, timeoutMs)) === 'timeout') {
+    logger.warn(
+      { timeoutMs },
+      'drain deadline expired; destroying open connections',
+    )
+    server.closeAllConnections()
+    await closed
+  }
+}
+
+/**
+ * Await the service stream's in-flight frame dispatch before the store
+ * closes, so a late enrollment frame cannot hit a closed DB. A dispatch
+ * stuck past the deadline no longer blocks shutdown; the reconnect
+ * reconciliation on the next boot recovers the lost event.
+ */
+async function stopServiceStream(
+  stream: ShutdownDeps['serviceStream'],
+  timeoutMs: number,
+  logger: Logger,
+): Promise<void> {
+  if (!stream) return
+  const stopped = Promise.resolve(stream.stop())
+  if ((await raceDeadline(stopped, timeoutMs)) === 'timeout') {
+    logger.warn(
+      { timeoutMs },
+      'service stream drain deadline expired; continuing shutdown',
+    )
+  }
+}
+
+async function raceDeadline(
+  work: Promise<unknown>,
+  timeoutMs: number,
+): Promise<'done' | 'timeout'> {
   let timer!: ReturnType<typeof setTimeout>
   const deadline = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), timeoutMs)
     timer.unref()
   })
   try {
-    const winner = await Promise.race([closed, deadline])
-    if (winner === 'timeout') {
-      logger.warn(
-        { timeoutMs },
-        'drain deadline expired; destroying open connections',
-      )
-      server.closeAllConnections()
-      await closed
-    }
+    return await Promise.race([work.then(() => 'done' as const), deadline])
   } finally {
     clearTimeout(timer)
   }

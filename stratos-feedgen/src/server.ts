@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import type { Server as HttpServer } from 'node:http'
 import express, { type Express, type RequestHandler } from 'express'
 import { createServer as createXrpcServer } from '@atproto/xrpc-server'
@@ -33,6 +34,11 @@ export interface FeedgenServerDeps {
   logger?: Logger
   /** Metric set; also enables the `/metrics` endpoint. Omitted: no metrics. */
   metrics?: FeedgenMetrics
+  /**
+   * Bearer token required on `/metrics`. Omitted: the endpoint is open and
+   * the operator must restrict access at the network layer.
+   */
+  metricsToken?: string
   /** Late-bound subscription state reported by `/health`. */
   subscriptionStatus?: SubscriptionStatus
 }
@@ -84,7 +90,15 @@ export function createFeedgenServer(
 
   const metrics = deps.metrics
   if (metrics) {
-    app.get('/metrics', (_req, res, next) => {
+    const metricsToken = deps.metricsToken
+    app.get('/metrics', (req, res, next) => {
+      if (
+        metricsToken !== undefined &&
+        !isBearerTokenValid(req.headers.authorization, metricsToken)
+      ) {
+        res.status(401).json({ error: 'Unauthorized' })
+        return
+      }
       metrics.registry.metrics().then((body) => {
         res.set('Content-Type', metrics.registry.contentType)
         res.send(body)
@@ -130,6 +144,19 @@ export function createFeedgenServer(
       })
     },
   }
+}
+
+/** Constant-time bearer comparison; the length guard leaks only the length. */
+function isBearerTokenValid(
+  header: string | undefined,
+  expectedToken: string,
+): boolean {
+  const scheme = 'Bearer '
+  if (!header?.startsWith(scheme)) return false
+  const presented = Buffer.from(header.slice(scheme.length))
+  const expected = Buffer.from(expectedToken)
+  if (presented.length !== expected.length) return false
+  return timingSafeEqual(presented, expected)
 }
 
 const KNOWN_ENDPOINTS = new Set([

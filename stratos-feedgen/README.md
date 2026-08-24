@@ -118,13 +118,14 @@ tests/
 
 ## Configuration
 
-| Env var               | Required | Description                                                                    |
-| --------------------- | -------- | ------------------------------------------------------------------------------ |
-| `FEEDGEN_SERVICE_DID` | yes      | This feed generator's service DID (e.g. `did:web:feedgen.example.com`)         |
-| `FEEDGEN_SIGNING_KEY` | yes      | Private signing key for this feed generator's service identity (hex secp256k1) |
-| `STRATOS_SERVICE_URL` | yes      | Base URL of the upstream Stratos service                                       |
-| `STRATOS_SERVICE_DID` | yes      | DID of the upstream Stratos service                                            |
-| `FEEDGEN_LOG_LEVEL`   | no       | Pino log level (default `info`)                                                |
+| Env var                 | Required | Description                                                                    |
+| ----------------------- | -------- | ------------------------------------------------------------------------------ |
+| `FEEDGEN_SERVICE_DID`   | yes      | This feed generator's service DID (e.g. `did:web:feedgen.example.com`)         |
+| `FEEDGEN_SIGNING_KEY`   | yes      | Private signing key for this feed generator's service identity (hex secp256k1) |
+| `STRATOS_SERVICE_URL`   | yes      | Base URL of the upstream Stratos service                                       |
+| `STRATOS_SERVICE_DID`   | yes      | DID of the upstream Stratos service                                            |
+| `FEEDGEN_LOG_LEVEL`     | no       | Pino log level (default `info`; an empty value falls back to the default)      |
+| `FEEDGEN_METRICS_TOKEN` | no       | Bearer token required on `/metrics`; unset leaves the endpoint open            |
 
 Additional configuration (DB path, port, S3 cache settings, feed definitions, labeler DIDs) is added as the corresponding subsystems land.
 
@@ -140,7 +141,12 @@ and `/metrics` requests are counted in metrics but not logged.
 
 ### `/metrics`
 
-Prometheus text format. Feedgen-specific metrics:
+Prometheus text format, served on the same listener as the public API. When
+`FEEDGEN_METRICS_TOKEN` is set, scrapes must send
+`Authorization: Bearer <token>` (constant-time comparison); other requests
+get 401. When unset, the endpoint is **open** — the operator must restrict
+access at the network layer (firewall or reverse proxy). Feedgen-specific
+metrics:
 
 | Metric                                  | Type      | Labels            |
 | --------------------------------------- | --------- | ----------------- |
@@ -167,9 +173,12 @@ the stream fields read `false`/`0` by design.
 
 On SIGTERM/SIGINT the feedgen stops accepting connections and drains in-flight
 HTTP requests (15 s deadline, then open sockets are destroyed), stops the
-service stream, waits for in-flight actor commit applies to finish (cursors
-are durable per applied commit, so this is the cursor flush), then closes the
-DB and exits 0. A second signal exits 1 immediately.
+service stream and waits for its in-flight enrollment dispatch (bounded by the
+same deadline; a dispatch cut off at the deadline is recovered by the
+reconcile on the next boot), waits for in-flight actor commit applies to
+finish (cursors are durable per applied commit, so this is the cursor flush),
+then closes the DB and exits 0. A signal during startup exits immediately; a
+second signal exits 1 immediately.
 `unhandledRejection`/`uncaughtException` log the error and exit 1.
 
 ### Manual soak test

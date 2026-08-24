@@ -38,7 +38,9 @@ interface TestServerCtx {
   status: SubscriptionStatus
 }
 
-async function startServer(): Promise<TestServerCtx> {
+async function startServer(opts?: {
+  metricsToken?: string
+}): Promise<TestServerCtx> {
   const status: SubscriptionStatus = { serviceStream: null, actorPool: null }
   const metrics = createFeedgenMetrics(status)
 
@@ -67,6 +69,7 @@ async function startServer(): Promise<TestServerCtx> {
     >[0]['enrollmentManager'],
     verifier,
     metrics,
+    metricsToken: opts?.metricsToken,
     subscriptionStatus: status,
   })
 
@@ -185,6 +188,38 @@ describe('/metrics endpoint', () => {
     expect(body).toContain(
       'feedgen_subscription_reconnects_total{kind="service"} 1',
     )
+  })
+
+  it('rejects scrapes without the configured bearer token', async () => {
+    ctx = await startServer({ metricsToken: 'magi-melchior-token' })
+
+    const missing = await fetch(`${ctx.baseUrl}/metrics`)
+    expect(missing.status).toBe(401)
+
+    const wrongLength = await fetch(`${ctx.baseUrl}/metrics`, {
+      headers: { authorization: 'Bearer wrong' },
+    })
+    expect(wrongLength.status).toBe(401)
+
+    const sameLength = await fetch(`${ctx.baseUrl}/metrics`, {
+      headers: { authorization: 'Bearer magi-melchior-tokeX' },
+    })
+    expect(sameLength.status).toBe(401)
+
+    const wrongScheme = await fetch(`${ctx.baseUrl}/metrics`, {
+      headers: { authorization: 'Basic magi-melchior-token' },
+    })
+    expect(wrongScheme.status).toBe(401)
+  })
+
+  it('serves scrapes carrying the configured bearer token', async () => {
+    ctx = await startServer({ metricsToken: 'magi-melchior-token' })
+
+    const res = await fetch(`${ctx.baseUrl}/metrics`, {
+      headers: { authorization: 'Bearer magi-melchior-token' },
+    })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('feedgen_requests_total')
   })
 
   it('reports subscription state on /health from the late-bound status', async () => {
