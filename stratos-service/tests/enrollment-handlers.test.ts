@@ -373,6 +373,12 @@ describe('Unenroll endpoint', () => {
 
     const unenrollSpy = vi.fn().mockResolvedValue(undefined)
     const queueRemoveSpy = vi.fn().mockRejectedValue(new Error('db closed'))
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }
 
     const ctx = {
       enrollmentStore: {
@@ -393,12 +399,7 @@ describe('Unenroll endpoint', () => {
       authVerifier: {
         standard: vi.fn(),
       },
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      },
+      logger,
       app: {
         get: vi.fn(),
         post: vi.fn(),
@@ -418,6 +419,52 @@ describe('Unenroll endpoint', () => {
     expect((res as any).body.success).toBe(true)
     expect(unenrollSpy).toHaveBeenCalledWith(did)
     expect(queueRemoveSpy).toHaveBeenCalledWith(did)
+    expect(logger.warn).toHaveBeenCalledWith(
+      { err: 'db closed', did },
+      'failed to remove queued PDS sync job during unenrollment',
+    )
+  })
+
+  it('unenrolls without a logger when queued sync removal fails', async () => {
+    const did = 'did:plc:testuser'
+    const server = createMockXrpcServer()
+
+    const ctx = {
+      enrollmentStore: {
+        getEnrollment: vi.fn().mockResolvedValue(null),
+      },
+      enrollmentService: {
+        unenroll: vi.fn().mockResolvedValue(undefined),
+      },
+      profileRecordWriter: {
+        deleteEnrollmentRecord: vi.fn(),
+      },
+      oauthClient: {
+        revoke: vi.fn().mockResolvedValue(undefined),
+      },
+      pdsSyncQueue: {
+        remove: vi.fn().mockRejectedValue(new Error('db closed')),
+      },
+      authVerifier: {
+        standard: vi.fn(),
+      },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
+    } as unknown as AppContext
+
+    registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
+
+    const res = await invokeMethod(
+      server,
+      'zone.stratos.enrollment.unenroll',
+      {},
+      { credentials: { type: 'user', did } },
+    )
+
+    expect((res as any).body.success).toBe(true)
   })
 
   it('proceeds even if PDS record deletion fails', async () => {
