@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { encode as cborEncode, toBytes as cborToBytes } from '@atcute/cbor'
 import type { CidLink } from '@atcute/cid'
@@ -617,6 +617,10 @@ describe('verifyStratosRecord', () => {
   const SERVICE_DID = 'did:web:nerv.tokyo.jp'
   const USER_DID = 'did:plc:shinji'
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   const didDocFetchFor = (keypair: Secp256k1Keypair) => {
     const publicKeyMultibase = keypair.did().slice('did:key:'.length)
     return vi.fn<typeof fetch>(
@@ -833,8 +837,6 @@ describe('verifyStratosRecord', () => {
     )
 
     expect(result.level).toBe('cid-integrity')
-
-    vi.restoreAllMocks()
   })
 
   it('returns cid-integrity when no serviceDid is given', async () => {
