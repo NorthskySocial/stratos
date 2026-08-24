@@ -56,9 +56,11 @@ export async function verifyEnrolled(
       throw err
     }
     deps.logger?.error({ err, did }, 'failed to verify enrollment eligibility')
+    // 'VerificationFailed' marks a failed check, not a policy denial.
+    // The status endpoint must not report it as an authoritative denial.
     throw new EnrollmentDeniedError(
       'Enrollment verification failed',
-      'NotInAllowlist',
+      'VerificationFailed',
       { cause: err },
     )
   }

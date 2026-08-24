@@ -65,8 +65,9 @@ export async function validateEnrollment(
   try {
     didDoc = await idResolver.did.resolve(did)
   } catch (err) {
-    // DID resolution failed
-    return { allowed: false, reason: 'DidNotResolved', cause: err }
+    // A thrown resolution is a failed check, not proof that the DID
+    // does not resolve. Keep it distinct from 'DidNotResolved'.
+    return { allowed: false, reason: 'VerificationFailed', cause: err }
   }
 
   if (!didDoc) {
@@ -110,6 +111,7 @@ export async function assertEnrollment(
       DidNotResolved: 'Could not resolve your DID document',
       PdsEndpointNotFound: 'Could not find a PDS endpoint in your DID document',
       ServiceClosed: 'This Stratos service is not accepting new enrollments',
+      VerificationFailed: 'Enrollment verification failed',
     }
 
     throw new EnrollmentDeniedError(messages[result.reason!], result.reason!, {
