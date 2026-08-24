@@ -103,6 +103,79 @@ describe('SqlitePdsSyncQueueStore', () => {
     await expect(store.remove('did:plc:unknown')).resolves.toBeUndefined()
   })
 
+  it('removeIfCurrent deletes the job when the generation is still current', async () => {
+    const generation = await store.upsertPending(USAGI)
+
+    await expect(store.removeIfCurrent(USAGI, generation)).resolves.toBe(true)
+    expect(await store.list()).toHaveLength(0)
+  })
+
+  it('removeIfCurrent keeps the job when a newer intent superseded it', async () => {
+    const stale = await store.upsertPending(USAGI)
+    const current = await store.upsertPending(USAGI)
+    expect(current).toBeGreaterThan(stale)
+
+    await expect(store.removeIfCurrent(USAGI, stale)).resolves.toBe(false)
+
+    const [survivor] = await store.list()
+    expect(survivor.did).toBe(USAGI)
+    expect(survivor.generation).toBe(current)
+  })
+
+  it('removeIfCurrent reports false for an unknown did', async () => {
+    await expect(store.removeIfCurrent('did:plc:unknown', 1)).resolves.toBe(
+      false,
+    )
+  })
+
+  it('markRetry and markFailed ignore a superseded generation', async () => {
+    const stale = await store.upsertPending(USAGI)
+    const current = await store.upsertPending(USAGI)
+
+    await store.markFailed(USAGI, stale, 'invalid_grant')
+    await store.markRetry(
+      USAGI,
+      stale,
+      5,
+      new Date(Date.now() + 60_000).toISOString(),
+      'stale write',
+    )
+
+    const [job] = await store.list()
+    expect(job.status).toBe('pending')
+    expect(job.attemptCount).toBe(0)
+    expect(job.lastError).toBeNull()
+    expect(job.generation).toBe(current)
+  })
+
+  it('requeueFailed revives every failed job and bumps its generation', async () => {
+    const usagiGeneration = await store.upsertPending(USAGI)
+    await store.markFailed(USAGI, usagiGeneration, 'invalid_grant')
+    const reiGeneration = await store.upsertPending(REI)
+    await store.markFailed(REI, reiGeneration, 'invalid_grant')
+    await store.upsertPending(AMI)
+
+    await expect(store.requeueFailed()).resolves.toBe(2)
+
+    const jobs = await store.list()
+    expect(jobs.map((j) => j.status)).toEqual(['pending', 'pending', 'pending'])
+
+    const usagi = jobs.find((j) => j.did === USAGI)
+    expect(usagi?.attemptCount).toBe(0)
+    expect(usagi?.lastError).toBeNull()
+    expect(usagi?.generation).toBeGreaterThan(usagiGeneration)
+
+    const due = await store.listDue(new Date().toISOString(), 10)
+    expect(due.map((j) => j.did).sort()).toEqual([AMI, REI, USAGI].sort())
+  })
+
+  it('requeueFailed reports zero when no job has failed', async () => {
+    await store.upsertPending(USAGI)
+
+    await expect(store.requeueFailed()).resolves.toBe(0)
+    expect((await store.list())[0].status).toBe('pending')
+  })
+
   it('list orders jobs by firstQueuedAt', async () => {
     await store.upsertPending(USAGI)
     await new Promise((resolve) => setTimeout(resolve, 5))

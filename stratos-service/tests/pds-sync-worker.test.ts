@@ -319,11 +319,19 @@ describe('PdsEnrollmentSyncWorker', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     const sync = vi.fn().mockImplementation(async () => {
       await gate
       return 'ok'
     })
-    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+    const worker = new PdsEnrollmentSyncWorker(
+      {
+        queue,
+        sync,
+        logger: logger as unknown as PdsSyncWorkerDeps['logger'],
+      },
+      CONFIG,
+    )
 
     // Mutation A starts and blocks inside the PDS write.
     const first = await worker.enqueue(USAGI)
@@ -335,6 +343,16 @@ describe('PdsEnrollmentSyncWorker', () => {
 
     release()
     await expect(inFlight).resolves.toBe('ok')
+
+    // A reports that it was superseded, and must not claim it wrote a record.
+    expect(logger.info).toHaveBeenCalledWith(
+      { did: USAGI, generation: first },
+      'pds sync: superseded mid-attempt, newer job retained',
+    )
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'pds sync: enrollment record written',
+    )
 
     // A must not clear B's job on its way out.
     const job = queue.jobs.get(USAGI)
@@ -365,11 +383,21 @@ describe('PdsEnrollmentSyncWorker', () => {
     const generation = await worker.enqueue(USAGI)
     const inFlight = worker.kick(USAGI, generation)
 
-    const cancelled = worker.cancel(USAGI)
+    let cancelResolved = false
+    const cancelled = worker.cancel(USAGI).then(() => {
+      cancelResolved = true
+    })
+
+    // cancel must still be waiting: the attempt has not settled yet.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(false)
+    expect(cancelResolved).toBe(false)
+
     release()
     await cancelled
 
     expect(settled).toBe(true)
+    expect(cancelResolved).toBe(true)
     expect(queue.jobs.has(USAGI)).toBe(false)
     await inFlight
   })
