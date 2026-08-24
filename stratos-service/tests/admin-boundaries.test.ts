@@ -652,7 +652,7 @@ describe('admin boundary endpoints', () => {
     })
 
     it('returns 500 when the queue read fails', async () => {
-      const { app, pdsSyncQueue } = createCtx({})
+      const { app, ctx, pdsSyncQueue } = createCtx({})
       pdsSyncQueue.list = vi.fn().mockRejectedValue(new Error('db closed'))
 
       const res = await invokeGetRoute(
@@ -664,6 +664,10 @@ describe('admin boundary endpoints', () => {
         error: 'InternalError',
         message: 'Failed to list PDS sync status',
       })
+      expect(ctx.logger?.error).toHaveBeenCalledWith(
+        { err: 'db closed' },
+        'admin.listPdsSyncStatus failed',
+      )
     })
   })
 
@@ -693,6 +697,27 @@ describe('admin boundary endpoints', () => {
         expect.objectContaining({ requeued: 2 }),
         'admin requeued PDS sync jobs',
       )
+      expect(ctx.authVerifier.admin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          req: expect.anything(),
+          res: expect.anything(),
+        }),
+      )
+    })
+
+    it('revives failed jobs when no logger is set', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      const usagi = await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.markFailed('did:plc:usagi', usagi, 'invalid_grant')
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toEqual({ requeued: 1 })
     })
 
     it('reports zero when no job has failed', async () => {
@@ -723,7 +748,7 @@ describe('admin boundary endpoints', () => {
     })
 
     it('returns 500 when the queue write fails', async () => {
-      const { app, pdsSyncQueue } = createCtx({})
+      const { app, ctx, pdsSyncQueue } = createCtx({})
       pdsSyncQueue.requeueFailed = vi
         .fn()
         .mockRejectedValue(new Error('db closed'))
@@ -738,6 +763,37 @@ describe('admin boundary endpoints', () => {
         error: 'InternalError',
         message: 'Failed to requeue PDS sync jobs',
       })
+      expect(ctx.logger?.error).toHaveBeenCalledWith(
+        { err: 'db closed' },
+        'admin.requeuePdsSync failed',
+      )
+    })
+  })
+
+  describe('inline sync kick failure', () => {
+    it('degrades to deferred instead of failing the committed mutation', async () => {
+      const { app, ctx } = createCtx({})
+      ctx.pdsSyncWorker.kick = vi
+        .fn()
+        .mockRejectedValue(new Error('queue write failed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.addBoundary',
+        {
+          did: 'did:plc:usagi',
+          boundary: 'did:web:nerv.tokyo.jp/bees',
+        },
+      )
+
+      // The boundary change already committed; a queue failure must not
+      // surface as a 500.
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
+      expect(ctx.logger?.warn).toHaveBeenCalledWith(
+        { err: 'queue write failed', did: 'did:plc:usagi' },
+        'pds sync attempt failed inline; job remains queued',
+      )
     })
   })
 
