@@ -149,6 +149,11 @@ const envSchema = z
       .int()
       .positive()
       .default(12),
+    STRATOS_PDS_SYNC_CLAIM_LIMIT: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(10),
 
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
@@ -333,6 +338,7 @@ export interface StratosServiceConfig {
     backoffBaseMs: number
     backoffCapMs: number
     maxAttempts: number
+    claimLimit: number
   }
   identity: {
     plcUrl: string
@@ -630,6 +636,16 @@ function parseAllowedRedirectOrigins(raw: string | undefined): string[] {
     })
 }
 
+function pdsSyncConfig(env: Env): StratosServiceConfig['pdsSync'] {
+  return {
+    tickMs: env.STRATOS_PDS_SYNC_TICK_MS,
+    backoffBaseMs: env.STRATOS_PDS_SYNC_BACKOFF_BASE_MS,
+    backoffCapMs: env.STRATOS_PDS_SYNC_BACKOFF_CAP_MS,
+    maxAttempts: env.STRATOS_PDS_SYNC_MAX_ATTEMPTS,
+    claimLimit: env.STRATOS_PDS_SYNC_CLAIM_LIMIT,
+  }
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
@@ -694,12 +710,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
         allowedDomains,
       ),
     },
-    pdsSync: {
-      tickMs: env.STRATOS_PDS_SYNC_TICK_MS,
-      backoffBaseMs: env.STRATOS_PDS_SYNC_BACKOFF_BASE_MS,
-      backoffCapMs: env.STRATOS_PDS_SYNC_BACKOFF_CAP_MS,
-      maxAttempts: env.STRATOS_PDS_SYNC_MAX_ATTEMPTS,
-    },
+    pdsSync: pdsSyncConfig(env),
     identity: {
       plcUrl: env.STRATOS_PLC_URL,
     },

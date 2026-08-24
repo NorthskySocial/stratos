@@ -318,7 +318,8 @@ async function migratePdsSyncTables(db: ServicePgDb): Promise<void> {
         "nextAttemptAt" TEXT NOT NULL,
         "firstQueuedAt" TEXT NOT NULL,
         "updatedAt" TEXT NOT NULL,
-        "lastError" TEXT
+        "lastError" TEXT,
+        "generation" INTEGER NOT NULL DEFAULT 0
       )
     `,
   )

@@ -89,6 +89,10 @@ export const enrollmentPdsSync = sqliteTable(
     firstQueuedAt: text('firstQueuedAt').notNull(),
     updatedAt: text('updatedAt').notNull(),
     lastError: text('lastError'),
+    // Bumped on every fresh intent. An attempt carries the generation it read
+    // and only clears the row while that generation is still current, so a
+    // mutation that supersedes an in-flight attempt keeps its job.
+    generation: integer('generation').notNull().default(0),
   },
   (table) => [
     index('enrollment_pds_sync_due_idx').on(table.status, table.nextAttemptAt),

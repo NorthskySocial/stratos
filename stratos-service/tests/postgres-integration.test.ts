@@ -657,7 +657,7 @@ describe('PostgreSQL Backend Integration', () => {
       await queue.upsertPending(testDid)
       const [before] = await queue.list()
 
-      await queue.markFailed(testDid, 'invalid_grant')
+      await queue.markFailed(testDid, 1, 'invalid_grant')
       const [failed] = await queue.list()
       expect(failed.status).toBe('failed')
 
@@ -672,9 +672,9 @@ describe('PostgreSQL Backend Integration', () => {
     it('markRetry hides the job until nextAttemptAt and listDue excludes failed jobs', async () => {
       const future = new Date(Date.now() + 60_000).toISOString()
       await queue.upsertPending(testDid)
-      await queue.markRetry(testDid, 1, future, 'ECONNREFUSED')
+      await queue.markRetry(testDid, 1, 1, future, 'ECONNREFUSED')
       await queue.upsertPending(testDid2)
-      await queue.markFailed(testDid2, 'invalid_grant')
+      await queue.markFailed(testDid2, 1, 'invalid_grant')
 
       const dueNow = await queue.listDue(new Date().toISOString(), 10)
       expect(dueNow).toHaveLength(0)

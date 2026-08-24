@@ -77,9 +77,18 @@ describe('PDS enrollment sync (sqlite integration)', () => {
         backoffBaseMs: 5,
         backoffCapMs: 50,
         maxAttempts: 12,
+        claimLimit: 10,
         ...overrides,
       },
     )
+  }
+
+  /** Mirror the handler: record intent, then run the inline attempt. */
+  function kickNow(
+    worker: PdsEnrollmentSyncWorker,
+    did: string = USAGI,
+  ): Promise<'ok' | 'deferred'> {
+    return worker.enqueue(did).then((gen) => worker.kick(did, gen))
   }
 
   beforeEach(async () => {
@@ -118,8 +127,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       .mockResolvedValue({})
     const worker = createWorker()
 
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('deferred')
+    await expect(kickNow(worker)).resolves.toBe('deferred')
     expect(pds.putRecords).toHaveLength(0)
 
     worker.start()
@@ -193,8 +201,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     restore.mockRejectedValueOnce(sessionGone).mockResolvedValue({})
     const worker = createWorker()
 
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('deferred')
+    await expect(kickNow(worker)).resolves.toBe('deferred')
 
     const jobs = await queue.list()
     expect(jobs).toHaveLength(1)
@@ -202,8 +209,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     expect(jobs[0].lastError).toContain('deleted by another process')
 
     // A fresh admin mutation re-enqueues and succeeds inline.
-    await worker.enqueue(USAGI)
-    await expect(worker.kick(USAGI)).resolves.toBe('ok')
+    await expect(kickNow(worker)).resolves.toBe('ok')
     expect(await queue.list()).toHaveLength(0)
     expect(pds.putRecords).toHaveLength(1)
   })
@@ -213,7 +219,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     await enrollmentStore.unenroll(USAGI)
 
     const worker = createWorker()
-    await expect(worker.kick(USAGI)).resolves.toBe('ok')
+    await expect(kickNow(worker)).resolves.toBe('ok')
     expect(await queue.list()).toHaveLength(0)
     expect(pds.putRecords).toHaveLength(0)
   })
