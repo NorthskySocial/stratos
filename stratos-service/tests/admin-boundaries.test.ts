@@ -4,10 +4,16 @@ import express from 'express'
 import type { AppContext } from '../src'
 import type { EnrollmentEventEmitter } from '../src/context-types.js'
 import type { EnrollmentStore } from '../src/oauth'
-import { registerEnrollmentHandlers } from '../src/features'
+import {
+  PdsEnrollmentSyncWorker,
+  registerEnrollmentHandlers,
+  syncEnrollmentRecordToPds,
+  type PdsSyncJob,
+  type PdsSyncQueueStore,
+} from '../src/features'
 
 // The boundary handlers write the user's PDS enrollment record through an
-// `Agent` constructed inside `updatePdsEnrollmentRecord`. Stub it so the PDS
+// `Agent` constructed inside `syncEnrollmentRecordToPds`. Stub it so the PDS
 // write is deterministic: by default it succeeds (pdsSync: 'ok'); a failure is
 // injected per-test by making `oauthClient.restore` throw before the Agent is
 // ever built. The mock must be a real constructor (class), not an arrow
@@ -68,6 +74,39 @@ function invokePostRoute(
   })
 }
 
+function invokeGetRoute(
+  app: express.Application,
+  path: string,
+): Promise<MockResponse> {
+  return new Promise((resolve, reject) => {
+    let statusCode = 200
+    const req = {
+      query: {},
+      headers: {},
+      method: 'GET',
+      url: path,
+    } as unknown as express.Request
+    const res = {
+      status(code: number) {
+        statusCode = code
+        return res
+      },
+      json(responseBody: unknown) {
+        resolve({ statusCode, body: responseBody })
+        return res
+      },
+      setHeader() {
+        return res
+      },
+    } as unknown as express.Response
+
+    app(req, res, (err?: any) => {
+      if (err) return reject(err)
+      resolve({ statusCode, body: null })
+    })
+  })
+}
+
 function createMockStore(
   overrides: Partial<EnrollmentStore> = {},
 ): EnrollmentStore {
@@ -92,6 +131,56 @@ function createMockStore(
   }
 }
 
+/** In-memory queue so the real worker's bookkeeping is observable per test. */
+class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
+  jobs = new Map<string, PdsSyncJob>()
+
+  async upsertPending(did: string): Promise<void> {
+    const now = new Date().toISOString()
+    const existing = this.jobs.get(did)
+    this.jobs.set(did, {
+      did,
+      status: 'pending',
+      attemptCount: 0,
+      nextAttemptAt: now,
+      firstQueuedAt: existing?.firstQueuedAt ?? now,
+      updatedAt: now,
+      lastError: null,
+    })
+  }
+
+  async listDue(now: string, limit: number): Promise<PdsSyncJob[]> {
+    return [...this.jobs.values()]
+      .filter((j) => j.status === 'pending' && j.nextAttemptAt <= now)
+      .slice(0, limit)
+  }
+
+  async markRetry(
+    did: string,
+    attemptCount: number,
+    nextAttemptAt: string,
+    lastError: string,
+  ): Promise<void> {
+    const job = this.jobs.get(did)
+    if (!job) return
+    this.jobs.set(did, { ...job, attemptCount, nextAttemptAt, lastError })
+  }
+
+  async markFailed(did: string, lastError: string): Promise<void> {
+    const job = this.jobs.get(did)
+    if (!job) return
+    this.jobs.set(did, { ...job, status: 'failed', lastError })
+  }
+
+  async remove(did: string): Promise<void> {
+    this.jobs.delete(did)
+  }
+
+  async list(): Promise<PdsSyncJob[]> {
+    return [...this.jobs.values()]
+  }
+}
+
 function createCtx(opts: {
   enrollmentStore?: Partial<EnrollmentStore>
   adminAuthFails?: boolean
@@ -101,6 +190,7 @@ function createCtx(opts: {
   enrollmentStore: EnrollmentStore
   app: express.Application
   enrollmentEvents: EnrollmentEventEmitter
+  pdsSyncQueue: InMemoryPdsSyncQueue
 } {
   const enrollmentStore = createMockStore(opts.enrollmentStore)
 
@@ -108,10 +198,49 @@ function createCtx(opts: {
 
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
 
+  const oauthClient = {
+    restore: opts.pdsWriteFails
+      ? vi.fn(async () => {
+          throw new Error('oauth session expired')
+        })
+      : vi.fn(async () => ({})),
+  }
+
+  const createAttestation = vi.fn(async () => ({
+    sig: new Uint8Array([1, 2, 3]),
+    signingKey: 'did:key:zTestKey',
+  }))
+
+  const pdsSyncQueue = new InMemoryPdsSyncQueue()
+  const pdsSyncWorker = new PdsEnrollmentSyncWorker(
+    {
+      queue: pdsSyncQueue,
+      sync: (did) =>
+        syncEnrollmentRecordToPds(
+          {
+            enrollmentStore: enrollmentStore as never,
+            createAttestation,
+            oauthClient: oauthClient as never,
+            serviceDid: 'did:web:stratos.example.com',
+            publicUrl: 'https://stratos.example.com',
+          },
+          did,
+        ),
+    },
+    {
+      tickMs: 30_000,
+      backoffBaseMs: 30_000,
+      backoffCapMs: 3_600_000,
+      maxAttempts: 12,
+    },
+  )
+
   const ctx = {
     app,
     enrollmentStore,
     enrollmentEvents,
+    pdsSyncQueue,
+    pdsSyncWorker,
     enrollmentService: {
       isEnrolled: enrollmentStore.isEnrolled,
       getEnrollment: vi.fn(),
@@ -127,18 +256,9 @@ function createCtx(opts: {
         credentials: { did: null },
       })),
     },
-    oauthClient: {
-      restore: opts.pdsWriteFails
-        ? vi.fn(async () => {
-            throw new Error('oauth session expired')
-          })
-        : vi.fn(async () => ({})),
-    },
+    oauthClient,
     serviceDid: 'did:web:stratos.example.com',
-    createAttestation: vi.fn(async () => ({
-      sig: new Uint8Array([1, 2, 3]),
-      signingKey: 'did:key:zTestKey',
-    })),
+    createAttestation,
     cfg: {
       service: { publicUrl: 'https://stratos.example.com' },
       stratos: {
@@ -165,14 +285,14 @@ function createCtx(opts: {
   registerEnrollmentHandlers(xrpcServer as any, ctx)
   // Ensure the router is initialized for tests that look into _router
   // ;(app as any)._router = (app as any)._router || express.Router()
-  return { ctx, enrollmentStore, app, enrollmentEvents }
+  return { ctx, enrollmentStore, app, enrollmentEvents, pdsSyncQueue }
 }
 
 describe('admin boundary endpoints', () => {
   vi.setConfig({ testTimeout: 15000 })
   describe('POST /xrpc/zone.stratos.admin.addBoundary', () => {
     it('adds a boundary to an enrolled user', async () => {
-      const { app, enrollmentStore } = createCtx({})
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({})
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.addBoundary',
@@ -191,10 +311,14 @@ describe('admin boundary endpoints', () => {
         'did:plc:usagi',
         'did:web:nerv.tokyo.jp/bees',
       )
+      // The inline sync succeeded, so no durable job remains.
+      expect(pdsSyncQueue.jobs.size).toBe(0)
     })
 
-    it('reports pdsSync failed but still applies the local change on PDS write failure', async () => {
-      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+    it('reports pdsSync deferred and leaves a pending job on PDS write failure', async () => {
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({
+        pdsWriteFails: true,
+      })
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.addBoundary',
@@ -202,9 +326,13 @@ describe('admin boundary endpoints', () => {
       )
       expect(res.statusCode).toBe(200)
       const body = res.body as { boundaries: string[]; pdsSync: string }
-      expect(body.pdsSync).toBe('failed')
+      expect(body.pdsSync).toBe('deferred')
       // The local store mutation is still applied; only PDS propagation failed.
       expect(enrollmentStore.addBoundary).toHaveBeenCalled()
+      // Durable intent survives for the background worker to retry.
+      const job = pdsSyncQueue.jobs.get('did:plc:usagi')
+      expect(job?.status).toBe('pending')
+      expect(job?.attemptCount).toBe(1)
     })
 
     it('rejects unauthenticated requests', async () => {
@@ -282,8 +410,10 @@ describe('admin boundary endpoints', () => {
       )
     })
 
-    it('reports pdsSync failed on PDS write failure', async () => {
-      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+    it('reports pdsSync deferred on PDS write failure', async () => {
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({
+        pdsWriteFails: true,
+      })
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.removeBoundary',
@@ -293,8 +423,9 @@ describe('admin boundary endpoints', () => {
         },
       )
       expect(res.statusCode).toBe(200)
-      expect((res.body as { pdsSync: string }).pdsSync).toBe('failed')
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
       expect(enrollmentStore.removeBoundary).toHaveBeenCalled()
+      expect(pdsSyncQueue.jobs.get('did:plc:usagi')?.status).toBe('pending')
     })
 
     it('rejects unauthenticated requests', async () => {
@@ -354,8 +485,10 @@ describe('admin boundary endpoints', () => {
       )
     })
 
-    it('reports pdsSync failed on PDS write failure', async () => {
-      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+    it('reports pdsSync deferred on PDS write failure', async () => {
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({
+        pdsWriteFails: true,
+      })
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.setBoundaries',
@@ -365,8 +498,9 @@ describe('admin boundary endpoints', () => {
         },
       )
       expect(res.statusCode).toBe(200)
-      expect((res.body as { pdsSync: string }).pdsSync).toBe('failed')
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
       expect(enrollmentStore.setBoundaries).toHaveBeenCalled()
+      expect(pdsSyncQueue.jobs.get('did:plc:usagi')?.status).toBe('pending')
     })
 
     it('allows setting empty boundaries', async () => {
@@ -417,6 +551,51 @@ describe('admin boundary endpoints', () => {
         app,
         '/xrpc/zone.stratos.admin.setBoundaries',
         { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
+      )
+      expect(res.statusCode).toBe(401)
+    })
+  })
+
+  describe('GET /xrpc/zone.stratos.admin.listPdsSyncStatus', () => {
+    it('returns queued jobs to an admin', async () => {
+      const { app, pdsSyncQueue } = createCtx({ pdsWriteFails: true })
+      await invokePostRoute(app, '/xrpc/zone.stratos.admin.addBoundary', {
+        did: 'did:plc:usagi',
+        boundary: 'did:web:nerv.tokyo.jp/bees',
+      })
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(200)
+      const body = res.body as { jobs: Array<{ did: string; status: string }> }
+      expect(body.jobs).toHaveLength(1)
+      expect(body.jobs[0].did).toBe('did:plc:usagi')
+      expect(body.jobs[0].status).toBe('pending')
+      expect(pdsSyncQueue.jobs.size).toBe(1)
+    })
+
+    it('returns an empty list when the queue is drained', async () => {
+      const { app } = createCtx({})
+      await invokePostRoute(app, '/xrpc/zone.stratos.admin.addBoundary', {
+        did: 'did:plc:usagi',
+        boundary: 'did:web:nerv.tokyo.jp/bees',
+      })
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { jobs: unknown[] }).jobs).toEqual([])
+    })
+
+    it('rejects unauthenticated requests', async () => {
+      const { app } = createCtx({ adminAuthFails: true })
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
       )
       expect(res.statusCode).toBe(401)
     })

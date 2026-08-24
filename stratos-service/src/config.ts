@@ -132,6 +132,24 @@ const envSchema = z
       .positive()
       .default(300_000),
 
+    // Durable PDS enrollment-record sync queue
+    STRATOS_PDS_SYNC_TICK_MS: z.coerce.number().int().positive().default(30_000),
+    STRATOS_PDS_SYNC_BACKOFF_BASE_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
+    STRATOS_PDS_SYNC_BACKOFF_CAP_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(3_600_000),
+    STRATOS_PDS_SYNC_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(12),
+
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
       .number()
@@ -308,6 +326,13 @@ export interface StratosServiceConfig {
     allowListBootstrapName?: string
     valkeyUrl?: string
     serviceEnrollments: ServiceEnrollment[]
+  }
+  /** Durable PDS enrollment-record sync queue scheduling knobs. */
+  pdsSync: {
+    tickMs: number
+    backoffBaseMs: number
+    backoffCapMs: number
+    maxAttempts: number
   }
   identity: {
     plcUrl: string
@@ -668,6 +693,12 @@ export function envToConfig(env: Env): StratosServiceConfig {
         serviceDid,
         allowedDomains,
       ),
+    },
+    pdsSync: {
+      tickMs: env.STRATOS_PDS_SYNC_TICK_MS,
+      backoffBaseMs: env.STRATOS_PDS_SYNC_BACKOFF_BASE_MS,
+      backoffCapMs: env.STRATOS_PDS_SYNC_BACKOFF_CAP_MS,
+      maxAttempts: env.STRATOS_PDS_SYNC_MAX_ATTEMPTS,
     },
     identity: {
       plcUrl: env.STRATOS_PLC_URL,

@@ -19,6 +19,8 @@ import {
   initRepo,
   MigratingBoundaryResolver,
   EnrollmentBoundaryResolver,
+  PdsEnrollmentSyncWorker,
+  syncEnrollmentRecordToPds,
 } from './features'
 
 import { getServiceDidWithFragment } from './config.js'
@@ -131,6 +133,14 @@ export async function createAppContext(
     logger,
   })
 
+  const { createAttestation, pdsSyncWorker } = initPdsSync(
+    cfg,
+    storage,
+    identity.oauthClient,
+    signingKey,
+    logger,
+  )
+
   const ctx: AppContext = {
     cfg,
     version: VERSION,
@@ -145,25 +155,10 @@ export async function createAppContext(
     serviceDid: cfg.service.did,
     actorSigner,
     jwksResolver,
+    pdsSyncWorker,
     app: initExpressApp(),
     logger,
-
-    /**
-     * Create an attestation for an actor
-     * @param did - The DID of the actor
-     * @param boundaries - The boundaries of the attestation
-     * @param userDidKey - The DID key of the user
-     * @returns The attestation signature and signing key
-     */
-    async createAttestation(
-      did: string,
-      boundaries: string[],
-      userDidKey: string,
-    ) {
-      const payload = createAttestationPayload(did, boundaries, userDidKey)
-      const sig = await signingKey.sign(payload)
-      return { sig, signingKey: signingKey.did() }
-    },
+    createAttestation,
 
     /**
      * Check the health of the application
@@ -184,6 +179,7 @@ export async function createAppContext(
      * Destroy the application context
      */
     async destroy() {
+      pdsSyncWorker.stop()
       await storageDestroy()
       services.repoCtx.repoWriteLocks.destroy()
       if (services.enrollmentCtx.allowListProvider) {
@@ -354,6 +350,55 @@ function initAuth(
   )
 
   return { dpopVerifier, authVerifier, lexiconProvider, xrpcServer }
+}
+
+/**
+ * Initializes the enrollment attestation signer and the durable PDS sync
+ * worker that retries failed enrollment-record writes to members' PDSes.
+ * @param cfg - Configuration options for the application.
+ * @param storage - Storage context providing the queue and enrollment stores.
+ * @param oauthClient - OAuth client used to restore member PDS sessions.
+ * @param signingKey - This service's signing keypair.
+ * @param logger - Logger instance for logging application events.
+ * @returns The attestation factory and the PDS sync worker.
+ */
+function initPdsSync(
+  cfg: AppContextOptions['cfg'],
+  storage: StorageContext,
+  oauthClient: AppContext['oauthClient'],
+  signingKey: crypto.Keypair,
+  logger?: AppContext['logger'],
+) {
+  const createAttestation = async (
+    did: string,
+    boundaries: string[],
+    userDidKey: string,
+  ) => {
+    const payload = createAttestationPayload(did, boundaries, userDidKey)
+    const sig = await signingKey.sign(payload)
+    return { sig, signingKey: signingKey.did() }
+  }
+
+  const pdsSyncWorker = new PdsEnrollmentSyncWorker(
+    {
+      queue: storage.pdsSyncQueue,
+      sync: (did) =>
+        syncEnrollmentRecordToPds(
+          {
+            enrollmentStore: storage.enrollmentStore,
+            createAttestation,
+            oauthClient,
+            serviceDid: cfg.service.did,
+            publicUrl: cfg.service.publicUrl,
+          },
+          did,
+        ),
+      logger,
+    },
+    cfg.pdsSync,
+  )
+
+  return { createAttestation, pdsSyncWorker }
 }
 
 /**

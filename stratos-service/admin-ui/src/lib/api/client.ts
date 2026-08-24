@@ -56,10 +56,11 @@ export interface BoundariesResponse {
   did: string
   boundaries: string[]
   /**
-   * 'failed' when the boundary change persisted locally but the member's PDS
-   * enrollment record could not be rewritten.
+   * 'deferred' when the boundary change persisted locally but the member's
+   * PDS enrollment record has not been rewritten yet; a background worker
+   * retries until it converges.
    */
-  pdsSync?: 'ok' | 'failed'
+  pdsSync?: 'ok' | 'deferred'
 }
 
 export class ApiError extends Error {

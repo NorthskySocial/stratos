@@ -33,6 +33,7 @@ import {
   PgEnrollmentStoreWriter,
   PostgresActorStore,
 } from '../src/infra/storage/postgres/index.js'
+import { PgPdsSyncQueueStore } from '../src/features/enrollment/internal/pds-sync-store.js'
 
 describe('PostgreSQL Backend Integration', () => {
   let pgUrl: string
@@ -624,6 +625,74 @@ describe('PostgreSQL Backend Integration', () => {
       expect(services[0].isService).toBe(true)
 
       await enrollmentStore.unenroll(serviceDid)
+    })
+  })
+
+  describe('PgPdsSyncQueueStore', () => {
+    let queue: PgPdsSyncQueueStore
+
+    beforeEach(() => {
+      queue = new PgPdsSyncQueueStore(serviceDb)
+    })
+
+    afterEach(async () => {
+      await cleanupClient`DELETE FROM "enrollment_pds_sync"`
+    })
+
+    it('upsertPending creates a due pending job', async () => {
+      await queue.upsertPending(testDid)
+
+      const jobs = await queue.list()
+      expect(jobs).toHaveLength(1)
+      expect(jobs[0].did).toBe(testDid)
+      expect(jobs[0].status).toBe('pending')
+      expect(jobs[0].attemptCount).toBe(0)
+      expect(jobs[0].lastError).toBeNull()
+
+      const due = await queue.listDue(new Date().toISOString(), 10)
+      expect(due.map((j) => j.did)).toEqual([testDid])
+    })
+
+    it('upsertPending revives a failed job and preserves firstQueuedAt', async () => {
+      await queue.upsertPending(testDid)
+      const [before] = await queue.list()
+
+      await queue.markFailed(testDid, 'invalid_grant')
+      const [failed] = await queue.list()
+      expect(failed.status).toBe('failed')
+
+      await queue.upsertPending(testDid)
+      const [revived] = await queue.list()
+      expect(revived.status).toBe('pending')
+      expect(revived.attemptCount).toBe(0)
+      expect(revived.lastError).toBeNull()
+      expect(revived.firstQueuedAt).toBe(before.firstQueuedAt)
+    })
+
+    it('markRetry hides the job until nextAttemptAt and listDue excludes failed jobs', async () => {
+      const future = new Date(Date.now() + 60_000).toISOString()
+      await queue.upsertPending(testDid)
+      await queue.markRetry(testDid, 1, future, 'ECONNREFUSED')
+      await queue.upsertPending(testDid2)
+      await queue.markFailed(testDid2, 'invalid_grant')
+
+      const dueNow = await queue.listDue(new Date().toISOString(), 10)
+      expect(dueNow).toHaveLength(0)
+
+      const dueLater = await queue.listDue(
+        new Date(Date.now() + 120_000).toISOString(),
+        10,
+      )
+      expect(dueLater.map((j) => j.did)).toEqual([testDid])
+      expect(dueLater[0].attemptCount).toBe(1)
+      expect(dueLater[0].lastError).toBe('ECONNREFUSED')
+    })
+
+    it('remove deletes the job and tolerates unknown dids', async () => {
+      await queue.upsertPending(testDid)
+      await queue.remove(testDid)
+      await expect(queue.remove('did:plc:unknown')).resolves.toBeUndefined()
+      expect(await queue.list()).toHaveLength(0)
     })
   })
 })

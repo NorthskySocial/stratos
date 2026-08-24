@@ -523,6 +523,8 @@ export class StratosServer {
   async start(): Promise<void> {
     const port = this.ctx.cfg.service.port
 
+    this.ctx.pdsSyncWorker.start()
+
     return new Promise((resolve) => {
       this.server = this.app.listen(port, () => {
         const upgradeListeners = this.server?.listenerCount('upgrade') ?? 0

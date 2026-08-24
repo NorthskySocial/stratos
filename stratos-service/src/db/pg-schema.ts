@@ -1,4 +1,11 @@
-import { pgTable, text, boolean, index, primaryKey } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  text,
+  boolean,
+  index,
+  integer,
+  primaryKey,
+} from 'drizzle-orm/pg-core'
 
 export const pgOauthSession = pgTable('oauth_session', {
   key: text('key').primaryKey(),
@@ -48,6 +55,22 @@ export const pgEnrollmentBoundary = pgTable(
   ],
 )
 
+export const pgEnrollmentPdsSync = pgTable(
+  'enrollment_pds_sync',
+  {
+    did: text('did').primaryKey(),
+    status: text('status').notNull(),
+    attemptCount: integer('attemptCount').notNull().default(0),
+    nextAttemptAt: text('nextAttemptAt').notNull(),
+    firstQueuedAt: text('firstQueuedAt').notNull(),
+    updatedAt: text('updatedAt').notNull(),
+    lastError: text('lastError'),
+  },
+  (table) => [
+    index('enrollment_pds_sync_due_idx').on(table.status, table.nextAttemptAt),
+  ],
+)
+
 export type PgOAuthSession = typeof pgOauthSession.$inferSelect
 export type PgNewOAuthSession = typeof pgOauthSession.$inferInsert
 export type PgOAuthState = typeof pgOauthState.$inferSelect
@@ -58,3 +81,5 @@ export type PgEnrollment = typeof pgEnrollment.$inferSelect
 export type PgNewEnrollment = typeof pgEnrollment.$inferInsert
 export type PgEnrollmentBoundary = typeof pgEnrollmentBoundary.$inferSelect
 export type PgNewEnrollmentBoundary = typeof pgEnrollmentBoundary.$inferInsert
+export type PgEnrollmentPdsSync = typeof pgEnrollmentPdsSync.$inferSelect
+export type PgNewEnrollmentPdsSync = typeof pgEnrollmentPdsSync.$inferInsert

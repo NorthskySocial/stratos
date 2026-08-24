@@ -312,6 +312,7 @@ describe('Unenroll endpoint', () => {
     const unenrollSpy = vi.fn().mockResolvedValue(undefined)
     const deleteRecordSpy = vi.fn().mockResolvedValue(undefined)
     const revokeSpy = vi.fn().mockResolvedValue(undefined)
+    const queueRemoveSpy = vi.fn().mockResolvedValue(undefined)
     const getEnrollmentSpy = vi.fn().mockResolvedValue({
       did,
       enrollmentRkey: 'rkey-123',
@@ -329,6 +330,9 @@ describe('Unenroll endpoint', () => {
       },
       oauthClient: {
         revoke: revokeSpy,
+      },
+      pdsSyncQueue: {
+        remove: queueRemoveSpy,
       },
       authVerifier: {
         standard: vi.fn(),
@@ -360,6 +364,60 @@ describe('Unenroll endpoint', () => {
     expect(deleteRecordSpy).toHaveBeenCalledWith(did, 'rkey-123')
     expect(unenrollSpy).toHaveBeenCalledWith(did)
     expect(revokeSpy).toHaveBeenCalledWith(did)
+    expect(queueRemoveSpy).toHaveBeenCalledWith(did)
+  })
+
+  it('proceeds even if queued PDS sync job removal fails', async () => {
+    const did = 'did:plc:testuser'
+    const server = createMockXrpcServer()
+
+    const unenrollSpy = vi.fn().mockResolvedValue(undefined)
+    const queueRemoveSpy = vi.fn().mockRejectedValue(new Error('db closed'))
+
+    const ctx = {
+      enrollmentStore: {
+        getEnrollment: vi.fn().mockResolvedValue(null),
+      },
+      enrollmentService: {
+        unenroll: unenrollSpy,
+      },
+      profileRecordWriter: {
+        deleteEnrollmentRecord: vi.fn(),
+      },
+      oauthClient: {
+        revoke: vi.fn().mockResolvedValue(undefined),
+      },
+      pdsSyncQueue: {
+        remove: queueRemoveSpy,
+      },
+      authVerifier: {
+        standard: vi.fn(),
+      },
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      },
+      app: {
+        get: vi.fn(),
+        post: vi.fn(),
+        use: vi.fn(),
+      } as any,
+    } as unknown as AppContext
+
+    registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
+
+    const res = await invokeMethod(
+      server,
+      'zone.stratos.enrollment.unenroll',
+      {},
+      { credentials: { type: 'user', did } },
+    )
+
+    expect((res as any).body.success).toBe(true)
+    expect(unenrollSpy).toHaveBeenCalledWith(did)
+    expect(queueRemoveSpy).toHaveBeenCalledWith(did)
   })
 
   it('proceeds even if PDS record deletion fails', async () => {
@@ -386,6 +444,9 @@ describe('Unenroll endpoint', () => {
       },
       oauthClient: {
         revoke: revokeSpy,
+      },
+      pdsSyncQueue: {
+        remove: vi.fn().mockResolvedValue(undefined),
       },
       authVerifier: {
         standard: vi.fn(),
@@ -443,6 +504,9 @@ describe('Unenroll endpoint', () => {
       },
       oauthClient: {
         revoke: revokeSpy,
+      },
+      pdsSyncQueue: {
+        remove: vi.fn().mockResolvedValue(undefined),
       },
       authVerifier: {
         standard: vi.fn(),
