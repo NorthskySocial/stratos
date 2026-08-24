@@ -598,6 +598,22 @@ describe('admin boundary endpoints', () => {
         '/xrpc/zone.stratos.admin.listPdsSyncStatus',
       )
       expect(res.statusCode).toBe(401)
+      expect(res.body).toEqual({
+        error: 'AuthRequired',
+        message: 'Admin auth required',
+      })
+    })
+
+    it('passes the request context to the admin verifier', async () => {
+      const { app, ctx } = createCtx({})
+      await invokeGetRoute(app, '/xrpc/zone.stratos.admin.listPdsSyncStatus')
+
+      expect(ctx.authVerifier.admin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          req: expect.anything(),
+          res: expect.anything(),
+        }),
+      )
     })
   })
 

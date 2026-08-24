@@ -139,6 +139,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       boundaries: Array<{ value: string }>
       signingKey: string
       service: string
+      attestation: { sig: Uint8Array; signingKey: string }
     }
     const values = record.boundaries.map((b) => b.value)
     expect(values).toContain(ENGINEERING)
@@ -147,6 +148,26 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     expect(values).toContain(RESERVED)
     expect(record.signingKey).toBe('did:key:zSailorMoon')
     expect(record.service).toBe('https://stratos.example.com')
+    expect(record.attestation.signingKey).toBe('did:key:zServiceKey')
+    expect(Array.from(record.attestation.sig)).toEqual([1, 2, 3])
+  })
+
+  it('reports ok on a write and obsolete when the actor is not enrolled', async () => {
+    const deps = {
+      enrollmentStore,
+      createAttestation,
+      oauthClient: { restore } as never,
+      serviceDid: 'did:web:stratos.example.com',
+      publicUrl: 'https://stratos.example.com',
+    }
+
+    await expect(syncEnrollmentRecordToPds(deps, USAGI)).resolves.toBe('ok')
+    expect(pds.putRecords).toHaveLength(1)
+
+    await expect(
+      syncEnrollmentRecordToPds(deps, 'did:plc:chibiusatsukino'),
+    ).resolves.toBe('obsolete')
+    expect(pds.putRecords).toHaveLength(1)
   })
 
   it('recovers a pending job left behind by a crash on restart', async () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PdsEnrollmentSyncWorker,
   type PdsSyncWorkerConfig,
+  type PdsSyncWorkerDeps,
 } from '../src/features/enrollment/pds-sync-worker.js'
 import { classifyPdsSyncError } from '../src/features/enrollment/internal/pds-enrollment-sync.js'
 import type {
@@ -100,6 +101,7 @@ describe('PdsEnrollmentSyncWorker', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('kick returns ok and removes the job on success', async () => {
@@ -265,6 +267,95 @@ describe('PdsEnrollmentSyncWorker', () => {
     release()
     await expect(first).resolves.toBe('ok')
     expect(sync).toHaveBeenCalledTimes(1)
+  })
+
+  it('logs the write only when a record was actually written', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker(
+      {
+        queue,
+        sync,
+        logger: logger as unknown as PdsSyncWorkerDeps['logger'],
+      },
+      CONFIG,
+    )
+
+    await worker.enqueue(USAGI)
+    await worker.kick(USAGI)
+    expect(logger.info).toHaveBeenCalledWith(
+      { did: USAGI, attemptCount: 0 },
+      'pds sync: enrollment record written',
+    )
+
+    logger.info.mockClear()
+    sync.mockResolvedValue('obsolete')
+    await worker.enqueue(USAGI)
+    await worker.kick(USAGI)
+    expect(logger.info).not.toHaveBeenCalled()
+  })
+
+  it('adds jitter on top of the exponential backoff delay', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const sync = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'))
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+    const start = Date.now()
+
+    await worker.enqueue(USAGI)
+    await worker.kick(USAGI)
+
+    const job = queue.jobs.get(USAGI)
+    expect(Date.parse(job!.nextAttemptAt) - start).toBe(30_500)
+  })
+
+  it('stop halts the ticker', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+    worker.stop()
+
+    await worker.enqueue(USAGI)
+    await vi.advanceTimersByTimeAsync(CONFIG.tickMs * 3)
+    expect(sync).not.toHaveBeenCalled()
+  })
+
+  it('start is idempotent, so one stop halts every ticker', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    worker.start()
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+    worker.stop()
+
+    await worker.enqueue(USAGI)
+    await vi.advanceTimersByTimeAsync(CONFIG.tickMs * 3)
+    expect(sync).not.toHaveBeenCalled()
+  })
+
+  it('skips a tick while the previous tick is still running', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sync = vi.fn().mockImplementation(async () => {
+      await gate
+      return 'ok'
+    })
+    const listDue = vi.spyOn(queue, 'listDue')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(CONFIG.tickMs)
+    expect(listDue).toHaveBeenCalledTimes(1)
+
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    worker.stop()
   })
 })
 
