@@ -242,6 +242,11 @@ const defaultSigningKeyCache = new Map<string, PublicKey>()
  * can resolve the service signing key, and falls back to CID integrity when
  * it cannot. it keeps each service key between calls.
  *
+ * when verification fails with a key that came from the cache, the function
+ * drops the cached entry, resolves the key once more, and retries once. this
+ * makes service key rotation self-heal without a restart. a failure with a
+ * freshly resolved key propagates unchanged.
+ *
  * take the CAR from a source that serves inclusion proofs, such as a PDS
  * com.atproto.sync.getRecord response or an owner-scoped
  * zone.stratos.sync.getRepo export. the Stratos service does not serve a
@@ -253,6 +258,8 @@ const defaultSigningKeyCache = new Map<string, PublicKey>()
  * @param collection the collection NSID
  * @param rkey the record key
  * @param serviceDid the service's did:web identifier, if known
+ * @param options optional configuration (fetch function, cache); the cache
+ *   defaults to a module-level Map shared by all calls
  * @returns the verified record with its CID and verification level
  */
 export const verifyStratosRecord = async (
@@ -261,25 +268,55 @@ export const verifyStratosRecord = async (
   collection: string,
   rkey: string,
   serviceDid?: string,
+  options?: ResolveSigningKeyOptions,
 ): Promise<VerifiedRecord> => {
-  let signingKey: PublicKey | undefined
-
-  if (serviceDid) {
-    try {
-      signingKey = await resolveServiceSigningKey(serviceDid, {
-        cache: defaultSigningKeyCache,
-      })
-    } catch {
-      // the key did not resolve. fall through to CID-only verification.
-    }
+  if (!serviceDid) {
+    return verifyRecordCar(carBytes, collection, rkey, did)
   }
 
-  return verifyRecordCar(
-    carBytes,
-    collection,
-    rkey,
-    did,
-    signingKey,
-    signingKey ? 'service-signature' : 'cid-integrity',
-  )
+  const cache = options?.cache ?? defaultSigningKeyCache
+  const resolveOptions = { ...options, cache }
+  const keyCameFromCache = cache.has(serviceDid)
+
+  let signingKey: PublicKey | undefined
+  try {
+    signingKey = await resolveServiceSigningKey(serviceDid, resolveOptions)
+  } catch {
+    // the key did not resolve. fall through to CID-only verification.
+  }
+
+  if (!signingKey) {
+    return verifyRecordCar(carBytes, collection, rkey, did)
+  }
+
+  try {
+    return await verifyRecordCar(
+      carBytes,
+      collection,
+      rkey,
+      did,
+      signingKey,
+      'service-signature',
+    )
+  } catch (verificationError) {
+    if (!keyCameFromCache) throw verificationError
+
+    cache.delete(serviceDid)
+    let freshKey: PublicKey
+    try {
+      freshKey = await resolveServiceSigningKey(serviceDid, resolveOptions)
+    } catch {
+      // re-resolution failed: report the signature failure, not a
+      // resolution error, and never downgrade to cid-integrity.
+      throw verificationError
+    }
+    return verifyRecordCar(
+      carBytes,
+      collection,
+      rkey,
+      did,
+      freshKey,
+      'service-signature',
+    )
+  }
 }

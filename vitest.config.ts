@@ -1,10 +1,15 @@
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
+
+// anchor project paths to this file so vitest resolves them from any cwd
+const rootDir = dirname(fileURLToPath(import.meta.url))
 
 const nodeProject = (name: string) => ({
   extends: true,
   test: {
     name,
-    root: `./${name}`,
+    root: join(rootDir, name),
     environment: 'node' as const,
     globals: true,
     include: ['tests/**/*.test.ts'],
@@ -38,7 +43,7 @@ export default defineConfig({
       nodeProject('stratos-client'),
       nodeProject('stratos-indexer'),
       nodeProject('stratos-feedgen'),
-      './webapp/vite.config.ts',
+      join(rootDir, 'webapp/vite.config.ts'),
     ],
   },
 })

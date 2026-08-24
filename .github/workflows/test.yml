@@ -11,6 +11,8 @@ on:
       - main
       - develop
       - feat/*
+      - fix/*
+      - chore/*
 
 jobs:
   test:

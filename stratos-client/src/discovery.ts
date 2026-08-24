@@ -1,6 +1,9 @@
 import type { FetchHandler } from '@atcute/client'
 import { Client, simpleFetchHandler } from '@atcute/client'
-import '@atcute/atproto'
+import type {
+  ComAtprotoRepoGetRecord,
+  ComAtprotoRepoListRecords,
+} from '@atcute/atproto'
 import type { ServiceAttestation, StratosEnrollment } from './types.js'
 import { serviceDIDToRkey } from './routing.js'
 
@@ -10,14 +13,11 @@ import { serviceDIDToRkey } from './routing.js'
 
 export const ENROLLMENT_COLLECTION = 'zone.stratos.actor.enrollment'
 
+const MAX_ENROLLMENT_PAGES = 10
+
 interface GetRecordResponse {
   uri: string
   value: unknown
-}
-
-interface XRPCResponse<T> {
-  ok: boolean
-  data: T
 }
 
 // PDS records may carry the sig as a raw Uint8Array, a Buffer-like, or the
@@ -104,11 +104,33 @@ const extractRkey = (uri: string): string => {
 
 interface ListRecordsResponse {
   records: Array<GetRecordResponse>
+  cursor?: string
+}
+
+const listEnrollmentPage = async (
+  rpc: Client,
+  did: string,
+  cursor: string | undefined,
+): Promise<ListRecordsResponse | null> => {
+  const res = await rpc.get('com.atproto.repo.listRecords', {
+    params: {
+      repo: did as ComAtprotoRepoListRecords.$params['repo'],
+      collection: ENROLLMENT_COLLECTION,
+      limit: 100,
+      ...(cursor !== undefined ? { cursor } : {}),
+    },
+  })
+  return res.ok ? res.data : null
 }
 
 /**
  * discovers all Stratos enrollments by listing enrollment records
- * from the user's PDS via com.atproto.repo.listRecords.
+ * from the user's PDS via com.atproto.repo.listRecords. the function
+ * follows the response cursor until the PDS reports no more pages, up
+ * to MAX_ENROLLMENT_PAGES pages.
+ *
+ * the result is all-or-nothing: when any page request fails, the
+ * function returns an empty array.
  *
  * @param did the DID to check for enrollments
  * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
@@ -121,25 +143,37 @@ export const discoverEnrollments = async (
   const rpc = new Client({ handler: toHandler(pdsUrlOrHandler) })
 
   try {
-    const res = (await rpc.get('com.atproto.repo.listRecords', {
-      params: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        repo: did as any,
-        collection: ENROLLMENT_COLLECTION,
-        limit: 100,
-      },
-    })) as XRPCResponse<ListRecordsResponse>
-
-    if (!res.ok) return []
-
     const enrollments: Array<StratosEnrollment> = []
-    for (const record of res.data.records) {
-      const enrollment = parseEnrollmentRecord(
-        record.value,
-        extractRkey(record.uri),
+    // guards against a malformed server that repeats a cursor forever
+    const seenCursors = new Set<string>()
+    let cursor: string | undefined
+
+    // a user holds one enrollment per service, so 10 pages (1000
+    // records) exceed any real repo; the cap stops a hostile server
+    // that mints a fresh cursor on every page
+    for (let pageCount = 0; pageCount < MAX_ENROLLMENT_PAGES; pageCount++) {
+      const page = await listEnrollmentPage(rpc, did, cursor)
+      if (!page) return []
+
+      for (const record of page.records) {
+        const enrollment = parseEnrollmentRecord(
+          record.value,
+          extractRkey(record.uri),
+        )
+        if (enrollment) enrollments.push(enrollment)
+      }
+
+      const next = page.cursor
+      if (
+        next === undefined ||
+        seenCursors.has(next) ||
+        page.records.length === 0
       )
-      if (enrollment) enrollments.push(enrollment)
+        break
+      seenCursors.add(next)
+      cursor = next
     }
+
     return enrollments
   } catch {
     return []
@@ -191,14 +225,13 @@ export const getEnrollmentByServiceDid = async (
   const rkey = serviceDIDToRkey(serviceDid)
 
   try {
-    const res = (await rpc.get('com.atproto.repo.getRecord', {
+    const res = await rpc.get('com.atproto.repo.getRecord', {
       params: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        repo: did as any,
+        repo: did as ComAtprotoRepoGetRecord.$params['repo'],
         collection: ENROLLMENT_COLLECTION,
         rkey,
       },
-    })) as XRPCResponse<GetRecordResponse>
+    })
 
     if (!res.ok) return null
 

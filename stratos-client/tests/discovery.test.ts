@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Client } from '@atcute/client'
 import {
   ENROLLMENT_COLLECTION,
+  discoverEnrollments,
   getEnrollmentByServiceDid,
   parseEnrollmentRecord,
   serviceDIDToRkey,
@@ -15,6 +17,13 @@ vi.mock('@atcute/client', async () => {
     simpleFetchHandler: vi.fn(),
   }
 })
+
+const mockClient = async (mockGet: ReturnType<typeof vi.fn>) => {
+  const { Client: MockedClient } = await import('@atcute/client')
+  vi.mocked(MockedClient).mockImplementation(function () {
+    return { get: mockGet } as unknown as Client
+  })
+}
 
 describe('Enrollment Discovery', () => {
   describe('serviceDIDToRkey', () => {
@@ -119,9 +128,237 @@ describe('Enrollment Discovery', () => {
     })
   })
 
+  describe('discoverEnrollments', () => {
+    const enrollmentRecord = (serviceDid: string) => ({
+      uri: `at://did:plc:shinji/${ENROLLMENT_COLLECTION}/${serviceDid}`,
+      value: {
+        service: serviceDid,
+        createdAt: '1995-10-04T18:30:00Z',
+        signingKey: 'did:key:zAsukaKey',
+        attestation: {
+          signingKey: 'did:key:zMisatoKey',
+          sig: new Uint8Array([1, 2, 3]),
+        },
+      },
+    })
+
+    it('should follow the cursor across pages and return all enrollments', async () => {
+      const mockGet = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:nerv.tokyo.jp')],
+            cursor: 'magi-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:seele.berlin.de')],
+          },
+        })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:shinji',
+        'https://pds.nerv',
+      )
+
+      expect(result).toHaveLength(2)
+      expect(result.map((e) => e.rkey)).toEqual([
+        'did:web:nerv.tokyo.jp',
+        'did:web:seele.berlin.de',
+      ])
+      expect(mockGet).toHaveBeenCalledTimes(2)
+      expect(mockGet.mock.calls[0][0]).toBe('com.atproto.repo.listRecords')
+      expect(mockGet.mock.calls[0][1].params).toMatchObject({
+        repo: 'did:plc:shinji',
+        collection: ENROLLMENT_COLLECTION,
+        limit: 100,
+      })
+      expect(mockGet.mock.calls[0][1].params).not.toHaveProperty('cursor')
+      expect(mockGet.mock.calls[1][1].params).toMatchObject({
+        cursor: 'magi-1',
+      })
+    })
+
+    it('should make a single request when the response has no cursor', async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        ok: true,
+        data: { records: [enrollmentRecord('did:web:nerv.tokyo.jp')] },
+      })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:rei',
+        'https://pds.nerv',
+      )
+
+      expect(result).toHaveLength(1)
+      expect(mockGet).toHaveBeenCalledTimes(1)
+    })
+
+    it('should treat an empty-string cursor as a valid cursor and keep paging', async () => {
+      const mockGet = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:nerv.tokyo.jp')],
+            cursor: '',
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:seele.berlin.de')],
+          },
+        })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:kaworu',
+        'https://pds.nerv',
+      )
+
+      expect(mockGet).toHaveBeenCalledTimes(2)
+      expect(mockGet.mock.calls[1][1].params).toMatchObject({ cursor: '' })
+      expect(result).toHaveLength(2)
+    })
+
+    it('should terminate when the server repeats a cursor', async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          records: [enrollmentRecord('did:web:nerv.tokyo.jp')],
+          cursor: 'magi-loop',
+        },
+      })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:asuka',
+        'https://pds.nerv',
+      )
+
+      expect(mockGet).toHaveBeenCalledTimes(2)
+      expect(result).toHaveLength(2)
+    })
+
+    it('should stop after the page cap when every page mints a fresh cursor', async () => {
+      let pageNumber = 0
+      const mockGet = vi.fn().mockImplementation(() => {
+        pageNumber++
+        return Promise.resolve({
+          ok: true,
+          data: {
+            records: [
+              enrollmentRecord(`did:web:angel-${pageNumber}.tokyo3.jp`),
+            ],
+            cursor: `magi-${pageNumber}`,
+          },
+        })
+      })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:gendo',
+        'https://pds.nerv',
+      )
+
+      expect(mockGet).toHaveBeenCalledTimes(10)
+      expect(result).toHaveLength(10)
+    })
+
+    it('should stop when a page carries a cursor but no records', async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        ok: true,
+        data: { records: [], cursor: 'magi-1' },
+      })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:misato',
+        'https://pds.nerv',
+      )
+
+      expect(result).toEqual([])
+      expect(mockGet).toHaveBeenCalledTimes(1)
+    })
+
+    it('should return an empty array when a later page request throws', async () => {
+      const mockGet = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:nerv.tokyo.jp')],
+            cursor: 'magi-1',
+          },
+        })
+        .mockRejectedValueOnce(new Error('Network error'))
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:shinji',
+        'https://pds.nerv',
+      )
+
+      expect(result).toEqual([])
+    })
+
+    it('should return an empty array when a page response is not ok', async () => {
+      const mockGet = vi.fn().mockResolvedValue({ ok: false })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:rei',
+        'https://pds.nerv',
+      )
+
+      expect(result).toEqual([])
+    })
+
+    it('should filter invalid records on later pages', async () => {
+      const mockGet = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:nerv.tokyo.jp')],
+            cursor: 'magi-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [
+              {
+                uri: `at://did:plc:shinji/${ENROLLMENT_COLLECTION}/bad`,
+                value: { service: 42 },
+              },
+              enrollmentRecord('did:web:seele.berlin.de'),
+            ],
+          },
+        })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:shinji',
+        'https://pds.nerv',
+      )
+
+      expect(result).toHaveLength(2)
+      expect(result.map((e) => e.rkey)).toEqual([
+        'did:web:nerv.tokyo.jp',
+        'did:web:seele.berlin.de',
+      ])
+    })
+  })
+
   describe('getEnrollmentByServiceDid', () => {
     it('should get a specific enrollment by service DID', async () => {
-      const { Client } = await import('@atcute/client')
       const serviceDid = 'did:web:nerv.tokyo.jp'
       const rkey = serviceDIDToRkey(serviceDid)
       const mockGet = vi.fn().mockResolvedValue({
@@ -135,9 +372,7 @@ describe('Enrollment Discovery', () => {
           },
         },
       })
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
+      await mockClient(mockGet)
 
       const result = await getEnrollmentByServiceDid(
         'did:plc:shinji',
@@ -156,11 +391,8 @@ describe('Enrollment Discovery', () => {
     })
 
     it('should return null if record not found', async () => {
-      const { Client } = await import('@atcute/client')
       const mockGet = vi.fn().mockResolvedValue({ ok: false })
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
+      await mockClient(mockGet)
 
       const result = await getEnrollmentByServiceDid(
         'did:plc:rei',
@@ -171,11 +403,8 @@ describe('Enrollment Discovery', () => {
     })
 
     it('should return null if RPC throws', async () => {
-      const { Client } = await import('@atcute/client')
       const mockGet = vi.fn().mockRejectedValue(new Error('Network error'))
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
+      await mockClient(mockGet)
 
       const result = await getEnrollmentByServiceDid(
         'did:plc:rei',
