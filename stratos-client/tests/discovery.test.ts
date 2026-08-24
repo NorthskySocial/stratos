@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Client } from '@atcute/client'
 import {
   ENROLLMENT_COLLECTION,
   discoverEnrollments,
@@ -16,6 +17,13 @@ vi.mock('@atcute/client', async () => {
     simpleFetchHandler: vi.fn(),
   }
 })
+
+const mockClient = async (mockGet: ReturnType<typeof vi.fn>) => {
+  const { Client: MockedClient } = await import('@atcute/client')
+  vi.mocked(MockedClient).mockImplementation(function () {
+    return { get: mockGet } as unknown as Client
+  })
+}
 
 describe('Enrollment Discovery', () => {
   describe('serviceDIDToRkey', () => {
@@ -134,13 +142,6 @@ describe('Enrollment Discovery', () => {
       },
     })
 
-    const mockClient = async (mockGet: ReturnType<typeof vi.fn>) => {
-      const { Client } = await import('@atcute/client')
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
-    }
-
     it('should follow the cursor across pages and return all enrollments', async () => {
       const mockGet = vi
         .fn()
@@ -170,6 +171,7 @@ describe('Enrollment Discovery', () => {
         'did:web:seele.berlin.de',
       ])
       expect(mockGet).toHaveBeenCalledTimes(2)
+      expect(mockGet.mock.calls[0][0]).toBe('com.atproto.repo.listRecords')
       expect(mockGet.mock.calls[0][1].params).toMatchObject({
         repo: 'did:plc:shinji',
         collection: ENROLLMENT_COLLECTION,
@@ -195,6 +197,34 @@ describe('Enrollment Discovery', () => {
 
       expect(result).toHaveLength(1)
       expect(mockGet).toHaveBeenCalledTimes(1)
+    })
+
+    it('should treat an empty-string cursor as a valid cursor and keep paging', async () => {
+      const mockGet = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:nerv.tokyo.jp')],
+            cursor: '',
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            records: [enrollmentRecord('did:web:seele.berlin.de')],
+          },
+        })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollments(
+        'did:plc:kaworu',
+        'https://pds.nerv',
+      )
+
+      expect(mockGet).toHaveBeenCalledTimes(2)
+      expect(mockGet.mock.calls[1][1].params).toMatchObject({ cursor: '' })
+      expect(result).toHaveLength(2)
     })
 
     it('should terminate when the server repeats a cursor', async () => {
@@ -329,7 +359,6 @@ describe('Enrollment Discovery', () => {
 
   describe('getEnrollmentByServiceDid', () => {
     it('should get a specific enrollment by service DID', async () => {
-      const { Client } = await import('@atcute/client')
       const serviceDid = 'did:web:nerv.tokyo.jp'
       const rkey = serviceDIDToRkey(serviceDid)
       const mockGet = vi.fn().mockResolvedValue({
@@ -343,9 +372,7 @@ describe('Enrollment Discovery', () => {
           },
         },
       })
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
+      await mockClient(mockGet)
 
       const result = await getEnrollmentByServiceDid(
         'did:plc:shinji',
@@ -364,11 +391,8 @@ describe('Enrollment Discovery', () => {
     })
 
     it('should return null if record not found', async () => {
-      const { Client } = await import('@atcute/client')
       const mockGet = vi.fn().mockResolvedValue({ ok: false })
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
+      await mockClient(mockGet)
 
       const result = await getEnrollmentByServiceDid(
         'did:plc:rei',
@@ -379,11 +403,8 @@ describe('Enrollment Discovery', () => {
     })
 
     it('should return null if RPC throws', async () => {
-      const { Client } = await import('@atcute/client')
       const mockGet = vi.fn().mockRejectedValue(new Error('Network error'))
-      ;(Client as any).mockImplementation(function () {
-        return { get: mockGet }
-      })
+      await mockClient(mockGet)
 
       const result = await getEnrollmentByServiceDid(
         'did:plc:rei',

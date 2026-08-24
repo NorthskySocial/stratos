@@ -1,6 +1,9 @@
 import type { FetchHandler } from '@atcute/client'
 import { Client, simpleFetchHandler } from '@atcute/client'
-import '@atcute/atproto'
+import type {
+  ComAtprotoRepoGetRecord,
+  ComAtprotoRepoListRecords,
+} from '@atcute/atproto'
 import type { ServiceAttestation, StratosEnrollment } from './types.js'
 import { serviceDIDToRkey } from './routing.js'
 
@@ -15,11 +18,6 @@ const MAX_ENROLLMENT_PAGES = 10
 interface GetRecordResponse {
   uri: string
   value: unknown
-}
-
-interface XRPCResponse<T> {
-  ok: boolean
-  data: T
 }
 
 // PDS records may carry the sig as a raw Uint8Array, a Buffer-like, or the
@@ -114,15 +112,14 @@ const listEnrollmentPage = async (
   did: string,
   cursor: string | undefined,
 ): Promise<ListRecordsResponse | null> => {
-  const res = (await rpc.get('com.atproto.repo.listRecords', {
+  const res = await rpc.get('com.atproto.repo.listRecords', {
     params: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      repo: did as any,
+      repo: did as ComAtprotoRepoListRecords.$params['repo'],
       collection: ENROLLMENT_COLLECTION,
       limit: 100,
       ...(cursor !== undefined ? { cursor } : {}),
     },
-  })) as XRPCResponse<ListRecordsResponse>
+  })
   return res.ok ? res.data : null
 }
 
@@ -167,7 +164,12 @@ export const discoverEnrollments = async (
       }
 
       const next = page.cursor
-      if (!next || seenCursors.has(next) || page.records.length === 0) break
+      if (
+        next === undefined ||
+        seenCursors.has(next) ||
+        page.records.length === 0
+      )
+        break
       seenCursors.add(next)
       cursor = next
     }
@@ -223,14 +225,13 @@ export const getEnrollmentByServiceDid = async (
   const rkey = serviceDIDToRkey(serviceDid)
 
   try {
-    const res = (await rpc.get('com.atproto.repo.getRecord', {
+    const res = await rpc.get('com.atproto.repo.getRecord', {
       params: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        repo: did as any,
+        repo: did as ComAtprotoRepoGetRecord.$params['repo'],
         collection: ENROLLMENT_COLLECTION,
         rkey,
       },
-    })) as XRPCResponse<GetRecordResponse>
+    })
 
     if (!res.ok) return null
 
