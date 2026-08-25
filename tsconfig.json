@@ -9,12 +9,12 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "types": ["node"],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
   },
   "references": [{ "path": "./stratos-core" }, { "path": "./stratos-service" }],
   "files": [],
-  "include": ["test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

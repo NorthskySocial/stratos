@@ -1,4 +1,11 @@
 /// <reference types="svelte" />
+/// <reference types="vite/client" />
+
+// Vite adds an `any` index signature to ImportMetaEnv. This option removes it,
+// so an undeclared VITE_* key is an error and not `any`.
+interface ViteTypeOptions {
+  strictImportMetaEnv: unknown
+}
 
 interface ImportMetaEnv {
   readonly VITE_STRATOS_URL?: string
