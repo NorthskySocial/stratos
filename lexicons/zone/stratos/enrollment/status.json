@@ -31,10 +31,27 @@
               "type": "boolean",
               "description": "Whether the DID is enrolled in this Stratos service."
             },
+            "eligible": {
+              "type": "boolean",
+              "description": "Whether the DID is eligible to enroll. Only included when the DID is not enrolled. Omitted when the eligibility check cannot complete."
+            },
+            "active": {
+              "type": "boolean",
+              "description": "Whether the enrollment is active. Only included when enrolled."
+            },
             "enrolledAt": {
               "type": "string",
               "format": "datetime",
               "description": "When the DID was enrolled, if enrolled."
+            },
+            "signingKey": {
+              "type": "string",
+              "format": "did",
+              "description": "The service-held signing key DID for this enrollment. Only included when enrolled."
+            },
+            "enrollmentRkey": {
+              "type": "string",
+              "description": "Record key of the zone.stratos.actor.enrollment record on the user's PDS. Only included when enrolled."
             },
             "boundaries": {
               "type": "array",
