@@ -230,7 +230,7 @@ describe('enrollment', () => {
         expect(result.reason).toBe('PdsEndpointNotFound')
       })
 
-      it('should return DidNotResolved on resolution error', async () => {
+      it('should return VerificationFailed on resolution error', async () => {
         const mockResolver = {
           did: {
             resolve: vi.fn().mockRejectedValue(new Error('Network error')),
@@ -239,8 +239,10 @@ describe('enrollment', () => {
 
         const result = await validateEnrollment(pdsConfig, did, mockResolver)
 
+        // A thrown resolution is a failed check, not proof that the
+        // DID does not resolve.
         expect(result.allowed).toBe(false)
-        expect(result.reason).toBe('DidNotResolved')
+        expect(result.reason).toBe('VerificationFailed')
       })
     })
 
@@ -339,6 +341,36 @@ describe('enrollment', () => {
       await expect(
         assertEnrollment(config, 'did:plc:test', mockResolver),
       ).rejects.toThrow(EnrollmentDeniedError)
+    })
+
+    it('should wrap a resolution failure with message and cause', async () => {
+      const config: EnrollmentConfig = {
+        mode: ENROLLMENT_MODE.ALLOWLIST,
+        allowedDids: [],
+        allowedPdsEndpoints: ['https://pds.example.com'],
+      }
+      const resolutionError = new Error('Network error')
+      const mockResolver = {
+        did: {
+          resolve: vi.fn().mockRejectedValue(resolutionError),
+        },
+      } as unknown as IdResolver
+
+      const err = await assertEnrollment(
+        config,
+        'did:plc:motoko',
+        mockResolver,
+      ).then(
+        () => null,
+        (e: unknown) => e,
+      )
+
+      expect(err).toBeInstanceOf(EnrollmentDeniedError)
+      expect((err as EnrollmentDeniedError).reason).toBe('VerificationFailed')
+      expect((err as EnrollmentDeniedError).message).toBe(
+        'Enrollment verification failed',
+      )
+      expect((err as Error).cause).toBe(resolutionError)
     })
 
     it('should include reason in EnrollmentDeniedError', async () => {

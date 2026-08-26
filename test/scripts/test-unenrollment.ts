@@ -50,12 +50,14 @@ async function run() {
     await unenroll(userState.did)
     pass('Unenrollment request succeeded')
 
-    // 3. Verify Stratos status
+    // 3. Verify Stratos status — unenroll hard-deletes the enrollment row,
+    // so the truthful contract state is enrolled: false (re-enrollment stays
+    // possible, which eligible reports separately).
     const statusAfter = await enrollmentStatus(userState.did)
-    if (statusAfter.active !== false) {
-      throw new Error('User is still active in Stratos after unenrollment')
+    if (statusAfter.enrolled) {
+      throw new Error('User is still enrolled in Stratos after unenrollment')
     }
-    pass('User is inactive in Stratos')
+    pass('User is no longer enrolled in Stratos')
 
     // 4. Verify PDS record deletion
     const recordAfter = await getEnrollmentRecord(userState.did)
