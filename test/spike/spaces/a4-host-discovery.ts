@@ -106,31 +106,50 @@ async function main() {
           : undefined
       },
     }
-    const spaceUri = 'at://did:web:localhost%3A3100/space/zone.stratos.space.feed/spike'
+    const spaceUri =
+      'at://did:web:localhost%3A3100/space/zone.stratos.space.feed/spike'
 
     const viaDoc = await resolveRepoHost(spaceUri, MEMBER_DID, {
-      overrides: { async get() { return undefined } },
+      overrides: {
+        async get() {
+          return undefined
+        },
+      },
       dids,
     })
     log('no override — resolved from the DID document', viaDoc)
 
     const viaOverride = await resolveRepoHost(spaceUri, MEMBER_DID, {
-      overrides: { async get() { return 'http://host.example:9999' } },
+      overrides: {
+        async get() {
+          return 'http://host.example:9999'
+        },
+      },
       dids,
     })
     log('override present — override wins', viaOverride)
 
-    const unknown = await resolveRepoHost(spaceUri, 'did:web:localhost%3A3999', {
-      overrides: { async get() { return undefined } },
-      dids,
-    })
+    const unknown = await resolveRepoHost(
+      spaceUri,
+      'did:web:localhost%3A3999',
+      {
+        overrides: {
+          async get() {
+            return undefined
+          },
+        },
+        dids,
+      },
+    )
     log('unresolvable member', unknown)
 
     // The resolved host must actually be reachable and be a spaces PDS.
     let reachable = false
     let spacesCapable = false
     if (viaDoc) {
-      const health = await fetch(`${viaDoc.host}/xrpc/_health`).catch(() => undefined)
+      const health = await fetch(`${viaDoc.host}/xrpc/_health`).catch(
+        () => undefined,
+      )
       reachable = health?.ok ?? false
       const probe = await fetch(
         `${viaDoc.host}/xrpc/com.atproto.space.getRecord`,

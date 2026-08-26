@@ -137,8 +137,7 @@ async function main() {
     // verified the credential if a BAD credential gets a different answer.
     // Flip one signature character to keep the shape and break the signature.
     const lastChar = credential.slice(-1)
-    const tampered =
-      credential.slice(0, -1) + (lastChar === 'A' ? 'B' : 'A')
+    const tampered = credential.slice(0, -1) + (lastChar === 'A' ? 'B' : 'A')
     const controlProof = await createDpopProof(dpopKey, {
       htm: 'GET',
       htu: url.toString(),

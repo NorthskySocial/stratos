@@ -43,9 +43,7 @@ interface AlphaAccounts {
 }
 
 async function main() {
-  const cfg = JSON.parse(
-    readFileSync(ACCOUNTS_PATH, 'utf8'),
-  ) as AlphaAccounts
+  const cfg = JSON.parse(readFileSync(ACCOUNTS_PATH, 'utf8')) as AlphaAccounts
   const pdsUrl = `https://${cfg.pds}`
   const account = cfg.accounts[0]
   if (!account) throw new Error('no accounts in alpha-users.json')

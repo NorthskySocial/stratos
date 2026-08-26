@@ -94,9 +94,7 @@ async function main() {
     console.log(
       'RESULT: the host does NOT authorize writes against the space authority.',
     )
-    console.log(
-      'Presence of a record in a repo is NOT evidence of membership.',
-    )
+    console.log('Presence of a record in a repo is NOT evidence of membership.')
   } else {
     console.log('RESULT: the host DID reject the write. Detail above.')
   }
