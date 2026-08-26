@@ -258,7 +258,10 @@ async function main() {
       })
       ingested += 1
     }
-    log('ingested from the foreign host', { ingested, hydratedSeparately: hydrated })
+    log('ingested from the foreign host', {
+      ingested,
+      hydratedSeparately: hydrated,
+    })
 
     // 4. A Stratos-custody post, indexed the way the feedgen does today.
     const custodyUri = `at://did:plc:stratoscustodyuser/${COLLECTION}/local1`
