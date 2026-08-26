@@ -92,7 +92,9 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       signingKeyDid TEXT NOT NULL,
       active TEXT NOT NULL DEFAULT 'true',
       enrollmentRkey TEXT,
-      isService INTEGER NOT NULL DEFAULT 0
+      isService INTEGER NOT NULL DEFAULT 0,
+      custody TEXT NOT NULL DEFAULT 'stratos',
+      repoHost TEXT
     )
   `)
 
@@ -110,6 +112,24 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
     .run(
       sql`
     ALTER TABLE enrollment ADD COLUMN isService INTEGER NOT NULL DEFAULT 0
+  `,
+    )
+    .catch(() => {})
+
+  // Migration: add custody column if missing (for existing databases)
+  await db
+    .run(
+      sql`
+    ALTER TABLE enrollment ADD COLUMN custody TEXT NOT NULL DEFAULT 'stratos'
+  `,
+    )
+    .catch(() => {})
+
+  // Migration: add repoHost column if missing (for existing databases)
+  await db
+    .run(
+      sql`
+    ALTER TABLE enrollment ADD COLUMN repoHost TEXT
   `,
     )
     .catch(() => {})

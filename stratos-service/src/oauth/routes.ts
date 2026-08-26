@@ -1,13 +1,22 @@
 import express from 'express'
 import { Agent } from '@atproto/api'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
-import { IdResolver } from '@atproto/identity'
-import type {
-  EnrollmentConfig,
-  EnrollmentValidator,
-  Logger,
+import {
+  type DidDocument,
+  getDidKeyFromMultibase,
+  IdResolver,
+} from '@atproto/identity'
+import {
+  MissingAtprotoKeyError,
+  type Custody,
+  type EnrollmentConfig,
+  type EnrollmentValidator,
+  type Logger,
 } from '@northskysocial/stratos-core'
 import type { RequestHeaders } from '../infra/auth/index.js'
+
+/** Verification method id fragment for a user's own atproto repo-signing key. */
+const ATPROTO_KID = '#atproto'
 
 import { handleAuthorize } from './handlers/authorize.js'
 import { handleCallback } from './handlers/callback.js'
@@ -35,6 +44,10 @@ export interface EnrollmentRecord {
   active: boolean
   enrollmentRkey?: string
   isService?: boolean
+  /** Who hosts and signs this enrollment's repo. Defaults to 'stratos' when absent. */
+  custody?: Custody
+  /** The repo host endpoint when custody is 'pds'. Undefined for 'stratos' custody. */
+  repoHost?: string
 }
 
 /**
@@ -169,6 +182,59 @@ export async function migrateEnrollmentRkey(
       'failed to migrate legacy enrollment rkey',
     )
   }
+}
+
+/**
+ * Select the verification method whose id fragment is `#atproto`, controlled
+ * by the DID subject. Returns undefined if none is present.
+ */
+function selectAtprotoMethod(
+  didDoc: DidDocument,
+): NonNullable<DidDocument['verificationMethod']>[number] | undefined {
+  const methods = didDoc.verificationMethod ?? []
+  return methods.find((vm) => {
+    const fragment = vm.id.startsWith('#')
+      ? vm.id
+      : vm.id.slice(didDoc.id.length)
+    return fragment === ATPROTO_KID
+  })
+}
+
+/**
+ * Resolve a user's own `#atproto` repo-signing key from their DID document,
+ * for 'pds' custody enrollment. Fails closed: a DID that cannot be resolved,
+ * or whose document has no usable `#atproto` key, throws rather than falling
+ * back to Stratos custody or storing an empty key.
+ *
+ * @param did - The user's DID.
+ * @param idResolver - Identity resolver for resolving the DID document.
+ * @returns The user's `#atproto` public key as a did:key string.
+ * @throws MissingAtprotoKeyError if the DID document has no usable `#atproto` key.
+ */
+export async function resolveAtprotoSigningKey(
+  did: string,
+  idResolver: IdResolver,
+): Promise<string> {
+  const didDoc = await idResolver.did.resolve(did)
+  const method = didDoc && selectAtprotoMethod(didDoc)
+
+  const didKey = (() => {
+    if (!method?.publicKeyMultibase || !method.type) return undefined
+    try {
+      return getDidKeyFromMultibase({
+        type: method.type,
+        publicKeyMultibase: method.publicKeyMultibase,
+      })
+    } catch {
+      return undefined
+    }
+  })()
+
+  if (!didKey) {
+    throw new MissingAtprotoKeyError(did)
+  }
+
+  return didKey
 }
 
 /**

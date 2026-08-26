@@ -155,6 +155,8 @@ describe('SqliteEnrollmentStore isService support', () => {
       active: true,
       enrollmentRkey: '3kabc',
       isService: false,
+      custody: 'stratos',
+      repoHost: undefined,
     })
     expect(await store.getBoundaries(USER_DID)).toEqual(
       expect.arrayContaining(['pilot', 'medical']),
@@ -204,6 +206,8 @@ describe('SqliteEnrollmentStore isService support', () => {
       active: false,
       enrollmentRkey: '3kxyz',
       isService: true,
+      custody: 'stratos',
+      repoHost: undefined,
     })
 
     // Untouched fields remain after a partial update.
@@ -244,6 +248,8 @@ describe('SqliteEnrollmentStore isService support', () => {
       active: true,
       enrollmentRkey: '3kuser',
       isService: false,
+      custody: 'stratos',
+      repoHost: undefined,
     })
     const service = all.find((e) => e.did === SERVICE_DID)
     expect(service?.active).toBe(false)
@@ -285,6 +291,8 @@ describe('SqliteEnrollmentStore isService support', () => {
       active: true,
       enrollmentRkey: '3ksvc',
       isService: true,
+      custody: 'stratos',
+      repoHost: undefined,
     })
 
     const limited = await store.listServiceEnrollments({ limit: 1 })
@@ -380,5 +388,137 @@ describe('SqliteEnrollmentStore removeBoundary', () => {
       'galaxy-police',
       'jurai-royals',
     ])
+  })
+})
+
+describe('SqliteEnrollmentStore custody and repoHost', () => {
+  const REI_DID = 'did:plc:reiayanami'
+
+  let testDir: string
+  let store: SqliteEnrollmentStore
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-enrollment-custody-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    const db = createServiceDb(join(testDir, 'service.sqlite'))
+    await migrateServiceDb(db)
+    store = new SqliteEnrollmentStore(db)
+  })
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('defaults custody to stratos and leaves repoHost undefined when omitted', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.custody).toBe('stratos')
+    expect(enrollment?.repoHost).toBeUndefined()
+  })
+
+  it('persists explicit pds custody and repoHost on first enroll', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.custody).toBe('pds')
+    expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
+  })
+
+  it('overwrites custody and repoHost on re-enroll via onConflictDoUpdate', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      custody: 'stratos',
+    })
+    expect((await store.getEnrollment(REI_DID))?.custody).toBe('stratos')
+    expect((await store.getEnrollment(REI_DID))?.repoHost).toBeUndefined()
+
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-06-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.custody).toBe('pds')
+    expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
+  })
+
+  it('keeps custody and repoHost stored as stratos/undefined when a re-enroll omits them', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-06-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.custody).toBe('stratos')
+    expect(enrollment?.repoHost).toBeUndefined()
+  })
+
+  it('updateEnrollment sets custody independently of repoHost', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      custody: 'stratos',
+    })
+
+    await store.updateEnrollment(REI_DID, { custody: 'pds' })
+    const afterCustody = await store.getEnrollment(REI_DID)
+    expect(afterCustody?.custody).toBe('pds')
+    expect(afterCustody?.repoHost).toBeUndefined()
+
+    await store.updateEnrollment(REI_DID, {
+      repoHost: 'https://pds.nerv.example.com',
+    })
+    const afterRepoHost = await store.getEnrollment(REI_DID)
+    expect(afterRepoHost?.custody).toBe('pds')
+    expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
+  })
+
+  it('enroll with an empty boundaries array stores no boundary rows', async () => {
+    await store.setBoundaries(REI_DID, ['leftover'])
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      boundaries: [],
+    })
+
+    expect(await store.getBoundaries(REI_DID)).toEqual(['leftover'])
   })
 })
