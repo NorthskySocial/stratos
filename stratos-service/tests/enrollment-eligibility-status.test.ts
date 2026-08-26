@@ -4,18 +4,33 @@ import { registerEnrollmentHandlers } from '../src/features/index.js'
 import type { AppContext } from '../src/index.js'
 import { EnrollmentDeniedError } from '@northskysocial/stratos-core'
 
+/** The shape `zone.stratos.enrollment.status` returns. */
+interface EnrollmentStatusBody {
+  did?: string
+  enrolled?: boolean
+  eligible?: boolean
+  active?: boolean
+  enrolledAt?: string
+  signingKey?: string
+  enrollmentRkey?: string
+}
+
+type XrpcHandler = (ctx: {
+  params: Record<string, unknown>
+  auth?: unknown
+}) => Promise<{ body: EnrollmentStatusBody }>
+
 interface MockXrpcServer {
-  methods: Record<string, any>
-  method: (nsid: string, config: any) => void
+  methods: Record<string, XrpcHandler>
+  method: (nsid: string, config: { handler: XrpcHandler }) => void
 }
 
 function createMockXrpcServer(): MockXrpcServer {
-  const methods: Record<string, any> = {}
+  const methods: Record<string, XrpcHandler> = {}
   return {
     methods,
-    method: (nsid: string, config: any) => {
-      // The registerEnrollmentHandlers function calls server.method(nsid, config)
-      // where config is { auth, handler }
+    // registerEnrollmentHandlers calls server.method(nsid, { auth, handler }).
+    method: (nsid, config) => {
       methods[nsid] = config.handler
     },
   }
@@ -26,10 +41,9 @@ async function invokeMethod(
   nsid: string,
   params: Record<string, unknown> = {},
   auth?: unknown,
-): Promise<any> {
+): Promise<{ statusCode: number; body: EnrollmentStatusBody }> {
   const handler = server.methods[nsid]
   if (!handler) throw new Error(`Method ${nsid} not registered`)
-  // The handler returned by createXrpcHandler is (handlerCtx) => Promise<HandlerResponse>
   const result = await handler({ params, auth })
   return { statusCode: 200, body: result.body }
 }

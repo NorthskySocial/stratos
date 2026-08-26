@@ -212,9 +212,24 @@ async function run() {
       // DIDs report `enrolled: false, eligible: true`). Requiring
       // enrollmentRkey too keeps the skip robust against older servers.
       if (status?.enrolled && status.enrollmentRkey) {
-        pass(`${userDef.name} already enrolled — OAuth skipped`, userState.did)
-        userState.enrolled = true
-        continue
+        // A service row alone does not prove the enrollment. Check the PDS
+        // record before we skip OAuth. A stale row would otherwise hide a
+        // missing record, and this phase would report a pass it never checked.
+        const existing = await findPdsEnrollmentRkey(
+          userState.did,
+          status.enrollmentRkey,
+        )
+        if (existing.found) {
+          pass(
+            `${userDef.name} already enrolled — OAuth skipped`,
+            userState.did,
+          )
+          userState.enrolled = true
+          continue
+        }
+        info(
+          `${userDef.name} reports enrolled but the PDS record is missing — enrolling again`,
+        )
       }
 
       info(`Enrolling ${userDef.name} (${userState.handle})...`)
