@@ -11,13 +11,49 @@ through `zone.stratos.actor.enrollment` records.
 
 ### Key Concepts
 
-| Concept            | Description                                                                                                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Boundary**       | Access control scope (e.g., "engineering", "leadership"). Records have boundaries; viewers must share at least one.                                     |
-| **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                                                               |
-| **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                                                       |
-| **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.                                           |
-| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped WebSocket stream consumed by sync clients (the standalone `stratos-indexer` and `stratos-feedgen`). |
+| Concept            | Description                                                                                                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Boundary**       | Access control scope (e.g., "engineering", "leadership"). Records have boundaries; viewers must share at least one.                                                                             |
+| **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                                                                                                       |
+| **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                                                                                               |
+| **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.                                                                                   |
+| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped WebSocket stream consumed by sync clients (the standalone `stratos-indexer` and `stratos-feedgen`).                                         |
+| **Custody**        | Which party holds a user's records. `stratos` = Stratos hosts the repo and signs. `pds` = the user's own spaces-capable PDS hosts the repo and the user signs.                                  |
+| **Space**          | An upstream permissioned-data container (proposal 0016). Stratos is always the space **authority**. For a `pds`-custody user it is only the authority, and the user's PDS is the repo **host**. |
+
+### Mixed-mode custody
+
+Stratos supports two custody classes at once. Read the class before you change
+any write, sync, or boundary code.
+
+| User's PDS     | Custody   | Repo host          | Who signs                    |
+| -------------- | --------- | ------------------ | ---------------------------- |
+| non-spaces     | `stratos` | Stratos            | Stratos, per-actor P-256 key |
+| spaces-capable | `pds`     | the user's own PDS | the user                     |
+
+Three rules follow. They are load-bearing, and each was proven against the
+upstream alpha PDS rather than read from the spec.
+
+1. **Never trust a boundary on a `pds`-custody record.** A repo host does not
+   authorize writes against the space authority. Any account can write records
+   into a Stratos-owned space URI in its own repo. A boundary on such a record is
+   a user-supplied claim. Always re-derive the boundary from Stratos enrollment
+   state. See `stratos-feedgen/src/subscription/indexer.ts` for the ingest path.
+2. **Membership decides whose repo the syncer reads.** It is the only write-side
+   control that exists. Removing a member does not stop them writing; it stops us
+   reading. The syncer iterates the member list. Do not add writer discovery.
+3. **A space record URI has seven segments and starts with the authority**:
+   `at://{authorityDid}/space/{type}/{skey}/{authorDid}/{collection}/{rkey}`.
+   A custody record keeps the familiar `at://{authorDid}/{collection}/{rkey}`.
+   Code that takes the first segment as the author is wrong for a space record.
+
+`zone.stratos.space.feed` must stay published as a `com.atproto.lexicon.schema`
+record with `defs.main.type` of `space`. A user's PDS resolves that NSID before
+it grants a space scope. If the record is missing, authorization fails with
+`invalid_scope`, and nothing in the Stratos logs explains why.
+
+Interop regression scripts live in `test/spike/spaces/`. Run them when you change
+credentials, host discovery, or ingest.
 
 ### Packages
 
@@ -442,6 +478,42 @@ When modifying `stratos-client/` exports or XRPC endpoints, update `stratos-clie
 
 Minimal comments. Only explain _why_, not _what_. Never generate: commented-out code, restated
 JSDoc, section divider comments (`// ====`), or TODOs without issue refs.
+
+---
+
+## Commit and Pull Request Guidelines
+
+**Do not copy the tone of the existing git history.** An agent wrote much of it.
+It is not a sample of the maintainer's voice.
+
+Write in the maintainer's voice, inside the Simplified Technical English rules.
+The two fit together like this.
+
+The rules, which are not negotiable: imperative mood, present tense, one idea per
+sentence, 20 words or fewer per sentence, the same word for the same thing every
+time, no idiom and no metaphor.
+
+The voice, which comes from how the maintainer writes:
+
+- Say the decision flatly. "Error ordering is fine for beta." Not "it may be
+  worth considering whether error ordering is acceptable".
+- Give the reason in the same breath, and keep it to one short sentence. State a
+  general principle when there is one.
+- Use "we" for a product or team decision. Use the imperative for an instruction.
+- Use plain domain words: boundary, custody, spaces PDS, feedgen, sync, enroll,
+  flow. Do not reach for a longer word.
+- No hedging, no pleasantries, no emphasis markup, no filler.
+- Name the concrete thing that changed. Do not restate the diff.
+
+Mechanics:
+
+- Subject line: sentence case. Use a `fix:`, `chore:`, or `ci:` prefix for
+  infrastructure. Use a plain imperative for a behaviour change.
+- Add a body only when the reason is not evident from the subject.
+- **Do not add a `Co-Authored-By` trailer.**
+
+Stack dependent pull requests with the `gh-stack` extension. Open the stack once
+the work is complete, not one PR at a time.
 
 ---
 
