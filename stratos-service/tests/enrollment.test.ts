@@ -358,7 +358,7 @@ describe('enrollment', () => {
 
       const err = await assertEnrollment(
         config,
-        'did:plc:test',
+        'did:plc:motoko',
         mockResolver,
       ).then(
         () => null,
