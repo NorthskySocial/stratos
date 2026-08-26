@@ -1,13 +1,17 @@
 import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
-import type {
-  EnrollmentValidationResult,
-  SpacesCapability,
-  Logger,
+import type { IdResolver } from '@atproto/identity'
+import {
+  classifyCustody,
+  type Custody,
+  type EnrollmentValidationResult,
+  type Logger,
+  type SpacesCapability,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
 import {
   migrateEnrollmentRkey,
+  resolveAtprotoSigningKey,
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
@@ -27,6 +31,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
     initRepo,
     createSigningKey,
     createAttestation,
+    idResolver,
   } = config
 
   const enrollBoundaries = selectEnrollBoundaries(
@@ -96,6 +101,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           initRepo,
           createSigningKey,
           createAttestation,
+          idResolver,
           enrollBoundaries,
           pdsEndpoint: enrollmentResult.pdsEndpoint!,
           spacesCapability: enrollmentResult.spacesCapability,
@@ -206,6 +212,10 @@ async function handleExistingEnrollment(deps: {
       enrollment.signingKeyDid,
     )
 
+    // Rows persisted before MM-03 carry no custody; treat them as 'stratos'
+    // custody so re-auth publishes the same invariant a fresh enrollment would.
+    const custody: Custody = enrollment.custody ?? 'stratos'
+
     await profileRecordWriter.putEnrollmentRecord(
       did,
       enrollment.enrollmentRkey!,
@@ -218,9 +228,47 @@ async function handleExistingEnrollment(deps: {
           signingKey: attestation.signingKey,
         },
         createdAt: new Date().toISOString(),
+        custody,
+        repoHost: enrollment.repoHost,
       },
     )
   }
+}
+
+/** Result of provisioning a new enrollment's signing key, independent of custody class. */
+interface SigningKeyProvision {
+  userSigningKeyDid: string
+  repoHost: string | undefined
+}
+
+/**
+ * Provision 'stratos' custody: initialize the Stratos-hosted repo and
+ * generate a Stratos-managed signing key for it. This is today's unchanged
+ * enrollment path.
+ */
+async function provisionStratosSigningKey(
+  did: string,
+  initRepo: OAuthRoutesConfig['initRepo'],
+  createSigningKey: OAuthRoutesConfig['createSigningKey'],
+): Promise<SigningKeyProvision> {
+  await initRepo(did)
+  const userSigningKeyDid = await createSigningKey(did)
+  return { userSigningKeyDid, repoHost: undefined }
+}
+
+/**
+ * Provision 'pds' custody: no Stratos repo is created. The user's own
+ * spaces-capable PDS hosts the repo, signed with their own `#atproto` key
+ * read from their DID document. Fails closed (throws) if that key is absent
+ * -- callers must not fall back to Stratos custody on failure.
+ */
+async function provisionPdsSigningKey(
+  did: string,
+  pdsEndpoint: string,
+  idResolver: IdResolver,
+): Promise<SigningKeyProvision> {
+  const userSigningKeyDid = await resolveAtprotoSigningKey(did, idResolver)
+  return { userSigningKeyDid, repoHost: pdsEndpoint }
 }
 
 async function handleNewEnrollment(deps: {
@@ -232,6 +280,7 @@ async function handleNewEnrollment(deps: {
   initRepo: OAuthRoutesConfig['initRepo']
   createSigningKey: OAuthRoutesConfig['createSigningKey']
   createAttestation: OAuthRoutesConfig['createAttestation']
+  idResolver: IdResolver
   enrollBoundaries: string[]
   pdsEndpoint: string
   spacesCapability: SpacesCapability | undefined
@@ -246,17 +295,19 @@ async function handleNewEnrollment(deps: {
     initRepo,
     createSigningKey,
     createAttestation,
+    idResolver,
     enrollBoundaries,
     pdsEndpoint,
     spacesCapability,
     logger,
   } = deps
 
-  // Initialize actor store and repo with an empty signed commit
-  await initRepo(did)
+  const custody = classifyCustody(spacesCapability)
+  const { userSigningKeyDid, repoHost } =
+    custody === 'pds'
+      ? await provisionPdsSigningKey(did, pdsEndpoint, idResolver)
+      : await provisionStratosSigningKey(did, initRepo, createSigningKey)
 
-  // Generate user signing key and service attestation
-  const userSigningKeyDid = await createSigningKey(did)
   const attestation = await createAttestation(
     did,
     enrollBoundaries,
@@ -275,13 +326,11 @@ async function handleNewEnrollment(deps: {
       signingKey: attestation.signingKey,
     },
     createdAt: new Date().toISOString(),
+    custody,
+    repoHost,
   })
 
   // Create enrollment record
-  // MM-03 stores this as the custody class. Logged here so the verdict is
-  // tied to the enrollment it decided, not to the callback that read it.
-  logger?.info({ did, spacesCapability }, 'enrolling actor')
-
   await enrollmentStore.enroll({
     did,
     enrolledAt: new Date().toISOString(),
@@ -290,7 +339,14 @@ async function handleNewEnrollment(deps: {
     signingKeyDid: userSigningKeyDid,
     active: true,
     enrollmentRkey,
+    custody,
+    repoHost,
   })
+
+  logger?.info(
+    { did, spacesCapability, custody },
+    'determined enrollment custody',
+  )
 }
 
 /**

@@ -23,6 +23,13 @@ export interface Enrollment {
 export type SpacesCapability = 'capable' | 'not-capable' | 'unknown'
 
 /**
+ * Who hosts and signs a user's repo. 'stratos' is the Stratos-hosted,
+ * Stratos-signed repo (the only mode available today). 'pds' is the user's
+ * own spaces-capable PDS, signing with their own `#atproto` key.
+ */
+export type Custody = 'stratos' | 'pds'
+
+/**
  * Result of enrollment validation
  */
 export interface EnrollmentValidationResult {

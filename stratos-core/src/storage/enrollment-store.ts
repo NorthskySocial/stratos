@@ -1,3 +1,5 @@
+import type { Custody } from '../enrollment/types.js'
+
 /**
  * Enrollment record as stored in the database.
  * Uses string dates for database compatibility.
@@ -12,6 +14,10 @@ export interface StoredEnrollment {
   active: boolean
   enrollmentRkey?: string
   isService?: boolean
+  /** Who hosts and signs this enrollment's repo. Defaults to 'stratos' when absent (pre-MM-03 rows). */
+  custody?: Custody
+  /** The repo host endpoint when custody is 'pds'. Undefined for 'stratos' custody. */
+  repoHost?: string
 }
 
 /**
