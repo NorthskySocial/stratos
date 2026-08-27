@@ -37,5 +37,4 @@ export interface EnrollmentValidationResult {
   reason?: import('../shared/errors.js').EnrollmentDenialReason
   pdsEndpoint?: string
   autoEnrollDomains?: string[]
-  spacesCapability?: SpacesCapability
 }
