@@ -21,6 +21,7 @@ describe('handleCallback PDS Record', () => {
       getEnrollment: vi.fn(),
       getBoundaries: vi.fn(),
       setBoundaries: vi.fn(),
+      updateEnrollment: vi.fn(),
     }
     const mockEnrollmentValidator = {
       validate: vi

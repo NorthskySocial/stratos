@@ -3,6 +3,7 @@ import type {
   Custody,
   EnrollmentStoreReader,
   EnrollmentStoreWriter,
+  SpacesCapability,
   StoredEnrollment,
   ListEnrollmentsOptions,
 } from '@northskysocial/stratos-core'
@@ -28,6 +29,8 @@ function toStoredEnrollment(row: PgEnrollment): StoredEnrollment {
     isService: row.isService,
     custody: (row.custody as Custody | null) ?? 'stratos',
     repoHost: row.repoHost ?? undefined,
+    capabilityVerdict:
+      (row.capabilityVerdict as SpacesCapability | null) ?? undefined,
   }
 }
 
@@ -129,6 +132,7 @@ export class PgEnrollmentStoreWriter
         isService: data.isService ?? false,
         custody: data.custody ?? 'stratos',
         repoHost: data.repoHost ?? null,
+        capabilityVerdict: data.capabilityVerdict ?? null,
       })
       .onConflictDoUpdate({
         target: pgEnrollment.did,
@@ -141,6 +145,7 @@ export class PgEnrollmentStoreWriter
           isService: data.isService ?? false,
           custody: data.custody ?? 'stratos',
           repoHost: data.repoHost ?? null,
+          capabilityVerdict: data.capabilityVerdict ?? null,
         },
       })
 
@@ -184,8 +189,15 @@ export class PgEnrollmentStoreWriter
     if (updates.custody !== undefined) {
       setValues.custody = updates.custody
     }
-    if (updates.repoHost !== undefined) {
-      setValues.repoHost = updates.repoHost
+    // `repoHost` alone needs to express "clear it": custody reconciliation
+    // must be able to drop a stored repoHost when it flips a user back to
+    // 'stratos' custody. `in` sees an explicit `repoHost: undefined`, where
+    // `!== undefined` would treat it the same as an omitted key.
+    if ('repoHost' in updates) {
+      setValues.repoHost = updates.repoHost ?? null
+    }
+    if (updates.capabilityVerdict !== undefined) {
+      setValues.capabilityVerdict = updates.capabilityVerdict
     }
 
     if (Object.keys(setValues).length > 0) {

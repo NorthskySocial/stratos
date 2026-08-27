@@ -93,6 +93,8 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       active: record.active,
       enrollmentRkey: record.enrollmentRkey,
       isService: record.isService ?? false,
+      custody: record.custody,
+      repoHost: record.repoHost,
     }
   }
 
@@ -123,18 +125,27 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   /**
    * Save enrollment record for a user.
    *
+   * Reads any existing record first: `enroll()` is a full-replace upsert, so
+   * omitting `custody`/`repoHost`/`pdsEndpoint` here would silently reset a
+   * returning user back to `stratos` custody and drop their PDS endpoint.
+   *
    * @param did - The user's DID.
    * @param signingKeyDid - The DID of the signing key.
    * @param now - The current date and time.
    * @private
    */
   private async saveEnrollment(did: string, signingKeyDid: string, now: Date) {
+    const existing = await this.enrollmentStore.getEnrollment(did)
+
     await this.enrollmentStore.enroll({
       did,
       enrolledAt: now.toISOString(),
-      pdsEndpoint: undefined,
+      pdsEndpoint: existing?.pdsEndpoint,
       signingKeyDid,
       active: true,
+      custody: existing?.custody,
+      repoHost: existing?.repoHost,
+      capabilityVerdict: existing?.capabilityVerdict,
     })
   }
 

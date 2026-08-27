@@ -100,6 +100,7 @@ describe('handleCallback', () => {
       isEnrolled: vi.fn(),
       enroll: vi.fn(),
       getEnrollment: vi.fn(),
+      updateEnrollment: vi.fn(),
     }
     mockIdResolver = {
       did: {
@@ -684,6 +685,134 @@ describe('handleCallback', () => {
         enrolled: false,
       }),
     )
+  })
+
+  describe('custody reconciliation on re-auth', () => {
+    function existingEnrollment(overrides: Record<string, unknown>) {
+      return {
+        did: 'did:plc:kaoru',
+        enrollmentRkey: 'did:web:localhost:3100',
+        active: true,
+        signingKeyDid: 'did:key:zQ3sh...',
+        pdsEndpoint: 'https://pds.example.com',
+        custody: 'stratos',
+        ...overrides,
+      }
+    }
+
+    beforeEach(() => {
+      mockEnrollmentStore.getBoundaries = vi.fn().mockResolvedValue([])
+      mockEnrollmentStore.setBoundaries = vi.fn()
+    })
+
+    async function runExisting() {
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+      const handler = handleCallback(config)
+      const req: any = {
+        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      }
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        redirect: vi.fn(),
+      }
+      await handler(req, res)
+      return res
+    }
+
+    it('flips stratos custody to pds when a re-auth grant becomes capable', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:kaoru',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({ custody: 'stratos', repoHost: undefined }),
+      )
+
+      await runExisting()
+
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+    })
+
+    it('flips pds custody back to stratos and clears repoHost when the grant is revoked', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.objectContaining({
+          custody: 'stratos',
+          repoHost: undefined,
+        }),
+      )
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'stratos',
+          repoHost: undefined,
+        }),
+      )
+    })
+
+    it('never flips pds custody to stratos when the re-auth verdict is unknown', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: {
+          sub: 'did:plc:kaoru',
+          getTokenInfo: vi
+            .fn()
+            .mockRejectedValue(new Error('introspection down')),
+        },
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+      // custody itself must never be part of an update triggered only by an
+      // unknown verdict -- only the observed verdict may be persisted.
+      expect(mockEnrollmentStore.updateEnrollment).not.toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.objectContaining({ custody: 'stratos' }),
+      )
+    })
   })
 
   describe('spaces capability detection', () => {

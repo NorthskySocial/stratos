@@ -2,6 +2,7 @@ import { asc, eq, gt, and } from 'drizzle-orm'
 import {
   type Custody,
   type EnrollmentStoreReader,
+  type SpacesCapability,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
 import {
@@ -27,6 +28,8 @@ function toStoredEnrollment(row: Enrollment): StoredEnrollment {
     isService: row.isService,
     custody: (row.custody as Custody | null) ?? 'stratos',
     repoHost: row.repoHost ?? undefined,
+    capabilityVerdict:
+      (row.capabilityVerdict as SpacesCapability | null) ?? undefined,
   }
 }
 
@@ -71,6 +74,7 @@ export class SqliteEnrollmentStore
         isService: record.isService ?? false,
         custody: record.custody ?? 'stratos',
         repoHost: record.repoHost ?? null,
+        capabilityVerdict: record.capabilityVerdict ?? null,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -83,6 +87,7 @@ export class SqliteEnrollmentStore
           isService: record.isService ?? false,
           custody: record.custody ?? 'stratos',
           repoHost: record.repoHost ?? null,
+          capabilityVerdict: record.capabilityVerdict ?? null,
         },
       })
 
@@ -150,7 +155,13 @@ export class SqliteEnrollmentStore
       set.enrollmentRkey = updates.enrollmentRkey ?? null
     if (updates.isService !== undefined) set.isService = updates.isService
     if (updates.custody !== undefined) set.custody = updates.custody
-    if (updates.repoHost !== undefined) set.repoHost = updates.repoHost ?? null
+    // `repoHost` alone needs to express "clear it": custody reconciliation
+    // must be able to drop a stored repoHost when it flips a user back to
+    // 'stratos' custody. `in` sees an explicit `repoHost: undefined`, where
+    // `!== undefined` would treat it the same as an omitted key.
+    if ('repoHost' in updates) set.repoHost = updates.repoHost ?? null
+    if (updates.capabilityVerdict !== undefined)
+      set.capabilityVerdict = updates.capabilityVerdict
 
     if (Object.keys(set).length > 0) {
       await this.db.update(enrollment).set(set).where(eq(enrollment.did, did))

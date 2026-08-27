@@ -1,4 +1,4 @@
-import type { Custody } from '../enrollment/types.js'
+import type { Custody, SpacesCapability } from '../enrollment/types.js'
 
 /**
  * Enrollment record as stored in the database.
@@ -18,6 +18,13 @@ export interface StoredEnrollment {
   custody?: Custody
   /** The repo host endpoint when custody is 'pds'. Undefined for 'stratos' custody. */
   repoHost?: string
+  /**
+   * The most recently observed capability probe verdict, from the last
+   * enrolment or re-auth. Not authoritative on its own -- `custody` is the
+   * value every write and read gate trusts -- but keeps the verdict a future
+   * migration or audit pass can find, instead of it living only in a log line.
+   */
+  capabilityVerdict?: SpacesCapability
 }
 
 /**
