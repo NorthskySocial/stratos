@@ -41,7 +41,7 @@ describe('EnrollmentServiceImpl', () => {
         actorStoreDestroyer,
       )
 
-      await service.enroll(did, ['section9'], 'did:key:zMotoko')
+      const result = await service.enroll(did, ['section9'], 'did:key:zMotoko')
 
       expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -52,6 +52,10 @@ describe('EnrollmentServiceImpl', () => {
           capabilityVerdict: undefined,
         }),
       )
+      // The returned Enrollment must match the row just written, not a
+      // stripped-down object that contradicts it.
+      expect(result.custody).toBeUndefined()
+      expect(result.repoHost).toBeUndefined()
     })
 
     it('carries forward an existing enrollment custody, repoHost, and pdsEndpoint', async () => {
@@ -75,7 +79,7 @@ describe('EnrollmentServiceImpl', () => {
         actorStoreDestroyer,
       )
 
-      await service.enroll(did, ['section9'], 'did:key:zMotoko')
+      const result = await service.enroll(did, ['section9'], 'did:key:zMotoko')
 
       expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -86,6 +90,10 @@ describe('EnrollmentServiceImpl', () => {
           capabilityVerdict: 'capable',
         }),
       )
+      // The returned Enrollment must match the row just written, not a
+      // stripped-down object that contradicts it.
+      expect(result.custody).toBe('pds')
+      expect(result.repoHost).toBe('https://niihama.example.com')
     })
   })
 
