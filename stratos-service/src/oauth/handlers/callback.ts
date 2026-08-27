@@ -52,9 +52,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       const did = session.sub
 
       // Validate enrollment eligibility
-      const enrollmentResult: EnrollmentValidationResult = {
-        ...(await config.enrollmentValidator.validate(did)),
-      }
+      const enrollmentResult: EnrollmentValidationResult =
+        await config.enrollmentValidator.validate(did)
 
       if (!enrollmentResult.allowed) {
         return denyEnrollment(res, did, enrollmentResult.reason, oauthClient)
@@ -64,15 +63,12 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       // the space scope `handleAuthorize` requested, so the grant (or its
       // absence) is the answer; a failed read is 'unknown', never a false
       // 'not-capable'.
-      enrollmentResult.spacesCapability = await detectSpacesCapability(
+      const spacesCapability = await detectSpacesCapability(
         session,
         serviceDid,
         logger,
       )
-      logger?.info(
-        { did, spacesCapability: enrollmentResult.spacesCapability },
-        'detected PDS spaces capability',
-      )
+      logger?.info({ did, spacesCapability }, 'detected PDS spaces capability')
 
       // Check if already enrolled
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
@@ -88,7 +84,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           createAttestation,
           autoEnrollDomains,
           defaultBoundaries,
-          spacesCapability: enrollmentResult.spacesCapability,
+          spacesCapability,
           logger,
         })
       } else {
@@ -104,7 +100,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           idResolver,
           enrollBoundaries,
           pdsEndpoint: enrollmentResult.pdsEndpoint!,
-          spacesCapability: enrollmentResult.spacesCapability,
+          spacesCapability,
           logger,
         })
       }
@@ -173,7 +169,9 @@ async function handleExistingEnrollment(deps: {
   } = deps
 
   // A re-auth can change the verdict, because the user may grant or withhold
-  // the space scope each time. MM-03 reconciles the stored custody class.
+  // the space scope each time. Nothing reconciles the stored custody class
+  // yet, so a user who revokes the space grant keeps 'pds' custody. Tracked
+  // for MM-04.
   logger?.info({ did, spacesCapability }, 're-authorised existing enrollment')
 
   // Migrate legacy (self-keyed or TID-keyed) enrollment record to service DID rkey
