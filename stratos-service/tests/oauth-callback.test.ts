@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleCallback } from '../src/oauth/handlers/callback.js'
+import { buildSpaceScope } from '../src/oauth/index.js'
+
+/**
+ * A minimal OAuth session double. `scope` defaults to the base grant only,
+ * i.e. a PDS that ignored the requested space scope — the common case for
+ * tests unrelated to spaces-capability detection.
+ */
+function sessionFor(sub: string, scope = 'atproto') {
+  return { sub, getTokenInfo: vi.fn().mockResolvedValue({ scope }) }
+}
 
 describe('handleCallback', () => {
   let mockOauthClient: any
@@ -64,7 +74,7 @@ describe('handleCallback', () => {
   })
 
   it('handles successful new enrollment', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = sessionFor('did:plc:alice')
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
@@ -92,7 +102,7 @@ describe('handleCallback', () => {
   })
 
   it('handles successful existing enrollment', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = sessionFor('did:plc:alice')
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
     mockEnrollmentStore.getEnrollment.mockResolvedValue({
@@ -125,7 +135,7 @@ describe('handleCallback', () => {
   })
 
   it('denies enrollment if not allowed', async () => {
-    const session = { sub: 'did:plc:malice' }
+    const session = sessionFor('did:plc:malice')
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentValidator.validate.mockResolvedValue({
       allowed: false,
@@ -177,7 +187,7 @@ describe('handleCallback', () => {
   })
 
   it('handles DID resolution failure when checking PDS allowlist', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = sessionFor('did:plc:alice')
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentValidator.validate.mockResolvedValue({
       allowed: false,
@@ -206,7 +216,7 @@ describe('handleCallback', () => {
 
   it('redirects to the target that authorize verified into the OAuth state', async () => {
     mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:alice' },
+      session: sessionFor('did:plc:alice'),
       state: 'https://app.example/',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
@@ -230,7 +240,7 @@ describe('handleCallback', () => {
 
   it('ignores a stratos_redirect cookie, which a host neighbour could forge', async () => {
     mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:alice' },
+      session: sessionFor('did:plc:alice'),
       state: null,
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
@@ -261,7 +271,7 @@ describe('handleCallback', () => {
   it('declines a stored redirect that uses a disallowed scheme', async () => {
     config.baseUrl = 'https://stratos.example'
     mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:alice' },
+      session: sessionFor('did:plc:alice'),
       state: 'http://evil.example/',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
@@ -291,7 +301,7 @@ describe('handleCallback', () => {
 
   it('declines a stored redirect that is not a valid URL', async () => {
     mockOauthClient.callback.mockResolvedValue({
-      session: { sub: 'did:plc:alice' },
+      session: sessionFor('did:plc:alice'),
       state: 'not-a-url',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
@@ -322,7 +332,7 @@ describe('handleCallback', () => {
   it('puts no credential on the redirect', async () => {
     const did = 'did:plc:alice'
     mockOauthClient.callback.mockResolvedValue({
-      session: { sub: did },
+      session: sessionFor(did),
       state: 'https://app.example/',
     })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
@@ -349,7 +359,7 @@ describe('handleCallback', () => {
 
   it('handles re-enrollment logic correctly', async () => {
     // Test that handleExistingEnrollment is called and it updates/migrates as needed
-    const session = { sub: 'did:plc:alice' }
+    const session = sessionFor('did:plc:alice')
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
     mockEnrollmentStore.getEnrollment.mockResolvedValue({
@@ -376,5 +386,100 @@ describe('handleCallback', () => {
         enrolled: false,
       }),
     )
+  })
+
+  describe('spaces capability detection', () => {
+    // These tests need an unambiguous authority DID, so they override the
+    // shared `did:web:localhost%3A3100` fixture with the house convention.
+    const SERVICE_DID = 'did:web:stratos.example.com'
+
+    beforeEach(() => {
+      config.serviceDid = SERVICE_DID
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    })
+
+    async function runCallback(session: unknown) {
+      mockOauthClient.callback.mockResolvedValue({ session })
+      const handler = handleCallback(config)
+      const req: any = {
+        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      }
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        redirect: vi.fn(),
+      }
+      await handler(req, res)
+      return res
+    }
+
+    it('reports capable when the PDS granted the requested space scope', async () => {
+      const scope = `atproto ${buildSpaceScope(SERVICE_DID)}`
+      const session = sessionFor('did:plc:kenshin', scope)
+      await runCallback(session)
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:kenshin', spacesCapability: 'capable' },
+        'detected PDS spaces capability',
+      )
+      // getTokenInfo(true) would force a network refresh; the check only
+      // needs the scope already on the session.
+      expect(session.getTokenInfo).toHaveBeenCalledWith(false)
+    })
+
+    it('reports not-capable when the PDS silently dropped the space scope', async () => {
+      // sessionFor defaults to the base-only grant, i.e. the scope a
+      // non-spaces PDS returns after ignoring the space scope request.
+      await runCallback(sessionFor('did:plc:kaoru'))
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:kaoru', spacesCapability: 'not-capable' },
+        'detected PDS spaces capability',
+      )
+    })
+
+    it('reports not-capable when the granted scope names a different authority', async () => {
+      const scope = `atproto ${buildSpaceScope('did:web:other.example.com')}`
+      await runCallback(sessionFor('did:plc:sanosuke', scope))
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:sanosuke', spacesCapability: 'not-capable' },
+        'detected PDS spaces capability',
+      )
+    })
+
+    it('reports unknown, never not-capable, when the token-info read fails', async () => {
+      const session = {
+        sub: 'did:plc:megumi',
+        getTokenInfo: vi
+          .fn()
+          .mockRejectedValue(new Error('introspection down')),
+      }
+      await runCallback(session)
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:megumi', spacesCapability: 'unknown' },
+        'detected PDS spaces capability',
+      )
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ did: 'did:plc:megumi' }),
+        expect.stringContaining('failed to read granted OAuth scope'),
+      )
+    })
+
+    it('does not require a logger: a token-info failure still resolves the request', async () => {
+      config.logger = undefined
+      const session = {
+        sub: 'did:plc:yahiko',
+        getTokenInfo: vi
+          .fn()
+          .mockRejectedValue(new Error('introspection down')),
+      }
+      const res = await runCallback(session)
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true, did: 'did:plc:yahiko' }),
+      )
+    })
   })
 })

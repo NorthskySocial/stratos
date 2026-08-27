@@ -20,6 +20,31 @@ export const OAUTH_SCOPE = [
   'repo:zone.stratos.actor.enrollment',
 ].join(' ')
 
+/** Space type NSID this service hosts. */
+export const SPACE_TYPE = 'zone.stratos.space.feed'
+
+const SPACE_COLLECTION = 'zone.stratos.feed.post'
+
+/**
+ * Builds the space-scope grant requested at enrolment. Omits `skey`: a user
+ * may hold no boundaries yet, so the scope cannot name a concrete space, and
+ * a scope granted without `skey` covers every space added under this
+ * authority later. A PDS that does not understand `space:` scopes ignores
+ * it and authorization completes normally with only `atproto` granted —
+ * that grant (or its absence) is what `detectSpacesCapability` reads back.
+ */
+export function buildSpaceScope(serviceDid: string): string {
+  return `space:${SPACE_TYPE}?authority=${serviceDid}&collection=${SPACE_COLLECTION}&action=create&action=read`
+}
+
+/**
+ * Full scope requested for the enrolment OAuth flow: the fixed base scope
+ * plus this service's space-scope grant.
+ */
+export function buildOAuthScope(serviceDid: string): string {
+  return [OAUTH_SCOPE, buildSpaceScope(serviceDid)].join(' ')
+}
+
 /**
  * OAuth scope for admin login. Admins only prove identity; they get no repo
  * write grants. Identity-only `atproto` scope is deliberate.

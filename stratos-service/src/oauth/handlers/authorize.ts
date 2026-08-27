@@ -1,5 +1,5 @@
 import express from 'express'
-import { OAUTH_SCOPE } from '../client.js'
+import { buildOAuthScope } from '../client.js'
 import { verifyRedirectTarget } from '../redirect-target.js'
 import type { OAuthRoutesConfig } from '../routes.js'
 
@@ -19,7 +19,8 @@ const HOW_TO_PROVE_REDIRECT =
  * @returns Express handler function
  */
 export const handleAuthorize = (config: OAuthRoutesConfig) => {
-  const { oauthClient, logger } = config
+  const { oauthClient, serviceDid, logger } = config
+  const scope = buildOAuthScope(serviceDid)
 
   const isSecure = config.baseUrl.startsWith('https://')
   const redirectGates = {
@@ -65,16 +66,13 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       }
 
       // Start the authorization flow
-      logger?.debug(
-        { handle, scope: OAUTH_SCOPE },
-        'Starting OAuth authorization',
-      )
+      logger?.debug({ handle, scope }, 'Starting OAuth authorization')
       // The verified target rides in the OAuth state, which the client stores
       // server-side and returns only to this callback. A cookie cannot do this
       // job: cookies are not bound to an origin, so a different host on the
       // same registrable domain can write one.
       const authUrl = await oauthClient.authorize(handle, {
-        scope: OAUTH_SCOPE,
+        scope,
         state: verifiedRedirect,
       })
 

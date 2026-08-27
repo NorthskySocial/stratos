@@ -10,6 +10,7 @@ import {
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
+import { detectSpacesCapability } from '../spaces-capability.js'
 
 export const handleCallback = (config: OAuthRoutesConfig) => {
   const {
@@ -45,12 +46,27 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       const did = session.sub
 
       // Validate enrollment eligibility
-      const enrollmentResult: EnrollmentValidationResult =
-        await config.enrollmentValidator.validate(did)
+      const enrollmentResult: EnrollmentValidationResult = {
+        ...(await config.enrollmentValidator.validate(did)),
+      }
 
       if (!enrollmentResult.allowed) {
         return denyEnrollment(res, did, enrollmentResult.reason, oauthClient)
       }
+
+      // Read back the scope actually granted. A non-spaces PDS silently drops
+      // the space scope `handleAuthorize` requested, so the grant (or its
+      // absence) is the answer; a failed read is 'unknown', never a false
+      // 'not-capable'.
+      enrollmentResult.spacesCapability = await detectSpacesCapability(
+        session,
+        serviceDid,
+        logger,
+      )
+      logger?.info(
+        { did, spacesCapability: enrollmentResult.spacesCapability },
+        'detected PDS spaces capability',
+      )
 
       // Check if already enrolled
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
