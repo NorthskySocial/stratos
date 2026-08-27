@@ -215,8 +215,14 @@ async function handleExistingEnrollment(deps: {
     // Only a confirmed verdict moves custody. A user who revokes the space
     // grant is reconciled back to 'stratos' custody here; an 'unknown'
     // verdict (a transient introspection failure) leaves custody untouched.
-    const custody = reconcileCustody(storedCustody, spacesCapability)
-    const custodyChanged = custody !== storedCustody
+    // A custody change is a data migration, not a label change: the repo has
+    // to move and the signing key has to change with it. Neither happens on
+    // this path, and flipping the label alone would publish an enrollment
+    // whose `signingKey` contradicts its `custody`. Record what we observed,
+    // keep the stored class, and let MM-10 move anyone who has diverged.
+    const custody = storedCustody
+    const wantedCustody = reconcileCustody(storedCustody, spacesCapability)
+    const custodyDiverged = wantedCustody !== storedCustody
     // 'pds' custody hosts the repo at the user's own PDS, already known from
     // the stored pdsEndpoint. 'stratos' custody has no repoHost.
     const repoHost = custody === 'pds' ? enrollment.pdsEndpoint : undefined
@@ -238,18 +244,16 @@ async function handleExistingEnrollment(deps: {
       },
     )
 
-    if (custodyChanged || spacesCapability !== enrollment.capabilityVerdict) {
+    if (spacesCapability !== enrollment.capabilityVerdict) {
       await enrollmentStore.updateEnrollment(did, {
-        custody,
-        repoHost,
         capabilityVerdict: spacesCapability,
       })
-      if (custodyChanged) {
-        logger?.info(
-          { did, from: storedCustody, to: custody },
-          'reconciled custody on re-auth',
-        )
-      }
+    }
+    if (custodyDiverged) {
+      logger?.warn(
+        { did, storedCustody, wantedCustody, spacesCapability },
+        'custody diverged from the granted scope, migration required',
+      )
     }
   }
 }
