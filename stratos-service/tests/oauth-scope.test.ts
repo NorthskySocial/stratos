@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { OAUTH_SCOPE } from '../src/oauth/index.js'
+import {
+  buildOAuthScope,
+  buildSpaceScope,
+  OAUTH_SCOPE,
+} from '../src/oauth/index.js'
 import { IdResolver } from '@atproto/identity'
 import { PdsTokenVerifier } from '../src/infra/auth/index.js'
 
@@ -23,6 +27,30 @@ describe('OAUTH_SCOPE', () => {
 
   it('should match the expected full value', () => {
     expect(OAUTH_SCOPE).toBe('atproto repo:zone.stratos.actor.enrollment')
+  })
+})
+
+describe('buildSpaceScope', () => {
+  it('requests this service as authority, with no skey and no PDS probe', () => {
+    expect(buildSpaceScope('did:web:stratos.example.com')).toBe(
+      'space:zone.stratos.space.feed?authority=did:web:stratos.example.com&collection=zone.stratos.feed.post&action=create&action=read',
+    )
+  })
+
+  it('omits skey so the grant covers boundaries added after enrolment', () => {
+    expect(buildSpaceScope('did:web:stratos.example.com')).not.toContain(
+      'skey=',
+    )
+  })
+})
+
+describe('buildOAuthScope', () => {
+  it('keeps the fixed base scope and appends the space grant', () => {
+    const scope = buildOAuthScope('did:web:stratos.example.com')
+    const parts = scope.split(' ')
+    expect(parts[0]).toBe('atproto')
+    expect(parts).toContain('repo:zone.stratos.actor.enrollment')
+    expect(scope).toContain(buildSpaceScope('did:web:stratos.example.com'))
   })
 })
 
