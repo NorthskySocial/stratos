@@ -23,7 +23,7 @@ export const OAUTH_SCOPE = [
 /** Space type NSID this service hosts. */
 export const SPACE_TYPE = 'zone.stratos.space.feed'
 
-const SPACE_COLLECTION = 'zone.stratos.feed.post'
+export const SPACE_COLLECTION = 'zone.stratos.feed.post'
 
 /**
  * Builds the space-scope grant requested at enrolment. Omits `skey`: a user
@@ -34,7 +34,13 @@ const SPACE_COLLECTION = 'zone.stratos.feed.post'
  * that grant (or its absence) is what `detectSpacesCapability` reads back.
  */
 export function buildSpaceScope(serviceDid: string): string {
-  return `space:${SPACE_TYPE}?authority=${serviceDid}&collection=${SPACE_COLLECTION}&action=create&action=read`
+  // Encode the authority. The scope parser percent-decodes a parameter value,
+  // and a `did:web` service DID carries `%3A` for the port. Interpolated raw,
+  // `did:web:127.0.0.1%3A3100` parses back as `did:web:127.0.0.1:3100`, which
+  // is a different DID: the grant never matches and a capable PDS is recorded
+  // as Stratos custody. It also sends the wrong authority to the PDS.
+  const authority = encodeURIComponent(serviceDid)
+  return `space:${SPACE_TYPE}?authority=${authority}&collection=${SPACE_COLLECTION}&action=create&action=read`
 }
 
 /**

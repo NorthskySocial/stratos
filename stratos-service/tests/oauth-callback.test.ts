@@ -389,13 +389,33 @@ describe('handleCallback', () => {
   })
 
   describe('spaces capability detection', () => {
-    // These tests need an unambiguous authority DID, so they override the
-    // shared `did:web:localhost%3A3100` fixture with the house convention.
-    const SERVICE_DID = 'did:web:stratos.example.com'
+    // Keep the shared fixture. A `did:web` service DID carries `%3A` for its
+    // port, and interpolating that raw into the scope used to break the match
+    // silently, so the encoded form is the case worth defending.
+    const SERVICE_DID = 'did:web:localhost%3A3100'
 
     beforeEach(() => {
       config.serviceDid = SERVICE_DID
       mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    })
+
+    it.each([
+      ['did:web:localhost%3A3100', 'a did:web with an encoded port'],
+      ['did:web:127.0.0.1%3A3100', 'the e2e service DID'],
+      ['did:web:stratos.example.com', 'a did:web with no port'],
+      ['did:plc:kaoru', 'a did:plc'],
+    ])('reports capable for %s (%s)', async (serviceDid) => {
+      config.serviceDid = serviceDid
+      const session = sessionFor(
+        'did:plc:kenshin',
+        `atproto ${buildSpaceScope(serviceDid)}`,
+      )
+      await runCallback(session)
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:kenshin', spacesCapability: 'capable' },
+        'detected PDS spaces capability',
+      )
     })
 
     async function runCallback(session: unknown) {
