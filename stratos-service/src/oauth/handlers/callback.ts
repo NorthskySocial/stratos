@@ -216,14 +216,12 @@ async function handleExistingEnrollment(deps: {
     // Rows persisted before MM-03 carry no custody; treat them as 'stratos'
     // custody so re-auth starts from the same invariant a fresh enrollment would.
     const storedCustody: Custody = enrollment.custody ?? 'stratos'
-    // Only a confirmed verdict moves custody. A user who revokes the space
-    // grant is reconciled back to 'stratos' custody here; an 'unknown'
-    // verdict (a transient introspection failure) leaves custody untouched.
-    // A custody change is a data migration, not a label change: the repo has
-    // to move and the signing key has to change with it. Neither happens on
-    // this path, and flipping the label alone would publish an enrollment
-    // whose `signingKey` contradicts its `custody`. Record what we observed,
-    // keep the stored class, and let MM-10 move anyone who has diverged.
+    // Re-auth never changes custody. A custody change is a data migration,
+    // not a label change: the repo has to move and the signing key has to
+    // change with it. Neither happens here, and flipping the label alone
+    // would publish an enrollment whose `signingKey` contradicts its
+    // `custody`. Record what we observed, keep the stored class, and let
+    // MM-10 move anyone who has diverged.
     const custody = storedCustody
     const wantedCustody = reconcileCustody(storedCustody, spacesCapability)
     const custodyDiverged = wantedCustody !== storedCustody
