@@ -700,6 +700,94 @@ describe('PostgreSQL Backend Integration', () => {
       expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
     })
 
+    it('should round-trip a truthy capabilityVerdict through enroll and getEnrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zRitsukoAkagi1',
+        active: true,
+        capabilityVerdict: 'capable',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('capable')
+    })
+
+    it('should leave capabilityVerdict undefined when omitted from enroll', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zRitsukoAkagi2',
+        active: true,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBeUndefined()
+    })
+
+    it('should overwrite capabilityVerdict on re-enroll via onConflictDoUpdate', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMakotoHyuga1',
+        active: true,
+        capabilityVerdict: 'capable',
+      })
+
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMakotoHyuga2',
+        active: true,
+        capabilityVerdict: 'not-capable',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('not-capable')
+    })
+
+    it('should update capabilityVerdict without disturbing custody or repoHost', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zPenPenSama1',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        capabilityVerdict: 'capable',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('capable')
+      expect(result?.custody).toBe('pds')
+      expect(result?.repoHost).toBe('https://pds.nerv.example.com')
+    })
+
+    it('should clear repoHost to undefined via updateEnrollment when explicitly passed undefined', async () => {
+      // The custody-downgrade path: reconcileCustody flips a user back to
+      // 'stratos' custody and must be able to drop the stale repoHost.
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zPenPenSama2',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        custody: 'stratos',
+        repoHost: undefined,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.custody).toBe('stratos')
+      expect(result?.repoHost).toBeUndefined()
+    })
+
     it('should keep existing boundaries when enroll is called with an empty boundaries array', async () => {
       await enrollmentStore.enroll({
         did: testDid,

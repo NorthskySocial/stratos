@@ -6,6 +6,7 @@ import {
   extractPdsEndpoint,
   isDidAllowed,
   isPdsAllowed,
+  reconcileCustody,
   validateEnrollmentEligibility,
 } from '../src/index.js'
 
@@ -216,6 +217,31 @@ describe('Enrollment Domain Logic', () => {
 
     it('falls back to stratos custody when no verdict was recorded', () => {
       expect(classifyCustody(undefined)).toBe('stratos')
+    })
+  })
+
+  describe('reconcileCustody', () => {
+    it('upgrades stratos custody to pds on a confirmed capable verdict', () => {
+      expect(reconcileCustody('stratos', 'capable')).toBe('pds')
+    })
+
+    it('withdraws pds custody to stratos on a confirmed not-capable verdict', () => {
+      expect(reconcileCustody('pds', 'not-capable')).toBe('stratos')
+    })
+
+    it('leaves pds custody unchanged on an unknown verdict', () => {
+      // Losing the answer is not the same as learning the answer is no.
+      // This is the whole reason the third state exists.
+      expect(reconcileCustody('pds', 'unknown')).toBe('pds')
+    })
+
+    it('leaves stratos custody unchanged on an unknown verdict', () => {
+      expect(reconcileCustody('stratos', 'unknown')).toBe('stratos')
+    })
+
+    it('leaves custody unchanged when no verdict was recorded', () => {
+      expect(reconcileCustody('pds', undefined)).toBe('pds')
+      expect(reconcileCustody('stratos', undefined)).toBe('stratos')
     })
   })
 })

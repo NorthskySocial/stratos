@@ -509,6 +509,93 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
   })
 
+  it('round-trips a truthy capabilityVerdict through enroll and getEnrollment', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'capable',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('capable')
+  })
+
+  it('leaves capabilityVerdict undefined when omitted from enroll', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBeUndefined()
+  })
+
+  it('overwrites capabilityVerdict on re-enroll via onConflictDoUpdate', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'capable',
+    })
+
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-06-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'not-capable',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('not-capable')
+  })
+
+  it('updateEnrollment sets capabilityVerdict without disturbing custody or repoHost', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    await store.updateEnrollment(REI_DID, { capabilityVerdict: 'capable' })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('capable')
+    expect(enrollment?.custody).toBe('pds')
+    expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
+  })
+
+  it('updateEnrollment clears repoHost to undefined when explicitly passed undefined', async () => {
+    // This is the custody-downgrade path: reconcileCustody flips a user back
+    // to 'stratos' custody and must be able to drop the stale repoHost, not
+    // just leave it stuck at the old PDS endpoint.
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    await store.updateEnrollment(REI_DID, {
+      custody: 'stratos',
+      repoHost: undefined,
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.custody).toBe('stratos')
+    expect(enrollment?.repoHost).toBeUndefined()
+  })
+
   it('enroll with an empty boundaries array leaves existing boundary rows in place', async () => {
     await store.setBoundaries(REI_DID, ['leftover'])
     await store.enroll({

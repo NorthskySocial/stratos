@@ -3,6 +3,7 @@ import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import type { IdResolver } from '@atproto/identity'
 import {
   classifyCustody,
+  reconcileCustody,
   type Custody,
   type EnrollmentValidationResult,
   type Logger,
@@ -169,9 +170,7 @@ async function handleExistingEnrollment(deps: {
   } = deps
 
   // A re-auth can change the verdict, because the user may grant or withhold
-  // the space scope each time. Nothing reconciles the stored custody class
-  // yet, so a user who revokes the space grant keeps 'pds' custody. Tracked
-  // for MM-04.
+  // the space scope each time.
   logger?.info({ did, spacesCapability }, 're-authorised existing enrollment')
 
   // Migrate legacy (self-keyed or TID-keyed) enrollment record to service DID rkey
@@ -211,8 +210,16 @@ async function handleExistingEnrollment(deps: {
     )
 
     // Rows persisted before MM-03 carry no custody; treat them as 'stratos'
-    // custody so re-auth publishes the same invariant a fresh enrollment would.
-    const custody: Custody = enrollment.custody ?? 'stratos'
+    // custody so re-auth starts from the same invariant a fresh enrollment would.
+    const storedCustody: Custody = enrollment.custody ?? 'stratos'
+    // Only a confirmed verdict moves custody. A user who revokes the space
+    // grant is reconciled back to 'stratos' custody here; an 'unknown'
+    // verdict (a transient introspection failure) leaves custody untouched.
+    const custody = reconcileCustody(storedCustody, spacesCapability)
+    const custodyChanged = custody !== storedCustody
+    // 'pds' custody hosts the repo at the user's own PDS, already known from
+    // the stored pdsEndpoint. 'stratos' custody has no repoHost.
+    const repoHost = custody === 'pds' ? enrollment.pdsEndpoint : undefined
 
     await profileRecordWriter.putEnrollmentRecord(
       did,
@@ -227,9 +234,23 @@ async function handleExistingEnrollment(deps: {
         },
         createdAt: new Date().toISOString(),
         custody,
-        repoHost: enrollment.repoHost,
+        repoHost,
       },
     )
+
+    if (custodyChanged || spacesCapability !== enrollment.capabilityVerdict) {
+      await enrollmentStore.updateEnrollment(did, {
+        custody,
+        repoHost,
+        capabilityVerdict: spacesCapability,
+      })
+      if (custodyChanged) {
+        logger?.info(
+          { did, from: storedCustody, to: custody },
+          'reconciled custody on re-auth',
+        )
+      }
+    }
   }
 }
 
@@ -344,6 +365,7 @@ async function handleNewEnrollment(deps: {
     enrollmentRkey,
     custody,
     repoHost,
+    capabilityVerdict: spacesCapability,
   })
 
   logger?.info(

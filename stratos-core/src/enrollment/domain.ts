@@ -119,3 +119,25 @@ export function classifyCustody(
 ): Custody {
   return spacesCapability === 'capable' ? 'pds' : 'stratos'
 }
+
+/**
+ * Decide whether a re-authorising enrollment's stored custody should change,
+ * from the capability verdict this re-auth just observed. Only a confirmed
+ * verdict moves custody: 'capable' grants 'pds', 'not-capable' withdraws it
+ * back to 'stratos'. An 'unknown' verdict, or no verdict at all, changes
+ * nothing -- losing the answer is not the same as learning the answer is no,
+ * and treating it that way would flip a 'pds' user back to 'stratos' on a
+ * transient introspection failure.
+ *
+ * @param current - The enrollment's currently stored custody class.
+ * @param verdict - The capability verdict this re-auth observed.
+ * @returns The custody class to store going forward.
+ */
+export function reconcileCustody(
+  current: Custody,
+  verdict: SpacesCapability | undefined,
+): Custody {
+  if (verdict === 'capable') return 'pds'
+  if (verdict === 'not-capable') return 'stratos'
+  return current
+}

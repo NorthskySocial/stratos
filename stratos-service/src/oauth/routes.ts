@@ -13,6 +13,7 @@ import {
   type EnrollmentConfig,
   type EnrollmentValidator,
   type Logger,
+  type SpacesCapability,
 } from '@northskysocial/stratos-core'
 import type { RequestHeaders } from '../infra/auth/index.js'
 
@@ -49,6 +50,8 @@ export interface EnrollmentRecord {
   custody?: Custody
   /** The repo host endpoint when custody is 'pds'. Undefined for 'stratos' custody. */
   repoHost?: string
+  /** The most recently observed capability probe verdict. See StoredEnrollment. */
+  capabilityVerdict?: SpacesCapability
 }
 
 /**
