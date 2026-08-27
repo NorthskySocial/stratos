@@ -196,6 +196,10 @@ describe('handleCallback', () => {
 
     await handler(req, res)
 
+    // The verdict has to reach the stored enrollment, not just the log line.
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ capabilityVerdict: 'capable' }),
+    )
     expect(mockLogger.info).toHaveBeenCalledWith(
       {
         did: 'did:plc:alice',
@@ -703,6 +707,13 @@ describe('handleCallback', () => {
     beforeEach(() => {
       mockEnrollmentStore.getBoundaries = vi.fn().mockResolvedValue([])
       mockEnrollmentStore.setBoundaries = vi.fn()
+      // Matches existingEnrollment()'s stored pdsEndpoint, so these tests
+      // isolate custody reconciliation from the separate pdsEndpoint-refresh
+      // behaviour covered below.
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
     })
 
     async function runExisting() {
@@ -821,6 +832,73 @@ describe('handleCallback', () => {
       expect(mockEnrollmentStore.updateEnrollment).not.toHaveBeenCalledWith(
         'did:plc:kaoru',
         expect.objectContaining({ custody: 'stratos' }),
+      )
+    })
+
+    it('refreshes repoHost and the stored pdsEndpoint when the resolved PDS endpoint changes', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:kaoru',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://new-pds.example.com',
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+          pdsEndpoint: 'https://pds.example.com',
+          capabilityVerdict: 'capable',
+        }),
+      )
+
+      await runExisting()
+
+      // A user who moved PDS must get their new host published, not a stale one.
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://new-pds.example.com',
+        }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        { pdsEndpoint: 'https://new-pds.example.com' },
+      )
+    })
+
+    it('refreshes the stored pdsEndpoint on stratos custody without setting a repoHost', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://new-pds.example.com',
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'stratos',
+          repoHost: undefined,
+          pdsEndpoint: 'https://pds.example.com',
+          capabilityVerdict: 'not-capable',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({ custody: 'stratos', repoHost: undefined }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        { pdsEndpoint: 'https://new-pds.example.com' },
       )
     })
   })

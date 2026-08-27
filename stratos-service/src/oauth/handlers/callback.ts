@@ -86,6 +86,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           autoEnrollDomains,
           defaultBoundaries,
           spacesCapability,
+          pdsEndpoint: enrollmentResult.pdsEndpoint!,
           logger,
         })
       } else {
@@ -155,6 +156,8 @@ async function handleExistingEnrollment(deps: {
   autoEnrollDomains: string[] | undefined
   defaultBoundaries: string[]
   spacesCapability: SpacesCapability | undefined
+  /** Freshly resolved from the DID document this request, not the stored value. */
+  pdsEndpoint: string
   logger: Logger | undefined
 }) {
   const {
@@ -166,6 +169,7 @@ async function handleExistingEnrollment(deps: {
     profileRecordWriter,
     createAttestation,
     spacesCapability,
+    pdsEndpoint,
     logger,
   } = deps
 
@@ -223,9 +227,12 @@ async function handleExistingEnrollment(deps: {
     const custody = storedCustody
     const wantedCustody = reconcileCustody(storedCustody, spacesCapability)
     const custodyDiverged = wantedCustody !== storedCustody
-    // 'pds' custody hosts the repo at the user's own PDS, already known from
-    // the stored pdsEndpoint. 'stratos' custody has no repoHost.
-    const repoHost = custody === 'pds' ? enrollment.pdsEndpoint : undefined
+    // 'pds' custody hosts the repo at the user's own PDS. Use the endpoint
+    // resolved this request, not the stored one, so a user who moved PDS
+    // gets their new host published instead of a stale routing target.
+    // 'stratos' custody has no repoHost.
+    const repoHost = custody === 'pds' ? pdsEndpoint : undefined
+    const pdsEndpointChanged = pdsEndpoint !== enrollment.pdsEndpoint
 
     await profileRecordWriter.putEnrollmentRecord(
       did,
@@ -244,9 +251,11 @@ async function handleExistingEnrollment(deps: {
       },
     )
 
-    if (spacesCapability !== enrollment.capabilityVerdict) {
+    const verdictChanged = spacesCapability !== enrollment.capabilityVerdict
+    if (verdictChanged || pdsEndpointChanged) {
       await enrollmentStore.updateEnrollment(did, {
-        capabilityVerdict: spacesCapability,
+        ...(verdictChanged ? { capabilityVerdict: spacesCapability } : {}),
+        ...(pdsEndpointChanged ? { pdsEndpoint } : {}),
       })
     }
     if (custodyDiverged) {
