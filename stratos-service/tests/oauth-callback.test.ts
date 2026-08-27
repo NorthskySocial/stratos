@@ -720,7 +720,7 @@ describe('handleCallback', () => {
       return res
     }
 
-    it('flips stratos custody to pds when a re-auth grant becomes capable', async () => {
+    it('records the new verdict but keeps stratos custody when the grant becomes capable', async () => {
       mockOauthClient.callback.mockResolvedValue({
         session: sessionFor(
           'did:plc:kaoru',
@@ -733,24 +733,28 @@ describe('handleCallback', () => {
 
       await runExisting()
 
+      // Moving custody means moving the repo and changing the signing key.
+      // Neither happens here, so the label must not move on its own.
       expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
         'did:plc:kaoru',
-        expect.objectContaining({
-          custody: 'pds',
-          repoHost: 'https://pds.example.com',
-        }),
+        { capabilityVerdict: 'capable' },
       )
       expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
         'did:plc:kaoru',
         expect.any(String),
+        expect.objectContaining({ custody: 'stratos', repoHost: undefined }),
+      )
+      expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.objectContaining({
-          custody: 'pds',
-          repoHost: 'https://pds.example.com',
+          did: 'did:plc:kaoru',
+          storedCustody: 'stratos',
+          wantedCustody: 'pds',
         }),
+        'custody diverged from the granted scope, migration required',
       )
     })
 
-    it('flips pds custody back to stratos and clears repoHost when the grant is revoked', async () => {
+    it('records the new verdict but keeps pds custody when the grant is revoked', async () => {
       mockOauthClient.callback.mockResolvedValue({
         session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
       })
@@ -763,20 +767,26 @@ describe('handleCallback', () => {
 
       await runExisting()
 
+      // Flipping to 'stratos' here would reopen the write gate and mint a
+      // second signing key, while the user's records stay on their PDS.
       expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
         'did:plc:kaoru',
-        expect.objectContaining({
-          custody: 'stratos',
-          repoHost: undefined,
-        }),
+        { capabilityVerdict: 'not-capable' },
       )
       expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
         'did:plc:kaoru',
         expect.any(String),
         expect.objectContaining({
-          custody: 'stratos',
-          repoHost: undefined,
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
         }),
+      )
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storedCustody: 'pds',
+          wantedCustody: 'stratos',
+        }),
+        'custody diverged from the granted scope, migration required',
       )
     })
 

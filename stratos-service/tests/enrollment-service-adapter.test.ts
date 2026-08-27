@@ -1,10 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import type { EnrollmentStoreWriter } from '@northskysocial/stratos-core'
 import { EnrollmentServiceImpl } from '../src/features/enrollment/adapter.js'
 
+/** Only the methods this adapter calls. */
+type MockEnrollmentStore = {
+  [K in
+    | 'isEnrolled'
+    | 'enroll'
+    | 'getEnrollment'
+    | 'getBoundaries'
+    | 'unenroll']: Mock
+}
+
 describe('EnrollmentServiceImpl', () => {
-  let mockEnrollmentStore: any
-  let actorStoreCreator: ReturnType<typeof vi.fn>
-  let actorStoreDestroyer: ReturnType<typeof vi.fn>
+  let mockEnrollmentStore: MockEnrollmentStore
+  let actorStoreCreator: Mock<(did: string) => Promise<void>>
+  let actorStoreDestroyer: Mock<(did: string) => Promise<void>>
 
   const did = 'did:plc:motoko'
 
@@ -25,7 +36,7 @@ describe('EnrollmentServiceImpl', () => {
       mockEnrollmentStore.getEnrollment.mockResolvedValue(null)
 
       const service = new EnrollmentServiceImpl(
-        mockEnrollmentStore,
+        mockEnrollmentStore as unknown as EnrollmentStoreWriter,
         actorStoreCreator,
         actorStoreDestroyer,
       )
@@ -59,7 +70,7 @@ describe('EnrollmentServiceImpl', () => {
       })
 
       const service = new EnrollmentServiceImpl(
-        mockEnrollmentStore,
+        mockEnrollmentStore as unknown as EnrollmentStoreWriter,
         actorStoreCreator,
         actorStoreDestroyer,
       )
@@ -83,7 +94,7 @@ describe('EnrollmentServiceImpl', () => {
       mockEnrollmentStore.getEnrollment.mockResolvedValue(null)
 
       const service = new EnrollmentServiceImpl(
-        mockEnrollmentStore,
+        mockEnrollmentStore as unknown as EnrollmentStoreWriter,
         actorStoreCreator,
         actorStoreDestroyer,
       )
@@ -104,7 +115,7 @@ describe('EnrollmentServiceImpl', () => {
       mockEnrollmentStore.getBoundaries.mockResolvedValue(['section9'])
 
       const service = new EnrollmentServiceImpl(
-        mockEnrollmentStore,
+        mockEnrollmentStore as unknown as EnrollmentStoreWriter,
         actorStoreCreator,
         actorStoreDestroyer,
       )
@@ -125,7 +136,7 @@ describe('EnrollmentServiceImpl', () => {
       mockEnrollmentStore.getBoundaries.mockResolvedValue([])
 
       const service = new EnrollmentServiceImpl(
-        mockEnrollmentStore,
+        mockEnrollmentStore as unknown as EnrollmentStoreWriter,
         actorStoreCreator,
         actorStoreDestroyer,
       )
