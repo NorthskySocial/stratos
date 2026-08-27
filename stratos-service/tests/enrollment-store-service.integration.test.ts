@@ -465,7 +465,7 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
   })
 
-  it('keeps custody and repoHost stored as stratos/undefined when a re-enroll omits them', async () => {
+  it('resets custody to stratos and clears repoHost when a re-enroll omits them', async () => {
     await store.enroll({
       did: REI_DID,
       enrolledAt: '2025-01-01T00:00:00Z',
@@ -509,7 +509,7 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
   })
 
-  it('enroll with an empty boundaries array stores no boundary rows', async () => {
+  it('enroll with an empty boundaries array leaves existing boundary rows in place', async () => {
     await store.setBoundaries(REI_DID, ['leftover'])
     await store.enroll({
       did: REI_DID,
