@@ -725,6 +725,20 @@ describe('PostgreSQL Backend Integration', () => {
       expect(result?.capabilityVerdict).toBeUndefined()
     })
 
+    it('should round-trip an unknown capabilityVerdict, distinct from not-capable and absent', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zRitsukoAkagi3',
+        active: true,
+        capabilityVerdict: 'unknown',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('unknown')
+      expect(result?.capabilityVerdict).not.toBe('not-capable')
+    })
+
     it('should overwrite capabilityVerdict on re-enroll via onConflictDoUpdate', async () => {
       await enrollmentStore.enroll({
         did: testDid,
@@ -767,8 +781,8 @@ describe('PostgreSQL Backend Integration', () => {
     })
 
     it('should clear repoHost to undefined via updateEnrollment when explicitly passed undefined', async () => {
-      // The custody-downgrade path: reconcileCustody flips a user back to
-      // 'stratos' custody and must be able to drop the stale repoHost.
+      // A future custody migration (MM-10) needs to clear repoHost when it
+      // moves a user off 'pds' custody, not just leave it at the old endpoint.
       await enrollmentStore.enroll({
         did: testDid,
         enrolledAt: new Date().toISOString(),

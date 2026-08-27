@@ -344,6 +344,11 @@ describe('enrollment isService migration', () => {
     expect(enrollment?.isService).toBe(false)
     expect(enrollment?.enrolledAt).toBe('2024-12-01T00:00:00Z')
     expect(enrollment?.pdsEndpoint).toBe('https://pds.example.com')
+    // A row from before MM-03 has neither column: custody must read back at
+    // its 'stratos' default, and the verdict must read back undefined, not
+    // some other falsy stand-in.
+    expect(enrollment?.custody).toBe('stratos')
+    expect(enrollment?.capabilityVerdict).toBeUndefined()
   })
 })
 
@@ -534,6 +539,20 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(enrollment?.capabilityVerdict).toBeUndefined()
   })
 
+  it('round-trips an unknown capabilityVerdict, distinct from not-capable and absent', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'unknown',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('unknown')
+    expect(enrollment?.capabilityVerdict).not.toBe('not-capable')
+  })
+
   it('overwrites capabilityVerdict on re-enroll via onConflictDoUpdate', async () => {
     await store.enroll({
       did: REI_DID,
@@ -574,9 +593,8 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
   })
 
   it('updateEnrollment clears repoHost to undefined when explicitly passed undefined', async () => {
-    // This is the custody-downgrade path: reconcileCustody flips a user back
-    // to 'stratos' custody and must be able to drop the stale repoHost, not
-    // just leave it stuck at the old PDS endpoint.
+    // A future custody migration (MM-10) needs to clear repoHost when it
+    // moves a user off 'pds' custody, not just leave it at the old endpoint.
     await store.enroll({
       did: REI_DID,
       enrolledAt: '2025-01-01T00:00:00Z',
