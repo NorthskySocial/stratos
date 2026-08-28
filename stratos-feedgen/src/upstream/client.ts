@@ -9,6 +9,7 @@ const LXM = {
   hydrateRecords: 'zone.stratos.repo.hydrateRecords',
   getBlob: 'com.atproto.sync.getBlob',
   subscribeRecords: 'zone.stratos.sync.subscribeRecords',
+  getSpaceCredential: 'zone.stratos.space.getSpaceCredential',
 } as const
 
 export interface UpstreamStratosClientOptions {
@@ -46,6 +47,24 @@ export interface GetBlobResult {
   stream: Readable
   contentType: string
   contentLength?: number
+}
+
+export interface GetSpaceCredentialResult {
+  credential: string
+  expiresAt: string
+}
+
+export interface GetSpaceCredentialOptions {
+  /** The space's `at://` URI to request a credential for. */
+  space: string
+  /** Self-minted `atproto-space-delegation+jwt` establishing the caller's identity. */
+  delegationToken: string
+  /**
+   * Builds the standalone mint-time DPoP proof (no `ath`) for the given
+   * absolute request URL. Key material lives with the caller, not this
+   * client, so proof construction is injected rather than owned here.
+   */
+  buildMintProof: (htu: string) => Promise<string>
 }
 
 /**
@@ -134,6 +153,35 @@ export class UpstreamStratosClient {
 
   async mintServiceAuthToken(): Promise<string> {
     return this.mintFor(LXM.subscribeRecords)
+  }
+
+  /**
+   * Exchange a self-minted delegation token for a space credential.
+   *
+   * Identity flows through the delegation token, not an `Authorization`
+   * header, so this sends only the mint-time `dpop` proof the endpoint
+   * requires to bind the credential (see
+   * `stratos-service/src/features/space-credential/handler.ts`).
+   */
+  async getSpaceCredential(
+    opts: GetSpaceCredentialOptions,
+  ): Promise<GetSpaceCredentialResult> {
+    const url = `${this.serviceUrl}/xrpc/${LXM.getSpaceCredential}`
+    const lxm = LXM.getSpaceCredential
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        dpop: await opts.buildMintProof(url),
+      },
+      body: JSON.stringify({
+        space: opts.space,
+        delegationToken: opts.delegationToken,
+      }),
+    })
+    await throwIfNotOk(res, url, lxm)
+    return (await res.json()) as GetSpaceCredentialResult
   }
 
   private mintFor(lxm: string): Promise<string> {
