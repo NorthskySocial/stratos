@@ -37,11 +37,22 @@ interface AlphaAccounts {
 async function main() {
   const cfg = JSON.parse(readFileSync(ACCOUNTS_PATH, 'utf8')) as AlphaAccounts
   const pdsUrl = `https://${cfg.pds}`
-  // The SECOND account, unrelated to the A5 writer.
+  // The SECOND account, unrelated to the A5 writer. The result only means
+  // anything if it really is a different account, so check rather than trust
+  // the positions.
+  const writer = cfg.accounts[0]
   const account = cfg.accounts[1]
   if (!account) {
     throw new Error(
       'alpha-users.json needs a second account: this probe must use one that is unrelated to the A5 writer',
+    )
+  }
+  if (
+    writer &&
+    account.username.toLowerCase() === writer.username.toLowerCase()
+  ) {
+    throw new Error(
+      `alpha-users.json lists ${account.username} twice: this probe would run as the A5 writer and prove nothing`,
     )
   }
 
