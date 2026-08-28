@@ -1250,7 +1250,7 @@ export const stratosLexicons: LexiconDoc[] = [
   "defs": {
     "main": {
       "type": "query",
-      "description": "List the known repos that hold data in a space (the writer set), with each repo's current rev, commit hash, and resolved repo host. Spec-shaped mirror of com.atproto.space.listRepos (atproto#5187), extended with the `host` and `hostSource` fields upstream has no answer for: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint. Callable with standard user auth (the caller must be a member of the space) or with a space credential for that space (for syncing services).",
+      "description": "List the known repos that hold data in a space (the writer set), with each repo's current rev and resolved repo host. Spec-shaped mirror of com.atproto.space.listRepos (atproto#5187), extended with the `host` and `hostSource` fields upstream has no answer for: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint. This is a membership oracle, not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
       "parameters": {
         "type": "params",
         "required": ["space"],
@@ -1303,7 +1303,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "repo": {
       "type": "object",
-      "required": ["did", "rev", "hash"],
+      "required": ["did"],
       "properties": {
         "did": {
           "type": "string",
@@ -1312,12 +1312,12 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "rev": {
           "type": "string",
-          "description": "The repo's current revision (TID), as last reported to the authority. May lag the repo host, which is the source of truth.",
+          "description": "The repo's current revision (TID). Present only for a stratos-custody member, whose repo Stratos itself stores; absent for a pds-custody member, whose repo lives on their own PDS.",
           "format": "tid"
         },
         "hash": {
           "type": "bytes",
-          "description": "The repo's current commit hash (sha256 of the LtHash state), as last reported to the authority."
+          "description": "Unpopulated by this service: Stratos stores an MST repo, not an LtHash repo, so it never computes the sha256-of-LtHash-state value this field describes upstream. Reserved for a repo host that does."
         },
         "host": {
           "type": "string",

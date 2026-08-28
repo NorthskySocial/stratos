@@ -5,13 +5,20 @@ import {
 } from '@atproto/xrpc-server'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import {
+  resolveRepoHost,
   spaceUriToBoundary,
   StratosValidator,
+  type RepoHostResolverDeps,
+  type StoredEnrollment,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import type { HandlerAuth, XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
-import { isSpaceCredentialAuth } from '../../infra/auth/credential-scope.js'
+import {
+  isSpaceCredentialAuth,
+  resolveEffectiveBoundaries,
+} from '../../infra/auth/credential-scope.js'
+import { createRepoHostResolverDeps } from './host-resolution.js'
 
 /**
  * XRPC method NSID for the space-scoped record read. Spec-shaped mirror of
@@ -27,6 +34,13 @@ export const GET_SPACE_RECORD_METHOD = 'zone.stratos.space.getRecord'
  */
 export const LIST_SPACE_BLOBS_METHOD = 'zone.stratos.space.listBlobs'
 
+/**
+ * XRPC method NSID for the space membership oracle. Spec-shaped mirror of
+ * `com.atproto.space.listRepos` (atproto#5187), extended with `host` /
+ * `hostSource` per Stratos's own repo-host-discovery convention.
+ */
+export const LIST_SPACE_REPOS_METHOD = 'zone.stratos.space.listRepos'
+
 interface GetSpaceRecordParams {
   space?: string
   repo?: string
@@ -40,6 +54,19 @@ interface ListSpaceBlobsParams {
   since?: string
   limit?: unknown
   cursor?: string
+}
+
+interface ListSpaceReposParams {
+  space?: string
+  limit?: unknown
+  cursor?: string
+}
+
+interface RepoEntry {
+  did: string
+  rev?: string
+  host?: string
+  hostSource?: 'authority-override' | 'did-document'
 }
 
 /**
@@ -85,6 +112,25 @@ export function registerSpaceReadHandlers(
         requireAuth: false,
         handler: async ({ params, auth }) => {
           return handleListSpaceBlobs(ctx, params, auth)
+        },
+      },
+    ),
+  })
+
+  // Auth binding: `serviceOrSpaceCredential`, not `standardOrSpaceCredential`
+  // -- this is a membership oracle for syncing services, never a member's own
+  // user session. A member reads their own boundary; this endpoint enumerates
+  // OTHER members, which a user session must never be admitted to do.
+  xrpc.method(LIST_SPACE_REPOS_METHOD, {
+    type: 'query',
+    auth: ctx.authVerifier.serviceOrSpaceCredential,
+    handler: createXrpcHandler<unknown, ListSpaceReposParams>(
+      ctx,
+      LIST_SPACE_REPOS_METHOD,
+      {
+        requireAuth: false,
+        handler: async ({ params, auth }) => {
+          return handleListSpaceRepos(ctx, params, auth)
         },
       },
     ),
@@ -185,7 +231,7 @@ async function handleListSpaceBlobs(
       'InvalidRequest',
     )
   }
-  const limit = parseLimit(params.limit)
+  const limit = parseLimit(params.limit, 500)
 
   const boundary = resolveSpaceBoundary(ctx, space)
   await assertAdmitted(ctx, space, boundary, auth)
@@ -206,18 +252,19 @@ async function handleListSpaceBlobs(
 }
 
 /**
- * Parse and clamp `limit` to the lexicon-declared range 1..1000 (default 500).
+ * Parse and clamp `limit` to the lexicon-declared range 1..1000.
  *
  * The lexicon declares `limit` as an integer, but params reach the handler
  * without schema validation, so the raw query value can be a string or not an
  * integer at all.
  *
  * @param raw - The raw `limit` param.
+ * @param defaultLimit - The lexicon-declared default for this endpoint.
  * @returns The clamped integer limit.
  * @throws InvalidRequestError when the value is not an integer.
  */
-function parseLimit(raw: unknown): number {
-  if (raw === undefined) return 500
+function parseLimit(raw: unknown, defaultLimit: number): number {
+  if (raw === undefined) return defaultLimit
   const value =
     typeof raw === 'number'
       ? raw
@@ -228,6 +275,97 @@ function parseLimit(raw: unknown): number {
     throw new InvalidRequestError('limit must be an integer', 'InvalidRequest')
   }
   return Math.min(Math.max(value, 1), 1000)
+}
+
+/**
+ * Core logic for {@link LIST_SPACE_REPOS_METHOD}.
+ *
+ * This is a membership oracle, not a member-facing read: admission is
+ * `serviceOrSpaceCredential` only (see {@link resolveEffectiveBoundaries}),
+ * never a plain user session. Membership is derived from active enrollment +
+ * boundary -- there is no second, independently-maintained member list.
+ *
+ * Steps:
+ *   1. Require `space`; resolve its boundary → else `UnknownSpace`.
+ *   2. The caller's effective boundary set must include it → else `AuthRequired`.
+ *   3. Page active enrollments carrying that boundary.
+ *   4. Per member, resolve a repo host (never throws; absent fields on a
+ *      resolution miss) and a Stratos-known `rev` (stratos-custody only).
+ */
+async function handleListSpaceRepos(
+  ctx: AppContext,
+  params: ListSpaceReposParams,
+  auth: HandlerAuth | undefined,
+): Promise<{ repos: RepoEntry[]; cursor?: string }> {
+  const { space } = params
+  if (!space) {
+    throw new InvalidRequestError('space is required', 'InvalidRequest')
+  }
+
+  const boundary = resolveSpaceBoundary(ctx, space)
+
+  const callerBoundaries = await resolveEffectiveBoundaries(ctx, auth)
+  if (!callerBoundaries.has(boundary)) {
+    throw new AuthRequiredError('Not admitted to this space', 'AuthRequired')
+  }
+
+  const limit = parseLimit(params.limit, 100)
+  const members = await ctx.enrollmentStore.listEnrollmentsByBoundary(
+    boundary,
+    { limit, cursor: params.cursor },
+  )
+
+  const hostDeps = createRepoHostResolverDeps(ctx.idResolver)
+  const repos = await Promise.all(
+    members.map((member) => buildRepoEntry(ctx, space, member, hostDeps)),
+  )
+
+  return {
+    repos,
+    ...(members.length === limit
+      ? { cursor: members[members.length - 1].did }
+      : {}),
+  }
+}
+
+/**
+ * Build one {@link RepoEntry}: resolve the member's repo host (absent on a
+ * miss, never fails the whole call) and Stratos-known rev.
+ */
+async function buildRepoEntry(
+  ctx: AppContext,
+  space: string,
+  member: StoredEnrollment,
+  hostDeps: RepoHostResolverDeps,
+): Promise<RepoEntry> {
+  const [resolvedHost, rev] = await Promise.all([
+    resolveRepoHost(space, member.did, hostDeps),
+    getStratosRev(ctx, member),
+  ])
+  return {
+    did: member.did,
+    ...(rev ? { rev } : {}),
+    ...(resolvedHost
+      ? { host: resolvedHost.host, hostSource: resolvedHost.source }
+      : {}),
+  }
+}
+
+/**
+ * The repo revision Stratos itself has for a member -- meaningful only for a
+ * stratos-custody member, whose repo Stratos stores. A pds-custody member's
+ * repo lives on their own PDS; Stratos never learns its rev.
+ */
+async function getStratosRev(
+  ctx: AppContext,
+  member: StoredEnrollment,
+): Promise<string | undefined> {
+  if (member.custody === 'pds') return undefined
+  if (!(await ctx.actorStore.exists(member.did))) return undefined
+  return ctx.actorStore.read(member.did, async (store) => {
+    const root = await store.repo.getRootDetailed()
+    return root?.rev
+  })
 }
 
 /**

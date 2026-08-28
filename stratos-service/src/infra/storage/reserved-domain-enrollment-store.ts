@@ -84,6 +84,29 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
     return this.inner.enrollmentCount()
   }
 
+  /**
+   * List active enrollments carrying a given boundary (a space's member
+   * list).
+   *
+   * The reserved domain is force-included at write time (see `enroll` /
+   * `setBoundaries` below), but a row persisted before this decorator existed
+   * -- or before the reserved domain changed -- never got backfilled. That is
+   * the same gap `getBoundaries` closes by unioning on read. For the reserved
+   * domain, trusting the persisted `enrollment_boundary` join would silently
+   * exclude those un-backfilled members, so every active enrollment is
+   * enumerated instead.
+   */
+  async listEnrollmentsByBoundary(
+    boundary: string,
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    if (boundary !== this.reservedDomain) {
+      return this.inner.listEnrollmentsByBoundary(boundary, options)
+    }
+    const rows = await this.inner.listEnrollments(options)
+    return rows.filter((row) => row.active)
+  }
+
   // ─── Writes (force-include the reserved domain) ───────────────────────
 
   enroll(record: EnrollmentRecord): Promise<void> {

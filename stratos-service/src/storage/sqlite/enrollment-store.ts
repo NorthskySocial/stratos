@@ -2,6 +2,7 @@ import { asc, eq, gt, and } from 'drizzle-orm'
 import {
   type Custody,
   type EnrollmentStoreReader,
+  type ListEnrollmentsOptions,
   type SpacesCapability,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
@@ -210,6 +211,47 @@ export class SqliteEnrollmentStore
       .select()
       .from(enrollment)
       .where(condition)
+      .orderBy(asc(enrollment.did))
+      .limit(limit)
+
+    return rows.map(toStoredEnrollment)
+  }
+
+  /**
+   * List active enrollments carrying a given boundary (a space's member list).
+   * @param boundary - Boundary to filter by
+   * @param options - Pagination options
+   * @returns List of active enrollments carrying the boundary
+   */
+  async listEnrollmentsByBoundary(
+    boundary: string,
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 50
+    const cursor = options?.cursor
+
+    const conditions = [
+      eq(enrollmentBoundary.boundary, boundary),
+      eq(enrollment.active, 'true'),
+    ]
+    if (cursor) conditions.push(gt(enrollment.did, cursor))
+
+    const rows = await this.db
+      .select({
+        did: enrollment.did,
+        enrolledAt: enrollment.enrolledAt,
+        pdsEndpoint: enrollment.pdsEndpoint,
+        signingKeyDid: enrollment.signingKeyDid,
+        active: enrollment.active,
+        enrollmentRkey: enrollment.enrollmentRkey,
+        isService: enrollment.isService,
+        custody: enrollment.custody,
+        repoHost: enrollment.repoHost,
+        capabilityVerdict: enrollment.capabilityVerdict,
+      })
+      .from(enrollment)
+      .innerJoin(enrollmentBoundary, eq(enrollment.did, enrollmentBoundary.did))
+      .where(and(...conditions))
       .orderBy(asc(enrollment.did))
       .limit(limit)
 

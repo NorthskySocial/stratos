@@ -97,6 +97,47 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
     return rows.map(toStoredEnrollment)
   }
 
+  /**
+   * List active enrollments carrying a given boundary (a space's member list).
+   */
+  async listEnrollmentsByBoundary(
+    boundary: string,
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 100
+    const cursor = options?.cursor
+
+    const conditions = [
+      eq(pgEnrollmentBoundary.boundary, boundary),
+      eq(pgEnrollment.active, 'true'),
+    ]
+    if (cursor) conditions.push(gt(pgEnrollment.did, cursor))
+
+    const rows = await this.db
+      .select({
+        did: pgEnrollment.did,
+        enrolledAt: pgEnrollment.enrolledAt,
+        pdsEndpoint: pgEnrollment.pdsEndpoint,
+        signingKeyDid: pgEnrollment.signingKeyDid,
+        active: pgEnrollment.active,
+        enrollmentRkey: pgEnrollment.enrollmentRkey,
+        isService: pgEnrollment.isService,
+        custody: pgEnrollment.custody,
+        repoHost: pgEnrollment.repoHost,
+        capabilityVerdict: pgEnrollment.capabilityVerdict,
+      })
+      .from(pgEnrollment)
+      .innerJoin(
+        pgEnrollmentBoundary,
+        eq(pgEnrollment.did, pgEnrollmentBoundary.did),
+      )
+      .where(and(...conditions))
+      .orderBy(asc(pgEnrollment.did))
+      .limit(limit)
+
+    return rows.map(toStoredEnrollment)
+  }
+
   async enrollmentCount(): Promise<number> {
     const rows = await this.db
       .select({ count: sql<number>`count(*)` })
