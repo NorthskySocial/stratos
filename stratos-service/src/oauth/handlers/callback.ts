@@ -11,7 +11,7 @@ import {
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
 import {
   migrateEnrollmentRkey,
-  resolveAtprotoSigningKey,
+  resolveAtprotoIdentity,
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
@@ -262,11 +262,16 @@ async function provisionStratosSigningKey(
  */
 async function provisionPdsSigningKey(
   did: string,
-  pdsEndpoint: string,
   idResolver: IdResolver,
 ): Promise<SigningKeyProvision> {
-  const userSigningKeyDid = await resolveAtprotoSigningKey(did, idResolver)
-  return { userSigningKeyDid, repoHost: pdsEndpoint }
+  // Take the key and the host from one document. The enrolment result has no
+  // PDS endpoint in open mode, where eligibility returns before the document
+  // is resolved.
+  const identity = await resolveAtprotoIdentity(did, idResolver)
+  return {
+    userSigningKeyDid: identity.signingKeyDid,
+    repoHost: identity.pdsEndpoint,
+  }
 }
 
 async function handleNewEnrollment(deps: {
@@ -303,7 +308,7 @@ async function handleNewEnrollment(deps: {
   const custody = classifyCustody(spacesCapability)
   const { userSigningKeyDid, repoHost } =
     custody === 'pds'
-      ? await provisionPdsSigningKey(did, pdsEndpoint, idResolver)
+      ? await provisionPdsSigningKey(did, idResolver)
       : await provisionStratosSigningKey(did, initRepo, createSigningKey)
 
   const attestation = await createAttestation(
