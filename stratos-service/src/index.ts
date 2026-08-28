@@ -28,6 +28,7 @@ import { registerHandlers } from './api'
 import { registerSubscribeRecords } from './subscription'
 import { createAdminAuthRoutes, createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
+import { SPACE_CREDENTIAL_KID } from './infra/auth/space-credential-verifier.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from './features'
 import { reconcileServiceEnrollments } from './features/enrollment'
 
@@ -284,20 +285,35 @@ export class StratosServer {
       const serviceEndpoint = cfg.service.publicUrl
       const publicKeyMultibase = ctx.signingDidKey.slice('did:key:'.length)
 
+      // A foreign spaces PDS accepts only the `#atproto` or `#atproto_space`
+      // key fragment when it verifies a space credential. Publish `#atproto`
+      // as well, so a foreign host can verify credentials that this service
+      // mints. Both entries carry the same key.
+      const verificationMethod = [
+        {
+          id: `${serviceDid}#${cfg.service.serviceFragment}`,
+          type: 'Multikey',
+          controller: serviceDid,
+          publicKeyMultibase,
+        },
+      ]
+      const spaceKeyFragment = SPACE_CREDENTIAL_KID.slice('#'.length)
+      if (cfg.service.serviceFragment !== spaceKeyFragment) {
+        verificationMethod.push({
+          id: `${serviceDid}#${spaceKeyFragment}`,
+          type: 'Multikey',
+          controller: serviceDid,
+          publicKeyMultibase,
+        })
+      }
+
       res.json({
         '@context': [
           'https://www.w3.org/ns/did/v1',
           'https://w3id.org/security/multikey/v1',
         ],
         id: serviceDid,
-        verificationMethod: [
-          {
-            id: `${serviceDid}#${cfg.service.serviceFragment}`,
-            type: 'Multikey',
-            controller: serviceDid,
-            publicKeyMultibase,
-          },
-        ],
+        verificationMethod,
         service: [
           {
             id: '#stratos',
