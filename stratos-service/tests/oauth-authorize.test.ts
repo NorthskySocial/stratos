@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleAuthorize } from '../src/oauth/handlers/authorize.js'
-import { OAUTH_SCOPE } from '../src/oauth'
+import { buildOAuthScope } from '../src/oauth'
+
+const SERVICE_DID = 'did:web:stratos.example.com'
+const OAUTH_SCOPE = buildOAuthScope(SERVICE_DID)
 
 const PROOF_REQUIRED =
   'redirect_uri is not declared by a client_id metadata document and its origin is not allow-listed'
@@ -31,6 +34,7 @@ describe('handleAuthorize', () => {
       baseUrl: 'http://localhost:3100',
       allowedRedirectOrigins: [],
       fetchClientRedirectUris: mockFetchRedirectUris,
+      serviceDid: SERVICE_DID,
     }
   })
 

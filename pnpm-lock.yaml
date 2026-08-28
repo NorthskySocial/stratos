@@ -424,6 +424,9 @@ importers:
       '@atproto/oauth-provider':
         specifier: ^0.22.3
         version: 0.22.3(supports-color@8.1.1)
+      '@atproto/oauth-scopes':
+        specifier: 0.0.0-spaces-alpha-20260818163953
+        version: 0.0.0-spaces-alpha-20260818163953
       '@atproto/oauth-types':
         specifier: ^0.7.5
         version: 0.7.5
@@ -959,6 +962,10 @@ packages:
     resolution: {integrity: sha512-VLyzNgHYds/Gii3K498fb29f5QsUL48+fk2ng3qpRMzyIlB+AHvspIuf0DWFRlSqVl7oSzVhowiJBewhaKeHzQ==}
     engines: {node: '>=22'}
 
+  '@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953':
+    resolution: {integrity: sha512-bQz4BwNk/FAPd8bXGO3EyhlIKu/UJzN5XIgmNeiZXtJbhbe30J78A3WnvBuA+SILiGFw7/M9hfgq9FcJKCzjCw==}
+    engines: {node: '>=22'}
+
   '@atproto/oauth-scopes@0.5.9':
     resolution: {integrity: sha512-2wA3TJhrizFxWe5sXaKztwAGuXPCdzV6L8/Uw0PaTZ8FQS/ywPHzE6k71Kd3QT150RPsyEkuhwDqNK0mOAPwcQ==}
     engines: {node: '>=22'}
@@ -978,6 +985,10 @@ packages:
   '@atproto/sync@0.1.40':
     resolution: {integrity: sha512-tnzFPqKBXPXpuGvx87sjqLHgEzIOT/QfQZUp0YOUHtpipBgvijEnNXV9XeTIgiUAv69wyRR+6YjJkLCYfHpVwQ==}
     engines: {node: '>=18.7.0'}
+
+  '@atproto/syntax@0.0.0-spaces-alpha-20260818163953':
+    resolution: {integrity: sha512-Xl2fpD/NcfVOWpHR86HKym2XNDYHmgiqThZXoYMwh9XUo+/LgVZYGVpSecfKRBcQ5tNGiRivE1Fvio5YDfJ3lA==}
+    engines: {node: '>=22'}
 
   '@atproto/syntax@0.4.3':
     resolution: {integrity: sha512-YoZUz40YAJr5nPwvCDWgodEOlt5IftZqPJvA0JDWjuZKD8yXddTwSzXSaKQAzGOpuM+/A3uXRtPzJJqlScc+iA==}
@@ -7270,6 +7281,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953':
+    dependencies:
+      '@atproto/did': 0.5.4
+      '@atproto/syntax': 0.0.0-spaces-alpha-20260818163953
+
   '@atproto/oauth-scopes@0.5.9':
     dependencies:
       '@atproto/did': 0.5.4
@@ -7319,6 +7335,11 @@ snapshots:
       - bufferutil
       - supports-color
       - utf-8-validate
+
+  '@atproto/syntax@0.0.0-spaces-alpha-20260818163953':
+    dependencies:
+      iso-datestring-validator: 2.2.2
+      tslib: 2.8.1
 
   '@atproto/syntax@0.4.3':
     dependencies:
