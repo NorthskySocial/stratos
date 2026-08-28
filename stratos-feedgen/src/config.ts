@@ -9,8 +9,15 @@ export interface FeedgenConfig {
   feedgenPublicUrl: string
   /** Private signing key for this feed generator's service identity. */
   feedgenSigningKey: string
-  /** Base URL of the upstream Stratos service. */
+  /** Base URL this feedgen sends requests to the upstream Stratos service on. May be internal-only. */
   stratosServiceUrl: string
+  /**
+   * Base URL Stratos verifies the space-surface DPoP `htu` against
+   * (its own `STRATOS_PUBLIC_URL`). Defaults to `stratosServiceUrl`. Set this
+   * separately when `stratosServiceUrl` is an internal address that differs
+   * from Stratos's externally-known origin.
+   */
+  stratosPublicUrl: string
   /** DID of the upstream Stratos service. */
   stratosServiceDid: string
   /** PLC directory URL used to resolve `did:plc:` issuers. */
@@ -77,6 +84,9 @@ export function loadFeedgenConfig(
     feedgenSigningKey: requireEnv(env, 'FEEDGEN_SIGNING_KEY'),
     stratosServiceUrl: trimTrailingSlash(
       requireEnv(env, 'STRATOS_SERVICE_URL'),
+    ),
+    stratosPublicUrl: trimTrailingSlash(
+      env['STRATOS_PUBLIC_URL'] ?? requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
     feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),

@@ -11,6 +11,8 @@ import { Secp256k1Keypair } from '@atproto/crypto'
 import {
   UpstreamStratosClient,
   StratosClientError,
+  describeUpstreamError,
+  MAX_LOGGED_ERROR_BODY_LENGTH,
 } from '../src/upstream/index.js'
 
 interface CapturedRequest {
@@ -290,6 +292,36 @@ describe('UpstreamStratosClient', () => {
       expect(req.headers.authorization).toBeUndefined()
     })
 
+    it('builds the mint proof htu from publicUrl, not serviceUrl, while still sending the request to serviceUrl', async () => {
+      const publicClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        publicUrl: 'https://stratos.public.test',
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+      })
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            credential: 'credential-value',
+            expiresAt: '2026-01-01T00:00:00.000Z',
+          }),
+        )
+      }
+      await publicClient.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async (htu) => `proof-for-${htu}`,
+      })
+      expect(mock.requests).toHaveLength(1)
+      const req = mock.requests[0]
+      expect(req.url).toBe('/xrpc/zone.stratos.space.getSpaceCredential')
+      expect(req.headers.dpop).toBe(
+        'proof-for-https://stratos.public.test/xrpc/zone.stratos.space.getSpaceCredential',
+      )
+    })
+
     it('throws StratosClientError on non-2xx (e.g. NotEnrolled)', async () => {
       mock.handler = (_req, res) => {
         res.statusCode = 400
@@ -308,6 +340,37 @@ describe('UpstreamStratosClient', () => {
         status: 400,
         lxm: 'zone.stratos.space.getSpaceCredential',
       })
+    })
+  })
+
+  describe('trailing slash normalization', () => {
+    it('strips a trailing slash from both serviceUrl and publicUrl', async () => {
+      const slashClient = new UpstreamStratosClient({
+        serviceUrl: `${mock.baseUrl}/`,
+        publicUrl: 'https://stratos.public.test/',
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+      })
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            credential: 'credential-value',
+            expiresAt: '2026-01-01T00:00:00.000Z',
+          }),
+        )
+      }
+      await slashClient.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async (htu) => `proof-for-${htu}`,
+      })
+      const req = mock.requests[0]
+      expect(req.url).toBe('/xrpc/zone.stratos.space.getSpaceCredential')
+      expect(req.headers.dpop).toBe(
+        'proof-for-https://stratos.public.test/xrpc/zone.stratos.space.getSpaceCredential',
+      )
     })
   })
 
@@ -345,5 +408,53 @@ describe('StratosClientError', () => {
     expect(err.lxm).toBe('foo')
     expect(err.url).toBe('https://x/xrpc/foo')
     expect(err.name).toBe('StratosClientError')
+  })
+})
+
+describe('describeUpstreamError', () => {
+  it('includes status, lxm, and the body for a StratosClientError', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: 'NotEnrolled',
+      url: 'https://x/xrpc/zone.stratos.space.getSpaceCredential',
+      lxm: 'zone.stratos.space.getSpaceCredential',
+    })
+    expect(describeUpstreamError(err)).toBe(
+      '400 zone.stratos.space.getSpaceCredential: NotEnrolled',
+    )
+  })
+
+  it('caps a long response body and marks the cut with an ellipsis', () => {
+    const longBody = 'x'.repeat(MAX_LOGGED_ERROR_BODY_LENGTH + 50)
+    const err = new StratosClientError({
+      status: 502,
+      body: longBody,
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    const described = describeUpstreamError(err)
+    expect(described).toBe(
+      `502 foo: ${'x'.repeat(MAX_LOGGED_ERROR_BODY_LENGTH)}…`,
+    )
+    expect(described.length).toBeLessThan(longBody.length)
+  })
+
+  it('does not cap a body at exactly the limit', () => {
+    const body = 'x'.repeat(MAX_LOGGED_ERROR_BODY_LENGTH)
+    const err = new StratosClientError({
+      status: 502,
+      body,
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe(`502 foo: ${body}`)
+  })
+
+  it('falls back to the message for a plain Error', () => {
+    expect(describeUpstreamError(new Error('boom'))).toBe('boom')
+  })
+
+  it('falls back to String() for a non-Error throw', () => {
+    expect(describeUpstreamError('just a string')).toBe('just a string')
   })
 })

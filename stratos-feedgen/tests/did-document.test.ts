@@ -110,4 +110,19 @@ describe('loadFeedgenConfig public URL derivation', () => {
     })
     expect(cfg.feedgenPublicUrl).toBe('https://feeds.example.com')
   })
+
+  it('defaults stratosPublicUrl to STRATOS_SERVICE_URL when unset', () => {
+    const cfg = loadFeedgenConfig({ ...baseEnv })
+    expect(cfg.stratosPublicUrl).toBe('https://stratos.spiegelcorp.test')
+  })
+
+  it('prefers STRATOS_PUBLIC_URL when set, independent of the internal STRATOS_SERVICE_URL', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      STRATOS_SERVICE_URL: 'http://internal.stratos.local:3100',
+      STRATOS_PUBLIC_URL: 'https://stratos.spiegelcorp.test/',
+    })
+    expect(cfg.stratosServiceUrl).toBe('http://internal.stratos.local:3100')
+    expect(cfg.stratosPublicUrl).toBe('https://stratos.spiegelcorp.test')
+  })
 })
