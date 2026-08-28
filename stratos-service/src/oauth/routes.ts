@@ -7,6 +7,7 @@ import {
   IdResolver,
 } from '@atproto/identity'
 import {
+  extractPdsEndpoint,
   MissingAtprotoKeyError,
   type Custody,
   type EnrollmentConfig,
@@ -215,6 +216,28 @@ export async function resolveAtprotoSigningKey(
   did: string,
   idResolver: IdResolver,
 ): Promise<string> {
+  return (await resolveAtprotoIdentity(did, idResolver)).signingKeyDid
+}
+
+/** A user's `#atproto` signing key and the PDS that hosts their repo. */
+export interface AtprotoIdentity {
+  signingKeyDid: string
+  pdsEndpoint: string
+}
+
+/**
+ * Read both facts we need about a `pds` custody user from one DID document.
+ *
+ * The signing key and the repo host must come from the same document. Taking
+ * the host from the enrolment result instead leaves it undefined in open
+ * mode, where eligibility returns before the document is ever resolved.
+ *
+ * @throws MissingAtprotoKeyError when either fact is absent.
+ */
+export async function resolveAtprotoIdentity(
+  did: string,
+  idResolver: IdResolver,
+): Promise<AtprotoIdentity> {
   const didDoc = await idResolver.did.resolve(did)
   const method = didDoc && selectAtprotoMethod(didDoc)
 
@@ -234,7 +257,14 @@ export async function resolveAtprotoSigningKey(
     throw new MissingAtprotoKeyError(did)
   }
 
-  return didKey
+  const pdsEndpoint = didDoc && extractPdsEndpoint({ service: didDoc.service })
+  if (!pdsEndpoint) {
+    // A `pds` custody enrolment with no host has nowhere to sync from, so
+    // refuse it rather than store a record that cannot be routed.
+    throw new MissingAtprotoKeyError(did)
+  }
+
+  return { signingKeyDid: didKey, pdsEndpoint }
 }
 
 /**

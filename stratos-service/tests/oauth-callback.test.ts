@@ -71,6 +71,13 @@ function atprotoDidDoc(did: string, keypair: Keypair) {
         publicKeyMultibase: keypair.did().slice('did:key:'.length),
       },
     ],
+    service: [
+      {
+        id: '#atproto_pds',
+        type: 'AtprotoPersonalDataServer',
+        serviceEndpoint: 'https://pds.example.com',
+      },
+    ],
   }
 }
 
@@ -696,6 +703,13 @@ describe('handleCallback', () => {
       // user's own #atproto key. Without this the request 500s and a
       // log-only assertion still passes, hiding the failure.
       mockIdResolver.did.resolve.mockResolvedValue({
+        service: [
+          {
+            id: '#atproto_pds',
+            type: 'AtprotoPersonalDataServer',
+            serviceEndpoint: 'https://pds.example.com',
+          },
+        ],
         id: 'did:plc:kenshin',
         verificationMethod: [
           {
@@ -847,5 +861,28 @@ describe('handleCallback', () => {
         expect.objectContaining({ success: true, did: 'did:plc:yahiko' }),
       )
     })
+  })
+
+  it('refuses pds custody when the DID document names no PDS', async () => {
+    // Open mode returns eligibility without resolving the document, so the
+    // enrolment result carries no endpoint. A pds custody row without a host
+    // has nowhere to sync from and must not be stored.
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const did = 'did:plc:misato'
+    mockOauthClient.callback.mockResolvedValue({
+      session: sessionFor(did, `atproto ${buildSpaceScope(config.serviceDid)}`),
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    // No pdsEndpoint, exactly as open mode returns it.
+    mockEnrollmentValidator.validate.mockResolvedValue({ allowed: true })
+    const doc = atprotoDidDoc(did, keypair)
+    mockIdResolver.did.resolve.mockResolvedValue({ ...doc, service: [] })
+
+    const handler = handleCallback(config)
+    const res = makeRes()
+    await callHandler(handler, makeReq(), res)
+
+    expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
+    expect(mockProfileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
   })
 })
