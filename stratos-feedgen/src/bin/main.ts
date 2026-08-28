@@ -7,6 +7,7 @@ import { EnrollmentManager } from '../enrollment/index.js'
 import { loadFeedRegistry } from '../feeds/index.js'
 import { Purger, reconcileEnrollments } from '../purge/index.js'
 import { createFeedgenServer } from '../server.js'
+import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
   ActorPool,
   intersectsBoundaries,
@@ -37,6 +38,16 @@ async function main(): Promise<void> {
     max: cfg.boundaryCacheMax,
   })
 
+  // Held for the syncer this feedgen becomes in MM-06; not yet on the sync
+  // path. Constructing it here so credential acquisition is exercised at
+  // startup rather than the first time something needs it.
+  const spaceCredentialManager = new SpaceCredentialManager({
+    client: upstream,
+    signingKey: keypair,
+    feedgenDid: cfg.feedgenServiceDid,
+    authorityDid: cfg.stratosServiceDid,
+  })
+
   const store = await createFeedgenStore(cfg)
 
   const verifier = createFeedRequestVerifier({
@@ -60,6 +71,16 @@ async function main(): Promise<void> {
 
   const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
   const indexer = new SubscriptionIndexer(store)
+
+  // Best-effort warm-up: a boundary this feedgen has no membership for yet
+  // (or a mint failure) must not block startup or crash the process. MM-06
+  // will make actual sync depend on a held credential; here we only prove
+  // acquisition works.
+  for (const boundary of configuredBoundaries) {
+    spaceCredentialManager.getCredential(boundary).catch((err: unknown) => {
+      console.error(`space credential warm-up failed for ${boundary}:`, err)
+    })
+  }
 
   const subscribeEnrollments =
     process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
