@@ -166,4 +166,42 @@ describe('ReservedDomainEnrollmentStore', () => {
     expect(dids).toContain(DID)
     expect(dids).not.toContain(inactive)
   })
+
+  it('pages the reserved domain past deactivated members without dropping any active one', async () => {
+    // A deactivated row anywhere in the key range must not shorten a page:
+    // if `active` were filtered after `LIMIT`, a page containing one would
+    // come back short, and the handler reads a short page as the last page.
+    const members = [
+      'did:plc:nausicaa',
+      'did:plc:kiki',
+      'did:plc:satsuki',
+      'did:plc:ashitaka',
+      'did:plc:san',
+      'did:plc:chihiro',
+    ].sort()
+    const deactivated = new Set([members[1], members[3]])
+
+    for (const did of members) {
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        active: !deactivated.has(did),
+        signingKeyDid: 'did:key:z6Mk',
+      })
+    }
+
+    const seen: string[] = []
+    let cursor: string | undefined
+    do {
+      const page = await store.listEnrollmentsByBoundary(RESERVED, {
+        limit: 2,
+        cursor,
+      })
+      seen.push(...page.map((m) => m.did))
+      cursor = page.length === 2 ? page[page.length - 1].did : undefined
+    } while (cursor)
+
+    const activeMembers = members.filter((did) => !deactivated.has(did))
+    expect(seen.sort()).toEqual(activeMembers)
+  })
 })

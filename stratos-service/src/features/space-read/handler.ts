@@ -8,7 +8,6 @@ import {
   resolveRepoHost,
   spaceUriToBoundary,
   StratosValidator,
-  type RepoHostResolverDeps,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
@@ -315,10 +314,7 @@ async function handleListSpaceRepos(
     { limit, cursor: params.cursor },
   )
 
-  const hostDeps = createRepoHostResolverDeps(ctx.idResolver)
-  const repos = await Promise.all(
-    members.map((member) => buildRepoEntry(ctx, space, member, hostDeps)),
-  )
+  const repos = await buildRepoEntries(ctx, space, members)
 
   return {
     repos,
@@ -326,6 +322,34 @@ async function handleListSpaceRepos(
       ? { cursor: members[members.length - 1].did }
       : {}),
   }
+}
+
+/** Caps concurrent per-member host/rev lookups fanned out from one page. */
+const MAX_CONCURRENT_REPO_LOOKUPS = 10
+
+/**
+ * Resolve every member's repo entry, bounded to
+ * {@link MAX_CONCURRENT_REPO_LOOKUPS} in flight at once -- a page can hold up
+ * to 1000 members, and each entry does a DID resolution and/or an actor-store
+ * read, so an unbounded fan-out can exhaust the admin connection pool.
+ */
+async function buildRepoEntries(
+  ctx: AppContext,
+  space: string,
+  members: StoredEnrollment[],
+): Promise<RepoEntry[]> {
+  const entries = new Array<RepoEntry>(members.length)
+  let nextIndex = 0
+
+  async function worker(): Promise<void> {
+    for (let index = nextIndex++; index < members.length; index = nextIndex++) {
+      entries[index] = await buildRepoEntry(ctx, space, members[index])
+    }
+  }
+
+  const workerCount = Math.min(MAX_CONCURRENT_REPO_LOOKUPS, members.length)
+  await Promise.all(Array.from({ length: workerCount }, worker))
+  return entries
 }
 
 /**
@@ -336,8 +360,8 @@ async function buildRepoEntry(
   ctx: AppContext,
   space: string,
   member: StoredEnrollment,
-  hostDeps: RepoHostResolverDeps,
 ): Promise<RepoEntry> {
+  const hostDeps = createRepoHostResolverDeps(ctx.idResolver, member.repoHost)
   const [resolvedHost, rev] = await Promise.all([
     resolveRepoHost(space, member.did, hostDeps),
     getStratosRev(ctx, member),
@@ -354,18 +378,25 @@ async function buildRepoEntry(
 /**
  * The repo revision Stratos itself has for a member -- meaningful only for a
  * stratos-custody member, whose repo Stratos stores. A pds-custody member's
- * repo lives on their own PDS; Stratos never learns its rev.
+ * repo lives on their own PDS; Stratos never learns its rev. Never throws:
+ * an actor-store failure degrades to an absent rev instead of failing the
+ * whole page.
  */
 async function getStratosRev(
   ctx: AppContext,
   member: StoredEnrollment,
 ): Promise<string | undefined> {
   if (member.custody === 'pds') return undefined
-  if (!(await ctx.actorStore.exists(member.did))) return undefined
-  return ctx.actorStore.read(member.did, async (store) => {
-    const root = await store.repo.getRootDetailed()
-    return root?.rev
-  })
+  try {
+    if (!(await ctx.actorStore.exists(member.did))) return undefined
+    return await ctx.actorStore.read(member.did, async (store) => {
+      const root = await store.repo.getRootDetailed()
+      return root?.rev
+    })
+  } catch (err) {
+    ctx.logger?.warn({ did: member.did, err }, 'listRepos: rev lookup failed')
+    return undefined
+  }
 }
 
 /**

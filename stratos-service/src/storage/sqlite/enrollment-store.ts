@@ -174,17 +174,21 @@ export class SqliteEnrollmentStore
    * @param options - Pagination options
    * @returns List of enrollments and optional cursor for next page
    */
-  async listEnrollments(options?: {
-    limit?: number
-    cursor?: string
-  }): Promise<StoredEnrollment[]> {
+  async listEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
     const limit = options?.limit ?? 50
     const cursor = options?.cursor
+
+    const conditions = [
+      cursor ? gt(enrollment.did, cursor) : undefined,
+      options?.activeOnly ? eq(enrollment.active, 'true') : undefined,
+    ].filter((c) => c !== undefined)
 
     const rows = await this.db
       .select()
       .from(enrollment)
-      .where(cursor ? gt(enrollment.did, cursor) : undefined)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(asc(enrollment.did))
       .limit(limit)
 

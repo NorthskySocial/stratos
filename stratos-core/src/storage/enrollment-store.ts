@@ -33,6 +33,12 @@ export interface StoredEnrollment {
 export interface ListEnrollmentsOptions {
   limit?: number
   cursor?: string
+  /**
+   * Filter to active enrollments in SQL, before `limit` is applied. Required
+   * whenever a caller filters the result by `active` afterward -- filtering
+   * after a SQL `LIMIT` drops rows from the page instead of the result.
+   */
+  activeOnly?: boolean
 }
 
 /**

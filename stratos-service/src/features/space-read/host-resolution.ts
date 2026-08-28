@@ -6,14 +6,17 @@ import type {
 } from '@northskysocial/stratos-core'
 
 /**
- * No Stratos storage records host overrides yet (the admin override table is
- * MM-08, not built). Every lookup reports "no override", which sends
- * `resolveRepoHost` straight to the DID-document arm -- the same outcome as
- * an override store that happens to hold nothing for this member.
+ * Reports a member's own `repoHost` (from their enrollment row) as Stratos's
+ * authority-recorded override. `repoHost` is written on enrolment and kept
+ * current on a PDS move, so it is already the answer to "does Stratos know a
+ * host for this member that overrides their DID document" -- no separate
+ * override table is needed.
  */
-export class NoopHostOverrideReader implements HostOverrideReader {
+export class EnrollmentHostOverrideReader implements HostOverrideReader {
+  constructor(private readonly repoHost: string | undefined) {}
+
   async get(): Promise<string | undefined> {
-    return undefined
+    return this.repoHost
   }
 }
 
@@ -47,12 +50,16 @@ export class DidDocumentPdsReader implements DidPdsReader {
   }
 }
 
-/** Builds the {@link RepoHostResolverDeps} `resolveRepoHost` needs. */
+/**
+ * Builds the {@link RepoHostResolverDeps} `resolveRepoHost` needs for one
+ * member. `repoHost` comes from that member's own enrollment row.
+ */
 export function createRepoHostResolverDeps(
   idResolver: IdResolver,
+  repoHost: string | undefined,
 ): RepoHostResolverDeps {
   return {
-    overrides: new NoopHostOverrideReader(),
+    overrides: new EnrollmentHostOverrideReader(repoHost),
     dids: new DidDocumentPdsReader(idResolver),
   }
 }
