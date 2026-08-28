@@ -77,9 +77,17 @@ async function main(): Promise<void> {
   // will make actual sync depend on a held credential; here we only prove
   // acquisition works.
   for (const boundary of configuredBoundaries) {
-    spaceCredentialManager.getCredential(boundary).catch((err: unknown) => {
-      console.error(`space credential warm-up failed for ${boundary}:`, err)
-    })
+    spaceCredentialManager
+      .getCredential(boundary)
+      // Log the success too. Logging only failures makes a warm-up that never
+      // ran look the same as one that worked, and the e2e cannot tell them
+      // apart.
+      .then(() => {
+        console.log(`space credential acquired for ${boundary}`)
+      })
+      .catch((err: unknown) => {
+        console.error(`space credential warm-up failed for ${boundary}:`, err)
+      })
   }
 
   const subscribeEnrollments =

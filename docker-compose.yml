@@ -49,6 +49,9 @@ services:
       target: stratos
     container_name: stratos
     restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
     ports:
       - '${STRATOS_PORT:-3100}:3100'
     environment:
@@ -56,6 +59,9 @@ services:
       STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
       STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL}
       STRATOS_PORT: 3100
+      # The space-credential delegation path and client attestation both need a
+      # replay store to enforce single-use tokens. Without it they fail closed.
+      STRATOS_VALKEY_URL: redis://valkey:6379
 
       # Service fragment for DID document
       STRATOS_SERVICE_FRAGMENT: ${STRATOS_SERVICE_FRAGMENT:-atproto_pns}
@@ -148,6 +154,17 @@ services:
       timeout: 3s
       retries: 5
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: stratos-valkey
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Uncomment to use with S3-compatible storage (e.g., MinIO)
   # minio:
   #   image: minio/minio:latest
@@ -170,4 +187,5 @@ services:
 volumes:
   stratos-data:
   pgdata:
+  valkey-data:
   # minio-data:
