@@ -101,9 +101,13 @@ export class SpaceDpopProofChecker {
         'DPoP proof "htm" does not match the request',
       )
     }
-    if (typeof htu !== 'string' || htu !== this.expectedHtu(req.url)) {
+    const expectedHtu = this.expectedHtu(req.url)
+    if (typeof htu !== 'string' || htu !== expectedHtu) {
+      // Name both sides. A mismatch here is a deployment problem, not an
+      // attack, and without the values it takes a rebuild to find out which
+      // URL was wrong.
       throw new SpaceDpopProofError(
-        'DPoP proof "htu" does not match the request',
+        `DPoP proof "htu" does not match the request: proof=${String(htu)} expected=${expectedHtu}`,
       )
     }
     if (boundToken !== undefined) {
