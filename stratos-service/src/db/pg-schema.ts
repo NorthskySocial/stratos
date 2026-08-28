@@ -48,6 +48,7 @@ export const pgEnrollmentBoundary = pgTable(
   (table) => [
     primaryKey({ columns: [table.did, table.boundary] }),
     index('enrollment_boundary_did_idx').on(table.did),
+    index('enrollment_boundary_boundary_idx').on(table.boundary),
   ],
 )
 

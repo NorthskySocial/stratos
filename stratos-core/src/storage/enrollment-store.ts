@@ -56,6 +56,17 @@ export interface EnrollmentStoreReader {
     options?: ListEnrollmentsOptions,
   ) => Promise<StoredEnrollment[]>
 
+  /**
+   * List active enrollments carrying a given boundary. This is a space's
+   * member list: a space maps 1:1 to a boundary, so "who is a member of this
+   * space" is "who has this boundary and is active". An indexed join, not a
+   * `listEnrollments` scan filtered in memory.
+   */
+  listEnrollmentsByBoundary: (
+    boundary: string,
+    options?: ListEnrollmentsOptions,
+  ) => Promise<StoredEnrollment[]>
+
   /** Count total enrollments */
   enrollmentCount: () => Promise<number>
 

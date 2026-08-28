@@ -117,4 +117,53 @@ describe('ReservedDomainEnrollmentStore', () => {
     // The raw store is untouched (read-side union, not a write-back).
     expect((await raw.getBoundaries(DID)).sort()).toEqual([ENG])
   })
+
+  it('listEnrollmentsByBoundary passes through unchanged for a non-reserved boundary', async () => {
+    const shinji = 'did:plc:shinji'
+    await store.enroll({
+      did: DID,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+    await store.enroll({
+      did: shinji,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [OPS],
+    })
+
+    const members = await store.listEnrollmentsByBoundary(ENG)
+    expect(members.map((m) => m.did)).toEqual([DID])
+  })
+
+  it('listEnrollmentsByBoundary for the reserved domain enumerates every active enrollment, including a pre-decorator row never backfilled with it', async () => {
+    // Written through the raw store, so its persisted `enrollment_boundary`
+    // rows never got the reserved domain -- the same pre-decorator gap
+    // `getBoundaries` unions over.
+    const raw = new SqliteEnrollmentStore(db)
+    await raw.enroll({
+      did: DID,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+
+    const inactive = 'did:plc:kaworu'
+    await raw.enroll({
+      did: inactive,
+      enrolledAt: new Date().toISOString(),
+      active: false,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+
+    const members = await store.listEnrollmentsByBoundary(RESERVED)
+    const dids = members.map((m) => m.did)
+    expect(dids).toContain(DID)
+    expect(dids).not.toContain(inactive)
+  })
 })
