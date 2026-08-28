@@ -14,7 +14,10 @@ import {
   ServiceStream,
   SubscriptionIndexer,
 } from '../subscription/index.js'
-import { UpstreamStratosClient } from '../upstream/index.js'
+import {
+  describeUpstreamError,
+  UpstreamStratosClient,
+} from '../upstream/index.js'
 
 async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
@@ -27,6 +30,7 @@ async function main(): Promise<void> {
 
   const upstream = new UpstreamStratosClient({
     serviceUrl: cfg.stratosServiceUrl,
+    publicUrl: cfg.stratosPublicUrl,
     serviceDid: cfg.stratosServiceDid,
     feedgenDid: cfg.feedgenServiceDid,
     keypair,
@@ -86,7 +90,10 @@ async function main(): Promise<void> {
         console.log(`space credential acquired for ${boundary}`)
       })
       .catch((err: unknown) => {
-        console.error(`space credential warm-up failed for ${boundary}:`, err)
+        console.error(
+          `space credential warm-up failed for ${boundary}:`,
+          describeUpstreamError(err),
+        )
       })
   }
 
