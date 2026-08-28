@@ -2,6 +2,52 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleCallback } from '../src/oauth/handlers/callback.js'
 import { buildSpaceScope } from '../src/oauth/index.js'
 
+/** Minimal Express request the callback handler reads. */
+interface MockRequest {
+  url: string
+  cookies?: Record<string, string>
+  headers?: Record<string, string>
+}
+
+/** Minimal Express response the callback handler writes. */
+interface MockResponse {
+  status: ReturnType<typeof vi.fn>
+  json: ReturnType<typeof vi.fn>
+  // Not every case exercises the redirect or cookie branches.
+  redirect?: ReturnType<typeof vi.fn>
+  clearCookie?: ReturnType<typeof vi.fn>
+}
+
+function makeReq(
+  url = 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+): MockRequest {
+  return { url }
+}
+
+function makeRes(): MockResponse {
+  return {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn(),
+    redirect: vi.fn(),
+  }
+}
+
+/**
+ * The handler wants Express types; these mocks carry only what it touches.
+ * The cast is confined here so no test needs `any` at the call site.
+ */
+function callHandler(
+  handler: ReturnType<typeof handleCallback>,
+  req: MockRequest,
+  res: MockResponse,
+): Promise<unknown> {
+  const invoke = handler as unknown as (
+    req: MockRequest,
+    res: MockResponse,
+  ) => unknown
+  return Promise.resolve(invoke(req, res))
+}
+
 /**
  * A minimal OAuth session double. `scope` defaults to the base grant only,
  * i.e. a PDS that ignored the requested space scope — the common case for
@@ -79,16 +125,12 @@ describe('handleCallback', () => {
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-    }
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res = makeRes()
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(mockOauthClient.callback).toHaveBeenCalled()
     expect(mockEnrollmentStore.enroll).toHaveBeenCalled()
@@ -111,16 +153,12 @@ describe('handleCallback', () => {
     })
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-    }
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res = makeRes()
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(mockOauthClient.callback).toHaveBeenCalled()
     expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
@@ -143,15 +181,15 @@ describe('handleCallback', () => {
     })
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(mockOauthClient.revoke).toHaveBeenCalledWith('did:plc:malice')
     expect(res.status).toHaveBeenCalledWith(403)
@@ -167,15 +205,15 @@ describe('handleCallback', () => {
     mockOauthClient.callback.mockRejectedValue(new Error('OAuth failed'))
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(res.status).toHaveBeenCalledWith(500)
     expect(res.json).toHaveBeenCalledWith(
@@ -195,15 +233,15 @@ describe('handleCallback', () => {
     })
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(res.status).toHaveBeenCalledWith(403)
     expect(res.json).toHaveBeenCalledWith(
@@ -222,18 +260,14 @@ describe('handleCallback', () => {
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-    }
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res = makeRes()
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
-    expect(res.redirect).toHaveBeenCalledWith(
+    expect(res.redirect!).toHaveBeenCalledWith(
       'https://app.example/?stratos_enrolled=true',
     )
   })
@@ -246,18 +280,18 @@ describe('handleCallback', () => {
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
-    const req: any = {
+    const req: MockRequest = {
       url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
       cookies: { stratos_redirect: 'https://evil.example/' },
     }
-    const res: any = {
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
       redirect: vi.fn(),
       clearCookie: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(res.redirect).not.toHaveBeenCalled()
     expect(res.json).toHaveBeenCalledWith(
@@ -277,17 +311,17 @@ describe('handleCallback', () => {
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'https://stratos.example/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
+    const req = makeReq(
+      'https://stratos.example/oauth/callback?code=foo&state=bar',
+    )
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
       redirect: vi.fn(),
       clearCookie: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(res.redirect).not.toHaveBeenCalled()
     expect(mockLogger.warn).toHaveBeenCalledWith(
@@ -307,17 +341,17 @@ describe('handleCallback', () => {
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
       redirect: vi.fn(),
       clearCookie: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(res.redirect).not.toHaveBeenCalled()
     expect(mockLogger.warn).toHaveBeenCalledWith(
@@ -338,19 +372,19 @@ describe('handleCallback', () => {
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=secret-code&state=bar',
-    }
-    const res: any = {
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=secret-code&state=bar',
+    )
+    const res: MockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
       redirect: vi.fn(),
       clearCookie: vi.fn(),
     }
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
-    const target = new URL(res.redirect.mock.calls[0][0])
+    const target = new URL(res.redirect!.mock.calls[0][0])
     expect([...target.searchParams.keys()]).toEqual(['stratos_enrolled'])
     expect(target.href).not.toContain(did)
     expect(target.href).not.toContain('secret-code')
@@ -368,16 +402,12 @@ describe('handleCallback', () => {
     })
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-    }
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res = makeRes()
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     // Should still return success
     expect(res.json).toHaveBeenCalledWith(
@@ -421,15 +451,11 @@ describe('handleCallback', () => {
     async function runCallback(session: unknown) {
       mockOauthClient.callback.mockResolvedValue({ session })
       const handler = handleCallback(config)
-      const req: any = {
-        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      }
-      const res: any = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn(),
-        redirect: vi.fn(),
-      }
-      await handler(req, res)
+      const req = makeReq(
+        'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      )
+      const res = makeRes()
+      await callHandler(handler, req, res)
       return res
     }
 
