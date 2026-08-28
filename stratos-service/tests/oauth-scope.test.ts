@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { OAUTH_SCOPE } from '../src/oauth/index.js'
+import {
+  buildOAuthScope,
+  buildSpaceScope,
+  OAUTH_SCOPE,
+} from '../src/oauth/index.js'
 import { IdResolver } from '@atproto/identity'
 import { PdsTokenVerifier } from '../src/infra/auth/index.js'
 
@@ -23,6 +27,38 @@ describe('OAUTH_SCOPE', () => {
 
   it('should match the expected full value', () => {
     expect(OAUTH_SCOPE).toBe('atproto repo:zone.stratos.actor.enrollment')
+  })
+})
+
+describe('buildSpaceScope', () => {
+  it('requests this service as authority, with no skey and no PDS probe', () => {
+    expect(buildSpaceScope('did:web:stratos.example.com')).toBe(
+      'space:zone.stratos.space.feed?authority=did%3Aweb%3Astratos.example.com&collection=zone.stratos.feed.post&action=create&action=read',
+    )
+  })
+
+  it('encodes the authority so a did:web port survives the parser', () => {
+    // The parser percent-decodes a parameter value. A raw `%3A` would decode
+    // to `:` and yield a different DID, which is a silent capability miss.
+    const scope = buildSpaceScope('did:web:127.0.0.1%3A3100')
+    expect(scope).toContain('authority=did%3Aweb%3A127.0.0.1%253A3100')
+    expect(scope).not.toContain('authority=did:web:127.0.0.1%3A3100')
+  })
+
+  it('omits skey so the grant covers boundaries added after enrolment', () => {
+    expect(buildSpaceScope('did:web:stratos.example.com')).not.toContain(
+      'skey=',
+    )
+  })
+})
+
+describe('buildOAuthScope', () => {
+  it('keeps the fixed base scope and appends the space grant', () => {
+    const scope = buildOAuthScope('did:web:stratos.example.com')
+    const parts = scope.split(' ')
+    expect(parts[0]).toBe('atproto')
+    expect(parts).toContain('repo:zone.stratos.actor.enrollment')
+    expect(scope).toContain(buildSpaceScope('did:web:stratos.example.com'))
   })
 })
 

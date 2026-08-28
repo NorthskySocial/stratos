@@ -1,8 +1,8 @@
 import type { IdResolver } from '@atproto/identity'
 import {
+  buildOAuthScope,
   createOAuthClient,
   isolateAdminOAuthStores,
-  OAUTH_SCOPE,
   type OAuthClientConfig,
   type OAuthSessionStoreBackend,
   type OAuthStateStoreBackend,
@@ -22,7 +22,7 @@ function oauthClientConfig(cfg: StratosServiceConfig): OAuthClientConfig {
     redirectUri: `${cfg.service.publicUrl}/oauth/callback`,
     adminRedirectUri: `${cfg.service.publicUrl}/admin/oauth/callback`,
     privateKeyPem: cfg.oauth.clientSecret,
-    scope: OAUTH_SCOPE,
+    scope: buildOAuthScope(cfg.service.did),
     clientName: cfg.oauth.clientName,
     logoUri: cfg.oauth.logoUri,
     tosUri: cfg.oauth.tosUri,

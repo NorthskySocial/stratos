@@ -2,6 +2,7 @@ import express from 'express'
 import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import type {
   EnrollmentValidationResult,
+  SpacesCapability,
   Logger,
 } from '@northskysocial/stratos-core'
 import type { EnrollmentStore, OAuthRoutesConfig } from '../routes.js'
@@ -10,6 +11,7 @@ import {
   selectEnrollBoundaries,
   serviceDIDToRkey,
 } from '../routes.js'
+import { detectSpacesCapability } from '../spaces-capability.js'
 
 export const handleCallback = (config: OAuthRoutesConfig) => {
   const {
@@ -45,12 +47,27 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       const did = session.sub
 
       // Validate enrollment eligibility
-      const enrollmentResult: EnrollmentValidationResult =
-        await config.enrollmentValidator.validate(did)
+      const enrollmentResult: EnrollmentValidationResult = {
+        ...(await config.enrollmentValidator.validate(did)),
+      }
 
       if (!enrollmentResult.allowed) {
         return denyEnrollment(res, did, enrollmentResult.reason, oauthClient)
       }
+
+      // Read back the scope actually granted. A non-spaces PDS silently drops
+      // the space scope `handleAuthorize` requested, so the grant (or its
+      // absence) is the answer; a failed read is 'unknown', never a false
+      // 'not-capable'.
+      enrollmentResult.spacesCapability = await detectSpacesCapability(
+        session,
+        serviceDid,
+        logger,
+      )
+      logger?.info(
+        { did, spacesCapability: enrollmentResult.spacesCapability },
+        'detected PDS spaces capability',
+      )
 
       // Check if already enrolled
       const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
@@ -66,6 +83,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           createAttestation,
           autoEnrollDomains,
           defaultBoundaries,
+          spacesCapability: enrollmentResult.spacesCapability,
           logger,
         })
       } else {
@@ -80,6 +98,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           createAttestation,
           enrollBoundaries,
           pdsEndpoint: enrollmentResult.pdsEndpoint!,
+          spacesCapability: enrollmentResult.spacesCapability,
           logger,
         })
       }
@@ -132,6 +151,7 @@ async function handleExistingEnrollment(deps: {
   createAttestation: OAuthRoutesConfig['createAttestation']
   autoEnrollDomains: string[] | undefined
   defaultBoundaries: string[]
+  spacesCapability: SpacesCapability | undefined
   logger: Logger | undefined
 }) {
   const {
@@ -142,8 +162,13 @@ async function handleExistingEnrollment(deps: {
     serviceDid,
     profileRecordWriter,
     createAttestation,
+    spacesCapability,
     logger,
   } = deps
+
+  // A re-auth can change the verdict, because the user may grant or withhold
+  // the space scope each time. MM-03 reconciles the stored custody class.
+  logger?.info({ did, spacesCapability }, 're-authorised existing enrollment')
 
   // Migrate legacy (self-keyed or TID-keyed) enrollment record to service DID rkey
   await migrateEnrollmentRkey(
@@ -209,6 +234,7 @@ async function handleNewEnrollment(deps: {
   createAttestation: OAuthRoutesConfig['createAttestation']
   enrollBoundaries: string[]
   pdsEndpoint: string
+  spacesCapability: SpacesCapability | undefined
   logger: Logger | undefined
 }) {
   const {
@@ -222,6 +248,8 @@ async function handleNewEnrollment(deps: {
     createAttestation,
     enrollBoundaries,
     pdsEndpoint,
+    spacesCapability,
+    logger,
   } = deps
 
   // Initialize actor store and repo with an empty signed commit
@@ -250,6 +278,10 @@ async function handleNewEnrollment(deps: {
   })
 
   // Create enrollment record
+  // MM-03 stores this as the custody class. Logged here so the verdict is
+  // tied to the enrollment it decided, not to the callback that read it.
+  logger?.info({ did, spacesCapability }, 'enrolling actor')
+
   await enrollmentStore.enroll({
     did,
     enrolledAt: new Date().toISOString(),
