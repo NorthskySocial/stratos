@@ -95,6 +95,12 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
    * domain, trusting the persisted `enrollment_boundary` join would silently
    * exclude those un-backfilled members, so every active enrollment is
    * enumerated instead.
+   *
+   * `activeOnly` filters in SQL rather than after the fact: `listEnrollments`
+   * applies `LIMIT` before a caller can filter, so a page containing a
+   * deactivated row would otherwise come back short of `limit`, and the
+   * handler reads a short page as the last page -- silently truncating
+   * enumeration.
    */
   async listEnrollmentsByBoundary(
     boundary: string,
@@ -103,8 +109,7 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
     if (boundary !== this.reservedDomain) {
       return this.inner.listEnrollmentsByBoundary(boundary, options)
     }
-    const rows = await this.inner.listEnrollments(options)
-    return rows.filter((row) => row.active)
+    return this.inner.listEnrollments({ ...options, activeOnly: true })
   }
 
   // ─── Writes (force-include the reserved domain) ───────────────────────

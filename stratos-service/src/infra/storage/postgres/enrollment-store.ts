@@ -66,10 +66,14 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
     const limit = options?.limit ?? 100
     const cursor = options?.cursor
 
-    let query = this.db.select().from(pgEnrollment)
+    const conditions = [
+      cursor ? gt(pgEnrollment.did, cursor) : undefined,
+      options?.activeOnly ? eq(pgEnrollment.active, 'true') : undefined,
+    ].filter((c) => c !== undefined)
 
-    if (cursor) {
-      query = query.where(gt(pgEnrollment.did, cursor)) as typeof query
+    let query = this.db.select().from(pgEnrollment)
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query
     }
 
     const rows = await query.orderBy(asc(pgEnrollment.did)).limit(limit)

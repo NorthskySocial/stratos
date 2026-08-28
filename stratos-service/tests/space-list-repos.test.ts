@@ -65,8 +65,15 @@ const nonStringEndpointMemberDid = 'did:plc:mana-kirishima'
 // DID document's service id matches the DID-qualified form
 // (`${did}#atproto_pds`), not the bare `#atproto_pds` form.
 const didQualifiedServiceIdMemberDid = 'did:plc:makoto-hyuga'
+// Enrollment row carries its own `repoHost` -- the authority-override arm
+// must answer from it and never reach DID resolution.
+const overrideMemberDid = 'did:plc:ritsuko-akagi'
+// Stratos-custody, but the actor store rejects (simulating a pool timeout) --
+// `rev` lookup must degrade to absent, not fail the whole call.
+const revLookupFailsMemberDid = 'did:plc:kaji-ryoji'
 
 const PDS_ENDPOINT = 'https://pds.example.com'
+const OVERRIDE_HOST = 'https://override.pds.example.com'
 
 describe('zone.stratos.space.listRepos', () => {
   let dataDir: string
@@ -99,6 +106,11 @@ describe('zone.stratos.space.listRepos', () => {
     const idResolver = {
       did: {
         resolve: async (did: string) => {
+          if (did === overrideMemberDid) {
+            throw new Error(
+              'DID resolution must not run once the override arm answers',
+            )
+          }
           if (did === unresolvableMemberDid) {
             return { service: [] }
           }
@@ -131,9 +143,26 @@ describe('zone.stratos.space.listRepos', () => {
       },
     }
 
+    // Delegates to the real actor store, except `exists` rejects for
+    // `revLookupFailsMemberDid` -- simulates a pool-exhausted/unavailable
+    // actor store without touching every other member's real lookups.
+    const actorStoreWithFailure = new Proxy(actorStore, {
+      get(target, prop, receiver) {
+        if (prop === 'exists') {
+          return async (did: string) => {
+            if (did === revLookupFailsMemberDid) {
+              throw new Error('pool timeout')
+            }
+            return target.exists(did)
+          }
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+
     const ctx = {
       cfg,
-      actorStore,
+      actorStore: actorStoreWithFailure,
       enrollmentStore,
       serviceDid: SERVICE_DID,
       idResolver,
@@ -267,6 +296,26 @@ describe('zone.stratos.space.listRepos', () => {
       })
       await enrollmentStore.setBoundaries(did, [BOUNDARY_S.value])
     }
+
+    await enrollmentStore.enroll({
+      did: overrideMemberDid,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:zTest',
+      custody: 'pds',
+      repoHost: OVERRIDE_HOST,
+    })
+    await enrollmentStore.setBoundaries(overrideMemberDid, [BOUNDARY_S.value])
+
+    await enrollmentStore.enroll({
+      did: revLookupFailsMemberDid,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:zTest',
+    })
+    await enrollmentStore.setBoundaries(revLookupFailsMemberDid, [
+      BOUNDARY_S.value,
+    ])
   })
 
   afterEach(async () => {
@@ -441,6 +490,33 @@ describe('zone.stratos.space.listRepos', () => {
     }
     expect(entry.host).toBe(PDS_ENDPOINT)
     expect(entry.hostSource).toBe('did-document')
+  })
+
+  it('a member with a recorded repoHost resolves via the authority override, never the DID document', async () => {
+    const res = await call({}, serviceAuth)
+    const byDid = new Map(
+      res.body.repos.map((r: { did: string }) => [r.did, r]),
+    )
+    const entry = byDid.get(overrideMemberDid) as {
+      host?: string
+      hostSource?: string
+    }
+    expect(entry.host).toBe(OVERRIDE_HOST)
+    expect(entry.hostSource).toBe('authority-override')
+  })
+
+  it('a rejecting actor store degrades that member to no rev, without failing the whole page', async () => {
+    const res = await call({}, serviceAuth)
+    const dids = res.body.repos.map((r: { did: string }) => r.did)
+    expect(dids).toContain(revLookupFailsMemberDid)
+    expect(dids).toContain(stratosMemberDid)
+
+    const byDid = new Map(
+      res.body.repos.map((r: { did: string }) => [r.did, r]),
+    )
+    expect(
+      (byDid.get(revLookupFailsMemberDid) as { rev?: string }).rev,
+    ).toBeUndefined()
   })
 
   it('never invents a hash: the field is absent for every member', async () => {
