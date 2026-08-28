@@ -31,21 +31,24 @@ export interface DpopKeyPair {
 
 /** Generate a fresh P-256 DPoP key pair. */
 export async function generateDpopKeyPair(): Promise<DpopKeyPair> {
-  const pair = await webcrypto.subtle.generateKey(EC_KEY_ALGORITHM, true, [
+  const pair = await webcrypto.subtle.generateKey(EC_KEY_ALGORITHM, false, [
     'sign',
     'verify',
   ])
-  const publicJwk = (await webcrypto.subtle.exportKey(
-    'jwk',
-    pair.publicKey,
-  )) as { crv: string; kty: string; x: string; y: string }
+  const publicJwk = await webcrypto.subtle.exportKey('jwk', pair.publicKey)
+  const { crv, kty, x, y } = publicJwk
+  if (!crv || !kty || !x || !y) {
+    // A missing member would be dropped by JSON.stringify, silently changing
+    // both the proof header and the thumbprint the credential is bound to.
+    throw new Error('DPoP key export is missing a required JWK member')
+  }
   return {
     privateKey: pair.privateKey,
     jwk: {
-      crv: publicJwk.crv,
-      kty: publicJwk.kty,
-      x: publicJwk.x,
-      y: publicJwk.y,
+      crv,
+      kty,
+      x,
+      y,
     },
   }
 }

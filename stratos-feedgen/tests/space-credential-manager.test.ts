@@ -338,4 +338,43 @@ describe('SpaceCredentialManager', () => {
       ).rejects.toThrow(/cannot map boundary/)
     })
   })
+
+  it('rejects a credential whose expiry cannot be parsed', async () => {
+    // NaN compares false against everything, so an unparsed expiry would look
+    // neither due for refresh nor expired, and be served forever.
+    const { manager } = await makeManager({
+      getSpaceCredential: async () => ({
+        credential: 'cred-shinji',
+        expiresAt: 'not-a-date',
+      }),
+    })
+
+    await expect(manager.getCredential(BEBOP_BOUNDARY)).rejects.toThrow(
+      /unusable expiry/,
+    )
+  })
+
+  it('re-attempts a mint after an earlier failure', async () => {
+    // Guards the single-flight map: a cached rejection would make the second
+    // call return without touching the client.
+    let calls = 0
+    const { manager, client } = await makeManager({
+      getSpaceCredential: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('rejected')
+        return {
+          credential: 'cred-asuka',
+          expiresAt: new Date(7_200_000).toISOString(),
+        }
+      },
+    })
+
+    await expect(manager.getCredential(BEBOP_BOUNDARY)).rejects.toThrow(
+      'rejected',
+    )
+    await expect(manager.getCredential(BEBOP_BOUNDARY)).resolves.toMatchObject({
+      credential: 'cred-asuka',
+    })
+    expect(client.getSpaceCredential).toHaveBeenCalledTimes(2)
+  })
 })

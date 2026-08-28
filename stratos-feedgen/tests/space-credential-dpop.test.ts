@@ -35,11 +35,21 @@ describe('generateDpopKeyPair', () => {
     expect(typeof pair.jwk.y).toBe('string')
   })
 
-  it('produces an extractable private key', async () => {
+  it('keeps the private key inside the process', async () => {
+    // The private half binds every credential through `cnf.jkt`. It never
+    // needs to leave, so exporting it must fail.
     const pair = await generateDpopKeyPair()
+    expect(pair.privateKey.extractable).toBe(false)
     await expect(
       webcrypto.subtle.exportKey('jwk', pair.privateKey),
-    ).resolves.toBeDefined()
+    ).rejects.toThrow()
+  })
+
+  it('still exports the public JWK', async () => {
+    const pair = await generateDpopKeyPair()
+    expect(pair.jwk).toMatchObject({ kty: 'EC', crv: 'P-256' })
+    expect(pair.jwk.x).toBeTruthy()
+    expect(pair.jwk.y).toBeTruthy()
   })
 })
 

@@ -122,14 +122,14 @@ The service reads its configuration from environment variables in `stratos-servi
 
 ### Enrollment
 
-| Variable                        | Description                                             | Default     |
-| ------------------------------- | ------------------------------------------------------- | ----------- |
-| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                                   | `allowlist` |
-| `STRATOS_ALLOWED_DIDS`          | Allowed DIDs when running in allowlist mode             | empty       |
-| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Allowed PDS origins when running in allowlist mode      | empty       |
-| `STRATOS_AUTO_ENROLL_DOMAINS`   | Domains automatically assigned at enrollment time       | empty       |
-| `STRATOS_ALLOW_LIST_URI`        | Optional external allow-list source                     | unset       |
-| `STRATOS_VALKEY_URL`            | Optional Valkey/Redis backing store for allow-list data | unset       |
+| Variable                        | Description                                                                                                                                          | Default     |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `STRATOS_ENROLLMENT_MODE`       | `open` or `allowlist`                                                                                                                                | `allowlist` |
+| `STRATOS_ALLOWED_DIDS`          | Allowed DIDs when running in allowlist mode                                                                                                          | empty       |
+| `STRATOS_ALLOWED_PDS_ENDPOINTS` | Allowed PDS origins when running in allowlist mode                                                                                                   | empty       |
+| `STRATOS_AUTO_ENROLL_DOMAINS`   | Domains automatically assigned at enrollment time                                                                                                    | empty       |
+| `STRATOS_ALLOW_LIST_URI`        | Optional external allow-list source                                                                                                                  | unset       |
+| `STRATOS_VALKEY_URL`            | Valkey/Redis backing store. Required for the space-credential delegation and mint paths and for client attestation: all three fail closed without it | unset       |
 
 ### Storage for blobs
 
