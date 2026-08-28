@@ -97,6 +97,9 @@ async function main() {
     console.log('Presence of a record in a repo is NOT evidence of membership.')
   } else {
     console.log('RESULT: the host DID reject the write. Detail above.')
+    // The whole mixed-mode boundary rule rests on this staying true. If a
+    // host starts authorizing writes, that is a finding, not a passing run.
+    process.exitCode = 1
   }
   console.log('='.repeat(60))
 }
