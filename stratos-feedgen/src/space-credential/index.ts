@@ -1,4 +1,4 @@
-export { createDpopProof, dpopThumbprint, generateDpopKeyPair } from './dpop.js'
+export { createDpopProof, generateDpopKeyPair } from './dpop.js'
 export type { CreateDpopProofOptions, DpopJwk, DpopKeyPair } from './dpop.js'
 export {
   DELEGATION_TOKEN_LIFETIME_SECONDS,

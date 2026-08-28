@@ -53,20 +53,6 @@ export async function generateDpopKeyPair(): Promise<DpopKeyPair> {
   }
 }
 
-/**
- * RFC 7638 SHA-256 JWK thumbprint. Member order is canonical for an EC key
- * (`crv`, `kty`, `x`, `y`).
- */
-export function dpopThumbprint(jwk: DpopJwk): string {
-  const canonical = JSON.stringify({
-    crv: jwk.crv,
-    kty: jwk.kty,
-    x: jwk.x,
-    y: jwk.y,
-  })
-  return createHash('sha256').update(canonical).digest('base64url')
-}
-
 /** Inputs to {@link createDpopProof}. */
 export interface CreateDpopProofOptions {
   /** HTTP method the proof covers. */
