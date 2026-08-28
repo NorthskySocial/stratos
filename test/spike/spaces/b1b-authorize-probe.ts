@@ -26,12 +26,22 @@ function loopbackClientId(scope: string): string {
 
 /** The provider renders errors into a JSON blob inside the HTML shell. */
 function extractError(html: string): string {
-  const hydration = html.match(
-    /__NEXT_HYDRATION_DATA__|"error"\s*:\s*"([^"]+)"/,
-  )
-  if (hydration?.[1]) {
-    const desc = html.match(/"error_description"\s*:\s*"([^"]+)"/)
-    return `${hydration[1]}${desc ? `: ${desc[1]}` : ''}`
+  // Parse the provider's error blob as one object. Two independent regexes
+  // can pair an `error` from one place with a `description` from another.
+  const blob = html.match(/window\["__errorData"\]=JSON\.parse\("(.*?)"\);/)
+  if (blob?.[1]) {
+    try {
+      const parsed: unknown = JSON.parse(JSON.parse(`"${blob[1]}"`))
+      if (typeof parsed === 'object' && parsed !== null) {
+        const { error, error_description: desc } = parsed as {
+          error?: string
+          error_description?: string
+        }
+        if (error) return desc ? `${error}: ${desc}` : error
+      }
+    } catch {
+      // Fall through to the title.
+    }
   }
   const title = html.match(/<title>([^<]*)<\/title>/)
   return title?.[1]?.trim() || html.slice(0, 160).replace(/\s+/g, ' ')

@@ -305,12 +305,14 @@ async function main() {
     const custodyPosts = feed.posts.filter(
       (p) => p.did === 'did:plc:stratoscustodyuser',
     ).length
-    const bothPresent = spacesPosts > 0 && custodyPosts > 0
+    const ownRecordIndexed = feed.posts.some((p) => p.uri.endsWith(`/${rkey}`))
+    const bothPresent = spacesPosts > 0 && custodyPosts > 0 && ownRecordIndexed
     const noLeak = leaked.posts.length === 0
     console.log(`\n${'='.repeat(60)}`)
     console.log(
       `mixed feed: ${spacesPosts} spaces-PDS post(s), ${custodyPosts} Stratos-custody post(s)`,
     )
+    console.log(`this run's own record indexed: ${ownRecordIndexed}`)
     console.log(`claimed-but-ungranted boundary was dropped: ${noLeak}`)
     console.log(
       bothPresent && noLeak
