@@ -1,6 +1,8 @@
 export { UpstreamStratosClient } from './client.js'
 export type {
   GetBlobResult,
+  GetSpaceCredentialOptions,
+  GetSpaceCredentialResult,
   HydrateRecordsResult,
   HydratedRecord,
   ResolveEnrollmentsResult,
