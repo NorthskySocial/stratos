@@ -196,8 +196,8 @@ export class PgEnrollmentStoreWriter
     if ('repoHost' in updates) {
       setValues.repoHost = updates.repoHost ?? null
     }
-    if (updates.capabilityVerdict !== undefined) {
-      setValues.capabilityVerdict = updates.capabilityVerdict
+    if ('capabilityVerdict' in updates) {
+      setValues.capabilityVerdict = updates.capabilityVerdict ?? null
     }
 
     if (Object.keys(setValues).length > 0) {

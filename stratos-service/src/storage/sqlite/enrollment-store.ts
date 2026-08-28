@@ -160,8 +160,8 @@ export class SqliteEnrollmentStore
     // 'stratos' custody. `in` sees an explicit `repoHost: undefined`, where
     // `!== undefined` would treat it the same as an omitted key.
     if ('repoHost' in updates) set.repoHost = updates.repoHost ?? null
-    if (updates.capabilityVerdict !== undefined)
-      set.capabilityVerdict = updates.capabilityVerdict
+    if ('capabilityVerdict' in updates)
+      set.capabilityVerdict = updates.capabilityVerdict ?? null
 
     if (Object.keys(set).length > 0) {
       await this.db.update(enrollment).set(set).where(eq(enrollment.did, did))
