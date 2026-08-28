@@ -215,16 +215,12 @@ describe('handleCallback', () => {
     })
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-    }
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res = makeRes()
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(config.initRepo).toHaveBeenCalledWith('did:plc:kenshin')
     expect(config.createSigningKey).toHaveBeenCalledWith('did:plc:kenshin')
