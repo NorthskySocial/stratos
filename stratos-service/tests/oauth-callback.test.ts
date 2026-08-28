@@ -827,8 +827,13 @@ describe('handleCallback', () => {
           repoHost: 'https://pds.example.com',
         }),
       )
-      // custody itself must never be part of an update triggered only by an
-      // unknown verdict -- only the observed verdict may be persisted.
+      // The verdict is persisted so a later migration pass can find this
+      // user. Custody itself must not move: losing the answer is not the
+      // same as learning the answer is no.
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.objectContaining({ capabilityVerdict: 'unknown' }),
+      )
       expect(mockEnrollmentStore.updateEnrollment).not.toHaveBeenCalledWith(
         'did:plc:kaoru',
         expect.objectContaining({ custody: 'stratos' }),
@@ -868,7 +873,10 @@ describe('handleCallback', () => {
       )
       expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
         'did:plc:kaoru',
-        { pdsEndpoint: 'https://new-pds.example.com' },
+        {
+          pdsEndpoint: 'https://new-pds.example.com',
+          repoHost: 'https://new-pds.example.com',
+        },
       )
     })
 

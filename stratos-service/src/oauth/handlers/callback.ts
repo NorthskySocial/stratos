@@ -253,7 +253,10 @@ async function handleExistingEnrollment(deps: {
     if (verdictChanged || pdsEndpointChanged) {
       await enrollmentStore.updateEnrollment(did, {
         ...(verdictChanged ? { capabilityVerdict: spacesCapability } : {}),
-        ...(pdsEndpointChanged ? { pdsEndpoint } : {}),
+        // `repoHost` is the routing target, so it moves with the endpoint.
+        // Publishing the new host while the store keeps the old one would
+        // point the syncer at a PDS the user has left.
+        ...(pdsEndpointChanged ? { pdsEndpoint, repoHost } : {}),
       })
     }
     if (custodyDiverged) {
