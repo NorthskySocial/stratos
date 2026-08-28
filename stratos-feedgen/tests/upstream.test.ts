@@ -12,7 +12,6 @@ import {
   UpstreamStratosClient,
   StratosClientError,
   describeUpstreamError,
-  MAX_LOGGED_ERROR_BODY_LENGTH,
 } from '../src/upstream/index.js'
 
 interface CapturedRequest {
@@ -412,10 +411,10 @@ describe('StratosClientError', () => {
 })
 
 describe('describeUpstreamError', () => {
-  it('includes status, lxm, and the body for a StratosClientError', () => {
+  it('includes status and lxm for a StratosClientError', () => {
     const err = new StratosClientError({
       status: 400,
-      body: 'NotEnrolled',
+      body: JSON.stringify({ error: 'NotEnrolled' }),
       url: 'https://x/xrpc/zone.stratos.space.getSpaceCredential',
       lxm: 'zone.stratos.space.getSpaceCredential',
     })
@@ -424,37 +423,51 @@ describe('describeUpstreamError', () => {
     )
   })
 
-  it('caps a long response body and marks the cut with an ellipsis', () => {
-    const longBody = 'x'.repeat(MAX_LOGGED_ERROR_BODY_LENGTH + 50)
-    const err = new StratosClientError({
-      status: 502,
-      body: longBody,
-      url: 'https://x/xrpc/foo',
-      lxm: 'foo',
-    })
-    const described = describeUpstreamError(err)
-    expect(described).toBe(
-      `502 foo: ${'x'.repeat(MAX_LOGGED_ERROR_BODY_LENGTH)}…`,
-    )
-    expect(described.length).toBeLessThan(longBody.length)
-  })
-
-  it('does not cap a body at exactly the limit', () => {
-    const body = 'x'.repeat(MAX_LOGGED_ERROR_BODY_LENGTH)
+  it('logs no part of a body that is not an XRPC error', () => {
+    // The body comes from the other end. A misrouted URL could return
+    // anything, so none of it belongs in a log line.
+    const body = 'x'.repeat(5000)
     const err = new StratosClientError({
       status: 502,
       body,
       url: 'https://x/xrpc/foo',
       lxm: 'foo',
     })
-    expect(describeUpstreamError(err)).toBe(`502 foo: ${body}`)
+    const described = describeUpstreamError(err)
+    expect(described).toBe('502 foo')
+    expect(described).not.toContain('x')
   })
 
-  it('falls back to the message for a plain Error', () => {
-    expect(describeUpstreamError(new Error('boom'))).toBe('boom')
+  it('logs the error code but never the message', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({
+        error: 'NotEnrolled',
+        message: 'shinji is not enrolled in nerv',
+      }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    const described = describeUpstreamError(err)
+    expect(described).toBe('400 foo: NotEnrolled')
+    expect(described).not.toContain('shinji')
   })
 
-  it('falls back to String() for a non-Error throw', () => {
-    expect(describeUpstreamError('just a string')).toBe('just a string')
+  it('ignores an error value too long to be a code', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: 'y'.repeat(200) }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe('400 foo')
+  })
+
+  it('reports the error name, not the message, for a plain Error', () => {
+    expect(describeUpstreamError(new TypeError('boom'))).toBe('TypeError')
+  })
+
+  it('reports nothing from a non-Error throw', () => {
+    expect(describeUpstreamError('just a string')).toBe('unknown error')
   })
 })
