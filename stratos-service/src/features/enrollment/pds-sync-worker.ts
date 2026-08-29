@@ -22,9 +22,6 @@ export interface PdsSyncWorkerConfig {
   attemptTimeoutMs: number
 }
 
-/**
- * Dependencies for the PDS enrollment sync worker.
- */
 export interface PdsSyncWorkerDeps {
   queue: PdsSyncQueueStore
   sync(did: string, signal: AbortSignal): Promise<PdsEnrollmentSyncResult>
@@ -52,7 +49,16 @@ type AttemptJob = Pick<PdsSyncJob, 'did' | 'attemptCount' | 'generation'>
 export class PdsEnrollmentSyncWorker {
   private timer?: NodeJS.Timeout
   private ticking = false
+  private stopped = false
+  private tickPromise?: Promise<void>
   private inFlight = new Map<string, Promise<'ok' | 'deferred'>>()
+  /**
+   * Per-DID chain that serializes {@link enqueue} against {@link cancel}. An
+   * unserialized enqueue can clear the cancellation fence and insert a fresh
+   * row mid-cancel; the cancel then deletes that newer row and the fresh
+   * intent's inline attempt runs unfenced against a departing actor.
+   */
+  private mutations = new Map<string, Promise<void>>()
   /**
    * DIDs cancelled after a tick claimed their job but before the attempt
    * started. The `inFlight` map cannot fence that window. Entries are
@@ -73,6 +79,7 @@ export class PdsEnrollmentSyncWorker {
    */
   start(): void {
     if (this.timer) return
+    this.stopped = false
     this.timer = setInterval(() => {
       void this.tick()
     }, this.config.tickMs)
@@ -80,9 +87,16 @@ export class PdsEnrollmentSyncWorker {
     void this.tick()
   }
 
-  stop(): void {
+  /**
+   * Halt the ticker and wait for the active tick and in-flight attempts to
+   * settle, so teardown cannot destroy storage under a running attempt.
+   */
+  async stop(): Promise<void> {
+    this.stopped = true
     clearInterval(this.timer)
     this.timer = undefined
+    await this.tickPromise
+    await Promise.allSettled(this.inFlight.values())
   }
 
   /**
@@ -93,8 +107,10 @@ export class PdsEnrollmentSyncWorker {
    * @returns The generation to pass to the matching {@link kick}.
    */
   async enqueue(did: string): Promise<number> {
-    this.cancelled.delete(did)
-    return this.deps.queue.upsertPending(did)
+    return this.serialize(did, async () => {
+      this.cancelled.delete(did)
+      return this.deps.queue.upsertPending(did)
+    })
   }
 
   /**
@@ -112,27 +128,60 @@ export class PdsEnrollmentSyncWorker {
    * late write cannot resurrect a record that nothing is left to clean up.
    */
   async cancel(did: string): Promise<void> {
-    this.cancelled.add(did)
-    await this.deps.queue.remove(did)
-    const inFlight = this.inFlight.get(did)
-    if (inFlight) await inFlight.catch(() => undefined)
+    await this.serialize(did, async () => {
+      this.cancelled.add(did)
+      try {
+        await this.deps.queue.remove(did)
+      } finally {
+        // A failed removal must not skip this wait: the residual row is
+        // harmless (a later attempt resolves obsolete), a late write is not.
+        const inFlight = this.inFlight.get(did)
+        if (inFlight) await inFlight.catch(() => undefined)
+      }
+    })
   }
 
-  private async tick(): Promise<void> {
-    if (this.ticking) return
+  /**
+   * Attempts do not take this lock: one that passes the `cancelled` check
+   * registers in `inFlight` before any await, so {@link cancel} always sees
+   * it. Only the fence state itself needs serializing.
+   */
+  private async serialize<T>(did: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.mutations.get(did) ?? Promise.resolve()
+    const run = prev.then(fn)
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.mutations.set(did, tail)
+    try {
+      return await run
+    } finally {
+      if (this.mutations.get(did) === tail) this.mutations.delete(did)
+    }
+  }
+
+  private tick(): Promise<void> {
+    if (this.ticking || this.stopped) return Promise.resolve()
     this.ticking = true
+    this.tickPromise = this.runTick().finally(() => {
+      this.ticking = false
+    })
+    return this.tickPromise
+  }
+
+  private async runTick(): Promise<void> {
     try {
       const due = await this.deps.queue.listDue(
         new Date().toISOString(),
         this.config.claimLimit,
       )
       for (const job of due) {
+        if (this.stopped) break
         await this.attempt(job)
       }
     } catch (err) {
       this.deps.logger?.warn({ err }, 'pds sync: tick failed')
-    } finally {
-      this.ticking = false
     }
   }
 

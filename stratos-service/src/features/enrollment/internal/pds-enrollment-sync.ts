@@ -30,8 +30,6 @@ export type PdsEnrollmentSyncResult = 'ok' | 'obsolete'
  * deferred job always writes the truth at execution time, and superseding
  * admin mutations converge on one final write.
  *
- * @param deps - Sync dependencies
- * @param did - Actor whose PDS record is rewritten
  * @param signal - Aborts the attempt; the PDS write receives it directly
  * @returns `'ok'` on success, `'obsolete'` when there is nothing to sync
  * @throws The underlying OAuth/PDS error; classify with

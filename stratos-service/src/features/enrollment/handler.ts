@@ -1112,7 +1112,6 @@ function decodePdsSyncCursor(cursor: string): PdsSyncPageKey | undefined {
  * records are still behind (`pending`) or need intervention (`failed`).
  * Paginated so a fleet-wide failure cannot make one read load the whole
  * backlog.
- * @param ctx - Application context
  */
 function registerListPdsSyncStatusHandler(ctx: AppContext): void {
   ctx.app.get(
@@ -1149,12 +1148,12 @@ function registerListPdsSyncStatusHandler(ctx: AppContext): void {
       }
 
       try {
-        const jobs = await ctx.pdsSyncQueue.list(rawLimit, after)
+        // Fetch one extra row so an exactly-full final page emits no cursor.
+        const rows = await ctx.pdsSyncQueue.list(rawLimit + 1, after)
+        const hasMore = rows.length > rawLimit
+        const jobs = hasMore ? rows.slice(0, rawLimit) : rows
         const last = jobs.at(-1)
-        const cursor =
-          jobs.length === rawLimit && last
-            ? encodePdsSyncCursor(last)
-            : undefined
+        const cursor = hasMore && last ? encodePdsSyncCursor(last) : undefined
         res.json(cursor ? { jobs, cursor } : { jobs })
       } catch (err) {
         ctx.logger?.error(
