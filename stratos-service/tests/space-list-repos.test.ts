@@ -79,6 +79,7 @@ const OVERRIDE_HOST = 'https://override.pds.example.com'
 
 type ListReposEntry = {
   did: string
+  custody: string
   rev?: string
   host?: string
   hostSource?: string
@@ -424,6 +425,14 @@ describe('zone.stratos.space.listRepos', () => {
     expect((byDid.get(pdsMemberDid) as { rev?: string }).rev).toBeUndefined()
   })
 
+  it('a pds-custody member reports custody: pds', async () => {
+    const res = await call({}, serviceAuth)
+    const byDid = new Map(res.body.repos.map((r) => [r.did, r]))
+    expect((byDid.get(pdsMemberDid) as { custody?: string }).custody).toBe(
+      'pds',
+    )
+  })
+
   it('a pds-custody member never gets a rev, even when a repo exists in the Stratos actor store', async () => {
     const res = await call({}, serviceAuth)
     const byDid = new Map(
@@ -541,6 +550,14 @@ describe('zone.stratos.space.listRepos', () => {
     expect(
       (byDid.get(revLookupFailsMemberDid) as { rev?: string }).rev,
     ).toBeUndefined()
+  })
+
+  it('a stratos-custody member whose rev lookup fails still reports custody: stratos', async () => {
+    const res = await call({}, serviceAuth)
+    const byDid = new Map(res.body.repos.map((r) => [r.did, r]))
+    expect(
+      (byDid.get(revLookupFailsMemberDid) as { custody?: string }).custody,
+    ).toBe('stratos')
   })
 
   it('logs one aggregated warn per page for failed rev lookups, not one per member', async () => {

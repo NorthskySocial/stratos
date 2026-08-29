@@ -1303,12 +1303,17 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "repo": {
       "type": "object",
-      "required": ["did"],
+      "required": ["did", "custody"],
       "properties": {
         "did": {
           "type": "string",
           "format": "did",
           "description": "The DID of a repo that holds data in the space."
+        },
+        "custody": {
+          "type": "string",
+          "knownValues": ["stratos", "pds"],
+          "description": "Who hosts and signs this member's repo: 'stratos' when Stratos itself holds and signs it, 'pds' when the member's own spaces-capable PDS does. Always present; an enrollment recorded before custody tracking reports 'stratos'."
         },
         "rev": {
           "type": "string",

@@ -375,6 +375,18 @@ export async function applyWritesBatch(
     queuedAtMs: Date.now(),
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
+
+  // A 'pds' custody actor keeps their repo on their own PDS and signs with
+  // their own key; Stratos must not also accept batched writes for it. See
+  // create.ts.
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  if (enrollment?.custody === 'pds') {
+    throw new InvalidRequestError(
+      'This actor writes records to their own PDS',
+      'PdsCustodyWriteForbidden',
+    )
+  }
+
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(
     ctx,
     callerDid,
