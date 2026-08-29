@@ -269,8 +269,14 @@ async function handleExistingEnrollment(deps: {
         ...(verdictChanged ? { capabilityVerdict: spacesCapability } : {}),
         // `repoHost` is the routing target, so it moves with the endpoint.
         // Publishing the new host while the store keeps the old one would
-        // point the syncer at a PDS the user has left.
-        ...(pdsEndpointChanged ? { pdsEndpoint, repoHost } : {}),
+        // point the syncer at a PDS the user has left. Only 'pds' custody
+        // owns a repoHost; the store treats a present key as an explicit
+        // clear, so 'stratos' custody must not send the key at all.
+        ...(pdsEndpointChanged
+          ? custody === 'pds'
+            ? { pdsEndpoint, repoHost }
+            : { pdsEndpoint }
+          : {}),
       })
     }
     if (custodyDiverged) {
