@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream'
 import type { Keypair } from '@atproto/crypto'
+import type { Custody } from '@northskysocial/stratos-core'
 
 import { StratosClientError } from './errors.js'
 import { mintServiceJwt } from './jwt.js'
@@ -10,6 +11,7 @@ const LXM = {
   getBlob: 'com.atproto.sync.getBlob',
   subscribeRecords: 'zone.stratos.sync.subscribeRecords',
   getSpaceCredential: 'zone.stratos.space.getSpaceCredential',
+  listSpaceRepos: 'zone.stratos.space.listRepos',
 } as const
 
 export interface UpstreamStratosClientOptions {
@@ -73,6 +75,44 @@ export interface GetSpaceCredentialOptions {
    * client, so proof construction is injected rather than owned here.
    */
   buildMintProof: (htu: string) => Promise<string>
+}
+
+/**
+ * Structural subset of `SpaceCredentialManager`'s `HeldSpaceCredential` this
+ * client needs to present a space credential. Declared locally, rather than
+ * imported, so `upstream/` does not depend on `space-credential/`.
+ */
+export interface SpaceCredentialProof {
+  /** The space-credential JWT, presented in the `authorization` header. */
+  readonly credential: string
+  /** Builds a fresh presentation-proof DPoP header bound to the credential via `ath`. */
+  readonly createPresentationProof: (
+    htm: string,
+    htu: string,
+  ) => Promise<string>
+}
+
+export interface ListSpaceReposOptions {
+  /** The space's `at://` URI to list member repos for. */
+  space: string
+  cursor?: string
+  limit?: number
+}
+
+/** Spec-shaped mirror of a `com.atproto.space.listRepos` entry, extended with `host`/`hostSource`. */
+export interface SpaceRepoEntry {
+  did: string
+  custody: Custody
+  /** Present only for a stratos-custody member. */
+  rev?: string
+  /** The resolved repo host, if resolvable. */
+  host?: string
+  hostSource?: 'authority-override' | 'did-document'
+}
+
+export interface ListSpaceReposResult {
+  repos: SpaceRepoEntry[]
+  cursor?: string
 }
 
 /**
@@ -195,6 +235,41 @@ export class UpstreamStratosClient {
     })
     await throwIfNotOk(res, url, lxm)
     return (await res.json()) as GetSpaceCredentialResult
+  }
+
+  /**
+   * List the members of a space this feedgen is syncing, via the Stratos
+   * mirror of `com.atproto.space.listRepos`. Authenticated with a space
+   * credential, presented the same way a foreign host later verifies it: a
+   * `DPoP <credential>` authorization header plus a fresh presentation proof.
+   */
+  async listSpaceRepos(
+    opts: ListSpaceReposOptions,
+    credentialProof: SpaceCredentialProof,
+  ): Promise<ListSpaceReposResult> {
+    const path = `/xrpc/${LXM.listSpaceRepos}`
+    const url = new URL(`${this.serviceUrl}${path}`)
+    url.searchParams.set('space', opts.space)
+    if (opts.limit !== undefined) {
+      url.searchParams.set('limit', String(opts.limit))
+    }
+    if (opts.cursor !== undefined) {
+      url.searchParams.set('cursor', opts.cursor)
+    }
+    const lxm = LXM.listSpaceRepos
+    // Same htu convention as getSpaceCredential: verified against publicUrl,
+    // not the address this client actually sends the request to.
+    const htu = `${this.publicUrl}${path}`
+    const res = await this.fetchImpl(url, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        authorization: `DPoP ${credentialProof.credential}`,
+        dpop: await credentialProof.createPresentationProof('GET', htu),
+      },
+    })
+    await throwIfNotOk(res, url.toString(), lxm)
+    return (await res.json()) as ListSpaceReposResult
   }
 
   private mintFor(lxm: string): Promise<string> {

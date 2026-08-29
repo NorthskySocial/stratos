@@ -5,7 +5,11 @@ export type {
   GetSpaceCredentialResult,
   HydrateRecordsResult,
   HydratedRecord,
+  ListSpaceReposOptions,
+  ListSpaceReposResult,
   ResolveEnrollmentsResult,
+  SpaceCredentialProof,
+  SpaceRepoEntry,
   UpstreamStratosClientOptions,
 } from './client.js'
 export { StratosClientError } from './errors.js'

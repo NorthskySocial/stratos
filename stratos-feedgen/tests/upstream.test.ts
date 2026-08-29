@@ -342,6 +342,129 @@ describe('UpstreamStratosClient', () => {
     })
   })
 
+  describe('listSpaceRepos', () => {
+    function fakeCredentialProof(credential = 'space-credential-value') {
+      const proofCalls: Array<{ htm: string; htu: string }> = []
+      return {
+        credential,
+        proofCalls,
+        createPresentationProof: async (htm: string, htu: string) => {
+          proofCalls.push({ htm, htu })
+          return `presentation-proof-for-${htm}-${htu}`
+        },
+      }
+    }
+
+    const SPACE_URI =
+      'at://did:web:stratos.test/space/zone.stratos.space.feed/spike'
+
+    it('GETs the mirror with a DPoP credential header and a presentation proof', async () => {
+      const credentialProof = fakeCredentialProof()
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            repos: [
+              {
+                did: 'did:plc:asuka',
+                custody: 'pds',
+                host: 'https://nerv.example',
+                hostSource: 'did-document',
+              },
+            ],
+          }),
+        )
+      }
+      const result = await client.listSpaceRepos(
+        { space: SPACE_URI },
+        credentialProof,
+      )
+      expect(result.repos).toEqual([
+        {
+          did: 'did:plc:asuka',
+          custody: 'pds',
+          host: 'https://nerv.example',
+          hostSource: 'did-document',
+        },
+      ])
+      expect(mock.requests).toHaveLength(1)
+      const req = mock.requests[0]
+      expect(req.method).toBe('GET')
+      expect(req.url).toBe(
+        '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
+      )
+      expect(req.headers.authorization).toBe('DPoP space-credential-value')
+      expect(req.headers.accept).toBe('application/json')
+      expect(req.headers.dpop).toBe(
+        `presentation-proof-for-GET-${mock.baseUrl}/xrpc/zone.stratos.space.listRepos`,
+      )
+      expect(credentialProof.proofCalls).toEqual([
+        {
+          htm: 'GET',
+          htu: `${mock.baseUrl}/xrpc/zone.stratos.space.listRepos`,
+        },
+      ])
+    })
+
+    it('sends limit and cursor as query params when provided', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ repos: [], cursor: 'next-cursor' }))
+      }
+      const result = await client.listSpaceRepos(
+        { space: SPACE_URI, limit: 50, cursor: 'prev-cursor' },
+        fakeCredentialProof(),
+      )
+      expect(result).toEqual({ repos: [], cursor: 'next-cursor' })
+      const url = new URL(mock.requests[0].url, mock.baseUrl)
+      expect(url.searchParams.get('limit')).toBe('50')
+      expect(url.searchParams.get('cursor')).toBe('prev-cursor')
+    })
+
+    it('builds the presentation proof htu from publicUrl, not serviceUrl', async () => {
+      const publicClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        publicUrl: 'https://stratos.public.test',
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+      })
+      const credentialProof = fakeCredentialProof()
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ repos: [] }))
+      }
+      await publicClient.listSpaceRepos(
+        { space: SPACE_URI },
+        credentialProof,
+      )
+      expect(mock.requests[0].url).toBe(
+        '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
+      )
+      expect(credentialProof.proofCalls).toEqual([
+        {
+          htm: 'GET',
+          htu: 'https://stratos.public.test/xrpc/zone.stratos.space.listRepos',
+        },
+      ])
+    })
+
+    it('throws StratosClientError on non-2xx (e.g. AuthRequired)', async () => {
+      mock.handler = (_req, res) => {
+        res.statusCode = 401
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'AuthRequired' }))
+      }
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).rejects.toMatchObject({
+        name: 'StratosClientError',
+        status: 401,
+        lxm: 'zone.stratos.space.listRepos',
+      })
+    })
+  })
+
   describe('trailing slash normalization', () => {
     it('strips a trailing slash from both serviceUrl and publicUrl', async () => {
       const slashClient = new UpstreamStratosClient({
