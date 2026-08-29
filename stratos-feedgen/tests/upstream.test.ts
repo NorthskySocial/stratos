@@ -463,6 +463,27 @@ describe('describeUpstreamError', () => {
     expect(describeUpstreamError(err)).toBe('400 foo')
   })
 
+  it('ignores an error value with characters outside the code grammar', () => {
+    // A newline in a logged value forges extra log lines (CWE-117).
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: 'Not\nEnrolled' }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe('400 foo')
+  })
+
+  it('ignores an empty-string error value', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: '' }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe('400 foo')
+  })
+
   it('reports the error name, not the message, for a plain Error', () => {
     expect(describeUpstreamError(new TypeError('boom'))).toBe('TypeError')
   })

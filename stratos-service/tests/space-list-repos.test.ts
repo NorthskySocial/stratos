@@ -83,6 +83,10 @@ describe('zone.stratos.space.listRepos', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let handler: any
   let methods: Map<string, { type?: string; handler: unknown }>
+  let warnSpy: ReturnType<typeof vi.fn>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ctx: any
+  let revFailDids: Set<string>
 
   beforeEach(async () => {
     dataDir = join(
@@ -143,14 +147,15 @@ describe('zone.stratos.space.listRepos', () => {
       },
     }
 
-    // Delegates to the real actor store, except `exists` rejects for
-    // `revLookupFailsMemberDid` -- simulates a pool-exhausted/unavailable
-    // actor store without touching every other member's real lookups.
+    // Delegates to the real actor store, except `exists` rejects for every
+    // DID in `revFailDids` -- simulates a pool-exhausted/unavailable actor
+    // store without touching every other member's real lookups.
+    revFailDids = new Set([revLookupFailsMemberDid])
     const actorStoreWithFailure = new Proxy(actorStore, {
       get(target, prop, receiver) {
         if (prop === 'exists') {
           return async (did: string) => {
-            if (did === revLookupFailsMemberDid) {
+            if (revFailDids.has(did)) {
               throw new Error('pool timeout')
             }
             return target.exists(did)
@@ -160,7 +165,7 @@ describe('zone.stratos.space.listRepos', () => {
       },
     })
 
-    const ctx = {
+    ctx = {
       cfg,
       actorStore: actorStoreWithFailure,
       enrollmentStore,
@@ -171,7 +176,7 @@ describe('zone.stratos.space.listRepos', () => {
         debug: vi.fn(),
         info: vi.fn(),
         error: vi.fn(),
-        warn: vi.fn(),
+        warn: (warnSpy = vi.fn()),
       },
     }
     const capturedMethods = new Map<
@@ -517,6 +522,86 @@ describe('zone.stratos.space.listRepos', () => {
     expect(
       (byDid.get(revLookupFailsMemberDid) as { rev?: string }).rev,
     ).toBeUndefined()
+  })
+
+  it('logs one aggregated warn per page for failed rev lookups, not one per member', async () => {
+    await call({}, serviceAuth)
+    const revWarns = warnSpy.mock.calls.filter(([, msg]) =>
+      String(msg).includes('rev lookup failed'),
+    )
+    expect(revWarns).toHaveLength(1)
+    const [payload] = revWarns[0] as [
+      { failedCount: number; sample: Array<{ did: string; error: string }> },
+    ]
+    expect(payload.failedCount).toBe(1)
+    expect(payload.sample).toEqual([
+      { did: revLookupFailsMemberDid, error: 'pool timeout' },
+    ])
+  })
+
+  it('logs no aggregated warn when every rev lookup succeeds', async () => {
+    await enrollmentStore.setBoundaries(revLookupFailsMemberDid, [])
+    await call({}, serviceAuth)
+    const revWarns = warnSpy.mock.calls.filter(([, msg]) =>
+      String(msg).includes('rev lookup failed'),
+    )
+    expect(revWarns).toHaveLength(0)
+  })
+
+  it('caps the warn sample at five failures while counting them all', async () => {
+    const extraFailDids = [
+      'did:plc:spike-spiegel',
+      'did:plc:jet-black',
+      'did:plc:faye-valentine',
+      'did:plc:ed-wong',
+      'did:plc:ein-corgi',
+    ]
+    for (const did of extraFailDids) {
+      revFailDids.add(did)
+      await enrollmentStore.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        active: true,
+        signingKeyDid: 'did:key:zTest',
+      })
+      await enrollmentStore.setBoundaries(did, [BOUNDARY_S.value])
+    }
+
+    await call({}, serviceAuth)
+    const revWarns = warnSpy.mock.calls.filter(([, msg]) =>
+      String(msg).includes('rev lookup failed'),
+    )
+    expect(revWarns).toHaveLength(1)
+    const [payload] = revWarns[0] as [
+      { failedCount: number; sample: Array<{ did: string }> },
+    ]
+    expect(payload.failedCount).toBe(6)
+    expect(payload.sample).toHaveLength(5)
+  })
+
+  it('a failed rev lookup with no logger configured still returns the page', async () => {
+    const capturedMethods = new Map<
+      string,
+      { type?: string; handler: unknown }
+    >()
+    const server = {
+      method: (name: string, cfgArg: { type?: string; handler: unknown }) =>
+        capturedMethods.set(name, cfgArg),
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    registerSpaceReadHandlers(server as any, { ...ctx, logger: undefined })
+    const loggerless =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      capturedMethods.get('zone.stratos.space.listRepos')!.handler as any
+
+    const res = await loggerless({
+      params: { space: SPACE_S },
+      auth: serviceAuth,
+      req: {},
+      res: {},
+    })
+    const dids = res.body.repos.map((r: { did: string }) => r.did)
+    expect(dids).toContain(revLookupFailsMemberDid)
   })
 
   it('never invents a hash: the field is absent for every member', async () => {

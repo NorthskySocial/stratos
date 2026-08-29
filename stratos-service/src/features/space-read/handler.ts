@@ -339,17 +339,38 @@ async function buildRepoEntries(
   members: StoredEnrollment[],
 ): Promise<RepoEntry[]> {
   const entries = new Array<RepoEntry>(members.length)
+  const revFailures: RevLookupFailure[] = []
   let nextIndex = 0
 
   async function worker(): Promise<void> {
     for (let index = nextIndex++; index < members.length; index = nextIndex++) {
-      entries[index] = await buildRepoEntry(ctx, space, members[index])
+      entries[index] = await buildRepoEntry(
+        ctx,
+        space,
+        members[index],
+        revFailures,
+      )
     }
   }
 
   const workerCount = Math.min(MAX_CONCURRENT_REPO_LOOKUPS, members.length)
   await Promise.all(Array.from({ length: workerCount }, worker))
+
+  // One aggregated line per page. A storage outage must not emit one warn
+  // per member -- a full page is up to 1000 members.
+  if (revFailures.length > 0) {
+    ctx.logger?.warn(
+      { failedCount: revFailures.length, sample: revFailures.slice(0, 5) },
+      'listRepos: rev lookup failed for some members',
+    )
+  }
   return entries
+}
+
+/** One failed rev lookup, collected for the per-page aggregated warn. */
+interface RevLookupFailure {
+  did: string
+  error: string
 }
 
 /**
@@ -360,11 +381,12 @@ async function buildRepoEntry(
   ctx: AppContext,
   space: string,
   member: StoredEnrollment,
+  revFailures: RevLookupFailure[],
 ): Promise<RepoEntry> {
   const hostDeps = createRepoHostResolverDeps(ctx.idResolver, member.repoHost)
   const [resolvedHost, rev] = await Promise.all([
     resolveRepoHost(space, member.did, hostDeps),
-    getStratosRev(ctx, member),
+    getStratosRev(ctx, member, revFailures),
   ])
   return {
     did: member.did,
@@ -380,11 +402,12 @@ async function buildRepoEntry(
  * stratos-custody member, whose repo Stratos stores. A pds-custody member's
  * repo lives on their own PDS; Stratos never learns its rev. Never throws:
  * an actor-store failure degrades to an absent rev instead of failing the
- * whole page.
+ * whole page, and is recorded in `revFailures` for the aggregated warn.
  */
 async function getStratosRev(
   ctx: AppContext,
   member: StoredEnrollment,
+  revFailures: RevLookupFailure[],
 ): Promise<string | undefined> {
   if (member.custody === 'pds') return undefined
   try {
@@ -394,7 +417,10 @@ async function getStratosRev(
       return root?.rev
     })
   } catch (err) {
-    ctx.logger?.warn({ did: member.did, err }, 'listRepos: rev lookup failed')
+    revFailures.push({
+      did: member.did,
+      error: err instanceof Error ? err.message : String(err),
+    })
     return undefined
   }
 }

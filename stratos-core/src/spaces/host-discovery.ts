@@ -46,18 +46,19 @@ export interface RepoHostResolverDeps {
 }
 
 /**
- * Swallows a rejection from an injected dependency and reports "not found"
- * instead. A member whose DID document (or override lookup) is momentarily
- * unreachable must never halt a sync pass -- it must fall through to the next
- * arm, or to "unknown host", the same as a clean "not found" answer. This is
+ * Swallows a rejection or a synchronous throw from an injected dependency and
+ * reports "not found" instead. A member whose DID document (or override
+ * lookup) is momentarily unreachable must never halt a sync pass -- it must
+ * fall through to the next arm, or to "unknown host", the same as a clean
+ * "not found" answer. This is
  * enforced here, once, rather than trusted to every `DidPdsReader` /
  * `HostOverrideReader` implementation to get right.
  */
 async function settleToUndefined<T>(
-  lookup: Promise<T | undefined>,
+  lookup: () => Promise<T | undefined>,
 ): Promise<T | undefined> {
   try {
-    return await lookup
+    return await lookup()
   } catch {
     return undefined
   }
@@ -75,12 +76,14 @@ export async function resolveRepoHost(
   memberDid: string,
   deps: RepoHostResolverDeps,
 ): Promise<ResolvedRepoHost | undefined> {
-  const override = await settleToUndefined(
+  const override = await settleToUndefined(() =>
     deps.overrides.get(spaceUri, memberDid),
   )
   if (override) return { host: override, source: 'authority-override' }
 
-  const endpoint = await settleToUndefined(deps.dids.getPdsEndpoint(memberDid))
+  const endpoint = await settleToUndefined(() =>
+    deps.dids.getPdsEndpoint(memberDid),
+  )
   if (endpoint) return { host: endpoint, source: 'did-document' }
 
   return undefined

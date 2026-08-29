@@ -125,4 +125,20 @@ describe('loadFeedgenConfig public URL derivation', () => {
     expect(cfg.stratosServiceUrl).toBe('http://internal.stratos.local:3100')
     expect(cfg.stratosPublicUrl).toBe('https://stratos.spiegelcorp.test')
   })
+
+  it('treats a blank STRATOS_PUBLIC_URL as unset', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      STRATOS_PUBLIC_URL: '   ',
+    })
+    expect(cfg.stratosPublicUrl).toBe('https://stratos.spiegelcorp.test')
+  })
+
+  it('treats a blank FEEDGEN_PUBLIC_URL as unset', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      FEEDGEN_PUBLIC_URL: '',
+    })
+    expect(cfg.feedgenPublicUrl).toBe(PUBLIC_URL)
+  })
 })

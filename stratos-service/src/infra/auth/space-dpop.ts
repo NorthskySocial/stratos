@@ -105,9 +105,10 @@ export class SpaceDpopProofChecker {
     if (typeof htu !== 'string' || htu !== expectedHtu) {
       // Name both sides. A mismatch here is a deployment problem, not an
       // attack, and without the values it takes a rebuild to find out which
-      // URL was wrong.
+      // URL was wrong. The proof value is caller-supplied, so reduce it to
+      // origin and path before it can reach a log (CWE-532).
       throw new SpaceDpopProofError(
-        `DPoP proof "htu" does not match the request: proof=${String(htu)} expected=${expectedHtu}`,
+        `DPoP proof "htu" does not match the request: proof=${sanitizeHtu(htu)} expected=${expectedHtu}`,
       )
     }
     if (boundToken !== undefined) {
@@ -160,6 +161,20 @@ function extractProofHeader(
   }
   if (value.length === 1 && value[0]) return value[0]
   throw new SpaceDpopProofError('DPoP header must contain a single proof')
+}
+
+/**
+ * Reduce a caller-supplied `htu` to origin and path for an error message. The
+ * query and fragment can carry tokens; a non-URL value can carry anything.
+ */
+function sanitizeHtu(htu: unknown): string {
+  if (typeof htu !== 'string') return String(htu)
+  try {
+    const url = new URL(htu)
+    return url.origin + url.pathname
+  } catch {
+    return '<malformed>'
+  }
 }
 
 function hashToken(token: string): string {

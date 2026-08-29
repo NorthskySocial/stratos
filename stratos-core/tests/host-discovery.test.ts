@@ -102,6 +102,34 @@ describe('resolveRepoHost', () => {
     expect(result).toBeUndefined()
   })
 
+  it('does not throw when a reader throws synchronously instead of rejecting', async () => {
+    const result = await resolveRepoHost(SPACE_URI, MEMBER_DID, {
+      overrides: {
+        get: () => {
+          throw new Error('synchronous reader bug')
+        },
+      },
+      dids: {
+        getPdsEndpoint: () => {
+          throw new Error('synchronous reader bug')
+        },
+      },
+    })
+    expect(result).toBeUndefined()
+  })
+
+  it('falls through to the DID document when the override reader throws synchronously', async () => {
+    const result = await resolveRepoHost(SPACE_URI, MEMBER_DID, {
+      overrides: {
+        get: () => {
+          throw new Error('synchronous reader bug')
+        },
+      },
+      dids: didReader(DID_DOC_HOST),
+    })
+    expect(result).toEqual({ host: DID_DOC_HOST, source: 'did-document' })
+  })
+
   it('treats an empty-string override as absent and falls through to the DID document', async () => {
     const result = await resolveRepoHost(SPACE_URI, MEMBER_DID, {
       overrides: overrideReader(''),

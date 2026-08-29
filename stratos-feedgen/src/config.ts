@@ -79,14 +79,15 @@ export function loadFeedgenConfig(
   return {
     feedgenServiceDid,
     feedgenPublicUrl: trimTrailingSlash(
-      env['FEEDGEN_PUBLIC_URL'] ?? didWebToUrl(feedgenServiceDid),
+      optionalEnv(env, 'FEEDGEN_PUBLIC_URL') ?? didWebToUrl(feedgenServiceDid),
     ),
     feedgenSigningKey: requireEnv(env, 'FEEDGEN_SIGNING_KEY'),
     stratosServiceUrl: trimTrailingSlash(
       requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosPublicUrl: trimTrailingSlash(
-      env['STRATOS_PUBLIC_URL'] ?? requireEnv(env, 'STRATOS_SERVICE_URL'),
+      optionalEnv(env, 'STRATOS_PUBLIC_URL') ??
+        requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
     feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
@@ -127,6 +128,13 @@ function parseStorageBackend(value: string | undefined): StorageBackend {
   throw new Error(
     `Invalid FEEDGEN_STORAGE_BACKEND: ${value} (expected 'sqlite' or 'postgres')`,
   )
+}
+
+/** Read an optional env var. A blank or whitespace-only value counts as unset. */
+function optionalEnv(env: FeedgenEnv, key: string): string | undefined {
+  const value = env[key]
+  if (!value || value.trim() === '') return undefined
+  return value
 }
 
 function requireEnv(env: FeedgenEnv, key: string): string {
