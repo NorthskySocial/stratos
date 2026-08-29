@@ -180,7 +180,7 @@ export class SpaceCredentialManager {
     return {
       spaceUri,
       credential: result.credential,
-      expiresAtMs: parseExpiry(result.expiresAt, spaceUri),
+      expiresAtMs: parseExpiry(result.expiresAt, spaceUri, this.now()),
       jitterMs: this.random() * this.refreshMarginMs * JITTER_FRACTION,
     }
   }
@@ -210,11 +210,17 @@ export class SpaceCredentialManager {
  *
  * An unparsed value yields NaN, and every comparison against NaN is false, so
  * the credential would never look due for refresh and never look expired. The
- * manager would then serve it forever. Fail closed instead.
+ * manager would then serve it forever. An expiry at or before `nowMs` is a
+ * credential that arrives already expired; storing it would return dead
+ * access to the caller. Fail closed on both.
  */
-function parseExpiry(expiresAt: string, spaceUri: string): number {
+function parseExpiry(
+  expiresAt: string,
+  spaceUri: string,
+  nowMs: number,
+): number {
   const ms = Date.parse(expiresAt)
-  if (!Number.isFinite(ms)) {
+  if (!Number.isFinite(ms) || ms <= nowMs) {
     throw new Error(`space credential for ${spaceUri} has an unusable expiry`)
   }
   return ms
