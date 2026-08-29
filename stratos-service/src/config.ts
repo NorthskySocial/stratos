@@ -133,7 +133,11 @@ const envSchema = z
       .default(300_000),
 
     // Durable PDS enrollment-record sync queue
-    STRATOS_PDS_SYNC_TICK_MS: z.coerce.number().int().positive().default(30_000),
+    STRATOS_PDS_SYNC_TICK_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
     STRATOS_PDS_SYNC_BACKOFF_BASE_MS: z.coerce
       .number()
       .int()
@@ -154,6 +158,11 @@ const envSchema = z
       .int()
       .positive()
       .default(10),
+    STRATOS_PDS_SYNC_ATTEMPT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
 
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
@@ -339,6 +348,7 @@ export interface StratosServiceConfig {
     backoffCapMs: number
     maxAttempts: number
     claimLimit: number
+    attemptTimeoutMs: number
   }
   identity: {
     plcUrl: string
@@ -643,6 +653,7 @@ function pdsSyncConfig(env: Env): StratosServiceConfig['pdsSync'] {
     backoffCapMs: env.STRATOS_PDS_SYNC_BACKOFF_CAP_MS,
     maxAttempts: env.STRATOS_PDS_SYNC_MAX_ATTEMPTS,
     claimLimit: env.STRATOS_PDS_SYNC_CLAIM_LIMIT,
+    attemptTimeoutMs: env.STRATOS_PDS_SYNC_ATTEMPT_TIMEOUT_MS,
   }
 }
 

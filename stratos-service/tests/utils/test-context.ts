@@ -80,6 +80,7 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
       backoffCapMs: 3_600_000,
       maxAttempts: 12,
       claimLimit: 10,
+      attemptTimeoutMs: 30_000,
     },
     dpop: {
       requireNonce: false,

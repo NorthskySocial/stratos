@@ -33,7 +33,7 @@ describe('SqlitePdsSyncQueueStore', () => {
   it('upsertPending creates a due pending job', async () => {
     await store.upsertPending(USAGI)
 
-    const jobs = await store.list()
+    const jobs = await store.list(100)
     expect(jobs).toHaveLength(1)
     expect(jobs[0].did).toBe(USAGI)
     expect(jobs[0].status).toBe('pending')
@@ -46,14 +46,14 @@ describe('SqlitePdsSyncQueueStore', () => {
 
   it('upsertPending revives a failed job and preserves firstQueuedAt', async () => {
     await store.upsertPending(USAGI)
-    const [before] = await store.list()
+    const [before] = await store.list(100)
 
     await store.markFailed(USAGI, 1, 'invalid_grant')
-    const [failed] = await store.list()
+    const [failed] = await store.list(100)
     expect(failed.status).toBe('failed')
 
     await store.upsertPending(USAGI)
-    const [revived] = await store.list()
+    const [revived] = await store.list(100)
     expect(revived.status).toBe('pending')
     expect(revived.attemptCount).toBe(0)
     expect(revived.lastError).toBeNull()
@@ -96,7 +96,7 @@ describe('SqlitePdsSyncQueueStore', () => {
   it('remove deletes the job', async () => {
     await store.upsertPending(USAGI)
     await store.remove(USAGI)
-    expect(await store.list()).toHaveLength(0)
+    expect(await store.list(100)).toHaveLength(0)
   })
 
   it('remove is a no-op for an unknown did', async () => {
@@ -107,7 +107,7 @@ describe('SqlitePdsSyncQueueStore', () => {
     const generation = await store.upsertPending(USAGI)
 
     await expect(store.removeIfCurrent(USAGI, generation)).resolves.toBe(true)
-    expect(await store.list()).toHaveLength(0)
+    expect(await store.list(100)).toHaveLength(0)
   })
 
   it('removeIfCurrent keeps the job when a newer intent superseded it', async () => {
@@ -117,7 +117,7 @@ describe('SqlitePdsSyncQueueStore', () => {
 
     await expect(store.removeIfCurrent(USAGI, stale)).resolves.toBe(false)
 
-    const [survivor] = await store.list()
+    const [survivor] = await store.list(100)
     expect(survivor.did).toBe(USAGI)
     expect(survivor.generation).toBe(current)
   })
@@ -141,7 +141,7 @@ describe('SqlitePdsSyncQueueStore', () => {
       'stale write',
     )
 
-    const [job] = await store.list()
+    const [job] = await store.list(100)
     expect(job.status).toBe('pending')
     expect(job.attemptCount).toBe(0)
     expect(job.lastError).toBeNull()
@@ -157,7 +157,7 @@ describe('SqlitePdsSyncQueueStore', () => {
 
     await expect(store.requeueFailed()).resolves.toBe(2)
 
-    const jobs = await store.list()
+    const jobs = await store.list(100)
     expect(jobs.map((j) => j.status)).toEqual(['pending', 'pending', 'pending'])
 
     const usagi = jobs.find((j) => j.did === USAGI)
@@ -173,7 +173,7 @@ describe('SqlitePdsSyncQueueStore', () => {
     await store.upsertPending(USAGI)
 
     await expect(store.requeueFailed()).resolves.toBe(0)
-    expect((await store.list())[0].status).toBe('pending')
+    expect((await store.list(100))[0].status).toBe('pending')
   })
 
   it('list orders jobs by firstQueuedAt', async () => {
@@ -181,7 +181,40 @@ describe('SqlitePdsSyncQueueStore', () => {
     await new Promise((resolve) => setTimeout(resolve, 5))
     await store.upsertPending(REI)
 
-    const jobs = await store.list()
+    const jobs = await store.list(100)
     expect(jobs.map((j) => j.did)).toEqual([USAGI, REI])
+  })
+
+  it('list bounds each page and pages forward from the given key', async () => {
+    await store.upsertPending(USAGI)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await store.upsertPending(REI)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await store.upsertPending(AMI)
+
+    const first = await store.list(2)
+    expect(first.map((j) => j.did)).toEqual([USAGI, REI])
+
+    const last = first[first.length - 1]
+    const second = await store.list(2, {
+      firstQueuedAt: last.firstQueuedAt,
+      did: last.did,
+    })
+    expect(second.map((j) => j.did)).toEqual([AMI])
+  })
+
+  it('list breaks a firstQueuedAt tie on did and does not skip rows', async () => {
+    // Order the DIDs so the tie-break assertion is explicit.
+    const [first, second] = [REI, USAGI].sort()
+    await store.upsertPending(first)
+    await store.upsertPending(second)
+    const jobs = await store.list(100)
+    // Same-millisecond enqueues may share firstQueuedAt; either way the
+    // page order is total and resuming from row one yields row two.
+    const page = await store.list(100, {
+      firstQueuedAt: jobs[0].firstQueuedAt,
+      did: jobs[0].did,
+    })
+    expect(page.map((j) => j.did)).toEqual([jobs[1].did])
   })
 })

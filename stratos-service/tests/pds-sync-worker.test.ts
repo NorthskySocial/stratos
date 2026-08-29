@@ -18,6 +18,7 @@ const CONFIG: PdsSyncWorkerConfig = {
   backoffCapMs: 3_600_000,
   maxAttempts: 3,
   claimLimit: 10,
+  attemptTimeoutMs: 30_000,
 }
 
 /**
@@ -115,8 +116,8 @@ class FakeQueue implements PdsSyncQueueStore {
     return requeued
   }
 
-  async list(): Promise<PdsSyncJob[]> {
-    return [...this.jobs.values()]
+  async list(limit: number): Promise<PdsSyncJob[]> {
+    return [...this.jobs.values()].slice(0, limit)
   }
 }
 
@@ -131,9 +132,7 @@ function syncNow(
   worker: PdsEnrollmentSyncWorker,
   did: string = USAGI,
 ): Promise<'ok' | 'deferred'> {
-  return worker
-    .enqueue(did)
-    .then((generation) => worker.kick(did, generation))
+  return worker.enqueue(did).then((generation) => worker.kick(did, generation))
 }
 
 describe('PdsEnrollmentSyncWorker', () => {
@@ -194,7 +193,13 @@ describe('PdsEnrollmentSyncWorker', () => {
     await worker.kick(USAGI, generation)
 
     // Force the retry due now; the immediate start tick picks it up.
-    await queue.markRetry(USAGI, generation, 1, new Date().toISOString(), 'ECONNREFUSED')
+    await queue.markRetry(
+      USAGI,
+      generation,
+      1,
+      new Date().toISOString(),
+      'ECONNREFUSED',
+    )
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 
@@ -215,7 +220,13 @@ describe('PdsEnrollmentSyncWorker', () => {
 
     const generation = await worker.enqueue(USAGI)
     await worker.kick(USAGI, generation)
-    await queue.markRetry(USAGI, generation, 5, new Date().toISOString(), 'flaky')
+    await queue.markRetry(
+      USAGI,
+      generation,
+      5,
+      new Date().toISOString(),
+      'flaky',
+    )
 
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
@@ -250,7 +261,13 @@ describe('PdsEnrollmentSyncWorker', () => {
     expect(queue.jobs.get(USAGI)?.status).toBe('pending')
 
     // Make the retry due now, then let the ticker exhaust the budget.
-    await queue.markRetry(USAGI, generation, 1, new Date().toISOString(), 'still down')
+    await queue.markRetry(
+      USAGI,
+      generation,
+      1,
+      new Date().toISOString(),
+      'still down',
+    )
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 
@@ -266,7 +283,7 @@ describe('PdsEnrollmentSyncWorker', () => {
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(sync).toHaveBeenCalledWith(USAGI)
+    expect(sync).toHaveBeenCalledWith(USAGI, expect.any(AbortSignal))
     expect(queue.jobs.has(USAGI)).toBe(false)
     worker.stop()
   })
@@ -434,6 +451,83 @@ describe('PdsEnrollmentSyncWorker', () => {
     expect(queue.jobs.has(USAGI)).toBe(false)
   })
 
+  it('never runs a job that was cancelled after its tick claimed it', async () => {
+    const REI = 'did:plc:reiayanami'
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sync = vi.fn().mockImplementation(async (did: string) => {
+      if (did === USAGI) await gate
+      return 'ok'
+    })
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    await worker.enqueue(REI)
+    // Force a deterministic due order: the tick claims USAGI first.
+    queue.jobs.get(USAGI)!.nextAttemptAt = '2000-01-01T00:00:00.000Z'
+
+    worker.start()
+    // The tick has claimed both jobs and is blocked inside USAGI's attempt.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sync).toHaveBeenCalledTimes(1)
+
+    // REI is claimed but not started, so `inFlight` cannot fence it.
+    await worker.cancel(REI)
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(sync).toHaveBeenCalledTimes(1)
+    expect(sync).not.toHaveBeenCalledWith(REI, expect.anything())
+    worker.stop()
+  })
+
+  it('reports ok for a kick that lands after cancel', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    const generation = await worker.enqueue(USAGI)
+    await worker.cancel(USAGI)
+
+    // A cancelled job is obsolete, not a failure: no retry bookkeeping.
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('ok')
+    expect(sync).not.toHaveBeenCalled()
+  })
+
+  it('re-enrolling after cancel lifts the cancellation fence', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.cancel(USAGI)
+    const generation = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('ok')
+    expect(sync).toHaveBeenCalledTimes(1)
+  })
+
+  it('defers an attempt that exceeds attemptTimeoutMs and aborts its signal', async () => {
+    vi.useRealTimers()
+    const sync = vi.fn(
+      (_did: string, signal: AbortSignal) =>
+        new Promise<'ok'>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          })
+        }),
+    )
+    const worker = new PdsEnrollmentSyncWorker(
+      { queue, sync },
+      { ...CONFIG, attemptTimeoutMs: 20 },
+    )
+
+    const generation = await worker.enqueue(USAGI)
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('deferred')
+
+    const job = queue.jobs.get(USAGI)
+    expect(job?.status).toBe('pending')
+    expect(job?.lastError).toMatch(/timeout|timed out/i)
+  })
+
   it('logs the write only when a record was actually written', async () => {
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     const sync = vi.fn().mockResolvedValue('ok')
@@ -525,7 +619,7 @@ describe('PdsEnrollmentSyncWorker', () => {
 
     // The ticker survives the failed read and picks the job up next tick.
     await vi.advanceTimersByTimeAsync(CONFIG.tickMs)
-    expect(sync).toHaveBeenCalledWith(USAGI)
+    expect(sync).toHaveBeenCalledWith(USAGI, expect.any(AbortSignal))
     worker.stop()
   })
 
@@ -539,7 +633,7 @@ describe('PdsEnrollmentSyncWorker', () => {
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(CONFIG.tickMs)
 
-    expect(sync).toHaveBeenCalledWith(USAGI)
+    expect(sync).toHaveBeenCalledWith(USAGI, expect.any(AbortSignal))
     worker.stop()
   })
 
@@ -567,7 +661,13 @@ describe('PdsEnrollmentSyncWorker', () => {
       'pds sync: attempt failed, retry scheduled',
     )
 
-    await queue.markRetry(USAGI, generation, 1, new Date().toISOString(), 'still down')
+    await queue.markRetry(
+      USAGI,
+      generation,
+      1,
+      new Date().toISOString(),
+      'still down',
+    )
     worker.start()
     await vi.advanceTimersByTimeAsync(0)
 

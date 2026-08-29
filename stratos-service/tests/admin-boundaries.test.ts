@@ -9,6 +9,7 @@ import {
   registerEnrollmentHandlers,
   syncEnrollmentRecordToPds,
   type PdsSyncJob,
+  type PdsSyncPageKey,
   type PdsSyncQueueStore,
 } from '../src/features'
 
@@ -77,11 +78,12 @@ function invokePostRoute(
 function invokeGetRoute(
   app: express.Application,
   path: string,
+  query: Record<string, string> = {},
 ): Promise<MockResponse> {
   return new Promise((resolve, reject) => {
     let statusCode = 200
     const req = {
-      query: {},
+      query,
       headers: {},
       method: 'GET',
       url: path,
@@ -210,8 +212,20 @@ class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
     return requeued
   }
 
-  async list(): Promise<PdsSyncJob[]> {
+  async list(limit: number, after?: PdsSyncPageKey): Promise<PdsSyncJob[]> {
     return [...this.jobs.values()]
+      .sort((a, b) =>
+        a.firstQueuedAt === b.firstQueuedAt
+          ? a.did.localeCompare(b.did)
+          : a.firstQueuedAt.localeCompare(b.firstQueuedAt),
+      )
+      .filter(
+        (j) =>
+          !after ||
+          j.firstQueuedAt > after.firstQueuedAt ||
+          (j.firstQueuedAt === after.firstQueuedAt && j.did > after.did),
+      )
+      .slice(0, limit)
   }
 }
 
@@ -249,7 +263,7 @@ function createCtx(opts: {
   const pdsSyncWorker = new PdsEnrollmentSyncWorker(
     {
       queue: pdsSyncQueue,
-      sync: (did) =>
+      sync: (did, signal) =>
         syncEnrollmentRecordToPds(
           {
             enrollmentStore: enrollmentStore as never,
@@ -259,6 +273,7 @@ function createCtx(opts: {
             publicUrl: 'https://stratos.example.com',
           },
           did,
+          signal,
         ),
     },
     {
@@ -267,6 +282,7 @@ function createCtx(opts: {
       backoffCapMs: 3_600_000,
       maxAttempts: 12,
       claimLimit: 10,
+      attemptTimeoutMs: 30_000,
     },
   )
 
@@ -670,6 +686,81 @@ describe('admin boundary endpoints', () => {
       )
     })
 
+    it('rejects a limit that is not an integer between 1 and 100', async () => {
+      const { app } = createCtx({})
+      for (const limit of ['0', '101', '2.5', 'bees']) {
+        const res = await invokeGetRoute(
+          app,
+          '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+          { limit },
+        )
+        expect(res.statusCode).toBe(400)
+        expect(res.body).toEqual({
+          error: 'InvalidRequest',
+          message: 'limit must be an integer between 1 and 100',
+        })
+      }
+    })
+
+    it('rejects a malformed cursor', async () => {
+      const { app } = createCtx({})
+      for (const cursor of [
+        '',
+        Buffer.from('no-separator').toString('base64url'),
+        Buffer.from('|did:plc:usagi').toString('base64url'),
+        Buffer.from('2026-01-01T00:00:00.000Z|').toString('base64url'),
+      ]) {
+        const res = await invokeGetRoute(
+          app,
+          '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+          { cursor },
+        )
+        expect(res.statusCode).toBe(400)
+        expect(res.body).toEqual({
+          error: 'InvalidRequest',
+          message: 'malformed cursor',
+        })
+      }
+    })
+
+    it('pages the queue with a cursor and omits it on the last page', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.upsertPending('did:plc:rei')
+      await pdsSyncQueue.upsertPending('did:plc:ami')
+
+      const first = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '2' },
+      )
+      expect(first.statusCode).toBe(200)
+      const firstBody = first.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(firstBody.jobs).toHaveLength(2)
+      expect(firstBody.cursor).toBeDefined()
+
+      const second = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '2', cursor: firstBody.cursor! },
+      )
+      expect(second.statusCode).toBe(200)
+      const secondBody = second.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(secondBody.cursor).toBeUndefined()
+      const seen = [...firstBody.jobs, ...secondBody.jobs].map((j) => j.did)
+      expect(seen.sort()).toEqual([
+        'did:plc:ami',
+        'did:plc:rei',
+        'did:plc:usagi',
+      ])
+    })
+
     it('still answers 500 without a logger when the queue read fails', async () => {
       const { app, ctx, pdsSyncQueue } = createCtx({})
       ;(ctx as { logger?: unknown }).logger = undefined
@@ -704,7 +795,7 @@ describe('admin boundary endpoints', () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.body).toEqual({ requeued: 2 })
-      expect((await pdsSyncQueue.list()).map((j) => j.status)).toEqual([
+      expect((await pdsSyncQueue.list(100)).map((j) => j.status)).toEqual([
         'pending',
         'pending',
         'pending',

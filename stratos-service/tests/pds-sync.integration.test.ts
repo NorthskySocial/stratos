@@ -19,6 +19,7 @@ const ENGINEERING = 'did:web:nerv.tokyo.jp/engineering'
 // every write and the oauthClient.restore stub injects failures.
 const pds = vi.hoisted(() => ({
   putRecords: [] as Array<Record<string, unknown>>,
+  putOptions: [] as Array<{ signal?: AbortSignal } | undefined>,
 }))
 
 vi.mock('@atproto/api', () => ({
@@ -26,8 +27,12 @@ vi.mock('@atproto/api', () => ({
     com = {
       atproto: {
         repo: {
-          putRecord: async (args: Record<string, unknown>) => {
+          putRecord: async (
+            args: Record<string, unknown>,
+            opts?: { signal?: AbortSignal },
+          ) => {
             pds.putRecords.push(args)
+            pds.putOptions.push(opts)
             return {}
           },
         },
@@ -60,7 +65,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     return new PdsEnrollmentSyncWorker(
       {
         queue,
-        sync: (did) =>
+        sync: (did, signal) =>
           syncEnrollmentRecordToPds(
             {
               enrollmentStore,
@@ -70,6 +75,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
               publicUrl: 'https://stratos.example.com',
             },
             did,
+            signal,
           ),
       },
       {
@@ -78,6 +84,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
         backoffCapMs: 50,
         maxAttempts: 12,
         claimLimit: 10,
+        attemptTimeoutMs: 30_000,
         ...overrides,
       },
     )
@@ -106,6 +113,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     queue = new SqlitePdsSyncQueueStore(db)
     restore = vi.fn(async () => ({}))
     pds.putRecords.length = 0
+    pds.putOptions.length = 0
 
     await enrollmentStore.enroll({
       did: USAGI,
@@ -137,7 +145,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       // there aborts the whole mutation run.
       await vi.waitFor(
         async () => {
-          expect(await queue.list()).toHaveLength(0)
+          expect(await queue.list(100)).toHaveLength(0)
         },
         { timeout: 15_000, interval: 20 },
       )
@@ -175,13 +183,84 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       publicUrl: 'https://stratos.example.com',
     }
 
-    await expect(syncEnrollmentRecordToPds(deps, USAGI)).resolves.toBe('ok')
+    const signal = AbortSignal.timeout(30_000)
+    await expect(syncEnrollmentRecordToPds(deps, USAGI, signal)).resolves.toBe(
+      'ok',
+    )
     expect(pds.putRecords).toHaveLength(1)
+    // The attempt signal must reach the PDS write so an abort stops the wire call.
+    expect(pds.putOptions[0]?.signal).toBeInstanceOf(AbortSignal)
 
     await expect(
-      syncEnrollmentRecordToPds(deps, 'did:plc:chibiusatsukino'),
+      syncEnrollmentRecordToPds(deps, 'did:plc:chibiusatsukino', signal),
     ).resolves.toBe('obsolete')
     expect(pds.putRecords).toHaveLength(1)
+  })
+
+  it('rejects at once when the signal is already aborted', async () => {
+    restore.mockImplementation(() => new Promise(() => {}))
+    const deps = {
+      enrollmentStore,
+      createAttestation,
+      oauthClient: { restore } as never,
+      serviceDid: 'did:web:stratos.example.com',
+      publicUrl: 'https://stratos.example.com',
+    }
+    const reason = new Error('attempt deadline elapsed')
+    const controller = new AbortController()
+    controller.abort(reason)
+
+    // Race against a timer: a hang here means the pre-abort check is gone.
+    const outcome = await Promise.race([
+      syncEnrollmentRecordToPds(deps, USAGI, controller.signal).then(
+        () => 'resolved',
+        (err: unknown) => err,
+      ),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 500)),
+    ])
+    expect(outcome).toBe(reason)
+    expect(pds.putRecords).toHaveLength(0)
+  })
+
+  it('rejects with the abort reason when the abort lands mid-restore', async () => {
+    // The abort must land after the restore call registers the abort
+    // listener, or the test only re-covers the pre-abort branch.
+    let restoreStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      restoreStarted = resolve
+    })
+    restore.mockImplementation(() => {
+      restoreStarted()
+      return new Promise(() => {})
+    })
+    const deps = {
+      enrollmentStore,
+      createAttestation,
+      oauthClient: { restore } as never,
+      serviceDid: 'did:web:stratos.example.com',
+      publicUrl: 'https://stratos.example.com',
+    }
+    const reason = new Error('attempt deadline elapsed')
+    const controller = new AbortController()
+
+    const attempt = syncEnrollmentRecordToPds(
+      deps,
+      USAGI,
+      controller.signal,
+    ).then(
+      () => 'resolved',
+      (err: unknown) => err,
+    )
+    await started
+    controller.abort(reason)
+
+    // Race against a timer: a hang here means the abort listener does not fire.
+    const outcome = await Promise.race([
+      attempt,
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 500)),
+    ])
+    expect(outcome).toBe(reason)
+    expect(pds.putRecords).toHaveLength(0)
   })
 
   it('recovers a pending job left behind by a crash on restart', async () => {
@@ -196,7 +275,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       // there aborts the whole mutation run.
       await vi.waitFor(
         async () => {
-          expect(await queue.list()).toHaveLength(0)
+          expect(await queue.list(100)).toHaveLength(0)
         },
         { timeout: 15_000, interval: 20 },
       )
@@ -215,14 +294,14 @@ describe('PDS enrollment sync (sqlite integration)', () => {
 
     await expect(kickNow(worker)).resolves.toBe('deferred')
 
-    const jobs = await queue.list()
+    const jobs = await queue.list(100)
     expect(jobs).toHaveLength(1)
     expect(jobs[0].status).toBe('failed')
     expect(jobs[0].lastError).toContain('deleted by another process')
 
     // A fresh admin mutation re-enqueues and succeeds inline.
     await expect(kickNow(worker)).resolves.toBe('ok')
-    expect(await queue.list()).toHaveLength(0)
+    expect(await queue.list(100)).toHaveLength(0)
     expect(pds.putRecords).toHaveLength(1)
   })
 
@@ -232,7 +311,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
 
     const worker = createWorker()
     await expect(kickNow(worker)).resolves.toBe('ok')
-    expect(await queue.list()).toHaveLength(0)
+    expect(await queue.list(100)).toHaveLength(0)
     expect(pds.putRecords).toHaveLength(0)
   })
 })
