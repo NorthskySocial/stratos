@@ -642,7 +642,7 @@ describe('PostgreSQL Backend Integration', () => {
     it('upsertPending creates a due pending job', async () => {
       await queue.upsertPending(testDid)
 
-      const jobs = await queue.list()
+      const jobs = await queue.list(100)
       expect(jobs).toHaveLength(1)
       expect(jobs[0].did).toBe(testDid)
       expect(jobs[0].status).toBe('pending')
@@ -655,14 +655,14 @@ describe('PostgreSQL Backend Integration', () => {
 
     it('upsertPending revives a failed job and preserves firstQueuedAt', async () => {
       await queue.upsertPending(testDid)
-      const [before] = await queue.list()
+      const [before] = await queue.list(100)
 
       await queue.markFailed(testDid, 1, 'invalid_grant')
-      const [failed] = await queue.list()
+      const [failed] = await queue.list(100)
       expect(failed.status).toBe('failed')
 
       await queue.upsertPending(testDid)
-      const [revived] = await queue.list()
+      const [revived] = await queue.list(100)
       expect(revived.status).toBe('pending')
       expect(revived.attemptCount).toBe(0)
       expect(revived.lastError).toBeNull()
@@ -692,7 +692,22 @@ describe('PostgreSQL Backend Integration', () => {
       await queue.upsertPending(testDid)
       await queue.remove(testDid)
       await expect(queue.remove('did:plc:unknown')).resolves.toBeUndefined()
-      expect(await queue.list()).toHaveLength(0)
+      expect(await queue.list(100)).toHaveLength(0)
+    })
+
+    it('list bounds each page and pages forward from the given key', async () => {
+      await queue.upsertPending(testDid)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      await queue.upsertPending(testDid2)
+
+      const first = await queue.list(1)
+      expect(first.map((j) => j.did)).toEqual([testDid])
+
+      const second = await queue.list(1, {
+        firstQueuedAt: first[0].firstQueuedAt,
+        did: first[0].did,
+      })
+      expect(second.map((j) => j.did)).toEqual([testDid2])
     })
   })
 })

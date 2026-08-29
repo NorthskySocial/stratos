@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, lte, or, sql } from 'drizzle-orm'
 import { enrollmentPdsSync, type ServiceDb } from '../../../db'
 import { pgEnrollmentPdsSync } from '../../../db/pg-schema.js'
 import type { ServicePgDb } from '../../../db/pg.js'
@@ -69,8 +69,19 @@ export interface PdsSyncQueueStore {
   remove(did: string): Promise<void>
   /** Reset every terminal job to pending. @returns The number revived. */
   requeueFailed(): Promise<number>
-  /** All jobs, for the operator observability endpoint. */
-  list(): Promise<PdsSyncJob[]>
+  /**
+   * One bounded page of jobs for the operator observability endpoint,
+   * ordered by `(firstQueuedAt, did)`. Pass the last row of the previous
+   * page as `after` to continue. Bounded so a fleet-wide failure cannot
+   * make one read load the whole backlog.
+   */
+  list(limit: number, after?: PdsSyncPageKey): Promise<PdsSyncJob[]>
+}
+
+/** Keyset cursor: the sort key of the last row of the previous page. */
+export interface PdsSyncPageKey {
+  firstQueuedAt: string
+  did: string
 }
 
 function nowIso(): string {
@@ -205,7 +216,9 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
   }
 
   async remove(did: string): Promise<void> {
-    await this.db.delete(enrollmentPdsSync).where(eq(enrollmentPdsSync.did, did))
+    await this.db
+      .delete(enrollmentPdsSync)
+      .where(eq(enrollmentPdsSync.did, did))
   }
 
   async requeueFailed(): Promise<number> {
@@ -225,11 +238,23 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
     return rows.length
   }
 
-  async list(): Promise<PdsSyncJob[]> {
+  async list(limit: number, after?: PdsSyncPageKey): Promise<PdsSyncJob[]> {
     const rows = await this.db
       .select()
       .from(enrollmentPdsSync)
-      .orderBy(asc(enrollmentPdsSync.firstQueuedAt))
+      .where(
+        after
+          ? or(
+              gt(enrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+              and(
+                eq(enrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+                gt(enrollmentPdsSync.did, after.did),
+              ),
+            )
+          : undefined,
+      )
+      .orderBy(asc(enrollmentPdsSync.firstQueuedAt), asc(enrollmentPdsSync.did))
+      .limit(limit)
     return rows.map(toJob)
   }
 }
@@ -360,11 +385,26 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
     return rows.length
   }
 
-  async list(): Promise<PdsSyncJob[]> {
+  async list(limit: number, after?: PdsSyncPageKey): Promise<PdsSyncJob[]> {
     const rows = await this.db
       .select()
       .from(pgEnrollmentPdsSync)
-      .orderBy(asc(pgEnrollmentPdsSync.firstQueuedAt))
+      .where(
+        after
+          ? or(
+              gt(pgEnrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+              and(
+                eq(pgEnrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+                gt(pgEnrollmentPdsSync.did, after.did),
+              ),
+            )
+          : undefined,
+      )
+      .orderBy(
+        asc(pgEnrollmentPdsSync.firstQueuedAt),
+        asc(pgEnrollmentPdsSync.did),
+      )
+      .limit(limit)
     return rows.map(toJob)
   }
 }

@@ -32,6 +32,7 @@ export type PdsEnrollmentSyncResult = 'ok' | 'obsolete'
  *
  * @param deps - Sync dependencies
  * @param did - Actor whose PDS record is rewritten
+ * @param signal - Aborts the attempt; the PDS write receives it directly
  * @returns `'ok'` on success, `'obsolete'` when there is nothing to sync
  * @throws The underlying OAuth/PDS error; classify with
  *   {@link classifyPdsSyncError}
@@ -39,6 +40,7 @@ export type PdsEnrollmentSyncResult = 'ok' | 'obsolete'
 export async function syncEnrollmentRecordToPds(
   deps: PdsEnrollmentSyncDeps,
   did: string,
+  signal: AbortSignal,
 ): Promise<PdsEnrollmentSyncResult> {
   const enrollment = await deps.enrollmentStore.getEnrollment(did)
   if (!enrollment?.signingKeyDid) return 'obsolete'
@@ -51,26 +53,56 @@ export async function syncEnrollmentRecordToPds(
   )
 
   const rkey = serviceDIDToRkey(deps.serviceDid)
-  const oauthSession = await deps.oauthClient.restore(did)
+  // `restore` accepts no signal, so race it against the deadline. That is
+  // safe: it writes no PDS records, and the OAuth client serializes token
+  // refreshes per subject, so an orphaned refresh cannot overlap a later
+  // attempt's. The only write is `putRecord`, which carries the real signal
+  // and is aborted on the wire.
+  const oauthSession = await untilAborted(deps.oauthClient.restore(did), signal)
   const agent = new Agent(oauthSession)
 
-  await agent.com.atproto.repo.putRecord({
-    repo: did,
-    collection: 'zone.stratos.actor.enrollment',
-    rkey,
-    record: {
-      service: deps.publicUrl,
-      boundaries: boundaries.map((value) => ({ value })),
-      signingKey: enrollment.signingKeyDid,
-      attestation: {
-        sig: attestation.sig,
-        signingKey: attestation.signingKey,
+  await agent.com.atproto.repo.putRecord(
+    {
+      repo: did,
+      collection: 'zone.stratos.actor.enrollment',
+      rkey,
+      record: {
+        service: deps.publicUrl,
+        boundaries: boundaries.map((value) => ({ value })),
+        signingKey: enrollment.signingKeyDid,
+        attestation: {
+          sig: attestation.sig,
+          signingKey: attestation.signingKey,
+        },
+        createdAt: new Date().toISOString(),
       },
-      createdAt: new Date().toISOString(),
     },
-  })
+    { signal },
+  )
 
   return 'ok'
+}
+
+/** Settle with the promise, or reject with the signal's reason on abort. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason as Error)
+      return
+    }
+    const onAbort = () => reject(signal.reason as Error)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      },
+    )
+  })
 }
 
 /**

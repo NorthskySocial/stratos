@@ -5,6 +5,22 @@
     "main": {
       "type": "query",
       "description": "List queued PDS enrollment-record sync jobs. Shows which members' PDS records are still behind this service's boundary state. Requires admin authorization.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum number of jobs per page."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor from a previous response."
+          }
+        }
+      },
       "output": {
         "encoding": "application/json",
         "schema": {
@@ -17,6 +33,10 @@
                 "type": "ref",
                 "ref": "#job"
               }
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Pass to the next call to continue. Absent on the last page."
             }
           }
         }

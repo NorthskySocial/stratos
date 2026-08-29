@@ -29,5 +29,6 @@ export {
   PgPdsSyncQueueStore,
   type PdsSyncJob,
   type PdsSyncJobStatus,
+  type PdsSyncPageKey,
   type PdsSyncQueueStore,
 } from './internal/pds-sync-store.js'

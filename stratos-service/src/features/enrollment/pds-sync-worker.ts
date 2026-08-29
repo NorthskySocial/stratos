@@ -18,6 +18,8 @@ export interface PdsSyncWorkerConfig {
   maxAttempts: number
   /** Jobs claimed per tick; volume is admin-mutation-scale. */
   claimLimit: number
+  /** Deadline per sync attempt; the signal aborts the PDS write. */
+  attemptTimeoutMs: number
 }
 
 /**
@@ -25,7 +27,7 @@ export interface PdsSyncWorkerConfig {
  */
 export interface PdsSyncWorkerDeps {
   queue: PdsSyncQueueStore
-  sync(did: string): Promise<PdsEnrollmentSyncResult>
+  sync(did: string, signal: AbortSignal): Promise<PdsEnrollmentSyncResult>
   logger?: Logger
 }
 
@@ -51,6 +53,13 @@ export class PdsEnrollmentSyncWorker {
   private timer?: NodeJS.Timeout
   private ticking = false
   private inFlight = new Map<string, Promise<'ok' | 'deferred'>>()
+  /**
+   * DIDs cancelled after a tick claimed their job but before the attempt
+   * started. The `inFlight` map cannot fence that window. Entries are
+   * cleared by fresh intent; a residual entry for a departed actor is
+   * harmless because unenrollment also removed the queue row.
+   */
+  private cancelled = new Set<string>()
 
   constructor(
     private deps: PdsSyncWorkerDeps,
@@ -84,6 +93,7 @@ export class PdsEnrollmentSyncWorker {
    * @returns The generation to pass to the matching {@link kick}.
    */
   async enqueue(did: string): Promise<number> {
+    this.cancelled.delete(did)
     return this.deps.queue.upsertPending(did)
   }
 
@@ -102,6 +112,7 @@ export class PdsEnrollmentSyncWorker {
    * late write cannot resurrect a record that nothing is left to clean up.
    */
   async cancel(did: string): Promise<void> {
+    this.cancelled.add(did)
     await this.deps.queue.remove(did)
     const inFlight = this.inFlight.get(did)
     if (inFlight) await inFlight.catch(() => undefined)
@@ -139,8 +150,10 @@ export class PdsEnrollmentSyncWorker {
 
   private async execute(job: AttemptJob): Promise<'ok' | 'deferred'> {
     const { did } = job
+    if (this.cancelled.has(did)) return 'ok'
     try {
-      const result = await this.deps.sync(did)
+      const signal = AbortSignal.timeout(this.config.attemptTimeoutMs)
+      const result = await this.deps.sync(did, signal)
       const cleared = await this.deps.queue.removeIfCurrent(did, job.generation)
       if (!cleared) {
         // A mutation landed while this attempt was writing. Its job survives

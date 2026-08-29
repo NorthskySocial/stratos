@@ -382,7 +382,7 @@ function initPdsSync(
   const pdsSyncWorker = new PdsEnrollmentSyncWorker(
     {
       queue: storage.pdsSyncQueue,
-      sync: (did) =>
+      sync: (did, signal) =>
         syncEnrollmentRecordToPds(
           {
             enrollmentStore: storage.enrollmentStore,
@@ -392,6 +392,7 @@ function initPdsSync(
             publicUrl: cfg.service.publicUrl,
           },
           did,
+          signal,
         ),
       logger,
     },

@@ -5,6 +5,7 @@ import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
 import { verifyEnrolled } from './internal/auth.js'
+import type { PdsSyncPageKey } from './internal/pds-sync-store.js'
 
 /**
  * Register all enrollment-related XRPC handlers
@@ -1086,11 +1087,31 @@ function registerListDomainsHandler(ctx: AppContext): void {
   )
 }
 
+const PDS_SYNC_STATUS_DEFAULT_LIMIT = 50
+const PDS_SYNC_STATUS_MAX_LIMIT = 100
+
+/** Encode a page key as an opaque cursor. The separator is in neither part. */
+function encodePdsSyncCursor(key: PdsSyncPageKey): string {
+  return Buffer.from(`${key.firstQueuedAt}|${key.did}`).toString('base64url')
+}
+
+function decodePdsSyncCursor(cursor: string): PdsSyncPageKey | undefined {
+  const decoded = Buffer.from(cursor, 'base64url').toString()
+  const separator = decoded.indexOf('|')
+  if (separator < 1 || separator === decoded.length - 1) return undefined
+  return {
+    firstQueuedAt: decoded.slice(0, separator),
+    did: decoded.slice(separator + 1),
+  }
+}
+
 /**
  * Register handler for listing PDS enrollment-record sync jobs.
  *
  * Surfaces the durable sync queue so an operator can see which actors' PDS
  * records are still behind (`pending`) or need intervention (`failed`).
+ * Paginated so a fleet-wide failure cannot make one read load the whole
+ * backlog.
  * @param ctx - Application context
  */
 function registerListPdsSyncStatusHandler(ctx: AppContext): void {
@@ -1105,9 +1126,36 @@ function registerListPdsSyncStatusHandler(ctx: AppContext): void {
           .json({ error: 'AuthRequired', message: 'Admin auth required' })
       }
 
+      const rawLimit = Number(req.query.limit ?? PDS_SYNC_STATUS_DEFAULT_LIMIT)
+      if (
+        !Number.isInteger(rawLimit) ||
+        rawLimit < 1 ||
+        rawLimit > PDS_SYNC_STATUS_MAX_LIMIT
+      ) {
+        return res.status(400).json({
+          error: 'InvalidRequest',
+          message: `limit must be an integer between 1 and ${PDS_SYNC_STATUS_MAX_LIMIT}`,
+        })
+      }
+
+      let after: PdsSyncPageKey | undefined
+      if (typeof req.query.cursor === 'string') {
+        after = decodePdsSyncCursor(req.query.cursor)
+        if (!after) {
+          return res
+            .status(400)
+            .json({ error: 'InvalidRequest', message: 'malformed cursor' })
+        }
+      }
+
       try {
-        const jobs = await ctx.pdsSyncQueue.list()
-        res.json({ jobs })
+        const jobs = await ctx.pdsSyncQueue.list(rawLimit, after)
+        const last = jobs.at(-1)
+        const cursor =
+          jobs.length === rawLimit && last
+            ? encodePdsSyncCursor(last)
+            : undefined
+        res.json(cursor ? { jobs, cursor } : { jobs })
       } catch (err) {
         ctx.logger?.error(
           { err: err instanceof Error ? err.message : String(err) },
