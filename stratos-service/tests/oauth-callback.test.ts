@@ -909,6 +909,49 @@ describe('handleCallback', () => {
         { pdsEndpoint: 'https://new-pds.example.com' },
       )
     })
+
+    it('resolves the PDS endpoint from the DID document when open-mode eligibility returns none', async () => {
+      // Open mode answers eligibility before it resolves the DID document,
+      // so the validation result carries no endpoint. A pds-custody re-auth
+      // must publish a resolved host, never `repoHost: undefined`.
+      const keypair = await Secp256k1Keypair.create({ exportable: true })
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:kaoru',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({ allowed: true })
+      const doc = atprotoDidDoc('did:plc:kaoru', keypair)
+      doc.service[0].serviceEndpoint = 'https://resolved-pds.example.com'
+      mockIdResolver.did.resolve.mockResolvedValue(doc)
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+          pdsEndpoint: 'https://pds.example.com',
+          capabilityVerdict: 'capable',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://resolved-pds.example.com',
+        }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        {
+          pdsEndpoint: 'https://resolved-pds.example.com',
+          repoHost: 'https://resolved-pds.example.com',
+        },
+      )
+    })
   })
 
   describe('spaces capability detection', () => {
