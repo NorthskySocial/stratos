@@ -168,7 +168,7 @@ function extractProofHeader(
  * query and fragment can carry tokens; a non-URL value can carry anything.
  */
 function sanitizeHtu(htu: unknown): string {
-  if (typeof htu !== 'string') return String(htu)
+  if (typeof htu !== 'string') return '<malformed>'
   try {
     const url = new URL(htu)
     return url.origin + url.pathname

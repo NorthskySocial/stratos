@@ -25,7 +25,9 @@ import { randomBytes } from 'node:crypto'
 import { decode } from '@atcute/cbor'
 import { spaceUriToBoundary } from '@northskysocial/stratos-core'
 
+import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import { SqliteEnrollmentStore, StratosActorStore } from '../src/context.js'
+import type { AppContext } from '../src/context-types.js'
 import {
   closeServiceDb,
   createServiceDb,
@@ -75,17 +77,32 @@ const revLookupFailsMemberDid = 'did:plc:kaji-ryoji'
 const PDS_ENDPOINT = 'https://pds.example.com'
 const OVERRIDE_HOST = 'https://override.pds.example.com'
 
+type ListReposEntry = {
+  did: string
+  rev?: string
+  host?: string
+  hostSource?: string
+}
+
+// The narrowed shape of the captured `listRepos` handler. The registration
+// seam hands handlers back as `unknown`; this is the single point where the
+// test asserts what it captured.
+type ListReposHandler = (input: {
+  params: Record<string, unknown>
+  auth: { credentials: Record<string, unknown> } | undefined
+  req: unknown
+  res: unknown
+}) => Promise<{ body: { repos: ListReposEntry[]; cursor?: string } }>
+
 describe('zone.stratos.space.listRepos', () => {
   let dataDir: string
   let actorStore: StratosActorStore
   let enrollmentStore: SqliteEnrollmentStore
   let db: ServiceDb
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let handler: any
+  let handler: ListReposHandler
   let methods: Map<string, { type?: string; handler: unknown }>
   let warnSpy: ReturnType<typeof vi.fn>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ctx: any
+  let ctx: AppContext
   let revFailDids: Set<string>
 
   beforeEach(async () => {
@@ -165,6 +182,8 @@ describe('zone.stratos.space.listRepos', () => {
       },
     })
 
+    // A partial mock: only the fields the space-read handlers touch. The one
+    // cast to `AppContext` lives here, at the construction boundary.
     ctx = {
       cfg,
       actorStore: actorStoreWithFailure,
@@ -178,7 +197,7 @@ describe('zone.stratos.space.listRepos', () => {
         error: vi.fn(),
         warn: (warnSpy = vi.fn()),
       },
-    }
+    } as unknown as AppContext
     const capturedMethods = new Map<
       string,
       { type?: string; handler: unknown }
@@ -187,10 +206,10 @@ describe('zone.stratos.space.listRepos', () => {
       method: (name: string, cfgArg: { type?: string; handler: unknown }) =>
         capturedMethods.set(name, cfgArg),
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    registerSpaceReadHandlers(server as any, ctx as any)
+    registerSpaceReadHandlers(server as unknown as XrpcServer, ctx)
     methods = capturedMethods
-    handler = capturedMethods.get('zone.stratos.space.listRepos')!.handler
+    handler = capturedMethods.get('zone.stratos.space.listRepos')!
+      .handler as ListReposHandler
 
     // The calling service must itself be enrolled in the boundary it queries.
     await enrollmentStore.enroll({
@@ -588,11 +607,12 @@ describe('zone.stratos.space.listRepos', () => {
       method: (name: string, cfgArg: { type?: string; handler: unknown }) =>
         capturedMethods.set(name, cfgArg),
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    registerSpaceReadHandlers(server as any, { ...ctx, logger: undefined })
-    const loggerless =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      capturedMethods.get('zone.stratos.space.listRepos')!.handler as any
+    registerSpaceReadHandlers(server as unknown as XrpcServer, {
+      ...ctx,
+      logger: undefined,
+    })
+    const loggerless = capturedMethods.get('zone.stratos.space.listRepos')!
+      .handler as ListReposHandler
 
     const res = await loggerless({
       params: { space: SPACE_S },

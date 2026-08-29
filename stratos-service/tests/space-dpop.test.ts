@@ -32,7 +32,11 @@ async function makeProofKey() {
   const jwk = await exportJWK(publicKey)
   const jkt = await calculateJwkThumbprint(jwk)
   async function buildProof(
-    opts: { ath?: string; nonce?: string; htu?: string | number } = {},
+    opts: {
+      ath?: string
+      nonce?: string
+      htu?: string | number | string[]
+    } = {},
   ): Promise<string> {
     return new SignJWT({
       htm: 'POST',
@@ -121,14 +125,44 @@ describe('SpaceDpopProofChecker', () => {
     expect(err.message).not.toContain('fake log line')
   })
 
-  it('stringifies a non-string htu instead of treating it as a URL', async () => {
+  it('reports a non-string htu as malformed instead of stringifying it', async () => {
     const key = await makeProofKey()
     const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
     const err = await checker
       .check(request(await key.buildProof({ htu: 42 })))
       .catch((e) => e)
     expect(err).toBeInstanceOf(SpaceDpopProofError)
-    expect(err.message).toContain('proof=42')
+    expect(err.message).toContain('proof=<malformed>')
+    expect(err.message).not.toContain('proof=42')
+  })
+
+  it('reports an array htu holding a valid URL as malformed, never its content', async () => {
+    // Without the type guard, `new URL(['https://...'])` coerces the single
+    // element to a parseable string and the caller's value reaches the
+    // message.
+    const key = await makeProofKey()
+    const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
+    const err = await checker
+      .check(request(await key.buildProof({ htu: ['https://evil.test/leak'] })))
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(SpaceDpopProofError)
+    expect(err.message).toContain('proof=<malformed>')
+    expect(err.message).not.toContain('evil.test')
+  })
+
+  it('does not echo elements of an array htu (String() would join them verbatim)', async () => {
+    const key = await makeProofKey()
+    const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
+    const err = await checker
+      .check(
+        request(
+          await key.buildProof({ htu: ['https://a.test\nfake log line'] }),
+        ),
+      )
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(SpaceDpopProofError)
+    expect(err.message).toContain('proof=<malformed>')
+    expect(err.message).not.toContain('fake log line')
   })
 
   it('with a bound token: requires a matching ath', async () => {

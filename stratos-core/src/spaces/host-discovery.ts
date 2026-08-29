@@ -46,13 +46,8 @@ export interface RepoHostResolverDeps {
 }
 
 /**
- * Swallows a rejection or a synchronous throw from an injected dependency and
- * reports "not found" instead. A member whose DID document (or override
- * lookup) is momentarily unreachable must never halt a sync pass -- it must
- * fall through to the next arm, or to "unknown host", the same as a clean
- * "not found" answer. This is
- * enforced here, once, rather than trusted to every `DidPdsReader` /
- * `HostOverrideReader` implementation to get right.
+ * A member whose host lookup fails must never halt a sync pass. This helper
+ * enforces that once, for every injected reader.
  */
 async function settleToUndefined<T>(
   lookup: () => Promise<T | undefined>,
