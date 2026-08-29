@@ -31,6 +31,15 @@ export class DidDocumentPdsReader implements DidPdsReader {
   constructor(private readonly idResolver: IdResolver) {}
 
   async getPdsEndpoint(memberDid: string): Promise<string | undefined> {
+    // A did:web resolution fetches `https://{host}/.well-known/did.json`
+    // server-side, and the host comes from the member's own DID. Refuse a
+    // host in private or local address space before any fetch (SSRF). This
+    // does not defend against DNS rebinding; a deployment must also isolate
+    // egress at the network level.
+    if (memberDid.startsWith(DID_WEB_PREFIX)) {
+      const host = didWebHostname(memberDid)
+      if (!host || isPrivateOrLocalHost(host)) return undefined
+    }
     try {
       const didDoc = await this.idResolver.did.resolve(memberDid)
       if (!didDoc) return undefined
@@ -48,6 +57,68 @@ export class DidDocumentPdsReader implements DidPdsReader {
       return undefined
     }
   }
+}
+
+const DID_WEB_PREFIX = 'did:web:'
+
+/**
+ * Extract the hostname a did:web resolves against. The first colon-separated
+ * segment after the prefix is the percent-encoded authority; it may carry a
+ * port. Returns `undefined` when the authority does not parse.
+ */
+export function didWebHostname(did: string): string | undefined {
+  const [encodedAuthority] = did.slice(DID_WEB_PREFIX.length).split(':')
+  if (!encodedAuthority) return undefined
+  try {
+    const url = new URL(`https://${decodeURIComponent(encodedAuthority)}`)
+    // WHATWG URL keeps brackets on an IPv6 hostname; strip them.
+    return url.hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * True for a hostname in loopback, private, link-local, or local-only DNS
+ * space -- the destinations a server-side fetch must never reach for a
+ * caller-chosen host.
+ */
+export function isPrivateOrLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+
+  if (host.includes(':')) {
+    if (host === '::' || host === '::1') return true
+    if (/^f[cd]/.test(host)) return true // fc00::/7 unique local
+    if (/^fe[89ab]/.test(host)) return true // fe80::/10 link local
+    if (host.startsWith('::ffff:')) {
+      // An IPv4-mapped address answers for its embedded IPv4.
+      return isPrivateOrLocalHost(host.slice('::ffff:'.length))
+    }
+    return false
+  }
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])]
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    )
+  }
+
+  return (
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    // A single-label name, `localhost` included, only resolves on an
+    // internal search domain.
+    !host.includes('.')
+  )
 }
 
 /**

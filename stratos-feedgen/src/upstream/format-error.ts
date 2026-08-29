@@ -19,8 +19,11 @@ export function describeUpstreamError(err: unknown): string {
   return 'unknown error'
 }
 
-/** Maximum length of a value we will accept as an XRPC error code. */
-const MAX_ERROR_CODE_LENGTH = 64
+/**
+ * Shape of a value we accept as an XRPC error code: a short identifier. This
+ * also rejects control characters, so the code is safe to place in a log line.
+ */
+const ERROR_CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 
 /**
  * Read the `error` code from an XRPC error body.
@@ -38,6 +41,5 @@ function extractErrorCode(body: string): string | undefined {
   if (typeof parsed !== 'object' || parsed === null) return undefined
   const code = (parsed as { error?: unknown }).error
   if (typeof code !== 'string') return undefined
-  // An error code is a short identifier. Anything longer is not one.
-  return code.length <= MAX_ERROR_CODE_LENGTH ? code : undefined
+  return ERROR_CODE_PATTERN.test(code) ? code : undefined
 }

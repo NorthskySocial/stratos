@@ -172,12 +172,12 @@ describe('ReservedDomainEnrollmentStore', () => {
     // if `active` were filtered after `LIMIT`, a page containing one would
     // come back short, and the handler reads a short page as the last page.
     const members = [
-      'did:plc:nausicaa',
-      'did:plc:kiki',
-      'did:plc:satsuki',
-      'did:plc:ashitaka',
-      'did:plc:san',
-      'did:plc:chihiro',
+      'did:plc:shinji',
+      'did:plc:asuka',
+      'did:plc:rei',
+      'did:plc:misato',
+      'did:plc:spike',
+      'did:plc:faye',
     ].sort()
     const deactivated = new Set([members[1], members[3]])
 

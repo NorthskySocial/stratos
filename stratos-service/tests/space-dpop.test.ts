@@ -32,11 +32,11 @@ async function makeProofKey() {
   const jwk = await exportJWK(publicKey)
   const jkt = await calculateJwkThumbprint(jwk)
   async function buildProof(
-    opts: { ath?: string; nonce?: string } = {},
+    opts: { ath?: string; nonce?: string; htu?: string | number } = {},
   ): Promise<string> {
     return new SignJWT({
       htm: 'POST',
-      htu: `${SERVICE_ENDPOINT}${PATH}`,
+      htu: opts.htu ?? `${SERVICE_ENDPOINT}${PATH}`,
       jti: randomUUID(),
       ...(opts.ath ? { ath: opts.ath } : {}),
       ...(opts.nonce ? { nonce: opts.nonce } : {}),
@@ -90,6 +90,45 @@ describe('SpaceDpopProofChecker', () => {
     // The failure must carry the verification reason, not the missing-header
     // message.
     expect(err.message).not.toBe('DPoP proof required')
+  })
+
+  it('names both htu values on a mismatch, but strips the proof query', async () => {
+    const key = await makeProofKey()
+    const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
+    const err = await checker
+      .check(
+        request(
+          await key.buildProof({
+            htu: `https://wrong.test${PATH}?access_token=super-secret`,
+          }),
+        ),
+      )
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(SpaceDpopProofError)
+    expect(err.message).toContain(`proof=https://wrong.test${PATH}`)
+    expect(err.message).toContain(`expected=${SERVICE_ENDPOINT}${PATH}`)
+    expect(err.message).not.toContain('super-secret')
+  })
+
+  it('reports a non-URL htu as malformed instead of echoing it', async () => {
+    const key = await makeProofKey()
+    const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
+    const err = await checker
+      .check(request(await key.buildProof({ htu: 'not a url\nfake log line' })))
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(SpaceDpopProofError)
+    expect(err.message).toContain('proof=<malformed>')
+    expect(err.message).not.toContain('fake log line')
+  })
+
+  it('stringifies a non-string htu instead of treating it as a URL', async () => {
+    const key = await makeProofKey()
+    const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
+    const err = await checker
+      .check(request(await key.buildProof({ htu: 42 })))
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(SpaceDpopProofError)
+    expect(err.message).toContain('proof=42')
   })
 
   it('with a bound token: requires a matching ath', async () => {
