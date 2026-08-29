@@ -240,6 +240,127 @@ export function describeStoreContract(
       })
     })
 
+    describe('space sync cursor', () => {
+      const SPACE_URI = `at://${SPIKE_DID}/space/feed/bounty-hunters`
+      const OTHER_SPACE_URI = `at://${SPIKE_DID}/space/feed/syndicate`
+
+      it('upserts and reads back', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe(
+          'cursor-1',
+        )
+      })
+
+      it('returns null for unknown (space, member) pair', async () => {
+        expect(
+          await store.getSpaceCursor(SPACE_URI, 'did:plc:unknown'),
+        ).toBeNull()
+      })
+
+      it('overwrites on conflict', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'cursor-2',
+          '2024-01-02T00:00:00.000Z',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe(
+          'cursor-2',
+        )
+      })
+
+      it('scopes cursors independently per (space, member) pair', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          VASH_DID,
+          'vash-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'other-space-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe(
+          'faye-cursor',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, VASH_DID)).toBe(
+          'vash-cursor',
+        )
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBe(
+          'other-space-cursor',
+        )
+      })
+
+      it('deleteSpaceCursor removes one pair only and is idempotent', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'other-space-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.deleteSpaceCursor(SPACE_URI, FAYE_DID)).toBe(1)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBe(
+          'other-space-cursor',
+        )
+        // second call is a no-op
+        expect(await store.deleteSpaceCursor(SPACE_URI, FAYE_DID)).toBe(0)
+      })
+
+      it('deleteSpaceCursors removes every cursor held for a did across spaces', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'faye-cursor-2',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          VASH_DID,
+          'vash-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.deleteSpaceCursors(FAYE_DID)).toBe(2)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBeNull()
+        // VASH's cursor in the same space is untouched.
+        expect(await store.getSpaceCursor(SPACE_URI, VASH_DID)).toBe(
+          'vash-cursor',
+        )
+      })
+    })
+
     describe('enrolled actor', () => {
       it('upserts and reads back', async () => {
         const a = makeActor()

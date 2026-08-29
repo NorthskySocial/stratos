@@ -5,6 +5,7 @@ import {
   enrolledActor as enrolledActorTbl,
   post as postTbl,
   postBoundary as postBoundaryTbl,
+  spaceSyncCursor as spaceSyncCursorTbl,
   syncCursor as syncCursorTbl,
 } from './schema/sqlite.js'
 import { sqliteSchema } from './schema/index.js'
@@ -85,6 +86,15 @@ export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
       boundariesJson TEXT NOT NULL,
       enrolledAt TEXT NOT NULL,
       lastSeenAt TEXT NOT NULL
+    )
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS space_sync_cursor (
+      spaceUri TEXT NOT NULL,
+      did TEXT NOT NULL,
+      cursor TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      PRIMARY KEY (spaceUri, did)
     )
   `)
 }
@@ -206,6 +216,25 @@ export class SqliteFeedgenStore implements FeedgenStore {
     return res.rowsAffected
   }
 
+  async deleteSpaceCursor(spaceUri: string, did: string): Promise<number> {
+    const res = await this.db
+      .delete(spaceSyncCursorTbl)
+      .where(
+        and(
+          eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+          eq(spaceSyncCursorTbl.did, did),
+        ),
+      )
+    return res.rowsAffected
+  }
+
+  async deleteSpaceCursors(did: string): Promise<number> {
+    const res = await this.db
+      .delete(spaceSyncCursorTbl)
+      .where(eq(spaceSyncCursorTbl.did, did))
+    return res.rowsAffected
+  }
+
   async getPost(uri: string): Promise<IndexedPost | null> {
     const rows = await this.db
       .select()
@@ -309,6 +338,35 @@ export class SqliteFeedgenStore implements FeedgenStore {
       .where(eq(syncCursorTbl.did, did))
       .limit(1)
     return rows.length === 0 ? null : rows[0].seq
+  }
+
+  async upsertSpaceCursor(
+    spaceUri: string,
+    did: string,
+    cursor: string,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.db
+      .insert(spaceSyncCursorTbl)
+      .values({ spaceUri, did, cursor, updatedAt })
+      .onConflictDoUpdate({
+        target: [spaceSyncCursorTbl.spaceUri, spaceSyncCursorTbl.did],
+        set: { cursor, updatedAt },
+      })
+  }
+
+  async getSpaceCursor(spaceUri: string, did: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ cursor: spaceSyncCursorTbl.cursor })
+      .from(spaceSyncCursorTbl)
+      .where(
+        and(
+          eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+          eq(spaceSyncCursorTbl.did, did),
+        ),
+      )
+      .limit(1)
+    return rows.length === 0 ? null : rows[0].cursor
   }
 
   async upsertEnrolledActor(input: EnrolledActorUpsert): Promise<void> {

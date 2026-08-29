@@ -45,7 +45,7 @@ maybeDescribe('postgres backend (testcontainers)', () => {
       await migratePgDb(db)
       await db.execute(
         sql.raw(
-          'TRUNCATE TABLE post_boundary, post, sync_cursor, enrolled_actor RESTART IDENTITY CASCADE',
+          'TRUNCATE TABLE post_boundary, post, sync_cursor, enrolled_actor, space_sync_cursor RESTART IDENTITY CASCADE',
         ),
       )
       return new PgFeedgenStore(db)

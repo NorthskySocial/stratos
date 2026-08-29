@@ -1,7 +1,7 @@
 import { extractBoundaries } from '@northskysocial/stratos-core'
 import type { BlobRef, FeedgenStore } from '../db/index.js'
 
-const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
+export const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 
 export interface CommitOp {
   action: 'create' | 'update' | 'delete'
@@ -66,7 +66,10 @@ function isPostPath(path: string): boolean {
   return path.startsWith(`${STRATOS_POST_COLLECTION}/`)
 }
 
-function pickSortAt(record: Record<string, unknown>, fallback: string): string {
+export function pickSortAt(
+  record: Record<string, unknown>,
+  fallback: string,
+): string {
   const createdAt = record['createdAt']
   return typeof createdAt === 'string' && createdAt.length > 0
     ? createdAt
@@ -79,7 +82,7 @@ function pickSortAt(record: Record<string, unknown>, fallback: string): string {
  * and the `recordWithMedia` variant. Returns an empty array if the record
  * carries no embed.
  */
-function extractBlobRefs(record: Record<string, unknown>): BlobRef[] {
+export function extractBlobRefs(record: Record<string, unknown>): BlobRef[] {
   const refs: BlobRef[] = []
   const seen = new Set<string>()
   const push = (cid: string, mimeType?: string): void => {
