@@ -5,7 +5,11 @@ import { type FeedgenConfig, loadFeedgenConfig } from '../config.js'
 import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
 import { loadFeedRegistry } from '../feeds/index.js'
-import { Purger, reconcileEnrollments } from '../purge/index.js'
+import {
+  createReconcileScheduler,
+  Purger,
+  reconcileEnrollments,
+} from '../purge/index.js'
 import { createFeedgenServer } from '../server.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
@@ -186,23 +190,30 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     actorPool: pool,
   })
 
-  // Startup reconciliation: catch enroll/unenroll (and boundary-shrink)
-  // changes missed while the feedgen was down by diffing the persisted
-  // snapshot against a fresh resolveEnrollments snapshot. Bounded via
-  // batching so upstream resolves don't fan out unbounded on large tenants.
-  const summary = await reconcileEnrollments(
-    { store, purger, client: upstream },
-    configuredBoundaries,
-    {
-      batchSize: parseIntEnv(process.env['FEEDGEN_RECONCILE_BATCH_SIZE']),
-      maxActors: parseIntEnv(process.env['FEEDGEN_RECONCILE_MAX_ACTORS']),
-    },
-  )
-  console.log(
-    `enrollment reconciliation examined ${summary.examined} actors ` +
-      `(${summary.unenrolled} unenrolled, ${summary.shrunk} shrunk, ` +
-      `${summary.postsPurged} posts purged, ${summary.errors} errors)`,
-  )
+  // Reconciliation: catch enroll/unenroll (and boundary-shrink) changes
+  // missed while the feedgen was down or disconnected by diffing the
+  // persisted snapshot against a fresh resolveEnrollments snapshot. Bounded
+  // via batching so upstream resolves don't fan out unbounded on large
+  // tenants.
+  const runReconcile = async (): Promise<void> => {
+    const summary = await reconcileEnrollments(
+      { store, purger, client: upstream },
+      configuredBoundaries,
+      {
+        batchSize: parseIntEnv(process.env['FEEDGEN_RECONCILE_BATCH_SIZE']),
+        maxActors: parseIntEnv(process.env['FEEDGEN_RECONCILE_MAX_ACTORS']),
+      },
+    )
+    console.log(
+      `enrollment reconciliation examined ${summary.examined} actors ` +
+        `(${summary.unenrolled} unenrolled, ${summary.shrunk} shrunk, ` +
+        `${summary.postsPurged} posts purged, ${summary.errors} errors)`,
+    )
+  }
+  await runReconcile()
+  const triggerReconcile = createReconcileScheduler(runReconcile, (err) => {
+    console.error('reconnect reconciliation failed:', err)
+  })
 
   // Seed only AFTER reconciliation so the snapshot already reflects
   // revocations that landed while the feedgen was down - otherwise an actor
@@ -267,6 +278,14 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       onUnenroll: async (did) => {
         // purgeActor invalidates the boundary cache as part of the purge.
         await purger.purgeActor(did)
+      },
+      // Every open triggers a reconcile: a reconnect can hide a missed
+      // unenroll, and the startup reconcile can itself run against a
+      // degraded upstream (per-actor resolve failures are only counted).
+      // The scheduler coalesces, so a healthy boot pays one bounded extra
+      // run.
+      onSessionEstablished: () => {
+        triggerReconcile()
       },
     },
     (err) => {

@@ -18,6 +18,14 @@ export interface ServiceStreamCallbacks {
     did: string,
     boundaries: string[],
   ) => void | Promise<void>
+  /**
+   * Fired on every socket open — the initial connect and each reconnect. The
+   * reconnect case is the hook for recovering events the stream cannot replay
+   * (a missed `unenroll` leaves no trace in the snapshot replay); consumers
+   * trigger their reconciliation here. A rejection is reported via `onError`
+   * and never tears down the stream.
+   */
+  onSessionEstablished?: () => void | Promise<void>
 }
 
 export interface ServiceStreamConfig {
@@ -170,7 +178,13 @@ export class ServiceStream {
     this.ws = ws
 
     ws.addEventListener('open', () => {
+      // A socket that opens after stop() or after being superseded must not
+      // arm timers or fire session hooks against torn-down state.
+      if (this.ws !== ws) return
       this.armStabilityReset()
+      void Promise.resolve()
+        .then(() => this.callbacks.onSessionEstablished?.())
+        .catch((err: unknown) => this.onError?.(err as Error))
     })
 
     ws.onmessage = (e: MessageEventLike) => {
@@ -267,7 +281,9 @@ export class ServiceStream {
    * lossless for enroll and boundary changes: this stream has no cursor, and
    * the upstream replays every current enrollment on connect
    * (`createServiceSubscriptionHandler` in the service's `subscribe-records`),
-   * so the reconnect restores the full set.
+   * so the reconnect restores those. A discarded `unenroll` is NOT replayed —
+   * the actor is simply absent from the snapshot — so consumers hang their
+   * reconciliation off `onSessionEstablished` to purge missed unenrolls.
    */
   private failConnection(): void {
     this.queue = []
@@ -313,6 +329,7 @@ export class ServiceStream {
   }
 
   private async handleMessage(data: Uint8Array): Promise<void> {
+    let enrollment: EnrollmentMessage
     try {
       // atproto subscription framing: two concatenated DAG-CBOR values, the
       // first being a header `{op, t}` and the second being the body.
@@ -322,28 +339,50 @@ export class ServiceStream {
       ]
       if (header['t'] !== '#enrollment') return
       const [body] = decodeFirst(rest) as [Record<string, unknown>, Uint8Array]
-      const enrollment = body as unknown as EnrollmentMessage
-      switch (enrollment.action) {
-        case 'enroll':
-          await this.callbacks.onEnroll(
-            enrollment.did,
-            enrollment.boundaries ?? [],
-          )
-          break
-        case 'unenroll':
-          await this.callbacks.onUnenroll(enrollment.did)
-          break
-        case 'boundaries':
-          // optional so consumers that don't track boundary changes can
-          // omit it. An unknown/future action simply falls through as a no-op.
-          await this.callbacks.onBoundariesChanged?.(
-            enrollment.did,
-            enrollment.boundaries ?? [],
-          )
-          break
-      }
+      enrollment = body as unknown as EnrollmentMessage
     } catch (err) {
+      // A malformed frame would only be resent verbatim by a reconnect
+      // (poison loop), and replay restores the same state anyway — log and
+      // skip it rather than dropping the connection.
       this.onError?.(err as Error)
+      return
+    }
+    try {
+      await this.dispatch(enrollment)
+    } catch (err) {
+      // A failed handler means the event was NOT applied. Dropping the
+      // connection is the retry: the reconnect's snapshot replay redelivers
+      // enroll/boundary state, and reconciliation covers unenrolls.
+      this.onError?.(
+        new StratosError(
+          `enrollment ${enrollment.action} handler failed; dropping connection to retry`,
+          'SERVICE_STREAM_HANDLER_FAILED',
+          { cause: err },
+        ),
+      )
+      this.failConnection()
+    }
+  }
+
+  private async dispatch(enrollment: EnrollmentMessage): Promise<void> {
+    switch (enrollment.action) {
+      case 'enroll':
+        await this.callbacks.onEnroll(
+          enrollment.did,
+          enrollment.boundaries ?? [],
+        )
+        break
+      case 'unenroll':
+        await this.callbacks.onUnenroll(enrollment.did)
+        break
+      case 'boundaries':
+        // optional so consumers that don't track boundary changes can
+        // omit it. An unknown/future action simply falls through as a no-op.
+        await this.callbacks.onBoundariesChanged?.(
+          enrollment.did,
+          enrollment.boundaries ?? [],
+        )
+        break
     }
   }
 }
