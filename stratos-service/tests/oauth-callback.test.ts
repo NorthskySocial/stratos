@@ -908,6 +908,10 @@ describe('handleCallback', () => {
         'did:plc:kaoru',
         { pdsEndpoint: 'https://new-pds.example.com' },
       )
+      // The store treats a present `repoHost` key as an explicit clear, so
+      // equality alone is not enough: the key must be absent.
+      const updateArg = mockEnrollmentStore.updateEnrollment.mock.calls[0][1]
+      expect('repoHost' in updateArg).toBe(false)
     })
 
     it('resolves the PDS endpoint from the DID document when open-mode eligibility returns none', async () => {
@@ -923,7 +927,7 @@ describe('handleCallback', () => {
       })
       mockEnrollmentValidator.validate.mockResolvedValue({ allowed: true })
       const doc = atprotoDidDoc('did:plc:kaoru', keypair)
-      doc.service[0].serviceEndpoint = 'https://resolved-pds.example.com'
+      doc.service[0].serviceEndpoint = 'https://pds.tokyo3.example.com'
       mockIdResolver.did.resolve.mockResolvedValue(doc)
       mockEnrollmentStore.getEnrollment.mockResolvedValue(
         existingEnrollment({
@@ -941,14 +945,14 @@ describe('handleCallback', () => {
         expect.any(String),
         expect.objectContaining({
           custody: 'pds',
-          repoHost: 'https://resolved-pds.example.com',
+          repoHost: 'https://pds.tokyo3.example.com',
         }),
       )
       expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
         'did:plc:kaoru',
         {
-          pdsEndpoint: 'https://resolved-pds.example.com',
-          repoHost: 'https://resolved-pds.example.com',
+          pdsEndpoint: 'https://pds.tokyo3.example.com',
+          repoHost: 'https://pds.tokyo3.example.com',
         },
       )
     })
