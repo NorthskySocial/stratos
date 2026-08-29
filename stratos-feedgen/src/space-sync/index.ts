@@ -38,3 +38,20 @@ export type {
   SpaceSyncerDeps,
   SpaceSyncSuccess,
 } from './space-syncer.js'
+export { CommitVerifier } from './commit-verify.js'
+export type {
+  CommitVerifierDeps,
+  CommitVerifyFailure,
+  CommitVerifyFailureReason,
+  CommitVerifyResult,
+  CommitVerifySuccess,
+} from './commit-verify.js'
+export { SpaceSyncRunner } from './sync-runner.js'
+export type {
+  SpaceCommitConsecutiveFailureLogEvent,
+  SpaceCommitVerifyLogEvent,
+  SpaceSyncRunFailure,
+  SpaceSyncRunFailureReason,
+  SpaceSyncRunnerDeps,
+  SpaceSyncRunResult,
+} from './sync-runner.js'

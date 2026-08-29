@@ -28,6 +28,7 @@ export interface PurgeAudit {
     | 'reconcile-boundary-shrink'
     | 'space-unenroll'
     | 'space-boundary-shrink'
+    | 'space-commit-invalid'
   did?: string
   boundary?: string
   counts: PurgeCounts
@@ -122,7 +123,8 @@ export class Purger {
     trigger:
       | 'boundary-shrink'
       | 'reconcile-boundary-shrink'
-      | 'space-boundary-shrink' = 'boundary-shrink',
+      | 'space-boundary-shrink'
+      | 'space-commit-invalid' = 'boundary-shrink',
   ): Promise<PurgeCounts> {
     const counts = zeroCounts()
     counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)

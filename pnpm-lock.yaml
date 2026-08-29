@@ -242,6 +242,9 @@ importers:
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
+      '@noble/hashes':
+        specifier: ^1.6.1
+        version: 1.8.0
       '@northskysocial/stratos-core':
         specifier: workspace:*
         version: link:../stratos-core
