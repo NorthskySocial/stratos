@@ -26,6 +26,8 @@ export interface PurgeAudit {
     | 'boundary-deleted'
     | 'reconcile-unenroll'
     | 'reconcile-boundary-shrink'
+    | 'space-unenroll'
+    | 'space-boundary-shrink'
   did?: string
   boundary?: string
   counts: PurgeCounts
@@ -94,7 +96,7 @@ export class Purger {
    */
   async purgeActor(
     did: string,
-    trigger: 'unenroll' | 'reconcile-unenroll' = 'unenroll',
+    trigger: 'unenroll' | 'reconcile-unenroll' | 'space-unenroll' = 'unenroll',
   ): Promise<PurgeCounts> {
     // Stop ingestion first so no new records race the delete.
     this.actorPool?.removeActor(did)
@@ -119,7 +121,8 @@ export class Purger {
     boundary: string,
     trigger:
       | 'boundary-shrink'
-      | 'reconcile-boundary-shrink' = 'boundary-shrink',
+      | 'reconcile-boundary-shrink'
+      | 'space-boundary-shrink' = 'boundary-shrink',
   ): Promise<PurgeCounts> {
     const counts = zeroCounts()
     counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)

@@ -20,3 +20,13 @@ export {
   SpaceHostUnreachableError,
   SpaceNotFoundError,
 } from './errors.js'
+export { MembershipTracker } from './membership.js'
+export type {
+  BoundaryPassFailure,
+  BoundaryPassOutcome,
+  BoundaryPassSuccess,
+  MembershipPassLogEvent,
+  MembershipTrackerDeps,
+  PollTarget,
+  RemovedMember,
+} from './membership.js'
