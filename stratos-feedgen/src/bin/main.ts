@@ -9,7 +9,7 @@ import { loadFeedRegistry } from '../feeds/index.js'
 import {
   createShutdownHandler,
   installPanicHandlers,
-  type ShutdownHandler,
+  type ShutdownDeps,
 } from '../lifecycle/shutdown.js'
 import { createLogger } from '../logger.js'
 import {
@@ -36,13 +36,12 @@ async function main(): Promise<void> {
   const logger = createLogger(cfg.logLevel)
   installPanicHandlers(logger)
 
-  // Listeners are installed before the long async startup so a signal that
-  // arrives mid-startup exits instead of being ignored. The placeholder is
-  // swapped for the full drain sequence once everything is wired.
-  let shutdown: ShutdownHandler = async (signal: string): Promise<void> => {
-    logger.info({ signal }, 'shutdown signal during startup; exiting')
-    process.exit(0)
-  }
+  // Listeners are installed before the long async startup. The handler reads
+  // the deps at signal time, and startup fills them as resources come up, so
+  // a mid-startup signal drains exactly what already exists (open store,
+  // listening server) instead of exiting around it.
+  const shutdownDeps: ShutdownDeps = { logger }
+  const shutdown = createShutdownHandler(shutdownDeps)
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
   process.on('SIGINT', () => void shutdown('SIGINT'))
 
@@ -77,6 +76,7 @@ async function main(): Promise<void> {
   })
 
   const store = await createFeedgenStore(cfg)
+  shutdownDeps.store = store
 
   const verifier = createFeedRequestVerifier({
     feedgenDid: cfg.feedgenServiceDid,
@@ -99,6 +99,7 @@ async function main(): Promise<void> {
   })
 
   const httpServer = await server.listen(port)
+  shutdownDeps.httpServer = httpServer
   logger.info({ port }, 'stratos-feedgen listening')
 
   const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
@@ -124,14 +125,8 @@ async function main(): Promise<void> {
   const actorPool = subscription?.actorPool ?? null
   subscriptionStatus.serviceStream = serviceStream
   subscriptionStatus.actorPool = actorPool
-
-  shutdown = createShutdownHandler({
-    httpServer,
-    serviceStream,
-    actorPool,
-    store,
-    logger,
-  })
+  shutdownDeps.serviceStream = serviceStream
+  shutdownDeps.actorPool = actorPool
 }
 
 interface StartSubscriptionDeps {

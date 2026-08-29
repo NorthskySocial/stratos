@@ -330,6 +330,50 @@ describe('createShutdownHandler', () => {
     expect(exit).toHaveBeenCalledWith(0)
   })
 
+  it('completes with only a logger when no resources exist yet', async () => {
+    const lines: CapturedLine[] = []
+    const exit = vi.fn()
+    const handler = createShutdownHandler({
+      logger: captureLogger(lines),
+      exit,
+    })
+
+    await handler('SIGTERM')
+
+    expect(exit).toHaveBeenCalledWith(0)
+    expect(lines.filter((l) => l.level === 'error')).toEqual([])
+    expect(lines.filter((l) => l.level === 'info').map((l) => l.msg)).toEqual([
+      'shutdown started',
+      'shutdown complete',
+    ])
+  })
+
+  it('drains deps assigned after the handler was created', async () => {
+    const events: string[] = []
+    const exit = vi.fn()
+    const deps: Parameters<typeof createShutdownHandler>[0] = {
+      logger: nullLogger,
+      exit,
+    }
+    const handler = createShutdownHandler(deps)
+    // Startup fills deps after the handler is installed.
+    deps.store = {
+      close: async () => {
+        events.push('store.close')
+      },
+    }
+    deps.serviceStream = {
+      stop: () => {
+        events.push('stream.stop')
+      },
+    }
+
+    await handler('SIGTERM')
+
+    expect(events).toEqual(['stream.stop', 'store.close'])
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
   it('exits 1 immediately on a second signal', async () => {
     const lines: CapturedLine[] = []
     const { httpServer } = await listen((_req, res) => res.end())

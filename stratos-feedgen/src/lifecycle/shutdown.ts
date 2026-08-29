@@ -2,10 +2,10 @@ import type { Server as HttpServer } from 'node:http'
 import type { Logger } from '@northskysocial/stratos-core'
 
 export interface ShutdownDeps {
-  httpServer: HttpServer
+  httpServer?: HttpServer | null
   serviceStream?: { stop: () => void | Promise<void> } | null
   actorPool?: { stop: () => Promise<void> } | null
-  store: { close: () => Promise<void> }
+  store?: { close: () => Promise<void> } | null
   logger: Logger
   /** In-flight HTTP drain deadline before open sockets are destroyed. */
   drainTimeoutMs?: number
@@ -23,6 +23,10 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 15_000
  * await the actor pool's in-flight commit applies — cursors are durable
  * per-commit, so awaiting the drain IS the cursor flush — then close the DB.
  * A second signal exits immediately as an operator escape hatch.
+ *
+ * Deps are read at signal time and unset deps are skipped, so one handler
+ * installed before startup completes drains exactly what exists when the
+ * signal arrives.
  */
 export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
   const drainTimeoutMs = deps.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
@@ -38,10 +42,12 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
     shuttingDown = true
     deps.logger.info({ signal }, 'shutdown started')
     try {
-      await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
+      if (deps.httpServer) {
+        await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
+      }
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
       await deps.actorPool?.stop()
-      await deps.store.close()
+      await deps.store?.close()
       deps.logger.info({ signal }, 'shutdown complete')
       exit(0)
     } catch (err) {

@@ -144,9 +144,11 @@ and `/metrics` requests are counted in metrics but not logged.
 Prometheus text format, served on the same listener as the public API. When
 `FEEDGEN_METRICS_TOKEN` is set, scrapes must send
 `Authorization: Bearer <token>` (constant-time comparison); other requests
-get 401. When unset, the endpoint is **open** — the operator must restrict
-access at the network layer (firewall or reverse proxy). Feedgen-specific
-metrics:
+get 401. The token travels as a plaintext header, so serve `/metrics` over
+HTTPS (TLS-terminating reverse proxy) — on plain HTTP the token is exposed
+to any on-path observer. When unset, the endpoint is **open** — the operator
+must restrict access at the network layer (firewall or reverse proxy).
+Feedgen-specific metrics:
 
 | Metric                                  | Type      | Labels            |
 | --------------------------------------- | --------- | ----------------- |
