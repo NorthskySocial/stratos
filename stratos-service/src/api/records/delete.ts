@@ -54,6 +54,16 @@ export async function deleteRecord(
     )
   }
 
+  // A 'pds' custody actor keeps their repo on their own PDS and signs with
+  // their own key; Stratos must not also accept deletes for it. See create.ts.
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  if (enrollment?.custody === 'pds') {
+    throw new InvalidRequestError(
+      'This actor writes records to their own PDS',
+      'PdsCustodyWriteForbidden',
+    )
+  }
+
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUriSyntax(uriStr)
 
