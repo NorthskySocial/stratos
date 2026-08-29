@@ -300,6 +300,27 @@ Follow Clean code design patterns and prioritize the following:
 - Export types explicitly from index files
 - Use named exports (no default exports)
 
+#### Two compilers
+
+The workspace installs two TypeScript compilers. `package.json` cannot hold
+comments, so the arrangement is recorded here.
+
+| Binary | Compiler                                      | Used by              |
+| ------ | --------------------------------------------- | -------------------- |
+| `tsc`  | TypeScript 7.0 (Go), the `typescript-7` alias | `build`, `typecheck` |
+| `tsc6` | TypeScript 6.0, the `typescript` alias        | typescript-eslint    |
+
+typescript-eslint does not support the TypeScript 7 API. The `typescript` name
+therefore stays aliased to `@typescript/typescript6`, which installs its binary
+as `tsc6`. The names do not collide, so a plain `tsc` in a script is TypeScript 7.
+
+The type-aware ESLint rules read TypeScript 6 semantics while the build reads
+TypeScript 7 semantics. The two compilers can narrow a type differently. Trust
+`pnpm run typecheck` when a lint result and a build result disagree.
+
+Remove the `typescript` alias and use one compiler when typescript-eslint
+supports TypeScript 7.
+
 ### Naming Conventions
 
 | Item            | Convention             | Example                 |
