@@ -179,7 +179,7 @@ export async function createAppContext(
      * Destroy the application context
      */
     async destroy() {
-      pdsSyncWorker.stop()
+      await pdsSyncWorker.stop()
       await storageDestroy()
       services.repoCtx.repoWriteLocks.destroy()
       if (services.enrollmentCtx.allowListProvider) {

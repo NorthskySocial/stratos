@@ -451,6 +451,188 @@ describe('PdsEnrollmentSyncWorker', () => {
     expect(queue.jobs.has(USAGI)).toBe(false)
   })
 
+  it('cancel still waits for the in-flight attempt when queue removal fails', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let settled = false
+    const sync = vi.fn().mockImplementation(async () => {
+      await gate
+      settled = true
+      return 'ok'
+    })
+    vi.spyOn(queue, 'remove').mockRejectedValue(new Error('db locked'))
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    const generation = await worker.enqueue(USAGI)
+    const inFlight = worker.kick(USAGI, generation)
+
+    let cancelSettled = false
+    const cancelled = worker.cancel(USAGI).catch((err: unknown) => {
+      cancelSettled = true
+      return err
+    })
+
+    // The removal failure must not let cancel resolve past a running attempt.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(cancelSettled).toBe(false)
+
+    release()
+    const err = await cancelled
+    expect(settled).toBe(true)
+    expect(err).toBeInstanceOf(Error)
+    await inFlight
+  })
+
+  it('serializes a cancel against a concurrent enqueue so the fresh row survives', async () => {
+    let releaseRemove!: () => void
+    const removeGate = new Promise<void>((resolve) => {
+      releaseRemove = resolve
+    })
+    const realRemove = queue.remove.bind(queue)
+    vi.spyOn(queue, 'remove').mockImplementation(async (did: string) => {
+      await removeGate
+      return realRemove(did)
+    })
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    // Unenrollment blocks inside its queue removal; a fresh mutation lands.
+    const cancelled = worker.cancel(USAGI)
+    const enqueued = worker.enqueue(USAGI)
+
+    // Without serialization the enqueue's row appears now and the pending
+    // removal then deletes it, orphaning the mutation's inline attempt.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(queue.jobs.has(USAGI)).toBe(false)
+
+    releaseRemove()
+    await cancelled
+    const generation = await enqueued
+    expect(queue.jobs.get(USAGI)?.generation).toBe(generation)
+
+    // The fence was lifted in order: the inline attempt runs and writes.
+    await expect(worker.kick(USAGI, generation)).resolves.toBe('ok')
+    expect(sync).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases only its own chain link so a third mutation stays serialized', async () => {
+    let releaseRemove!: () => void
+    const removeGate = new Promise<void>((resolve) => {
+      releaseRemove = resolve
+    })
+    const realRemove = queue.remove.bind(queue)
+    vi.spyOn(queue, 'remove').mockImplementationOnce(async (did: string) => {
+      await removeGate
+      return realRemove(did)
+    })
+    let releaseUpsert!: () => void
+    const upsertGate = new Promise<void>((resolve) => {
+      releaseUpsert = resolve
+    })
+    const realUpsert = queue.upsertPending.bind(queue)
+    vi.spyOn(queue, 'upsertPending').mockImplementation(async (did: string) => {
+      await upsertGate
+      return realUpsert(did)
+    })
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    // A cancel blocks in its removal while a fresh enqueue chains behind it.
+    const firstCancel = worker.cancel(USAGI)
+    const enqueued = worker.enqueue(USAGI)
+
+    // The first cancel settles while the enqueue still holds the chain. Its
+    // cleanup must leave the enqueue's link in place, or the second cancel
+    // below starts unserialized and runs before the enqueue's insert.
+    releaseRemove()
+    await vi.advanceTimersByTimeAsync(0)
+    const secondCancel = worker.cancel(USAGI)
+    await vi.advanceTimersByTimeAsync(0)
+
+    releaseUpsert()
+    await Promise.all([firstCancel, enqueued, secondCancel])
+
+    // Serialized order is insert then remove: no row survives the cancel.
+    expect(queue.jobs.has(USAGI)).toBe(false)
+  })
+
+  it('releases the per-DID chain once its mutations settle', async () => {
+    const sync = vi.fn().mockResolvedValue('ok')
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    await worker.cancel(USAGI)
+
+    // A settled chain must not be retained: an entry per departed actor
+    // would otherwise accumulate for the life of the service.
+    const chains = (worker as unknown as { mutations: Map<string, unknown> })
+      .mutations
+    expect(chains.size).toBe(0)
+  })
+
+  it('stop resolves only after the active tick and its attempt settle', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let settled = false
+    const sync = vi.fn().mockImplementation(async () => {
+      await gate
+      settled = true
+      return 'ok'
+    })
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    worker.start()
+    // The startup tick claims the job and blocks inside the attempt.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sync).toHaveBeenCalledTimes(1)
+
+    let stopResolved = false
+    const stopping = worker.stop().then(() => {
+      stopResolved = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(stopResolved).toBe(false)
+
+    release()
+    await stopping
+    expect(settled).toBe(true)
+  })
+
+  it('stop fences claimed jobs that have not started', async () => {
+    const REI = 'did:plc:reiayanami'
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sync = vi.fn().mockImplementation(async (did: string) => {
+      if (did === USAGI) await gate
+      return 'ok'
+    })
+    const worker = new PdsEnrollmentSyncWorker({ queue, sync }, CONFIG)
+
+    await worker.enqueue(USAGI)
+    await worker.enqueue(REI)
+    // Force a deterministic due order: the tick claims USAGI first.
+    queue.jobs.get(USAGI)!.nextAttemptAt = '2000-01-01T00:00:00.000Z'
+
+    worker.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sync).toHaveBeenCalledTimes(1)
+
+    const stopping = worker.stop()
+    release()
+    await stopping
+
+    // REI was claimed by the tick but must not start after stop.
+    expect(sync).toHaveBeenCalledTimes(1)
+    expect(sync).not.toHaveBeenCalledWith(REI, expect.anything())
+  })
+
   it('never runs a job that was cancelled after its tick claimed it', async () => {
     const REI = 'did:plc:reiayanami'
     let release!: () => void

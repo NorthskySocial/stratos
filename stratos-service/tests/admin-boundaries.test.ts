@@ -761,6 +761,54 @@ describe('admin boundary endpoints', () => {
       ])
     })
 
+    it('omits the cursor when the final page is exactly full', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.upsertPending('did:plc:rei')
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '2' },
+      )
+      expect(res.statusCode).toBe(200)
+      const body = res.body as { jobs: { did: string }[]; cursor?: string }
+      expect(body.jobs).toHaveLength(2)
+      expect(body.cursor).toBeUndefined()
+    })
+
+    it('encodes the cursor from the last returned job', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.upsertPending('did:plc:rei')
+
+      const first = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '1' },
+      )
+      expect(first.statusCode).toBe(200)
+      const firstBody = first.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(firstBody.jobs).toHaveLength(1)
+      expect(firstBody.cursor).toBeDefined()
+
+      const second = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '1', cursor: firstBody.cursor! },
+      )
+      expect(second.statusCode).toBe(200)
+      const secondBody = second.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(secondBody.jobs).toHaveLength(1)
+      expect(secondBody.jobs[0].did).not.toBe(firstBody.jobs[0].did)
+    })
+
     it('still answers 500 without a logger when the queue read fails', async () => {
       const { app, ctx, pdsSyncQueue } = createCtx({})
       ;(ctx as { logger?: unknown }).logger = undefined
