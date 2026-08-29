@@ -86,7 +86,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           autoEnrollDomains,
           defaultBoundaries,
           spacesCapability,
-          pdsEndpoint: enrollmentResult.pdsEndpoint!,
+          pdsEndpoint: enrollmentResult.pdsEndpoint,
+          idResolver,
           logger,
         })
       } else {
@@ -156,8 +157,12 @@ async function handleExistingEnrollment(deps: {
   autoEnrollDomains: string[] | undefined
   defaultBoundaries: string[]
   spacesCapability: SpacesCapability | undefined
-  /** Freshly resolved from the DID document this request, not the stored value. */
-  pdsEndpoint: string
+  /**
+   * Resolved this request, not the stored value. Absent in open mode, where
+   * eligibility returns before the DID document is resolved.
+   */
+  pdsEndpoint: string | undefined
+  idResolver: IdResolver
   logger: Logger | undefined
 }) {
   const {
@@ -169,7 +174,7 @@ async function handleExistingEnrollment(deps: {
     profileRecordWriter,
     createAttestation,
     spacesCapability,
-    pdsEndpoint,
+    idResolver,
     logger,
   } = deps
 
@@ -191,6 +196,15 @@ async function handleExistingEnrollment(deps: {
   // Ensure PDS record exists (in case user deleted it but stayed enrolled in Stratos)
   const enrollment = await enrollmentStore.getEnrollment(did)
   if (enrollment && enrollment.active) {
+    // Open-mode eligibility returns an allowed result with no PDS endpoint.
+    // Resolve it from the DID document instead of publishing `undefined`: a
+    // pds-custody re-auth would publish `repoHost: undefined` and clear the
+    // stored route. A failed resolution fails the callback closed, so no
+    // absent endpoint is ever published or stored.
+    const pdsEndpoint =
+      deps.pdsEndpoint ??
+      (await resolveAtprotoIdentity(did, idResolver)).pdsEndpoint
+
     const currentBoundaries = await enrollmentStore.getBoundaries(did)
     const newBoundaries = selectEnrollBoundaries(
       deps.autoEnrollDomains,
