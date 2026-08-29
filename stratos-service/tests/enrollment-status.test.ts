@@ -509,7 +509,15 @@ function invokeAdminPost(
       },
     } as unknown as express.Response
     app(req, res, ((err?: unknown) => {
-      if (err) reject(err instanceof Error ? err : new Error(String(err)))
+      if (err) {
+        reject(
+          err instanceof Error
+            ? err
+            : new Error(
+                typeof err === 'string' ? err : 'route middleware failed',
+              ),
+        )
+      }
     }) as express.NextFunction)
   })
 }
