@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as fc from 'fast-check'
 import express from 'express'
+import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../src/index.js'
 import { registerEnrollmentHandlers } from '../src/features/index.js'
+import { ResolveEnrollmentsCache } from '../src/features/enrollment/handler.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
 
 function didArb(): fc.Arbitrary<string> {
@@ -462,8 +465,374 @@ describe('resolveEnrollments endpoint', () => {
     registerEnrollmentHandlers(xrpc as any, ctx)
 
     await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
-    await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
+    const hit = await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
 
     expect(callCount).toBe(1)
+    // The cache-hit path must return the full response, not just short-circuit.
+    expect(hit.body).toEqual({
+      did: 'did:plc:bulmabrief',
+      enrolled: true,
+      boundaries: ['west-city.jp'],
+    })
+  })
+})
+
+function invokeAdminPost(
+  ctx: AppContext,
+  path: string,
+  body: Record<string, unknown>,
+): Promise<MockResponse> {
+  const app = ctx.app
+  return new Promise((resolve, reject) => {
+    let statusCode = 200
+    const req = {
+      query: {},
+      body,
+      // Signals body-parser that the body is already parsed, so the
+      // adminJsonParser middleware passes it through untouched.
+      _body: true,
+      headers: {},
+      method: 'POST',
+      url: path,
+    } as unknown as express.Request
+    const res = {
+      status(code: number) {
+        statusCode = code
+        return res
+      },
+      json(responseBody: unknown) {
+        resolve({ statusCode, body: responseBody })
+        return res
+      },
+      setHeader() {
+        return res
+      },
+    } as unknown as express.Response
+    app(req, res, ((err?: unknown) => {
+      if (err) {
+        reject(
+          err instanceof Error
+            ? err
+            : new Error(
+                typeof err === 'string' ? err : 'route middleware failed',
+              ),
+        )
+      }
+    }) as express.NextFunction)
+  })
+}
+
+describe('resolveEnrollments cache invalidation', () => {
+  const REI = 'did:plc:reiayanami'
+  const MISATO = 'did:plc:misatokatsuragi'
+
+  interface HarnessState {
+    enrolled: boolean
+    active: boolean
+    boundaries: string[]
+    boundaryReads: number
+  }
+
+  function createHarness(initialBoundaries: string[] = ['tokyo-3.nerv.jp']): {
+    ctx: AppContext
+    xrpc: MockXrpcServer
+    state: HarnessState
+  } {
+    const state: HarnessState = {
+      enrolled: true,
+      active: true,
+      boundaries: [...initialBoundaries],
+      boundaryReads: 0,
+    }
+    const app = express()
+    const ctx = {
+      app,
+      enrollmentService: {
+        isEnrolled: async () => state.enrolled,
+        getEnrollment: async () => null,
+        unenroll: async () => {
+          state.enrolled = false
+          state.boundaries = []
+        },
+      },
+      boundaryResolver: {
+        getBoundaries: async () => {
+          state.boundaryReads++
+          return [...state.boundaries]
+        },
+      },
+      // getEnrollment intentionally returns no signingKeyDid or
+      // enrollmentRkey so the PDS write/delete paths short-circuit.
+      enrollmentStore: {
+        isEnrolled: async () => state.enrolled,
+        getEnrollment: async () =>
+          state.enrolled
+            ? {
+                did: REI,
+                enrolledAt: '2026-01-01T00:00:00.000Z',
+                pdsEndpoint: 'https://pds.tokyo-3.nerv.jp',
+                active: state.active,
+              }
+            : null,
+        getBoundaries: async () => [...state.boundaries],
+        addBoundary: async (_did: string, boundary: string) => {
+          state.boundaries.push(boundary)
+        },
+        removeBoundary: async (_did: string, boundary: string) => {
+          state.boundaries = state.boundaries.filter((b) => b !== boundary)
+        },
+        setBoundaries: async (_did: string, boundaries: string[]) => {
+          state.boundaries = [...boundaries]
+        },
+        updateEnrollment: async (_did: string, patch: { active?: boolean }) => {
+          if (patch.active !== undefined) state.active = patch.active
+        },
+      },
+      actorStore: { deleteSigningKey: async () => {} },
+      oauthClient: { revoke: async () => {}, restore: async () => {} },
+      enrollmentEvents: new EventEmitter(),
+      authVerifier: {
+        optionalStandard: async () => ({ credentials: { type: 'none' } }),
+        standard: async () => ({ credentials: { type: 'user', did: REI } }),
+        admin: async () => ({ credentials: { type: 'admin', did: MISATO } }),
+      },
+      createAttestation: async () => ({
+        sig: new Uint8Array([0xde, 0xad]),
+        signingKey: 'did:key:zDnaeServiceKey',
+      }),
+      serviceDid: 'did:web:stratos.nerv.jp',
+      cfg: {
+        service: { publicUrl: 'https://stratos.nerv.jp' },
+        adminDids: [],
+        stratos: { allowedDomains: ['tokyo-3.nerv.jp', 'geofront.nerv.jp'] },
+      },
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      },
+    } as unknown as AppContext
+    const xrpc = createMockXrpcServer()
+    registerEnrollmentHandlers(xrpc as unknown as XrpcServer, ctx)
+    return { ctx, xrpc, state }
+  }
+
+  interface ResolveBody {
+    did: string
+    enrolled: boolean
+    boundaries: string[]
+  }
+
+  it('returns enrolled false after unenroll within the cache TTL', async () => {
+    const { ctx, xrpc } = createHarness()
+
+    const before = await invokeResolveRoute(ctx, { did: REI })
+    expect((before.body as ResolveBody).enrolled).toBe(true)
+    expect((before.body as ResolveBody).boundaries).toEqual(['tokyo-3.nerv.jp'])
+
+    const unenroll = await invokeMethod(
+      xrpc,
+      'zone.stratos.enrollment.unenroll',
+      {},
+      { credentials: { type: 'user', did: REI } },
+    )
+    expect((unenroll.body as { success: boolean }).success).toBe(true)
+
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).enrolled).toBe(false)
+    expect((after.body as ResolveBody).boundaries).toEqual([])
+  })
+
+  it('returns the added boundary after addBoundary within the cache TTL', async () => {
+    const { ctx } = createHarness()
+
+    const before = await invokeResolveRoute(ctx, { did: REI })
+    expect((before.body as ResolveBody).boundaries).toEqual(['tokyo-3.nerv.jp'])
+
+    const admin = await invokeAdminPost(
+      ctx,
+      '/xrpc/zone.stratos.admin.addBoundary',
+      { did: REI, boundary: 'geofront.nerv.jp' },
+    )
+    expect(admin.statusCode).toBe(200)
+
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).boundaries).toEqual([
+      'tokyo-3.nerv.jp',
+      'geofront.nerv.jp',
+    ])
+  })
+
+  it('drops the removed boundary after removeBoundary within the cache TTL', async () => {
+    const { ctx } = createHarness(['tokyo-3.nerv.jp', 'geofront.nerv.jp'])
+
+    const before = await invokeResolveRoute(ctx, { did: REI })
+    expect((before.body as ResolveBody).boundaries).toEqual([
+      'tokyo-3.nerv.jp',
+      'geofront.nerv.jp',
+    ])
+
+    const admin = await invokeAdminPost(
+      ctx,
+      '/xrpc/zone.stratos.admin.removeBoundary',
+      { did: REI, boundary: 'geofront.nerv.jp' },
+    )
+    expect(admin.statusCode).toBe(200)
+
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).boundaries).toEqual(['tokyo-3.nerv.jp'])
+  })
+
+  it('returns the replacement set after setBoundaries within the cache TTL', async () => {
+    const { ctx } = createHarness()
+
+    const before = await invokeResolveRoute(ctx, { did: REI })
+    expect((before.body as ResolveBody).boundaries).toEqual(['tokyo-3.nerv.jp'])
+
+    const admin = await invokeAdminPost(
+      ctx,
+      '/xrpc/zone.stratos.admin.setBoundaries',
+      { did: REI, boundaries: ['geofront.nerv.jp'] },
+    )
+    expect(admin.statusCode).toBe(200)
+
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).boundaries).toEqual(['geofront.nerv.jp'])
+  })
+
+  it('re-reads the store after setActive within the cache TTL', async () => {
+    const { ctx, state } = createHarness()
+
+    await invokeResolveRoute(ctx, { did: REI })
+    expect(state.boundaryReads).toBe(1)
+
+    const admin = await invokeAdminPost(
+      ctx,
+      '/xrpc/zone.stratos.admin.setActive',
+      { did: REI, active: false },
+    )
+    expect(admin.statusCode).toBe(200)
+
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect(after.statusCode).toBe(200)
+    // A cached entry would serve the second resolve without touching the
+    // store; the invalidation forces a fresh boundary read.
+    expect(state.boundaryReads).toBe(2)
+  })
+
+  it('refuses to cache a boundary set resolved before an in-flight mutation', async () => {
+    const { ctx } = createHarness()
+
+    let releaseResolve!: () => void
+    const gate = new Promise<void>((resolve) => (releaseResolve = resolve))
+    const resolver = ctx.boundaryResolver as {
+      getBoundaries: (did: string) => Promise<string[]>
+    }
+    const readBoundaries = resolver.getBoundaries
+    // First call: park a resolution that already read the pre-mutation set.
+    // Later calls fall through to the live store.
+    resolver.getBoundaries = async () => {
+      resolver.getBoundaries = readBoundaries
+      await gate
+      return ['tokyo-3.nerv.jp']
+    }
+
+    const inFlight = invokeResolveRoute(ctx, { did: REI })
+
+    const admin = await invokeAdminPost(
+      ctx,
+      '/xrpc/zone.stratos.admin.addBoundary',
+      { did: REI, boundary: 'geofront.nerv.jp' },
+    )
+    expect(admin.statusCode).toBe(200)
+
+    releaseResolve()
+    const stale = await inFlight
+    expect((stale.body as ResolveBody).boundaries).toEqual(['tokyo-3.nerv.jp'])
+
+    // The stale write must not have landed: the next resolve within the TTL
+    // reads the store again and sees the mutation.
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).boundaries).toEqual([
+      'tokyo-3.nerv.jp',
+      'geofront.nerv.jp',
+    ])
+  })
+})
+
+describe('ResolveEnrollmentsCache bounds', () => {
+  const ASUKA = 'did:plc:asukalangley'
+  const SHINJI = 'did:plc:shinjiikari'
+  const KAWORU = 'did:plc:kaworunagisa'
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('evicts an expired entry on read', () => {
+    vi.useFakeTimers()
+    const cache = new ResolveEnrollmentsCache(1000, 10)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
+
+    vi.advanceTimersByTime(1000)
+    expect(cache.get(ASUKA)).toBeUndefined()
+    // The expired row must be gone, not merely masked: a leftover row per
+    // resolved DID would accumulate for the life of the process.
+    const entries = (cache as unknown as { entries: Map<string, unknown> })
+      .entries
+    expect(entries.size).toBe(0)
+  })
+
+  it('serves an entry for the full TTL', () => {
+    vi.useFakeTimers()
+    const cache = new ResolveEnrollmentsCache(1000, 10)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+
+    vi.advanceTimersByTime(999)
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
+  })
+
+  it('caps stored entries by evicting the oldest insert', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 2)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+    cache.set(SHINJI, ['geofront.nerv.jp'], cache.epoch())
+    cache.set(KAWORU, ['seele.nerv.jp'], cache.epoch())
+
+    expect(cache.get(ASUKA)).toBeUndefined()
+    expect(cache.get(SHINJI)).toEqual(['geofront.nerv.jp'])
+    expect(cache.get(KAWORU)).toEqual(['seele.nerv.jp'])
+    const entries = (cache as unknown as { entries: Map<string, unknown> })
+      .entries
+    expect(entries.size).toBe(2)
+  })
+
+  it('overwrites an existing DID at the cap without evicting', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 2)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+    cache.set(SHINJI, ['geofront.nerv.jp'], cache.epoch())
+    cache.set(SHINJI, ['seele.nerv.jp'], cache.epoch())
+
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
+    expect(cache.get(SHINJI)).toEqual(['seele.nerv.jp'])
+  })
+
+  it('rejects a write fenced against a stale epoch', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 10)
+    const epoch = cache.epoch()
+    // Any invalidation voids in-flight writes, including for other DIDs.
+    cache.invalidate(SHINJI)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], epoch)
+
+    expect(cache.get(ASUKA)).toBeUndefined()
+  })
+
+  it('accepts a write when no invalidation intervened', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 10)
+    const epoch = cache.epoch()
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], epoch)
+
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
   })
 })
