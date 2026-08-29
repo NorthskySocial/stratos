@@ -1,0 +1,741 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { PostUpsert } from '../src/db/index.js'
+import {
+  MalformedCursorError,
+  RepoNotFoundError,
+  SpaceSyncer,
+  type GetRecordOptions,
+  type GetRecordResult,
+  type ListRepoOpsOptions,
+  type ListRepoOpsResult,
+  type PollTarget,
+  type RepoOpEntry,
+  type SpaceSyncerDeps,
+  type SpaceSyncLogEvent,
+  type SpaceSyncResult,
+  type SpaceSyncSuccess,
+} from '../src/space-sync/index.js'
+
+// 90s-anime crew DIDs and boundaries — `{serviceDid}/{domainName}`.
+const STRATOS_DID = 'did:web:stratos.test'
+const BEBOP_BOUNDARY = `${STRATOS_DID}/bebop-crew`
+const SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/bebop-crew`
+const SPIKE_DID = 'did:plc:spikespiegel'
+const HOST = 'https://spike.example'
+const POST_COLLECTION = 'zone.stratos.feed.post'
+const FIXED_NOW = '2024-06-01T00:00:00.000Z'
+
+function makeTarget(overrides: Partial<PollTarget> = {}): PollTarget {
+  return {
+    spaceUri: SPACE_URI,
+    boundary: BEBOP_BOUNDARY,
+    did: SPIKE_DID,
+    host: HOST,
+    ...overrides,
+  }
+}
+
+function makePostRecord(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    $type: POST_COLLECTION,
+    text: 'see you space cowboy',
+    createdAt: FIXED_NOW,
+    ...overrides,
+  }
+}
+
+/**
+ * Omits `value` entirely rather than accepting a boolean flag to control its
+ * presence — callers that want an inline value spread it in explicitly;
+ * callers that want the `getRecord` fallback path just omit it.
+ */
+function baseOp(overrides: Partial<RepoOpEntry> = {}): RepoOpEntry {
+  return {
+    rev: '1',
+    collection: POST_COLLECTION,
+    rkey: '3jxyz',
+    cid: 'bafyone',
+    prev: null,
+    ...overrides,
+  }
+}
+
+function makePage(
+  overrides: Partial<ListRepoOpsResult> = {},
+): ListRepoOpsResult {
+  return {
+    ops: [],
+    ...overrides,
+  }
+}
+
+function fakeStore() {
+  return {
+    upsertPost: vi.fn(async (_input: PostUpsert): Promise<void> => {}),
+    deletePost: vi.fn(async (_uri: string): Promise<void> => {}),
+    getSpaceCursor: vi.fn(
+      async (_spaceUri: string, _did: string): Promise<string | null> => null,
+    ),
+    upsertSpaceCursor: vi.fn(
+      async (
+        _spaceUri: string,
+        _did: string,
+        _cursor: string,
+        _updatedAt: string,
+      ): Promise<void> => {},
+    ),
+    deleteSpaceCursor: vi.fn(
+      async (_spaceUri: string, _did: string): Promise<number> => 1,
+    ),
+  }
+}
+
+function fakeCredentialManager() {
+  return {
+    getCredential: vi.fn(async (boundary: string) => ({
+      boundary,
+      spaceUri: SPACE_URI,
+      credential: `cred-${boundary}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      createPresentationProof: async () => 'proof',
+    })),
+  }
+}
+
+function fakeHostClient() {
+  return {
+    listRepoOps: vi.fn<
+      (opts: ListRepoOpsOptions) => Promise<ListRepoOpsResult>
+    >(async () => makePage()),
+    getRecord: vi.fn<
+      (opts: GetRecordOptions) => Promise<GetRecordResult>
+    >(async () => {
+      throw new Error('getRecord not stubbed for this test')
+    }),
+  }
+}
+
+interface BuildSyncerOptions {
+  store?: ReturnType<typeof fakeStore>
+  client?: ReturnType<typeof fakeHostClient>
+  credentialManager?: SpaceSyncerDeps['credentialManager']
+  maxRecordBytes?: number
+  maxPages?: number
+  maxRecordsPerMember?: number
+  log?: (event: SpaceSyncLogEvent) => void
+  onError?: (target: PollTarget, err: unknown) => void
+}
+
+function buildSyncer(opts: BuildSyncerOptions = {}): {
+  syncer: SpaceSyncer
+  store: ReturnType<typeof fakeStore>
+  client: ReturnType<typeof fakeHostClient>
+} {
+  const store = opts.store ?? fakeStore()
+  const client = opts.client ?? fakeHostClient()
+  const syncer = new SpaceSyncer({
+    store,
+    credentialManager: opts.credentialManager ?? fakeCredentialManager(),
+    createHostClient: () => client,
+    maxRecordBytes: opts.maxRecordBytes,
+    maxPages: opts.maxPages,
+    maxRecordsPerMember: opts.maxRecordsPerMember,
+    now: () => FIXED_NOW,
+    log: opts.log,
+    onError: opts.onError,
+  })
+  return { syncer, store, client }
+}
+
+function expectSuccess(result: SpaceSyncResult): SpaceSyncSuccess {
+  if (!result.ok) {
+    throw new Error(`expected success, got failure: ${String(result.error)}`)
+  }
+  return result
+}
+
+describe('SpaceSyncer', () => {
+  describe('create and delete propagation', () => {
+    it('indexes a created post from an inline op value', async () => {
+      const { syncer, store, client } = buildSyncer({
+        client: (() => {
+          const c = fakeHostClient()
+          c.listRepoOps.mockResolvedValue(
+            makePage({ ops: [baseOp({ value: makePostRecord() })] }),
+          )
+          return c
+        })(),
+      })
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.recordsIndexed).toBe(1)
+      expect(result.recordsDeleted).toBe(0)
+      expect(result.pagesFetched).toBe(1)
+      expect(result.stopReason).toBe('complete')
+      expect(store.upsertPost).toHaveBeenCalledWith({
+        uri: `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jxyz`,
+        did: SPIKE_DID,
+        cid: 'bafyone',
+        sortAt: FIXED_NOW,
+        indexedAt: FIXED_NOW,
+        record: makePostRecord(),
+        blobRefs: [],
+        boundaries: [BEBOP_BOUNDARY],
+      })
+      expect(client.getRecord).not.toHaveBeenCalled()
+    })
+
+    it('deletes a post when the op cid is null', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ cid: null })] }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.recordsDeleted).toBe(1)
+      expect(result.recordsIndexed).toBe(0)
+      expect(store.deletePost).toHaveBeenCalledWith(
+        `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jxyz`,
+      )
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+
+    it('updates an existing post the same way it creates one', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({ cid: 'bafytwo', value: makePostRecord({ text: 'v2' }) }),
+          ],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ cid: 'bafytwo', record: expect.objectContaining({ text: 'v2' }) }),
+      )
+    })
+  })
+
+  describe('superseded-op coalescing', () => {
+    it('elides the getRecord fetch for a superseded op on the same path', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({ cid: 'bafyold' }),
+            baseOp({ cid: 'bafynew', value: makePostRecord() }),
+          ],
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(client.getRecord).not.toHaveBeenCalled()
+      expect(store.upsertPost).toHaveBeenCalledTimes(1)
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ cid: 'bafynew' }),
+      )
+      expect(result.recordsIndexed).toBe(1)
+    })
+  })
+
+  describe('getRecord fallback', () => {
+    it('fetches the record when the op carries no inline value', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [baseOp()] }))
+      client.getRecord.mockResolvedValue({
+        uri: `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jxyz`,
+        cid: 'bafyone',
+        value: makePostRecord(),
+      })
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(client.getRecord).toHaveBeenCalledWith({
+        space: SPACE_URI,
+        repo: SPIKE_DID,
+        collection: POST_COLLECTION,
+        rkey: '3jxyz',
+      })
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ cid: 'bafyone', record: makePostRecord() }),
+      )
+      expect(result.recordsIndexed).toBe(1)
+    })
+
+    it('aborts the target when getRecord fails', async () => {
+      const { syncer, store, client } = buildSyncer({ onError: vi.fn() })
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [baseOp()] }))
+      client.getRecord.mockRejectedValue(
+        new RepoNotFoundError({ status: 404, body: '', url: HOST }),
+      )
+
+      const result = await syncer.syncTarget(makeTarget())
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.reason).toBe('member-skip')
+      expect(store.upsertPost).not.toHaveBeenCalled()
+      expect(store.upsertSpaceCursor).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('cursor handling', () => {
+    it('resumes from a previously stored cursor', async () => {
+      const store = fakeStore()
+      store.getSpaceCursor.mockResolvedValue('resume-cursor')
+      const { syncer, client } = buildSyncer({ store })
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(client.listRepoOps).toHaveBeenCalledWith({
+        space: SPACE_URI,
+        repo: SPIKE_DID,
+        cursor: 'resume-cursor',
+      })
+    })
+
+    it('starts cold when no cursor is stored', async () => {
+      const { syncer, client } = buildSyncer()
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(client.listRepoOps).toHaveBeenCalledWith({
+        space: SPACE_URI,
+        repo: SPIKE_DID,
+        cursor: undefined,
+      })
+    })
+
+    it('persists the page cursor only while a page is non-terminal', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps
+        .mockResolvedValueOnce(makePage({ ops: [], cursor: 'page-2' }))
+        .mockResolvedValueOnce(makePage({ ops: [] }))
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(store.upsertSpaceCursor).toHaveBeenCalledTimes(1)
+      expect(store.upsertSpaceCursor).toHaveBeenCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
+        'page-2',
+        FIXED_NOW,
+      )
+      expect(result.pagesFetched).toBe(2)
+      expect(result.stopReason).toBe('complete')
+    })
+
+    it('drops the cursor and reports malformed-cursor when the host rejects it', async () => {
+      const store = fakeStore()
+      store.getSpaceCursor.mockResolvedValue('stale-cursor')
+      const onError = vi.fn()
+      const { syncer, client } = buildSyncer({ store, onError })
+      const err = new MalformedCursorError({ status: 400, body: '', url: HOST })
+      client.listRepoOps.mockRejectedValue(err)
+
+      const result = await syncer.syncTarget(makeTarget())
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.reason).toBe('malformed-cursor')
+        expect(result.error).toBe(err)
+      }
+      expect(store.deleteSpaceCursor).toHaveBeenCalledWith(SPACE_URI, SPIKE_DID)
+      expect(onError).toHaveBeenCalledWith(makeTarget(), err)
+    })
+
+    it('leaves the cursor untouched on any other failure (member-skip)', async () => {
+      const store = fakeStore()
+      const onError = vi.fn()
+      const { syncer, client } = buildSyncer({ store, onError })
+      const err = new RepoNotFoundError({ status: 404, body: '', url: HOST })
+      client.listRepoOps.mockRejectedValue(err)
+
+      const result = await syncer.syncTarget(makeTarget())
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.reason).toBe('member-skip')
+        expect(result.error).toBe(err)
+      }
+      expect(store.deleteSpaceCursor).not.toHaveBeenCalled()
+      expect(onError).toHaveBeenCalledWith(makeTarget(), err)
+    })
+  })
+
+  describe('record size cap', () => {
+    it('skips an oversized decoded record without indexing it', async () => {
+      const { syncer, store, client } = buildSyncer({ maxRecordBytes: 10 })
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value: makePostRecord() })] }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedOversized).toBe(1)
+      expect(result.recordsIndexed).toBe(0)
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('createdAt clamp', () => {
+    it('passes through a plausible past createdAt unchanged', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({
+              value: makePostRecord({ createdAt: '2020-01-01T00:00:00.000Z' }),
+            }),
+          ],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ sortAt: '2020-01-01T00:00:00.000Z' }),
+      )
+    })
+
+    it('clamps a future createdAt to now', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({
+              value: makePostRecord({ createdAt: '2999-01-01T00:00:00.000Z' }),
+            }),
+          ],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ sortAt: FIXED_NOW }),
+      )
+    })
+
+    it('clamps an unparseable createdAt to now', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [baseOp({ value: makePostRecord({ createdAt: 'not-a-date' }) })],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ sortAt: FIXED_NOW }),
+      )
+    })
+  })
+
+  describe('malformed op rejection', () => {
+    it('rejects an op with an invalid collection NSID', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({
+              collection: 'zone/stratos.feed.post',
+              value: makePostRecord(),
+            }),
+          ],
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(1)
+      expect(result.recordsIndexed).toBe(0)
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+
+    it('rejects an op with an invalid rkey', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [baseOp({ rkey: 'bad/rkey', value: makePostRecord() })],
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(1)
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+
+    it('ignores a non-post collection without counting it as malformed', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps
+        .mockResolvedValueOnce(
+          makePage({
+            ops: [
+              baseOp({
+                collection: 'zone.stratos.actor.profile',
+                value: { $type: 'zone.stratos.actor.profile' },
+              }),
+            ],
+            cursor: 'page-2',
+          }),
+        )
+        .mockResolvedValueOnce(makePage({ ops: [] }))
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(0)
+      expect(result.recordsIndexed).toBe(0)
+      expect(store.upsertPost).not.toHaveBeenCalled()
+      expect(store.upsertSpaceCursor).toHaveBeenCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
+        'page-2',
+        FIXED_NOW,
+      )
+    })
+
+    it('treats a non-object inline value as malformed without calling getRecord', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value: ['not-a-record'] })] }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(1)
+      expect(client.getRecord).not.toHaveBeenCalled()
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('boundary claim strip', () => {
+    it('always stamps the poll target boundary, ignoring any boundary claim in the record', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({
+              value: makePostRecord({
+                boundary: 'attacker-supplied-boundary',
+                boundaries: ['attacker-supplied-boundary'],
+              }),
+            }),
+          ],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ boundaries: [BEBOP_BOUNDARY] }),
+      )
+    })
+  })
+
+  describe('per-member cap', () => {
+    it('stops after the page that crosses the per-member record cap', async () => {
+      const { syncer, client } = buildSyncer({ maxRecordsPerMember: 1 })
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({ rkey: 'one', value: makePostRecord() }),
+            baseOp({ rkey: 'two', value: makePostRecord() }),
+          ],
+          cursor: 'page-2',
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.recordsIndexed).toBe(2)
+      expect(result.stopReason).toBe('per-member-cap')
+      expect(result.pagesFetched).toBe(1)
+      expect(client.listRepoOps).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('max pages bound', () => {
+    it('stops after maxPages even if the host keeps paging', async () => {
+      const { syncer, client } = buildSyncer({ maxPages: 2 })
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [], cursor: 'always-more' }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(client.listRepoOps).toHaveBeenCalledTimes(2)
+      expect(result.pagesFetched).toBe(2)
+      expect(result.stopReason).toBe('max-pages')
+    })
+  })
+
+  describe('finalCommit', () => {
+    it('surfaces the commit envelope from the terminal page', async () => {
+      const { syncer, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [], commit: { sig: 'abc' } }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.finalCommit).toEqual({ sig: 'abc' })
+    })
+
+    it('omits finalCommit when the terminal page carries none', async () => {
+      const { syncer, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [] }))
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.finalCommit).toBeUndefined()
+      expect('finalCommit' in result).toBe(false)
+    })
+
+    it('ignores a commit envelope on a non-terminal page', async () => {
+      const { syncer, client } = buildSyncer()
+      client.listRepoOps
+        .mockResolvedValueOnce(
+          makePage({ ops: [], cursor: 'page-2', commit: { sig: 'ignored' } }),
+        )
+        .mockResolvedValueOnce(makePage({ ops: [] }))
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.finalCommit).toBeUndefined()
+    })
+  })
+
+  describe('default logging', () => {
+    it('logs a structured summary to console.log when no log override is given', async () => {
+      const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const { syncer, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value: makePostRecord() })] }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(consoleLog).toHaveBeenCalledWith(
+        JSON.stringify({
+          msg: 'feedgen.space-sync-pass',
+          spaceUri: SPACE_URI,
+          did: SPIKE_DID,
+          pagesFetched: 1,
+          recordsIndexed: 1,
+          recordsDeleted: 0,
+          skippedOversized: 0,
+          skippedMalformed: 0,
+          stopReason: 'complete',
+        }),
+      )
+      consoleLog.mockRestore()
+    })
+
+    it('logs the failed target to console.error when no onError override is given', async () => {
+      const consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => {})
+      const { syncer, client } = buildSyncer()
+      const err = new RepoNotFoundError({ status: 404, body: '', url: HOST })
+      client.listRepoOps.mockRejectedValue(err)
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(consoleError).toHaveBeenCalledWith(
+        `space sync failed for ${SPIKE_DID} in ${SPACE_URI}:`,
+        err,
+      )
+      consoleError.mockRestore()
+    })
+  })
+
+  describe('blob ref wiring', () => {
+    it('extracts blob refs from an embed on the resolved record', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({
+              value: makePostRecord({
+                embed: {
+                  $type: 'app.bsky.embed.images',
+                  images: [
+                    {
+                      image: { ref: { $link: 'bafkreicid' }, mimeType: 'image/jpeg' },
+                    },
+                  ],
+                },
+              }),
+            }),
+          ],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blobRefs: [{ cid: 'bafkreicid', mimeType: 'image/jpeg' }],
+        }),
+      )
+    })
+  })
+
+  describe('mixed page', () => {
+    it('applies every op kind on one page and reports combined counts', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            // Create via inline value.
+            baseOp({ rkey: 'created', value: makePostRecord() }),
+            // Delete.
+            baseOp({ rkey: 'deleted', cid: null }),
+            // Malformed collection — grammar-invalid, always skipped.
+            baseOp({
+              rkey: 'bad-collection',
+              collection: 'zone/stratos.feed.post',
+              value: makePostRecord(),
+            }),
+            // Non-post collection — silently ignored, not malformed.
+            baseOp({
+              rkey: 'other-collection',
+              collection: 'zone.stratos.actor.profile',
+              value: { $type: 'zone.stratos.actor.profile' },
+            }),
+            // Superseded pair on the same path — only the second is applied.
+            baseOp({ rkey: 'superseded', cid: 'bafyold' }),
+            baseOp({
+              rkey: 'superseded',
+              cid: 'bafynew',
+              value: makePostRecord(),
+            }),
+          ],
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.recordsIndexed).toBe(2)
+      expect(result.recordsDeleted).toBe(1)
+      expect(result.skippedMalformed).toBe(1)
+      expect(client.getRecord).not.toHaveBeenCalled()
+      expect(store.upsertPost).toHaveBeenCalledTimes(2)
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          uri: `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/superseded`,
+          cid: 'bafynew',
+        }),
+      )
+    })
+  })
+})

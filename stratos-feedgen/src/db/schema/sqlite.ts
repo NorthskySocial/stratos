@@ -44,3 +44,14 @@ export const enrolledActor = sqliteTable('enrolled_actor', {
   enrolledAt: text('enrolledAt').notNull(),
   lastSeenAt: text('lastSeenAt').notNull(),
 })
+
+export const spaceSyncCursor = sqliteTable(
+  'space_sync_cursor',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+    cursor: text('cursor').notNull(),
+    updatedAt: text('updatedAt').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)

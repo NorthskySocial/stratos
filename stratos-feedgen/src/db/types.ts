@@ -70,10 +70,23 @@ export interface FeedgenStore {
   deletePostsByBoundary: (boundary: string) => Promise<number>
   /** Delete the sync cursor for `did`. Returns rows removed (0 or 1). */
   deleteCursor: (did: string) => Promise<number>
+  /** Delete the stored space cursor for one (space, member) pair. Returns rows removed (0 or 1). */
+  deleteSpaceCursor: (spaceUri: string, did: string) => Promise<number>
+  /** Delete every space cursor held for `did`, across all spaces. Returns rows removed. */
+  deleteSpaceCursors: (did: string) => Promise<number>
 
   // sync cursor
   upsertCursor: (did: string, seq: number, updatedAt: string) => Promise<void>
   getCursor: (did: string) => Promise<number | null>
+
+  // space sync cursor (per space, per member)
+  upsertSpaceCursor: (
+    spaceUri: string,
+    did: string,
+    cursor: string,
+    updatedAt: string,
+  ) => Promise<void>
+  getSpaceCursor: (spaceUri: string, did: string) => Promise<string | null>
 
   // enrolled actor
   upsertEnrolledActor: (input: EnrolledActorUpsert) => Promise<void>

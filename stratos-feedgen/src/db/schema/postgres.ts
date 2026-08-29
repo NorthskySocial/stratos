@@ -38,3 +38,14 @@ export const pgEnrolledActor = pgTable('enrolled_actor', {
   enrolledAt: text('enrolledAt').notNull(),
   lastSeenAt: text('lastSeenAt').notNull(),
 })
+
+export const pgSpaceSyncCursor = pgTable(
+  'space_sync_cursor',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+    cursor: text('cursor').notNull(),
+    updatedAt: text('updatedAt').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)

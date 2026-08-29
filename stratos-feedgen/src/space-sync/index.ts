@@ -30,3 +30,11 @@ export type {
   PollTarget,
   RemovedMember,
 } from './membership.js'
+export { SpaceSyncer } from './space-syncer.js'
+export type {
+  SpaceSyncFailure,
+  SpaceSyncLogEvent,
+  SpaceSyncResult,
+  SpaceSyncerDeps,
+  SpaceSyncSuccess,
+} from './space-syncer.js'
