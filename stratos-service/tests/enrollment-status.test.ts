@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as fc from 'fast-check'
 import express from 'express'
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../src/index.js'
 import { registerEnrollmentHandlers } from '../src/features/index.js'
+import { ResolveEnrollmentsCache } from '../src/features/enrollment/handler.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
 
 function didArb(): fc.Arbitrary<string> {
@@ -464,9 +465,15 @@ describe('resolveEnrollments endpoint', () => {
     registerEnrollmentHandlers(xrpc as any, ctx)
 
     await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
-    await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
+    const hit = await invokeResolveRoute(ctx, { did: 'did:plc:bulmabrief' })
 
     expect(callCount).toBe(1)
+    // The cache-hit path must return the full response, not just short-circuit.
+    expect(hit.body).toEqual({
+      did: 'did:plc:bulmabrief',
+      enrolled: true,
+      boundaries: ['west-city.jp'],
+    })
   })
 })
 
@@ -502,7 +509,7 @@ function invokeAdminPost(
       },
     } as unknown as express.Response
     app(req, res, ((err?: unknown) => {
-      if (err) reject(err)
+      if (err) reject(err instanceof Error ? err : new Error(String(err)))
     }) as express.NextFunction)
   })
 }
@@ -743,5 +750,81 @@ describe('resolveEnrollments cache invalidation', () => {
       'tokyo-3.nerv.jp',
       'geofront.nerv.jp',
     ])
+  })
+})
+
+describe('ResolveEnrollmentsCache bounds', () => {
+  const ASUKA = 'did:plc:asukalangley'
+  const SHINJI = 'did:plc:shinjiikari'
+  const KAWORU = 'did:plc:kaworunagisa'
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('evicts an expired entry on read', () => {
+    vi.useFakeTimers()
+    const cache = new ResolveEnrollmentsCache(1000, 10)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
+
+    vi.advanceTimersByTime(1000)
+    expect(cache.get(ASUKA)).toBeUndefined()
+    // The expired row must be gone, not merely masked: a leftover row per
+    // resolved DID would accumulate for the life of the process.
+    const entries = (cache as unknown as { entries: Map<string, unknown> })
+      .entries
+    expect(entries.size).toBe(0)
+  })
+
+  it('serves an entry for the full TTL', () => {
+    vi.useFakeTimers()
+    const cache = new ResolveEnrollmentsCache(1000, 10)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+
+    vi.advanceTimersByTime(999)
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
+  })
+
+  it('caps stored entries by evicting the oldest insert', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 2)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+    cache.set(SHINJI, ['geofront.nerv.jp'], cache.epoch())
+    cache.set(KAWORU, ['seele.nerv.jp'], cache.epoch())
+
+    expect(cache.get(ASUKA)).toBeUndefined()
+    expect(cache.get(SHINJI)).toEqual(['geofront.nerv.jp'])
+    expect(cache.get(KAWORU)).toEqual(['seele.nerv.jp'])
+    const entries = (cache as unknown as { entries: Map<string, unknown> })
+      .entries
+    expect(entries.size).toBe(2)
+  })
+
+  it('overwrites an existing DID at the cap without evicting', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 2)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], cache.epoch())
+    cache.set(SHINJI, ['geofront.nerv.jp'], cache.epoch())
+    cache.set(SHINJI, ['seele.nerv.jp'], cache.epoch())
+
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
+    expect(cache.get(SHINJI)).toEqual(['seele.nerv.jp'])
+  })
+
+  it('rejects a write fenced against a stale epoch', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 10)
+    const epoch = cache.epoch()
+    // Any invalidation voids in-flight writes, including for other DIDs.
+    cache.invalidate(SHINJI)
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], epoch)
+
+    expect(cache.get(ASUKA)).toBeUndefined()
+  })
+
+  it('accepts a write when no invalidation intervened', () => {
+    const cache = new ResolveEnrollmentsCache(60_000, 10)
+    const epoch = cache.epoch()
+    cache.set(ASUKA, ['tokyo-3.nerv.jp'], epoch)
+
+    expect(cache.get(ASUKA)).toEqual(['tokyo-3.nerv.jp'])
   })
 })
