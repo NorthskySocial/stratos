@@ -1,0 +1,40 @@
+# Spike-only: the upstream alpha "spaces" PDS.
+#
+# Usage:
+#   docker compose -f docker-compose.spaces.yml up -d
+#
+# The PDS runs on the host network on purpose. The upstream did:web resolver
+# downgrades to plain HTTP only when the host is literally `localhost`
+# (packages/identity/src/did/web-resolver.ts). Host networking therefore lets
+# the PDS resolve `did:web:localhost%3A3100` to a Stratos on the host, with no
+# TLS and no tunnel.
+#
+# Image tag comes from the upstream workflow at commit 89deb9fac.
+services:
+  pds-spaces:
+    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha
+    container_name: stratos-spike-pds-spaces
+    restart: 'no'
+    network_mode: host
+    # The image runs as `node`, but a fresh named volume is owned by root, so
+    # the PDS cannot create its SQLite files. Root is acceptable here because
+    # this container is throwaway spike infrastructure.
+    user: '0:0'
+    environment:
+      PDS_PORT: 3010
+      PDS_HOSTNAME: localhost
+      PDS_DATA_DIRECTORY: /pds
+      PDS_BLOBSTORE_DISK_LOCATION: /pds/blocks
+      PDS_JWT_SECRET: spike-jwt-secret-do-not-use-outside-tests
+      PDS_ADMIN_PASSWORD: spike-admin
+      # Deterministic so a spike script can re-derive the DID without a restart.
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: 3ee7e0ba1e6b6b1a8b0d8e4f7a2c9d1e5f8a3b6c9d2e5f8a1b4c7d0e3f6a9b2c
+      PDS_DEV_MODE: 'true'
+      PDS_SERVICE_HANDLE_DOMAINS: .spike.test
+      LOG_ENABLED: 'true'
+      LOG_LEVEL: info
+    volumes:
+      - pds-spaces-data:/pds
+
+volumes:
+  pds-spaces-data:

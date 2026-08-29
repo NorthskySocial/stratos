@@ -10,6 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "types": ["node", "deno"],
     "allowImportingTsExtensions": true,
     "noEmit": true,
     // stratos-core publishes its `types` as raw `src/*.ts` written against

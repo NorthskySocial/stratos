@@ -1,6 +1,6 @@
 {
   "name": "@northskysocial/stratos-client",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Client library for Stratos private namespace service",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -60,7 +60,8 @@
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^25.2.1",
-    "typescript": "^5.9.3",
+    "typescript": "npm:@typescript/typescript6@~6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
     "vitest": "^4.0.18"
   }
 }

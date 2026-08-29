@@ -16,6 +16,13 @@ export interface Enrollment {
 }
 
 /**
+ * Whether a user's PDS supports spaces, decided at enrolment from the
+ * granted OAuth scope (not probed). `unknown` means the check itself failed
+ * and must never be treated as `not-capable`.
+ */
+export type SpacesCapability = 'capable' | 'not-capable' | 'unknown'
+
+/**
  * Result of enrollment validation
  */
 export interface EnrollmentValidationResult {
@@ -23,4 +30,5 @@ export interface EnrollmentValidationResult {
   reason?: import('../shared/errors.js').EnrollmentDenialReason
   pdsEndpoint?: string
   autoEnrollDomains?: string[]
+  spacesCapability?: SpacesCapability
 }
