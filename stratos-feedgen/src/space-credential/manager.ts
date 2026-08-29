@@ -1,5 +1,5 @@
 import type { Keypair } from '@atproto/crypto'
-import { boundaryToSpaceUri } from '@northskysocial/stratos-core'
+import { boundaryToSpaceUri, StratosError } from '@northskysocial/stratos-core'
 import type { UpstreamStratosClient } from '../upstream/index.js'
 import {
   createDpopProof,
@@ -221,7 +221,10 @@ function parseExpiry(
 ): number {
   const ms = Date.parse(expiresAt)
   if (!Number.isFinite(ms) || ms <= nowMs) {
-    throw new Error(`space credential for ${spaceUri} has an unusable expiry`)
+    throw new StratosError(
+      `space credential for ${spaceUri} has an unusable expiry`,
+      'InvalidCredentialExpiry',
+    )
   }
   return ms
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
-import { boundaryToSpaceUri } from '@northskysocial/stratos-core'
+import { boundaryToSpaceUri, StratosError } from '@northskysocial/stratos-core'
 import {
   DEFAULT_REFRESH_MARGIN_MS,
   SpaceCredentialManager,
@@ -253,8 +253,15 @@ describe('SpaceCredentialManager', () => {
       expect(mintCount).toBe(1)
 
       // Plain margin alone would not be due until 540_000; jitter (6_000 at
-      // this margin) pulls the threshold to 534_000.
-      clock.advance(534_000)
+      // this margin) pulls the threshold to 534_000. Just short of it, the
+      // credential is still cached -- a maximal draw is a small nudge, never
+      // an immediate refresh.
+      clock.advance(533_999)
+      const stillCached = await manager.getCredential(BEBOP_BOUNDARY)
+      expect(stillCached.credential).toBe('cred-1')
+      expect(mintCount).toBe(1)
+
+      clock.advance(1)
       const refreshed = await manager.getCredential(BEBOP_BOUNDARY)
       expect(refreshed.credential).toBe('cred-2')
       expect(mintCount).toBe(2)
@@ -403,9 +410,12 @@ describe('SpaceCredentialManager', () => {
       }),
     })
 
-    await expect(manager.getCredential(BEBOP_BOUNDARY)).rejects.toThrow(
-      /unusable expiry/,
-    )
+    // A domain error, so callers can classify credential-validation failures
+    // apart from unexpected ones.
+    const err = await manager.getCredential(BEBOP_BOUNDARY).catch((e) => e)
+    expect(err).toBeInstanceOf(StratosError)
+    expect(err.code).toBe('InvalidCredentialExpiry')
+    expect(err.message).toMatch(/unusable expiry/)
   })
 
   it('rejects a credential that arrives already expired', async () => {
