@@ -12,14 +12,40 @@ import { verifyEnrolled } from './internal/auth.js'
  * Positive `resolveEnrollments` response cache, keyed by DID.
  *
  * Shared between the resolve handler and every handler that mutates
- * enrollment or boundary state: a mutation must delete the DID's entry, or a
+ * enrollment or boundary state: a mutation must call `invalidate`, or a
  * downstream reconcile that resolves within the TTL reads stale
  * `enrolled: true` state and purges nothing.
+ *
+ * A per-DID generation fences the resolve handler's read-then-set window:
+ * `set` writes only while the caller's generation is still current, so a
+ * resolution that started before an invalidation cannot re-insert the stale
+ * boundary set it read.
  */
-type ResolveEnrollmentsCache = Map<
-  string,
-  { boundaries: string[]; timestamp: number }
->
+class ResolveEnrollmentsCache {
+  private readonly entries = new Map<
+    string,
+    { boundaries: string[]; timestamp: number }
+  >()
+  private readonly generations = new Map<string, number>()
+
+  get(did: string): { boundaries: string[]; timestamp: number } | undefined {
+    return this.entries.get(did)
+  }
+
+  generation(did: string): number {
+    return this.generations.get(did) ?? 0
+  }
+
+  set(did: string, boundaries: string[], generation: number): void {
+    if (generation !== this.generation(did)) return
+    this.entries.set(did, { boundaries, timestamp: Date.now() })
+  }
+
+  invalidate(did: string): void {
+    this.entries.delete(did)
+    this.generations.set(did, this.generation(did) + 1)
+  }
+}
 
 /**
  * Register all enrollment-related XRPC handlers
@@ -31,7 +57,7 @@ export function registerEnrollmentHandlers(
   server: XrpcServer,
   ctx: AppContext,
 ): void {
-  const resolveCache: ResolveEnrollmentsCache = new Map()
+  const resolveCache = new ResolveEnrollmentsCache()
   registerEnrollmentStatus(server, ctx)
   registerEnrollmentUnenroll(server, ctx, resolveCache)
   registerResolveEnrollmentsHandler(ctx, resolveCache)
@@ -194,7 +220,7 @@ function registerEnrollmentUnenroll(
 
         // 2. Perform hard delete: local enrollment record and actor data
         await ctx.enrollmentService.unenroll(did!)
-        resolveCache.delete(did!)
+        resolveCache.invalidate(did!)
 
         // 3. Delete signing key (if it exists)
         try {
@@ -254,13 +280,16 @@ function registerResolveEnrollmentsHandler(
           })
         }
 
+        // Snapshot before the awaits: an invalidation that lands while the
+        // resolution is in flight bumps the generation and voids this write.
+        const generation = cache.generation(did)
         const enrolled = await ctx.enrollmentService.isEnrolled(did)
         if (!enrolled) {
           return res.json({ did, enrolled: false, boundaries: [] })
         }
 
         const boundaries = await ctx.boundaryResolver.getBoundaries(did)
-        cache.set(did, { boundaries, timestamp: Date.now() })
+        cache.set(did, boundaries, generation)
         res.json({ did, enrolled: true, boundaries })
       } catch (err) {
         ctx.logger?.error(
@@ -537,7 +566,7 @@ function registerSetActiveHandler(
 
         if (enrollment.active !== active) {
           await ctx.enrollmentStore.updateEnrollment(did, { active })
-          resolveCache.delete(did)
+          resolveCache.invalidate(did)
         }
 
         ctx.logger?.info(
@@ -621,7 +650,7 @@ function registerAddBoundaryHandler(
 
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.addBoundary(did, boundary)
-        resolveCache.delete(did)
+        resolveCache.invalidate(did)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
@@ -703,7 +732,7 @@ function registerRemoveBoundaryHandler(
 
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.removeBoundary(did, boundary)
-        resolveCache.delete(did)
+        resolveCache.invalidate(did)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
@@ -793,7 +822,7 @@ function registerSetBoundariesHandler(
 
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
-        resolveCache.delete(did)
+        resolveCache.invalidate(did)
 
         // Re-read the EFFECTIVE persisted set: the store decorator force-includes
         // the reserved all-members domain, so the requested `boundaries` may omit

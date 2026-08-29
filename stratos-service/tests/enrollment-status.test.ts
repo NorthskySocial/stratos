@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import * as fc from 'fast-check'
 import express from 'express'
+import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../src/index.js'
 import { registerEnrollmentHandlers } from '../src/features/index.js'
 import type { Enrollment } from '@northskysocial/stratos-core'
@@ -469,8 +470,6 @@ describe('resolveEnrollments endpoint', () => {
   })
 })
 
-// --- resolveEnrollments cache invalidation tests ---
-
 function invokeAdminPost(
   ctx: AppContext,
   path: string,
@@ -600,7 +599,7 @@ describe('resolveEnrollments cache invalidation', () => {
       },
     } as unknown as AppContext
     const xrpc = createMockXrpcServer()
-    registerEnrollmentHandlers(xrpc as any, ctx)
+    registerEnrollmentHandlers(xrpc as unknown as XrpcServer, ctx)
     return { ctx, xrpc, state }
   }
 
@@ -705,5 +704,44 @@ describe('resolveEnrollments cache invalidation', () => {
     // A cached entry would serve the second resolve without touching the
     // store; the invalidation forces a fresh boundary read.
     expect(state.boundaryReads).toBe(2)
+  })
+
+  it('refuses to cache a boundary set resolved before an in-flight mutation', async () => {
+    const { ctx } = createHarness()
+
+    let releaseResolve!: () => void
+    const gate = new Promise<void>((resolve) => (releaseResolve = resolve))
+    const resolver = ctx.boundaryResolver as {
+      getBoundaries: (did: string) => Promise<string[]>
+    }
+    const readBoundaries = resolver.getBoundaries
+    // First call: park a resolution that already read the pre-mutation set.
+    // Later calls fall through to the live store.
+    resolver.getBoundaries = async () => {
+      resolver.getBoundaries = readBoundaries
+      await gate
+      return ['tokyo-3.nerv.jp']
+    }
+
+    const inFlight = invokeResolveRoute(ctx, { did: REI })
+
+    const admin = await invokeAdminPost(
+      ctx,
+      '/xrpc/zone.stratos.admin.addBoundary',
+      { did: REI, boundary: 'geofront.nerv.jp' },
+    )
+    expect(admin.statusCode).toBe(200)
+
+    releaseResolve()
+    const stale = await inFlight
+    expect((stale.body as ResolveBody).boundaries).toEqual(['tokyo-3.nerv.jp'])
+
+    // The stale write must not have landed: the next resolve within the TTL
+    // reads the store again and sees the mutation.
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).boundaries).toEqual([
+      'tokyo-3.nerv.jp',
+      'geofront.nerv.jp',
+    ])
   })
 })
