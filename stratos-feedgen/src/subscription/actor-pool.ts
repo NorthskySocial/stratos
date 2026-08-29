@@ -69,6 +69,8 @@ export class ActorPool {
   private readonly now: () => number
   private lastConnectAt = 0
   private evictionTimer: ReturnType<typeof setInterval> | null = null
+  /** Drains of syncers retired outside `stop()`; awaited at shutdown. */
+  private retiring = new Set<Promise<void>>()
 
   constructor(
     private config: ActorPoolConfig,
@@ -102,14 +104,18 @@ export class ActorPool {
       this.evictionTimer = null
     }
     const syncers = [...this.active.values()]
+    const retiring = [...this.retiring]
     this.active.clear()
     this.waiting = []
     this.requested.clear()
     // Await in-flight commit applies so the caller can close the DB safely.
+    // This includes retired syncers: a drain still in flight from
+    // removeActor/evictIdle must settle before the store closes.
     // allSettled: one failing syncer must not abandon the drain of the rest.
-    const results = await Promise.allSettled(
-      syncers.map((syncer) => syncer.drainAndStop()),
-    )
+    const results = await Promise.allSettled([
+      ...syncers.map((syncer) => syncer.drainAndStop()),
+      ...retiring,
+    ])
     for (const result of results) {
       if (result.status === 'rejected') {
         this.deps.onError?.(result.reason as Error)
@@ -138,7 +144,7 @@ export class ActorPool {
     this.requested.delete(did)
     const syncer = this.active.get(did)
     if (syncer) {
-      syncer.stop()
+      this.retire(syncer)
       this.active.delete(did)
       this.promoteNext()
       return
@@ -193,7 +199,7 @@ export class ActorPool {
       const did = idle[i].did
       const syncer = this.active.get(did)
       if (!syncer) continue
-      syncer.stop()
+      this.retire(syncer)
       this.active.delete(did)
       // Keep `requested` — the actor is still enrolled, just cycled out.
       this.waiting.push(did)
@@ -240,6 +246,19 @@ export class ActorPool {
     syncer.setConnectGate(() => this.acquireConnectSlot())
     this.active.set(did, syncer)
     syncer.start()
+  }
+
+  /**
+   * Signal a syncer to stop and track its drain until it settles, so
+   * `stop()` can await in-flight commit applies from retired syncers —
+   * otherwise a late apply races the store close.
+   */
+  private retire(syncer: ActorSyncer): void {
+    const drain = syncer.drainAndStop().catch((err: unknown) => {
+      this.deps.onError?.(err as Error)
+    })
+    this.retiring.add(drain)
+    void drain.then(() => this.retiring.delete(drain))
   }
 
   private promoteNext(): void {
