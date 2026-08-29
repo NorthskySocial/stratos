@@ -67,7 +67,7 @@ async function makeManager(overrides: {
 describe('SpaceCredentialManager', () => {
   describe('mint-and-exchange', () => {
     it('mints a delegation token, presents a mint-time proof, and holds the returned credential', async () => {
-      const expiresAt = new Date(3_600_000).toISOString()
+      const expiresAt = new Date(Date.now() + 3_600_000).toISOString()
       const { manager, client } = await makeManager({
         getSpaceCredential: async (opts) => {
           expect(opts.space).toBe(expectedSpaceUri(BEBOP_BOUNDARY))
@@ -103,7 +103,7 @@ describe('SpaceCredentialManager', () => {
       const client = {
         getSpaceCredential: vi.fn(async () => ({
           credential: 'the-credential',
-          expiresAt: new Date(3_600_000).toISOString(),
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
         })),
       }
       const manager = new SpaceCredentialManager({
@@ -354,6 +354,24 @@ describe('SpaceCredentialManager', () => {
     )
   })
 
+  it('rejects a credential that arrives already expired', async () => {
+    // The mint response is the server's claim. An expiry at or before now
+    // means the credential is dead on arrival; holding it would hand the
+    // caller access that no longer exists.
+    const clock = makeClock(1_000_000)
+    const { manager } = await makeManager({
+      now: clock.now,
+      getSpaceCredential: async () => ({
+        credential: 'cred-rei',
+        expiresAt: new Date(clock.now()).toISOString(),
+      }),
+    })
+
+    await expect(manager.getCredential(BEBOP_BOUNDARY)).rejects.toThrow(
+      /unusable expiry/,
+    )
+  })
+
   it('re-attempts a mint after an earlier failure', async () => {
     // Guards the single-flight map: a cached rejection would make the second
     // call return without touching the client.
@@ -364,7 +382,7 @@ describe('SpaceCredentialManager', () => {
         if (calls === 1) throw new Error('rejected')
         return {
           credential: 'cred-asuka',
-          expiresAt: new Date(7_200_000).toISOString(),
+          expiresAt: new Date(Date.now() + 7_200_000).toISOString(),
         }
       },
     })

@@ -75,20 +75,31 @@ async function main(): Promise<void> {
   // Best-effort warm-up: a boundary this feedgen has no membership for yet
   // (or a mint failure) must not block startup or crash the process. MM-06
   // will make actual sync depend on a held credential; here we only prove
-  // acquisition works.
-  for (const boundary of configuredBoundaries) {
-    spaceCredentialManager
-      .getCredential(boundary)
-      // Log the success too. Logging only failures makes a warm-up that never
-      // ran look the same as one that worked, and the e2e cannot tell them
-      // apart.
-      .then(() => {
-        console.log(`space credential acquired for ${boundary}`)
-      })
-      .catch((err: unknown) => {
-        console.error(`space credential warm-up failed for ${boundary}:`, err)
-      })
-  }
+  // acquisition works. Emit one completion event, not one line per boundary.
+  // Log the acquired count too. A summary with only failures makes a warm-up
+  // that never ran look the same as one that worked.
+  void Promise.all(
+    [...configuredBoundaries].map(async (boundary) => {
+      try {
+        await spaceCredentialManager.getCredential(boundary)
+        return { boundary }
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.message : 'unknown error'
+        return { boundary, reason }
+      }
+    }),
+  ).then((results) => {
+    const failed = results.filter(
+      (r): r is { boundary: string; reason: string } => 'reason' in r,
+    )
+    const summary = `space credential warm-up: attempted=${results.length} acquired=${results.length - failed.length} failed=${failed.length}`
+    if (failed.length === 0) {
+      console.log(summary)
+    } else {
+      const detail = failed.map((f) => `${f.boundary}: ${f.reason}`).join('; ')
+      console.error(`${summary} (${detail})`)
+    }
+  })
 
   const subscribeEnrollments =
     process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
