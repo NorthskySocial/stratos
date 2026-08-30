@@ -1,7 +1,11 @@
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import type { SpaceCredentialProof } from '../upstream/index.js'
 import {
   InsecureHostOriginError,
+  InvalidHostOriginError,
   MalformedCursorError,
+  PrivateHostOriginError,
   RepoNotFoundError,
   SpaceHostInvalidResponseError,
   SpaceHostRedirectError,
@@ -17,6 +21,17 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 const DEFAULT_MAX_PAGE_BYTES = 1_048_576
 /** Matches `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`'s planned default (WP6). */
 const DEFAULT_MAX_RECORD_BYTES = 65_536
+const ERROR_BODY_CAP_BYTES = 4_096
+const PRIVATE_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00000000, 0x00ffffff],
+  [0x0a000000, 0x0affffff],
+  [0x64400000, 0x647fffff],
+  [0x7f000000, 0x7fffffff],
+  [0xa9fe0000, 0xa9feffff],
+  [0xac100000, 0xac1fffff],
+  [0xc0a80000, 0xc0a8ffff],
+  [0xe0000000, 0xffffffff],
+]
 
 export interface SpaceHostClientOptions {
   /** Origin (scheme + host [+ port]) this client sends every request to. */
@@ -37,6 +52,8 @@ export interface SpaceHostClientOptions {
   maxPageBytes?: number
   /** Byte cap for a `getRecord` response body. */
   maxRecordBytes?: number
+  /** Injectable DNS resolver. */
+  resolveHost?: (hostname: string) => Promise<readonly string[]>
 }
 
 export interface ListRepoOpsOptions {
@@ -53,7 +70,6 @@ export interface RepoOpEntry {
   collection: string
   rkey: string
   cid: string | null
-  prev: string | null
   value?: unknown
 }
 
@@ -94,6 +110,7 @@ export class SpaceHostClient {
   private readonly allowHttpOrigins: ReadonlySet<string>
   private readonly maxPageBytes: number
   private readonly maxRecordBytes: number
+  private readonly resolveHost: (hostname: string) => Promise<readonly string[]>
 
   constructor(opts: SpaceHostClientOptions) {
     this.hostOrigin = opts.hostOrigin
@@ -103,6 +120,7 @@ export class SpaceHostClient {
     this.allowHttpOrigins = opts.allowHttpOrigins ?? new Set()
     this.maxPageBytes = opts.maxPageBytes ?? DEFAULT_MAX_PAGE_BYTES
     this.maxRecordBytes = opts.maxRecordBytes ?? DEFAULT_MAX_RECORD_BYTES
+    this.resolveHost = opts.resolveHost ?? resolveHost
   }
 
   async listRepoOps(opts: ListRepoOpsOptions): Promise<ListRepoOpsResult> {
@@ -141,7 +159,7 @@ export class SpaceHostClient {
     capBytes: number,
     signal?: AbortSignal,
   ): Promise<{ url: string; text: string }> {
-    const origin = this.assertSecureOrigin()
+    const origin = await this.assertSecureOrigin()
     const url = new URL(pathname, origin)
     for (const [key, value] of Object.entries(searchParams)) {
       if (value !== undefined) url.searchParams.set(key, value)
@@ -171,20 +189,54 @@ export class SpaceHostClient {
       throw classifyFetchError(err, url.toString())
     }
 
-    const text = await readBodyWithCap(res, capBytes, url.toString())
+    const text = await readBodyWithCap(
+      res,
+      res.ok ? capBytes : ERROR_BODY_CAP_BYTES,
+      url.toString(),
+      !res.ok,
+    )
     if (!res.ok) {
       throw buildRequestError(res.status, text, url.toString())
     }
     return { url: url.toString(), text }
   }
 
-  /** https-only unless the exact origin is allowlisted; checked before any I/O. */
-  private assertSecureOrigin(): string {
-    const origin = new URL(this.hostOrigin).origin
-    if (origin.startsWith('https://') || this.allowHttpOrigins.has(origin)) {
+  /** Validate the scheme and resolved addresses before any request. */
+  private async assertSecureOrigin(): Promise<string> {
+    let url: URL
+    try {
+      url = new URL(this.hostOrigin)
+    } catch (err) {
+      throw new InvalidHostOriginError(this.hostOrigin, { cause: err })
+    }
+    const origin = url.origin
+    if (this.allowHttpOrigins.has(origin)) {
       return origin
     }
-    throw new InsecureHostOriginError(origin)
+    if (url.protocol !== 'https:') {
+      throw new InsecureHostOriginError(origin)
+    }
+
+    const hostname = stripIpv6Brackets(url.hostname)
+    let addresses: readonly string[]
+    try {
+      addresses = isIP(hostname) ? [hostname] : await this.resolveHost(hostname)
+    } catch (err) {
+      throw new SpaceHostUnreachableError(origin, { cause: err })
+    }
+    if (addresses.length === 0) {
+      throw new SpaceHostUnreachableError(origin, {
+        cause: new Error('the host did not resolve to an address'),
+      })
+    }
+    // DNS can change after this check. The transport must add address pinning
+    // before this check can prevent rebinding during the request.
+    for (const address of addresses) {
+      if (isPrivateAddress(address)) {
+        throw new PrivateHostOriginError(origin, address)
+      }
+    }
+    return origin
   }
 }
 
@@ -197,6 +249,7 @@ async function readBodyWithCap(
   res: Response,
   capBytes: number,
   url: string,
+  truncate = false,
 ): Promise<string> {
   const body = res.body
   if (!body) return ''
@@ -209,15 +262,20 @@ async function readBodyWithCap(
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
-      read += value.byteLength
-      if (read > capBytes) {
+      const remaining = capBytes - read
+      if (value.byteLength > remaining) {
+        if (truncate && remaining > 0) {
+          text += decoder.decode(value.subarray(0, remaining), { stream: true })
+        }
+        if (truncate) break
         throw new SpaceHostResponseTooLargeError(url, capBytes)
       }
+      read += value.byteLength
       text += decoder.decode(value, { stream: true })
     }
   } catch (err) {
     if (err instanceof SpaceHostResponseTooLargeError) throw err
-    throw new SpaceHostUnreachableError(url, { cause: err })
+    throw classifyFetchError(err, url)
   } finally {
     await reader.cancel().catch(() => {})
   }
@@ -271,13 +329,20 @@ function parseErrorCode(body: string): string | undefined {
       return parsed.error
     }
   } catch {
-    // non-JSON body — fall through to a generic request error
+    const match = /"error"\s*:\s*"((?:[^"\\]|\\.)*)"/u.exec(body)
+    if (match) {
+      try {
+        return JSON.parse(`"${match[1]}"`) as string
+      } catch {
+        // Continue with a generic request error.
+      }
+    }
   }
   return undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object'
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function parseJsonRecord(text: string, url: string): Record<string, unknown> {
@@ -328,7 +393,7 @@ function decodeRepoOp(
       `op at index ${index} was not an object`,
     )
   }
-  const { rev, collection, rkey, cid, prev, value } = entry
+  const { rev, collection, rkey, cid, value } = entry
   if (
     typeof rev !== 'string' ||
     typeof collection !== 'string' ||
@@ -344,9 +409,62 @@ function decodeRepoOp(
     collection,
     rkey,
     cid: typeof cid === 'string' ? cid : null,
-    prev: typeof prev === 'string' ? prev : null,
     ...(value !== undefined ? { value } : {}),
   }
+}
+
+async function resolveHost(hostname: string): Promise<readonly string[]> {
+  const addresses = await lookup(hostname, { all: true, verbatim: true })
+  return addresses.map(({ address }) => address)
+}
+
+function stripIpv6Brackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname
+}
+
+function isPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase()
+  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u)
+  if (mappedIpv4) return isPrivateIpv4(mappedIpv4[1])
+  const mappedIpv4Hex = normalized.match(
+    /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u,
+  )
+  if (mappedIpv4Hex) {
+    const high = Number.parseInt(mappedIpv4Hex[1], 16)
+    const low = Number.parseInt(mappedIpv4Hex[2], 16)
+    return isPrivateIpv4(
+      `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`,
+    )
+  }
+  if (isIP(normalized) === 4) return isPrivateIpv4(normalized)
+  if (isIP(normalized) !== 6) return true
+
+  const first = Number.parseInt(normalized.split(':', 1)[0] || '0', 16)
+  return (
+    normalized === '::' ||
+    normalized === '::1' ||
+    (first & 0xfe00) === 0xfc00 ||
+    (first & 0xffc0) === 0xfe80 ||
+    (first & 0xff00) === 0xff00
+  )
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const parts = address.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((part) => part < 0 || part > 255)) {
+    return true
+  }
+  const value =
+    (parts[0] * 0x1000000 +
+      parts[1] * 0x10000 +
+      parts[2] * 0x100 +
+      parts[3]) >>>
+    0
+  return PRIVATE_IPV4_RANGES.some(
+    ([start, end]) => value >= start && value <= end,
+  )
 }
 
 function decodeGetRecordResult(text: string, url: string): GetRecordResult {

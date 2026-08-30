@@ -14,7 +14,9 @@ import {
 import type { SpaceCredentialProof } from '../src/upstream/index.js'
 import {
   InsecureHostOriginError,
+  InvalidHostOriginError,
   MalformedCursorError,
+  PrivateHostOriginError,
   RepoNotFoundError,
   SpaceHostClient,
   SpaceHostClientError,
@@ -85,7 +87,8 @@ function decodeJwt(token: string): {
 }
 
 const CREDENTIAL = 'held-space-credential-jwt'
-const SPACE_URI = 'at://did:web:stratos.test/space/zone.stratos.space.feed/bebop'
+const SPACE_URI =
+  'at://did:web:stratos.test/space/zone.stratos.space.feed/bebop'
 const REPO_DID = 'did:plc:spike'
 
 /** Mirrors `SpaceCredentialManager`'s real `toHeld()` binding, not a stub string. */
@@ -137,7 +140,6 @@ describe('SpaceHostClient', () => {
                 collection: 'zone.stratos.feed.post',
                 rkey: 'a1',
                 cid: 'bafyA',
-                prev: null,
                 value: { text: 'see you space cowboy' },
               },
             ],
@@ -159,7 +161,6 @@ describe('SpaceHostClient', () => {
             collection: 'zone.stratos.feed.post',
             rkey: 'a1',
             cid: 'bafyA',
-            prev: null,
             value: { text: 'see you space cowboy' },
           },
         ],
@@ -204,7 +205,6 @@ describe('SpaceHostClient', () => {
                   collection: 'zone.stratos.feed.post',
                   rkey: 'a1',
                   cid: 'bafyA',
-                  prev: null,
                 },
               ],
               cursor: '1/0',
@@ -219,7 +219,6 @@ describe('SpaceHostClient', () => {
                   collection: 'zone.stratos.feed.post',
                   rkey: 'a2',
                   cid: 'bafyB',
-                  prev: 'bafyA',
                 },
               ],
               commit: { ver: 1, rev: '2' },
@@ -245,9 +244,7 @@ describe('SpaceHostClient', () => {
       })
       expect(page2.cursor).toBeUndefined()
       expect(page2.commit).toEqual({ ver: 1, rev: '2' })
-      // A valid non-null prev/cid must survive decoding unchanged, not just
-      // a null/invalid one collapsing to null.
-      expect(page2.ops[0]).toMatchObject({ cid: 'bafyB', prev: 'bafyA' })
+      expect(page2.ops[0]).toMatchObject({ cid: 'bafyB' })
 
       expect(mock.requests).toHaveLength(2)
       const url1 = new URL(mock.requests[0].url, mock.baseUrl)
@@ -366,6 +363,17 @@ describe('SpaceHostClient', () => {
       ).rejects.toBeInstanceOf(SpaceHostInvalidResponseError)
     })
 
+    it('throws SpaceHostInvalidResponseError for a 2xx array body', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end('[]')
+      }
+      const client = await createClient()
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(SpaceHostInvalidResponseError)
+    })
+
     it('throws SpaceHostInvalidResponseError when an ops entry is not an object', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')
@@ -387,9 +395,15 @@ describe('SpaceHostClient', () => {
     }
 
     it.each([
-      ['rev', { collection: VALID_OP_FIELDS.collection, rkey: VALID_OP_FIELDS.rkey }],
+      [
+        'rev',
+        { collection: VALID_OP_FIELDS.collection, rkey: VALID_OP_FIELDS.rkey },
+      ],
       ['collection', { rev: VALID_OP_FIELDS.rev, rkey: VALID_OP_FIELDS.rkey }],
-      ['rkey', { rev: VALID_OP_FIELDS.rev, collection: VALID_OP_FIELDS.collection }],
+      [
+        'rkey',
+        { rev: VALID_OP_FIELDS.rev, collection: VALID_OP_FIELDS.collection },
+      ],
     ] as const)(
       'throws SpaceHostInvalidResponseError when an ops entry is missing "%s"',
       async (_field, entry) => {
@@ -404,7 +418,7 @@ describe('SpaceHostClient', () => {
       },
     )
 
-    it('defaults a malformed cid/prev to null and omits an absent value field', async () => {
+    it('defaults a malformed cid to null and omits an absent value field', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(
@@ -415,7 +429,6 @@ describe('SpaceHostClient', () => {
                 collection: 'zone.stratos.feed.post',
                 rkey: 'a1',
                 cid: 404,
-                prev: false,
               },
             ],
           }),
@@ -432,7 +445,6 @@ describe('SpaceHostClient', () => {
           collection: 'zone.stratos.feed.post',
           rkey: 'a1',
           cid: null,
-          prev: null,
         },
       ])
       expect(Object.hasOwn(result.ops[0], 'value')).toBe(false)
@@ -483,9 +495,7 @@ describe('SpaceHostClient', () => {
         true,
       )
       const url = new URL(req.url, mock.baseUrl)
-      expect(url.searchParams.get('collection')).toBe(
-        'zone.stratos.feed.post',
-      )
+      expect(url.searchParams.get('collection')).toBe('zone.stratos.feed.post')
       expect(url.searchParams.get('rkey')).toBe('a1')
     })
 
@@ -532,6 +542,84 @@ describe('SpaceHostClient', () => {
   })
 
   describe('hardening', () => {
+    it('rejects an invalid host origin with a typed error', async () => {
+      const client = await createClient({ hostOrigin: 'not a URL' })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(InvalidHostOriginError)
+    })
+
+    it.each([
+      '127.0.0.1',
+      '10.0.0.1',
+      '169.254.1.1',
+      '192.168.1.1',
+      '::1',
+      'fc00::1',
+      'fe80::1',
+      '::ffff:7f00:1',
+    ])('rejects a host that resolves to %s', async (address) => {
+      let fetched = false
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => [address],
+        fetch: async () => {
+          fetched = true
+          return new Response(JSON.stringify({ ops: [] }))
+        },
+      })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+      expect(fetched).toBe(false)
+    })
+
+    it('rejects a host when any resolved address is private', async () => {
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => ['8.8.8.8', '10.0.0.1'],
+      })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+    })
+
+    it('rejects a private literal address without calling DNS', async () => {
+      let resolved = false
+      const client = await createClient({
+        hostOrigin: 'https://127.0.0.1',
+        resolveHost: async () => {
+          resolved = true
+          return ['8.8.8.8']
+        },
+      })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+      expect(resolved).toBe(false)
+    })
+
+    it('rejects a host when DNS returns no addresses', async () => {
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => [],
+      })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(SpaceHostUnreachableError)
+    })
+
+    it('allows a public address returned by DNS', async () => {
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => ['8.8.8.8'],
+        fetch: async () => new Response(JSON.stringify({ ops: [] })),
+      })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).resolves.toMatchObject({ ops: [] })
+    })
+
     it('times out a hanging response', async () => {
       mock.handler = () => {
         // Never respond.
@@ -540,6 +628,34 @@ describe('SpaceHostClient', () => {
       await expect(
         client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
       ).rejects.toBeInstanceOf(SpaceHostTimeoutError)
+    })
+
+    it('classifies a body-stream timeout as SpaceHostTimeoutError', async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new DOMException('timed out', 'TimeoutError'))
+        },
+      })
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => ['8.8.8.8'],
+        fetch: async () => new Response(body),
+      })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(SpaceHostTimeoutError)
+    })
+
+    it('classifies an oversized error body from its first 4 KiB', async () => {
+      mock.handler = (_req, res) => {
+        res.statusCode = 400
+        res.setHeader('content-type', 'application/json')
+        res.end(`{"error":"MalformedCursor","detail":"${'x'.repeat(10_000)}"}`)
+      }
+      const client = await createClient({ maxPageBytes: 32 })
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(MalformedCursorError)
     })
 
     it('cuts an oversized page body at the cap and surfaces a typed error', async () => {
@@ -655,6 +771,7 @@ describe('SpaceHostClient', () => {
         // from a foreign host that never accepts a connection.
         hostOrigin: 'https://127.0.0.1:1',
         credentialProof: await makeCredentialProof(),
+        allowHttpOrigins: new Set(['https://127.0.0.1:1']),
       })
       const err = await client
         .listRepoOps({ space: SPACE_URI, repo: REPO_DID })
@@ -695,12 +812,13 @@ describe('SpaceHostClient', () => {
 
 describe('space-sync error taxonomy', () => {
   it('names every SpaceHostClientError subclass and carries its url', () => {
-    const classes: Array<[new (url: string) => SpaceHostClientError, string]> = [
-      [InsecureHostOriginError, 'InsecureHostOriginError'],
-      [SpaceHostRedirectError, 'SpaceHostRedirectError'],
-      [SpaceHostTimeoutError, 'SpaceHostTimeoutError'],
-      [SpaceHostUnreachableError, 'SpaceHostUnreachableError'],
-    ]
+    const classes: Array<[new (url: string) => SpaceHostClientError, string]> =
+      [
+        [InsecureHostOriginError, 'InsecureHostOriginError'],
+        [SpaceHostRedirectError, 'SpaceHostRedirectError'],
+        [SpaceHostTimeoutError, 'SpaceHostTimeoutError'],
+        [SpaceHostUnreachableError, 'SpaceHostUnreachableError'],
+      ]
     for (const [ErrorClass, name] of classes) {
       const err = new ErrorClass('https://nerv.example/xrpc/foo')
       expect(err.name).toBe(name)

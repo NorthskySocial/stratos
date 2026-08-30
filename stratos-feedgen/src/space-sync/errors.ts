@@ -135,3 +135,22 @@ export class InsecureHostOriginError extends SpaceHostClientError {
     this.name = 'InsecureHostOriginError'
   }
 }
+
+/** Member-skip: the discovered host value is not a valid URL origin. */
+export class InvalidHostOriginError extends SpaceHostClientError {
+  constructor(origin: string, options?: ErrorOptions) {
+    super(`space host origin was invalid: ${origin}`, origin, options)
+    this.name = 'InvalidHostOriginError'
+  }
+}
+
+/** Member-skip: the host resolves to an address that is not publicly routable. */
+export class PrivateHostOriginError extends SpaceHostClientError {
+  readonly address: string
+
+  constructor(origin: string, address: string) {
+    super(`space host resolved to a private address: ${address}`, origin)
+    this.name = 'PrivateHostOriginError'
+    this.address = address
+  }
+}

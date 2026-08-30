@@ -11,6 +11,7 @@ import { Secp256k1Keypair } from '@atproto/crypto'
 import {
   UpstreamStratosClient,
   StratosClientError,
+  StratosInvalidResponseError,
   describeUpstreamError,
 } from '../src/upstream/index.js'
 
@@ -434,10 +435,7 @@ describe('UpstreamStratosClient', () => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ repos: [] }))
       }
-      await publicClient.listSpaceRepos(
-        { space: SPACE_URI },
-        credentialProof,
-      )
+      await publicClient.listSpaceRepos({ space: SPACE_URI }, credentialProof)
       expect(mock.requests[0].url).toBe(
         '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
       )
@@ -462,6 +460,95 @@ describe('UpstreamStratosClient', () => {
         status: 401,
         lxm: 'zone.stratos.space.listRepos',
       })
+    })
+
+    it('sets a timeout signal on the membership request', async () => {
+      const fetchImpl = async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal)
+        return new Response(JSON.stringify({ repos: [] }), {
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      const timeoutClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl,
+        requestTimeoutMs: 50,
+      })
+      await expect(
+        timeoutClient.listSpaceRepos(
+          { space: SPACE_URI },
+          fakeCredentialProof(),
+        ),
+      ).resolves.toEqual({ repos: [] })
+    })
+
+    it.each([
+      ['an array body', []],
+      ['a missing repos field', {}],
+      ['a non-object repo', { repos: [null] }],
+      ['a repo without a DID', { repos: [{ custody: 'pds' }] }],
+      [
+        'an invalid custody value',
+        { repos: [{ did: 'did:plc:asuka', custody: 'other' }] },
+      ],
+      [
+        'an invalid host source',
+        {
+          repos: [
+            {
+              did: 'did:plc:asuka',
+              custody: 'pds',
+              hostSource: 'unknown',
+            },
+          ],
+        },
+      ],
+      ['a non-string cursor', { repos: [], cursor: 42 }],
+    ] as const)('rejects %s', async (_name, body) => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(body))
+      }
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).rejects.toBeInstanceOf(StratosInvalidResponseError)
+    })
+
+    it('rejects a non-JSON response with the typed response error', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'text/plain')
+        res.end('not JSON')
+      }
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).rejects.toBeInstanceOf(StratosInvalidResponseError)
+    })
+
+    it('does not classify a body timeout as an invalid response', async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new DOMException('timed out', 'TimeoutError'))
+        },
+      })
+      const timeoutClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: async () => new Response(body),
+      })
+      const err = await timeoutClient
+        .listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof())
+        .catch((cause: unknown) => cause)
+      expect(err).toBeInstanceOf(DOMException)
+      expect((err as Error).name).toBe('TimeoutError')
+      expect(err).not.toBeInstanceOf(StratosInvalidResponseError)
     })
   })
 

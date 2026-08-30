@@ -9,7 +9,9 @@ export type {
 } from './host-client.js'
 export {
   InsecureHostOriginError,
+  InvalidHostOriginError,
   MalformedCursorError,
+  PrivateHostOriginError,
   RepoNotFoundError,
   SpaceHostClientError,
   SpaceHostInvalidResponseError,

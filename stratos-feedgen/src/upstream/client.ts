@@ -2,7 +2,7 @@ import { Readable } from 'node:stream'
 import type { Keypair } from '@atproto/crypto'
 import type { Custody } from '@northskysocial/stratos-core'
 
-import { StratosClientError } from './errors.js'
+import { StratosClientError, StratosInvalidResponseError } from './errors.js'
 import { mintServiceJwt } from './jwt.js'
 
 const LXM = {
@@ -13,6 +13,8 @@ const LXM = {
   getSpaceCredential: 'zone.stratos.space.getSpaceCredential',
   listSpaceRepos: 'zone.stratos.space.listRepos',
 } as const
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 
 export interface UpstreamStratosClientOptions {
   /** Base URL this client sends requests to (no trailing slash). May be internal-only. */
@@ -33,6 +35,8 @@ export interface UpstreamStratosClientOptions {
   keypair: Keypair
   /** Optional fetch implementation override (test injection). */
   fetch?: typeof fetch
+  /** Timeout for the space membership request. */
+  requestTimeoutMs?: number
 }
 
 export interface ResolveEnrollmentsResult {
@@ -126,6 +130,7 @@ export class UpstreamStratosClient {
   private readonly feedgenDid: string
   private readonly keypair: Keypair
   private readonly fetchImpl: typeof fetch
+  private readonly requestTimeoutMs: number
 
   constructor(opts: UpstreamStratosClientOptions) {
     this.serviceUrl = trimTrailingSlash(opts.serviceUrl)
@@ -134,6 +139,7 @@ export class UpstreamStratosClient {
     this.feedgenDid = opts.feedgenDid
     this.keypair = opts.keypair
     this.fetchImpl = opts.fetch ?? fetch
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
   }
 
   async resolveEnrollments(did: string): Promise<ResolveEnrollmentsResult> {
@@ -262,6 +268,7 @@ export class UpstreamStratosClient {
     const htu = `${this.publicUrl}${path}`
     const res = await this.fetchImpl(url, {
       method: 'GET',
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
         accept: 'application/json',
         authorization: `DPoP ${credentialProof.credential}`,
@@ -269,7 +276,19 @@ export class UpstreamStratosClient {
       },
     })
     await throwIfNotOk(res, url.toString(), lxm)
-    return (await res.json()) as ListSpaceReposResult
+    let body: unknown
+    try {
+      body = await res.json()
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err
+      throw new StratosInvalidResponseError(
+        url.toString(),
+        lxm,
+        'body was not valid JSON',
+        { cause: err },
+      )
+    }
+    return decodeListSpaceRepos(body, url.toString(), lxm)
   }
 
   private mintFor(lxm: string): Promise<string> {
@@ -280,6 +299,91 @@ export class UpstreamStratosClient {
       keypair: this.keypair,
     })
   }
+}
+
+function decodeListSpaceRepos(
+  raw: unknown,
+  url: string,
+  lxm: string,
+): ListSpaceReposResult {
+  if (!isRecord(raw) || !Array.isArray(raw.repos)) {
+    throw new StratosInvalidResponseError(url, lxm, 'repos was not an array')
+  }
+  const repos = raw.repos.map((entry, index) =>
+    decodeSpaceRepoEntry(entry, index, url, lxm),
+  )
+  if (raw.cursor !== undefined && typeof raw.cursor !== 'string') {
+    throw new StratosInvalidResponseError(url, lxm, 'cursor was not a string')
+  }
+  return {
+    repos,
+    ...(raw.cursor !== undefined ? { cursor: raw.cursor } : {}),
+  }
+}
+
+function decodeSpaceRepoEntry(
+  raw: unknown,
+  index: number,
+  url: string,
+  lxm: string,
+): SpaceRepoEntry {
+  if (!isRecord(raw)) {
+    throw new StratosInvalidResponseError(
+      url,
+      lxm,
+      `repo at index ${index} was not an object`,
+    )
+  }
+  if (typeof raw.did !== 'string') {
+    throw new StratosInvalidResponseError(
+      url,
+      lxm,
+      `repo at index ${index} had no DID`,
+    )
+  }
+  if (raw.custody !== 'stratos' && raw.custody !== 'pds') {
+    throw new StratosInvalidResponseError(
+      url,
+      lxm,
+      `repo at index ${index} had invalid custody`,
+    )
+  }
+  if (raw.rev !== undefined && typeof raw.rev !== 'string') {
+    throw new StratosInvalidResponseError(
+      url,
+      lxm,
+      `repo at index ${index} had an invalid rev`,
+    )
+  }
+  if (raw.host !== undefined && typeof raw.host !== 'string') {
+    throw new StratosInvalidResponseError(
+      url,
+      lxm,
+      `repo at index ${index} had an invalid host`,
+    )
+  }
+  if (
+    raw.hostSource !== undefined &&
+    raw.hostSource !== 'authority-override' &&
+    raw.hostSource !== 'did-document'
+  ) {
+    throw new StratosInvalidResponseError(
+      url,
+      lxm,
+      `repo at index ${index} had an invalid host source`,
+    )
+  }
+  return {
+    did: raw.did,
+    custody: raw.custody,
+    ...(raw.rev !== undefined ? { rev: raw.rev } : {}),
+    ...(raw.host !== undefined ? { host: raw.host } : {}),
+    ...(raw.hostSource !== undefined ? { hostSource: raw.hostSource } : {}),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function trimTrailingSlash(url: string): string {
