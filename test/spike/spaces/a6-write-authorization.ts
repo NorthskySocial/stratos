@@ -18,6 +18,8 @@
 import { readFileSync } from 'node:fs'
 
 const REPO_ROOT = new URL('../../../', import.meta.url).pathname
+// Deliberately outside this repo. `ops/` is a sibling of `stratos/` in the
+// workspace, and the credentials stay there rather than being copied in.
 const ACCOUNTS_PATH = `${REPO_ROOT}../ops/alpha-users.json`
 const COLLECTION = 'zone.stratos.feed.post'
 
@@ -35,9 +37,24 @@ interface AlphaAccounts {
 async function main() {
   const cfg = JSON.parse(readFileSync(ACCOUNTS_PATH, 'utf8')) as AlphaAccounts
   const pdsUrl = `https://${cfg.pds}`
-  // The SECOND account, unrelated to the A5 writer.
-  const account = cfg.accounts[1] ?? cfg.accounts[0]
-  if (!account) throw new Error('no accounts in alpha-users.json')
+  // The SECOND account, unrelated to the A5 writer. The result only means
+  // anything if it really is a different account, so check rather than trust
+  // the positions.
+  const writer = cfg.accounts[0]
+  const account = cfg.accounts[1]
+  if (!account) {
+    throw new Error(
+      'alpha-users.json needs a second account: this probe must use one that is unrelated to the A5 writer',
+    )
+  }
+  if (
+    writer &&
+    account.username.toLowerCase() === writer.username.toLowerCase()
+  ) {
+    throw new Error(
+      `alpha-users.json lists ${account.username} twice: this probe would run as the A5 writer and prove nothing`,
+    )
+  }
 
   const sessionRes = await fetch(
     `${pdsUrl}/xrpc/com.atproto.server.createSession`,

@@ -1,12 +1,35 @@
 import { eq, gt, asc, sql, and } from 'drizzle-orm'
 import type {
+  Custody,
   EnrollmentStoreReader,
   EnrollmentStoreWriter,
   StoredEnrollment,
   ListEnrollmentsOptions,
 } from '@northskysocial/stratos-core'
 import type { ServicePgDb } from '../../../db/pg.js'
-import { pgEnrollment, pgEnrollmentBoundary } from '../../../db/pg-schema.js'
+import {
+  pgEnrollment,
+  pgEnrollmentBoundary,
+  type PgEnrollment,
+} from '../../../db/pg-schema.js'
+
+/**
+ * Map a stored enrollment row to the storage-port shape. Rows written before
+ * MM-03 have no custody value, so an absent column defaults to 'stratos'.
+ */
+function toStoredEnrollment(row: PgEnrollment): StoredEnrollment {
+  return {
+    did: row.did,
+    enrolledAt: row.enrolledAt,
+    pdsEndpoint: row.pdsEndpoint ?? undefined,
+    signingKeyDid: row.signingKeyDid,
+    active: row.active === 'true',
+    enrollmentRkey: row.enrollmentRkey ?? undefined,
+    isService: row.isService,
+    custody: (row.custody as Custody | null) ?? 'stratos',
+    repoHost: row.repoHost ?? undefined,
+  }
+}
 
 export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
   constructor(protected db: ServicePgDb) {}
@@ -31,15 +54,7 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
     const row = rows[0]
     if (!row) return null
 
-    return {
-      did: row.did,
-      enrolledAt: row.enrolledAt,
-      pdsEndpoint: row.pdsEndpoint ?? undefined,
-      signingKeyDid: row.signingKeyDid,
-      active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-      isService: row.isService,
-    }
+    return toStoredEnrollment(row)
   }
 
   async listEnrollments(
@@ -56,15 +71,7 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
 
     const rows = await query.orderBy(asc(pgEnrollment.did)).limit(limit)
 
-    return rows.map((row) => ({
-      did: row.did,
-      enrolledAt: row.enrolledAt,
-      pdsEndpoint: row.pdsEndpoint ?? undefined,
-      signingKeyDid: row.signingKeyDid,
-      active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-      isService: row.isService,
-    }))
+    return rows.map(toStoredEnrollment)
   }
 
   async listServiceEnrollments(
@@ -84,15 +91,7 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       .orderBy(asc(pgEnrollment.did))
       .limit(limit)
 
-    return rows.map((row) => ({
-      did: row.did,
-      enrolledAt: row.enrolledAt,
-      pdsEndpoint: row.pdsEndpoint ?? undefined,
-      signingKeyDid: row.signingKeyDid,
-      active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-      isService: row.isService,
-    }))
+    return rows.map(toStoredEnrollment)
   }
 
   async enrollmentCount(): Promise<number> {
@@ -128,6 +127,8 @@ export class PgEnrollmentStoreWriter
         active: data.active ? 'true' : 'false',
         enrollmentRkey: data.enrollmentRkey ?? null,
         isService: data.isService ?? false,
+        custody: data.custody ?? 'stratos',
+        repoHost: data.repoHost ?? null,
       })
       .onConflictDoUpdate({
         target: pgEnrollment.did,
@@ -138,6 +139,8 @@ export class PgEnrollmentStoreWriter
           active: data.active ? 'true' : 'false',
           enrollmentRkey: data.enrollmentRkey ?? null,
           isService: data.isService ?? false,
+          custody: data.custody ?? 'stratos',
+          repoHost: data.repoHost ?? null,
         },
       })
 
@@ -177,6 +180,12 @@ export class PgEnrollmentStoreWriter
     }
     if (updates.isService !== undefined) {
       setValues.isService = updates.isService
+    }
+    if (updates.custody !== undefined) {
+      setValues.custody = updates.custody
+    }
+    if (updates.repoHost !== undefined) {
+      setValues.repoHost = updates.repoHost
     }
 
     if (Object.keys(setValues).length > 0) {

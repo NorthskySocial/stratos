@@ -135,9 +135,17 @@ async function main() {
 
     // Negative control. A "repo not found" answer only proves the host
     // verified the credential if a BAD credential gets a different answer.
-    // Flip one signature character to keep the shape and break the signature.
-    const lastChar = credential.slice(-1)
-    const tampered = credential.slice(0, -1) + (lastChar === 'A' ? 'B' : 'A')
+    // Flip a character inside the signature, not the final one: the last
+    // base64url character carries spare bits, so changing it can decode to
+    // the same bytes and leave the signature valid.
+    const dot = credential.lastIndexOf('.')
+    const sigStart = dot + 1
+    const flipAt = sigStart + 1
+    const original = credential[flipAt]
+    const tampered =
+      credential.slice(0, flipAt) +
+      (original === 'A' ? 'B' : 'A') +
+      credential.slice(flipAt + 1)
     const controlProof = await createDpopProof(dpopKey, {
       htm: 'GET',
       htu: url.toString(),

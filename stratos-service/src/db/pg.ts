@@ -260,7 +260,9 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
         "signingKeyDid" TEXT NOT NULL,
         "active" TEXT NOT NULL DEFAULT 'true',
         "enrollmentRkey" TEXT,
-        "isService" BOOLEAN NOT NULL DEFAULT FALSE
+        "isService" BOOLEAN NOT NULL DEFAULT FALSE,
+        "custody" TEXT NOT NULL DEFAULT 'stratos',
+        "repoHost" TEXT
       )
     `,
   )
@@ -297,6 +299,20 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     db,
     'enrollment_add_isService',
     sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "isService" BOOLEAN NOT NULL DEFAULT FALSE`,
+  )
+
+  // Migration: add custody column if missing (for existing databases)
+  await executeMigrationStep(
+    db,
+    'enrollment_add_custody',
+    sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "custody" TEXT NOT NULL DEFAULT 'stratos'`,
+  )
+
+  // Migration: add repoHost column if missing (for existing databases)
+  await executeMigrationStep(
+    db,
+    'enrollment_add_repoHost',
+    sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "repoHost" TEXT`,
   )
 }
 

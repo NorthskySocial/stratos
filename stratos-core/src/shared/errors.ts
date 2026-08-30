@@ -105,3 +105,19 @@ export class BlobAccessDeniedError extends StratosError {
     this.name = 'BlobAccessDeniedError'
   }
 }
+
+/**
+ * Error thrown when a PDS-custody enrollment's DID document has no usable
+ * `#atproto` signing key. Enrollment must fail closed rather than fall back
+ * to Stratos custody or store an empty signing key.
+ */
+export class MissingAtprotoKeyError extends StratosError {
+  constructor(did: string, options?: { cause?: unknown }) {
+    super(
+      `No usable #atproto key found for ${did}`,
+      'MissingAtprotoKey',
+      options,
+    )
+    this.name = 'MissingAtprotoKeyError'
+  }
+}

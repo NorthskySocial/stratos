@@ -1,5 +1,6 @@
 import { asc, eq, gt, and } from 'drizzle-orm'
 import {
+  type Custody,
   type EnrollmentStoreReader,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
@@ -10,6 +11,24 @@ import {
   type ServiceDb,
 } from '../../db'
 import { type EnrollmentRecord, type EnrollmentStore } from '../../oauth'
+
+/**
+ * Map a stored enrollment row to the storage-port shape. Rows written before
+ * MM-03 have no custody value, so an absent column defaults to 'stratos'.
+ */
+function toStoredEnrollment(row: Enrollment): StoredEnrollment {
+  return {
+    did: row.did,
+    enrolledAt: row.enrolledAt,
+    pdsEndpoint: row.pdsEndpoint ?? undefined,
+    signingKeyDid: row.signingKeyDid,
+    active: row.active === 'true',
+    enrollmentRkey: row.enrollmentRkey ?? undefined,
+    isService: row.isService,
+    custody: (row.custody as Custody | null) ?? 'stratos',
+    repoHost: row.repoHost ?? undefined,
+  }
+}
 
 /**
  * SQLite enrollment store implements both OAuth EnrollmentStore
@@ -50,6 +69,8 @@ export class SqliteEnrollmentStore
         active: record.active ? 'true' : 'false',
         enrollmentRkey: record.enrollmentRkey ?? null,
         isService: record.isService ?? false,
+        custody: record.custody ?? 'stratos',
+        repoHost: record.repoHost ?? null,
       })
       .onConflictDoUpdate({
         target: enrollment.did,
@@ -60,6 +81,8 @@ export class SqliteEnrollmentStore
           active: record.active ? 'true' : 'false',
           enrollmentRkey: record.enrollmentRkey ?? null,
           isService: record.isService ?? false,
+          custody: record.custody ?? 'stratos',
+          repoHost: record.repoHost ?? null,
         },
       })
 
@@ -103,15 +126,7 @@ export class SqliteEnrollmentStore
     const row = rows[0]
     if (!row) return null
 
-    return {
-      did: row.did,
-      enrolledAt: row.enrolledAt,
-      pdsEndpoint: row.pdsEndpoint ?? undefined,
-      signingKeyDid: row.signingKeyDid,
-      active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-      isService: row.isService,
-    }
+    return toStoredEnrollment(row)
   }
 
   /**
@@ -134,6 +149,8 @@ export class SqliteEnrollmentStore
     if (updates.enrollmentRkey !== undefined)
       set.enrollmentRkey = updates.enrollmentRkey ?? null
     if (updates.isService !== undefined) set.isService = updates.isService
+    if (updates.custody !== undefined) set.custody = updates.custody
+    if (updates.repoHost !== undefined) set.repoHost = updates.repoHost ?? null
 
     if (Object.keys(set).length > 0) {
       await this.db.update(enrollment).set(set).where(eq(enrollment.did, did))
@@ -159,15 +176,7 @@ export class SqliteEnrollmentStore
       .orderBy(asc(enrollment.did))
       .limit(limit)
 
-    return rows.map((row) => ({
-      did: row.did,
-      enrolledAt: row.enrolledAt,
-      pdsEndpoint: row.pdsEndpoint ?? undefined,
-      signingKeyDid: row.signingKeyDid,
-      active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-      isService: row.isService,
-    }))
+    return rows.map(toStoredEnrollment)
   }
 
   /**
@@ -193,15 +202,7 @@ export class SqliteEnrollmentStore
       .orderBy(asc(enrollment.did))
       .limit(limit)
 
-    return rows.map((row) => ({
-      did: row.did,
-      enrolledAt: row.enrolledAt,
-      pdsEndpoint: row.pdsEndpoint ?? undefined,
-      signingKeyDid: row.signingKeyDid,
-      active: row.active === 'true',
-      enrollmentRkey: row.enrollmentRkey ?? undefined,
-      isService: row.isService,
-    }))
+    return rows.map(toStoredEnrollment)
   }
 
   /**
