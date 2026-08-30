@@ -154,10 +154,27 @@ class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
     return generation
   }
 
-  async listDue(now: string, limit: number): Promise<PdsSyncJob[]> {
-    return [...this.jobs.values()]
+  async isPending(did: string, generation: number): Promise<boolean> {
+    const job = this.jobs.get(did)
+    return job?.status === 'pending' && job.generation === generation
+  }
+
+  async claimDue(
+    now: string,
+    leaseUntil: string,
+  ): Promise<PdsSyncJob | undefined> {
+    const job = [...this.jobs.values()]
       .filter((j) => j.status === 'pending' && j.nextAttemptAt <= now)
-      .slice(0, limit)
+      .at(0)
+    if (!job) return undefined
+    const claimed = {
+      ...job,
+      nextAttemptAt: leaseUntil,
+      updatedAt: now,
+      generation: job.generation + 1,
+    }
+    this.jobs.set(job.did, claimed)
+    return claimed
   }
 
   async markRetry(
@@ -182,15 +199,19 @@ class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
     this.jobs.set(did, { ...job, status: 'failed', lastError })
   }
 
-  async removeIfCurrent(did: string, generation: number): Promise<boolean> {
+  async markCompleted(did: string, generation: number): Promise<boolean> {
     const job = this.jobs.get(did)
     if (!job || job.generation !== generation) return false
-    this.jobs.delete(did)
+    this.jobs.set(did, { ...job, status: 'completed' })
     return true
   }
 
-  async remove(did: string): Promise<void> {
-    this.jobs.delete(did)
+  async markCancelled(did: string): Promise<number | undefined> {
+    const job = this.jobs.get(did)
+    if (!job) return undefined
+    const generation = job.generation + 1
+    this.jobs.set(did, { ...job, status: 'cancelled', generation })
+    return generation
   }
 
   async requeueFailed(): Promise<number> {
@@ -219,6 +240,7 @@ class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
           ? a.did.localeCompare(b.did)
           : a.firstQueuedAt.localeCompare(b.firstQueuedAt),
       )
+      .filter((job) => job.status === 'pending' || job.status === 'failed')
       .filter(
         (j) =>
           !after ||
@@ -362,8 +384,7 @@ describe('admin boundary endpoints', () => {
         'did:plc:usagi',
         'did:web:nerv.tokyo.jp/bees',
       )
-      // The inline sync succeeded, so no durable job remains.
-      expect(pdsSyncQueue.jobs.size).toBe(0)
+      expect(pdsSyncQueue.jobs.get('did:plc:usagi')?.status).toBe('completed')
     })
 
     it('reports pdsSync deferred and leaves a pending job on PDS write failure', async () => {
