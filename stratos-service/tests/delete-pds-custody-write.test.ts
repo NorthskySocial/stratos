@@ -35,7 +35,10 @@ describe('deleteRecord pds-custody rejection', () => {
     )
     await expect(
       deleteRecord(ctx, buildInput(), CALLER_DID),
-    ).rejects.toMatchObject({ customErrorName: 'PdsCustodyWriteForbidden' })
+    ).rejects.toMatchObject({
+      customErrorName: 'PdsCustodyWriteForbidden',
+      message: 'This actor writes records to their own PDS',
+    })
   })
 
   it('never reaches the signer, so no Stratos key is minted', async () => {
