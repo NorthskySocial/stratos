@@ -143,11 +143,11 @@ describe('SpaceDpopProofChecker', () => {
     const key = await makeProofKey()
     const checker = new SpaceDpopProofChecker(SERVICE_ENDPOINT)
     const err = await checker
-      .check(request(await key.buildProof({ htu: ['https://evil.test/leak'] })))
+      .check(request(await key.buildProof({ htu: ['https://mars.test/leak'] })))
       .catch((e) => e)
     expect(err).toBeInstanceOf(SpaceDpopProofError)
     expect(err.message).toContain('proof=<malformed>')
-    expect(err.message).not.toContain('evil.test')
+    expect(err.message).not.toContain('mars.test')
   })
 
   it('does not echo elements of an array htu (String() would join them verbatim)', async () => {
@@ -156,7 +156,9 @@ describe('SpaceDpopProofChecker', () => {
     const err = await checker
       .check(
         request(
-          await key.buildProof({ htu: ['https://a.test\nfake log line'] }),
+          await key.buildProof({
+            htu: ['https://tokyo-3.test\nfake log line'],
+          }),
         ),
       )
       .catch((e) => e)
