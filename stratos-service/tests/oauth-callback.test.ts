@@ -100,6 +100,7 @@ describe('handleCallback', () => {
       isEnrolled: vi.fn(),
       enroll: vi.fn(),
       getEnrollment: vi.fn(),
+      updateEnrollment: vi.fn(),
     }
     mockIdResolver = {
       did: {
@@ -195,6 +196,10 @@ describe('handleCallback', () => {
 
     await handler(req, res)
 
+    // The verdict has to reach the stored enrollment, not just the log line.
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ capabilityVerdict: 'capable' }),
+    )
     expect(mockLogger.info).toHaveBeenCalledWith(
       {
         did: 'did:plc:alice',
@@ -215,16 +220,12 @@ describe('handleCallback', () => {
     })
 
     const handler = handleCallback(config)
-    const req: any = {
-      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-    }
-    const res: any = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-      redirect: vi.fn(),
-    }
+    const req = makeReq(
+      'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    )
+    const res = makeRes()
 
-    await handler(req, res)
+    await callHandler(handler, req, res)
 
     expect(config.initRepo).toHaveBeenCalledWith('did:plc:kenshin')
     expect(config.createSigningKey).toHaveBeenCalledWith('did:plc:kenshin')
@@ -688,6 +689,273 @@ describe('handleCallback', () => {
         enrolled: false,
       }),
     )
+  })
+
+  describe('custody reconciliation on re-auth', () => {
+    function existingEnrollment(overrides: Record<string, unknown>) {
+      return {
+        did: 'did:plc:kaoru',
+        enrollmentRkey: 'did:web:localhost:3100',
+        active: true,
+        signingKeyDid: 'did:key:zQ3sh...',
+        pdsEndpoint: 'https://pds.example.com',
+        custody: 'stratos',
+        ...overrides,
+      }
+    }
+
+    beforeEach(() => {
+      mockEnrollmentStore.getBoundaries = vi.fn().mockResolvedValue([])
+      mockEnrollmentStore.setBoundaries = vi.fn()
+      // Matches existingEnrollment()'s stored pdsEndpoint, so these tests
+      // isolate custody reconciliation from the separate pdsEndpoint-refresh
+      // behaviour covered below.
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+    })
+
+    async function runExisting() {
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+      const handler = handleCallback(config)
+      const req: any = {
+        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      }
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        redirect: vi.fn(),
+      }
+      await handler(req, res)
+      return res
+    }
+
+    it('records the new verdict but keeps stratos custody when the grant becomes capable', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:kaoru',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({ custody: 'stratos', repoHost: undefined }),
+      )
+
+      await runExisting()
+
+      // Moving custody means moving the repo and changing the signing key.
+      // Neither happens here, so the label must not move on its own.
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        { capabilityVerdict: 'capable' },
+      )
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({ custody: 'stratos', repoHost: undefined }),
+      )
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          did: 'did:plc:kaoru',
+          storedCustody: 'stratos',
+          wantedCustody: 'pds',
+        }),
+        'custody diverged from the granted scope, migration required',
+      )
+    })
+
+    it('records the new verdict but keeps pds custody when the grant is revoked', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+
+      await runExisting()
+
+      // Flipping to 'stratos' here would reopen the write gate and mint a
+      // second signing key, while the user's records stay on their PDS.
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        { capabilityVerdict: 'not-capable' },
+      )
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storedCustody: 'pds',
+          wantedCustody: 'stratos',
+        }),
+        'custody diverged from the granted scope, migration required',
+      )
+    })
+
+    it('never flips pds custody to stratos when the re-auth verdict is unknown', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: {
+          sub: 'did:plc:kaoru',
+          getTokenInfo: vi
+            .fn()
+            .mockRejectedValue(new Error('introspection down')),
+        },
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+      // The verdict is persisted so a later migration pass can find this
+      // user. Custody itself must not move: losing the answer is not the
+      // same as learning the answer is no.
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.objectContaining({ capabilityVerdict: 'unknown' }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).not.toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.objectContaining({ custody: 'stratos' }),
+      )
+    })
+
+    it('refreshes repoHost and the stored pdsEndpoint when the resolved PDS endpoint changes', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:kaoru',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://new-pds.example.com',
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+          pdsEndpoint: 'https://pds.example.com',
+          capabilityVerdict: 'capable',
+        }),
+      )
+
+      await runExisting()
+
+      // A user who moved PDS must get their new host published, not a stale one.
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://new-pds.example.com',
+        }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        {
+          pdsEndpoint: 'https://new-pds.example.com',
+          repoHost: 'https://new-pds.example.com',
+        },
+      )
+    })
+
+    it('refreshes the stored pdsEndpoint on stratos custody without setting a repoHost', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://new-pds.example.com',
+      })
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'stratos',
+          repoHost: undefined,
+          pdsEndpoint: 'https://pds.example.com',
+          capabilityVerdict: 'not-capable',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({ custody: 'stratos', repoHost: undefined }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        { pdsEndpoint: 'https://new-pds.example.com' },
+      )
+      // The store treats a present `repoHost` key as an explicit clear, so
+      // equality alone is not enough: the key must be absent.
+      const updateArg = mockEnrollmentStore.updateEnrollment.mock.calls[0][1]
+      expect('repoHost' in updateArg).toBe(false)
+    })
+
+    it('resolves the PDS endpoint from the DID document when open-mode eligibility returns none', async () => {
+      // Open mode answers eligibility before it resolves the DID document,
+      // so the validation result carries no endpoint. A pds-custody re-auth
+      // must publish a resolved host, never `repoHost: undefined`.
+      const keypair = await Secp256k1Keypair.create({ exportable: true })
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:kaoru',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({ allowed: true })
+      const doc = atprotoDidDoc('did:plc:kaoru', keypair)
+      doc.service[0].serviceEndpoint = 'https://pds.tokyo3.example.com'
+      mockIdResolver.did.resolve.mockResolvedValue(doc)
+      mockEnrollmentStore.getEnrollment.mockResolvedValue(
+        existingEnrollment({
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+          pdsEndpoint: 'https://pds.example.com',
+          capabilityVerdict: 'capable',
+        }),
+      )
+
+      await runExisting()
+
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        expect.any(String),
+        expect.objectContaining({
+          custody: 'pds',
+          repoHost: 'https://pds.tokyo3.example.com',
+        }),
+      )
+      expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+        'did:plc:kaoru',
+        {
+          pdsEndpoint: 'https://pds.tokyo3.example.com',
+          repoHost: 'https://pds.tokyo3.example.com',
+        },
+      )
+    })
   })
 
   describe('spaces capability detection', () => {

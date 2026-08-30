@@ -11,6 +11,7 @@ import { Secp256k1Keypair } from '@atproto/crypto'
 import {
   UpstreamStratosClient,
   StratosClientError,
+  describeUpstreamError,
 } from '../src/upstream/index.js'
 
 interface CapturedRequest {
@@ -253,6 +254,125 @@ describe('UpstreamStratosClient', () => {
     })
   })
 
+  describe('getSpaceCredential', () => {
+    it('POSTs space + delegationToken and sends the mint proof as the dpop header', async () => {
+      mock.handler = (_req, res, body) => {
+        expect(JSON.parse(body)).toEqual({
+          space:
+            'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+          delegationToken: 'delegation-token-value',
+        })
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            credential: 'credential-value',
+            expiresAt: '2026-01-01T00:00:00.000Z',
+          }),
+        )
+      }
+      const result = await client.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async (htu) => `proof-for-${htu}`,
+      })
+      expect(result).toEqual({
+        credential: 'credential-value',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      })
+      expect(mock.requests).toHaveLength(1)
+      const req = mock.requests[0]
+      expect(req.method).toBe('POST')
+      expect(req.url).toBe('/xrpc/zone.stratos.space.getSpaceCredential')
+      expect(req.headers.dpop).toBe(
+        `proof-for-${mock.baseUrl}/xrpc/zone.stratos.space.getSpaceCredential`,
+      )
+      expect(req.headers['content-type']).toBe('application/json')
+      expect(req.headers.accept).toBe('application/json')
+      expect(req.headers.authorization).toBeUndefined()
+    })
+
+    it('builds the mint proof htu from publicUrl, not serviceUrl, while still sending the request to serviceUrl', async () => {
+      const publicClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        publicUrl: 'https://stratos.public.test',
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+      })
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            credential: 'credential-value',
+            expiresAt: '2026-01-01T00:00:00.000Z',
+          }),
+        )
+      }
+      await publicClient.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async (htu) => `proof-for-${htu}`,
+      })
+      expect(mock.requests).toHaveLength(1)
+      const req = mock.requests[0]
+      expect(req.url).toBe('/xrpc/zone.stratos.space.getSpaceCredential')
+      expect(req.headers.dpop).toBe(
+        'proof-for-https://stratos.public.test/xrpc/zone.stratos.space.getSpaceCredential',
+      )
+    })
+
+    it('throws StratosClientError on non-2xx (e.g. NotEnrolled)', async () => {
+      mock.handler = (_req, res) => {
+        res.statusCode = 400
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'NotEnrolled' }))
+      }
+      await expect(
+        client.getSpaceCredential({
+          space:
+            'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+          delegationToken: 'delegation-token-value',
+          buildMintProof: async () => 'proof',
+        }),
+      ).rejects.toMatchObject({
+        name: 'StratosClientError',
+        status: 400,
+        lxm: 'zone.stratos.space.getSpaceCredential',
+      })
+    })
+  })
+
+  describe('trailing slash normalization', () => {
+    it('strips a trailing slash from both serviceUrl and publicUrl', async () => {
+      const slashClient = new UpstreamStratosClient({
+        serviceUrl: `${mock.baseUrl}/`,
+        publicUrl: 'https://stratos.public.test/',
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+      })
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            credential: 'credential-value',
+            expiresAt: '2026-01-01T00:00:00.000Z',
+          }),
+        )
+      }
+      await slashClient.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async (htu) => `proof-for-${htu}`,
+      })
+      const req = mock.requests[0]
+      expect(req.url).toBe('/xrpc/zone.stratos.space.getSpaceCredential')
+      expect(req.headers.dpop).toBe(
+        'proof-for-https://stratos.public.test/xrpc/zone.stratos.space.getSpaceCredential',
+      )
+    })
+  })
+
   describe('no JWT caching', () => {
     it('mints a distinct token per call (different jti)', async () => {
       mock.handler = (_req, res) => {
@@ -287,5 +407,88 @@ describe('StratosClientError', () => {
     expect(err.lxm).toBe('foo')
     expect(err.url).toBe('https://x/xrpc/foo')
     expect(err.name).toBe('StratosClientError')
+  })
+})
+
+describe('describeUpstreamError', () => {
+  it('includes status and lxm for a StratosClientError', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: 'NotEnrolled' }),
+      url: 'https://x/xrpc/zone.stratos.space.getSpaceCredential',
+      lxm: 'zone.stratos.space.getSpaceCredential',
+    })
+    expect(describeUpstreamError(err)).toBe(
+      '400 zone.stratos.space.getSpaceCredential: NotEnrolled',
+    )
+  })
+
+  it('logs no part of a body that is not an XRPC error', () => {
+    // The body comes from the other end. A misrouted URL could return
+    // anything, so none of it belongs in a log line.
+    const body = 'x'.repeat(5000)
+    const err = new StratosClientError({
+      status: 502,
+      body,
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    const described = describeUpstreamError(err)
+    expect(described).toBe('502 foo')
+    expect(described).not.toContain('x')
+  })
+
+  it('logs the error code but never the message', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({
+        error: 'NotEnrolled',
+        message: 'shinji is not enrolled in nerv',
+      }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    const described = describeUpstreamError(err)
+    expect(described).toBe('400 foo: NotEnrolled')
+    expect(described).not.toContain('shinji')
+  })
+
+  it('ignores an error value too long to be a code', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: 'y'.repeat(200) }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe('400 foo')
+  })
+
+  it('ignores an error value with characters outside the code grammar', () => {
+    // A newline in a logged value forges extra log lines (CWE-117).
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: 'Not\nEnrolled' }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe('400 foo')
+  })
+
+  it('ignores an empty-string error value', () => {
+    const err = new StratosClientError({
+      status: 400,
+      body: JSON.stringify({ error: '' }),
+      url: 'https://x/xrpc/foo',
+      lxm: 'foo',
+    })
+    expect(describeUpstreamError(err)).toBe('400 foo')
+  })
+
+  it('reports the error name, not the message, for a plain Error', () => {
+    expect(describeUpstreamError(new TypeError('boom'))).toBe('TypeError')
+  })
+
+  it('reports nothing from a non-Error throw', () => {
+    expect(describeUpstreamError('just a string')).toBe('unknown error')
   })
 })

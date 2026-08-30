@@ -424,6 +424,63 @@ describe('PostgreSQL Backend Integration', () => {
       expect(boundaries).not.toContain('did:web:nerv.tokyo.jp/design')
     })
 
+    it('should list active enrollments carrying a boundary, excluding inactive and other-boundary rows', async () => {
+      const BOUNDARY = 'did:web:nerv.tokyo.jp/pilots'
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zAsukaLangley1',
+        active: true,
+      })
+      await enrollmentStore.setBoundaries(testDid, [BOUNDARY])
+
+      await enrollmentStore.enroll({
+        did: testDid2,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zShinjiIkari1',
+        active: false,
+      })
+      await enrollmentStore.setBoundaries(testDid2, [BOUNDARY])
+
+      // Called with no options at all -- exercises the default limit/cursor.
+      const members = await enrollmentStore.listEnrollmentsByBoundary(BOUNDARY)
+      expect(members.map((m) => m.did)).toEqual([testDid])
+    })
+
+    it('should paginate listEnrollmentsByBoundary with a cursor', async () => {
+      const BOUNDARY = 'did:web:nerv.tokyo.jp/eva'
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zReiAyanami1',
+        active: true,
+      })
+      await enrollmentStore.setBoundaries(testDid, [BOUNDARY])
+
+      await enrollmentStore.enroll({
+        did: testDid2,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMariMakinami1',
+        active: true,
+      })
+      await enrollmentStore.setBoundaries(testDid2, [BOUNDARY])
+
+      const firstPage = await enrollmentStore.listEnrollmentsByBoundary(
+        BOUNDARY,
+        { limit: 1 },
+      )
+      expect(firstPage).toHaveLength(1)
+
+      const secondPage = await enrollmentStore.listEnrollmentsByBoundary(
+        BOUNDARY,
+        { cursor: firstPage[0].did },
+      )
+      expect(secondPage.map((m) => m.did)).not.toContain(firstPage[0].did)
+      expect([...firstPage, ...secondPage].map((m) => m.did).sort()).toEqual(
+        [testDid, testDid2].sort(),
+      )
+    })
+
     it('should unenroll', async () => {
       await enrollmentStore.enroll({
         did: testDid,
@@ -699,6 +756,108 @@ describe('PostgreSQL Backend Integration', () => {
       const afterRepoHost = await enrollmentStore.getEnrollment(testDid)
       expect(afterRepoHost?.custody).toBe('pds')
       expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
+    })
+
+    it('should round-trip a truthy capabilityVerdict through enroll and getEnrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zRitsukoAkagi1',
+        active: true,
+        capabilityVerdict: 'capable',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('capable')
+    })
+
+    it('should leave capabilityVerdict undefined when omitted from enroll', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zRitsukoAkagi2',
+        active: true,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBeUndefined()
+    })
+
+    it('should round-trip an unknown capabilityVerdict, distinct from not-capable and absent', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zRitsukoAkagi3',
+        active: true,
+        capabilityVerdict: 'unknown',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('unknown')
+      expect(result?.capabilityVerdict).not.toBe('not-capable')
+    })
+
+    it('should overwrite capabilityVerdict on re-enroll via onConflictDoUpdate', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMakotoHyuga1',
+        active: true,
+        capabilityVerdict: 'capable',
+      })
+
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMakotoHyuga2',
+        active: true,
+        capabilityVerdict: 'not-capable',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('not-capable')
+    })
+
+    it('should update capabilityVerdict without disturbing custody or repoHost', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zPenPenSama1',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        capabilityVerdict: 'capable',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.capabilityVerdict).toBe('capable')
+      expect(result?.custody).toBe('pds')
+      expect(result?.repoHost).toBe('https://pds.nerv.example.com')
+    })
+
+    it('should clear repoHost to undefined via updateEnrollment when explicitly passed undefined', async () => {
+      // A future custody migration (MM-10) needs to clear repoHost when it
+      // moves a user off 'pds' custody, not just leave it at the old endpoint.
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zPenPenSama2',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        custody: 'stratos',
+        repoHost: undefined,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.custody).toBe('stratos')
+      expect(result?.repoHost).toBeUndefined()
     })
 
     it('should keep existing boundaries when enroll is called with an empty boundaries array', async () => {

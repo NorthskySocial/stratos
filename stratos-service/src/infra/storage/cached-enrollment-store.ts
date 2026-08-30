@@ -257,6 +257,18 @@ export class CachedEnrollmentStore implements EnrollmentStoreWriter {
     return this.inner.enrollmentCount()
   }
 
+  /**
+   * List active enrollments carrying a given boundary (a space's member
+   * list). Not cached: callers page through it, unlike the single-DID reads
+   * above.
+   */
+  async listEnrollmentsByBoundary(
+    boundary: string,
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    return this.inner.listEnrollmentsByBoundary(boundary, options)
+  }
+
   // ─── Write Operations (invalidate cache) ───────────────────────────────
 
   /**

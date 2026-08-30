@@ -262,7 +262,8 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
         "enrollmentRkey" TEXT,
         "isService" BOOLEAN NOT NULL DEFAULT FALSE,
         "custody" TEXT NOT NULL DEFAULT 'stratos',
-        "repoHost" TEXT
+        "repoHost" TEXT,
+        "capabilityVerdict" TEXT
       )
     `,
   )
@@ -284,6 +285,16 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     'enrollment_boundary_did_idx',
     sql`
       CREATE INDEX IF NOT EXISTS "enrollment_boundary_did_idx" ON "enrollment_boundary"("did")
+    `,
+  )
+
+  // Supports listEnrollmentsByBoundary: a space's member list is looked up by
+  // boundary, not by did.
+  await executeMigrationStep(
+    db,
+    'enrollment_boundary_boundary_idx',
+    sql`
+      CREATE INDEX IF NOT EXISTS "enrollment_boundary_boundary_idx" ON "enrollment_boundary"("boundary")
     `,
   )
 
@@ -313,6 +324,13 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     db,
     'enrollment_add_repoHost',
     sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "repoHost" TEXT`,
+  )
+
+  // Migration: add capabilityVerdict column if missing (for existing databases)
+  await executeMigrationStep(
+    db,
+    'enrollment_add_capabilityVerdict',
+    sql`ALTER TABLE "enrollment" ADD COLUMN IF NOT EXISTS "capabilityVerdict" TEXT`,
   )
 
   await migratePdsSyncTables(db)

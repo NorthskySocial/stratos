@@ -119,3 +119,29 @@ export function classifyCustody(
 ): Custody {
   return spacesCapability === 'capable' ? 'pds' : 'stratos'
 }
+
+/**
+ * Report which custody class a re-authorising enrollment's capability verdict
+ * would grant, so the caller can compare it against what is actually stored.
+ * It does not decide the stored custody -- moving custody means moving the
+ * repo and changing the signing key, and re-auth does neither. Flipping the
+ * label alone would publish an enrollment whose `signingKey` contradicts its
+ * `custody`. MM-10 is the unscheduled migration that will move anyone this
+ * function reports as diverged.
+ *
+ * An 'unknown' verdict, or no verdict at all, reports the current custody as
+ * still wanted -- losing the answer is not the same as learning the answer
+ * is no, and a transient introspection failure must not read as divergence.
+ *
+ * @param current - The enrollment's currently stored custody class.
+ * @param verdict - The capability verdict this re-auth observed.
+ * @returns The custody class the verdict would grant, for comparison only.
+ */
+export function reconcileCustody(
+  current: Custody,
+  verdict: SpacesCapability | undefined,
+): Custody {
+  if (verdict === 'capable') return 'pds'
+  if (verdict === 'not-capable') return 'stratos'
+  return current
+}

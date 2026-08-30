@@ -81,6 +81,8 @@ interface InvokeOptions {
   /** Request shape (method/url/headers) for mint-time DPoP proof checks. */
   req?: {
     method?: string
+    /** The full path, as Express keeps it when a router rewrites `url`. */
+    originalUrl?: string
     url?: string
     headers?: Record<string, string | string[] | undefined>
   }
@@ -530,6 +532,32 @@ describe('getSpaceCredential — delegation-token path', () => {
     expect(
       await verifyCredentialAgainst(signingKey.did(), res.body!.credential!),
     ).toBe(true)
+  })
+
+  it('accepts a proof when Express has rewritten url behind the router', async () => {
+    // Express sets `url` relative to the router's mount point and keeps the
+    // full path on `originalUrl`. A proof covers the full path, so reading
+    // `url` alone drops the `/xrpc` prefix and every mint fails.
+    const { userKey, server } = await setup(true)
+    const token = await mintDelegation({ userKey, iss: userKey.did() })
+    const { proof } = await makeMintProof(`${PUBLIC_URL}${MINT_PATH}`)
+
+    const res = await invoke(
+      server,
+      { space: SPACE_URI, delegationToken: token },
+      undefined,
+      {
+        req: {
+          method: 'POST',
+          url: '/zone.stratos.space.getSpaceCredential',
+          originalUrl: MINT_PATH,
+          headers: { dpop: proof },
+        },
+      },
+    )
+
+    expect(res.error).toBeUndefined()
+    expect(res.body?.credential).toBeTruthy()
   })
 
   it('rejects a valid token WITHOUT a mint-time DPoP proof → ProofRequired', async () => {

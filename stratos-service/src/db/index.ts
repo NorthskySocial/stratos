@@ -127,7 +127,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       enrollmentRkey TEXT,
       isService INTEGER NOT NULL DEFAULT 0,
       custody TEXT NOT NULL DEFAULT 'stratos',
-      repoHost TEXT
+      repoHost TEXT,
+      capabilityVerdict TEXT
     )
   `)
 
@@ -153,6 +154,12 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   await addEnrollmentColumn(
     db,
     sql`ALTER TABLE enrollment ADD COLUMN repoHost TEXT`,
+  )
+
+  // Migration: add capabilityVerdict column if missing (for existing databases)
+  await addEnrollmentColumn(
+    db,
+    sql`ALTER TABLE enrollment ADD COLUMN capabilityVerdict TEXT`,
   )
 
   await db.run(sql`
@@ -182,6 +189,12 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
 
   await db.run(sql`
     CREATE INDEX IF NOT EXISTS enrollment_pds_sync_due_idx ON enrollment_pds_sync(status, nextAttemptAt)
+  `)
+
+  // Supports listEnrollmentsByBoundary: a space's member list is looked up by
+  // boundary, not by did.
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS enrollment_boundary_boundary_idx ON enrollment_boundary(boundary)
   `)
 }
 

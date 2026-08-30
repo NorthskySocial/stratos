@@ -9,8 +9,15 @@ export interface FeedgenConfig {
   feedgenPublicUrl: string
   /** Private signing key for this feed generator's service identity. */
   feedgenSigningKey: string
-  /** Base URL of the upstream Stratos service. */
+  /** Base URL this feedgen sends requests to the upstream Stratos service on. May be internal-only. */
   stratosServiceUrl: string
+  /**
+   * Base URL Stratos verifies the space-surface DPoP `htu` against
+   * (its own `STRATOS_PUBLIC_URL`). Defaults to `stratosServiceUrl`. Set this
+   * separately when `stratosServiceUrl` is an internal address that differs
+   * from Stratos's externally-known origin.
+   */
+  stratosPublicUrl: string
   /** DID of the upstream Stratos service. */
   stratosServiceDid: string
   /** PLC directory URL used to resolve `did:plc:` issuers. */
@@ -78,11 +85,15 @@ export function loadFeedgenConfig(
   return {
     feedgenServiceDid,
     feedgenPublicUrl: trimTrailingSlash(
-      env['FEEDGEN_PUBLIC_URL'] ?? didWebToUrl(feedgenServiceDid),
+      optionalEnv(env, 'FEEDGEN_PUBLIC_URL') ?? didWebToUrl(feedgenServiceDid),
     ),
     feedgenSigningKey: requireEnv(env, 'FEEDGEN_SIGNING_KEY'),
     stratosServiceUrl: trimTrailingSlash(
       requireEnv(env, 'STRATOS_SERVICE_URL'),
+    ),
+    stratosPublicUrl: trimTrailingSlash(
+      optionalEnv(env, 'STRATOS_PUBLIC_URL') ??
+        requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
     feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
@@ -130,6 +141,13 @@ function parseStorageBackend(value: string | undefined): StorageBackend {
   throw new Error(
     `Invalid FEEDGEN_STORAGE_BACKEND: ${value} (expected 'sqlite' or 'postgres')`,
   )
+}
+
+/** Read an optional env var. A blank or whitespace-only value counts as unset. */
+function optionalEnv(env: FeedgenEnv, key: string): string | undefined {
+  const value = env[key]
+  if (!value || value.trim() === '') return undefined
+  return value
 }
 
 function requireEnv(env: FeedgenEnv, key: string): string {

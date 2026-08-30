@@ -43,6 +43,7 @@ export const pgEnrollment = pgTable('enrollment', {
   isService: boolean('isService').notNull().default(false),
   custody: text('custody').notNull().default('stratos'),
   repoHost: text('repoHost'),
+  capabilityVerdict: text('capabilityVerdict'),
 })
 
 export const pgEnrollmentBoundary = pgTable(
@@ -54,6 +55,7 @@ export const pgEnrollmentBoundary = pgTable(
   (table) => [
     primaryKey({ columns: [table.did, table.boundary] }),
     index('enrollment_boundary_did_idx').on(table.did),
+    index('enrollment_boundary_boundary_idx').on(table.boundary),
   ],
 )
 

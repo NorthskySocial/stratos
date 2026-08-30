@@ -107,6 +107,10 @@ export default defineConfig({
               text: 'Multi-Domain Enrollment',
               link: '/architecture/multi-domain-enrollment',
             },
+            {
+              text: 'Repo-Host Discovery',
+              link: '/architecture/repo-host-discovery',
+            },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },

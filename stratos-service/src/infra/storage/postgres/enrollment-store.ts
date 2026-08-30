@@ -3,6 +3,7 @@ import type {
   Custody,
   EnrollmentStoreReader,
   EnrollmentStoreWriter,
+  SpacesCapability,
   StoredEnrollment,
   ListEnrollmentsOptions,
 } from '@northskysocial/stratos-core'
@@ -28,6 +29,8 @@ function toStoredEnrollment(row: PgEnrollment): StoredEnrollment {
     isService: row.isService,
     custody: (row.custody as Custody | null) ?? 'stratos',
     repoHost: row.repoHost ?? undefined,
+    capabilityVerdict:
+      (row.capabilityVerdict as SpacesCapability | null) ?? undefined,
   }
 }
 
@@ -63,10 +66,14 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
     const limit = options?.limit ?? 100
     const cursor = options?.cursor
 
-    let query = this.db.select().from(pgEnrollment)
+    const conditions = [
+      cursor ? gt(pgEnrollment.did, cursor) : undefined,
+      options?.activeOnly ? eq(pgEnrollment.active, 'true') : undefined,
+    ].filter((c) => c !== undefined)
 
-    if (cursor) {
-      query = query.where(gt(pgEnrollment.did, cursor)) as typeof query
+    let query = this.db.select().from(pgEnrollment)
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query
     }
 
     const rows = await query.orderBy(asc(pgEnrollment.did)).limit(limit)
@@ -88,6 +95,47 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
       .select()
       .from(pgEnrollment)
       .where(condition)
+      .orderBy(asc(pgEnrollment.did))
+      .limit(limit)
+
+    return rows.map(toStoredEnrollment)
+  }
+
+  /**
+   * List active enrollments carrying a given boundary (a space's member list).
+   */
+  async listEnrollmentsByBoundary(
+    boundary: string,
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 100
+    const cursor = options?.cursor
+
+    const conditions = [
+      eq(pgEnrollmentBoundary.boundary, boundary),
+      eq(pgEnrollment.active, 'true'),
+    ]
+    if (cursor) conditions.push(gt(pgEnrollment.did, cursor))
+
+    const rows = await this.db
+      .select({
+        did: pgEnrollment.did,
+        enrolledAt: pgEnrollment.enrolledAt,
+        pdsEndpoint: pgEnrollment.pdsEndpoint,
+        signingKeyDid: pgEnrollment.signingKeyDid,
+        active: pgEnrollment.active,
+        enrollmentRkey: pgEnrollment.enrollmentRkey,
+        isService: pgEnrollment.isService,
+        custody: pgEnrollment.custody,
+        repoHost: pgEnrollment.repoHost,
+        capabilityVerdict: pgEnrollment.capabilityVerdict,
+      })
+      .from(pgEnrollment)
+      .innerJoin(
+        pgEnrollmentBoundary,
+        eq(pgEnrollment.did, pgEnrollmentBoundary.did),
+      )
+      .where(and(...conditions))
       .orderBy(asc(pgEnrollment.did))
       .limit(limit)
 
@@ -129,6 +177,7 @@ export class PgEnrollmentStoreWriter
         isService: data.isService ?? false,
         custody: data.custody ?? 'stratos',
         repoHost: data.repoHost ?? null,
+        capabilityVerdict: data.capabilityVerdict ?? null,
       })
       .onConflictDoUpdate({
         target: pgEnrollment.did,
@@ -141,6 +190,7 @@ export class PgEnrollmentStoreWriter
           isService: data.isService ?? false,
           custody: data.custody ?? 'stratos',
           repoHost: data.repoHost ?? null,
+          capabilityVerdict: data.capabilityVerdict ?? null,
         },
       })
 
@@ -184,8 +234,15 @@ export class PgEnrollmentStoreWriter
     if (updates.custody !== undefined) {
       setValues.custody = updates.custody
     }
-    if (updates.repoHost !== undefined) {
-      setValues.repoHost = updates.repoHost
+    // `repoHost` alone needs to express "clear it": custody reconciliation
+    // must be able to drop a stored repoHost when it flips a user back to
+    // 'stratos' custody. `in` sees an explicit `repoHost: undefined`, where
+    // `!== undefined` would treat it the same as an omitted key.
+    if ('repoHost' in updates) {
+      setValues.repoHost = updates.repoHost ?? null
+    }
+    if ('capabilityVerdict' in updates) {
+      setValues.capabilityVerdict = updates.capabilityVerdict ?? null
     }
 
     if (Object.keys(setValues).length > 0) {
