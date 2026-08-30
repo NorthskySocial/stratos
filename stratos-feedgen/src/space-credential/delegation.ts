@@ -15,8 +15,14 @@ const DELEGATION_TYP = 'atproto-space-delegation+jwt'
 const ATPROTO_KID = '#atproto'
 const SPACE_HOST_FRAGMENT = '#atproto_space_host'
 
-/** Delegation token lifetime, in seconds. Bounded by the verifier's `MAX_DELEGATION_LIFETIME`. */
-export const DELEGATION_TOKEN_LIFETIME_SECONDS = 300
+/**
+ * Delegation token lifetime, in seconds. The verifier's `MAX_DELEGATION_LIFETIME`
+ * is 300s, checked with a strict `>`; matching it leaves zero headroom against
+ * clock drift between the feedgen and Stratos. A single-use token redeemed
+ * inside one round trip does not need that much room, so this uses the spec's
+ * own 60s default instead.
+ */
+export const DELEGATION_TOKEN_LIFETIME_SECONDS = 60
 
 /** Inputs to {@link mintDelegationToken}. */
 export interface MintDelegationTokenInput {

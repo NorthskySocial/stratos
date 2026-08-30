@@ -288,6 +288,16 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     `,
   )
 
+  // Supports listEnrollmentsByBoundary: a space's member list is looked up by
+  // boundary, not by did.
+  await executeMigrationStep(
+    db,
+    'enrollment_boundary_boundary_idx',
+    sql`
+      CREATE INDEX IF NOT EXISTS "enrollment_boundary_boundary_idx" ON "enrollment_boundary"("boundary")
+    `,
+  )
+
   // Migration: add enrollmentRkey column if missing (for existing databases)
   await executeMigrationStep(
     db,

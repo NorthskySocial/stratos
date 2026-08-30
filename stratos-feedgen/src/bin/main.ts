@@ -30,7 +30,10 @@ import {
   ServiceStream,
   SubscriptionIndexer,
 } from '../subscription/index.js'
-import { UpstreamStratosClient } from '../upstream/index.js'
+import {
+  describeUpstreamError,
+  UpstreamStratosClient,
+} from '../upstream/index.js'
 
 async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
@@ -55,6 +58,7 @@ async function main(): Promise<void> {
 
   const upstream = new UpstreamStratosClient({
     serviceUrl: cfg.stratosServiceUrl,
+    publicUrl: cfg.stratosPublicUrl,
     serviceDid: cfg.stratosServiceDid,
     feedgenDid: cfg.feedgenServiceDid,
     keypair,
@@ -130,8 +134,7 @@ async function main(): Promise<void> {
         await spaceCredentialManager.getCredential(boundary)
         return { boundary }
       } catch (err: unknown) {
-        const reason = err instanceof Error ? err.message : 'unknown error'
-        return { boundary, reason }
+        return { boundary, reason: describeUpstreamError(err) }
       }
     }),
   ).then((results) => {

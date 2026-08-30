@@ -33,6 +33,12 @@ export interface StoredEnrollment {
 export interface ListEnrollmentsOptions {
   limit?: number
   cursor?: string
+  /**
+   * Filter to active enrollments in SQL, before `limit` is applied. Required
+   * whenever a caller filters the result by `active` afterward -- filtering
+   * after a SQL `LIMIT` drops rows from the page instead of the result.
+   */
+  activeOnly?: boolean
 }
 
 /**
@@ -53,6 +59,17 @@ export interface EnrollmentStoreReader {
 
   /** List only service enrollments */
   listServiceEnrollments: (
+    options?: ListEnrollmentsOptions,
+  ) => Promise<StoredEnrollment[]>
+
+  /**
+   * List active enrollments carrying a given boundary. This is a space's
+   * member list: a space maps 1:1 to a boundary, so "who is a member of this
+   * space" is "who has this boundary and is active". An indexed join, not a
+   * `listEnrollments` scan filtered in memory.
+   */
+  listEnrollmentsByBoundary: (
+    boundary: string,
     options?: ListEnrollmentsOptions,
   ) => Promise<StoredEnrollment[]>
 

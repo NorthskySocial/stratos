@@ -9,5 +9,6 @@ export type {
   UpstreamStratosClientOptions,
 } from './client.js'
 export { StratosClientError } from './errors.js'
+export { describeUpstreamError } from './format-error.js'
 export { SERVICE_JWT_LIFETIME_SECONDS, mintServiceJwt } from './jwt.js'
 export type { MintServiceJwtOptions } from './jwt.js'

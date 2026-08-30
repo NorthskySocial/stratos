@@ -90,6 +90,12 @@ export function registerSpaceCredentialHandlers(
 /** Minimal request shape needed to check a mint-time DPoP proof. */
 interface MintRequest {
   method?: string
+  /**
+   * The path as the client sent it. Express rewrites `url` to be relative to
+   * the router's mount point, so a proof's `htu` covers the full path and
+   * `url` alone would drop the `/xrpc` prefix.
+   */
+  originalUrl?: string
   url?: string
   headers?: Record<string, string | string[] | undefined>
 }
@@ -246,7 +252,7 @@ async function requireMintProofJkt(
   try {
     const proof = await proofChecker.check({
       method: req?.method || 'POST',
-      url: req?.url || '/',
+      url: req?.originalUrl || req?.url || '/',
       headers: req?.headers ?? {},
     })
     return proof.jkt

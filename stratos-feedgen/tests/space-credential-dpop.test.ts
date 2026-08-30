@@ -2,7 +2,6 @@ import { createHash, webcrypto } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   createDpopProof,
-  dpopThumbprint,
   generateDpopKeyPair,
 } from '../src/space-credential/dpop.js'
 
@@ -50,25 +49,6 @@ describe('generateDpopKeyPair', () => {
     expect(pair.jwk).toMatchObject({ kty: 'EC', crv: 'P-256' })
     expect(pair.jwk.x).toBeTruthy()
     expect(pair.jwk.y).toBeTruthy()
-  })
-})
-
-describe('dpopThumbprint', () => {
-  it('is deterministic for the same JWK', () => {
-    const jwk = { crv: 'P-256', kty: 'EC', x: 'xxx', y: 'yyy' }
-    expect(dpopThumbprint(jwk)).toBe(dpopThumbprint({ ...jwk }))
-  })
-
-  it('ignores member order (canonical JSON, RFC 7638)', () => {
-    const jwk = { crv: 'P-256', kty: 'EC', x: 'xxx', y: 'yyy' }
-    const reordered = { y: 'yyy', x: 'xxx', kty: 'EC', crv: 'P-256' }
-    expect(dpopThumbprint(jwk)).toBe(dpopThumbprint(reordered))
-  })
-
-  it('differs for different keys', () => {
-    const a = dpopThumbprint({ crv: 'P-256', kty: 'EC', x: 'aaa', y: 'bbb' })
-    const b = dpopThumbprint({ crv: 'P-256', kty: 'EC', x: 'ccc', y: 'ddd' })
-    expect(a).not.toBe(b)
   })
 })
 

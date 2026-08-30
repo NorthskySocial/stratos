@@ -170,6 +170,12 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   await db.run(sql`
     CREATE INDEX IF NOT EXISTS enrollment_boundary_did_idx ON enrollment_boundary(did)
   `)
+
+  // Supports listEnrollmentsByBoundary: a space's member list is looked up by
+  // boundary, not by did.
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS enrollment_boundary_boundary_idx ON enrollment_boundary(boundary)
+  `)
 }
 
 /**

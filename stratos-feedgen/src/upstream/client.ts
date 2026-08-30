@@ -13,8 +13,16 @@ const LXM = {
 } as const
 
 export interface UpstreamStratosClientOptions {
-  /** Base URL of the upstream Stratos service (no trailing slash). */
+  /** Base URL this client sends requests to (no trailing slash). May be internal-only. */
   serviceUrl: string
+  /**
+   * Base URL Stratos verifies the space-surface DPoP `htu` against
+   * (`STRATOS_PUBLIC_URL` server-side — see `space-dpop.ts`). Defaults to
+   * `serviceUrl`. Set this separately when the feedgen reaches Stratos on an
+   * internal address that differs from Stratos's externally-known origin, or
+   * every space-credential mint fails with `ProofRequired`.
+   */
+  publicUrl?: string
   /** DID of the upstream Stratos service. */
   serviceDid: string
   /** DID of this feed generator (used as JWT issuer). */
@@ -73,15 +81,15 @@ export interface GetSpaceCredentialOptions {
  */
 export class UpstreamStratosClient {
   private readonly serviceUrl: string
+  private readonly publicUrl: string
   private readonly serviceDid: string
   private readonly feedgenDid: string
   private readonly keypair: Keypair
   private readonly fetchImpl: typeof fetch
 
   constructor(opts: UpstreamStratosClientOptions) {
-    this.serviceUrl = opts.serviceUrl.endsWith('/')
-      ? opts.serviceUrl.slice(0, -1)
-      : opts.serviceUrl
+    this.serviceUrl = trimTrailingSlash(opts.serviceUrl)
+    this.publicUrl = trimTrailingSlash(opts.publicUrl ?? opts.serviceUrl)
     this.serviceDid = opts.serviceDid
     this.feedgenDid = opts.feedgenDid
     this.keypair = opts.keypair
@@ -166,14 +174,19 @@ export class UpstreamStratosClient {
   async getSpaceCredential(
     opts: GetSpaceCredentialOptions,
   ): Promise<GetSpaceCredentialResult> {
-    const url = `${this.serviceUrl}/xrpc/${LXM.getSpaceCredential}`
+    const path = `/xrpc/${LXM.getSpaceCredential}`
+    const url = `${this.serviceUrl}${path}`
     const lxm = LXM.getSpaceCredential
+    // The proof's `htu` must match what Stratos verifies against
+    // (`STRATOS_PUBLIC_URL`), which can differ from `serviceUrl` — the
+    // address this client actually sends the request to.
+    const htu = `${this.publicUrl}${path}`
     const res = await this.fetchImpl(url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         accept: 'application/json',
-        dpop: await opts.buildMintProof(url),
+        dpop: await opts.buildMintProof(htu),
       },
       body: JSON.stringify({
         space: opts.space,
@@ -192,6 +205,10 @@ export class UpstreamStratosClient {
       keypair: this.keypair,
     })
   }
+}
+
+function trimTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url
 }
 
 async function throwIfNotOk(

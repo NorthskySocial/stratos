@@ -1,5 +1,6 @@
 import { AuthRequiredError } from '@atproto/xrpc-server'
 import { spaceUriToBoundary } from '@northskysocial/stratos-core'
+import type { AppContext } from '../../context-types.js'
 import type { HandlerAuth } from '../../api/types.js'
 
 /**
@@ -80,4 +81,76 @@ export function resolveCredentialScope(
     viewerDomains: [boundary.value],
     spaceUri,
   }
+}
+
+/**
+ * Resolve the calling service's DID from service-auth credentials.
+ * @param auth - Handler auth context.
+ * @returns The caller service DID.
+ * @throws AuthRequiredError when the credential is not valid service auth.
+ */
+export function requireServiceCaller(auth: HandlerAuth | undefined): string {
+  const creds = auth?.credentials as
+    | { type?: string; did?: string; iss?: string }
+    | undefined
+  if (creds?.type !== 'service') {
+    throw new AuthRequiredError('Service auth required')
+  }
+  const callerDid = creds.iss ?? creds.did
+  if (!callerDid) {
+    throw new AuthRequiredError('Service auth required')
+  }
+  return callerDid
+}
+
+/**
+ * Resolve the caller's enrolled boundaries, failing closed on any error or an
+ * empty set. A caller with no enrolled boundaries can observe nothing.
+ * @param ctx - Application context.
+ * @param callerDid - The calling service DID.
+ * @returns The caller's boundary set.
+ * @throws AuthRequiredError when the caller is enrolled in no boundary.
+ */
+async function resolveCallerBoundaries(
+  ctx: AppContext,
+  callerDid: string,
+): Promise<ReadonlySet<string>> {
+  let boundaries: string[]
+  try {
+    boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
+  } catch (err) {
+    // Fail closed: a scope-resolution error must never widen access.
+    ctx.logger?.warn({ callerDid, err }, 'boundary resolution failed')
+    throw new AuthRequiredError('Service is not enrolled in any boundary')
+  }
+  if (boundaries.length === 0) {
+    throw new AuthRequiredError('Service is not enrolled in any boundary')
+  }
+  return new Set(boundaries)
+}
+
+/**
+ * Resolve the effective boundary set for a `serviceOrSpaceCredential`
+ * request, accepting EITHER inter-service auth OR a space credential. A space
+ * credential for space S yields the singleton `{boundary(S)}`, so a caller
+ * holding one is admitted to S only.
+ *
+ * Shared by every endpoint bound to `authVerifier.serviceOrSpaceCredential`
+ * (pull-sync, space membership) so the admission rule lives in one place.
+ *
+ * @param ctx - Application context.
+ * @param auth - Handler auth context.
+ * @returns The caller's boundary set.
+ * @throws AuthRequiredError when neither auth path resolves a usable scope.
+ */
+export async function resolveEffectiveBoundaries(
+  ctx: AppContext,
+  auth: HandlerAuth | undefined,
+): Promise<ReadonlySet<string>> {
+  const credentialScope = resolveCredentialScope(auth, ctx.serviceDid)
+  if (credentialScope) {
+    return new Set(credentialScope.viewerDomains)
+  }
+  const callerDid = requireServiceCaller(auth)
+  return resolveCallerBoundaries(ctx, callerDid)
 }
