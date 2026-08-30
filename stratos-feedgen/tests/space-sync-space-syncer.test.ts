@@ -125,6 +125,7 @@ interface BuildSyncerOptions {
   maxRecordBytes?: number
   maxPages?: number
   maxRecordsPerMember?: number
+  pageLimit?: number
   log?: (event: SpaceSyncLogEvent) => void
   onError?: (target: PollTarget, err: unknown) => void
 }
@@ -143,6 +144,7 @@ function buildSyncer(opts: BuildSyncerOptions = {}): {
     maxRecordBytes: opts.maxRecordBytes,
     maxPages: opts.maxPages,
     maxRecordsPerMember: opts.maxRecordsPerMember,
+    pageLimit: opts.pageLimit,
     now: () => FIXED_NOW,
     log: opts.log,
     onError: opts.onError,
@@ -892,6 +894,86 @@ describe('SpaceSyncer', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+  })
+
+  describe('page limit forwarding', () => {
+    it('forwards pageLimit as listRepoOps limit', async () => {
+      const { syncer, client } = buildSyncer({ pageLimit: 50 })
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [] }))
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(client.listRepoOps).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 50 }),
+      )
+    })
+  })
+
+  describe('cancellation', () => {
+    it('stops at the next checkpoint once the signal aborts mid-sync, leaving the cursor at the last completed page', async () => {
+      const { syncer, store, client } = buildSyncer()
+      const controller = new AbortController()
+      client.listRepoOps
+        .mockImplementationOnce(async () =>
+          makePage({
+            ops: [baseOp({ value: makePostRecord() })],
+            cursor: 'page-2',
+          }),
+        )
+        .mockImplementationOnce(async () => {
+          controller.abort()
+          return makePage({
+            ops: [baseOp({ rkey: 'never', value: makePostRecord() })],
+          })
+        })
+
+      const result = await syncer.syncTarget(makeTarget(), controller.signal)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.reason).toBe('aborted')
+      expect(store.upsertPost).toHaveBeenCalledTimes(1)
+      expect(store.upsertSpaceCursor).toHaveBeenCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
+        'page-2',
+        FIXED_NOW,
+      )
+    })
+
+    it('returns an aborted result immediately when the signal is already aborted before the first checkpoint', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value: makePostRecord() })] }),
+      )
+      const controller = new AbortController()
+      controller.abort()
+
+      const result = await syncer.syncTarget(makeTarget(), controller.signal)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.reason).toBe('aborted')
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+
+    it('forwards the signal to listRepoOps and getRecord', async () => {
+      const { syncer, client } = buildSyncer()
+      const controller = new AbortController()
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [baseOp()] }))
+      client.getRecord.mockResolvedValue({
+        uri: `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jxyz`,
+        cid: 'bafyone',
+        value: makePostRecord(),
+      })
+
+      await syncer.syncTarget(makeTarget(), controller.signal)
+
+      expect(client.listRepoOps).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal }),
+      )
+      expect(client.getRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal }),
+      )
     })
   })
 })

@@ -48,6 +48,7 @@ export type {
 } from './commit-verify.js'
 export { SpaceSyncRunner } from './sync-runner.js'
 export type {
+  SpaceCapStopStreakLogEvent,
   SpaceCommitConsecutiveFailureLogEvent,
   SpaceCommitVerifyLogEvent,
   SpaceSyncRunFailure,

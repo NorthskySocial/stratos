@@ -40,6 +40,8 @@ export interface PurgeCounts {
   posts: number
   /** `sync_cursor` rows removed. */
   cursors: number
+  /** `space_sync_cursor` rows removed. */
+  spaceCursors: number
   /** `enrolled_actor` rows removed. */
   enrolledActors: number
   /** in-memory boundary-cache entries invalidated. */
@@ -57,7 +59,7 @@ export interface PurgerDeps {
 }
 
 function zeroCounts(): PurgeCounts {
-  return { posts: 0, cursors: 0, enrolledActors: 0, boundaryCache: 0 }
+  return { posts: 0, cursors: 0, spaceCursors: 0, enrolledActors: 0, boundaryCache: 0 }
 }
 
 /**
@@ -92,8 +94,9 @@ export class Purger {
   /**
    * Actor left Stratos entirely: purge ALL of the actor's synced records,
    * every derived entry (index rows cascade with the posts), blob refs
-   * (inlined in the post row), cursor state, the enrolled-actor snapshot, the
-   * boundary-cache entry, and tear down the live syncer.
+   * (inlined in the post row), cursor state (both the Stratos subscription
+   * cursor and any cross-host space-sync cursors), the enrolled-actor
+   * snapshot, the boundary-cache entry, and tear down the live syncer.
    */
   async purgeActor(
     did: string,
@@ -104,6 +107,7 @@ export class Purger {
     const counts = zeroCounts()
     counts.posts = await this.store.deletePostsByDid(did)
     counts.cursors = await this.store.deleteCursor(did)
+    counts.spaceCursors = await this.store.deleteSpaceCursors(did)
     counts.enrolledActors = await this.deleteEnrolledActor(did)
     counts.boundaryCache = this.invalidate(did)
     this.audit({ trigger, did, counts })
@@ -116,6 +120,12 @@ export class Purger {
    * remaining in-scope boundary. The enrolled-actor snapshot is NOT removed
    * (the actor is still enrolled) — the caller updates it separately. The
    * boundary cache is invalidated so viewer resolution reflects the change.
+   *
+   * `spaceUri` is only consulted for the `space-commit-invalid` trigger: a
+   * failed commit verification also drops the space-sync cursor for that
+   * (space, actor) pair, so a retry re-fetches from scratch rather than
+   * resuming past the point verification stopped trusting. Other triggers
+   * have no single space in scope and leave cursor state untouched.
    */
   async purgeActorBoundary(
     did: string,
@@ -125,9 +135,13 @@ export class Purger {
       | 'reconcile-boundary-shrink'
       | 'space-boundary-shrink'
       | 'space-commit-invalid' = 'boundary-shrink',
+    spaceUri?: string,
   ): Promise<PurgeCounts> {
     const counts = zeroCounts()
     counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)
+    if (trigger === 'space-commit-invalid' && spaceUri) {
+      counts.spaceCursors = await this.store.deleteSpaceCursor(spaceUri, did)
+    }
     counts.boundaryCache = this.invalidate(did)
     this.audit({ trigger, did, boundary, counts })
     return counts

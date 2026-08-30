@@ -44,6 +44,8 @@ export interface ListRepoOpsOptions {
   repo: string
   cursor?: string
   limit?: number
+  /** Aborts the request early, combined with the per-request timeout. */
+  signal?: AbortSignal
 }
 
 export interface RepoOpEntry {
@@ -67,6 +69,8 @@ export interface GetRecordOptions {
   repo: string
   collection: string
   rkey: string
+  /** Aborts the request early, combined with the per-request timeout. */
+  signal?: AbortSignal
 }
 
 export interface GetRecordResult {
@@ -111,6 +115,7 @@ export class SpaceHostClient {
         limit: opts.limit === undefined ? undefined : String(opts.limit),
       },
       this.maxPageBytes,
+      opts.signal,
     )
     return decodeListRepoOpsResult(text, url)
   }
@@ -125,6 +130,7 @@ export class SpaceHostClient {
         rkey: opts.rkey,
       },
       this.maxRecordBytes,
+      opts.signal,
     )
     return decodeGetRecordResult(text, url)
   }
@@ -133,6 +139,7 @@ export class SpaceHostClient {
     pathname: string,
     searchParams: Record<string, string | undefined>,
     capBytes: number,
+    signal?: AbortSignal,
   ): Promise<{ url: string; text: string }> {
     const origin = this.assertSecureOrigin()
     const url = new URL(pathname, origin)
@@ -145,12 +152,15 @@ export class SpaceHostClient {
       htu,
     )
 
+    const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs)
     let res: Response
     try {
       res = await this.fetchImpl(url, {
         method: 'GET',
         redirect: 'error',
-        signal: AbortSignal.timeout(this.requestTimeoutMs),
+        signal: signal
+          ? AbortSignal.any([timeoutSignal, signal])
+          : timeoutSignal,
         headers: {
           accept: 'application/json',
           authorization: `DPoP ${this.credentialProof.credential}`,

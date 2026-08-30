@@ -10,6 +10,7 @@ const JITTER_FRACTION = 0.1
 
 const DEFAULT_INTERVAL_MS = 30_000
 const DEFAULT_MEMBER_BUDGET_MS = 60_000
+const DEFAULT_STOP_GRACE_MS = 10_000
 
 export interface SpaceSyncPassLogEvent {
   /** Poll targets produced by this pass's membership run. */
@@ -20,6 +21,8 @@ export interface SpaceSyncPassLogEvent {
   failed: number
   /** Targets abandoned for exceeding the member time budget this pass. */
   abandoned: number
+  /** Targets skipped with no network call because they are in a halt cooldown. */
+  halted: number
 }
 
 export interface SpaceSyncSchedulerDeps {
@@ -35,6 +38,8 @@ export interface SpaceSyncSchedulerDeps {
   intervalMs?: number
   /** Time budget (ms) for one member's sync within a pass. Default 60000. */
   memberBudgetMs?: number
+  /** Grace period `stop()` waits for an in-flight pass before returning anyway. Default 10000. */
+  stopGraceMs?: number
   /**
    * Structured per-pass summary sink. Called once per pass that starts.
    * Unlike its siblings elsewhere in `space-sync/`, this has no `console.*`
@@ -47,6 +52,8 @@ export interface SpaceSyncSchedulerDeps {
   onMemberBudgetExceeded?: (target: PollTarget) => void
   /** Called for a failure outside the per-member result channel: `membership.runPass` rejecting, or an injected callback throwing. */
   onError?: (err: unknown) => void
+  /** Called if `stop()`'s grace period elapses before the in-flight pass settles. Defaults to a no-op. */
+  onStopTimedOut?: () => void
   /** Injectable jitter source, `[0, 1)`. Defaults to `Math.random`. */
   random?: () => number
 }
@@ -68,18 +75,17 @@ type MemberPollOutcome =
  *   else. The next tick is scheduled independently of pass duration, so a
  *   slow pass costs skipped ticks, never a stacked backlog of concurrent
  *   passes against the same upstream.
- * - **A hung member cannot stall the pass.** `runTarget` has no
- *   cancellation seam — no `AbortSignal` reaches `listRepoOps`/`getRecord`
- *   in WP2-WP5 — so a member over `memberBudgetMs` is abandoned: the pass
- *   reports it via `onMemberBudgetExceeded` and moves on, leaving the
- *   underlying call to finish or fail on its own. This scheduler only ever
- *   holds `runner.runTarget`, never a store or cursor, so an abandoned
- *   member's cursor cannot be touched here even by accident — the next
- *   pass just retries it from wherever it last completed.
+ * - **A hung member cannot stall the pass.** A member over `memberBudgetMs`
+ *   is abandoned: the pass reports it via `onMemberBudgetExceeded` and moves
+ *   on. Abandonment aborts the `AbortSignal` passed into `runner.runTarget`,
+ *   so the underlying sync stops at its next checkpoint instead of running
+ *   to completion unobserved — the next pass retries it from wherever it
+ *   last completed, never from a state the abandoned call raced past.
  *
- * `stop()` resolves once any in-flight pass has settled, which is the only
- * contract a caller needs: it composes with a plain sequential shutdown
- * today and with a future `ShutdownDeps` registry equally well.
+ * `stop()` waits for an in-flight pass to settle, up to `stopGraceMs`, then
+ * returns regardless — a pass wedged on a call this scheduler does not
+ * control (a hung `membership.runPass`, for instance) must not block process
+ * shutdown forever.
  */
 export class SpaceSyncScheduler {
   private readonly membership: SpaceSyncSchedulerDeps['membership']
@@ -87,10 +93,12 @@ export class SpaceSyncScheduler {
   private readonly boundaries: Iterable<string>
   private readonly intervalMs: number
   private readonly memberBudgetMs: number
+  private readonly stopGraceMs: number
   private readonly log: (event: SpaceSyncPassLogEvent) => void
   private readonly onTickSkipped: () => void
   private readonly onMemberBudgetExceeded: (target: PollTarget) => void
   private readonly onError: (err: unknown) => void
+  private readonly onStopTimedOut: () => void
   private readonly random: () => number
 
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -103,10 +111,12 @@ export class SpaceSyncScheduler {
     this.boundaries = deps.boundaries
     this.intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS
     this.memberBudgetMs = deps.memberBudgetMs ?? DEFAULT_MEMBER_BUDGET_MS
+    this.stopGraceMs = deps.stopGraceMs ?? DEFAULT_STOP_GRACE_MS
     this.log = deps.log ?? noop
     this.onTickSkipped = deps.onTickSkipped ?? noop
     this.onMemberBudgetExceeded = deps.onMemberBudgetExceeded ?? noop
     this.onError = deps.onError ?? noop
+    this.onStopTimedOut = deps.onStopTimedOut ?? noop
     this.random = deps.random ?? Math.random
   }
 
@@ -117,15 +127,33 @@ export class SpaceSyncScheduler {
     this.scheduleNext()
   }
 
-  /** Stops future ticks and resolves once any in-flight pass has settled. */
+  /**
+   * Stops future ticks and waits for an in-flight pass to settle, up to
+   * `stopGraceMs`. On expiry this returns anyway and reports via
+   * `onStopTimedOut` — the pass is left to finish or fail on its own,
+   * unobserved, same as an abandoned member within a pass.
+   */
   async stop(): Promise<void> {
     this.stopped = true
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
     }
-    if (this.inFlight) {
-      await this.inFlight
+    const inFlight = this.inFlight
+    if (!inFlight) return
+
+    let graceTimer: ReturnType<typeof setTimeout> | undefined
+    const grace = new Promise<'timed-out'>((resolve) => {
+      graceTimer = setTimeout(() => resolve('timed-out'), this.stopGraceMs)
+      graceTimer.unref?.()
+    })
+    const outcome = await Promise.race([
+      inFlight.then(() => 'settled' as const),
+      grace,
+    ])
+    if (graceTimer) clearTimeout(graceTimer)
+    if (outcome === 'timed-out') {
+      this.onStopTimedOut()
     }
   }
 
@@ -164,40 +192,50 @@ export class SpaceSyncScheduler {
     let succeeded = 0
     let failed = 0
     let abandoned = 0
+    let halted = 0
     await Promise.all(
       targets.map(async (target) => {
         const outcome = await this.pollWithBudget(target)
         if (outcome.status === 'abandoned') {
           abandoned += 1
           this.onMemberBudgetExceeded(target)
-        } else if (outcome.status === 'errored' || !outcome.result.ok) {
+        } else if (outcome.status === 'errored') {
           failed += 1
+        } else if (!outcome.result.ok) {
+          if (outcome.result.reason === 'halted') {
+            halted += 1
+          } else {
+            failed += 1
+          }
         } else {
           succeeded += 1
         }
       }),
     )
 
-    this.log({ targets: targets.length, succeeded, failed, abandoned })
+    this.log({ targets: targets.length, succeeded, failed, abandoned, halted })
   }
 
   /**
-   * Races one member's sync against `memberBudgetMs`. There is no
-   * cancellation: on timeout the promise below resolves `'abandoned'` and
-   * `runTarget`'s own promise is left to settle on its own, unobserved by
-   * the pass that abandoned it.
+   * Races one member's sync against `memberBudgetMs`. On timeout the promise
+   * below resolves `'abandoned'` and aborts `runTarget`'s signal so the
+   * underlying sync stops at its next checkpoint — its settlement is still
+   * left unobserved by the pass that abandoned it, but it is no longer left
+   * running unbounded.
    */
   private pollWithBudget(target: PollTarget): Promise<MemberPollOutcome> {
     return new Promise<MemberPollOutcome>((resolve) => {
       let settled = false
+      const controller = new AbortController()
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
+        controller.abort()
         resolve({ status: 'abandoned' })
       }, this.memberBudgetMs)
       timer.unref?.()
       this.runner
-        .runTarget(target)
+        .runTarget(target, controller.signal)
         .then((result) => {
           if (settled) return
           settled = true
@@ -206,14 +244,15 @@ export class SpaceSyncScheduler {
         })
         .catch((err: unknown) => {
           // `runTarget` documents "never throws" — this is a backstop so a
-          // violation can't surface as an unhandled rejection after this
-          // member has already been raced against its budget.
+          // violation can't surface as an unhandled rejection. Once this
+          // member is already abandoned, a late rejection is most likely its
+          // own abort taking effect, not a new failure, so it is dropped
+          // rather than reported.
+          if (settled) return
           this.onError(err)
-          if (!settled) {
-            settled = true
-            clearTimeout(timer)
-            resolve({ status: 'errored' })
-          }
+          settled = true
+          clearTimeout(timer)
+          resolve({ status: 'errored' })
         })
     })
   }

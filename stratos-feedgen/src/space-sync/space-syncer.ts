@@ -44,6 +44,8 @@ export interface SpaceSyncerDeps {
   maxRecordBytes?: number
   maxPages?: number
   maxRecordsPerMember?: number
+  /** Forwarded as `listRepoOps`'s `limit`. Unset defers to the host's own default page size. */
+  pageLimit?: number
   /** Injectable clock for tests. Returns an ISO-8601 timestamp. */
   now?: () => string
   /** Structured per-target summary sink. Defaults to `console.log(JSON.stringify(...))`. */
@@ -71,11 +73,14 @@ export interface SpaceSyncFailure {
   /**
    * `'malformed-cursor'`: the host rejected the stored cursor; it has been
    * dropped so the next pass starts that (space, member) pair cold.
+   * `'aborted'`: the caller's `signal` fired before the sync reached a
+   * terminal or capped stopping point. The stored cursor is left untouched —
+   * an abandoned pass never mutates state past the point it was cut off.
    * `'member-skip'`: any other failure (unreachable host, missing repo,
    * timeout, oversized page, invalid response). The stored cursor is left
    * untouched.
    */
-  readonly reason: 'malformed-cursor' | 'member-skip'
+  readonly reason: 'malformed-cursor' | 'aborted' | 'member-skip'
   readonly error: unknown
 }
 
@@ -118,6 +123,7 @@ export class SpaceSyncer {
   private readonly maxRecordBytes: number
   private readonly maxPages: number
   private readonly maxRecordsPerMember: number
+  private readonly pageLimit: number | undefined
   private readonly now: () => string
   private readonly log: (event: SpaceSyncLogEvent) => void
   private readonly onError: (target: PollTarget, err: unknown) => void
@@ -131,6 +137,7 @@ export class SpaceSyncer {
     this.maxPages = deps.maxPages ?? DEFAULT_MAX_PAGES
     this.maxRecordsPerMember =
       deps.maxRecordsPerMember ?? DEFAULT_MAX_RECORDS_PER_MEMBER
+    this.pageLimit = deps.pageLimit
     this.now = deps.now ?? (() => new Date().toISOString())
     this.log = deps.log ?? defaultLog
     this.onError = deps.onError ?? defaultOnError
@@ -140,22 +147,36 @@ export class SpaceSyncer {
    * Sync one poll target. Never throws — every failure resolves to a
    * `SpaceSyncFailure` so one bad target never blocks a caller iterating a
    * member list.
+   *
+   * `signal`, when provided and already aborted or aborted mid-sync, cuts
+   * the sync short at the next checkpoint. That is expected caller-driven
+   * cancellation (e.g. a time budget), not a member fault, so it is neither
+   * reported through `onError` nor treated like `'member-skip'`.
    */
-  async syncTarget(target: PollTarget): Promise<SpaceSyncResult> {
+  async syncTarget(
+    target: PollTarget,
+    signal?: AbortSignal,
+  ): Promise<SpaceSyncResult> {
     try {
-      return await this.runSync(target)
+      return await this.runSync(target, signal)
     } catch (err) {
       if (err instanceof MalformedCursorError) {
         await this.store.deleteSpaceCursor(target.spaceUri, target.did)
         this.onError(target, err)
         return { target, ok: false, reason: 'malformed-cursor', error: err }
       }
+      if (err instanceof SpaceSyncAbortedError) {
+        return { target, ok: false, reason: 'aborted', error: err }
+      }
       this.onError(target, err)
       return { target, ok: false, reason: 'member-skip', error: err }
     }
   }
 
-  private async runSync(target: PollTarget): Promise<SpaceSyncSuccess> {
+  private async runSync(
+    target: PollTarget,
+    signal?: AbortSignal,
+  ): Promise<SpaceSyncSuccess> {
     const credential = await this.credentialManager.getCredential(
       target.boundary,
     )
@@ -180,10 +201,12 @@ export class SpaceSyncer {
         space: target.spaceUri,
         repo: target.did,
         cursor,
+        limit: this.pageLimit,
+        signal,
       })
       pagesFetched += 1
 
-      const applied = await this.applyPage(target, client, page.ops)
+      const applied = await this.applyPage(target, client, page.ops, signal)
       recordsIndexed += applied.indexed
       recordsDeleted += applied.deleted
       skippedOversized += applied.skippedOversized
@@ -191,6 +214,7 @@ export class SpaceSyncer {
 
       const isTerminal = page.cursor === undefined
       if (page.cursor !== undefined) {
+        assertNotAborted(signal)
         await this.store.upsertSpaceCursor(
           target.spaceUri,
           target.did,
@@ -250,6 +274,7 @@ export class SpaceSyncer {
     target: PollTarget,
     client: Pick<SpaceHostClient, 'listRepoOps' | 'getRecord'>,
     ops: RepoOpEntry[],
+    signal?: AbortSignal,
   ): Promise<AppliedPage> {
     let skippedMalformed = 0
     const valid: RepoOpEntry[] = []
@@ -270,6 +295,7 @@ export class SpaceSyncer {
     let deleted = 0
     let skippedOversized = 0
     for (const op of winners) {
+      assertNotAborted(signal)
       const uri = `${target.spaceUri}/${target.did}/${op.collection}/${op.rkey}`
       if (op.cid === null) {
         await this.store.deletePost(uri)
@@ -277,7 +303,7 @@ export class SpaceSyncer {
         continue
       }
       const cid = op.cid
-      const value = await this.resolveValue(target, client, op)
+      const value = await this.resolveValue(target, client, op, signal)
       if (value === undefined) {
         skippedMalformed += 1
         continue
@@ -306,6 +332,7 @@ export class SpaceSyncer {
     target: PollTarget,
     client: Pick<SpaceHostClient, 'listRepoOps' | 'getRecord'>,
     op: RepoOpEntry,
+    signal?: AbortSignal,
   ): Promise<Record<string, unknown> | undefined> {
     if (op.value !== undefined) {
       return isRecordValue(op.value) ? op.value : undefined
@@ -315,9 +342,21 @@ export class SpaceSyncer {
       repo: target.did,
       collection: op.collection,
       rkey: op.rkey,
+      signal,
     })
     return isRecordValue(fetched.value) ? fetched.value : undefined
   }
+}
+
+/**
+ * Internal-only: marks a sync stopped cooperatively because `signal` fired.
+ * Never crosses `syncTarget`'s boundary — caught there and turned into a
+ * `SpaceSyncFailure` with reason `'aborted'`.
+ */
+class SpaceSyncAbortedError extends Error {}
+
+function assertNotAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new SpaceSyncAbortedError()
 }
 
 /** Keeps only the last op per `(collection, rkey)`, in the page's own order. */
