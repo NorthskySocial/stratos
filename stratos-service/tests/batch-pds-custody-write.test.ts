@@ -9,7 +9,9 @@ const CALLER_DID = 'did:plc:motoko-kusanagi'
 function buildOps(): BatchWriteOp[] {
   // A delete op skips validateWritableRecord inside calculatePrecomputed, so
   // the test isolates the custody gate instead of wiring up record validation.
-  return [{ action: 'delete', collection: 'zone.stratos.feed.post', rkey: 'abc123' }]
+  return [
+    { action: 'delete', collection: 'zone.stratos.feed.post', rkey: 'abc123' },
+  ]
 }
 
 function buildContext(enrollment: unknown): AppContext {
@@ -29,9 +31,9 @@ describe('applyWritesBatch pds-custody rejection', () => {
       custody: 'pds',
     })
 
-    await expect(
-      applyWritesBatch(ctx, CALLER_DID, buildOps()),
-    ).rejects.toThrow(InvalidRequestError)
+    await expect(applyWritesBatch(ctx, CALLER_DID, buildOps())).rejects.toThrow(
+      InvalidRequestError,
+    )
     await expect(
       applyWritesBatch(ctx, CALLER_DID, buildOps()),
     ).rejects.toMatchObject({

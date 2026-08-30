@@ -205,7 +205,8 @@ describe('SpaceSyncRunner', () => {
         reason: 'mac-mismatch',
         transient: false,
       })
-      const onVerifyFailure = vi.fn<(event: SpaceCommitVerifyLogEvent) => void>()
+      const onVerifyFailure =
+        vi.fn<(event: SpaceCommitVerifyLogEvent) => void>()
       const { runner, purger } = buildRunner({
         syncer,
         verifier,
@@ -270,9 +271,8 @@ describe('SpaceSyncRunner', () => {
         transient: true,
         error: resolveError,
       })
-      const onVerifyTransient = vi.fn<
-        (event: SpaceCommitVerifyLogEvent, error: unknown) => void
-      >()
+      const onVerifyTransient =
+        vi.fn<(event: SpaceCommitVerifyLogEvent, error: unknown) => void>()
       const { runner, purger } = buildRunner({
         syncer,
         verifier,
@@ -302,9 +302,8 @@ describe('SpaceSyncRunner', () => {
         reason: 'mac-mismatch',
         transient: false,
       })
-      const onConsecutiveFailure = vi.fn<
-        (event: SpaceCommitConsecutiveFailureLogEvent) => void
-      >()
+      const onConsecutiveFailure =
+        vi.fn<(event: SpaceCommitConsecutiveFailureLogEvent) => void>()
       const { runner } = buildRunner({ syncer, verifier, onConsecutiveFailure })
 
       await runner.runTarget(makeTarget())
@@ -323,9 +322,8 @@ describe('SpaceSyncRunner', () => {
         reason: 'mac-mismatch',
         transient: false,
       })
-      const onConsecutiveFailure = vi.fn<
-        (event: SpaceCommitConsecutiveFailureLogEvent) => void
-      >()
+      const onConsecutiveFailure =
+        vi.fn<(event: SpaceCommitConsecutiveFailureLogEvent) => void>()
       const clock = fakeClock()
       const { runner } = buildRunner({
         syncer,
@@ -366,9 +364,8 @@ describe('SpaceSyncRunner', () => {
           reason: 'mac-mismatch',
           transient: false,
         })
-      const onConsecutiveFailure = vi.fn<
-        (event: SpaceCommitConsecutiveFailureLogEvent) => void
-      >()
+      const onConsecutiveFailure =
+        vi.fn<(event: SpaceCommitConsecutiveFailureLogEvent) => void>()
       const clock = fakeClock()
       const { runner } = buildRunner({
         syncer,
@@ -396,9 +393,8 @@ describe('SpaceSyncRunner', () => {
         reason: 'mac-mismatch',
         transient: false,
       })
-      const onConsecutiveFailure = vi.fn<
-        (event: SpaceCommitConsecutiveFailureLogEvent) => void
-      >()
+      const onConsecutiveFailure =
+        vi.fn<(event: SpaceCommitConsecutiveFailureLogEvent) => void>()
       const { runner } = buildRunner({ syncer, verifier, onConsecutiveFailure })
 
       await runner.runTarget(makeTarget({ did: SPIKE_DID }))
@@ -464,9 +460,7 @@ describe('SpaceSyncRunner', () => {
     })
 
     it('warns on a consecutive failure to console.warn by default', async () => {
-      const consoleWarn = vi
-        .spyOn(console, 'warn')
-        .mockImplementation(() => {})
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const consoleError = vi
         .spyOn(console, 'error')
         .mockImplementation(() => {})
@@ -495,9 +489,7 @@ describe('SpaceSyncRunner', () => {
     })
 
     it('warns on a transient verification failure to console.warn by default', async () => {
-      const consoleWarn = vi
-        .spyOn(console, 'warn')
-        .mockImplementation(() => {})
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const syncer = fakeSyncer()
       syncer.syncTarget.mockResolvedValue(
         makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
@@ -644,7 +636,10 @@ describe('SpaceSyncRunner', () => {
     it('logs each consecutive per-member-cap stop without halting before the threshold', async () => {
       const syncer = fakeSyncer()
       syncer.syncTarget.mockResolvedValue(
-        makeSyncSuccess({ stopReason: 'per-member-cap', finalCommit: undefined }),
+        makeSyncSuccess({
+          stopReason: 'per-member-cap',
+          finalCommit: undefined,
+        }),
       )
       const onCapStopStreak =
         vi.fn<(event: SpaceCapStopStreakLogEvent) => void>()
@@ -672,7 +667,10 @@ describe('SpaceSyncRunner', () => {
     it('halts the member without purging after 3 consecutive per-member-cap stops', async () => {
       const syncer = fakeSyncer()
       syncer.syncTarget.mockResolvedValue(
-        makeSyncSuccess({ stopReason: 'per-member-cap', finalCommit: undefined }),
+        makeSyncSuccess({
+          stopReason: 'per-member-cap',
+          finalCommit: undefined,
+        }),
       )
       const clock = fakeClock()
       const { runner, purger } = buildRunner({ syncer, now: clock.now })
@@ -696,21 +694,34 @@ describe('SpaceSyncRunner', () => {
       const syncer = fakeSyncer()
       syncer.syncTarget
         .mockResolvedValueOnce(
-          makeSyncSuccess({ stopReason: 'per-member-cap', finalCommit: undefined }),
+          makeSyncSuccess({
+            stopReason: 'per-member-cap',
+            finalCommit: undefined,
+          }),
         )
         .mockResolvedValueOnce(
-          makeSyncSuccess({ stopReason: 'per-member-cap', finalCommit: undefined }),
+          makeSyncSuccess({
+            stopReason: 'per-member-cap',
+            finalCommit: undefined,
+          }),
         )
         .mockResolvedValueOnce(
           makeSyncSuccess({ stopReason: 'max-pages', finalCommit: undefined }),
         )
         .mockResolvedValue(
-          makeSyncSuccess({ stopReason: 'per-member-cap', finalCommit: undefined }),
+          makeSyncSuccess({
+            stopReason: 'per-member-cap',
+            finalCommit: undefined,
+          }),
         )
       const onCapStopStreak =
         vi.fn<(event: SpaceCapStopStreakLogEvent) => void>()
       const clock = fakeClock()
-      const { runner } = buildRunner({ syncer, onCapStopStreak, now: clock.now })
+      const { runner } = buildRunner({
+        syncer,
+        onCapStopStreak,
+        now: clock.now,
+      })
 
       await runner.runTarget(makeTarget())
       await runner.runTarget(makeTarget())

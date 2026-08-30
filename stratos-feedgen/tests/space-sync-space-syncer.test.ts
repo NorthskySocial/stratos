@@ -109,11 +109,11 @@ function fakeHostClient() {
     listRepoOps: vi.fn<
       (opts: ListRepoOpsOptions) => Promise<ListRepoOpsResult>
     >(async () => makePage()),
-    getRecord: vi.fn<
-      (opts: GetRecordOptions) => Promise<GetRecordResult>
-    >(async () => {
-      throw new Error('getRecord not stubbed for this test')
-    }),
+    getRecord: vi.fn<(opts: GetRecordOptions) => Promise<GetRecordResult>>(
+      async () => {
+        throw new Error('getRecord not stubbed for this test')
+      },
+    ),
   }
 }
 
@@ -219,7 +219,10 @@ describe('SpaceSyncer', () => {
       await syncer.syncTarget(makeTarget())
 
       expect(store.upsertPost).toHaveBeenCalledWith(
-        expect.objectContaining({ cid: 'bafytwo', record: expect.objectContaining({ text: 'v2' }) }),
+        expect.objectContaining({
+          cid: 'bafytwo',
+          record: expect.objectContaining({ text: 'v2' }),
+        }),
       )
     })
   })
@@ -391,7 +394,9 @@ describe('SpaceSyncer', () => {
       const { syncer, store, client } = buildSyncer({
         maxRecordBytes: exactSize,
       })
-      client.listRepoOps.mockResolvedValue(makePage({ ops: [baseOp({ value })] }))
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value })] }),
+      )
 
       const result = expectSuccess(await syncer.syncTarget(makeTarget()))
 
@@ -464,7 +469,9 @@ describe('SpaceSyncer', () => {
         makePage({
           ops: [
             baseOp({
-              value: makePostRecord({ createdAt: sameInstantDifferentSpelling }),
+              value: makePostRecord({
+                createdAt: sameInstantDifferentSpelling,
+              }),
             }),
           ],
         }),
@@ -754,7 +761,10 @@ describe('SpaceSyncer', () => {
                   $type: 'app.bsky.embed.images',
                   images: [
                     {
-                      image: { ref: { $link: 'bafkreicid' }, mimeType: 'image/jpeg' },
+                      image: {
+                        ref: { $link: 'bafkreicid' },
+                        mimeType: 'image/jpeg',
+                      },
                     },
                   ],
                 },

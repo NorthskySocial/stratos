@@ -59,7 +59,13 @@ export interface PurgerDeps {
 }
 
 function zeroCounts(): PurgeCounts {
-  return { posts: 0, cursors: 0, spaceCursors: 0, enrolledActors: 0, boundaryCache: 0 }
+  return {
+    posts: 0,
+    cursors: 0,
+    spaceCursors: 0,
+    enrolledActors: 0,
+    boundaryCache: 0,
+  }
 }
 
 /**
