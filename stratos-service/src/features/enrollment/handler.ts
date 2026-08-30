@@ -11,6 +11,67 @@ import { createXrpcHandler } from '../../api/util.js'
 import { serviceDIDToRkey } from '../../oauth'
 import { verifyEnrolled } from './internal/auth.js'
 
+const RESOLVE_CACHE_TTL_MS = 60 * 1000
+const RESOLVE_CACHE_MAX_ENTRIES = 10_000
+
+/**
+ * Positive `resolveEnrollments` response cache, keyed by DID.
+ *
+ * Every handler that mutates enrollment or boundary state must call
+ * `invalidate`, or a downstream reconcile that resolves within the TTL reads
+ * stale `enrolled: true` state and purges nothing.
+ *
+ * An epoch fences the resolve handler's read-then-set window: every
+ * invalidation bumps it and `set` writes only while the caller's epoch is
+ * still current, so a resolution that started before an invalidation cannot
+ * re-insert the stale boundary set it read. One counter for all DIDs keeps
+ * the fence state constant-size; the cost is only a skipped cache insert
+ * when an unrelated invalidation lands mid-resolve.
+ *
+ * Expired entries are evicted on read and the map is capped (oldest insert
+ * evicted first), so the cache cannot grow for the life of the process.
+ */
+export class ResolveEnrollmentsCache {
+  private readonly entries = new Map<
+    string,
+    { boundaries: string[]; expiresAt: number }
+  >()
+  private currentEpoch = 0
+
+  constructor(
+    private readonly ttlMs: number,
+    private readonly maxEntries: number,
+  ) {}
+
+  get(did: string): string[] | undefined {
+    const entry = this.entries.get(did)
+    if (!entry) return undefined
+    if (Date.now() >= entry.expiresAt) {
+      this.entries.delete(did)
+      return undefined
+    }
+    return entry.boundaries
+  }
+
+  epoch(): number {
+    return this.currentEpoch
+  }
+
+  set(did: string, boundaries: string[], epoch: number): void {
+    if (epoch !== this.currentEpoch) return
+    if (!this.entries.has(did) && this.entries.size >= this.maxEntries) {
+      const oldest = this.entries.keys().next().value
+      if (oldest !== undefined) this.entries.delete(oldest)
+    }
+    this.entries.set(did, { boundaries, expiresAt: Date.now() + this.ttlMs })
+  }
+
+  invalidate(did: string): void {
+    this.entries.delete(did)
+    this.currentEpoch++
+  }
+}
+
 /**
  * Register all enrollment-related XRPC handlers
  *
@@ -21,10 +82,14 @@ export function registerEnrollmentHandlers(
   server: XrpcServer,
   ctx: AppContext,
 ): void {
+  const resolveCache = new ResolveEnrollmentsCache(
+    RESOLVE_CACHE_TTL_MS,
+    RESOLVE_CACHE_MAX_ENTRIES,
+  )
   registerEnrollmentStatus(server, ctx)
-  registerEnrollmentUnenroll(server, ctx)
-  registerResolveEnrollmentsHandler(ctx)
-  registerAdminBoundaryHandlers(ctx)
+  registerEnrollmentUnenroll(server, ctx, resolveCache)
+  registerResolveEnrollmentsHandler(ctx, resolveCache)
+  registerAdminBoundaryHandlers(ctx, resolveCache)
   registerListEnrollmentsHandler(ctx)
   registerListDomainsHandler(ctx)
 }
@@ -157,7 +222,11 @@ async function tryCreateAttestation(
  * @param server - XRPC server
  * @param ctx - Application context
  */
-function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
+function registerEnrollmentUnenroll(
+  server: XrpcServer,
+  ctx: AppContext,
+  resolveCache: ResolveEnrollmentsCache,
+): void {
   const xrpc = server as unknown as XrpcServerInternal
   const { authVerifier } = ctx
 
@@ -184,6 +253,7 @@ function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
 
         // 2. Perform hard delete: local enrollment record and actor data
         await ctx.enrollmentService.unenroll(did!)
+        resolveCache.invalidate(did!)
 
         // 3. Delete signing key (if it exists)
         try {
@@ -215,10 +285,10 @@ function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
  * Register handlers for enrollment-related operations
  * @param ctx - Application context
  */
-function registerResolveEnrollmentsHandler(ctx: AppContext): void {
-  const cache = new Map<string, { boundaries: string[]; timestamp: number }>()
-  const CACHE_TTL = 60 * 1000 // 1 minute
-
+function registerResolveEnrollmentsHandler(
+  ctx: AppContext,
+  cache: ResolveEnrollmentsCache,
+): void {
   ctx.app.get(
     '/xrpc/zone.stratos.identity.resolveEnrollments',
     async (req: Request, res: Response) => {
@@ -232,21 +302,20 @@ function registerResolveEnrollmentsHandler(ctx: AppContext): void {
         }
 
         const cached = cache.get(did)
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-          return res.json({
-            did,
-            enrolled: true,
-            boundaries: cached.boundaries,
-          })
+        if (cached) {
+          return res.json({ did, enrolled: true, boundaries: cached })
         }
 
+        // Snapshot before the awaits: an invalidation that lands while the
+        // resolution is in flight bumps the epoch and voids this write.
+        const epoch = cache.epoch()
         const enrolled = await ctx.enrollmentService.isEnrolled(did)
         if (!enrolled) {
           return res.json({ did, enrolled: false, boundaries: [] })
         }
 
         const boundaries = await ctx.boundaryResolver.getBoundaries(did)
-        cache.set(did, { boundaries, timestamp: Date.now() })
+        cache.set(did, boundaries, epoch)
         res.json({ did, enrolled: true, boundaries })
       } catch (err) {
         ctx.logger?.error(
@@ -269,11 +338,14 @@ function registerResolveEnrollmentsHandler(ctx: AppContext): void {
  * Register handlers for admin boundary-related operations
  * @param ctx - Application context
  */
-function registerAdminBoundaryHandlers(ctx: AppContext): void {
-  registerAddBoundaryHandler(ctx)
-  registerRemoveBoundaryHandler(ctx)
-  registerSetBoundariesHandler(ctx)
-  registerSetActiveHandler(ctx)
+function registerAdminBoundaryHandlers(
+  ctx: AppContext,
+  resolveCache: ResolveEnrollmentsCache,
+): void {
+  registerAddBoundaryHandler(ctx, resolveCache)
+  registerRemoveBoundaryHandler(ctx, resolveCache)
+  registerSetBoundariesHandler(ctx, resolveCache)
+  registerSetActiveHandler(ctx, resolveCache)
   registerAdminUserHandlers(ctx)
 }
 
@@ -480,7 +552,10 @@ function registerRemoveAdminHandler(ctx: AppContext): void {
  * also removes their PDS enrollment record.
  * @param ctx - Application context
  */
-function registerSetActiveHandler(ctx: AppContext): void {
+function registerSetActiveHandler(
+  ctx: AppContext,
+  resolveCache: ResolveEnrollmentsCache,
+): void {
   ctx.app.post(
     '/xrpc/zone.stratos.admin.setActive',
     adminJsonParser,
@@ -515,6 +590,7 @@ function registerSetActiveHandler(ctx: AppContext): void {
 
         if (enrollment.active !== active) {
           await ctx.enrollmentStore.updateEnrollment(did, { active })
+          resolveCache.invalidate(did)
         }
 
         ctx.logger?.info(
@@ -548,7 +624,10 @@ const adminJsonParser = express.json({ limit: '100kb' })
  * Register handler for adding a boundary
  * @param ctx - Application context
  */
-function registerAddBoundaryHandler(ctx: AppContext): void {
+function registerAddBoundaryHandler(
+  ctx: AppContext,
+  resolveCache: ResolveEnrollmentsCache,
+): void {
   ctx.app.post(
     '/xrpc/zone.stratos.admin.addBoundary',
     adminJsonParser,
@@ -594,6 +673,7 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
 
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.addBoundary(did, boundary)
+        resolveCache.invalidate(did)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
@@ -632,7 +712,10 @@ function registerAddBoundaryHandler(ctx: AppContext): void {
  * Register remove boundary handler for admin
  * @param ctx - The application context
  */
-function registerRemoveBoundaryHandler(ctx: AppContext): void {
+function registerRemoveBoundaryHandler(
+  ctx: AppContext,
+  resolveCache: ResolveEnrollmentsCache,
+): void {
   // POST /xrpc/zone.stratos.admin.removeBoundary
   ctx.app.post(
     '/xrpc/zone.stratos.admin.removeBoundary',
@@ -671,6 +754,7 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
 
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.removeBoundary(did, boundary)
+        resolveCache.invalidate(did)
         const boundaries = await ctx.enrollmentStore.getBoundaries(did)
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
@@ -709,7 +793,10 @@ function registerRemoveBoundaryHandler(ctx: AppContext): void {
  * Register handler for setting boundaries
  * @param ctx - Application context
  */
-function registerSetBoundariesHandler(ctx: AppContext): void {
+function registerSetBoundariesHandler(
+  ctx: AppContext,
+  resolveCache: ResolveEnrollmentsCache,
+): void {
   ctx.app.post(
     '/xrpc/zone.stratos.admin.setBoundaries',
     adminJsonParser,
@@ -756,6 +843,7 @@ function registerSetBoundariesHandler(ctx: AppContext): void {
 
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
+        resolveCache.invalidate(did)
 
         // Re-read the EFFECTIVE persisted set: the store decorator force-includes
         // the reserved all-members domain, so the requested `boundaries` may omit
