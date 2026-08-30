@@ -251,9 +251,7 @@ export function describeStoreContract(
           'cursor-1',
           '2024-01-01T00:00:00.000Z',
         )
-        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe(
-          'cursor-1',
-        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('cursor-1')
       })
 
       it('returns null for unknown (space, member) pair', async () => {
@@ -275,9 +273,7 @@ export function describeStoreContract(
           'cursor-2',
           '2024-01-02T00:00:00.000Z',
         )
-        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe(
-          'cursor-2',
-        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('cursor-2')
       })
 
       it('scopes cursors independently per (space, member) pair', async () => {

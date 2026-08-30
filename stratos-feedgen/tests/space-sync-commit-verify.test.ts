@@ -232,19 +232,37 @@ describe('CommitVerifier', () => {
     ['non-numeric ver', { ver: '1', rev: REV }],
     ['non-string rev', { ver: 1, rev: 42 }],
     ['hash not an object', { ver: 1, rev: REV, hash: 'not-bytes' }],
-    [
-      'hash.$bytes not a string',
-      { ver: 1, rev: REV, hash: { $bytes: 123 } },
-    ],
+    ['hash.$bytes not a string', { ver: 1, rev: REV, hash: { $bytes: 123 } }],
     // Each case below leaves every other field well-shaped, so it is that
     // field's own check — not a co-occurring one — that must reject it.
-    ['ver not a number, other fields valid', { ...validCommitFields(), ver: '1' }],
-    ['rev not a string, other fields valid', { ...validCommitFields(), rev: 42 }],
-    ['hash not bytes, other fields valid', { ...validCommitFields(), hash: 'not-bytes' }],
-    ['hash is null, other fields valid', { ...validCommitFields(), hash: null }],
-    ['ikm not bytes, other fields valid', { ...validCommitFields(), ikm: 'not-bytes' }],
-    ['mac not bytes, other fields valid', { ...validCommitFields(), mac: 'not-bytes' }],
-    ['sig not bytes, other fields valid', { ...validCommitFields(), sig: 'not-bytes' }],
+    [
+      'ver not a number, other fields valid',
+      { ...validCommitFields(), ver: '1' },
+    ],
+    [
+      'rev not a string, other fields valid',
+      { ...validCommitFields(), rev: 42 },
+    ],
+    [
+      'hash not bytes, other fields valid',
+      { ...validCommitFields(), hash: 'not-bytes' },
+    ],
+    [
+      'hash is null, other fields valid',
+      { ...validCommitFields(), hash: null },
+    ],
+    [
+      'ikm not bytes, other fields valid',
+      { ...validCommitFields(), ikm: 'not-bytes' },
+    ],
+    [
+      'mac not bytes, other fields valid',
+      { ...validCommitFields(), mac: 'not-bytes' },
+    ],
+    [
+      'sig not bytes, other fields valid',
+      { ...validCommitFields(), sig: 'not-bytes' },
+    ],
   ])('rejects a malformed commit (%s)', async (_label, commit) => {
     const verifier = buildVerifier(
       stubResolver(async () => {

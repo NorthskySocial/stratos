@@ -165,10 +165,7 @@ export class SpaceHostClient {
       if (value !== undefined) url.searchParams.set(key, value)
     }
     const htu = `${origin}${pathname}`
-    const dpop = await this.credentialProof.createPresentationProof(
-      'GET',
-      htu,
-    )
+    const dpop = await this.credentialProof.createPresentationProof('GET', htu)
 
     const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs)
     let res: Response
@@ -350,10 +347,7 @@ function parseJsonRecord(text: string, url: string): Record<string, unknown> {
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw new SpaceHostInvalidResponseError(
-      url,
-      'response was not valid JSON',
-    )
+    throw new SpaceHostInvalidResponseError(url, 'response was not valid JSON')
   }
   if (!isRecord(parsed)) {
     throw new SpaceHostInvalidResponseError(
@@ -364,10 +358,7 @@ function parseJsonRecord(text: string, url: string): Record<string, unknown> {
   return parsed
 }
 
-function decodeListRepoOpsResult(
-  text: string,
-  url: string,
-): ListRepoOpsResult {
+function decodeListRepoOpsResult(text: string, url: string): ListRepoOpsResult {
   const raw = parseJsonRecord(text, url)
   if (!Array.isArray(raw.ops)) {
     throw new SpaceHostInvalidResponseError(
@@ -382,11 +373,7 @@ function decodeListRepoOpsResult(
   }
 }
 
-function decodeRepoOp(
-  entry: unknown,
-  index: number,
-  url: string,
-): RepoOpEntry {
+function decodeRepoOp(entry: unknown, index: number, url: string): RepoOpEntry {
   if (!isRecord(entry)) {
     throw new SpaceHostInvalidResponseError(
       url,

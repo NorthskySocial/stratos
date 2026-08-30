@@ -254,7 +254,8 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
   })
 
   it('drops the space-sync cursor when the trigger is space-commit-invalid with a spaceUri', async () => {
-    const spaceUri = 'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    const spaceUri =
+      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,
@@ -275,7 +276,8 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
   })
 
   it('leaves the space-sync cursor alone without a spaceUri, even for space-commit-invalid', async () => {
-    const spaceUri = 'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    const spaceUri =
+      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,
@@ -295,7 +297,8 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
   })
 
   it('leaves the space-sync cursor alone for a boundary-shrink trigger even with a spaceUri', async () => {
-    const spaceUri = 'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    const spaceUri =
+      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,

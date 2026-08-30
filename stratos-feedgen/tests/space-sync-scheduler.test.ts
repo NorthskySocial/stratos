@@ -555,10 +555,7 @@ describe('SpaceSyncScheduler', () => {
 
   it('reports a membership.runPass rejection via onError and retries on the next tick', async () => {
     const failure = new Error('upstream unreachable')
-    const runPass = vi
-      .fn()
-      .mockRejectedValueOnce(failure)
-      .mockResolvedValue([])
+    const runPass = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue([])
     const runner = fakeRunner()
     const onError = vi.fn()
     const log = vi.fn()
