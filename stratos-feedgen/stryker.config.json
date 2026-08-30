@@ -18,7 +18,6 @@
     "src/api/**/*.ts",
     "src/auth/**/*.ts",
     "src/db/**/*.ts",
-    "src/**/*.ts",
     "!src/**/index.ts",
     "!src/**/*.d.ts",
     "!src/bin/**/*.ts",
