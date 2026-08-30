@@ -109,19 +109,30 @@ async function main(): Promise<void> {
 
   const subscribeEnrollments =
     process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
-  const subscription = subscribeEnrollments
-    ? await startSubscription({
-        cfg,
-        upstream,
-        store,
-        indexer,
-        enrollmentManager,
-        configuredBoundaries,
-        logger,
-        metrics,
-        shutdownDeps,
-      })
-    : null
+  let subscription: {
+    serviceStream: ServiceStream
+    actorPool: ActorPool
+  } | null = null
+  if (subscribeEnrollments) {
+    const starting = startSubscription({
+      cfg,
+      upstream,
+      store,
+      indexer,
+      enrollmentManager,
+      configuredBoundaries,
+      logger,
+      metrics,
+      shutdownDeps,
+    })
+    // Shutdown awaits this barrier before it closes the store. The swallow
+    // keeps a startup failure out of the panic path; main's catch reports it.
+    shutdownDeps.startup = starting.then(
+      () => undefined,
+      () => undefined,
+    )
+    subscription = await starting
+  }
   subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
   subscriptionStatus.actorPool = subscription?.actorPool ?? null
 }

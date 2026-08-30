@@ -3,6 +3,11 @@ import type { Logger } from '@northskysocial/stratos-core'
 
 export interface ShutdownDeps {
   httpServer?: HttpServer | null
+  /**
+   * Settles when startup completes. Shutdown waits for it before teardown.
+   * The promise must not reject.
+   */
+  startup?: Promise<void> | null
   serviceStream?: { stop: () => void | Promise<void> } | null
   actorPool?: { stop: () => Promise<void> } | null
   store?: { close: () => Promise<void> } | null
@@ -20,7 +25,8 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 15_000
 
 /**
  * Build the shutdown sequence: stop accepting connections and drain in-flight
- * requests (destroying stragglers at the deadline), stop the service stream
+ * requests (destroying stragglers at the deadline), await in-flight startup
+ * work (bounded by the same deadline), stop the service stream
  * and await its in-flight frame dispatch (bounded by the same deadline),
  * await the actor pool's in-flight commit applies — cursors are durable
  * per-commit, so awaiting the drain IS the cursor flush — then close the DB.
@@ -47,6 +53,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       if (deps.httpServer) {
         await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
       }
+      await awaitStartup(deps.startup, drainTimeoutMs, deps.logger)
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
       await deps.actorPool?.stop()
       await deps.store?.close()
@@ -100,6 +107,27 @@ async function drainHttpServer(
     )
     server.closeAllConnections()
     await closed
+  }
+}
+
+/**
+ * Await in-flight startup work before teardown, so the store cannot close
+ * under a pending reconcile or seed. The wait runs first, so the steps that
+ * follow stop a stream or pool that startup publishes mid-wait. Startup
+ * stuck past the deadline no longer blocks shutdown; the reconciliation on
+ * the next boot recovers.
+ */
+async function awaitStartup(
+  startup: ShutdownDeps['startup'],
+  timeoutMs: number,
+  logger: Logger,
+): Promise<void> {
+  if (!startup) return
+  if ((await raceDeadline(startup, timeoutMs)) === 'timeout') {
+    logger.warn(
+      { timeoutMs },
+      'startup drain deadline expired; continuing shutdown',
+    )
   }
 }
 

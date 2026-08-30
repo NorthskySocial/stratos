@@ -243,6 +243,64 @@ describe('createShutdownHandler', () => {
     expect(warns[0]?.obj['timeoutMs']).toBe(50)
   })
 
+  it('waits for in-flight startup before stopping the stream and closing the store', async () => {
+    const events: string[] = []
+    const startupGate = deferred()
+    const exit = vi.fn()
+    const deps: Parameters<typeof createShutdownHandler>[0] = {
+      logger: nullLogger,
+      exit,
+      store: {
+        close: async () => {
+          events.push('store.close')
+        },
+      },
+    }
+    deps.startup = startupGate.promise.then(() => {
+      // Startup finishes during the wait and publishes the stream it created.
+      deps.serviceStream = {
+        stop: () => {
+          events.push('stream.stop')
+        },
+      }
+      events.push('startup.settled')
+    })
+    const handler = createShutdownHandler(deps)
+
+    const done = handler('SIGTERM')
+    await new Promise((res) => setTimeout(res, 10))
+    expect(events).toEqual([])
+    startupGate.resolve()
+    await done
+
+    expect(events).toEqual(['startup.settled', 'stream.stop', 'store.close'])
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it('continues shutdown when startup misses the deadline', async () => {
+    const lines: CapturedLine[] = []
+    const exit = vi.fn()
+    const storeClose = vi.fn(async () => {})
+    const handler = createShutdownHandler({
+      startup: new Promise<void>(() => {}),
+      store: { close: storeClose },
+      logger: captureLogger(lines),
+      drainTimeoutMs: 50,
+      exit,
+    })
+
+    await handler('SIGTERM')
+
+    expect(storeClose).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledWith(0)
+    const warns = lines.filter((l) => l.level === 'warn')
+    expect(warns).toHaveLength(1)
+    expect(warns[0]?.msg).toBe(
+      'startup drain deadline expired; continuing shutdown',
+    )
+    expect(warns[0]?.obj['timeoutMs']).toBe(50)
+  })
+
   it('awaits the in-flight commit apply so the cursor lands before the DB closes', async () => {
     const events: string[] = []
     const applyGate = deferred()
