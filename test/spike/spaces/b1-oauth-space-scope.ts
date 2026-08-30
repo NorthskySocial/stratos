@@ -65,11 +65,14 @@ async function par(
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: form.toString(),
   })
+  // A body can only be read once, so take the text and parse from that.
+  // Reading json() then text() throws and loses the server's message.
+  const text = await res.text()
   let body: unknown
   try {
-    body = await res.json()
+    body = JSON.parse(text)
   } catch {
-    body = await res.text()
+    body = text
   }
   return { status: res.status, body }
 }

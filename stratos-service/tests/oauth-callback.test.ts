@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Secp256k1Keypair } from '@atproto/crypto'
+import type { Keypair } from '@atproto/crypto'
 import { handleCallback } from '../src/oauth/handlers/callback.js'
 import { buildSpaceScope } from '../src/oauth/index.js'
 
@@ -55,6 +57,28 @@ function callHandler(
  */
 function sessionFor(sub: string, scope = 'atproto') {
   return { sub, getTokenInfo: vi.fn().mockResolvedValue({ scope }) }
+}
+
+/** A DID document exposing `keypair` as the DID's `#atproto` signing method. */
+function atprotoDidDoc(did: string, keypair: Keypair) {
+  return {
+    id: did,
+    verificationMethod: [
+      {
+        id: `${did}#atproto`,
+        type: 'Multikey',
+        controller: did,
+        publicKeyMultibase: keypair.did().slice('did:key:'.length),
+      },
+    ],
+    service: [
+      {
+        id: '#atproto_pds',
+        type: 'AtprotoPersonalDataServer',
+        serviceEndpoint: 'https://pds.example.com',
+      },
+    ],
+  }
 }
 
 describe('handleCallback', () => {
@@ -140,6 +164,254 @@ describe('handleCallback', () => {
         enrolled: true,
         did: 'did:plc:alice',
       }),
+    )
+  })
+
+  it('records the spaces capability verdict for a new enrollment', async () => {
+    const session = sessionFor(
+      'did:plc:alice',
+      `atproto ${buildSpaceScope(config.serviceDid)}`,
+    )
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    mockOauthClient.callback.mockResolvedValue({ session })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://spaces.example.com',
+    })
+    mockIdResolver.did.resolve.mockResolvedValue(
+      atprotoDidDoc('did:plc:alice', keypair),
+    )
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      {
+        did: 'did:plc:alice',
+        spacesCapability: 'capable',
+        custody: 'pds',
+      },
+      'determined enrollment custody',
+    )
+  })
+
+  it('keeps stratos custody end-to-end when the capability verdict is not-capable', async () => {
+    const session = sessionFor('did:plc:kenshin')
+    mockOauthClient.callback.mockResolvedValue({ session })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(config.initRepo).toHaveBeenCalledWith('did:plc:kenshin')
+    expect(config.createSigningKey).toHaveBeenCalledWith('did:plc:kenshin')
+    expect(mockIdResolver.did.resolve).not.toHaveBeenCalled()
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        did: 'did:plc:kenshin',
+        signingKeyDid: 'did:key:zQ3sh...',
+        custody: 'stratos',
+        repoHost: undefined,
+      }),
+    )
+    expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+      'did:plc:kenshin',
+      expect.any(String),
+      expect.objectContaining({ custody: 'stratos', repoHost: undefined }),
+    )
+  })
+
+  it('falls back to stratos custody when the capability verdict is unknown', async () => {
+    const session = {
+      sub: 'did:plc:rei',
+      getTokenInfo: vi.fn().mockRejectedValue(new Error('token info refused')),
+    }
+    mockOauthClient.callback.mockResolvedValue({ session })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(config.initRepo).toHaveBeenCalledWith('did:plc:rei')
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ custody: 'stratos' }),
+    )
+  })
+
+  it('grants pds custody, resolves the user own #atproto key, and creates no Stratos repo', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const did = 'did:plc:asuka'
+    mockOauthClient.callback.mockResolvedValue({
+      session: sessionFor(did, `atproto ${buildSpaceScope(config.serviceDid)}`),
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    mockIdResolver.did.resolve.mockResolvedValue(atprotoDidDoc(did, keypair))
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(config.initRepo).not.toHaveBeenCalled()
+    expect(config.createSigningKey).not.toHaveBeenCalled()
+    expect(mockIdResolver.did.resolve).toHaveBeenCalledWith(did)
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        did,
+        signingKeyDid: keypair.did(),
+        custody: 'pds',
+        repoHost: 'https://pds.example.com',
+      }),
+    )
+    expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+      did,
+      expect.any(String),
+      expect.objectContaining({
+        signingKey: keypair.did(),
+        custody: 'pds',
+        repoHost: 'https://pds.example.com',
+      }),
+    )
+  })
+
+  it('fails closed when the DID document has no usable #atproto key', async () => {
+    const did = 'did:plc:shinji'
+    mockOauthClient.callback.mockResolvedValue({
+      session: sessionFor(did, `atproto ${buildSpaceScope(config.serviceDid)}`),
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    mockIdResolver.did.resolve.mockResolvedValue({
+      id: did,
+      verificationMethod: [],
+    })
+
+    const handler = handleCallback(config)
+    const req: any = {
+      url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+    }
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      redirect: vi.fn(),
+    }
+
+    await handler(req, res)
+
+    expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
+    expect(mockProfileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(500)
+  })
+
+  it('sends the same attestation payload shape for both custody classes', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+
+    // stratos custody
+    mockOauthClient.callback.mockResolvedValue({
+      session: sessionFor('did:plc:misato'),
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    const stratosHandler = handleCallback(config)
+    await stratosHandler(
+      {
+        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      } as any,
+      {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        redirect: vi.fn(),
+      } as any,
+    )
+    expect(config.createAttestation).toHaveBeenCalledWith(
+      'did:plc:misato',
+      expect.any(Array),
+      'did:key:zQ3sh...',
+    )
+
+    // pds custody
+    config.createAttestation.mockClear()
+    mockOauthClient.callback.mockResolvedValue({
+      session: sessionFor(
+        'did:plc:asuka2',
+        `atproto ${buildSpaceScope(config.serviceDid)}`,
+      ),
+    })
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    mockIdResolver.did.resolve.mockResolvedValue(
+      atprotoDidDoc('did:plc:asuka2', keypair),
+    )
+    const pdsHandler = handleCallback(config)
+    await pdsHandler(
+      {
+        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+      } as any,
+      {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        redirect: vi.fn(),
+      } as any,
+    )
+    expect(config.createAttestation).toHaveBeenCalledWith(
+      'did:plc:asuka2',
+      expect.any(Array),
+      keypair.did(),
     )
   })
 
@@ -427,6 +699,28 @@ describe('handleCallback', () => {
     beforeEach(() => {
       config.serviceDid = SERVICE_DID
       mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+      // A 'capable' verdict routes into pds provisioning, which resolves the
+      // user's own #atproto key. Without this the request 500s and a
+      // log-only assertion still passes, hiding the failure.
+      mockIdResolver.did.resolve.mockResolvedValue({
+        service: [
+          {
+            id: '#atproto_pds',
+            type: 'AtprotoPersonalDataServer',
+            serviceEndpoint: 'https://pds.example.com',
+          },
+        ],
+        id: 'did:plc:kenshin',
+        verificationMethod: [
+          {
+            id: 'did:plc:kenshin#atproto',
+            type: 'Multikey',
+            controller: 'did:plc:kenshin',
+            publicKeyMultibase:
+              'zQ3shokFTS3brHcDQrn82RUDfCZESWL1ZdCEJwekUDPQiYBme',
+          },
+        ],
+      })
     })
 
     it.each([
@@ -440,11 +734,17 @@ describe('handleCallback', () => {
         'did:plc:kenshin',
         `atproto ${buildSpaceScope(serviceDid)}`,
       )
-      await runCallback(session)
+      const res = await runCallback(session)
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         { did: 'did:plc:kenshin', spacesCapability: 'capable' },
         'detected PDS spaces capability',
+      )
+      // The verdict has to reach the stored enrollment. Asserting only the
+      // log lets a later failure pass unnoticed.
+      expect(res.status).not.toHaveBeenCalledWith(500)
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ custody: 'pds' }),
       )
     })
 
@@ -513,6 +813,40 @@ describe('handleCallback', () => {
       )
     })
 
+    it('reports unknown when the token response carried no scope', async () => {
+      const session = {
+        sub: 'did:plc:kenshin',
+        getTokenInfo: vi.fn().mockResolvedValue({}),
+      }
+      await runCallback(session)
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:kenshin', spacesCapability: 'unknown' },
+        'detected PDS spaces capability',
+      )
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ custody: 'stratos' }),
+      )
+    })
+
+    it('reports not-capable when the grant can read but cannot create', async () => {
+      // Custody decides where this user's records are written, so a read-only
+      // grant is not capable of the flow we would put them in.
+      const readOnly =
+        `atproto space:zone.stratos.space.feed?authority=${SERVICE_DID}` +
+        `&collection=zone.stratos.feed.post&action=read`
+      const session = sessionFor('did:plc:kenshin', readOnly)
+      await runCallback(session)
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { did: 'did:plc:kenshin', spacesCapability: 'not-capable' },
+        'detected PDS spaces capability',
+      )
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ custody: 'stratos' }),
+      )
+    })
+
     it('does not require a logger: a token-info failure still resolves the request', async () => {
       config.logger = undefined
       const session = {
@@ -527,5 +861,28 @@ describe('handleCallback', () => {
         expect.objectContaining({ success: true, did: 'did:plc:yahiko' }),
       )
     })
+  })
+
+  it('refuses pds custody when the DID document names no PDS', async () => {
+    // Open mode returns eligibility without resolving the document, so the
+    // enrolment result carries no endpoint. A pds custody row without a host
+    // has nowhere to sync from and must not be stored.
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const did = 'did:plc:misato'
+    mockOauthClient.callback.mockResolvedValue({
+      session: sessionFor(did, `atproto ${buildSpaceScope(config.serviceDid)}`),
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    // No pdsEndpoint, exactly as open mode returns it.
+    mockEnrollmentValidator.validate.mockResolvedValue({ allowed: true })
+    const doc = atprotoDidDoc(did, keypair)
+    mockIdResolver.did.resolve.mockResolvedValue({ ...doc, service: [] })
+
+    const handler = handleCallback(config)
+    const res = makeRes()
+    await callHandler(handler, makeReq(), res)
+
+    expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
+    expect(mockProfileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
   })
 })
