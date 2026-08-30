@@ -53,6 +53,8 @@ export interface FeedgenConfig {
   spaceSyncMemberBudgetMs: number
   /** Max accepted size (bytes) of a single record fetched from a member's host. */
   spaceSyncMaxRecordBytes: number
+  /** Max records indexed for one member in one pass. */
+  spaceSyncMaxRecordsPerMember: number
   /** Exact `http://` origins allowed for member hosts. `https://` origins are always allowed. */
   spaceSyncAllowHttpOrigins: ReadonlySet<string>
 }
@@ -77,6 +79,7 @@ export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
 export const DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS = 10_000
 export const DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS = 60_000
 export const DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES = 65_536
+export const DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER = 1_000
 export const DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS: ReadonlySet<string> =
   new Set()
 
@@ -169,6 +172,11 @@ export function loadFeedgenConfig(
       env['FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES'],
       'FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES',
       DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+    ),
+    spaceSyncMaxRecordsPerMember: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER'],
+      'FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER',
+      DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
     ),
     spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],

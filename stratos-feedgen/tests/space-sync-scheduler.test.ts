@@ -335,7 +335,6 @@ describe('SpaceSyncScheduler', () => {
                     collection: POST_COLLECTION,
                     rkey: 'r1',
                     cid: 'cid-1',
-                    prev: null,
                     value: { $type: POST_COLLECTION, text: 'partial' },
                   },
                 ],

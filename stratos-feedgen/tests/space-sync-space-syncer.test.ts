@@ -58,7 +58,6 @@ function baseOp(overrides: Partial<RepoOpEntry> = {}): RepoOpEntry {
     collection: POST_COLLECTION,
     rkey: '3jxyz',
     cid: 'bafyone',
-    prev: null,
     ...overrides,
   }
 }

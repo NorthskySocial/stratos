@@ -24,3 +24,20 @@ export class StratosClientError extends Error {
     this.lxm = opts.lxm
   }
 }
+
+export class StratosInvalidResponseError extends Error {
+  readonly url: string
+  readonly lxm: string
+
+  constructor(
+    url: string,
+    lxm: string,
+    reason: string,
+    options?: ErrorOptions,
+  ) {
+    super(`Stratos response was invalid: ${reason} (${url})`, options)
+    this.name = 'StratosInvalidResponseError'
+    this.url = url
+    this.lxm = lxm
+  }
+}

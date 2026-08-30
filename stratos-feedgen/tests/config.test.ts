@@ -5,6 +5,7 @@ import {
   DEFAULT_SPACE_SYNC_INTERVAL_MS,
   DEFAULT_SPACE_SYNC_MAX_PAGES,
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+  DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
   DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
@@ -36,6 +37,9 @@ describe('loadFeedgenConfig space-sync defaults', () => {
     expect(cfg.spaceSyncMaxRecordBytes).toBe(
       DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
     )
+    expect(cfg.spaceSyncMaxRecordsPerMember).toBe(
+      DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
+    )
     expect(cfg.spaceSyncAllowHttpOrigins).toEqual(
       DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS,
     )
@@ -65,6 +69,7 @@ describe('loadFeedgenConfig space-sync overrides', () => {
       FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS: '5000',
       FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS: '20000',
       FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES: '131072',
+      FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER: '500',
     })
     expect(cfg.spaceSyncIntervalMs).toBe(15_000)
     expect(cfg.spaceSyncPageLimit).toBe(250)
@@ -72,6 +77,7 @@ describe('loadFeedgenConfig space-sync overrides', () => {
     expect(cfg.spaceSyncRequestTimeoutMs).toBe(5_000)
     expect(cfg.spaceSyncMemberBudgetMs).toBe(20_000)
     expect(cfg.spaceSyncMaxRecordBytes).toBe(131_072)
+    expect(cfg.spaceSyncMaxRecordsPerMember).toBe(500)
   })
 
   it('rejects a non-positive-integer override', () => {
@@ -167,8 +173,7 @@ describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS', () => {
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
-        FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS:
-          'http://spike:pass@jet.bebop.test',
+        FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: 'http://spike:pass@jet.bebop.test',
       }),
     ).toThrow(/bare origin/)
   })
