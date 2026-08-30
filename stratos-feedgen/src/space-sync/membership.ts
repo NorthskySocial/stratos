@@ -4,6 +4,13 @@ import type { UpstreamStratosClient } from '../upstream/index.js'
 
 /** Rows requested per `listSpaceRepos` page. The lexicon's own maximum. */
 const PAGE_LIMIT = 1000
+/**
+ * Page ceiling for one boundary's enumeration. At `PAGE_LIMIT` rows a page,
+ * this covers 100,000 members before an enumeration is abandoned as failed —
+ * far more than a legitimate space, and a backstop against a host that never
+ * terminates pagination.
+ */
+const DEFAULT_MAX_ENUMERATION_PAGES = 100
 
 /** A `pds`-custody member ready to poll: their space, boundary, DID, and repo host. */
 export interface PollTarget {
@@ -60,11 +67,20 @@ export interface MembershipTrackerDeps {
   log?: (event: MembershipPassLogEvent) => void
   /** Called when a boundary's enumeration fails this pass. Defaults to `console.error`. */
   onError?: (boundary: string, err: unknown) => void
+  /** Page ceiling for one boundary's enumeration. Default 100. */
+  maxEnumerationPages?: number
 }
 
 interface BoundaryEnumeration {
   polls: PollTarget[]
   skippedNoHost: string[]
+  /**
+   * Every DID seen in a completed listing, regardless of custody or host.
+   * The presence signal for departure detection — `polls` alone only covers
+   * the subset that is also pollable, and a DID can be absent from `polls`
+   * for reasons (hostless, custody flip) that are not departure.
+   */
+  seenDids: string[]
 }
 
 /**
@@ -91,6 +107,7 @@ export class MembershipTracker {
   private readonly purger: Pick<Purger, 'purgeActor' | 'purgeActorBoundary'>
   private readonly log: (event: MembershipPassLogEvent) => void
   private readonly onError: (boundary: string, err: unknown) => void
+  private readonly maxEnumerationPages: number
   private readonly lastPolls = new Map<string, PollTarget[]>()
 
   constructor(deps: MembershipTrackerDeps) {
@@ -99,6 +116,8 @@ export class MembershipTracker {
     this.purger = deps.purger
     this.log = deps.log ?? defaultLog
     this.onError = deps.onError ?? defaultOnError
+    this.maxEnumerationPages =
+      deps.maxEnumerationPages ?? DEFAULT_MAX_ENUMERATION_PAGES
   }
 
   /**
@@ -136,7 +155,7 @@ export class MembershipTracker {
         return
       }
 
-      const { polls, skippedNoHost } = result.value
+      const { polls, skippedNoHost, seenDids } = result.value
       this.lastPolls.set(boundary, polls)
 
       const outcome: BoundaryPassSuccess = {
@@ -147,9 +166,12 @@ export class MembershipTracker {
         removed: [],
       }
       const previousDids = new Set(previous.map((p) => p.did))
-      const currentDids = new Set(polls.map((p) => p.did))
+      // A DID absent from `polls` may simply be hostless this pass, or have
+      // flipped custody away from `pds` — neither is a departure. Only a DID
+      // missing from the completed listing entirely has left.
+      const stillPresentDids = new Set(seenDids)
       for (const did of previousDids) {
-        if (!currentDids.has(did)) left.push({ outcome, did })
+        if (!stillPresentDids.has(did)) left.push({ outcome, did })
       }
       outcomes.push(outcome)
     })
@@ -204,16 +226,26 @@ export class MembershipTracker {
     const credential = await this.credentialManager.getCredential(boundary)
     const polls: PollTarget[] = []
     const skippedNoHost: string[] = []
+    const seenDids: string[] = []
     let cursor: string | undefined
+    let pages = 0
     do {
+      pages += 1
+      if (pages > this.maxEnumerationPages) {
+        throw new Error(
+          `space membership enumeration for boundary ${boundary} exceeded ${this.maxEnumerationPages} pages`,
+        )
+      }
       const page = await this.client.listSpaceRepos(
         { space: credential.spaceUri, cursor, limit: PAGE_LIMIT },
         credential,
       )
       for (const row of page.repos) {
+        seenDids.push(row.did)
         // Fail closed: only an explicit 'pds' custody polls. Absent,
         // 'stratos', or any unrecognized value stays with the (unchanged)
-        // subscription arm.
+        // subscription arm — but the did is still present in the space, so
+        // it must not read as departed.
         if (row.custody !== 'pds') continue
         if (!row.host) {
           skippedNoHost.push(row.did)
@@ -226,9 +258,16 @@ export class MembershipTracker {
           host: row.host,
         })
       }
+      // A host that returns the same cursor forever would otherwise spin
+      // this loop indefinitely without ever tripping the page ceiling above.
+      if (page.cursor !== undefined && page.cursor === cursor) {
+        throw new Error(
+          `space membership enumeration for boundary ${boundary} received a non-advancing cursor`,
+        )
+      }
       cursor = page.cursor
     } while (cursor !== undefined)
-    return { polls, skippedNoHost }
+    return { polls, skippedNoHost, seenDids }
   }
 }
 

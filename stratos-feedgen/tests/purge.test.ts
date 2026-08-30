@@ -137,6 +137,7 @@ describe('Purger.purgeActor (unenroll)', () => {
     expect(counts).toEqual({
       posts: 2,
       cursors: 1,
+      spaceCursors: 0,
       enrolledActors: 1,
       boundaryCache: 1,
     })
@@ -152,6 +153,7 @@ describe('Purger.purgeActor (unenroll)', () => {
     expect(second).toEqual({
       posts: 0,
       cursors: 0,
+      spaceCursors: 0,
       enrolledActors: 0,
       boundaryCache: 0,
     })
@@ -165,6 +167,33 @@ describe('Purger.purgeActor (unenroll)', () => {
     const counts = await purger.purgeActor(SPIKE)
     expect(counts.posts).toBe(2)
     expect(counts.boundaryCache).toBe(0)
+  })
+
+  it('removes space-sync cursors held by the actor, leaving other members untouched', async () => {
+    await seed()
+    const spaceUri =
+      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    await store.upsertSpaceCursor(
+      spaceUri,
+      SPIKE,
+      'rev-1',
+      '2024-01-01T00:00:00.000Z',
+    )
+    await store.upsertSpaceCursor(
+      spaceUri,
+      FAYE,
+      'rev-2',
+      '2024-01-01T00:00:00.000Z',
+    )
+    const audits: PurgeAudit[] = []
+    const purger = new Purger({ store, audit: (e) => audits.push(e) })
+
+    const counts = await purger.purgeActor(SPIKE)
+
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    expect(await store.getSpaceCursor(spaceUri, FAYE)).toBe('rev-2')
+    expect(counts.spaceCursors).toBe(1)
+    expect(audits[0]!.counts.spaceCursors).toBe(1)
   })
 })
 
@@ -222,6 +251,68 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     const purger = new Purger({ store, audit: () => {} })
     expect((await purger.purgeActorBoundary(SPIKE, 'bounty')).posts).toBe(1)
     expect((await purger.purgeActorBoundary(SPIKE, 'bounty')).posts).toBe(0)
+  })
+
+  it('drops the space-sync cursor when the trigger is space-commit-invalid with a spaceUri', async () => {
+    const spaceUri = 'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    await store.upsertSpaceCursor(
+      spaceUri,
+      SPIKE,
+      'rev-1',
+      '2024-01-01T00:00:00.000Z',
+    )
+    const purger = new Purger({ store, audit: () => {} })
+
+    const counts = await purger.purgeActorBoundary(
+      SPIKE,
+      'crew',
+      'space-commit-invalid',
+      spaceUri,
+    )
+
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    expect(counts.spaceCursors).toBe(1)
+  })
+
+  it('leaves the space-sync cursor alone without a spaceUri, even for space-commit-invalid', async () => {
+    const spaceUri = 'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    await store.upsertSpaceCursor(
+      spaceUri,
+      SPIKE,
+      'rev-1',
+      '2024-01-01T00:00:00.000Z',
+    )
+    const purger = new Purger({ store, audit: () => {} })
+
+    const counts = await purger.purgeActorBoundary(
+      SPIKE,
+      'crew',
+      'space-commit-invalid',
+    )
+
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBe('rev-1')
+    expect(counts.spaceCursors).toBe(0)
+  })
+
+  it('leaves the space-sync cursor alone for a boundary-shrink trigger even with a spaceUri', async () => {
+    const spaceUri = 'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    await store.upsertSpaceCursor(
+      spaceUri,
+      SPIKE,
+      'rev-1',
+      '2024-01-01T00:00:00.000Z',
+    )
+    const purger = new Purger({ store, audit: () => {} })
+
+    const counts = await purger.purgeActorBoundary(
+      SPIKE,
+      'crew',
+      'boundary-shrink',
+      spaceUri,
+    )
+
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBe('rev-1')
+    expect(counts.spaceCursors).toBe(0)
   })
 })
 

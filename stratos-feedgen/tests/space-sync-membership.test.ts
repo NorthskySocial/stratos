@@ -33,7 +33,13 @@ function fakeCredentialManager() {
 }
 
 function fakePurger() {
-  const counts = { posts: 0, cursors: 0, enrolledActors: 0, boundaryCache: 0 }
+  const counts = {
+    posts: 0,
+    cursors: 0,
+    spaceCursors: 0,
+    enrolledActors: 0,
+    boundaryCache: 0,
+  }
   return {
     purgeActor: vi.fn(async () => counts),
     purgeActorBoundary: vi.fn(async () => counts),
@@ -369,6 +375,87 @@ describe('MembershipTracker', () => {
     })
   })
 
+  describe('presence without a poll target', () => {
+    it('does not purge a member who stays enrolled but turns hostless', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          return calls === 1
+            ? {
+                repos: [
+                  {
+                    did: SPIKE,
+                    custody: 'pds',
+                    host: 'https://spike.example',
+                  },
+                ],
+              }
+            : { repos: [{ did: SPIKE, custody: 'pds' }] }
+        }),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY])
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      expect(purger.purgeActor).not.toHaveBeenCalled()
+      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(outcome.polls).toEqual([])
+      expect(outcome.skippedNoHost).toBe(1)
+      expect(outcome.removed).toEqual([])
+    })
+
+    it('does not purge a member whose custody flips away from pds', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          return calls === 1
+            ? {
+                repos: [
+                  {
+                    did: SPIKE,
+                    custody: 'pds',
+                    host: 'https://spike.example',
+                  },
+                ],
+              }
+            : {
+                repos: [
+                  {
+                    did: SPIKE,
+                    custody: 'stratos',
+                    host: 'https://spike.example',
+                  },
+                ],
+              }
+        }),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY])
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      expect(purger.purgeActor).not.toHaveBeenCalled()
+      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(outcome.polls).toEqual([])
+      expect(outcome.removed).toEqual([])
+    })
+  })
+
   describe('fault isolation', () => {
     it('does not let one failing boundary stop the others', async () => {
       const client = {
@@ -540,6 +627,70 @@ describe('MembershipTracker', () => {
         expect.objectContaining({ cursor: 'page-2' }),
         expect.anything(),
       )
+    })
+  })
+
+  describe('enumeration limits', () => {
+    it('treats an enumeration exceeding the page ceiling as a failed pass', async () => {
+      let page = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          page += 1
+          return {
+            repos: [
+              { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+            ],
+            cursor: `page-${page + 1}`,
+          }
+        }),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        maxEnumerationPages: 2,
+      })
+
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      const outcome = outcomeFor(outcomes, BEBOP_BOUNDARY)
+      expect(outcome.ok).toBe(false)
+      if (!outcome.ok) {
+        expect(String(outcome.error)).toContain('exceeded 2 pages')
+      }
+      expect(outcome.polls).toEqual([])
+      expect(client.listSpaceRepos).toHaveBeenCalledTimes(2)
+      expect(purger.purgeActor).not.toHaveBeenCalled()
+      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+    })
+
+    it('treats a non-advancing cursor as a failed pass', async () => {
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => ({
+          repos: [
+            { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+          ],
+          cursor: 'stuck',
+        })),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      const outcome = outcomeFor(outcomes, BEBOP_BOUNDARY)
+      expect(outcome.ok).toBe(false)
+      if (!outcome.ok) {
+        expect(String(outcome.error)).toContain('non-advancing cursor')
+      }
+      expect(client.listSpaceRepos).toHaveBeenCalledTimes(2)
+      expect(purger.purgeActor).not.toHaveBeenCalled()
+      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
     })
   })
 })
