@@ -649,8 +649,11 @@ describe('PostgreSQL Backend Integration', () => {
       expect(jobs[0].attemptCount).toBe(0)
       expect(jobs[0].lastError).toBeNull()
 
-      const due = await queue.listDue(new Date().toISOString(), 10)
-      expect(due.map((j) => j.did)).toEqual([testDid])
+      const claimed = await queue.claimDue(
+        new Date().toISOString(),
+        new Date(Date.now() + 60_000).toISOString(),
+      )
+      expect(claimed?.did).toBe(testDid)
     })
 
     it('upsertPending revives a failed job and preserves firstQueuedAt', async () => {
@@ -669,30 +672,43 @@ describe('PostgreSQL Backend Integration', () => {
       expect(revived.firstQueuedAt).toBe(before.firstQueuedAt)
     })
 
-    it('markRetry hides the job until nextAttemptAt and listDue excludes failed jobs', async () => {
+    it('claimDue honors nextAttemptAt and excludes failed jobs', async () => {
       const future = new Date(Date.now() + 60_000).toISOString()
       await queue.upsertPending(testDid)
       await queue.markRetry(testDid, 1, 1, future, 'ECONNREFUSED')
       await queue.upsertPending(testDid2)
       await queue.markFailed(testDid2, 1, 'invalid_grant')
 
-      const dueNow = await queue.listDue(new Date().toISOString(), 10)
-      expect(dueNow).toHaveLength(0)
+      const leaseUntil = new Date(Date.now() + 180_000).toISOString()
+      await expect(
+        queue.claimDue(new Date().toISOString(), leaseUntil),
+      ).resolves.toBeUndefined()
 
-      const dueLater = await queue.listDue(
+      const dueLater = await queue.claimDue(
         new Date(Date.now() + 120_000).toISOString(),
-        10,
+        leaseUntil,
       )
-      expect(dueLater.map((j) => j.did)).toEqual([testDid])
-      expect(dueLater[0].attemptCount).toBe(1)
-      expect(dueLater[0].lastError).toBe('ECONNREFUSED')
+      expect(dueLater?.did).toBe(testDid)
+      expect(dueLater?.attemptCount).toBe(1)
+      expect(dueLater?.lastError).toBe('ECONNREFUSED')
     })
 
-    it('remove deletes the job and tolerates unknown dids', async () => {
+    it('retains a cancelled generation and revives it monotonically', async () => {
       await queue.upsertPending(testDid)
-      await queue.remove(testDid)
-      await expect(queue.remove('did:plc:unknown')).resolves.toBeUndefined()
+      const cancelled = await queue.markCancelled(testDid)
       expect(await queue.list(100)).toHaveLength(0)
+      await expect(
+        queue.markCancelled('did:plc:unknown'),
+      ).resolves.toBeUndefined()
+      const revived = await queue.upsertPending(testDid)
+      expect(revived).toBeGreaterThan(cancelled!)
+      await expect(queue.markCompleted(testDid, cancelled!)).resolves.toBe(
+        false,
+      )
+      expect((await queue.list(100))[0]).toMatchObject({
+        status: 'pending',
+        generation: revived,
+      })
     })
 
     it('list bounds each page and pages forward from the given key', async () => {

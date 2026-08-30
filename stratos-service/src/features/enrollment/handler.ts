@@ -162,14 +162,7 @@ function registerEnrollmentUnenroll(server: XrpcServer, ctx: AppContext): void {
         // A write still running would otherwise land after step 2 and put the
         // enrollment record back on the user's PDS, where nothing could reach
         // it again once OAuth is revoked.
-        try {
-          await ctx.pdsSyncWorker.cancel(did!)
-        } catch (err) {
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to cancel queued PDS sync job during unenrollment',
-          )
-        }
+        await ctx.pdsSyncWorker.cancel(did!)
 
         // 2. Delete enrollment record from user's PDS (best-effort)
         try {

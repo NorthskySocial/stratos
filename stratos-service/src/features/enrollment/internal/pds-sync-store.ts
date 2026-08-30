@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, lte, or, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, lte, or, sql } from 'drizzle-orm'
 import { enrollmentPdsSync, type ServiceDb } from '../../../db'
 import { pgEnrollmentPdsSync } from '../../../db/pg-schema.js'
 import type { ServicePgDb } from '../../../db/pg.js'
@@ -30,7 +30,7 @@ export interface PdsSyncJob {
  * revived by a fresh admin mutation (via {@link PdsSyncQueueStore.upsertPending})
  * or by an operator (via {@link PdsSyncQueueStore.requeueFailed}).
  */
-export type PdsSyncJobStatus = 'pending' | 'failed'
+export type PdsSyncJobStatus = 'pending' | 'failed' | 'completed' | 'cancelled'
 
 /**
  * Persistence for the PDS enrollment-record sync queue.
@@ -45,8 +45,13 @@ export interface PdsSyncQueueStore {
    * starts, so that attempt can fence its own bookkeeping.
    */
   upsertPending(did: string): Promise<number>
-  /** Jobs with `status = 'pending'` and `nextAttemptAt <= now`. */
-  listDue(now: string, limit: number): Promise<PdsSyncJob[]>
+  /** Check that one pending generation still owns the actor's sync intent. */
+  isPending(did: string, generation: number): Promise<boolean>
+  /**
+   * Claim one due job and lease it until `leaseUntil`. The claim advances the
+   * generation so an expired worker cannot change queue state after a reclaim.
+   */
+  claimDue(now: string, leaseUntil: string): Promise<PdsSyncJob | undefined>
   /** Schedule a retry, only while `generation` is still current. */
   markRetry(
     did: string,
@@ -57,16 +62,13 @@ export interface PdsSyncQueueStore {
   ): Promise<void>
   /** Terminal failure, only while `generation` is still current. */
   markFailed(did: string, generation: number, lastError: string): Promise<void>
+  /** Mark a job completed only while `generation` is still current. */
+  markCompleted(did: string, generation: number): Promise<boolean>
   /**
-   * Clear a completed job, but only while `generation` is still current. A
-   * mutation that landed during the attempt has already bumped the generation,
-   * so its job survives and the ticker converges on the newer state.
-   *
-   * @returns `true` when the row was cleared, `false` when it was superseded.
+   * Fence an actor's queued work before unenrollment. Returns the cancellation
+   * generation, or `undefined` when no queued work exists.
    */
-  removeIfCurrent(did: string, generation: number): Promise<boolean>
-  /** Unconditional delete. Used when the actor unenrolls. */
-  remove(did: string): Promise<void>
+  markCancelled(did: string): Promise<number | undefined>
   /** Reset every terminal job to pending. @returns The number revived. */
   requeueFailed(): Promise<number>
   /**
@@ -147,9 +149,27 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
     return rows[0].generation
   }
 
-  async listDue(now: string, limit: number): Promise<PdsSyncJob[]> {
+  async isPending(did: string, generation: number): Promise<boolean> {
     const rows = await this.db
-      .select()
+      .select({ did: enrollmentPdsSync.did })
+      .from(enrollmentPdsSync)
+      .where(
+        and(
+          eq(enrollmentPdsSync.did, did),
+          eq(enrollmentPdsSync.generation, generation),
+          eq(enrollmentPdsSync.status, 'pending'),
+        ),
+      )
+      .limit(1)
+    return rows.length > 0
+  }
+
+  async claimDue(
+    now: string,
+    leaseUntil: string,
+  ): Promise<PdsSyncJob | undefined> {
+    const candidate = this.db
+      .select({ did: enrollmentPdsSync.did })
       .from(enrollmentPdsSync)
       .where(
         and(
@@ -158,8 +178,23 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
         ),
       )
       .orderBy(asc(enrollmentPdsSync.nextAttemptAt))
-      .limit(limit)
-    return rows.map(toJob)
+      .limit(1)
+    const rows = await this.db
+      .update(enrollmentPdsSync)
+      .set({
+        nextAttemptAt: leaseUntil,
+        updatedAt: now,
+        generation: sql`${enrollmentPdsSync.generation} + 1`,
+      })
+      .where(
+        and(
+          eq(enrollmentPdsSync.status, 'pending'),
+          lte(enrollmentPdsSync.nextAttemptAt, now),
+          inArray(enrollmentPdsSync.did, candidate),
+        ),
+      )
+      .returning()
+    return rows[0] ? toJob(rows[0]) : undefined
   }
 
   async markRetry(
@@ -182,6 +217,7 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
         and(
           eq(enrollmentPdsSync.did, did),
           eq(enrollmentPdsSync.generation, generation),
+          eq(enrollmentPdsSync.status, 'pending'),
         ),
       )
   }
@@ -198,27 +234,37 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
         and(
           eq(enrollmentPdsSync.did, did),
           eq(enrollmentPdsSync.generation, generation),
+          eq(enrollmentPdsSync.status, 'pending'),
         ),
       )
   }
 
-  async removeIfCurrent(did: string, generation: number): Promise<boolean> {
+  async markCompleted(did: string, generation: number): Promise<boolean> {
     const rows = await this.db
-      .delete(enrollmentPdsSync)
+      .update(enrollmentPdsSync)
+      .set({ status: 'completed', updatedAt: nowIso() })
       .where(
         and(
           eq(enrollmentPdsSync.did, did),
           eq(enrollmentPdsSync.generation, generation),
+          eq(enrollmentPdsSync.status, 'pending'),
         ),
       )
       .returning({ did: enrollmentPdsSync.did })
     return rows.length > 0
   }
 
-  async remove(did: string): Promise<void> {
-    await this.db
-      .delete(enrollmentPdsSync)
+  async markCancelled(did: string): Promise<number | undefined> {
+    const rows = await this.db
+      .update(enrollmentPdsSync)
+      .set({
+        status: 'cancelled',
+        updatedAt: nowIso(),
+        generation: sql`${enrollmentPdsSync.generation} + 1`,
+      })
       .where(eq(enrollmentPdsSync.did, did))
+      .returning({ generation: enrollmentPdsSync.generation })
+    return rows[0]?.generation
   }
 
   async requeueFailed(): Promise<number> {
@@ -243,15 +289,18 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
       .select()
       .from(enrollmentPdsSync)
       .where(
-        after
-          ? or(
-              gt(enrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
-              and(
-                eq(enrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
-                gt(enrollmentPdsSync.did, after.did),
-              ),
-            )
-          : undefined,
+        and(
+          inArray(enrollmentPdsSync.status, ['pending', 'failed']),
+          after
+            ? or(
+                gt(enrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+                and(
+                  eq(enrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+                  gt(enrollmentPdsSync.did, after.did),
+                ),
+              )
+            : undefined,
+        ),
       )
       .orderBy(asc(enrollmentPdsSync.firstQueuedAt), asc(enrollmentPdsSync.did))
       .limit(limit)
@@ -294,9 +343,27 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
     return rows[0].generation
   }
 
-  async listDue(now: string, limit: number): Promise<PdsSyncJob[]> {
+  async isPending(did: string, generation: number): Promise<boolean> {
     const rows = await this.db
-      .select()
+      .select({ did: pgEnrollmentPdsSync.did })
+      .from(pgEnrollmentPdsSync)
+      .where(
+        and(
+          eq(pgEnrollmentPdsSync.did, did),
+          eq(pgEnrollmentPdsSync.generation, generation),
+          eq(pgEnrollmentPdsSync.status, 'pending'),
+        ),
+      )
+      .limit(1)
+    return rows.length > 0
+  }
+
+  async claimDue(
+    now: string,
+    leaseUntil: string,
+  ): Promise<PdsSyncJob | undefined> {
+    const candidate = this.db
+      .select({ did: pgEnrollmentPdsSync.did })
       .from(pgEnrollmentPdsSync)
       .where(
         and(
@@ -305,8 +372,23 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
         ),
       )
       .orderBy(asc(pgEnrollmentPdsSync.nextAttemptAt))
-      .limit(limit)
-    return rows.map(toJob)
+      .limit(1)
+    const rows = await this.db
+      .update(pgEnrollmentPdsSync)
+      .set({
+        nextAttemptAt: leaseUntil,
+        updatedAt: now,
+        generation: sql`${pgEnrollmentPdsSync.generation} + 1`,
+      })
+      .where(
+        and(
+          eq(pgEnrollmentPdsSync.status, 'pending'),
+          lte(pgEnrollmentPdsSync.nextAttemptAt, now),
+          inArray(pgEnrollmentPdsSync.did, candidate),
+        ),
+      )
+      .returning()
+    return rows[0] ? toJob(rows[0]) : undefined
   }
 
   async markRetry(
@@ -329,6 +411,7 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
         and(
           eq(pgEnrollmentPdsSync.did, did),
           eq(pgEnrollmentPdsSync.generation, generation),
+          eq(pgEnrollmentPdsSync.status, 'pending'),
         ),
       )
   }
@@ -345,27 +428,37 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
         and(
           eq(pgEnrollmentPdsSync.did, did),
           eq(pgEnrollmentPdsSync.generation, generation),
+          eq(pgEnrollmentPdsSync.status, 'pending'),
         ),
       )
   }
 
-  async removeIfCurrent(did: string, generation: number): Promise<boolean> {
+  async markCompleted(did: string, generation: number): Promise<boolean> {
     const rows = await this.db
-      .delete(pgEnrollmentPdsSync)
+      .update(pgEnrollmentPdsSync)
+      .set({ status: 'completed', updatedAt: nowIso() })
       .where(
         and(
           eq(pgEnrollmentPdsSync.did, did),
           eq(pgEnrollmentPdsSync.generation, generation),
+          eq(pgEnrollmentPdsSync.status, 'pending'),
         ),
       )
       .returning({ did: pgEnrollmentPdsSync.did })
     return rows.length > 0
   }
 
-  async remove(did: string): Promise<void> {
-    await this.db
-      .delete(pgEnrollmentPdsSync)
+  async markCancelled(did: string): Promise<number | undefined> {
+    const rows = await this.db
+      .update(pgEnrollmentPdsSync)
+      .set({
+        status: 'cancelled',
+        updatedAt: nowIso(),
+        generation: sql`${pgEnrollmentPdsSync.generation} + 1`,
+      })
       .where(eq(pgEnrollmentPdsSync.did, did))
+      .returning({ generation: pgEnrollmentPdsSync.generation })
+    return rows[0]?.generation
   }
 
   async requeueFailed(): Promise<number> {
@@ -390,15 +483,18 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
       .select()
       .from(pgEnrollmentPdsSync)
       .where(
-        after
-          ? or(
-              gt(pgEnrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
-              and(
-                eq(pgEnrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
-                gt(pgEnrollmentPdsSync.did, after.did),
-              ),
-            )
-          : undefined,
+        and(
+          inArray(pgEnrollmentPdsSync.status, ['pending', 'failed']),
+          after
+            ? or(
+                gt(pgEnrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+                and(
+                  eq(pgEnrollmentPdsSync.firstQueuedAt, after.firstQueuedAt),
+                  gt(pgEnrollmentPdsSync.did, after.did),
+                ),
+              )
+            : undefined,
+        ),
       )
       .orderBy(
         asc(pgEnrollmentPdsSync.firstQueuedAt),

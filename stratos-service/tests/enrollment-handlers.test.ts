@@ -367,7 +367,7 @@ describe('Unenroll endpoint', () => {
     expect(cancelSpy).toHaveBeenCalledWith(did)
   })
 
-  it('proceeds even if queued PDS sync job removal fails', async () => {
+  it('stops unenrollment when durable queue cancellation fails', async () => {
     const did = 'did:plc:testuser'
     const server = createMockXrpcServer()
 
@@ -409,23 +409,21 @@ describe('Unenroll endpoint', () => {
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
 
-    const res = await invokeMethod(
-      server,
-      'zone.stratos.enrollment.unenroll',
-      {},
-      { credentials: { type: 'user', did } },
-    )
+    await expect(
+      invokeMethod(
+        server,
+        'zone.stratos.enrollment.unenroll',
+        {},
+        { credentials: { type: 'user', did } },
+      ),
+    ).rejects.toThrow('db closed')
 
-    expect((res as any).body.success).toBe(true)
-    expect(unenrollSpy).toHaveBeenCalledWith(did)
+    expect(unenrollSpy).not.toHaveBeenCalled()
     expect(cancelSpy).toHaveBeenCalledWith(did)
-    expect(logger.warn).toHaveBeenCalledWith(
-      { err: 'db closed', did },
-      'failed to cancel queued PDS sync job during unenrollment',
-    )
+    expect(logger.warn).not.toHaveBeenCalled()
   })
 
-  it('unenrolls without a logger when queued sync removal fails', async () => {
+  it('propagates cancellation failure without a logger', async () => {
     const did = 'did:plc:testuser'
     const server = createMockXrpcServer()
 
@@ -457,14 +455,14 @@ describe('Unenroll endpoint', () => {
 
     registerEnrollmentHandlers(server as unknown as XrpcServer, ctx)
 
-    const res = await invokeMethod(
-      server,
-      'zone.stratos.enrollment.unenroll',
-      {},
-      { credentials: { type: 'user', did } },
-    )
-
-    expect((res as any).body.success).toBe(true)
+    await expect(
+      invokeMethod(
+        server,
+        'zone.stratos.enrollment.unenroll',
+        {},
+        { credentials: { type: 'user', did } },
+      ),
+    ).rejects.toThrow('db closed')
   })
 
   it('proceeds even if PDS record deletion fails', async () => {
@@ -620,7 +618,7 @@ describe('Unenroll endpoint', () => {
         revoke: vi.fn().mockRejectedValue(new Error('OAuth Error')),
       },
       pdsSyncWorker: {
-        cancel: vi.fn().mockRejectedValue(new Error('queue down')),
+        cancel: vi.fn().mockResolvedValue(undefined),
       },
       authVerifier: {
         standard: vi.fn(),

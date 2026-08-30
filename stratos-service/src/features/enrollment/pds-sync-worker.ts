@@ -30,9 +30,16 @@ export interface PdsSyncWorkerDeps {
 
 /** Max random jitter added to each backoff delay. */
 const BACKOFF_JITTER_MS = 1_000
+/** Keep the claim valid while timeout cleanup updates the queue. */
+const CLAIM_LEASE_GRACE_MS = 1_000
 
 /** The unit of work an attempt fences itself against. */
 type AttemptJob = Pick<PdsSyncJob, 'did' | 'attemptCount' | 'generation'>
+
+interface InFlightAttempt {
+  generation: number
+  promise: Promise<'ok' | 'deferred'>
+}
 
 /**
  * Durable retry worker for PDS enrollment-record sync jobs.
@@ -51,7 +58,7 @@ export class PdsEnrollmentSyncWorker {
   private ticking = false
   private stopped = false
   private tickPromise?: Promise<void>
-  private inFlight = new Map<string, Promise<'ok' | 'deferred'>>()
+  private inFlight = new Map<string, InFlightAttempt>()
   /**
    * Per-DID chain that serializes {@link enqueue} against {@link cancel}. An
    * unserialized enqueue can clear the cancellation fence and insert a fresh
@@ -59,14 +66,6 @@ export class PdsEnrollmentSyncWorker {
    * intent's inline attempt runs unfenced against a departing actor.
    */
   private mutations = new Map<string, Promise<void>>()
-  /**
-   * DIDs cancelled after a tick claimed their job but before the attempt
-   * started. The `inFlight` map cannot fence that window. Entries are
-   * cleared by fresh intent; a residual entry for a departed actor is
-   * harmless because unenrollment also removed the queue row.
-   */
-  private cancelled = new Set<string>()
-
   constructor(
     private deps: PdsSyncWorkerDeps,
     private config: PdsSyncWorkerConfig,
@@ -96,7 +95,7 @@ export class PdsEnrollmentSyncWorker {
     clearInterval(this.timer)
     this.timer = undefined
     await this.tickPromise
-    await Promise.allSettled(this.inFlight.values())
+    await Promise.allSettled([...this.inFlight.values()].map((v) => v.promise))
   }
 
   /**
@@ -108,7 +107,6 @@ export class PdsEnrollmentSyncWorker {
    */
   async enqueue(did: string): Promise<number> {
     return this.serialize(did, async () => {
-      this.cancelled.delete(did)
       return this.deps.queue.upsertPending(did)
     })
   }
@@ -119,24 +117,21 @@ export class PdsEnrollmentSyncWorker {
    * attempt failed and the queue's retry/terminal bookkeeping was applied.
    */
   async kick(did: string, generation: number): Promise<'ok' | 'deferred'> {
+    if (!(await this.deps.queue.isPending(did, generation))) return 'ok'
     return this.attempt({ did, attemptCount: 0, generation })
   }
 
-  /**
-   * Drop an actor's job and wait for any attempt already in flight to settle.
-   * Unenrollment calls this before it deletes the PDS enrollment record, so a
-   * late write cannot resurrect a record that nothing is left to clean up.
-   */
+  /** Fence an actor's job and wait for any local attempt to settle. */
   async cancel(did: string): Promise<void> {
     await this.serialize(did, async () => {
-      this.cancelled.add(did)
-      try {
-        await this.deps.queue.remove(did)
-      } finally {
-        // A failed removal must not skip this wait: the residual row is
-        // harmless (a later attempt resolves obsolete), a late write is not.
-        const inFlight = this.inFlight.get(did)
-        if (inFlight) await inFlight.catch(() => undefined)
+      const generation = await this.deps.queue.markCancelled(did)
+
+      const inFlight = this.inFlight.get(did)
+      if (
+        inFlight &&
+        (generation === undefined || inFlight.generation < generation)
+      ) {
+        await inFlight.promise.catch(() => undefined)
       }
     })
   }
@@ -172,12 +167,16 @@ export class PdsEnrollmentSyncWorker {
 
   private async runTick(): Promise<void> {
     try {
-      const due = await this.deps.queue.listDue(
-        new Date().toISOString(),
-        this.config.claimLimit,
-      )
-      for (const job of due) {
+      for (let claimed = 0; claimed < this.config.claimLimit; claimed += 1) {
         if (this.stopped) break
+        const now = Date.now()
+        const job = await this.deps.queue.claimDue(
+          new Date(now).toISOString(),
+          new Date(
+            now + this.config.attemptTimeoutMs + CLAIM_LEASE_GRACE_MS,
+          ).toISOString(),
+        )
+        if (!job || this.stopped) break
         await this.attempt(job)
       }
     } catch (err) {
@@ -188,23 +187,24 @@ export class PdsEnrollmentSyncWorker {
   private async attempt(job: AttemptJob): Promise<'ok' | 'deferred'> {
     const { did } = job
     if (this.inFlight.has(did)) return 'deferred'
-    const running = this.execute(job)
-    this.inFlight.set(did, running)
+    const running = Promise.resolve().then(() => this.execute(job))
+    this.inFlight.set(did, { generation: job.generation, promise: running })
     try {
       return await running
     } finally {
-      this.inFlight.delete(did)
+      if (this.inFlight.get(did)?.promise === running) {
+        this.inFlight.delete(did)
+      }
     }
   }
 
   private async execute(job: AttemptJob): Promise<'ok' | 'deferred'> {
     const { did } = job
-    if (this.cancelled.has(did)) return 'ok'
     try {
       const signal = AbortSignal.timeout(this.config.attemptTimeoutMs)
       const result = await this.deps.sync(did, signal)
-      const cleared = await this.deps.queue.removeIfCurrent(did, job.generation)
-      if (!cleared) {
+      const completed = await this.deps.queue.markCompleted(did, job.generation)
+      if (!completed) {
         // A mutation landed while this attempt was writing. Its job survives
         // and the ticker converges on the newer boundary set.
         this.deps.logger?.info(
