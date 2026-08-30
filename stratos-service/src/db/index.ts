@@ -124,7 +124,8 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       enrollmentRkey TEXT,
       isService INTEGER NOT NULL DEFAULT 0,
       custody TEXT NOT NULL DEFAULT 'stratos',
-      repoHost TEXT
+      repoHost TEXT,
+      capabilityVerdict TEXT
     )
   `)
 
@@ -150,6 +151,12 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   await addEnrollmentColumn(
     db,
     sql`ALTER TABLE enrollment ADD COLUMN repoHost TEXT`,
+  )
+
+  // Migration: add capabilityVerdict column if missing (for existing databases)
+  await addEnrollmentColumn(
+    db,
+    sql`ALTER TABLE enrollment ADD COLUMN capabilityVerdict TEXT`,
   )
 
   await db.run(sql`
