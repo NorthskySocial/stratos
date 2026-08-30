@@ -8,6 +8,7 @@ import type {
   EnrollmentValidationResult,
   EnrollmentValidator,
   Logger,
+  StoredEnrollment,
 } from '@northskysocial/stratos-core'
 import {
   ensureQualifiedBoundaries,
@@ -56,10 +57,17 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     const now = new Date()
 
     await this.actorStoreCreator(did)
-    await this.saveEnrollment(did, signingKeyDid, now)
+    const existing = await this.enrollmentStore.getEnrollment(did)
+    await this.saveEnrollment(did, signingKeyDid, now, existing)
 
     this.emitEnrollmentEvent(did, boundaries, now)
-    return this.createEnrollmentObject(did, boundaries, signingKeyDid, now)
+    return this.createEnrollmentObject(
+      did,
+      boundaries,
+      signingKeyDid,
+      now,
+      existing,
+    )
   }
 
   /**
@@ -93,6 +101,8 @@ export class EnrollmentServiceImpl implements EnrollmentService {
       active: record.active,
       enrollmentRkey: record.enrollmentRkey,
       isService: record.isService ?? false,
+      custody: record.custody,
+      repoHost: record.repoHost,
     }
   }
 
@@ -123,18 +133,32 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   /**
    * Save enrollment record for a user.
    *
+   * Takes the caller's prior read of the existing record: `enroll()` is a
+   * full-replace upsert, so omitting `custody`/`repoHost`/`pdsEndpoint` here
+   * would silently reset a returning user back to `stratos` custody and drop
+   * their PDS endpoint.
+   *
    * @param did - The user's DID.
    * @param signingKeyDid - The DID of the signing key.
    * @param now - The current date and time.
+   * @param existing - The user's enrollment record before this call, if any.
    * @private
    */
-  private async saveEnrollment(did: string, signingKeyDid: string, now: Date) {
+  private async saveEnrollment(
+    did: string,
+    signingKeyDid: string,
+    now: Date,
+    existing: StoredEnrollment | null,
+  ) {
     await this.enrollmentStore.enroll({
       did,
       enrolledAt: now.toISOString(),
-      pdsEndpoint: undefined,
+      pdsEndpoint: existing?.pdsEndpoint,
       signingKeyDid,
       active: true,
+      custody: existing?.custody,
+      repoHost: existing?.repoHost,
+      capabilityVerdict: existing?.capabilityVerdict,
     })
   }
 
@@ -154,12 +178,15 @@ export class EnrollmentServiceImpl implements EnrollmentService {
   }
 
   /**
-   * Create an enrollment object for a user.
+   * Create the domain `Enrollment` returned to the caller. Must mirror what
+   * `saveEnrollment` just wrote, including the carried-forward `custody` and
+   * `repoHost` -- otherwise the caller sees an object that contradicts the row.
    *
    * @param did - The user's DID.
    * @param boundaries - The boundaries for the user's enrollment.
    * @param signingKeyDid - The DID of the signing key.
    * @param now - The current date and time.
+   * @param existing - The user's enrollment record before this call, if any.
    * @private
    */
   private createEnrollmentObject(
@@ -167,14 +194,17 @@ export class EnrollmentServiceImpl implements EnrollmentService {
     boundaries: string[],
     signingKeyDid: string,
     now: Date,
+    existing: StoredEnrollment | null,
   ): Enrollment {
     return {
       did,
       boundaries,
       enrolledAt: now,
-      pdsEndpoint: '',
+      pdsEndpoint: existing?.pdsEndpoint ?? '',
       signingKeyDid,
       active: true,
+      custody: existing?.custody,
+      repoHost: existing?.repoHost,
     }
   }
 }

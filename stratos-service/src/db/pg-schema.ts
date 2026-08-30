@@ -36,6 +36,7 @@ export const pgEnrollment = pgTable('enrollment', {
   isService: boolean('isService').notNull().default(false),
   custody: text('custody').notNull().default('stratos'),
   repoHost: text('repoHost'),
+  capabilityVerdict: text('capabilityVerdict'),
 })
 
 export const pgEnrollmentBoundary = pgTable(
