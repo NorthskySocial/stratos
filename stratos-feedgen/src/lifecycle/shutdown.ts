@@ -9,6 +9,7 @@ export interface ShutdownDeps {
    */
   startup?: Promise<void> | null
   serviceStream?: { stop: () => void | Promise<void> } | null
+  spaceSyncScheduler?: { stop: () => Promise<void> } | null
   actorPool?: { stop: () => Promise<void> } | null
   store?: { close: () => Promise<void> } | null
   logger: Logger
@@ -55,6 +56,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       }
       await awaitStartup(deps.startup, drainTimeoutMs, deps.logger)
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
+      await deps.spaceSyncScheduler?.stop()
       await deps.actorPool?.stop()
       await deps.store?.close()
       deps.logger.info({ signal }, 'shutdown complete')

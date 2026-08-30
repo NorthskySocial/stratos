@@ -25,6 +25,14 @@ import {
 import { createFeedgenServer } from '../server.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
+  CommitVerifier,
+  MembershipTracker,
+  SpaceHostClient,
+  SpaceSyncer,
+  SpaceSyncRunner,
+  SpaceSyncScheduler,
+} from '../space-sync/index.js'
+import {
   ActorPool,
   intersectsBoundaries,
   ServiceStream,
@@ -80,9 +88,6 @@ async function main(): Promise<void> {
     },
   })
 
-  // Held for the syncer this feedgen becomes in MM-06; not yet on the sync
-  // path. Constructing it here so credential acquisition is exercised at
-  // startup rather than the first time something needs it.
   const spaceCredentialManager = new SpaceCredentialManager({
     client: upstream,
     signingKey: keypair,
@@ -155,6 +160,7 @@ async function main(): Promise<void> {
   let subscription: {
     serviceStream: ServiceStream
     actorPool: ActorPool
+    purger: Purger
   } | null = null
   if (subscribeEnrollments) {
     const starting = startSubscription({
@@ -178,6 +184,79 @@ async function main(): Promise<void> {
   }
   subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
   subscriptionStatus.actorPool = subscription?.actorPool ?? null
+
+  if (cfg.spaceSyncEnabled) {
+    const purger =
+      subscription?.purger ??
+      new Purger({
+        store,
+        enrollmentCache: enrollmentManager,
+        audit: (entry) => logger.info({ ...entry }, 'feedgen purge'),
+      })
+    const membership = new MembershipTracker({
+      client: upstream,
+      credentialManager: spaceCredentialManager,
+      purger,
+      log: (event) =>
+        logger.info({ ...event }, 'space membership pass completed'),
+      onError: (boundary, err) =>
+        logger.error({ boundary, err }, 'space membership pass failed'),
+    })
+    const syncer = new SpaceSyncer({
+      store,
+      credentialManager: spaceCredentialManager,
+      createHostClient: (options) =>
+        new SpaceHostClient({
+          ...options,
+          requestTimeoutMs: cfg.spaceSyncRequestTimeoutMs,
+          allowHttpOrigins: cfg.spaceSyncAllowHttpOrigins,
+          maxRecordBytes: cfg.spaceSyncMaxRecordBytes,
+        }),
+      maxRecordBytes: cfg.spaceSyncMaxRecordBytes,
+      maxPages: cfg.spaceSyncMaxPages,
+      maxRecordsPerMember: cfg.spaceSyncMaxRecordsPerMember,
+      pageLimit: cfg.spaceSyncPageLimit,
+      log: (event) => logger.info({ ...event }, 'space member sync completed'),
+      onError: (target, err) =>
+        logger.error({ target, err }, 'space member sync failed'),
+    })
+    const runner = new SpaceSyncRunner({
+      syncer,
+      verifier: new CommitVerifier({ didResolver: idResolver.did }),
+      purger,
+      onVerifyFailure: (event) =>
+        logger.error({ ...event }, 'space commit verification failed'),
+      onVerifyTransient: (event, err) =>
+        logger.warn({ ...event, err }, 'space commit verification deferred'),
+      onConsecutiveFailure: (event) =>
+        logger.warn(
+          { ...event },
+          'space commit verification failed on consecutive passes',
+        ),
+      onCapStopStreak: (event) =>
+        logger.warn({ ...event }, 'space member hit the record cap'),
+      onError: (target, err) =>
+        logger.error({ target, err }, 'space sync runner failed'),
+    })
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: configuredBoundaries,
+      intervalMs: cfg.spaceSyncIntervalMs,
+      memberBudgetMs: cfg.spaceSyncMemberBudgetMs,
+      log: (event) => logger.info({ ...event }, 'space sync pass completed'),
+      onTickSkipped: () =>
+        logger.warn({}, 'space sync tick skipped because a pass is active'),
+      onMemberBudgetExceeded: (target) =>
+        logger.warn({ target }, 'space member exceeded the sync budget'),
+      onError: (err) => logger.error({ err }, 'space sync pass failed'),
+      onStopTimedOut: () =>
+        logger.warn({}, 'space sync shutdown grace period expired'),
+    })
+    shutdownDeps.spaceSyncScheduler = scheduler
+    scheduler.start()
+    logger.info({}, 'space sync scheduler started')
+  }
 }
 
 interface StartSubscriptionDeps {
@@ -200,6 +279,7 @@ interface StartSubscriptionDeps {
 async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream: ServiceStream
   actorPool: ActorPool
+  purger: Purger
 }> {
   const { cfg, upstream, store, indexer, enrollmentManager, logger, metrics } =
     deps
@@ -348,7 +428,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream.start()
   logger.info({}, 'service enrollment subscription started')
 
-  return { serviceStream, actorPool: pool }
+  return { serviceStream, actorPool: pool, purger }
 }
 
 function parsePort(value: string | undefined): number | undefined {
