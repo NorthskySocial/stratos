@@ -33,6 +33,9 @@ class FakeSyncer {
   stop(): void {
     this.stopped = true
   }
+  async drainAndStop(): Promise<void> {
+    this.stop()
+  }
   setConnectGate(_gate: (() => Promise<void>) | null): void {
     // ignored in tests
   }
@@ -142,6 +145,186 @@ describe('ActorPool', () => {
     await pool.stop()
     expect(pool.getActiveActors()).toEqual([])
     expect(FakeSyncer.instances.every((s) => s.stopped)).toBe(true)
+  })
+
+  it('stop() drains the rest and reports the failure when one syncer rejects', async () => {
+    const errors: Error[] = []
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        onError: (err) => errors.push(err),
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          if (config.did === 'did:plc:jimhawking') {
+            syncer.drainAndStop = async (): Promise<void> => {
+              throw new Error('drain wedged')
+            }
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+    pool.addActor('did:plc:jimhawking')
+    pool.addActor('did:plc:genestarwind')
+
+    await pool.stop()
+
+    expect(errors.map((e) => e.message)).toEqual(['drain wedged'])
+    expect(findSyncer('did:plc:genestarwind').stopped).toBe(true)
+  })
+
+  it('stop() still drains the rest when a syncer rejects and no onError is set', async () => {
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          if (config.did === 'did:plc:melfina') {
+            syncer.drainAndStop = async (): Promise<void> => {
+              throw new Error('drain wedged')
+            }
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+    pool.addActor('did:plc:melfina')
+    pool.addActor('did:plc:aishaclanclan')
+
+    await expect(pool.stop()).resolves.toBeUndefined()
+    expect(findSyncer('did:plc:aishaclanclan').stopped).toBe(true)
+  })
+
+  it('stop() awaits the in-flight drain of a syncer retired by removeActor', async () => {
+    let releaseDrain!: () => void
+    const drainGate = new Promise<void>((res) => (releaseDrain = res))
+    let drained = false
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          if (config.did === 'did:plc:spikespiegel') {
+            syncer.drainAndStop = async (): Promise<void> => {
+              await drainGate
+              drained = true
+            }
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+    pool.addActor('did:plc:spikespiegel')
+    pool.removeActor('did:plc:spikespiegel')
+
+    let stopResolved = false
+    const stopping = pool.stop().then(() => {
+      stopResolved = true
+    })
+    await new Promise((r) => setImmediate(r))
+    expect(stopResolved).toBe(false)
+
+    releaseDrain()
+    await stopping
+    expect(drained).toBe(true)
+  })
+
+  it('routes a retired drain rejection to onError and stop() still resolves', async () => {
+    const errors: Error[] = []
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        onError: (err) => errors.push(err),
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          if (config.did === 'did:plc:fayevalentine') {
+            syncer.drainAndStop = async (): Promise<void> => {
+              throw new Error('retire drain wedged')
+            }
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+    pool.addActor('did:plc:fayevalentine')
+    pool.removeActor('did:plc:fayevalentine')
+
+    await expect(pool.stop()).resolves.toBeUndefined()
+    expect(errors.map((e) => e.message)).toEqual(['retire drain wedged'])
+  })
+
+  it('tolerates a retired drain rejection when no onError is set', async () => {
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          if (config.did === 'did:plc:hildeschultz') {
+            syncer.drainAndStop = async (): Promise<void> => {
+              throw new Error('retire drain wedged')
+            }
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+    pool.addActor('did:plc:hildeschultz')
+    pool.removeActor('did:plc:hildeschultz')
+    // Let the rejected drain settle; an unhandled rejection fails the run.
+    await new Promise((r) => setImmediate(r))
+
+    await expect(pool.stop()).resolves.toBeUndefined()
+  })
+
+  it('removes a settled retired drain from the retiring set', async () => {
+    const pool = makePool()
+    pool.start()
+    pool.addActor('did:plc:jimhawking')
+    pool.removeActor('did:plc:jimhawking')
+    // FakeSyncer.drainAndStop resolves immediately; let the cleanup then() run.
+    await new Promise((r) => setImmediate(r))
+    const retiring = (pool as unknown as { retiring: Set<unknown> }).retiring
+    expect(retiring.size).toBe(0)
   })
 
   it('seedFromStore adds only actors with matching boundaries', async () => {
@@ -265,6 +448,54 @@ describe('ActorPool', () => {
       pool.removeActor('did:plc:b')
       expect(pool.getActiveActors()).toEqual(['did:plc:a'])
       expect(pool.getWaitingActors()).toEqual([])
+    })
+
+    it('stop() awaits the in-flight drain of an evicted syncer', async () => {
+      let releaseDrain!: () => void
+      const drainGate = new Promise<void>((res) => (releaseDrain = res))
+      let drained = false
+      const now = { t: 10_000 }
+      const pool = new ActorPool(
+        {
+          stratosServiceUrl: 'http://stratos.test',
+          mintToken: async () => 'tok',
+          maxConnections: 1,
+          connectDelayMs: 0,
+          idleEvictionMs: 1000,
+          evictionCheckIntervalMs: 60_000,
+        },
+        {
+          store,
+          indexer,
+          syncerFactory: (config) => {
+            const syncer = new FakeSyncer(config)
+            if (config.did === 'did:plc:genestarwind') {
+              syncer.drainAndStop = async (): Promise<void> => {
+                await drainGate
+                drained = true
+              }
+            }
+            return syncer as unknown as ActorSyncer
+          },
+          now: () => now.t,
+        },
+      )
+      pool.start()
+      pool.addActor('did:plc:genestarwind')
+      pool.addActor('did:plc:melfinapilot') // waits
+      findSyncer('did:plc:genestarwind').lastMessageAt = 0 // idle
+      expect(pool.evictIdle()).toEqual(['did:plc:genestarwind'])
+
+      let stopResolved = false
+      const stopping = pool.stop().then(() => {
+        stopResolved = true
+      })
+      await new Promise((r) => setImmediate(r))
+      expect(stopResolved).toBe(false)
+
+      releaseDrain()
+      await stopping
+      expect(drained).toBe(true)
     })
 
     it('disabled when idleEvictionMs is 0', () => {

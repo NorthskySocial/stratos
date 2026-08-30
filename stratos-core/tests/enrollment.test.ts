@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  classifyCustody,
   ENROLLMENT_MODE,
   EnrollmentConfig,
   extractPdsEndpoint,
@@ -197,6 +198,24 @@ describe('Enrollment Domain Logic', () => {
 
       expect(result.allowed).toBe(false)
       expect(result.reason).toBe('NotInAllowlist')
+    })
+  })
+
+  describe('classifyCustody', () => {
+    it('grants pds custody only on a confirmed capable verdict', () => {
+      expect(classifyCustody('capable')).toBe('pds')
+    })
+
+    it('falls back to stratos custody on a not-capable verdict', () => {
+      expect(classifyCustody('not-capable')).toBe('stratos')
+    })
+
+    it('falls back to stratos custody on an unknown verdict', () => {
+      expect(classifyCustody('unknown')).toBe('stratos')
+    })
+
+    it('falls back to stratos custody when no verdict was recorded', () => {
+      expect(classifyCustody(undefined)).toBe('stratos')
     })
   })
 })

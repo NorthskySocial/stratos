@@ -4,18 +4,33 @@ import { registerEnrollmentHandlers } from '../src/features/index.js'
 import type { AppContext } from '../src/index.js'
 import { EnrollmentDeniedError } from '@northskysocial/stratos-core'
 
+/** The shape `zone.stratos.enrollment.status` returns. */
+interface EnrollmentStatusBody {
+  did?: string
+  enrolled?: boolean
+  eligible?: boolean
+  active?: boolean
+  enrolledAt?: string
+  signingKey?: string
+  enrollmentRkey?: string
+}
+
+type XrpcHandler = (ctx: {
+  params: Record<string, unknown>
+  auth?: unknown
+}) => Promise<{ body: EnrollmentStatusBody }>
+
 interface MockXrpcServer {
-  methods: Record<string, any>
-  method: (nsid: string, config: any) => void
+  methods: Record<string, XrpcHandler>
+  method: (nsid: string, config: { handler: XrpcHandler }) => void
 }
 
 function createMockXrpcServer(): MockXrpcServer {
-  const methods: Record<string, any> = {}
+  const methods: Record<string, XrpcHandler> = {}
   return {
     methods,
-    method: (nsid: string, config: any) => {
-      // The registerEnrollmentHandlers function calls server.method(nsid, config)
-      // where config is { auth, handler }
+    // registerEnrollmentHandlers calls server.method(nsid, { auth, handler }).
+    method: (nsid, config) => {
       methods[nsid] = config.handler
     },
   }
@@ -26,10 +41,9 @@ async function invokeMethod(
   nsid: string,
   params: Record<string, unknown> = {},
   auth?: unknown,
-): Promise<any> {
+): Promise<{ statusCode: number; body: EnrollmentStatusBody }> {
   const handler = server.methods[nsid]
   if (!handler) throw new Error(`Method ${nsid} not registered`)
-  // The handler returned by createXrpcHandler is (handlerCtx) => Promise<HandlerResponse>
   const result = await handler({ params, auth })
   return { statusCode: 200, body: result.body }
 }
@@ -37,6 +51,8 @@ async function invokeMethod(
 function createCtx(opts: {
   getEnrollment: (did: string) => Promise<any | null>
   isEligible?: boolean
+  resolveThrows?: boolean
+  allowedPdsEndpoints?: string[]
 }): AppContext {
   const app = express()
   ;(app as any)._router = (app as any)._router || express.Router()
@@ -61,7 +77,7 @@ function createCtx(opts: {
     cfg: {
       enrollment: {
         mode: opts.isEligible ? 'open' : 'closed',
-        allowedPdsEndpoints: [],
+        allowedPdsEndpoints: opts.allowedPdsEndpoints ?? [],
         autoEnrollDomains: ['example.com'],
       },
       stratos: {
@@ -71,8 +87,11 @@ function createCtx(opts: {
     },
     idResolver: {
       did: {
-        resolve: async () =>
-          opts.isEligible
+        resolve: async () => {
+          if (opts.resolveThrows) {
+            throw new Error('PLC directory timeout')
+          }
+          return opts.isEligible
             ? {
                 service: [
                   {
@@ -81,7 +100,8 @@ function createCtx(opts: {
                   },
                 ],
               }
-            : null,
+            : null
+        },
       },
     } as any,
     logger: {
@@ -95,7 +115,7 @@ function createCtx(opts: {
 }
 
 describe('Enrollment status eligibility', () => {
-  it('reports enrolled: false when user not in DB and not eligible (REPRODUCTION)', async () => {
+  it('reports enrolled: false and eligible: false when user not in DB and not eligible', async () => {
     const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
@@ -104,13 +124,14 @@ describe('Enrollment status eligibility', () => {
 
     registerEnrollmentHandlers(xrpc as any, ctx)
     const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
-      did: 'did:plc:not-eligible',
+      did: 'did:plc:shinji-tokyo3',
     })
 
     expect(res.body.enrolled).toBe(false)
+    expect(res.body.eligible).toBe(false)
   })
 
-  it('SHOULD report enrolled: true when user not in DB but is eligible (CURRENTLY FAILS)', async () => {
+  it('reports enrolled: false and eligible: true when user not in DB but is eligible', async () => {
     const xrpc = createMockXrpcServer()
     const ctx = createCtx({
       getEnrollment: async () => null,
@@ -119,11 +140,60 @@ describe('Enrollment status eligibility', () => {
 
     registerEnrollmentHandlers(xrpc as any, ctx)
     const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
-      did: 'did:plc:eligible-but-not-in-db',
+      did: 'did:plc:asuka-nerv',
     })
 
-    // This is what we want to fix: currently this returns false
-    // because it only checks ctx.enrollmentService.getEnrollment
+    // Eligibility must not be reported as enrollment: an eligible DID has no
+    // enrollment row, cannot write records, and has no PDS enrollment record.
+    expect(res.body.enrolled).toBe(false)
+    expect(res.body.eligible).toBe(true)
+  })
+
+  it('omits eligible when the eligibility check itself fails', async () => {
+    const xrpc = createMockXrpcServer()
+    // Closed mode with a PDS allowlist forces DID resolution, which throws.
+    const ctx = createCtx({
+      getEnrollment: async () => null,
+      isEligible: false,
+      resolveThrows: true,
+      allowedPdsEndpoints: ['https://pds.example.com'],
+    })
+
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
+      did: 'did:plc:misato-nerv',
+    })
+
+    // A failed check is not a denial: the endpoint must not report an
+    // authoritative eligible: false when the PLC or PDS is unreachable.
+    expect(res.body.enrolled).toBe(false)
+    expect(res.body.eligible).toBeUndefined()
+  })
+
+  it('reports enrolled: true with active: false for a deactivated enrollment row', async () => {
+    const xrpc = createMockXrpcServer()
+    const enrolledAt = new Date('2026-01-15T12:00:00.000Z')
+    const ctx = createCtx({
+      getEnrollment: async () => ({
+        did: 'did:plc:rei-nerv',
+        enrolledAt,
+        active: false,
+        signingKeyDid: 'did:key:zRei',
+        enrollmentRkey: 'rkey-rei',
+      }),
+      isEligible: true,
+    })
+
+    registerEnrollmentHandlers(xrpc as any, ctx)
+    const res = await invokeMethod(xrpc, 'zone.stratos.enrollment.status', {
+      did: 'did:plc:rei-nerv',
+    })
+
+    // Deactivated is not the same as not enrolled: the row exists.
     expect(res.body.enrolled).toBe(true)
+    expect(res.body.active).toBe(false)
+    expect(res.body.eligible).toBeUndefined()
+    expect(res.body.enrolledAt).toBe(enrolledAt.toISOString())
+    expect(res.body.enrollmentRkey).toBe('rkey-rei')
   })
 })

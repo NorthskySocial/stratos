@@ -38,6 +38,32 @@ describe('verifyEnrolled', () => {
     ).rejects.toBeInstanceOf(EnrollmentDeniedError)
   })
 
+  it('wraps a failed eligibility check as VerificationFailed', async () => {
+    // The allow-list provider throws a raw error. verifyEnrolled must wrap
+    // it so callers see a structured denial, not an unhandled failure.
+    const backendError = new Error('allowlist backend unreachable')
+    const failingDeps = {
+      ...deps(null),
+      allowListProvider: {
+        isAllowed: vi.fn(async () => {
+          throw backendError
+        }),
+      } as never,
+    }
+
+    const err = await verifyEnrolled('did:plc:usagi', failingDeps).then(
+      () => null,
+      (e: unknown) => e,
+    )
+
+    expect(err).toBeInstanceOf(EnrollmentDeniedError)
+    expect((err as EnrollmentDeniedError).reason).toBe('VerificationFailed')
+    expect((err as EnrollmentDeniedError).message).toBe(
+      'Enrollment verification failed',
+    )
+    expect((err as Error).cause).toBe(backendError)
+  })
+
   it('does not readmit a deactivated member through auto-enrollment', async () => {
     // Enrollment open to everyone: without the active check, the deactivated
     // member would fall through and be readmitted.

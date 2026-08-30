@@ -1,6 +1,6 @@
 import { createClient } from '@libsql/client'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import * as schema from './schema.js'
 
 export {
@@ -51,6 +51,36 @@ export function createServiceDb(location: string): ServiceDb {
  *
  * @param db - Service database connection
  */
+/**
+ * Add a column that an older database may already have.
+ *
+ * SQLite has no `ADD COLUMN IF NOT EXISTS`, so a re-run has to be tolerated.
+ * Swallowing every error would let the service start with the column missing,
+ * so only the duplicate-column case is ignored.
+ */
+async function addEnrollmentColumn(
+  db: ServiceDb,
+  statement: SQL,
+): Promise<void> {
+  try {
+    await db.run(statement)
+  } catch (err) {
+    // The driver wraps the SQLite error, so the text we need sits on a
+    // `cause` further down the chain, not on the message we are handed.
+    if (!isDuplicateColumn(err)) throw err
+  }
+}
+
+/** True when `err`, or anything it wraps, is SQLite's duplicate-column error. */
+function isDuplicateColumn(err: unknown): boolean {
+  let current: unknown = err
+  while (current instanceof Error) {
+    if (current.message.includes('duplicate column name')) return true
+    current = current.cause
+  }
+  return false
+}
+
 export async function migrateServiceDb(db: ServiceDb): Promise<void> {
   // Create tables if not exist
   await db.run(sql`
@@ -95,27 +125,35 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
       signingKeyDid TEXT NOT NULL,
       active TEXT NOT NULL DEFAULT 'true',
       enrollmentRkey TEXT,
-      isService INTEGER NOT NULL DEFAULT 0
+      isService INTEGER NOT NULL DEFAULT 0,
+      custody TEXT NOT NULL DEFAULT 'stratos',
+      repoHost TEXT
     )
   `)
 
   // Migration: add enrollmentRkey column if missing (for existing databases)
-  await db
-    .run(
-      sql`
-    ALTER TABLE enrollment ADD COLUMN enrollmentRkey TEXT
-  `,
-    )
-    .catch(() => {})
+  await addEnrollmentColumn(
+    db,
+    sql`ALTER TABLE enrollment ADD COLUMN enrollmentRkey TEXT`,
+  )
 
   // Migration: add isService column if missing (for existing databases)
-  await db
-    .run(
-      sql`
-    ALTER TABLE enrollment ADD COLUMN isService INTEGER NOT NULL DEFAULT 0
-  `,
-    )
-    .catch(() => {})
+  await addEnrollmentColumn(
+    db,
+    sql`ALTER TABLE enrollment ADD COLUMN isService INTEGER NOT NULL DEFAULT 0`,
+  )
+
+  // Migration: add custody column if missing (for existing databases)
+  await addEnrollmentColumn(
+    db,
+    sql`ALTER TABLE enrollment ADD COLUMN custody TEXT NOT NULL DEFAULT 'stratos'`,
+  )
+
+  // Migration: add repoHost column if missing (for existing databases)
+  await addEnrollmentColumn(
+    db,
+    sql`ALTER TABLE enrollment ADD COLUMN repoHost TEXT`,
+  )
 
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS enrollment_boundary (

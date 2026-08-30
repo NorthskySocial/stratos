@@ -54,6 +54,7 @@ export async function waitForHealthy(
 export async function enrollmentStatus(did: string): Promise<{
   did: string
   enrolled: boolean
+  eligible?: boolean
   active?: boolean
   enrolledAt?: string
   enrollmentRkey?: string
@@ -70,6 +71,7 @@ export async function enrollmentStatus(did: string): Promise<{
   return (await res.json()) as {
     did: string
     enrolled: boolean
+    eligible?: boolean
     active?: boolean
     enrolledAt?: string
     enrollmentRkey?: string

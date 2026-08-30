@@ -1,5 +1,9 @@
 import { ENROLLMENT_MODE, EnrollmentConfig } from '../types.js'
-import type { EnrollmentValidationResult } from './types.js'
+import type {
+  Custody,
+  EnrollmentValidationResult,
+  SpacesCapability,
+} from './types.js'
 
 /**
  * Extract PDS endpoint from a DID document
@@ -99,4 +103,19 @@ export function validateEnrollmentEligibility(
   }
 
   return { allowed: false, reason: 'NotInAllowlist' }
+}
+
+/**
+ * Decide which repo custody a new enrollment gets from its capability
+ * probe verdict. Only a confirmed 'capable' result grants 'pds' custody --
+ * 'not-capable' and 'unknown' both fall back to 'stratos' custody, since an
+ * inconclusive probe must never be treated as a capability grant.
+ *
+ * @param spacesCapability - The enrolment-time capability probe verdict.
+ * @returns The custody class for the new enrollment.
+ */
+export function classifyCustody(
+  spacesCapability: SpacesCapability | undefined,
+): Custody {
+  return spacesCapability === 'capable' ? 'pds' : 'stratos'
 }

@@ -7,8 +7,8 @@ import {
   chromium,
   type Page,
 } from 'npm:playwright@1.58.2'
-import { STRATOS_URL, TEST_USERS } from './lib/config.ts'
-import { enrollmentStatus } from './lib/stratos.ts'
+import { PDS_URL, STRATOS_URL, TEST_USERS } from './lib/config.ts'
+import { enrollmentStatus, listPdsRecords } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
 import {
   fillSignInForm,
@@ -158,6 +158,32 @@ async function checkEnrollmentStatus(did: string) {
   }
 }
 
+/**
+ * Look up the user's `zone.stratos.actor.enrollment` records on the PDS and
+ * check whether one matches the rkey the status endpoint reported.
+ */
+async function findPdsEnrollmentRkey(
+  did: string,
+  expectedRkey: string,
+): Promise<{ found: boolean; rkeys: string[] }> {
+  try {
+    const listing = await listPdsRecords(
+      PDS_URL,
+      did,
+      'zone.stratos.actor.enrollment',
+    )
+    const rkeys = listing.records.map(
+      (record) => record.uri.split('/').pop() ?? '',
+    )
+    return { found: rkeys.includes(expectedRkey), rkeys }
+  } catch (err) {
+    error(`PDS listRecords failed for ${did}`, {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return { found: false, rkeys: [] }
+  }
+}
+
 async function run() {
   section('Phase 2: OAuth Enrollment')
 
@@ -182,14 +208,28 @@ async function run() {
       }
 
       const status = await checkEnrollmentStatus(userState.did)
-      // `enrolled: true` alone is ambiguous — the status endpoint reports
-      // eligible-but-not-yet-enrolled DIDs the same way (active: false, no
-      // rkey). Only an existing enrollment record (enrollmentRkey present)
-      // means OAuth has actually run and we can safely skip it.
+      // `enrolled: true` now means an enrollment row exists (eligible-only
+      // DIDs report `enrolled: false, eligible: true`). Requiring
+      // enrollmentRkey too keeps the skip robust against older servers.
       if (status?.enrolled && status.enrollmentRkey) {
-        pass(`${userDef.name} already enrolled — OAuth skipped`, userState.did)
-        userState.enrolled = true
-        continue
+        // A service row alone does not prove the enrollment. Check the PDS
+        // record before we skip OAuth. A stale row would otherwise hide a
+        // missing record, and this phase would report a pass it never checked.
+        const existing = await findPdsEnrollmentRkey(
+          userState.did,
+          status.enrollmentRkey,
+        )
+        if (existing.found) {
+          pass(
+            `${userDef.name} already enrolled — OAuth skipped`,
+            userState.did,
+          )
+          userState.enrolled = true
+          continue
+        }
+        info(
+          `${userDef.name} reports enrolled but the PDS record is missing — enrolling again`,
+        )
       }
 
       info(`Enrolling ${userDef.name} (${userState.handle})...`)
@@ -214,19 +254,33 @@ async function run() {
       }
 
       const finalStatus = await checkEnrollmentStatus(userState.did)
-      // Require the enrollment record rkey — `enrolled` alone also covers
-      // eligible-but-not-enrolled DIDs (see the skip check above).
-      if (finalStatus?.enrolled && finalStatus.enrollmentRkey) {
-        userState.enrolled = true
-        pass(`${userDef.name} enrolled successfully`, userState.did)
-      } else {
+      // Require the enrollment record rkey — see the skip check above.
+      if (!finalStatus?.enrolled || !finalStatus.enrollmentRkey) {
         fail(
           `${userDef.name} enrollment — OAuth succeeded but no enrollment record`,
           `enrolled=${finalStatus?.enrolled ?? 'unknown'}, rkey=${
             finalStatus?.enrollmentRkey ?? 'none'
           }`,
         )
+        continue
       }
+
+      // Verify the real side effect in this phase: the enrollment record must
+      // exist on the user's PDS with the rkey the status endpoint reported.
+      const pdsRkey = await findPdsEnrollmentRkey(
+        userState.did,
+        finalStatus.enrollmentRkey,
+      )
+      if (!pdsRkey.found) {
+        fail(
+          `${userDef.name} enrollment — no matching PDS enrollment record`,
+          `expected rkey=${finalStatus.enrollmentRkey}, PDS has [${pdsRkey.rkeys.join(', ')}]`,
+        )
+        continue
+      }
+
+      userState.enrolled = true
+      pass(`${userDef.name} enrolled successfully`, userState.did)
     }
   } finally {
     await browser.close()

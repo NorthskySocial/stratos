@@ -31,6 +31,7 @@ export interface ResolveEnrollmentsResponse {
 export interface EnrollmentStatusResponse {
   did: string
   enrolled: boolean
+  eligible?: boolean
   enrolledAt?: string
   active?: boolean
   signingKey?: string
