@@ -42,7 +42,10 @@ describe('updateRecord pds-custody rejection', () => {
     )
     await expect(
       updateRecord(ctx, buildInput(), CALLER_DID),
-    ).rejects.toMatchObject({ customErrorName: 'PdsCustodyWriteForbidden' })
+    ).rejects.toMatchObject({
+      customErrorName: 'PdsCustodyWriteForbidden',
+      message: 'This actor writes records to their own PDS',
+    })
   })
 
   it('never reaches the repo, so no partial update is attempted', async () => {

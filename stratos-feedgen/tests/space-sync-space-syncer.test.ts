@@ -3,6 +3,7 @@ import type { PostUpsert } from '../src/db/index.js'
 import {
   MalformedCursorError,
   RepoNotFoundError,
+  SpaceHostClient,
   SpaceSyncer,
   type GetRecordOptions,
   type GetRecordResult,
@@ -382,6 +383,21 @@ describe('SpaceSyncer', () => {
       expect(result.recordsIndexed).toBe(0)
       expect(store.upsertPost).not.toHaveBeenCalled()
     })
+
+    it('accepts a record exactly at the byte cap', async () => {
+      const value = makePostRecord()
+      const exactSize = Buffer.byteLength(JSON.stringify(value), 'utf8')
+      const { syncer, store, client } = buildSyncer({
+        maxRecordBytes: exactSize,
+      })
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [baseOp({ value })] }))
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedOversized).toBe(0)
+      expect(result.recordsIndexed).toBe(1)
+      expect(store.upsertPost).toHaveBeenCalled()
+    })
   })
 
   describe('createdAt clamp', () => {
@@ -435,6 +451,28 @@ describe('SpaceSyncer', () => {
 
       expect(store.upsertPost).toHaveBeenCalledWith(
         expect.objectContaining({ sortAt: FIXED_NOW }),
+      )
+    })
+
+    it('passes through a createdAt exactly at now unchanged, not clamped', async () => {
+      const { syncer, store, client } = buildSyncer()
+      // Same instant as FIXED_NOW, spelled without the milliseconds group, so
+      // it is a distinct string that parses to an equal millisecond value.
+      const sameInstantDifferentSpelling = '2024-06-01T00:00:00Z'
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({
+              value: makePostRecord({ createdAt: sameInstantDifferentSpelling }),
+            }),
+          ],
+        }),
+      )
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(store.upsertPost).toHaveBeenCalledWith(
+        expect.objectContaining({ sortAt: sameInstantDifferentSpelling }),
       )
     })
   })
@@ -515,6 +553,32 @@ describe('SpaceSyncer', () => {
       expect(client.getRecord).not.toHaveBeenCalled()
       expect(store.upsertPost).not.toHaveBeenCalled()
     })
+
+    it('treats a null inline value as malformed without calling getRecord', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value: null })] }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(1)
+      expect(client.getRecord).not.toHaveBeenCalled()
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
+
+    it('treats a scalar inline value as malformed without calling getRecord', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [baseOp({ value: 'not-a-record' })] }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(1)
+      expect(client.getRecord).not.toHaveBeenCalled()
+      expect(store.upsertPost).not.toHaveBeenCalled()
+    })
   })
 
   describe('boundary claim strip', () => {
@@ -559,6 +623,25 @@ describe('SpaceSyncer', () => {
       expect(result.recordsIndexed).toBe(2)
       expect(result.stopReason).toBe('per-member-cap')
       expect(result.pagesFetched).toBe(1)
+      expect(client.listRepoOps).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops when recordsIndexed lands exactly on the cap', async () => {
+      const { syncer, client } = buildSyncer({ maxRecordsPerMember: 2 })
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({ rkey: 'one', value: makePostRecord() }),
+            baseOp({ rkey: 'two', value: makePostRecord() }),
+          ],
+          cursor: 'page-2',
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.recordsIndexed).toBe(2)
+      expect(result.stopReason).toBe('per-member-cap')
       expect(client.listRepoOps).toHaveBeenCalledTimes(1)
     })
   })
@@ -736,6 +819,79 @@ describe('SpaceSyncer', () => {
           cid: 'bafynew',
         }),
       )
+    })
+  })
+
+  describe('host client construction', () => {
+    it('creates the host client with the target host and minted credential', async () => {
+      const client = fakeHostClient()
+      const createHostClient = vi.fn(() => client)
+      const credential = {
+        boundary: BEBOP_BOUNDARY,
+        spaceUri: SPACE_URI,
+        credential: 'cred-fixed',
+        expiresAt: new Date('2024-06-01T01:00:00.000Z'),
+        createPresentationProof: async () => 'proof',
+      }
+
+      const syncer = new SpaceSyncer({
+        store: fakeStore(),
+        credentialManager: { getCredential: vi.fn(async () => credential) },
+        createHostClient,
+        now: () => FIXED_NOW,
+      })
+
+      await syncer.syncTarget(makeTarget())
+
+      expect(createHostClient).toHaveBeenCalledWith({
+        hostOrigin: HOST,
+        credentialProof: credential,
+      })
+    })
+
+    it('falls back to a real SpaceHostClient when no factory override is given', async () => {
+      const listRepoOps = vi
+        .spyOn(SpaceHostClient.prototype, 'listRepoOps')
+        .mockResolvedValue(makePage({ ops: [] }))
+
+      const syncer = new SpaceSyncer({
+        store: fakeStore(),
+        credentialManager: fakeCredentialManager(),
+        now: () => FIXED_NOW,
+      })
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(listRepoOps).toHaveBeenCalledTimes(1)
+      expect(result.stopReason).toBe('complete')
+      listRepoOps.mockRestore()
+    })
+  })
+
+  describe('default clock', () => {
+    it('stamps a record with a real timestamp when no clock override is given', async () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(FIXED_NOW))
+      try {
+        const client = fakeHostClient()
+        client.listRepoOps.mockResolvedValue(
+          makePage({ ops: [baseOp({ value: makePostRecord() })] }),
+        )
+        const store = fakeStore()
+        const syncer = new SpaceSyncer({
+          store,
+          credentialManager: fakeCredentialManager(),
+          createHostClient: () => client,
+        })
+
+        await syncer.syncTarget(makeTarget())
+
+        expect(store.upsertPost).toHaveBeenCalledWith(
+          expect.objectContaining({ indexedAt: FIXED_NOW }),
+        )
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

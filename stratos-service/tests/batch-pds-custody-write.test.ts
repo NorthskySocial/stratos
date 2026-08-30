@@ -34,7 +34,10 @@ describe('applyWritesBatch pds-custody rejection', () => {
     ).rejects.toThrow(InvalidRequestError)
     await expect(
       applyWritesBatch(ctx, CALLER_DID, buildOps()),
-    ).rejects.toMatchObject({ customErrorName: 'PdsCustodyWriteForbidden' })
+    ).rejects.toMatchObject({
+      customErrorName: 'PdsCustodyWriteForbidden',
+      message: 'This actor writes records to their own PDS',
+    })
   })
 
   it('never reaches the signer, so no Stratos key is minted', async () => {
