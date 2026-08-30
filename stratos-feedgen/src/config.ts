@@ -1,3 +1,5 @@
+import { parseCommaList } from '@northskysocial/stratos-core'
+
 /**
  * Configuration for the Stratos feed generator.
  *
@@ -36,6 +38,23 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
+
+  /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
+  spaceSyncEnabled: boolean
+  /** Target interval (ms) between space-sync passes, before jitter. */
+  spaceSyncIntervalMs: number
+  /** Max ops requested per `listRepoOps` page when syncing a member. */
+  spaceSyncPageLimit: number
+  /** Max pages fetched for one member in one pass. */
+  spaceSyncMaxPages: number
+  /** Timeout (ms) for a single outbound request to a member's host. */
+  spaceSyncRequestTimeoutMs: number
+  /** Time budget (ms) for one member in one pass. A member over budget is abandoned for that pass. */
+  spaceSyncMemberBudgetMs: number
+  /** Max accepted size (bytes) of a single record fetched from a member's host. */
+  spaceSyncMaxRecordBytes: number
+  /** Exact `http://` origins allowed for member hosts. `https://` origins are always allowed. */
+  spaceSyncAllowHttpOrigins: ReadonlySet<string>
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
@@ -50,6 +69,16 @@ export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
 ]
 
 export const DEFAULT_PLC_URL = 'https://plc.directory'
+
+export const DEFAULT_SPACE_SYNC_ENABLED = true
+export const DEFAULT_SPACE_SYNC_INTERVAL_MS = 30_000
+export const DEFAULT_SPACE_SYNC_PAGE_LIMIT = 1_000
+export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
+export const DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS = 10_000
+export const DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS = 60_000
+export const DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES = 65_536
+export const DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS: ReadonlySet<string> =
+  new Set()
 
 export interface FeedgenEnv {
   [key: string]: string | undefined
@@ -106,6 +135,44 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
+    spaceSyncEnabled: parseBoolean(
+      env['FEEDGEN_SPACE_SYNC_ENABLED'],
+      'FEEDGEN_SPACE_SYNC_ENABLED',
+      DEFAULT_SPACE_SYNC_ENABLED,
+    ),
+    spaceSyncIntervalMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_INTERVAL_MS'],
+      'FEEDGEN_SPACE_SYNC_INTERVAL_MS',
+      DEFAULT_SPACE_SYNC_INTERVAL_MS,
+    ),
+    spaceSyncPageLimit: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_PAGE_LIMIT'],
+      'FEEDGEN_SPACE_SYNC_PAGE_LIMIT',
+      DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+    ),
+    spaceSyncMaxPages: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MAX_PAGES'],
+      'FEEDGEN_SPACE_SYNC_MAX_PAGES',
+      DEFAULT_SPACE_SYNC_MAX_PAGES,
+    ),
+    spaceSyncRequestTimeoutMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS'],
+      'FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS',
+      DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
+    ),
+    spaceSyncMemberBudgetMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS'],
+      'FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS',
+      DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+    ),
+    spaceSyncMaxRecordBytes: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES'],
+      'FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES',
+      DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+    ),
+    spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
+      env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
+    ),
   }
 }
 
@@ -120,6 +187,58 @@ function parsePositiveInt(
     throw new Error(`Invalid ${name}: ${value} (expected positive integer)`)
   }
   return parsed
+}
+
+function parseBoolean(
+  value: string | undefined,
+  name: string,
+  fallback: boolean,
+): boolean {
+  if (value === undefined || value === '') return fallback
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true') return true
+  if (normalized === 'false') return false
+  throw new Error(`Invalid ${name}: ${value} (expected 'true' or 'false')`)
+}
+
+/**
+ * Parses `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS` into the exact set of
+ * `http://` origins a member host is allowed to use. `https://` origins are
+ * always allowed and never belong in this list, so an entry that isn't a
+ * bare `http://` origin fails fast at load rather than being ignored.
+ */
+function parseAllowHttpOrigins(value: string | undefined): ReadonlySet<string> {
+  if (value === undefined || value === '') {
+    return DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS
+  }
+  return new Set(parseCommaList(value).map(parseHttpOrigin))
+}
+
+function parseHttpOrigin(entry: string): string {
+  const name = 'FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'
+  let url: URL
+  try {
+    url = new URL(entry)
+  } catch {
+    throw new Error(`Invalid ${name} entry "${entry}": not a valid URL`)
+  }
+  if (url.protocol !== 'http:') {
+    throw new Error(
+      `Invalid ${name} entry "${entry}": expected an http:// origin (https is always allowed)`,
+    )
+  }
+  const isBareOrigin =
+    url.username === '' &&
+    url.password === '' &&
+    url.pathname === '/' &&
+    url.search === '' &&
+    url.hash === ''
+  if (!isBareOrigin) {
+    throw new Error(
+      `Invalid ${name} entry "${entry}": expected a bare origin with no path, query, or userinfo`,
+    )
+  }
+  return url.origin
 }
 
 function parseStorageBackend(value: string | undefined): StorageBackend {
