@@ -104,6 +104,11 @@ describe('createShutdownHandler', () => {
           events.push('serviceStream.stop')
         },
       },
+      spaceSyncScheduler: {
+        stop: async () => {
+          events.push('spaceSyncScheduler.stop')
+        },
+      },
       actorPool: {
         stop: async () => {
           events.push('pool.stop.start')
@@ -133,6 +138,7 @@ describe('createShutdownHandler', () => {
     await done
     expect(events).toEqual([
       'serviceStream.stop',
+      'spaceSyncScheduler.stop',
       'pool.stop.start',
       'pool.stop.end',
       'store.close',
@@ -147,6 +153,41 @@ describe('createShutdownHandler', () => {
     // The drain deadline timer must be cleared once the drain wins the race.
     expect(clearTimeoutSpy).toHaveBeenCalled()
     clearTimeoutSpy.mockRestore()
+  })
+
+  it('stops the space sync scheduler before closing the store', async () => {
+    const events: string[] = []
+    const schedulerDrain = deferred()
+    const exit = vi.fn()
+    const handler = createShutdownHandler({
+      spaceSyncScheduler: {
+        stop: async () => {
+          events.push('scheduler.stop.start')
+          await schedulerDrain.promise
+          events.push('scheduler.stop.end')
+        },
+      },
+      store: {
+        close: async () => {
+          events.push('store.close')
+        },
+      },
+      logger: nullLogger,
+      exit,
+    })
+
+    const done = handler('SIGTERM')
+    await vi.waitFor(() => expect(events).toContain('scheduler.stop.start'))
+    expect(events).toEqual(['scheduler.stop.start'])
+    schedulerDrain.resolve()
+    await done
+
+    expect(events).toEqual([
+      'scheduler.stop.start',
+      'scheduler.stop.end',
+      'store.close',
+    ])
+    expect(exit).toHaveBeenCalledWith(0)
   })
 
   it('destroys sockets still open at the drain deadline and exits 0', async () => {
