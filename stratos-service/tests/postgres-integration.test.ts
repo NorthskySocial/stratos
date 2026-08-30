@@ -33,6 +33,7 @@ import {
   PgEnrollmentStoreWriter,
   PostgresActorStore,
 } from '../src/infra/storage/postgres/index.js'
+import { PgPdsSyncQueueStore } from '../src/features/enrollment/internal/pds-sync-store.js'
 
 describe('PostgreSQL Backend Integration', () => {
   let pgUrl: string
@@ -902,6 +903,105 @@ describe('PostgreSQL Backend Integration', () => {
       expect(services[0].isService).toBe(true)
 
       await enrollmentStore.unenroll(serviceDid)
+    })
+  })
+
+  describe('PgPdsSyncQueueStore', () => {
+    let queue: PgPdsSyncQueueStore
+
+    beforeEach(() => {
+      queue = new PgPdsSyncQueueStore(serviceDb)
+    })
+
+    afterEach(async () => {
+      await cleanupClient`DELETE FROM "enrollment_pds_sync"`
+    })
+
+    it('upsertPending creates a due pending job', async () => {
+      await queue.upsertPending(testDid)
+
+      const jobs = await queue.list(100)
+      expect(jobs).toHaveLength(1)
+      expect(jobs[0].did).toBe(testDid)
+      expect(jobs[0].status).toBe('pending')
+      expect(jobs[0].attemptCount).toBe(0)
+      expect(jobs[0].lastError).toBeNull()
+
+      const claimed = await queue.claimDue(
+        new Date().toISOString(),
+        new Date(Date.now() + 60_000).toISOString(),
+      )
+      expect(claimed?.did).toBe(testDid)
+    })
+
+    it('upsertPending revives a failed job and preserves firstQueuedAt', async () => {
+      await queue.upsertPending(testDid)
+      const [before] = await queue.list(100)
+
+      await queue.markFailed(testDid, 1, 'invalid_grant')
+      const [failed] = await queue.list(100)
+      expect(failed.status).toBe('failed')
+
+      await queue.upsertPending(testDid)
+      const [revived] = await queue.list(100)
+      expect(revived.status).toBe('pending')
+      expect(revived.attemptCount).toBe(0)
+      expect(revived.lastError).toBeNull()
+      expect(revived.firstQueuedAt).toBe(before.firstQueuedAt)
+    })
+
+    it('claimDue honors nextAttemptAt and excludes failed jobs', async () => {
+      const future = new Date(Date.now() + 60_000).toISOString()
+      await queue.upsertPending(testDid)
+      await queue.markRetry(testDid, 1, 1, future, 'ECONNREFUSED')
+      await queue.upsertPending(testDid2)
+      await queue.markFailed(testDid2, 1, 'invalid_grant')
+
+      const leaseUntil = new Date(Date.now() + 180_000).toISOString()
+      await expect(
+        queue.claimDue(new Date().toISOString(), leaseUntil),
+      ).resolves.toBeUndefined()
+
+      const dueLater = await queue.claimDue(
+        new Date(Date.now() + 120_000).toISOString(),
+        leaseUntil,
+      )
+      expect(dueLater?.did).toBe(testDid)
+      expect(dueLater?.attemptCount).toBe(1)
+      expect(dueLater?.lastError).toBe('ECONNREFUSED')
+    })
+
+    it('retains a cancelled generation and revives it monotonically', async () => {
+      await queue.upsertPending(testDid)
+      const cancelled = await queue.markCancelled(testDid)
+      expect(await queue.list(100)).toHaveLength(0)
+      await expect(
+        queue.markCancelled('did:plc:unknown'),
+      ).resolves.toBeUndefined()
+      const revived = await queue.upsertPending(testDid)
+      expect(revived).toBeGreaterThan(cancelled!)
+      await expect(queue.markCompleted(testDid, cancelled!)).resolves.toBe(
+        false,
+      )
+      expect((await queue.list(100))[0]).toMatchObject({
+        status: 'pending',
+        generation: revived,
+      })
+    })
+
+    it('list bounds each page and pages forward from the given key', async () => {
+      await queue.upsertPending(testDid)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      await queue.upsertPending(testDid2)
+
+      const first = await queue.list(1)
+      expect(first.map((j) => j.did)).toEqual([testDid])
+
+      const second = await queue.list(1, {
+        firstQueuedAt: first[0].firstQueuedAt,
+        did: first[0].did,
+      })
+      expect(second.map((j) => j.did)).toEqual([testDid2])
     })
   })
 })

@@ -10,6 +10,7 @@ export {
   adminUser,
   enrollment,
   enrollmentBoundary,
+  enrollmentPdsSync,
 } from './schema.js'
 export type {
   OAuthSession,
@@ -22,6 +23,8 @@ export type {
   NewEnrollment,
   EnrollmentBoundary,
   NewEnrollmentBoundary,
+  EnrollmentPdsSync,
+  NewEnrollmentPdsSync,
 } from './schema.js'
 
 export type ServiceDb = LibSQLDatabase<typeof schema> & {
@@ -169,6 +172,23 @@ export async function migrateServiceDb(db: ServiceDb): Promise<void> {
 
   await db.run(sql`
     CREATE INDEX IF NOT EXISTS enrollment_boundary_did_idx ON enrollment_boundary(did)
+  `)
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS enrollment_pds_sync (
+      did TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      attemptCount INTEGER NOT NULL DEFAULT 0,
+      nextAttemptAt TEXT NOT NULL,
+      firstQueuedAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      lastError TEXT,
+      generation INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS enrollment_pds_sync_due_idx ON enrollment_pds_sync(status, nextAttemptAt)
   `)
 
   // Supports listEnrollmentsByBoundary: a space's member list is looked up by

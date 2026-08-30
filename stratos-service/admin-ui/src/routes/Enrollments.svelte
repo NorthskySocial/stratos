@@ -176,10 +176,10 @@
           ? { ...member, boundaries: res.boundaries }
           : member,
       )
-      if (res.pdsSync === 'failed') {
+      if (res.pdsSync === 'deferred') {
         warning =
-          'Boundaries saved here, but the member\u2019s PDS enrollment record ' +
-          'could not be updated. Retry to sync it.'
+          'Boundaries saved here. The member\u2019s PDS enrollment record ' +
+          'update is deferred and will be retried in the background.'
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
