@@ -1,5 +1,5 @@
 import type { Keypair } from '@atproto/crypto'
-import { boundaryToSpaceUri } from '@northskysocial/stratos-core'
+import { boundaryToSpaceUri, StratosError } from '@northskysocial/stratos-core'
 import type { UpstreamStratosClient } from '../upstream/index.js'
 import {
   createDpopProof,
@@ -29,6 +29,14 @@ const SPACE_TYPE = 'zone.stratos.space.feed'
 /** Refresh once within this many ms of expiry. Small relative to the 2h server-side default TTL. */
 export const DEFAULT_REFRESH_MARGIN_MS = 5 * 60_000
 
+/**
+ * Fraction of {@link SpaceCredentialManagerOptions.refreshMarginMs} spread as
+ * random jitter, drawn once per credential at mint time. Every boundary
+ * warmed at startup would otherwise share the same expiry-derived refresh
+ * instant and become due for refresh in the same tick.
+ */
+const JITTER_FRACTION = 0.1
+
 export interface SpaceCredentialManagerOptions {
   client: Pick<UpstreamStratosClient, 'getSpaceCredential'>
   /** The feedgen's own signing key — mints the self-authorizing delegation token. */
@@ -43,6 +51,8 @@ export interface SpaceCredentialManagerOptions {
   now?: () => number
   /** Injectable DPoP key pair for tests; generated lazily otherwise. */
   dpopKeyPair?: DpopKeyPair
+  /** Injectable jitter source for tests. Returns a value in `[0, 1)`, like `Math.random`. */
+  random?: () => number
 }
 
 /** A held, still-valid space credential and the means to present it. */
@@ -62,6 +72,8 @@ interface HeldState {
   spaceUri: string
   credential: string
   expiresAtMs: number
+  /** Jitter drawn once at mint time; subtracted from the refresh margin. */
+  jitterMs: number
 }
 
 export class SpaceCredentialManager {
@@ -71,6 +83,7 @@ export class SpaceCredentialManager {
   private readonly authorityDid: string
   private readonly refreshMarginMs: number
   private readonly now: () => number
+  private readonly random: () => number
   private readonly held = new Map<string, HeldState>()
   private readonly inflight = new Map<string, Promise<HeldSpaceCredential>>()
   private dpopKeyPairPromise: Promise<DpopKeyPair> | undefined
@@ -82,6 +95,7 @@ export class SpaceCredentialManager {
     this.authorityDid = opts.authorityDid
     this.refreshMarginMs = opts.refreshMarginMs ?? DEFAULT_REFRESH_MARGIN_MS
     this.now = opts.now ?? Date.now
+    this.random = opts.random ?? Math.random
     if (opts.dpopKeyPair) {
       this.dpopKeyPairPromise = Promise.resolve(opts.dpopKeyPair)
     }
@@ -118,7 +132,9 @@ export class SpaceCredentialManager {
   }
 
   private needsRefresh(state: HeldState): boolean {
-    return this.now() >= state.expiresAtMs - this.refreshMarginMs
+    return (
+      this.now() >= state.expiresAtMs - this.refreshMarginMs - state.jitterMs
+    )
   }
 
   private async refresh(
@@ -165,6 +181,7 @@ export class SpaceCredentialManager {
       spaceUri,
       credential: result.credential,
       expiresAtMs: parseExpiry(result.expiresAt, spaceUri, this.now()),
+      jitterMs: this.random() * this.refreshMarginMs * JITTER_FRACTION,
     }
   }
 
@@ -204,7 +221,10 @@ function parseExpiry(
 ): number {
   const ms = Date.parse(expiresAt)
   if (!Number.isFinite(ms) || ms <= nowMs) {
-    throw new Error(`space credential for ${spaceUri} has an unusable expiry`)
+    throw new StratosError(
+      `space credential for ${spaceUri} has an unusable expiry`,
+      'InvalidCredentialExpiry',
+    )
   }
   return ms
 }

@@ -423,6 +423,63 @@ describe('PostgreSQL Backend Integration', () => {
       expect(boundaries).not.toContain('did:web:nerv.tokyo.jp/design')
     })
 
+    it('should list active enrollments carrying a boundary, excluding inactive and other-boundary rows', async () => {
+      const BOUNDARY = 'did:web:nerv.tokyo.jp/pilots'
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zAsukaLangley1',
+        active: true,
+      })
+      await enrollmentStore.setBoundaries(testDid, [BOUNDARY])
+
+      await enrollmentStore.enroll({
+        did: testDid2,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zShinjiIkari1',
+        active: false,
+      })
+      await enrollmentStore.setBoundaries(testDid2, [BOUNDARY])
+
+      // Called with no options at all -- exercises the default limit/cursor.
+      const members = await enrollmentStore.listEnrollmentsByBoundary(BOUNDARY)
+      expect(members.map((m) => m.did)).toEqual([testDid])
+    })
+
+    it('should paginate listEnrollmentsByBoundary with a cursor', async () => {
+      const BOUNDARY = 'did:web:nerv.tokyo.jp/eva'
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zReiAyanami1',
+        active: true,
+      })
+      await enrollmentStore.setBoundaries(testDid, [BOUNDARY])
+
+      await enrollmentStore.enroll({
+        did: testDid2,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMariMakinami1',
+        active: true,
+      })
+      await enrollmentStore.setBoundaries(testDid2, [BOUNDARY])
+
+      const firstPage = await enrollmentStore.listEnrollmentsByBoundary(
+        BOUNDARY,
+        { limit: 1 },
+      )
+      expect(firstPage).toHaveLength(1)
+
+      const secondPage = await enrollmentStore.listEnrollmentsByBoundary(
+        BOUNDARY,
+        { cursor: firstPage[0].did },
+      )
+      expect(secondPage.map((m) => m.did)).not.toContain(firstPage[0].did)
+      expect([...firstPage, ...secondPage].map((m) => m.did).sort()).toEqual(
+        [testDid, testDid2].sort(),
+      )
+    })
+
     it('should unenroll', async () => {
       await enrollmentStore.enroll({
         did: testDid,

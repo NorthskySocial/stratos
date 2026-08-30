@@ -77,6 +77,10 @@ function startFeedgen(sqlitePath: string): Deno.ChildProcess {
       FEEDGEN_SQLITE_PATH: sqlitePath,
       FEEDGEN_FEEDS_JSON: feedsJson,
       STRATOS_SERVICE_URL: STRATOS_URL,
+      // Set this explicitly. `Deno.Command` merges the parent environment, and
+      // `.env` carries a placeholder STRATOS_PUBLIC_URL that would otherwise
+      // win and break every DPoP proof's `htu`.
+      STRATOS_PUBLIC_URL: STRATOS_URL,
       STRATOS_SERVICE_DID: SERVICE_DID,
     },
     stdout: 'inherit',

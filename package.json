@@ -20,7 +20,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "mutation": "pnpm -r run mutation",
-    "codegen": "pnpm --filter stratos-service run codegen",
+    "codegen": "pnpm --filter @northskysocial/stratos-client run lexgen",
     "dev:local": "tsx scripts/dev-local.ts",
     "dev:local:debug": "tsx scripts/dev-local.ts --debug-service",
     "e2etest": "deno run -A test/scripts/run-all.ts",

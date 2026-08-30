@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
-import { boundaryToSpaceUri } from '@northskysocial/stratos-core'
+import { boundaryToSpaceUri, StratosError } from '@northskysocial/stratos-core'
 import {
   DEFAULT_REFRESH_MARGIN_MS,
   SpaceCredentialManager,
@@ -50,6 +50,7 @@ async function makeManager(overrides: {
   }) => Promise<GetSpaceCredentialResult>
   now?: () => number
   refreshMarginMs?: number
+  random?: () => number
 }) {
   const signingKey = await Secp256k1Keypair.create({ exportable: true })
   const client = { getSpaceCredential: vi.fn(overrides.getSpaceCredential) }
@@ -60,6 +61,7 @@ async function makeManager(overrides: {
     authorityDid: STRATOS_DID,
     now: overrides.now,
     refreshMarginMs: overrides.refreshMarginMs,
+    random: overrides.random,
   })
   return { manager, client, signingKey }
 }
@@ -228,6 +230,65 @@ describe('SpaceCredentialManager', () => {
       expect(refreshed.credential).toBe('cred-2')
       expect(client.getSpaceCredential).toHaveBeenCalledTimes(2)
     })
+
+    it('draws jitter once at mint time, ahead of the plain refresh margin', async () => {
+      // A max-draw random source (jitter = 10% of the margin) must pull the
+      // refresh instant earlier than the margin alone would.
+      const clock = makeClock()
+      let mintCount = 0
+      const { manager } = await makeManager({
+        now: clock.now,
+        refreshMarginMs: 60_000,
+        random: () => 1, // maximal jitter draw
+        getSpaceCredential: async () => {
+          mintCount += 1
+          return {
+            credential: `cred-${mintCount}`,
+            expiresAt: new Date(clock.now() + 600_000).toISOString(),
+          }
+        },
+      })
+
+      await manager.getCredential(BEBOP_BOUNDARY)
+      expect(mintCount).toBe(1)
+
+      // Plain margin alone would not be due until 540_000; jitter (6_000 at
+      // this margin) pulls the threshold to 534_000. Just short of it, the
+      // credential is still cached -- a maximal draw is a small nudge, never
+      // an immediate refresh.
+      clock.advance(533_999)
+      const stillCached = await manager.getCredential(BEBOP_BOUNDARY)
+      expect(stillCached.credential).toBe('cred-1')
+      expect(mintCount).toBe(1)
+
+      clock.advance(1)
+      const refreshed = await manager.getCredential(BEBOP_BOUNDARY)
+      expect(refreshed.credential).toBe('cred-2')
+      expect(mintCount).toBe(2)
+    })
+
+    it('draws no jitter when the random source returns zero', async () => {
+      const clock = makeClock()
+      let mintCount = 0
+      const { manager } = await makeManager({
+        now: clock.now,
+        refreshMarginMs: 60_000,
+        random: () => 0,
+        getSpaceCredential: async () => {
+          mintCount += 1
+          return {
+            credential: `cred-${mintCount}`,
+            expiresAt: new Date(clock.now() + 600_000).toISOString(),
+          }
+        },
+      })
+
+      await manager.getCredential(BEBOP_BOUNDARY)
+      clock.advance(539_000) // just short of the plain 540_000 margin instant
+      const stillCached = await manager.getCredential(BEBOP_BOUNDARY)
+      expect(stillCached.credential).toBe('cred-1')
+      expect(mintCount).toBe(1)
+    })
   })
 
   describe('rejected delegation token', () => {
@@ -349,9 +410,12 @@ describe('SpaceCredentialManager', () => {
       }),
     })
 
-    await expect(manager.getCredential(BEBOP_BOUNDARY)).rejects.toThrow(
-      /unusable expiry/,
-    )
+    // A domain error, so callers can classify credential-validation failures
+    // apart from unexpected ones.
+    const err = await manager.getCredential(BEBOP_BOUNDARY).catch((e) => e)
+    expect(err).toBeInstanceOf(StratosError)
+    expect(err.code).toBe('InvalidCredentialExpiry')
+    expect(err.message).toMatch(/unusable expiry/)
   })
 
   it('rejects a credential that arrives already expired', async () => {

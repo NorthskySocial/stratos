@@ -24,6 +24,7 @@ import zoneStratosServerListDomains from '../../../lexicons/zone/stratos/server/
 import zoneStratosSpaceGetRecord from '../../../lexicons/zone/stratos/space/getRecord.json' with { type: 'json' }
 import zoneStratosSpaceGetSpaceCredential from '../../../lexicons/zone/stratos/space/getSpaceCredential.json' with { type: 'json' }
 import zoneStratosSpaceListBlobs from '../../../lexicons/zone/stratos/space/listBlobs.json' with { type: 'json' }
+import zoneStratosSpaceListRepos from '../../../lexicons/zone/stratos/space/listRepos.json' with { type: 'json' }
 import zoneStratosSyncGetBlob from '../../../lexicons/zone/stratos/sync/getBlob.json' with { type: 'json' }
 import zoneStratosSyncGetRepo from '../../../lexicons/zone/stratos/sync/getRepo.json' with { type: 'json' }
 import zoneStratosSyncListRecordPaths from '../../../lexicons/zone/stratos/sync/listRecordPaths.json' with { type: 'json' }
@@ -56,6 +57,7 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosSpaceGetRecord as LexiconDoc,
   zoneStratosSpaceGetSpaceCredential as LexiconDoc,
   zoneStratosSpaceListBlobs as LexiconDoc,
+  zoneStratosSpaceListRepos as LexiconDoc,
   zoneStratosSyncGetBlob as LexiconDoc,
   zoneStratosSyncGetRepo as LexiconDoc,
   zoneStratosSyncListRecordPaths as LexiconDoc,

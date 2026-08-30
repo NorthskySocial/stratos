@@ -627,3 +627,50 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(await store.getBoundaries(REI_DID)).toEqual(['leftover'])
   })
 })
+
+describe('SqliteEnrollmentStore listEnrollmentsByBoundary', () => {
+  const BOUNDARY = 'did:web:host/eng'
+  const ASUKA_DID = 'did:plc:asukalangley'
+  const SHINJI_DID = 'did:plc:shinjiikari'
+
+  let testDir: string
+  let store: SqliteEnrollmentStore
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-enrollment-byboundary-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    const db = createServiceDb(join(testDir, 'service.sqlite'))
+    await migrateServiceDb(db)
+    store = new SqliteEnrollmentStore(db)
+
+    await store.enroll({
+      did: ASUKA_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeAsukaKey',
+      active: true,
+    })
+    await store.setBoundaries(ASUKA_DID, [BOUNDARY])
+
+    await store.enroll({
+      did: SHINJI_DID,
+      enrolledAt: '2025-01-02T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeShinjiKey',
+      active: true,
+    })
+    await store.setBoundaries(SHINJI_DID, [BOUNDARY])
+  })
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('defaults limit and cursor when called with no options at all', async () => {
+    const rows = await store.listEnrollmentsByBoundary(BOUNDARY)
+    expect(rows.map((r) => r.did).sort()).toEqual(
+      [ASUKA_DID, SHINJI_DID].sort(),
+    )
+  })
+})
