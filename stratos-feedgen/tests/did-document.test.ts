@@ -141,4 +141,28 @@ describe('loadFeedgenConfig public URL derivation', () => {
     })
     expect(cfg.feedgenPublicUrl).toBe(PUBLIC_URL)
   })
+
+  it('defaults the log level to info and honors FEEDGEN_LOG_LEVEL', () => {
+    expect(loadFeedgenConfig({ ...baseEnv }).logLevel).toBe('info')
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_LOG_LEVEL: 'debug' }).logLevel,
+    ).toBe('debug')
+  })
+
+  it('treats an empty FEEDGEN_LOG_LEVEL as unset', () => {
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_LOG_LEVEL: '' }).logLevel,
+    ).toBe('info')
+  })
+
+  it('parses FEEDGEN_METRICS_TOKEN and treats empty as unset', () => {
+    expect(loadFeedgenConfig({ ...baseEnv }).metricsToken).toBeUndefined()
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_METRICS_TOKEN: '' }).metricsToken,
+    ).toBeUndefined()
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_METRICS_TOKEN: 'himeya-soft' })
+        .metricsToken,
+    ).toBe('himeya-soft')
+  })
 })

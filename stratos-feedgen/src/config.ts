@@ -36,6 +36,10 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
+  /** Pino log level. */
+  logLevel: string
+  /** Bearer token required on `/metrics`. Unset: the endpoint is open. */
+  metricsToken?: string
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
@@ -50,6 +54,8 @@ export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
 ]
 
 export const DEFAULT_PLC_URL = 'https://plc.directory'
+
+export const DEFAULT_LOG_LEVEL = 'info'
 
 export interface FeedgenEnv {
   [key: string]: string | undefined
@@ -106,7 +112,14 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
+    logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
+    metricsToken: nonEmpty(env['FEEDGEN_METRICS_TOKEN']),
   }
+}
+
+/** Treat an empty env var the same as an unset one. */
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === '' ? undefined : value
 }
 
 function parsePositiveInt(
