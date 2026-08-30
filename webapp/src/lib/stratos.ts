@@ -48,8 +48,12 @@ export interface StratosEnrollment {
 
 export interface StratosServiceStatus {
   enrolled: boolean
+  eligible?: boolean
   enrolledAt?: string
   active?: boolean
+  /** The service-held signing key DID. Present only when enrolled. */
+  signingKey?: string
+  enrollmentRkey?: string
 }
 
 /**

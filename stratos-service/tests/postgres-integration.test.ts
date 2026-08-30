@@ -603,6 +603,125 @@ describe('PostgreSQL Backend Integration', () => {
       await enrollmentStore.unenroll(serviceDid)
     })
 
+    it('should default custody to stratos and leave repoHost undefined when omitted', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zReiAyanami1',
+        active: true,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.custody).toBe('stratos')
+      expect(result?.repoHost).toBeUndefined()
+    })
+
+    it('should persist explicit pds custody and repoHost on enroll', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zAsukaLangley1',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.custody).toBe('pds')
+      expect(result?.repoHost).toBe('https://pds.nerv.example.com')
+    })
+
+    it('should overwrite custody and repoHost on re-enroll via onConflictDoUpdate', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMisatoKatsuragi1',
+        active: true,
+        custody: 'stratos',
+      })
+      expect((await enrollmentStore.getEnrollment(testDid))?.custody).toBe(
+        'stratos',
+      )
+
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zMisatoKatsuragi2',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.custody).toBe('pds')
+      expect(result?.repoHost).toBe('https://pds.nerv.example.com')
+    })
+
+    it('should reset custody to stratos and repoHost to undefined when a re-enroll omits them', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zShinjiIkari1',
+        active: true,
+        custody: 'pds',
+        repoHost: 'https://pds.nerv.example.com',
+      })
+
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zShinjiIkari2',
+        active: true,
+      })
+
+      const result = await enrollmentStore.getEnrollment(testDid)
+      expect(result?.custody).toBe('stratos')
+      expect(result?.repoHost).toBeUndefined()
+    })
+
+    it('should update custody independently of repoHost via updateEnrollment', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zKaworuNagisa1',
+        active: true,
+        custody: 'stratos',
+      })
+
+      await enrollmentStore.updateEnrollment(testDid, { custody: 'pds' })
+      const afterCustody = await enrollmentStore.getEnrollment(testDid)
+      expect(afterCustody?.custody).toBe('pds')
+      expect(afterCustody?.repoHost).toBeUndefined()
+
+      await enrollmentStore.updateEnrollment(testDid, {
+        repoHost: 'https://pds.nerv.example.com',
+      })
+      const afterRepoHost = await enrollmentStore.getEnrollment(testDid)
+      expect(afterRepoHost?.custody).toBe('pds')
+      expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
+    })
+
+    it('should keep existing boundaries when enroll is called with an empty boundaries array', async () => {
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zPenPenBebop1',
+        active: true,
+        boundaries: ['leftover'],
+      })
+      expect(await enrollmentStore.getBoundaries(testDid)).toContain('leftover')
+
+      await enrollmentStore.enroll({
+        did: testDid,
+        enrolledAt: new Date().toISOString(),
+        signingKeyDid: 'did:key:zPenPenBebop1',
+        active: true,
+        boundaries: [],
+      })
+
+      expect(await enrollmentStore.getBoundaries(testDid)).toContain('leftover')
+    })
+
     it('should list only service enrollments via listServiceEnrollments', async () => {
       const serviceDid = 'did:web:nerv.example.com'
       await enrollmentStore.enroll({

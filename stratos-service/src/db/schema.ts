@@ -57,6 +57,8 @@ export const enrollment = sqliteTable('enrollment', {
   active: text('active').notNull().default('true'),
   enrollmentRkey: text('enrollmentRkey'),
   isService: integer('isService', { mode: 'boolean' }).notNull().default(false),
+  custody: text('custody').notNull().default('stratos'),
+  repoHost: text('repoHost'),
 })
 
 /**
