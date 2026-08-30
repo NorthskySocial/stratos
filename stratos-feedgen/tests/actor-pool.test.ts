@@ -319,8 +319,8 @@ describe('ActorPool', () => {
   it('removes a settled retired drain from the retiring set', async () => {
     const pool = makePool()
     pool.start()
-    pool.addActor('did:plc:a')
-    pool.removeActor('did:plc:a')
+    pool.addActor('did:plc:jimhawking')
+    pool.removeActor('did:plc:jimhawking')
     // FakeSyncer.drainAndStop resolves immediately; let the cleanup then() run.
     await new Promise((r) => setImmediate(r))
     const retiring = (pool as unknown as { retiring: Set<unknown> }).retiring
@@ -469,7 +469,7 @@ describe('ActorPool', () => {
           indexer,
           syncerFactory: (config) => {
             const syncer = new FakeSyncer(config)
-            if (config.did === 'did:plc:a') {
+            if (config.did === 'did:plc:genestarwind') {
               syncer.drainAndStop = async (): Promise<void> => {
                 await drainGate
                 drained = true
@@ -481,10 +481,10 @@ describe('ActorPool', () => {
         },
       )
       pool.start()
-      pool.addActor('did:plc:a')
-      pool.addActor('did:plc:b') // waits
-      findSyncer('did:plc:a').lastMessageAt = 0 // idle
-      expect(pool.evictIdle()).toEqual(['did:plc:a'])
+      pool.addActor('did:plc:genestarwind')
+      pool.addActor('did:plc:melfinapilot') // waits
+      findSyncer('did:plc:genestarwind').lastMessageAt = 0 // idle
+      expect(pool.evictIdle()).toEqual(['did:plc:genestarwind'])
 
       let stopResolved = false
       const stopping = pool.stop().then(() => {

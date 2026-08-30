@@ -119,14 +119,11 @@ async function main(): Promise<void> {
         configuredBoundaries,
         logger,
         metrics,
+        shutdownDeps,
       })
     : null
-  const serviceStream = subscription?.serviceStream ?? null
-  const actorPool = subscription?.actorPool ?? null
-  subscriptionStatus.serviceStream = serviceStream
-  subscriptionStatus.actorPool = actorPool
-  shutdownDeps.serviceStream = serviceStream
-  shutdownDeps.actorPool = actorPool
+  subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
+  subscriptionStatus.actorPool = subscription?.actorPool ?? null
 }
 
 interface StartSubscriptionDeps {
@@ -138,6 +135,7 @@ interface StartSubscriptionDeps {
   configuredBoundaries: Set<string>
   logger: Logger
   metrics: FeedgenMetrics
+  shutdownDeps: ShutdownDeps
 }
 
 /**
@@ -174,6 +172,8 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       },
     },
   )
+  // Publish before start, so a signal during seeding drains the pool.
+  deps.shutdownDeps.actorPool = pool
   pool.start()
 
   const purger = new Purger({
@@ -290,6 +290,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       logger.error({ err }, 'service stream error')
     },
   )
+  deps.shutdownDeps.serviceStream = serviceStream
   serviceStream.start()
   logger.info({}, 'service enrollment subscription started')
 

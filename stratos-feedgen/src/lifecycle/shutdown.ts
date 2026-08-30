@@ -12,7 +12,9 @@ export interface ShutdownDeps {
   exit?: (code: number) => void
 }
 
-export type ShutdownHandler = (signal: string) => Promise<void>
+export interface ShutdownHandler {
+  (signal: string): Promise<void>
+}
 
 const DEFAULT_DRAIN_TIMEOUT_MS = 15_000
 
