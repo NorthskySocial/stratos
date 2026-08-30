@@ -55,3 +55,8 @@ export type {
   SpaceSyncRunnerDeps,
   SpaceSyncRunResult,
 } from './sync-runner.js'
+export { SpaceSyncScheduler } from './scheduler.js'
+export type {
+  SpaceSyncPassLogEvent,
+  SpaceSyncSchedulerDeps,
+} from './scheduler.js'
