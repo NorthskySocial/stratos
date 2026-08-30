@@ -117,4 +117,91 @@ describe('ReservedDomainEnrollmentStore', () => {
     // The raw store is untouched (read-side union, not a write-back).
     expect((await raw.getBoundaries(DID)).sort()).toEqual([ENG])
   })
+
+  it('listEnrollmentsByBoundary passes through unchanged for a non-reserved boundary', async () => {
+    const shinji = 'did:plc:shinji'
+    await store.enroll({
+      did: DID,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+    await store.enroll({
+      did: shinji,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [OPS],
+    })
+
+    const members = await store.listEnrollmentsByBoundary(ENG)
+    expect(members.map((m) => m.did)).toEqual([DID])
+  })
+
+  it('listEnrollmentsByBoundary for the reserved domain enumerates every active enrollment, including a pre-decorator row never backfilled with it', async () => {
+    // Written through the raw store, so its persisted `enrollment_boundary`
+    // rows never got the reserved domain -- the same pre-decorator gap
+    // `getBoundaries` unions over.
+    const raw = new SqliteEnrollmentStore(db)
+    await raw.enroll({
+      did: DID,
+      enrolledAt: new Date().toISOString(),
+      active: true,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+
+    const inactive = 'did:plc:kaworu'
+    await raw.enroll({
+      did: inactive,
+      enrolledAt: new Date().toISOString(),
+      active: false,
+      signingKeyDid: 'did:key:z6Mk',
+      boundaries: [ENG],
+    })
+
+    const members = await store.listEnrollmentsByBoundary(RESERVED)
+    const dids = members.map((m) => m.did)
+    expect(dids).toContain(DID)
+    expect(dids).not.toContain(inactive)
+  })
+
+  it('pages the reserved domain past deactivated members without dropping any active one', async () => {
+    // A deactivated row anywhere in the key range must not shorten a page:
+    // if `active` were filtered after `LIMIT`, a page containing one would
+    // come back short, and the handler reads a short page as the last page.
+    const members = [
+      'did:plc:shinji',
+      'did:plc:asuka',
+      'did:plc:rei',
+      'did:plc:misato',
+      'did:plc:spike',
+      'did:plc:faye',
+    ].sort()
+    const deactivated = new Set([members[1], members[3]])
+
+    for (const did of members) {
+      await store.enroll({
+        did,
+        enrolledAt: new Date().toISOString(),
+        active: !deactivated.has(did),
+        signingKeyDid: 'did:key:z6Mk',
+      })
+    }
+
+    const seen: string[] = []
+    let cursor: string | undefined
+    do {
+      const page = await store.listEnrollmentsByBoundary(RESERVED, {
+        limit: 2,
+        cursor,
+      })
+      seen.push(...page.map((m) => m.did))
+      cursor = page.length === 2 ? page[page.length - 1].did : undefined
+    } while (cursor)
+
+    const activeMembers = members.filter((did) => !deactivated.has(did))
+    expect(seen.sort()).toEqual(activeMembers)
+  })
 })

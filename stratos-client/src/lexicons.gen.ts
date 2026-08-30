@@ -1366,6 +1366,94 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.space.listRepos",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List the known repos that hold data in a space (the writer set), with each repo's current rev and resolved repo host. Spec-shaped mirror of com.atproto.space.listRepos (atproto#5187), extended with the `host` and `hostSource` fields upstream has no answer for: an authority-recorded override, or else the member's DID-document #atproto_pds endpoint. This is a membership oracle, not a member-facing read: callable with inter-service auth (a syncing service, admitted by its own enrolled boundaries) or with a space credential for that space, never with a plain user session.",
+      "parameters": {
+        "type": "params",
+        "required": ["space"],
+        "properties": {
+          "space": {
+            "type": "string",
+            "description": "The space's at:// URI (at://{did}/space/{type}/{skey}). Mirrors the upstream space-ref string format (atproto#5187); declared as a plain string until @atproto/lexicon supports that format. Its space DID must equal this service's DID."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "Maximum number of repos to return."
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["repos"],
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "repos": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#repo"
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "UnknownSpace",
+          "description": "The requested space URI is malformed or its space DID does not match this service's DID."
+        },
+        {
+          "name": "AuthRequired",
+          "description": "The caller is not admitted to the requested space (not a member, or the presented credential targets a different space)."
+        }
+      ]
+    },
+    "repo": {
+      "type": "object",
+      "required": ["did"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID of a repo that holds data in the space."
+        },
+        "rev": {
+          "type": "string",
+          "description": "The repo's current revision (TID). Present only for a stratos-custody member, whose repo Stratos itself stores; absent for a pds-custody member, whose repo lives on their own PDS.",
+          "format": "tid"
+        },
+        "hash": {
+          "type": "bytes",
+          "description": "Unpopulated by this service: Stratos stores an MST repo, not an LtHash repo, so it never computes the sha256-of-LtHash-state value this field describes upstream. Reserved for a repo host that does."
+        },
+        "host": {
+          "type": "string",
+          "description": "The Stratos convention's resolved repo host for this member, if resolvable. Absent when neither an override nor a DID-document PDS endpoint could be found."
+        },
+        "hostSource": {
+          "type": "string",
+          "knownValues": ["authority-override", "did-document"],
+          "description": "Which arm of the Stratos host-discovery convention produced `host`. Absent along with `host` when the member is unresolvable."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.sync.getBlob",
   "defs": {
     "main": {

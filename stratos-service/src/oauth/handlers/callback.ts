@@ -3,6 +3,7 @@ import type { NodeOAuthClient } from '@atproto/oauth-client-node'
 import type { IdResolver } from '@atproto/identity'
 import {
   classifyCustody,
+  reconcileCustody,
   type Custody,
   type EnrollmentValidationResult,
   type Logger,
@@ -85,6 +86,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
           autoEnrollDomains,
           defaultBoundaries,
           spacesCapability,
+          pdsEndpoint: enrollmentResult.pdsEndpoint,
+          idResolver,
           logger,
         })
       } else {
@@ -154,6 +157,12 @@ async function handleExistingEnrollment(deps: {
   autoEnrollDomains: string[] | undefined
   defaultBoundaries: string[]
   spacesCapability: SpacesCapability | undefined
+  /**
+   * Resolved this request, not the stored value. Absent in open mode, where
+   * eligibility returns before the DID document is resolved.
+   */
+  pdsEndpoint: string | undefined
+  idResolver: IdResolver
   logger: Logger | undefined
 }) {
   const {
@@ -165,13 +174,12 @@ async function handleExistingEnrollment(deps: {
     profileRecordWriter,
     createAttestation,
     spacesCapability,
+    idResolver,
     logger,
   } = deps
 
   // A re-auth can change the verdict, because the user may grant or withhold
-  // the space scope each time. Nothing reconciles the stored custody class
-  // yet, so a user who revokes the space grant keeps 'pds' custody. Tracked
-  // for MM-04.
+  // the space scope each time.
   logger?.info({ did, spacesCapability }, 're-authorised existing enrollment')
 
   // Migrate legacy (self-keyed or TID-keyed) enrollment record to service DID rkey
@@ -188,6 +196,15 @@ async function handleExistingEnrollment(deps: {
   // Ensure PDS record exists (in case user deleted it but stayed enrolled in Stratos)
   const enrollment = await enrollmentStore.getEnrollment(did)
   if (enrollment && enrollment.active) {
+    // Open-mode eligibility returns an allowed result with no PDS endpoint.
+    // Resolve it from the DID document instead of publishing `undefined`: a
+    // pds-custody re-auth would publish `repoHost: undefined` and clear the
+    // stored route. A failed resolution fails the callback closed, so no
+    // absent endpoint is ever published or stored.
+    const pdsEndpoint =
+      deps.pdsEndpoint ??
+      (await resolveAtprotoIdentity(did, idResolver)).pdsEndpoint
+
     const currentBoundaries = await enrollmentStore.getBoundaries(did)
     const newBoundaries = selectEnrollBoundaries(
       deps.autoEnrollDomains,
@@ -211,8 +228,23 @@ async function handleExistingEnrollment(deps: {
     )
 
     // Rows persisted before MM-03 carry no custody; treat them as 'stratos'
-    // custody so re-auth publishes the same invariant a fresh enrollment would.
-    const custody: Custody = enrollment.custody ?? 'stratos'
+    // custody so re-auth starts from the same invariant a fresh enrollment would.
+    const storedCustody: Custody = enrollment.custody ?? 'stratos'
+    // Re-auth never changes custody. A custody change is a data migration,
+    // not a label change: the repo has to move and the signing key has to
+    // change with it. Neither happens here, and flipping the label alone
+    // would publish an enrollment whose `signingKey` contradicts its
+    // `custody`. Record what we observed, keep the stored class, and let
+    // MM-10 move anyone who has diverged.
+    const custody = storedCustody
+    const wantedCustody = reconcileCustody(storedCustody, spacesCapability)
+    const custodyDiverged = wantedCustody !== storedCustody
+    // 'pds' custody hosts the repo at the user's own PDS. Use the endpoint
+    // resolved this request, not the stored one, so a user who moved PDS
+    // gets their new host published instead of a stale routing target.
+    // 'stratos' custody has no repoHost.
+    const repoHost = custody === 'pds' ? pdsEndpoint : undefined
+    const pdsEndpointChanged = pdsEndpoint !== enrollment.pdsEndpoint
 
     await profileRecordWriter.putEnrollmentRecord(
       did,
@@ -227,9 +259,32 @@ async function handleExistingEnrollment(deps: {
         },
         createdAt: new Date().toISOString(),
         custody,
-        repoHost: enrollment.repoHost,
+        repoHost,
       },
     )
+
+    const verdictChanged = spacesCapability !== enrollment.capabilityVerdict
+    if (verdictChanged || pdsEndpointChanged) {
+      await enrollmentStore.updateEnrollment(did, {
+        ...(verdictChanged ? { capabilityVerdict: spacesCapability } : {}),
+        // `repoHost` is the routing target, so it moves with the endpoint.
+        // Publishing the new host while the store keeps the old one would
+        // point the syncer at a PDS the user has left. Only 'pds' custody
+        // owns a repoHost; the store treats a present key as an explicit
+        // clear, so 'stratos' custody must not send the key at all.
+        ...(pdsEndpointChanged
+          ? custody === 'pds'
+            ? { pdsEndpoint, repoHost }
+            : { pdsEndpoint }
+          : {}),
+      })
+    }
+    if (custodyDiverged) {
+      logger?.warn(
+        { did, storedCustody, wantedCustody, spacesCapability },
+        'custody diverged from the granted scope, migration required',
+      )
+    }
   }
 }
 
@@ -344,6 +399,7 @@ async function handleNewEnrollment(deps: {
     enrollmentRkey,
     custody,
     repoHost,
+    capabilityVerdict: spacesCapability,
   })
 
   logger?.info(

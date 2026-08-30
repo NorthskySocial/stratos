@@ -13,6 +13,10 @@ export interface Enrollment {
   active: boolean
   enrollmentRkey?: string
   isService?: boolean
+  /** Who hosts and signs this enrollment's repo. Absent means 'stratos'. */
+  custody?: Custody
+  /** The repo host endpoint when custody is 'pds'. Undefined for 'stratos' custody. */
+  repoHost?: string
 }
 
 /**

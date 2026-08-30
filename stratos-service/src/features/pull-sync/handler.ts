@@ -1,10 +1,9 @@
 import { Server as XrpcServer } from '@atproto/xrpc-server'
-import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
+import { InvalidRequestError } from '@atproto/xrpc-server'
 import type { AppContext } from '../../context.js'
 import { type XrpcServerInternal } from '../../api/types.js'
-import type { HandlerAuth } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
-import { resolveCredentialScope } from '../../infra/auth/credential-scope.js'
+import { resolveEffectiveBoundaries } from '../../infra/auth/credential-scope.js'
 import {
   listRepoOps,
   type ListRepoOpsParams,
@@ -14,78 +13,6 @@ import { listRecordPaths, type ListRecordPathsParams } from './recovery.js'
 
 const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 1000
-
-/**
- * Resolve the calling service's DID from service-auth credentials.
- * @param auth - Handler auth context
- * @returns The caller service DID
- * @throws AuthRequiredError when the credential is not valid service auth
- */
-function requireServiceCaller(auth: HandlerAuth | undefined): string {
-  const creds = auth?.credentials as
-    | { type?: string; did?: string; iss?: string }
-    | undefined
-  if (creds?.type !== 'service') {
-    throw new AuthRequiredError('Service auth required')
-  }
-  const callerDid = creds.iss ?? creds.did
-  if (!callerDid) {
-    throw new AuthRequiredError('Service auth required')
-  }
-  return callerDid
-}
-
-/**
- * Resolve the caller's enrolled boundaries, failing closed on any error or an
- * empty set. A caller with no enrolled boundaries can observe nothing.
- * @param ctx - Application context
- * @param callerDid - The calling service DID
- * @returns The caller's boundary set
- * @throws AuthRequiredError when the caller is enrolled in no boundary
- */
-async function resolveCallerBoundaries(
-  ctx: AppContext,
-  callerDid: string,
-): Promise<ReadonlySet<string>> {
-  let boundaries: string[]
-  try {
-    boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
-  } catch (err) {
-    // Fail closed: a scope-resolution error must never widen access.
-    ctx.logger?.warn(
-      { callerDid, err },
-      'pull-sync: boundary resolution failed',
-    )
-    throw new AuthRequiredError('Service is not enrolled in any boundary')
-  }
-  if (boundaries.length === 0) {
-    throw new AuthRequiredError('Service is not enrolled in any boundary')
-  }
-  return new Set(boundaries)
-}
-
-/**
- * Resolve the effective boundary set for a pull-sync request, accepting EITHER
- * inter-service auth (existing behaviour, unchanged) OR a space credential.
- * A space credential for space S yields the singleton `{boundary(S)}`
- * so the same fail-closed oplog/recovery gate returns records in S ONLY.
- *
- * @param ctx - Application context
- * @param auth - Handler auth context
- * @returns The caller's boundary set
- * @throws AuthRequiredError when neither auth path resolves a usable scope
- */
-async function resolveEffectiveBoundaries(
-  ctx: AppContext,
-  auth: HandlerAuth | undefined,
-): Promise<ReadonlySet<string>> {
-  const credentialScope = resolveCredentialScope(auth, ctx.serviceDid)
-  if (credentialScope) {
-    return new Set(credentialScope.viewerDomains)
-  }
-  const callerDid = requireServiceCaller(auth)
-  return resolveCallerBoundaries(ctx, callerDid)
-}
 
 /**
  * Clamp a caller-supplied limit into `[1, MAX_LIMIT]`, defaulting when absent.

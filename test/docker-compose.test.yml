@@ -1,4 +1,14 @@
 services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: stratos-test-valkey
+    restart: 'no'
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
   nginx:
     image: nginx:alpine
     container_name: stratos-nginx
@@ -57,6 +67,10 @@ services:
       - .env
     environment:
       STRATOS_PORT: 3100
+      # The space-credential delegation path and client attestation need a
+      # replay store for single-use tokens. Without it they fail closed, and
+      # the feedgen never obtains a credential.
+      STRATOS_VALKEY_URL: redis://valkey:6379
       STRATOS_DATA_DIR: /app/data
       STRATOS_BLOB_STORAGE: local
       STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL:-http://127.0.0.1:3100}
@@ -74,6 +88,8 @@ services:
     depends_on:
       ssl-init:
         condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
     volumes:
       - ./test-data:/app/data
     healthcheck:

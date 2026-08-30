@@ -23,13 +23,17 @@ import {
   reconcileEnrollments,
 } from '../purge/index.js'
 import { createFeedgenServer } from '../server.js'
+import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
   ActorPool,
   intersectsBoundaries,
   ServiceStream,
   SubscriptionIndexer,
 } from '../subscription/index.js'
-import { UpstreamStratosClient } from '../upstream/index.js'
+import {
+  describeUpstreamError,
+  UpstreamStratosClient,
+} from '../upstream/index.js'
 
 async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
@@ -54,6 +58,7 @@ async function main(): Promise<void> {
 
   const upstream = new UpstreamStratosClient({
     serviceUrl: cfg.stratosServiceUrl,
+    publicUrl: cfg.stratosPublicUrl,
     serviceDid: cfg.stratosServiceDid,
     feedgenDid: cfg.feedgenServiceDid,
     keypair,
@@ -73,6 +78,16 @@ async function main(): Promise<void> {
       if (event === 'hit') metrics.boundaryCacheHits.inc()
       else metrics.boundaryCacheMisses.inc()
     },
+  })
+
+  // Held for the syncer this feedgen becomes in MM-06; not yet on the sync
+  // path. Constructing it here so credential acquisition is exercised at
+  // startup rather than the first time something needs it.
+  const spaceCredentialManager = new SpaceCredentialManager({
+    client: upstream,
+    signingKey: keypair,
+    feedgenDid: cfg.feedgenServiceDid,
+    authorityDid: cfg.stratosServiceDid,
   })
 
   const store = await createFeedgenStore(cfg)
@@ -105,6 +120,34 @@ async function main(): Promise<void> {
   const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
   const indexer = new SubscriptionIndexer(store, {
     onPostIndexed: () => metrics.indexPostsTotal.inc(),
+  })
+
+  // Best-effort warm-up: a boundary this feedgen has no membership for yet
+  // (or a mint failure) must not block startup or crash the process. MM-06
+  // will make actual sync depend on a held credential; here we only prove
+  // acquisition works. Emit one completion event, not one line per boundary.
+  // Log the acquired count too. A summary with only failures makes a warm-up
+  // that never ran look the same as one that worked.
+  void Promise.all(
+    [...configuredBoundaries].map(async (boundary) => {
+      try {
+        await spaceCredentialManager.getCredential(boundary)
+        return { boundary }
+      } catch (err: unknown) {
+        return { boundary, reason: describeUpstreamError(err) }
+      }
+    }),
+  ).then((results) => {
+    const failed = results.filter(
+      (r): r is { boundary: string; reason: string } => 'reason' in r,
+    )
+    const summary = `space credential warm-up: attempted=${results.length} acquired=${results.length - failed.length} failed=${failed.length}`
+    if (failed.length === 0) {
+      console.log(summary)
+    } else {
+      const detail = failed.map((f) => `${f.boundary}: ${f.reason}`).join('; ')
+      console.error(`${summary} (${detail})`)
+    }
   })
 
   const subscribeEnrollments =

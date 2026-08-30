@@ -9,11 +9,20 @@ const LXM = {
   hydrateRecords: 'zone.stratos.repo.hydrateRecords',
   getBlob: 'com.atproto.sync.getBlob',
   subscribeRecords: 'zone.stratos.sync.subscribeRecords',
+  getSpaceCredential: 'zone.stratos.space.getSpaceCredential',
 } as const
 
 export interface UpstreamStratosClientOptions {
-  /** Base URL of the upstream Stratos service (no trailing slash). */
+  /** Base URL this client sends requests to (no trailing slash). May be internal-only. */
   serviceUrl: string
+  /**
+   * Base URL Stratos verifies the space-surface DPoP `htu` against
+   * (`STRATOS_PUBLIC_URL` server-side — see `space-dpop.ts`). Defaults to
+   * `serviceUrl`. Set this separately when the feedgen reaches Stratos on an
+   * internal address that differs from Stratos's externally-known origin, or
+   * every space-credential mint fails with `ProofRequired`.
+   */
+  publicUrl?: string
   /** DID of the upstream Stratos service. */
   serviceDid: string
   /** DID of this feed generator (used as JWT issuer). */
@@ -48,21 +57,39 @@ export interface GetBlobResult {
   contentLength?: number
 }
 
+export interface GetSpaceCredentialResult {
+  credential: string
+  expiresAt: string
+}
+
+export interface GetSpaceCredentialOptions {
+  /** The space's `at://` URI to request a credential for. */
+  space: string
+  /** Self-minted `atproto-space-delegation+jwt` establishing the caller's identity. */
+  delegationToken: string
+  /**
+   * Builds the standalone mint-time DPoP proof (no `ath`) for the given
+   * absolute request URL. Key material lives with the caller, not this
+   * client, so proof construction is injected rather than owned here.
+   */
+  buildMintProof: (htu: string) => Promise<string>
+}
+
 /**
  * Typed RPC client for the single upstream Stratos service this feed generator
  * federates with.
  */
 export class UpstreamStratosClient {
   private readonly serviceUrl: string
+  private readonly publicUrl: string
   private readonly serviceDid: string
   private readonly feedgenDid: string
   private readonly keypair: Keypair
   private readonly fetchImpl: typeof fetch
 
   constructor(opts: UpstreamStratosClientOptions) {
-    this.serviceUrl = opts.serviceUrl.endsWith('/')
-      ? opts.serviceUrl.slice(0, -1)
-      : opts.serviceUrl
+    this.serviceUrl = trimTrailingSlash(opts.serviceUrl)
+    this.publicUrl = trimTrailingSlash(opts.publicUrl ?? opts.serviceUrl)
     this.serviceDid = opts.serviceDid
     this.feedgenDid = opts.feedgenDid
     this.keypair = opts.keypair
@@ -136,6 +163,40 @@ export class UpstreamStratosClient {
     return this.mintFor(LXM.subscribeRecords)
   }
 
+  /**
+   * Exchange a self-minted delegation token for a space credential.
+   *
+   * Identity flows through the delegation token, not an `Authorization`
+   * header, so this sends only the mint-time `dpop` proof the endpoint
+   * requires to bind the credential (see
+   * `stratos-service/src/features/space-credential/handler.ts`).
+   */
+  async getSpaceCredential(
+    opts: GetSpaceCredentialOptions,
+  ): Promise<GetSpaceCredentialResult> {
+    const path = `/xrpc/${LXM.getSpaceCredential}`
+    const url = `${this.serviceUrl}${path}`
+    const lxm = LXM.getSpaceCredential
+    // The proof's `htu` must match what Stratos verifies against
+    // (`STRATOS_PUBLIC_URL`), which can differ from `serviceUrl` — the
+    // address this client actually sends the request to.
+    const htu = `${this.publicUrl}${path}`
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        dpop: await opts.buildMintProof(htu),
+      },
+      body: JSON.stringify({
+        space: opts.space,
+        delegationToken: opts.delegationToken,
+      }),
+    })
+    await throwIfNotOk(res, url, lxm)
+    return (await res.json()) as GetSpaceCredentialResult
+  }
+
   private mintFor(lxm: string): Promise<string> {
     return mintServiceJwt({
       lxm,
@@ -144,6 +205,10 @@ export class UpstreamStratosClient {
       keypair: this.keypair,
     })
   }
+}
+
+function trimTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url
 }
 
 async function throwIfNotOk(

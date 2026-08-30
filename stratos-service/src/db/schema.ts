@@ -59,6 +59,7 @@ export const enrollment = sqliteTable('enrollment', {
   isService: integer('isService', { mode: 'boolean' }).notNull().default(false),
   custody: text('custody').notNull().default('stratos'),
   repoHost: text('repoHost'),
+  capabilityVerdict: text('capabilityVerdict'),
 })
 
 /**
@@ -73,6 +74,7 @@ export const enrollmentBoundary = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.did, table.boundary] }),
     index('enrollment_boundary_did_idx').on(table.did),
+    index('enrollment_boundary_boundary_idx').on(table.boundary),
   ],
 )
 

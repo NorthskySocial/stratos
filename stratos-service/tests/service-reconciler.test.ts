@@ -31,6 +31,14 @@ class FakeEnrollmentStore implements EnrollmentStoreWriter {
     return [...this.enrollments.values()].filter((e) => e.isService === true)
   }
 
+  async listEnrollmentsByBoundary(
+    boundary: string,
+  ): Promise<StoredEnrollment[]> {
+    return [...this.enrollments.values()].filter(
+      (e) => e.active && (e.boundaries ?? []).includes(boundary),
+    )
+  }
+
   async enrollmentCount(): Promise<number> {
     return this.enrollments.size
   }

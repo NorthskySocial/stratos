@@ -344,6 +344,11 @@ describe('enrollment isService migration', () => {
     expect(enrollment?.isService).toBe(false)
     expect(enrollment?.enrolledAt).toBe('2024-12-01T00:00:00Z')
     expect(enrollment?.pdsEndpoint).toBe('https://pds.example.com')
+    // A row from before MM-03 has neither column: custody must read back at
+    // its 'stratos' default, and the verdict must read back undefined, not
+    // some other falsy stand-in.
+    expect(enrollment?.custody).toBe('stratos')
+    expect(enrollment?.capabilityVerdict).toBeUndefined()
   })
 })
 
@@ -509,6 +514,106 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(afterRepoHost?.repoHost).toBe('https://pds.nerv.example.com')
   })
 
+  it('round-trips a truthy capabilityVerdict through enroll and getEnrollment', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'capable',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('capable')
+  })
+
+  it('leaves capabilityVerdict undefined when omitted from enroll', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBeUndefined()
+  })
+
+  it('round-trips an unknown capabilityVerdict, distinct from not-capable and absent', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'unknown',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('unknown')
+    expect(enrollment?.capabilityVerdict).not.toBe('not-capable')
+  })
+
+  it('overwrites capabilityVerdict on re-enroll via onConflictDoUpdate', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'capable',
+    })
+
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-06-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiKey',
+      active: true,
+      capabilityVerdict: 'not-capable',
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('not-capable')
+  })
+
+  it('updateEnrollment sets capabilityVerdict without disturbing custody or repoHost', async () => {
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    await store.updateEnrollment(REI_DID, { capabilityVerdict: 'capable' })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.capabilityVerdict).toBe('capable')
+    expect(enrollment?.custody).toBe('pds')
+    expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
+  })
+
+  it('updateEnrollment clears repoHost to undefined when explicitly passed undefined', async () => {
+    // A future custody migration (MM-10) needs to clear repoHost when it
+    // moves a user off 'pds' custody, not just leave it at the old endpoint.
+    await store.enroll({
+      did: REI_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeReiOwnKey',
+      active: true,
+      custody: 'pds',
+      repoHost: 'https://pds.nerv.example.com',
+    })
+
+    await store.updateEnrollment(REI_DID, {
+      custody: 'stratos',
+      repoHost: undefined,
+    })
+
+    const enrollment = await store.getEnrollment(REI_DID)
+    expect(enrollment?.custody).toBe('stratos')
+    expect(enrollment?.repoHost).toBeUndefined()
+  })
+
   it('enroll with an empty boundaries array leaves existing boundary rows in place', async () => {
     await store.setBoundaries(REI_DID, ['leftover'])
     await store.enroll({
@@ -520,5 +625,52 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     })
 
     expect(await store.getBoundaries(REI_DID)).toEqual(['leftover'])
+  })
+})
+
+describe('SqliteEnrollmentStore listEnrollmentsByBoundary', () => {
+  const BOUNDARY = 'did:web:host/eng'
+  const ASUKA_DID = 'did:plc:asukalangley'
+  const SHINJI_DID = 'did:plc:shinjiikari'
+
+  let testDir: string
+  let store: SqliteEnrollmentStore
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `stratos-enrollment-byboundary-${randomBytes(8).toString('hex')}`,
+    )
+    await mkdir(testDir, { recursive: true })
+    const db = createServiceDb(join(testDir, 'service.sqlite'))
+    await migrateServiceDb(db)
+    store = new SqliteEnrollmentStore(db)
+
+    await store.enroll({
+      did: ASUKA_DID,
+      enrolledAt: '2025-01-01T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeAsukaKey',
+      active: true,
+    })
+    await store.setBoundaries(ASUKA_DID, [BOUNDARY])
+
+    await store.enroll({
+      did: SHINJI_DID,
+      enrolledAt: '2025-01-02T00:00:00Z',
+      signingKeyDid: 'did:key:zDnaeShinjiKey',
+      active: true,
+    })
+    await store.setBoundaries(SHINJI_DID, [BOUNDARY])
+  })
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('defaults limit and cursor when called with no options at all', async () => {
+    const rows = await store.listEnrollmentsByBoundary(BOUNDARY)
+    expect(rows.map((r) => r.did).sort()).toEqual(
+      [ASUKA_DID, SHINJI_DID].sort(),
+    )
   })
 })
