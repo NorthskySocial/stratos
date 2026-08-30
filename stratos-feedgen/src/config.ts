@@ -38,6 +38,10 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
+  /** Pino log level. */
+  logLevel: string
+  /** Bearer token required on `/metrics`. Unset: the endpoint is open. */
+  metricsToken?: string
 
   /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
   spaceSyncEnabled: boolean
@@ -71,6 +75,8 @@ export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
 ]
 
 export const DEFAULT_PLC_URL = 'https://plc.directory'
+
+export const DEFAULT_LOG_LEVEL = 'info'
 
 export const DEFAULT_SPACE_SYNC_ENABLED = true
 export const DEFAULT_SPACE_SYNC_INTERVAL_MS = 30_000
@@ -138,6 +144,9 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
+    logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
+    metricsToken: nonEmpty(env['FEEDGEN_METRICS_TOKEN']),
+
     spaceSyncEnabled: parseBoolean(
       env['FEEDGEN_SPACE_SYNC_ENABLED'],
       'FEEDGEN_SPACE_SYNC_ENABLED',
@@ -182,6 +191,11 @@ export function loadFeedgenConfig(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
     ),
   }
+}
+
+/** Treat an empty env var the same as an unset one. */
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === '' ? undefined : value
 }
 
 function parsePositiveInt(

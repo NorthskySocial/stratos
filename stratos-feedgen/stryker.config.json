@@ -20,7 +20,9 @@
     "src/auth/**/*.ts",
     "src/db/**/*.ts",
     "!src/**/index.ts",
-    "!src/**/*.d.ts"
+    "!src/**/*.d.ts",
+    "!src/bin/**/*.ts",
+    "!src/lexicon/schemas.ts"
   ],
   "incremental": true,
   "concurrency": 4,

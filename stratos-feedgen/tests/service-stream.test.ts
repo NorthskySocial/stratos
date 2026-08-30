@@ -1274,4 +1274,40 @@ describe('ServiceStream', () => {
     expect(enrolls).toEqual(['did:plc:milly'])
     stream.stop()
   })
+
+  it('stop() resolves only after the in-flight dispatch settles', async () => {
+    const mint = makeMintToken()
+    const gate = makeGate()
+    const handled: string[] = []
+    const stream = new ServiceStream(
+      { stratosServiceUrl: 'http://stratos.test', mintToken: mint.fn },
+      {
+        onEnroll: async (did) => {
+          await gate.wait()
+          handled.push(did)
+        },
+        onUnenroll: () => {},
+      },
+      undefined,
+      { wsCtor: FakeWebSocket as never, rng: () => 0.5 },
+    )
+
+    stream.start()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    ws.send(encodeEnrollmentFrame({ did: 'did:plc:kaneda', action: 'enroll' }))
+    await vi.waitFor(() => expect(gate.release).not.toBeNull())
+
+    let stopSettled = false
+    const stopped = stream.stop().then(() => {
+      stopSettled = true
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(stopSettled).toBe(false)
+
+    gate.release?.()
+    await stopped
+    expect(handled).toEqual(['did:plc:kaneda'])
+  })
 })
