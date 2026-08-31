@@ -29,6 +29,11 @@ import {
   type OAuthStateStoreBackend,
 } from './oauth'
 import { SqliteEnrollmentStore } from './storage/sqlite/enrollment-store.js'
+import {
+  PgPdsSyncQueueStore,
+  SqlitePdsSyncQueueStore,
+  type PdsSyncQueueStore,
+} from './features/enrollment/internal/pds-sync-store.js'
 import { StratosActorStore } from './storage/sqlite/actor-store.js'
 import type {
   EnrollmentStoreReader,
@@ -51,6 +56,7 @@ export interface StorageContext {
   }
   adminSessionStore: AdminSessionStore
   adminUserStore: AdminUserStore
+  pdsSyncQueue: PdsSyncQueueStore
   checkDbHealth: () => Promise<'ok' | 'error'>
   destroy: () => Promise<void>
 }
@@ -77,6 +83,7 @@ export async function createStorageContext(
   }
   let adminSessionStore: AdminSessionStore
   let adminUserStore: AdminUserStore
+  let pdsSyncQueue: PdsSyncQueueStore
   let actorStore: ActorStore
   let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
@@ -114,6 +121,7 @@ export async function createStorageContext(
     oauthStores = createPgOAuthStores(pgDb)
     adminSessionStore = new PgAdminSessionStore(pgDb, logger)
     adminUserStore = new PgAdminUserStore(pgDb, logger)
+    pdsSyncQueue = new PgPdsSyncQueueStore(pgDb)
     actorStore = new PostgresActorStore({
       connectionString: cfg.storage.postgresUrl,
       blobstore,
@@ -141,6 +149,7 @@ export async function createStorageContext(
     oauthStores = createSqliteOAuthStores(db)
     adminSessionStore = new SqliteAdminSessionStore(db, logger)
     adminUserStore = new SqliteAdminUserStore(db, logger)
+    pdsSyncQueue = new SqlitePdsSyncQueueStore(db)
     actorStore = new StratosActorStore({
       dataDir: path.join(cfg.storage.dataDir, 'actors'),
       blobstore,
@@ -170,6 +179,7 @@ export async function createStorageContext(
     oauthStores,
     adminSessionStore,
     adminUserStore,
+    pdsSyncQueue,
     actorStore,
     checkDbHealth,
     destroy,

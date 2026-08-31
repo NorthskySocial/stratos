@@ -91,9 +91,9 @@ async function run() {
       const resBody = res.body as { boundaries?: string[]; pdsSync?: string }
       const resBoundaries = resBody?.boundaries ?? []
 
-      // The handler returns 200 with pdsSync='failed' when the PDS write
-      // fails. Assert it here so the failure names the API call, not the
-      // later PDS poll timeout.
+      // The handler returns 200 with pdsSync='deferred' when the inline PDS
+      // write fails and the durable worker takes over. Require 'ok' here so
+      // the failure names the API call, not the later PDS poll timeout.
       if (
         res.status !== 200 ||
         !sameSet(resBoundaries, expected) ||

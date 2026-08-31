@@ -590,6 +590,11 @@ describe('resolveEnrollments cache invalidation', () => {
       },
       actorStore: { deleteSigningKey: async () => {} },
       oauthClient: { revoke: async () => {}, restore: async () => {} },
+      pdsSyncWorker: {
+        cancel: async () => {},
+        enqueue: async () => 1,
+        kick: async () => 'ok' as const,
+      },
       enrollmentEvents: new EventEmitter(),
       authVerifier: {
         optionalStandard: async () => ({ credentials: { type: 'none' } }),

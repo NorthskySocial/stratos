@@ -75,6 +75,7 @@ export interface StorageContext {
   }
   adminSessionStore: import('./oauth/admin-session-store.js').AdminSessionStore
   adminUserStore: import('./oauth/admin-user-store.js').AdminUserStore
+  pdsSyncQueue: import('./features/enrollment/internal/pds-sync-store.js').PdsSyncQueueStore
 }
 
 /**
@@ -129,6 +130,11 @@ export interface AppContext
   cfg: StratosServiceConfig
   version: string
   authVerifier: AuthVerifiers
+  /**
+   * Durable PDS enrollment-record sync worker. Admin boundary mutations
+   * enqueue durable intent here before attempting the PDS write inline.
+   */
+  pdsSyncWorker: import('./features/enrollment/pds-sync-worker.js').PdsEnrollmentSyncWorker
   xrpcServer: XrpcServer
   lexiconProvider: LexiconProvider
   app: express.Application
