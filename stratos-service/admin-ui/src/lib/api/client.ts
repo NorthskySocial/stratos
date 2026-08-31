@@ -235,11 +235,6 @@ export function listEnrollments(
   )
 }
 
-/**
- * Resolve the repository host for every space a member holds.
- * @param did - The member to inspect
- * @returns The host resolution rows for the member's spaces
- */
 export function getRepoHost(did: string): Promise<GetRepoHostResponse> {
   return request<GetRepoHostResponse>(
     `/xrpc/zone.stratos.admin.getRepoHost?did=${encodeURIComponent(did)}`,
