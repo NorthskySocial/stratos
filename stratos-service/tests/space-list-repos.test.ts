@@ -13,7 +13,9 @@
  *   - an other-boundary member is excluded;
  *   - `rev` is present only for a stratos-custody member Stratos itself
  *     stores a repo for; a pds-custody member never gets one;
- *   - an unresolvable host omits `host`/`hostSource` without failing the
+ *   - repo-host resolution runs only for pds-custody members; Stratos-custody
+ *     rows omit `host`/`hostSource` without touching DID resolution;
+ *   - an unresolvable PDS host omits `host`/`hostSource` without failing the
  *     whole call;
  *   - malformed / foreign space URIs → UnknownSpace.
  */
@@ -103,6 +105,7 @@ describe('zone.stratos.space.listRepos', () => {
   let handler: ListReposHandler
   let methods: Map<string, { type?: string; handler: unknown }>
   let warnSpy: ReturnType<typeof vi.fn>
+  let resolveDid: ReturnType<typeof vi.fn>
   let ctx: AppContext
   let revFailDids: Set<string>
 
@@ -125,43 +128,44 @@ describe('zone.stratos.space.listRepos', () => {
 
     // Resolves a DID document `#atproto_pds` endpoint for every member except
     // `unresolvableMemberDid`, which has no matching service entry.
+    resolveDid = vi.fn(async (did: string) => {
+      if (did === overrideMemberDid) {
+        throw new Error(
+          'DID resolution must not run once the override arm answers',
+        )
+      }
+      if (did === unresolvableMemberDid) {
+        return { service: [] }
+      }
+      if (did === nullDidDocMemberDid) {
+        return null
+      }
+      if (did === wrongServiceIdMemberDid) {
+        return {
+          service: [{ id: '#other', serviceEndpoint: PDS_ENDPOINT }],
+        }
+      }
+      if (did === nonStringEndpointMemberDid) {
+        return {
+          service: [
+            { id: '#atproto_pds', serviceEndpoint: { not: 'a string' } },
+          ],
+        }
+      }
+      if (did === didQualifiedServiceIdMemberDid) {
+        return {
+          service: [
+            { id: `${did}#atproto_pds`, serviceEndpoint: PDS_ENDPOINT },
+          ],
+        }
+      }
+      return {
+        service: [{ id: '#atproto_pds', serviceEndpoint: PDS_ENDPOINT }],
+      }
+    })
     const idResolver = {
       did: {
-        resolve: async (did: string) => {
-          if (did === overrideMemberDid) {
-            throw new Error(
-              'DID resolution must not run once the override arm answers',
-            )
-          }
-          if (did === unresolvableMemberDid) {
-            return { service: [] }
-          }
-          if (did === nullDidDocMemberDid) {
-            return null
-          }
-          if (did === wrongServiceIdMemberDid) {
-            return {
-              service: [{ id: '#other', serviceEndpoint: PDS_ENDPOINT }],
-            }
-          }
-          if (did === nonStringEndpointMemberDid) {
-            return {
-              service: [
-                { id: '#atproto_pds', serviceEndpoint: { not: 'a string' } },
-              ],
-            }
-          }
-          if (did === didQualifiedServiceIdMemberDid) {
-            return {
-              service: [
-                { id: `${did}#atproto_pds`, serviceEndpoint: PDS_ENDPOINT },
-              ],
-            }
-          }
-          return {
-            service: [{ id: '#atproto_pds', serviceEndpoint: PDS_ENDPOINT }],
-          }
-        },
+        resolve: resolveDid,
       },
     }
 
@@ -250,6 +254,7 @@ describe('zone.stratos.space.listRepos', () => {
       enrolledAt: new Date().toISOString(),
       active: true,
       signingKeyDid: 'did:key:zTest',
+      custody: 'pds',
     })
     await enrollmentStore.setBoundaries(unresolvableMemberDid, [
       BOUNDARY_S.value,
@@ -318,6 +323,7 @@ describe('zone.stratos.space.listRepos', () => {
         enrolledAt: new Date().toISOString(),
         active: true,
         signingKeyDid: 'did:key:zTest',
+        custody: 'pds',
       })
       await enrollmentStore.setBoundaries(did, [BOUNDARY_S.value])
     }
@@ -453,17 +459,26 @@ describe('zone.stratos.space.listRepos', () => {
     ).toBeUndefined()
   })
 
-  it('resolves a repo host from the DID document; an unresolvable member omits host fields without failing the call', async () => {
+  it('resolves PDS hosts while Stratos custody skips DID resolution and host fields', async () => {
     const res = await call({}, serviceAuth)
     const byDid = new Map(
       res.body.repos.map((r: { did: string }) => [r.did, r]),
     )
-    const resolved = byDid.get(stratosMemberDid) as {
+    const pds = byDid.get(pdsMemberDid) as {
       host?: string
       hostSource?: string
     }
-    expect(resolved.host).toBe(PDS_ENDPOINT)
-    expect(resolved.hostSource).toBe('did-document')
+    expect(pds.host).toBe(PDS_ENDPOINT)
+    expect(pds.hostSource).toBe('did-document')
+
+    const stratos = byDid.get(stratosMemberDid) as {
+      host?: string
+      hostSource?: string
+    }
+    expect(stratos.host).toBeUndefined()
+    expect(stratos.hostSource).toBeUndefined()
+    expect(resolveDid).not.toHaveBeenCalledWith(stratosMemberDid)
+    expect(resolveDid).toHaveBeenCalledWith(pdsMemberDid)
 
     const unresolved = byDid.get(unresolvableMemberDid) as {
       host?: string
@@ -471,6 +486,7 @@ describe('zone.stratos.space.listRepos', () => {
     }
     expect(unresolved.host).toBeUndefined()
     expect(unresolved.hostSource).toBeUndefined()
+    expect(resolveDid).toHaveBeenCalledWith(unresolvableMemberDid)
   })
 
   it('omits host fields when DID resolution returns no document', async () => {

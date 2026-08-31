@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { SpaceMemberSnapshot } from '../src/db/index.js'
 import {
   MembershipCursorStalledError,
   MembershipPageLimitError,
   MembershipTracker,
+  SpaceMutationFence,
   type BoundaryPassOutcome,
   type MembershipPassLogEvent,
 } from '../src/space-sync/index.js'
@@ -35,17 +37,48 @@ function fakeCredentialManager() {
 }
 
 function fakePurger() {
-  const counts = {
+  const counts = zeroPurgeCounts()
+  return {
+    purgeSpaceActor: vi.fn(async (_did: string) => counts),
+    purgeSpaceDeparture: vi.fn(
+      async (_did: string, _boundary: string, _spaceUri: string) => counts,
+    ),
+  }
+}
+
+function zeroPurgeCounts() {
+  return {
     posts: 0,
     cursors: 0,
     spaceCursors: 0,
     enrolledActors: 0,
     boundaryCache: 0,
   }
+}
+
+function fakeSnapshotStore() {
+  const snapshots = new Map<string, SpaceMemberSnapshot[]>()
   return {
-    purgeSpaceActor: vi.fn(async () => counts),
-    purgeSpaceDeparture: vi.fn(async () => counts),
+    listSpaceMembers: vi.fn(async (boundary: string) =>
+      (snapshots.get(boundary) ?? []).map((member) => ({ ...member })),
+    ),
+    replaceSpaceMembers: vi.fn(
+      async (boundary: string, members: SpaceMemberSnapshot[]) => {
+        snapshots.set(
+          boundary,
+          members.map((member) => ({ ...member })),
+        )
+      },
+    ),
   }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
 }
 
 function outcomeFor(
@@ -84,12 +117,17 @@ describe('MembershipTracker', () => {
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.polls).toEqual([
-        {
+        expect.objectContaining({
           spaceUri: spaceUriFor(BEBOP_BOUNDARY),
           boundary: BEBOP_BOUNDARY,
           did: SPIKE,
           host: 'https://spike.example',
-        },
+          lease: expect.objectContaining({
+            spaceUri: spaceUriFor(BEBOP_BOUNDARY),
+            did: SPIKE,
+            generation: expect.any(Number),
+          }),
+        }),
       ])
       expect(outcome.skippedNoHost).toBe(0)
     })
@@ -217,6 +255,59 @@ describe('MembershipTracker', () => {
       expect(outcome.removed).toEqual([])
       expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
       expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
+    })
+
+    it('reloads the persisted member snapshot after a tracker restart', async () => {
+      let enrolled = true
+      const client = {
+        listSpaceRepos: vi.fn(
+          async (): Promise<ListSpaceReposResult> => ({
+            repos: enrolled
+              ? [
+                  {
+                    did: SPIKE,
+                    custody: 'pds',
+                    host: 'https://spike.example',
+                  },
+                ]
+              : [],
+          }),
+        ),
+      }
+      const snapshotStore = fakeSnapshotStore()
+      const firstTracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger: fakePurger(),
+        snapshotStore,
+      })
+
+      await firstTracker.runPass([BEBOP_BOUNDARY])
+      expect(await snapshotStore.listSpaceMembers(BEBOP_BOUNDARY)).toEqual([
+        {
+          did: SPIKE,
+          custody: 'pds',
+          host: 'https://spike.example',
+        },
+      ])
+
+      enrolled = false
+      const restartedPurger = fakePurger()
+      const restartedTracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger: restartedPurger,
+        snapshotStore,
+      })
+      const outcomes = await restartedTracker.runPass([BEBOP_BOUNDARY])
+
+      expect(restartedPurger.purgeSpaceActor).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+      )
+      expect(
+        expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY)).removed,
+      ).toEqual([{ did: SPIKE, scope: 'actor' }])
+      expect(await snapshotStore.listSpaceMembers(BEBOP_BOUNDARY)).toEqual([])
     })
   })
 
@@ -473,10 +564,63 @@ describe('MembershipTracker', () => {
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'boundary' }])
     })
+
+    it('requires every configured boundary to be fresh before an actor-wide purge', async () => {
+      const bebopSpace = spaceUriFor(BEBOP_BOUNDARY)
+      const nervSpace = spaceUriFor(NERV_BOUNDARY)
+      let pass = 1
+      const client = {
+        listSpaceRepos: vi.fn(
+          async (
+            opts: ListSpaceReposOptions,
+          ): Promise<ListSpaceReposResult> => {
+            if (pass === 1) {
+              return opts.space === bebopSpace
+                ? {
+                    repos: [
+                      {
+                        did: SPIKE,
+                        custody: 'pds',
+                        host: 'https://spike.example',
+                      },
+                    ],
+                  }
+                : { repos: [] }
+            }
+            if (opts.space === nervSpace) {
+              throw new Error('nerv membership unavailable')
+            }
+            return { repos: [] }
+          },
+        ),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        onError: vi.fn(),
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+      pass = 2
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        bebopSpace,
+      )
+      expect(outcomeFor(outcomes, NERV_BOUNDARY).ok).toBe(false)
+      expect(
+        expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY)).removed,
+      ).toEqual([{ did: SPIKE, scope: 'boundary' }])
+    })
   })
 
   describe('presence without a poll target', () => {
-    it('does not purge a member who stays enrolled but turns hostless', async () => {
+    it('retains prior state without purging on a transient PDS host miss', async () => {
       let calls = 0
       const client = {
         listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
@@ -495,10 +639,12 @@ describe('MembershipTracker', () => {
         }),
       }
       const purger = fakePurger()
+      const snapshotStore = fakeSnapshotStore()
       const tracker = new MembershipTracker({
         client,
         credentialManager: fakeCredentialManager(),
         purger,
+        snapshotStore,
       })
 
       await tracker.runPass([BEBOP_BOUNDARY])
@@ -510,6 +656,81 @@ describe('MembershipTracker', () => {
       expect(outcome.polls).toEqual([])
       expect(outcome.skippedNoHost).toBe(1)
       expect(outcome.removed).toEqual([])
+      expect(await snapshotStore.listSpaceMembers(BEBOP_BOUNDARY)).toEqual([
+        {
+          did: SPIKE,
+          custody: 'pds',
+          host: 'https://spike.example',
+        },
+      ])
+    })
+
+    it('purges a valid PDS host move before a later fresh pass cold-authorizes the new host', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          return {
+            repos: [
+              {
+                did: SPIKE,
+                custody: 'pds',
+                host:
+                  calls === 1
+                    ? 'https://old-spike.example'
+                    : 'https://new-spike.example',
+              },
+            ],
+          }
+        }),
+      }
+      const mutationFence = new SpaceMutationFence()
+      const purger = fakePurger()
+      purger.purgeSpaceDeparture.mockImplementation(
+        async (did, boundary, spaceUri) =>
+          mutationFence.revokeSpace(did, boundary, spaceUri, async () =>
+            zeroPurgeCounts(),
+          ),
+      )
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        mutationFence,
+      })
+
+      const first = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      const firstGeneration = first.polls[0]?.lease?.generation
+      expect(firstGeneration).toEqual(expect.any(Number))
+
+      const changed = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        spaceUriFor(BEBOP_BOUNDARY),
+      )
+      expect(changed.polls).toEqual([])
+
+      const fresh = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      expect(fresh.polls).toEqual([
+        expect.objectContaining({
+          did: SPIKE,
+          host: 'https://new-spike.example',
+          lease: expect.objectContaining({
+            generation: expect.any(Number),
+          }),
+        }),
+      ])
+      expect(fresh.polls[0]!.lease!.generation).toBeGreaterThan(
+        firstGeneration!,
+      )
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledTimes(1)
     })
 
     it('purges a hostless member once a later complete pass confirms departure', async () => {
@@ -551,7 +772,7 @@ describe('MembershipTracker', () => {
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
 
-    it('does not purge a member whose custody flips away from pds', async () => {
+    it('purges the old PDS space before accepting a Stratos custody transition', async () => {
       let calls = 0
       const client = {
         listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
@@ -571,30 +792,38 @@ describe('MembershipTracker', () => {
                   {
                     did: SPIKE,
                     custody: 'stratos',
-                    host: 'https://spike.example',
                   },
                 ],
               }
         }),
       }
       const purger = fakePurger()
+      const snapshotStore = fakeSnapshotStore()
       const tracker = new MembershipTracker({
         client,
         credentialManager: fakeCredentialManager(),
         purger,
+        snapshotStore,
       })
 
       await tracker.runPass([BEBOP_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
       expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
-      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        spaceUriFor(BEBOP_BOUNDARY),
+      )
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.polls).toEqual([])
       expect(outcome.removed).toEqual([])
+      expect(await snapshotStore.listSpaceMembers(BEBOP_BOUNDARY)).toEqual([
+        { did: SPIKE, custody: 'stratos' },
+      ])
     })
 
-    it('purges a custody-changed member once a later complete pass confirms departure', async () => {
+    it('actor-purges after a prior custody transition is later confirmed departed', async () => {
       let calls = 0
       const client = {
         listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
@@ -616,7 +845,6 @@ describe('MembershipTracker', () => {
                 {
                   did: SPIKE,
                   custody: 'stratos',
-                  host: 'https://spike.example',
                 },
               ],
             }
@@ -636,7 +864,11 @@ describe('MembershipTracker', () => {
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
       expect(purger.purgeSpaceActor).toHaveBeenCalledWith(SPIKE)
-      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        spaceUriFor(BEBOP_BOUNDARY),
+      )
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
@@ -769,6 +1001,66 @@ describe('MembershipTracker', () => {
       expect(secondOutcome.polls).toEqual(firstOutcome.polls)
       expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
       expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('authorization revocation', () => {
+    it('does not reauthorize an enumeration that began before revocation', async () => {
+      const enumerationStarted = deferred()
+      const releaseEnumeration = deferred()
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          if (calls === 1) {
+            enumerationStarted.resolve()
+            await releaseEnumeration.promise
+          }
+          return {
+            repos: [
+              {
+                did: SPIKE,
+                custody: 'pds',
+                host: 'https://spike.example',
+              },
+            ],
+          }
+        }),
+      }
+      const mutationFence = new SpaceMutationFence()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger: fakePurger(),
+        mutationFence,
+      })
+
+      const stalePass = tracker.runPass([BEBOP_BOUNDARY])
+      await enumerationStarted.promise
+      await mutationFence.revokeSpace(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        spaceUriFor(BEBOP_BOUNDARY),
+        async () => {},
+      )
+      releaseEnumeration.resolve()
+
+      const stale = expectSuccess(outcomeFor(await stalePass, BEBOP_BOUNDARY))
+      expect(stale.polls).toEqual([])
+
+      const fresh = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      expect(fresh.polls).toEqual([
+        expect.objectContaining({
+          did: SPIKE,
+          host: 'https://spike.example',
+          lease: expect.objectContaining({
+            did: SPIKE,
+            spaceUri: spaceUriFor(BEBOP_BOUNDARY),
+          }),
+        }),
+      ])
     })
   })
 
