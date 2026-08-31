@@ -9,11 +9,6 @@ const MAX_LOG_LINES = 500
 export const FEEDGEN_DID = 'did:web:feedgen.test'
 export const FEEDGEN_SIGNING_KEY =
   '097ce261481a889a756db476dceb6cc57596541c264675e9712c7252cfd1183c'
-export const SPACE_COMMIT_TAMPER_MODULE = new URL(
-  './tamper-space-commit.mjs',
-  import.meta.url,
-).href
-
 export interface FeedDefinition {
   id: string
   boundary: string
@@ -184,10 +179,6 @@ export class FeedgenHarness {
         .map((event) => event.line)
         .join('\n')}`,
     )
-  }
-
-  countLogs(predicate: (event: FeedgenLogEvent) => boolean): number {
-    return this.logs.filter(predicate).length
   }
 
   recentLogLines(limit = 20): string[] {

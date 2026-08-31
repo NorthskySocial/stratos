@@ -22,7 +22,11 @@ import {
   submitSignInAndConsent,
 } from './lib/oauth-flow.ts'
 import { loadState, type TestState, type UserState } from './lib/state.ts'
-import { listPdsRecords, tryGetRecord } from './lib/stratos.ts'
+import {
+  isRecordNotFound,
+  listPdsRecords,
+  tryGetRecord,
+} from './lib/stratos.ts'
 
 const WEBAPP_URL = 'http://127.0.0.1:5173'
 const PDS_WEBAPP_URL = 'http://127.0.0.1:5174'
@@ -257,9 +261,11 @@ async function assertPdsResidency(
     member.did,
   )
   assert(
-    !stratosRead.ok,
-    'The browser PDS-custody post is absent from Stratos storage',
-    stratosRead.ok ? 'unexpected record' : `status=${stratosRead.status}`,
+    isRecordNotFound(stratosRead),
+    'The browser PDS-custody post is absent from Stratos storage with RecordNotFound',
+    stratosRead.ok
+      ? 'unexpected record'
+      : `status=${stratosRead.status} body=${stratosRead.error}`,
   )
 }
 

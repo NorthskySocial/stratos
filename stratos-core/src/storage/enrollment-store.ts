@@ -51,7 +51,6 @@ export interface EnrollmentStoreReader {
     options?: ListEnrollmentsOptions,
   ) => Promise<StoredEnrollment[]>
 
-  /** List only active enrollments */
   listActiveEnrollments: (
     options?: ListEnrollmentsOptions,
   ) => Promise<StoredEnrollment[]>
