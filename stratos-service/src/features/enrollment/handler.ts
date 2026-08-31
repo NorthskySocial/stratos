@@ -14,6 +14,7 @@ import { createXrpcHandler } from '../../api/util.js'
 import { serviceDIDToRkey, SPACE_TYPE } from '../../oauth'
 import { createRepoHostResolverDeps } from '../space-read/host-resolution.js'
 import { verifyEnrolled } from './internal/auth.js'
+import type { PdsSyncPageKey } from './internal/pds-sync-store.js'
 
 const RESOLVE_CACHE_TTL_MS = 60 * 1000
 const RESOLVE_CACHE_MAX_ENTRIES = 10_000
@@ -97,6 +98,8 @@ export function registerEnrollmentHandlers(
   registerListEnrollmentsHandler(ctx)
   registerGetRepoHostHandler(ctx)
   registerListDomainsHandler(ctx)
+  registerListPdsSyncStatusHandler(ctx)
+  registerRequeuePdsSyncHandler(ctx)
 }
 
 /**
@@ -240,7 +243,13 @@ function registerEnrollmentUnenroll(
     auth: authVerifier.standard,
     handler: createXrpcHandler(ctx, 'zone.stratos.enrollment.unenroll', {
       handler: async ({ did }) => {
-        // 1. Delete enrollment record from user's PDS (best-effort)
+        // 1. Cancel any queued sync and wait for an attempt already in flight.
+        // A write still running would otherwise land after step 2 and put the
+        // enrollment record back on the user's PDS, where nothing could reach
+        // it again once OAuth is revoked.
+        await ctx.pdsSyncWorker.cancel(did!)
+
+        // 2. Delete enrollment record from user's PDS (best-effort)
         try {
           const enrollment = await ctx.enrollmentStore.getEnrollment(did!)
           if (enrollment?.enrollmentRkey) {
@@ -256,11 +265,11 @@ function registerEnrollmentUnenroll(
           )
         }
 
-        // 2. Perform hard delete: local enrollment record and actor data
+        // 3. Perform hard delete: local enrollment record and actor data
         await ctx.enrollmentService.unenroll(did!)
         resolveCache.invalidate(did!)
 
-        // 3. Delete signing key (if it exists)
+        // 4. Delete signing key (if it exists)
         try {
           await ctx.actorStore.deleteSigningKey(did!)
         } catch (err) {
@@ -270,7 +279,7 @@ function registerEnrollmentUnenroll(
           )
         }
 
-        // 4. Revoke OAuth sessions
+        // 5. Revoke OAuth sessions
         try {
           await ctx.oauthClient.revoke(did!)
         } catch (err) {
@@ -676,6 +685,8 @@ function registerAddBoundaryHandler(
           })
         }
 
+        const generation = await enqueuePdsSync(ctx, did)
+
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.addBoundary(did, boundary)
         resolveCache.invalidate(did)
@@ -683,16 +694,7 @@ function registerAddBoundaryHandler(
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
-        let pdsSync: 'ok' | 'failed' = 'ok'
-        try {
-          await updatePdsEnrollmentRecord(ctx, did, boundaries)
-        } catch (err) {
-          pdsSync = 'failed'
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to update PDS enrollment record after addBoundary',
-          )
-        }
+        const pdsSync = await runPdsSync(ctx, did, generation)
 
         ctx.logger?.info(
           { adminDid, targetDid: did, boundary, pdsSync },
@@ -757,6 +759,8 @@ function registerRemoveBoundaryHandler(
           })
         }
 
+        const generation = await enqueuePdsSync(ctx, did)
+
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.removeBoundary(did, boundary)
         resolveCache.invalidate(did)
@@ -764,16 +768,7 @@ function registerRemoveBoundaryHandler(
 
         emitBoundaryChangeEvent(ctx, did, boundaries, priorBoundaries)
 
-        let pdsSync: 'ok' | 'failed' = 'ok'
-        try {
-          await updatePdsEnrollmentRecord(ctx, did, boundaries)
-        } catch (err) {
-          pdsSync = 'failed'
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to update PDS enrollment record after removeBoundary',
-          )
-        }
+        const pdsSync = await runPdsSync(ctx, did, generation)
 
         ctx.logger?.info(
           { adminDid, targetDid: did, boundary, pdsSync },
@@ -846,6 +841,8 @@ function registerSetBoundariesHandler(
           })
         }
 
+        const generation = await enqueuePdsSync(ctx, did)
+
         const priorBoundaries = await ctx.enrollmentStore.getBoundaries(did)
         await ctx.enrollmentStore.setBoundaries(did, boundaries)
         resolveCache.invalidate(did)
@@ -859,16 +856,7 @@ function registerSetBoundariesHandler(
 
         emitBoundaryChangeEvent(ctx, did, effectiveBoundaries, priorBoundaries)
 
-        let pdsSync: 'ok' | 'failed' = 'ok'
-        try {
-          await updatePdsEnrollmentRecord(ctx, did, effectiveBoundaries)
-        } catch (err) {
-          pdsSync = 'failed'
-          ctx.logger?.warn(
-            { err: err instanceof Error ? err.message : String(err), did },
-            'failed to update PDS enrollment record after setBoundaries',
-          )
-        }
+        const pdsSync = await runPdsSync(ctx, did, generation)
 
         ctx.logger?.info(
           {
@@ -1305,6 +1293,128 @@ function registerListDomainsHandler(ctx: AppContext): void {
   )
 }
 
+const PDS_SYNC_STATUS_DEFAULT_LIMIT = 50
+const PDS_SYNC_STATUS_MAX_LIMIT = 100
+
+/** Encode a page key as an opaque cursor. The separator is in neither part. */
+function encodePdsSyncCursor(key: PdsSyncPageKey): string {
+  return Buffer.from(`${key.firstQueuedAt}|${key.did}`).toString('base64url')
+}
+
+function decodePdsSyncCursor(cursor: string): PdsSyncPageKey | undefined {
+  const decoded = Buffer.from(cursor, 'base64url').toString()
+  const separator = decoded.indexOf('|')
+  if (separator < 1 || separator === decoded.length - 1) return undefined
+  return {
+    firstQueuedAt: decoded.slice(0, separator),
+    did: decoded.slice(separator + 1),
+  }
+}
+
+/**
+ * Register handler for listing PDS enrollment-record sync jobs.
+ *
+ * Surfaces the durable sync queue so an operator can see which actors' PDS
+ * records are still behind (`pending`) or need intervention (`failed`).
+ * Paginated so a fleet-wide failure cannot make one read load the whole
+ * backlog.
+ */
+function registerListPdsSyncStatusHandler(ctx: AppContext): void {
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res })
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      const rawLimit = Number(req.query.limit ?? PDS_SYNC_STATUS_DEFAULT_LIMIT)
+      if (
+        !Number.isInteger(rawLimit) ||
+        rawLimit < 1 ||
+        rawLimit > PDS_SYNC_STATUS_MAX_LIMIT
+      ) {
+        return res.status(400).json({
+          error: 'InvalidRequest',
+          message: `limit must be an integer between 1 and ${PDS_SYNC_STATUS_MAX_LIMIT}`,
+        })
+      }
+
+      let after: PdsSyncPageKey | undefined
+      if (typeof req.query.cursor === 'string') {
+        after = decodePdsSyncCursor(req.query.cursor)
+        if (!after) {
+          return res
+            .status(400)
+            .json({ error: 'InvalidRequest', message: 'malformed cursor' })
+        }
+      }
+
+      try {
+        // Fetch one extra row so an exactly-full final page emits no cursor.
+        const rows = await ctx.pdsSyncQueue.list(rawLimit + 1, after)
+        const hasMore = rows.length > rawLimit
+        const jobs = hasMore ? rows.slice(0, rawLimit) : rows
+        const last = jobs.at(-1)
+        const cursor = hasMore && last ? encodePdsSyncCursor(last) : undefined
+        res.json(cursor ? { jobs, cursor } : { jobs })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.listPdsSyncStatus failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to list PDS sync status',
+        })
+      }
+    },
+  )
+}
+
+/**
+ * Register handler for reviving terminally failed PDS sync jobs.
+ *
+ * A fault that every attempt sees alike — a JWKS rotation, clock skew — marks
+ * every job `'failed'` at once. Without this an operator would have to redo
+ * one admin mutation per affected actor to recover.
+ * @param ctx - Application context
+ */
+function registerRequeuePdsSyncHandler(ctx: AppContext): void {
+  ctx.app.post(
+    '/xrpc/zone.stratos.admin.requeuePdsSync',
+    async (req: Request, res: Response) => {
+      let adminDid: string
+      try {
+        const auth = await ctx.authVerifier.admin({ req, res })
+        adminDid = auth.credentials.did
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      try {
+        const requeued = await ctx.pdsSyncQueue.requeueFailed()
+        ctx.logger?.info({ adminDid, requeued }, 'admin requeued PDS sync jobs')
+        res.json({ requeued })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'admin.requeuePdsSync failed',
+        )
+        res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to requeue PDS sync jobs',
+        })
+      }
+    },
+  )
+}
+
 /**
  * Emit a service-stream `boundaries` change event.
  *
@@ -1354,46 +1464,45 @@ function boundarySetsEqual(a: string[], b: string[]): boolean {
 }
 
 /**
- * Update the PDS enrollment record with new boundaries
+ * Record durable sync intent BEFORE the local boundary commit. A crash in
+ * between then leaves a queued job rather than silence, and replaying it is
+ * harmless because the job re-derives boundaries when it runs.
+ *
+ * This runs before anything commits, so letting a queue-write failure reject
+ * the request is honest: the caller gets an error and nothing changed.
+ *
  * @param ctx - Application context
  * @param did - DID of the enrollment
- * @param boundaries - New boundaries to set
+ * @returns The generation to pass to {@link runPdsSync}
  */
-async function updatePdsEnrollmentRecord(
+async function enqueuePdsSync(ctx: AppContext, did: string): Promise<number> {
+  return ctx.pdsSyncWorker.enqueue(did)
+}
+
+/**
+ * Run the inline sync attempt for a mutation that has already committed.
+ *
+ * @param ctx - Application context
+ * @param did - DID of the enrollment
+ * @param generation - Generation returned by {@link enqueuePdsSync}
+ * @returns 'ok' when the PDS record is current, 'deferred' when the worker
+ * will retry in the background
+ */
+async function runPdsSync(
   ctx: AppContext,
   did: string,
-  boundaries: string[],
-): Promise<void> {
-  const enrollment = await ctx.enrollmentStore.getEnrollment(did)
-  if (!enrollment?.signingKeyDid) return
-
-  const attestation = await ctx.createAttestation(
-    did,
-    boundaries,
-    enrollment.signingKeyDid,
-  )
-
-  const rkey = serviceDIDToRkey(ctx.serviceDid)
-  const oauthSession = await ctx.oauthClient.restore(did)
-  const agent = new Agent(oauthSession)
-
-  await agent.com.atproto.repo.putRecord({
-    repo: did,
-    collection: 'zone.stratos.actor.enrollment',
-    rkey,
-    record: {
-      service: ctx.cfg.service.publicUrl,
-      boundaries: boundaries.map((value) => ({ value })),
-      signingKey: enrollment.signingKeyDid,
-      attestation: {
-        sig: attestation.sig,
-        signingKey: attestation.signingKey,
-      },
-      createdAt: new Date().toISOString(),
-      custody: enrollment.custody ?? 'stratos',
-      ...(enrollment.custody === 'pds' && enrollment.repoHost
-        ? { repoHost: enrollment.repoHost }
-        : {}),
-    },
-  })
+  generation: number,
+): Promise<'ok' | 'deferred'> {
+  try {
+    return await ctx.pdsSyncWorker.kick(did, generation)
+  } catch (err) {
+    // The boundary change already committed and the event already fired. A
+    // queue-write failure must not turn that into a 500; the job is durable
+    // and the ticker still owns it.
+    ctx.logger?.warn(
+      { err: err instanceof Error ? err.message : String(err), did },
+      'pds sync attempt failed inline; job remains queued',
+    )
+    return 'deferred'
+  }
 }

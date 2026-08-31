@@ -78,6 +78,31 @@ export const enrollmentBoundary = sqliteTable(
   ],
 )
 
+/**
+ * Durable PDS enrollment-record sync queue. One row per actor: the job carries
+ * no boundary payload, so superseding admin mutations collapse into one row
+ * whose eventual execution writes the current truth.
+ */
+export const enrollmentPdsSync = sqliteTable(
+  'enrollment_pds_sync',
+  {
+    did: text('did').primaryKey(),
+    status: text('status').notNull(),
+    attemptCount: integer('attemptCount').notNull().default(0),
+    nextAttemptAt: text('nextAttemptAt').notNull(),
+    firstQueuedAt: text('firstQueuedAt').notNull(),
+    updatedAt: text('updatedAt').notNull(),
+    lastError: text('lastError'),
+    // Bumped on every fresh intent. An attempt carries the generation it read
+    // and only clears the row while that generation is still current, so a
+    // mutation that supersedes an in-flight attempt keeps its job.
+    generation: integer('generation').notNull().default(0),
+  },
+  (table) => [
+    index('enrollment_pds_sync_due_idx').on(table.status, table.nextAttemptAt),
+  ],
+)
+
 export type OAuthSession = typeof oauthSession.$inferSelect
 export type NewOAuthSession = typeof oauthSession.$inferInsert
 export type OAuthState = typeof oauthState.$inferSelect
@@ -88,3 +113,5 @@ export type Enrollment = typeof enrollment.$inferSelect
 export type NewEnrollment = typeof enrollment.$inferInsert
 export type EnrollmentBoundary = typeof enrollmentBoundary.$inferSelect
 export type NewEnrollmentBoundary = typeof enrollmentBoundary.$inferInsert
+export type EnrollmentPdsSync = typeof enrollmentPdsSync.$inferSelect
+export type NewEnrollmentPdsSync = typeof enrollmentPdsSync.$inferInsert

@@ -4,14 +4,21 @@ import express from 'express'
 import type { AppContext } from '../src'
 import type { EnrollmentEventEmitter } from '../src/context-types.js'
 import type { EnrollmentStore } from '../src/oauth'
-import { registerEnrollmentHandlers } from '../src/features'
+import {
+  PdsEnrollmentSyncWorker,
+  registerEnrollmentHandlers,
+  syncEnrollmentRecordToPds,
+  type PdsSyncJob,
+  type PdsSyncPageKey,
+  type PdsSyncQueueStore,
+} from '../src/features'
 
 const { putRecord } = vi.hoisted(() => ({
   putRecord: vi.fn(async () => ({})),
 }))
 
 // The boundary handlers write the user's PDS enrollment record through an
-// `Agent` constructed inside `updatePdsEnrollmentRecord`. Stub it so the PDS
+// `Agent` constructed inside `syncEnrollmentRecordToPds`. Stub it so the PDS
 // write is deterministic: by default it succeeds (pdsSync: 'ok'); a failure is
 // injected per-test by making `oauthClient.restore` throw before the Agent is
 // ever built. The mock must be a real constructor (class), not an arrow
@@ -72,6 +79,40 @@ function invokePostRoute(
   })
 }
 
+function invokeGetRoute(
+  app: express.Application,
+  path: string,
+  query: Record<string, string> = {},
+): Promise<MockResponse> {
+  return new Promise((resolve, reject) => {
+    let statusCode = 200
+    const req = {
+      query,
+      headers: {},
+      method: 'GET',
+      url: path,
+    } as unknown as express.Request
+    const res = {
+      status(code: number) {
+        statusCode = code
+        return res
+      },
+      json(responseBody: unknown) {
+        resolve({ statusCode, body: responseBody })
+        return res
+      },
+      setHeader() {
+        return res
+      },
+    } as unknown as express.Response
+
+    app(req, res, (err?: any) => {
+      if (err) return reject(err)
+      resolve({ statusCode, body: null })
+    })
+  })
+}
+
 function createMockStore(
   overrides: Partial<EnrollmentStore> = {},
 ): EnrollmentStore {
@@ -96,6 +137,124 @@ function createMockStore(
   }
 }
 
+/** In-memory queue so the real worker's bookkeeping is observable per test. */
+class InMemoryPdsSyncQueue implements PdsSyncQueueStore {
+  jobs = new Map<string, PdsSyncJob>()
+
+  async upsertPending(did: string): Promise<number> {
+    const now = new Date().toISOString()
+    const existing = this.jobs.get(did)
+    const generation = (existing?.generation ?? 0) + 1
+    this.jobs.set(did, {
+      did,
+      status: 'pending',
+      attemptCount: 0,
+      nextAttemptAt: now,
+      firstQueuedAt: existing?.firstQueuedAt ?? now,
+      updatedAt: now,
+      lastError: null,
+      generation,
+    })
+    return generation
+  }
+
+  async isPending(did: string, generation: number): Promise<boolean> {
+    const job = this.jobs.get(did)
+    return job?.status === 'pending' && job.generation === generation
+  }
+
+  async claimDue(
+    now: string,
+    leaseUntil: string,
+  ): Promise<PdsSyncJob | undefined> {
+    const job = [...this.jobs.values()]
+      .filter((j) => j.status === 'pending' && j.nextAttemptAt <= now)
+      .at(0)
+    if (!job) return undefined
+    const claimed = {
+      ...job,
+      nextAttemptAt: leaseUntil,
+      updatedAt: now,
+      generation: job.generation + 1,
+    }
+    this.jobs.set(job.did, claimed)
+    return claimed
+  }
+
+  async markRetry(
+    did: string,
+    generation: number,
+    attemptCount: number,
+    nextAttemptAt: string,
+    lastError: string,
+  ): Promise<void> {
+    const job = this.jobs.get(did)
+    if (!job || job.generation !== generation) return
+    this.jobs.set(did, { ...job, attemptCount, nextAttemptAt, lastError })
+  }
+
+  async markFailed(
+    did: string,
+    generation: number,
+    lastError: string,
+  ): Promise<void> {
+    const job = this.jobs.get(did)
+    if (!job || job.generation !== generation) return
+    this.jobs.set(did, { ...job, status: 'failed', lastError })
+  }
+
+  async markCompleted(did: string, generation: number): Promise<boolean> {
+    const job = this.jobs.get(did)
+    if (!job || job.generation !== generation) return false
+    this.jobs.set(did, { ...job, status: 'completed' })
+    return true
+  }
+
+  async markCancelled(did: string): Promise<number | undefined> {
+    const job = this.jobs.get(did)
+    if (!job) return undefined
+    const generation = job.generation + 1
+    this.jobs.set(did, { ...job, status: 'cancelled', generation })
+    return generation
+  }
+
+  async requeueFailed(): Promise<number> {
+    const now = new Date().toISOString()
+    let requeued = 0
+    for (const [did, job] of this.jobs) {
+      if (job.status !== 'failed') continue
+      this.jobs.set(did, {
+        ...job,
+        status: 'pending',
+        attemptCount: 0,
+        nextAttemptAt: now,
+        updatedAt: now,
+        lastError: null,
+        generation: job.generation + 1,
+      })
+      requeued += 1
+    }
+    return requeued
+  }
+
+  async list(limit: number, after?: PdsSyncPageKey): Promise<PdsSyncJob[]> {
+    return [...this.jobs.values()]
+      .sort((a, b) =>
+        a.firstQueuedAt === b.firstQueuedAt
+          ? a.did.localeCompare(b.did)
+          : a.firstQueuedAt.localeCompare(b.firstQueuedAt),
+      )
+      .filter((job) => job.status === 'pending' || job.status === 'failed')
+      .filter(
+        (j) =>
+          !after ||
+          j.firstQueuedAt > after.firstQueuedAt ||
+          (j.firstQueuedAt === after.firstQueuedAt && j.did > after.did),
+      )
+      .slice(0, limit)
+  }
+}
+
 function createCtx(opts: {
   enrollmentStore?: Partial<EnrollmentStore>
   adminAuthFails?: boolean
@@ -105,6 +264,7 @@ function createCtx(opts: {
   enrollmentStore: EnrollmentStore
   app: express.Application
   enrollmentEvents: EnrollmentEventEmitter
+  pdsSyncQueue: InMemoryPdsSyncQueue
 } {
   const enrollmentStore = createMockStore(opts.enrollmentStore)
 
@@ -112,10 +272,52 @@ function createCtx(opts: {
 
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
 
+  const oauthClient = {
+    restore: opts.pdsWriteFails
+      ? vi.fn(async () => {
+          throw new Error('oauth session expired')
+        })
+      : vi.fn(async () => ({})),
+  }
+
+  const createAttestation = vi.fn(async () => ({
+    sig: new Uint8Array([1, 2, 3]),
+    signingKey: 'did:key:zTestKey',
+  }))
+
+  const pdsSyncQueue = new InMemoryPdsSyncQueue()
+  const pdsSyncWorker = new PdsEnrollmentSyncWorker(
+    {
+      queue: pdsSyncQueue,
+      sync: (did, signal) =>
+        syncEnrollmentRecordToPds(
+          {
+            enrollmentStore: enrollmentStore as never,
+            createAttestation,
+            oauthClient: oauthClient as never,
+            serviceDid: 'did:web:stratos.example.com',
+            publicUrl: 'https://stratos.example.com',
+          },
+          did,
+          signal,
+        ),
+    },
+    {
+      tickMs: 30_000,
+      backoffBaseMs: 30_000,
+      backoffCapMs: 3_600_000,
+      maxAttempts: 12,
+      claimLimit: 10,
+      attemptTimeoutMs: 30_000,
+    },
+  )
+
   const ctx = {
     app,
     enrollmentStore,
     enrollmentEvents,
+    pdsSyncQueue,
+    pdsSyncWorker,
     enrollmentService: {
       isEnrolled: enrollmentStore.isEnrolled,
       getEnrollment: vi.fn(),
@@ -131,18 +333,9 @@ function createCtx(opts: {
         credentials: { did: null },
       })),
     },
-    oauthClient: {
-      restore: opts.pdsWriteFails
-        ? vi.fn(async () => {
-            throw new Error('oauth session expired')
-          })
-        : vi.fn(async () => ({})),
-    },
+    oauthClient,
     serviceDid: 'did:web:stratos.example.com',
-    createAttestation: vi.fn(async () => ({
-      sig: new Uint8Array([1, 2, 3]),
-      signingKey: 'did:key:zTestKey',
-    })),
+    createAttestation,
     cfg: {
       service: { publicUrl: 'https://stratos.example.com' },
       stratos: {
@@ -169,14 +362,14 @@ function createCtx(opts: {
   registerEnrollmentHandlers(xrpcServer as any, ctx)
   // Ensure the router is initialized for tests that look into _router
   // ;(app as any)._router = (app as any)._router || express.Router()
-  return { ctx, enrollmentStore, app, enrollmentEvents }
+  return { ctx, enrollmentStore, app, enrollmentEvents, pdsSyncQueue }
 }
 
 describe('admin boundary endpoints', () => {
   vi.setConfig({ testTimeout: 15000 })
   describe('POST /xrpc/zone.stratos.admin.addBoundary', () => {
     it('adds a boundary to an enrolled user', async () => {
-      const { app, enrollmentStore } = createCtx({})
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({})
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.addBoundary',
@@ -195,10 +388,13 @@ describe('admin boundary endpoints', () => {
         'did:plc:usagi',
         'did:web:nerv.tokyo.jp/bees',
       )
+      expect(pdsSyncQueue.jobs.get('did:plc:usagi')?.status).toBe('completed')
     })
 
-    it('reports pdsSync failed but still applies the local change on PDS write failure', async () => {
-      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+    it('reports pdsSync deferred and leaves a pending job on PDS write failure', async () => {
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({
+        pdsWriteFails: true,
+      })
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.addBoundary',
@@ -206,9 +402,13 @@ describe('admin boundary endpoints', () => {
       )
       expect(res.statusCode).toBe(200)
       const body = res.body as { boundaries: string[]; pdsSync: string }
-      expect(body.pdsSync).toBe('failed')
+      expect(body.pdsSync).toBe('deferred')
       // The local store mutation is still applied; only PDS propagation failed.
       expect(enrollmentStore.addBoundary).toHaveBeenCalled()
+      // Durable intent survives for the background worker to retry.
+      const job = pdsSyncQueue.jobs.get('did:plc:usagi')
+      expect(job?.status).toBe('pending')
+      expect(job?.attemptCount).toBe(1)
     })
 
     it('rejects unauthenticated requests', async () => {
@@ -286,8 +486,10 @@ describe('admin boundary endpoints', () => {
       )
     })
 
-    it('reports pdsSync failed on PDS write failure', async () => {
-      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+    it('reports pdsSync deferred on PDS write failure', async () => {
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({
+        pdsWriteFails: true,
+      })
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.removeBoundary',
@@ -297,8 +499,9 @@ describe('admin boundary endpoints', () => {
         },
       )
       expect(res.statusCode).toBe(200)
-      expect((res.body as { pdsSync: string }).pdsSync).toBe('failed')
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
       expect(enrollmentStore.removeBoundary).toHaveBeenCalled()
+      expect(pdsSyncQueue.jobs.get('did:plc:usagi')?.status).toBe('pending')
     })
 
     it('rejects unauthenticated requests', async () => {
@@ -362,6 +565,7 @@ describe('admin boundary endpoints', () => {
             repoHost: 'https://pds.example.com',
           }),
         }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       )
     })
 
@@ -392,8 +596,10 @@ describe('admin boundary endpoints', () => {
       )
     })
 
-    it('reports pdsSync failed on PDS write failure', async () => {
-      const { app, enrollmentStore } = createCtx({ pdsWriteFails: true })
+    it('reports pdsSync deferred on PDS write failure', async () => {
+      const { app, enrollmentStore, pdsSyncQueue } = createCtx({
+        pdsWriteFails: true,
+      })
       const res = await invokePostRoute(
         app,
         '/xrpc/zone.stratos.admin.setBoundaries',
@@ -403,8 +609,9 @@ describe('admin boundary endpoints', () => {
         },
       )
       expect(res.statusCode).toBe(200)
-      expect((res.body as { pdsSync: string }).pdsSync).toBe('failed')
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
       expect(enrollmentStore.setBoundaries).toHaveBeenCalled()
+      expect(pdsSyncQueue.jobs.get('did:plc:usagi')?.status).toBe('pending')
     })
 
     it('allows setting empty boundaries', async () => {
@@ -457,6 +664,390 @@ describe('admin boundary endpoints', () => {
         { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
       )
       expect(res.statusCode).toBe(401)
+    })
+  })
+
+  describe('GET /xrpc/zone.stratos.admin.listPdsSyncStatus', () => {
+    it('returns queued jobs to an admin', async () => {
+      const { app, pdsSyncQueue } = createCtx({ pdsWriteFails: true })
+      await invokePostRoute(app, '/xrpc/zone.stratos.admin.addBoundary', {
+        did: 'did:plc:usagi',
+        boundary: 'did:web:nerv.tokyo.jp/bees',
+      })
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(200)
+      const body = res.body as { jobs: Array<{ did: string; status: string }> }
+      expect(body.jobs).toHaveLength(1)
+      expect(body.jobs[0].did).toBe('did:plc:usagi')
+      expect(body.jobs[0].status).toBe('pending')
+      expect(pdsSyncQueue.jobs.size).toBe(1)
+    })
+
+    it('returns an empty list when the queue is drained', async () => {
+      const { app } = createCtx({})
+      await invokePostRoute(app, '/xrpc/zone.stratos.admin.addBoundary', {
+        did: 'did:plc:usagi',
+        boundary: 'did:web:nerv.tokyo.jp/bees',
+      })
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { jobs: unknown[] }).jobs).toEqual([])
+    })
+
+    it('rejects unauthenticated requests', async () => {
+      const { app } = createCtx({ adminAuthFails: true })
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(401)
+      expect(res.body).toEqual({
+        error: 'AuthRequired',
+        message: 'Admin auth required',
+      })
+    })
+
+    it('passes the request context to the admin verifier', async () => {
+      const { app, ctx } = createCtx({})
+      await invokeGetRoute(app, '/xrpc/zone.stratos.admin.listPdsSyncStatus')
+
+      expect(ctx.authVerifier.admin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          req: expect.anything(),
+          res: expect.anything(),
+        }),
+      )
+    })
+
+    it('returns 500 when the queue read fails', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      pdsSyncQueue.list = vi.fn().mockRejectedValue(new Error('db closed'))
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to list PDS sync status',
+      })
+      expect(ctx.logger?.error).toHaveBeenCalledWith(
+        { err: 'db closed' },
+        'admin.listPdsSyncStatus failed',
+      )
+    })
+
+    it('rejects a limit that is not an integer between 1 and 100', async () => {
+      const { app } = createCtx({})
+      for (const limit of ['0', '101', '2.5', 'bees']) {
+        const res = await invokeGetRoute(
+          app,
+          '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+          { limit },
+        )
+        expect(res.statusCode).toBe(400)
+        expect(res.body).toEqual({
+          error: 'InvalidRequest',
+          message: 'limit must be an integer between 1 and 100',
+        })
+      }
+    })
+
+    it('rejects a malformed cursor', async () => {
+      const { app } = createCtx({})
+      for (const cursor of [
+        '',
+        Buffer.from('no-separator').toString('base64url'),
+        Buffer.from('|did:plc:usagi').toString('base64url'),
+        Buffer.from('2026-01-01T00:00:00.000Z|').toString('base64url'),
+      ]) {
+        const res = await invokeGetRoute(
+          app,
+          '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+          { cursor },
+        )
+        expect(res.statusCode).toBe(400)
+        expect(res.body).toEqual({
+          error: 'InvalidRequest',
+          message: 'malformed cursor',
+        })
+      }
+    })
+
+    it('pages the queue with a cursor and omits it on the last page', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.upsertPending('did:plc:rei')
+      await pdsSyncQueue.upsertPending('did:plc:ami')
+
+      const first = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '2' },
+      )
+      expect(first.statusCode).toBe(200)
+      const firstBody = first.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(firstBody.jobs).toHaveLength(2)
+      expect(firstBody.cursor).toBeDefined()
+
+      const second = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '2', cursor: firstBody.cursor! },
+      )
+      expect(second.statusCode).toBe(200)
+      const secondBody = second.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(secondBody.cursor).toBeUndefined()
+      const seen = [...firstBody.jobs, ...secondBody.jobs].map((j) => j.did)
+      expect(seen.sort()).toEqual([
+        'did:plc:ami',
+        'did:plc:rei',
+        'did:plc:usagi',
+      ])
+    })
+
+    it('omits the cursor when the final page is exactly full', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.upsertPending('did:plc:rei')
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '2' },
+      )
+      expect(res.statusCode).toBe(200)
+      const body = res.body as { jobs: { did: string }[]; cursor?: string }
+      expect(body.jobs).toHaveLength(2)
+      expect(body.cursor).toBeUndefined()
+    })
+
+    it('encodes the cursor from the last returned job', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.upsertPending('did:plc:rei')
+
+      const first = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '1' },
+      )
+      expect(first.statusCode).toBe(200)
+      const firstBody = first.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(firstBody.jobs).toHaveLength(1)
+      expect(firstBody.cursor).toBeDefined()
+
+      const second = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+        { limit: '1', cursor: firstBody.cursor! },
+      )
+      expect(second.statusCode).toBe(200)
+      const secondBody = second.body as {
+        jobs: { did: string }[]
+        cursor?: string
+      }
+      expect(secondBody.jobs).toHaveLength(1)
+      expect(secondBody.jobs[0].did).not.toBe(firstBody.jobs[0].did)
+    })
+
+    it('still answers 500 without a logger when the queue read fails', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      pdsSyncQueue.list = vi.fn().mockRejectedValue(new Error('db closed'))
+
+      const res = await invokeGetRoute(
+        app,
+        '/xrpc/zone.stratos.admin.listPdsSyncStatus',
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to list PDS sync status',
+      })
+    })
+  })
+
+  describe('POST /xrpc/zone.stratos.admin.requeuePdsSync', () => {
+    it('revives every failed job and reports the count', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      const usagi = await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.markFailed('did:plc:usagi', usagi, 'invalid_grant')
+      const rei = await pdsSyncQueue.upsertPending('did:plc:rei')
+      await pdsSyncQueue.markFailed('did:plc:rei', rei, 'invalid_grant')
+      await pdsSyncQueue.upsertPending('did:plc:ami')
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toEqual({ requeued: 2 })
+      expect((await pdsSyncQueue.list(100)).map((j) => j.status)).toEqual([
+        'pending',
+        'pending',
+        'pending',
+      ])
+      expect(ctx.logger?.info).toHaveBeenCalledWith(
+        expect.objectContaining({ requeued: 2 }),
+        'admin requeued PDS sync jobs',
+      )
+      expect(ctx.authVerifier.admin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          req: expect.anything(),
+          res: expect.anything(),
+        }),
+      )
+    })
+
+    it('revives failed jobs when no logger is set', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      const usagi = await pdsSyncQueue.upsertPending('did:plc:usagi')
+      await pdsSyncQueue.markFailed('did:plc:usagi', usagi, 'invalid_grant')
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toEqual({ requeued: 1 })
+    })
+
+    it('still answers 500 without a logger when the queue write fails', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      pdsSyncQueue.requeueFailed = vi
+        .fn()
+        .mockRejectedValue(new Error('db closed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to requeue PDS sync jobs',
+      })
+    })
+
+    it('reports zero when no job has failed', async () => {
+      const { app, pdsSyncQueue } = createCtx({})
+      await pdsSyncQueue.upsertPending('did:plc:usagi')
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toEqual({ requeued: 0 })
+    })
+
+    it('rejects unauthenticated requests', async () => {
+      const { app } = createCtx({ adminAuthFails: true })
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(401)
+      expect(res.body).toEqual({
+        error: 'AuthRequired',
+        message: 'Admin auth required',
+      })
+    })
+
+    it('returns 500 when the queue write fails', async () => {
+      const { app, ctx, pdsSyncQueue } = createCtx({})
+      pdsSyncQueue.requeueFailed = vi
+        .fn()
+        .mockRejectedValue(new Error('db closed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.requeuePdsSync',
+        {},
+      )
+      expect(res.statusCode).toBe(500)
+      expect(res.body).toEqual({
+        error: 'InternalError',
+        message: 'Failed to requeue PDS sync jobs',
+      })
+      expect(ctx.logger?.error).toHaveBeenCalledWith(
+        { err: 'db closed' },
+        'admin.requeuePdsSync failed',
+      )
+    })
+  })
+
+  describe('inline sync kick failure', () => {
+    it('degrades to deferred instead of failing the committed mutation', async () => {
+      const { app, ctx } = createCtx({})
+      ctx.pdsSyncWorker.kick = vi
+        .fn()
+        .mockRejectedValue(new Error('queue write failed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.addBoundary',
+        {
+          did: 'did:plc:usagi',
+          boundary: 'did:web:nerv.tokyo.jp/bees',
+        },
+      )
+
+      // The boundary change already committed; a queue failure must not
+      // surface as a 500.
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
+      expect(ctx.logger?.warn).toHaveBeenCalledWith(
+        { err: 'queue write failed', did: 'did:plc:usagi' },
+        'pds sync attempt failed inline; job remains queued',
+      )
+    })
+
+    it('degrades to deferred without a logger', async () => {
+      const { app, ctx } = createCtx({})
+      ;(ctx as { logger?: unknown }).logger = undefined
+      ctx.pdsSyncWorker.kick = vi
+        .fn()
+        .mockRejectedValue(new Error('queue write failed'))
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.addBoundary',
+        {
+          did: 'did:plc:usagi',
+          boundary: 'did:web:nerv.tokyo.jp/bees',
+        },
+      )
+
+      expect(res.statusCode).toBe(200)
+      expect((res.body as { pdsSync: string }).pdsSync).toBe('deferred')
     })
   })
 

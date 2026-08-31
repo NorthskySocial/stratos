@@ -132,6 +132,38 @@ const envSchema = z
       .positive()
       .default(300_000),
 
+    // Durable PDS enrollment-record sync queue
+    STRATOS_PDS_SYNC_TICK_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
+    STRATOS_PDS_SYNC_BACKOFF_BASE_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
+    STRATOS_PDS_SYNC_BACKOFF_CAP_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(3_600_000),
+    STRATOS_PDS_SYNC_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(12),
+    STRATOS_PDS_SYNC_CLAIM_LIMIT: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(10),
+    STRATOS_PDS_SYNC_ATTEMPT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
+
     // Repo import
     STRATOS_IMPORT_MAX_BYTES: z.coerce
       .number()
@@ -308,6 +340,15 @@ export interface StratosServiceConfig {
     allowListBootstrapName?: string
     valkeyUrl?: string
     serviceEnrollments: ServiceEnrollment[]
+  }
+  /** Durable PDS enrollment-record sync queue scheduling knobs. */
+  pdsSync: {
+    tickMs: number
+    backoffBaseMs: number
+    backoffCapMs: number
+    maxAttempts: number
+    claimLimit: number
+    attemptTimeoutMs: number
   }
   identity: {
     plcUrl: string
@@ -605,6 +646,17 @@ function parseAllowedRedirectOrigins(raw: string | undefined): string[] {
     })
 }
 
+function pdsSyncConfig(env: Env): StratosServiceConfig['pdsSync'] {
+  return {
+    tickMs: env.STRATOS_PDS_SYNC_TICK_MS,
+    backoffBaseMs: env.STRATOS_PDS_SYNC_BACKOFF_BASE_MS,
+    backoffCapMs: env.STRATOS_PDS_SYNC_BACKOFF_CAP_MS,
+    maxAttempts: env.STRATOS_PDS_SYNC_MAX_ATTEMPTS,
+    claimLimit: env.STRATOS_PDS_SYNC_CLAIM_LIMIT,
+    attemptTimeoutMs: env.STRATOS_PDS_SYNC_ATTEMPT_TIMEOUT_MS,
+  }
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
@@ -669,6 +721,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
         allowedDomains,
       ),
     },
+    pdsSync: pdsSyncConfig(env),
     identity: {
       plcUrl: env.STRATOS_PLC_URL,
     },
