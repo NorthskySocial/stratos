@@ -426,6 +426,53 @@ describe('MembershipTracker', () => {
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
+
+    it('does not actor-purge while another boundary has never completed', async () => {
+      const bebopSpace = spaceUriFor(BEBOP_BOUNDARY)
+      let bebopCalls = 0
+      const client = {
+        listSpaceRepos: vi.fn(
+          async (
+            opts: ListSpaceReposOptions,
+          ): Promise<ListSpaceReposResult> => {
+            if (opts.space !== bebopSpace) {
+              throw new Error('nerv membership unavailable')
+            }
+            bebopCalls += 1
+            return bebopCalls === 1
+              ? {
+                  repos: [
+                    {
+                      did: SPIKE,
+                      custody: 'pds',
+                      host: 'https://spike.example',
+                    },
+                  ],
+                }
+              : { repos: [] }
+          },
+        ),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        onError: vi.fn(),
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        bebopSpace,
+      )
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'boundary' }])
+    })
   })
 
   describe('presence without a poll target', () => {
