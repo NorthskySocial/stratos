@@ -29,7 +29,7 @@
           },
           "custody": {
             "type": "string",
-            "enum": ["stratos", "pds"],
+            "knownValues": ["stratos", "pds"],
             "description": "Only return enrollments with this repo custody."
           }
         }
@@ -53,7 +53,7 @@
             },
             "total": {
               "type": "integer",
-              "description": "Total number of enrollments in the service. Absent when a boundary filter is applied."
+              "description": "Total number of enrollments in the service. Absent when any filter is applied."
             }
           }
         }
@@ -83,7 +83,7 @@
         },
         "custody": {
           "type": "string",
-          "enum": ["stratos", "pds"],
+          "knownValues": ["stratos", "pds"],
           "description": "Who hosts the member repository."
         },
         "repoHost": {
