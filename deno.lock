@@ -22,6 +22,7 @@
     "npm:@atcute/identity-resolver@^2.0.1": "2.0.1_@atcute+identity@2.0.2__@atcute+lexicons@2.1.0__typescript@7.0.2_typescript@7.0.2",
     "npm:@atcute/identity@^2.0.2": "2.0.2_@atcute+lexicons@2.1.0_typescript@7.0.2",
     "npm:@atcute/mst@^1.0.3": "1.0.3_@atcute+cbor@2.3.6__@atcute+cid@2.4.2_@atcute+cid@2.4.2",
+    "npm:@atcute/repo@*": "1.0.2_@atcute+cbor@2.3.6__@atcute+cid@2.4.2_@atcute+cid@2.4.2_@atcute+lexicons@2.1.0",
     "npm:@atcute/repo@^1.0.2": "1.0.2_@atcute+cbor@2.3.6__@atcute+cid@2.4.2_@atcute+cid@2.4.2_@atcute+lexicons@2.1.0",
     "npm:@atcute/uint8array@^1.1.5": "1.1.5",
     "npm:@atproto/api@~0.20.41": "0.20.41",
@@ -43,10 +44,12 @@
     "npm:@atproto/oauth-client-browser@~0.5.3": "0.5.3",
     "npm:@atproto/oauth-client-node@~0.5.3": "0.5.3",
     "npm:@atproto/oauth-provider@~0.22.3": "0.22.3",
+    "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953": "0.0.0-spaces-alpha-20260818163953",
     "npm:@atproto/oauth-types@~0.7.5": "0.7.5",
     "npm:@atproto/repo@~0.8.1": "0.8.13",
     "npm:@atproto/syntax@0.4": "0.4.3",
     "npm:@atproto/syntax@~0.7.4": "0.7.4",
+    "npm:@atproto/xrpc-server@*": "0.12.5",
     "npm:@atproto/xrpc-server@~0.12.5": "0.12.5",
     "npm:@eslint/js@^10.0.1": "10.0.1_eslint@10.0.0",
     "npm:@ipld/dag-cbor@^9.2.5": "9.2.7",
@@ -832,7 +835,7 @@
         "@atproto/lex-resolver",
         "@atproto/oauth-provider-api",
         "@atproto/oauth-provider-ui",
-        "@atproto/oauth-scopes",
+        "@atproto/oauth-scopes@0.5.9",
         "@atproto/oauth-types",
         "@atproto/syntax@0.7.4",
         "@hapi/accept",
@@ -846,6 +849,13 @@
         "ioredis",
         "jose@5.10.0",
         "zod@3.25.76"
+      ]
+    },
+    "@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953": {
+      "integrity": "sha512-bQz4BwNk/FAPd8bXGO3EyhlIKu/UJzN5XIgmNeiZXtJbhbe30J78A3WnvBuA+SILiGFw7/M9hfgq9FcJKCzjCw==",
+      "dependencies": [
+        "@atproto/did@0.5.4",
+        "@atproto/syntax@0.0.0-spaces-alpha-20260818163953"
       ]
     },
     "@atproto/oauth-scopes@0.5.9": {
@@ -902,6 +912,13 @@
         "multiformats@9.9.0",
         "p-queue@6.6.2",
         "ws"
+      ]
+    },
+    "@atproto/syntax@0.0.0-spaces-alpha-20260818163953": {
+      "integrity": "sha512-Xl2fpD/NcfVOWpHR86HKym2XNDYHmgiqThZXoYMwh9XUo+/LgVZYGVpSecfKRBcQ5tNGiRivE1Fvio5YDfJ3lA==",
+      "dependencies": [
+        "iso-datestring-validator",
+        "tslib"
       ]
     },
     "@atproto/syntax@0.4.3": {
@@ -8179,6 +8196,7 @@
             "npm:@atproto/lexicon@~0.7.11",
             "npm:@atproto/oauth-client-node@~0.5.3",
             "npm:@atproto/oauth-provider@~0.22.3",
+            "npm:@atproto/oauth-scopes@0.0.0-spaces-alpha-20260818163953",
             "npm:@atproto/oauth-types@~0.7.5",
             "npm:@atproto/syntax@~0.7.4",
             "npm:@atproto/xrpc-server@~0.12.5",

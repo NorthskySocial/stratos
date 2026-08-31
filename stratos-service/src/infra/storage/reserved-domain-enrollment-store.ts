@@ -74,6 +74,12 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
     return this.inner.listEnrollments(options)
   }
 
+  listActiveEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    return this.inner.listActiveEnrollments(options)
+  }
+
   listServiceEnrollments(
     options?: ListEnrollmentsOptions,
   ): Promise<StoredEnrollment[]> {
@@ -96,8 +102,8 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
    * exclude those un-backfilled members, so every active enrollment is
    * enumerated instead.
    *
-   * `activeOnly` filters in SQL rather than after the fact: `listEnrollments`
-   * applies `LIMIT` before a caller can filter, so a page containing a
+   * `listActiveEnrollments` filters in SQL rather than after the fact:
+   * `listEnrollments` applies `LIMIT` before a caller can filter, so a page containing a
    * deactivated row would otherwise come back short of `limit`, and the
    * handler reads a short page as the last page -- silently truncating
    * enumeration.
@@ -109,7 +115,7 @@ export class ReservedDomainEnrollmentStore implements WrappedStore {
     if (boundary !== this.reservedDomain) {
       return this.inner.listEnrollmentsByBoundary(boundary, options)
     }
-    return this.inner.listEnrollments({ ...options, activeOnly: true })
+    return this.inner.listActiveEnrollments(options)
   }
 
   // ─── Writes (force-include the reserved domain) ───────────────────────

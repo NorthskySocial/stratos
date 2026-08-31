@@ -470,7 +470,7 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
   })
 
-  it('resets custody to stratos and clears repoHost when a re-enroll omits them', async () => {
+  it('preserves custody and repoHost when a re-enroll omits custody', async () => {
     await store.enroll({
       did: REI_DID,
       enrolledAt: '2025-01-01T00:00:00Z',
@@ -488,8 +488,8 @@ describe('SqliteEnrollmentStore custody and repoHost', () => {
     })
 
     const enrollment = await store.getEnrollment(REI_DID)
-    expect(enrollment?.custody).toBe('stratos')
-    expect(enrollment?.repoHost).toBeUndefined()
+    expect(enrollment?.custody).toBe('pds')
+    expect(enrollment?.repoHost).toBe('https://pds.nerv.example.com')
   })
 
   it('updateEnrollment sets custody independently of repoHost', async () => {

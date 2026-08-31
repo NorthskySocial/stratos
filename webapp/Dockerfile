@@ -18,6 +18,7 @@ RUN pnpm install --ignore-scripts
 
 # Copy lexicons (required by stratos-core lexicon imports)
 COPY lexicons/ ./lexicons/
+COPY lexicons-spaces/ ./lexicons-spaces/
 
 # Copy source code (after install, so cache invalidates only on source changes)
 COPY stratos-core/ ./stratos-core/
@@ -38,6 +39,7 @@ ARG VITE_STRATOS_SERVICE_DID
 ARG VITE_FEEDGEN_DID
 ARG VITE_FEEDGEN_FEED
 ARG VITE_ATPROTO_HANDLE_RESOLVER
+ARG VITE_ATPROTO_OAUTH_PROXY_URL
 
 ENV VITE_STRATOS_URL=${VITE_STRATOS_URL}
 ENV VITE_APPVIEW_URL=${VITE_APPVIEW_URL}
@@ -46,6 +48,7 @@ ENV VITE_STRATOS_SERVICE_DID=${VITE_STRATOS_SERVICE_DID}
 ENV VITE_FEEDGEN_DID=${VITE_FEEDGEN_DID}
 ENV VITE_FEEDGEN_FEED=${VITE_FEEDGEN_FEED}
 ENV VITE_ATPROTO_HANDLE_RESOLVER=${VITE_ATPROTO_HANDLE_RESOLVER}
+ENV VITE_ATPROTO_OAUTH_PROXY_URL=${VITE_ATPROTO_OAUTH_PROXY_URL}
 
 RUN pnpm build
 

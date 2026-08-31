@@ -714,7 +714,7 @@ describe('PostgreSQL Backend Integration', () => {
       expect(result?.repoHost).toBe('https://pds.nerv.example.com')
     })
 
-    it('should reset custody to stratos and repoHost to undefined when a re-enroll omits them', async () => {
+    it('should preserve custody and repoHost when a re-enroll omits custody', async () => {
       await enrollmentStore.enroll({
         did: testDid,
         enrolledAt: new Date().toISOString(),
@@ -732,8 +732,8 @@ describe('PostgreSQL Backend Integration', () => {
       })
 
       const result = await enrollmentStore.getEnrollment(testDid)
-      expect(result?.custody).toBe('stratos')
-      expect(result?.repoHost).toBeUndefined()
+      expect(result?.custody).toBe('pds')
+      expect(result?.repoHost).toBe('https://pds.nerv.example.com')
     })
 
     it('should update custody independently of repoHost via updateEnrollment', async () => {

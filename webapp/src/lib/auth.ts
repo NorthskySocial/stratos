@@ -3,7 +3,10 @@ import {
   BrowserOAuthClient,
   type OAuthSession,
 } from '@atproto/oauth-client-browser'
-import type { OAuthClientMetadataInput } from '@atproto/oauth-types'
+import {
+  buildAtprotoLoopbackClientMetadata,
+  type OAuthClientMetadataInput,
+} from '@atproto/oauth-types'
 
 let client: BrowserOAuthClient | null = null
 let currentSession: OAuthSession | null = null
@@ -20,7 +23,11 @@ export const SPACE_WRITE_SCOPE = buildSpaceWriteScope()
 export type SpaceWriteScopeStatus = 'granted' | 'missing' | 'unavailable'
 
 const HANDLE_RESOLVER =
-  import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER ?? 'https://bsky.social'
+  import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social'
+const OAUTH_PROXY_URL = import.meta.env.VITE_ATPROTO_OAUTH_PROXY_URL
+const OAUTH_PROXY_ORIGIN = OAUTH_PROXY_URL
+  ? new URL(HANDLE_RESOLVER).origin
+  : undefined
 
 // The single OAuth scope string for this app. Both the authorization request
 // (signIn) and the declared client metadata must use the exact same value, and
@@ -55,6 +62,35 @@ export async function getSpaceWriteScopeStatus(
 function isLoopback(): boolean {
   const h = window.location.hostname
   return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
+}
+
+async function fetchOAuth(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const request = new Request(input, init)
+  const requestUrl = new URL(request.url)
+  if (!OAUTH_PROXY_URL || requestUrl.origin !== OAUTH_PROXY_ORIGIN) {
+    return fetch(request)
+  }
+
+  const proxyBase = `${OAUTH_PROXY_URL.replace(/\/+$/, '')}/`
+  const proxyUrl = new URL(
+    `${requestUrl.pathname.slice(1)}${requestUrl.search}`,
+    proxyBase,
+  )
+  const body =
+    request.method === 'GET' || request.method === 'HEAD'
+      ? undefined
+      : await request.arrayBuffer()
+  return fetch(proxyUrl, {
+    method: request.method,
+    headers: request.headers,
+    body,
+    redirect: request.redirect,
+    credentials: request.credentials,
+    signal: request.signal,
+  })
 }
 
 /**
@@ -106,6 +142,24 @@ function buildClientMetadata(): OAuthClientMetadataInput {
   }
 }
 
+function loopbackRedirectUri(): string {
+  const redirectUrl = new URL('/', window.location.origin)
+  if (redirectUrl.hostname === 'localhost') {
+    redirectUrl.hostname = '127.0.0.1'
+  }
+  return redirectUrl.href
+}
+
+function getClientMetadata(): OAuthClientMetadataInput {
+  if (isLoopback()) {
+    return buildAtprotoLoopbackClientMetadata({
+      scope: OAUTH_SCOPE,
+      redirect_uris: [loopbackRedirectUri()],
+    })
+  }
+  return buildClientMetadata()
+}
+
 /**
  * Get the OAuth client instance.
  *
@@ -113,9 +167,11 @@ function buildClientMetadata(): OAuthClientMetadataInput {
  */
 function getClient(): BrowserOAuthClient {
   client ??= new BrowserOAuthClient({
+    fetch: fetchOAuth,
     handleResolver: HANDLE_RESOLVER,
     responseMode: 'query',
-    ...(isLoopback() ? {} : { clientMetadata: buildClientMetadata() }),
+    allowHttp: isLoopback(),
+    clientMetadata: getClientMetadata(),
     onSessionDeleted: (_sub, _cause) => {
       currentSession = null
       sessionDeletedCallback?.()

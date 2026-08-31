@@ -158,20 +158,7 @@ function resolveSpaceBoundary(ctx: AppContext, space: string): string {
   return boundary.value
 }
 
-/**
- * Core logic for {@link GET_SPACE_RECORD_METHOD}.
- *
- * Steps:
- *   1. Require `space`, `repo`, `collection`, `rkey`.
- *   2. Parse `space`; its DID must equal our service DID → else `UnknownSpace`.
- *   3. Admission (one space per request, fail closed):
- *      - space credential: its admitted space must EQUAL the requested space;
- *      - user session: the user must be enrolled in the space's boundary
- *        (live enrollment-store lookup — revocation-fresh, no cache).
- *   4. Fetch the record; it must exist AND belong to the requested space.
- *      Records outside the space — including records with no space at all —
- *      resolve to `RecordNotFound` (no existence leak).
- */
+/** A space read hides records outside the requested space to avoid existence leaks. */
 async function handleGetSpaceRecord(
   ctx: AppContext,
   params: GetSpaceRecordParams,
@@ -210,16 +197,6 @@ async function handleGetSpaceRecord(
   })
 }
 
-/**
- * Core logic for {@link LIST_SPACE_BLOBS_METHOD}.
- *
- * Steps:
- *   1. Require `space` and `repo`.
- *   2. Resolve the space's boundary → else `UnknownSpace`.
- *   3. Admission — same fail-closed contract as {@link handleGetSpaceRecord}.
- *   4. Enumerate blob CIDs that records reference within the boundary. The
- *      page cursor is the last CID of a full page.
- */
 async function handleListSpaceBlobs(
   ctx: AppContext,
   params: ListSpaceBlobsParams,
@@ -285,13 +262,6 @@ function parseLimit(raw: unknown, defaultLimit: number): number {
  * `serviceOrSpaceCredential` only (see {@link resolveEffectiveBoundaries}),
  * never a plain user session. Membership is derived from active enrollment +
  * boundary -- there is no second, independently-maintained member list.
- *
- * Steps:
- *   1. Require `space`; resolve its boundary → else `UnknownSpace`.
- *   2. The caller's effective boundary set must include it → else `AuthRequired`.
- *   3. Page active enrollments carrying that boundary.
- *   4. Per member, resolve a repo host (never throws; absent fields on a
- *      resolution miss) and a Stratos-known `rev` (stratos-custody only).
  */
 async function handleListSpaceRepos(
   ctx: AppContext,
@@ -341,6 +311,7 @@ async function buildRepoEntries(
   members: StoredEnrollment[],
 ): Promise<RepoEntry[]> {
   const entries = new Array<RepoEntry>(members.length)
+  const hostResolutionFailures: RepoHostResolutionFailure[] = []
   const revFailures: RevLookupFailure[] = []
   let nextIndex = 0
 
@@ -350,6 +321,7 @@ async function buildRepoEntries(
         ctx,
         space,
         members[index],
+        hostResolutionFailures,
         revFailures,
       )
     }
@@ -357,6 +329,17 @@ async function buildRepoEntries(
 
   const workerCount = Math.min(MAX_CONCURRENT_REPO_LOOKUPS, members.length)
   await Promise.all(Array.from({ length: workerCount }, worker))
+
+  if (hostResolutionFailures.length > 0) {
+    ctx.logger?.warn(
+      {
+        space,
+        failedCount: hostResolutionFailures.length,
+        sample: hostResolutionFailures.slice(0, 5),
+      },
+      'listRepos: repo host lookup failed for some members',
+    )
+  }
 
   // One aggregated line per page. A storage outage must not emit one warn
   // per member -- a full page is up to 1000 members.
@@ -375,6 +358,10 @@ interface RevLookupFailure {
   error: string
 }
 
+interface RepoHostResolutionFailure {
+  did: string
+}
+
 /**
  * Build one {@link RepoEntry}: resolve the member's repo host (absent on a
  * miss, never fails the whole call) and Stratos-known rev.
@@ -383,6 +370,7 @@ async function buildRepoEntry(
   ctx: AppContext,
   space: string,
   member: StoredEnrollment,
+  hostResolutionFailures: RepoHostResolutionFailure[],
   revFailures: RevLookupFailure[],
 ): Promise<RepoEntry> {
   const custody = member.custody ?? 'stratos'
@@ -396,6 +384,9 @@ async function buildRepoEntry(
       : undefined,
     getStratosRev(ctx, member, revFailures),
   ])
+  if (!resolvedHost) {
+    hostResolutionFailures.push({ did: member.did })
+  }
   return {
     did: member.did,
     custody,
