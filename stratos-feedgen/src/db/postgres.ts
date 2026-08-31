@@ -5,6 +5,7 @@ import {
   pgEnrolledActor as enrolledActorTbl,
   pgPost as postTbl,
   pgPostBoundary as postBoundaryTbl,
+  pgSpaceMemberSnapshot as spaceMemberSnapshotTbl,
   pgSpaceSyncCursor as spaceSyncCursorTbl,
   pgSyncCursor as syncCursorTbl,
 } from './schema/postgres.js'
@@ -97,6 +98,13 @@ export async function migratePgDb(
       PRIMARY KEY ("spaceUri", did)
     )
   `)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS space_member_snapshot (
+      boundary TEXT NOT NULL,
+      did TEXT NOT NULL,
+      PRIMARY KEY (boundary, did)
+    )
+  `)
 }
 
 export class PgFeedgenStore implements FeedgenStore {
@@ -156,37 +164,35 @@ export class PgFeedgenStore implements FeedgenStore {
     boundary: string,
   ): Promise<number> {
     return this.db.transaction(async (tx) => {
-      // Only posts that actually held `boundary` are candidates for orphan
-      // deletion - a pre-existing boundaryless post for this DID must not be
-      // swept up by dropping an unrelated boundary.
-      const candidates = await tx
-        .select({ uri: postBoundaryTbl.uri })
-        .from(postBoundaryTbl)
-        .innerJoin(postTbl, eq(postTbl.uri, postBoundaryTbl.uri))
-        .where(
-          and(eq(postTbl.did, did), eq(postBoundaryTbl.boundary, boundary)),
-        )
-      if (candidates.length === 0) return 0
-      const uris = candidates.map((c) => c.uri)
-      // Drop this DID's membership in `boundary` from the index.
-      await tx
-        .delete(postBoundaryTbl)
-        .where(
-          and(
-            eq(postBoundaryTbl.boundary, boundary),
-            inArray(postBoundaryTbl.uri, uris),
-          ),
-        )
-      // Delete only those candidates now left with no boundary rows at all.
       const deleted = await tx
         .delete(postTbl)
         .where(
           and(
-            inArray(postTbl.uri, uris),
-            sql`NOT EXISTS (SELECT 1 FROM post_boundary pb WHERE pb.uri = ${postTbl.uri})`,
+            eq(postTbl.did, did),
+            sql`EXISTS (
+              SELECT 1 FROM post_boundary target
+              WHERE target.uri = ${postTbl.uri}
+                AND target.boundary = ${boundary}
+            )`,
+            sql`NOT EXISTS (
+              SELECT 1 FROM post_boundary other
+              WHERE other.uri = ${postTbl.uri}
+                AND other.boundary <> ${boundary}
+            )`,
           ),
         )
         .returning({ uri: postTbl.uri })
+
+      await tx.delete(postBoundaryTbl).where(
+        and(
+          eq(postBoundaryTbl.boundary, boundary),
+          sql`EXISTS (
+            SELECT 1 FROM post authored
+            WHERE authored.uri = ${postBoundaryTbl.uri}
+              AND authored.did = ${did}
+          )`,
+        ),
+      )
       return deleted.length
     })
   }
@@ -230,6 +236,14 @@ export class PgFeedgenStore implements FeedgenStore {
     const deleted = await this.db
       .delete(spaceSyncCursorTbl)
       .where(eq(spaceSyncCursorTbl.did, did))
+      .returning({ did: spaceSyncCursorTbl.did })
+    return deleted.length
+  }
+
+  async deleteSpaceCursorsBySpace(spaceUri: string): Promise<number> {
+    const deleted = await this.db
+      .delete(spaceSyncCursorTbl)
+      .where(eq(spaceSyncCursorTbl.spaceUri, spaceUri))
       .returning({ did: spaceSyncCursorTbl.did })
     return deleted.length
   }
@@ -366,6 +380,32 @@ export class PgFeedgenStore implements FeedgenStore {
       )
       .limit(1)
     return rows.length === 0 ? null : rows[0].cursor
+  }
+
+  async listSpaceMembers(boundary: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ did: spaceMemberSnapshotTbl.did })
+      .from(spaceMemberSnapshotTbl)
+      .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
+      .orderBy(asc(spaceMemberSnapshotTbl.did))
+    return rows.map(({ did }) => did)
+  }
+
+  async replaceSpaceMembers(boundary: string, dids: string[]): Promise<void> {
+    const uniqueDids = [...new Set(dids)]
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(spaceMemberSnapshotTbl)
+        .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
+      if (uniqueDids.length > 0) {
+        await tx.insert(spaceMemberSnapshotTbl).values(
+          uniqueDids.map((did) => ({
+            boundary,
+            did,
+          })),
+        )
+      }
+    })
   }
 
   async upsertEnrolledActor(input: EnrolledActorUpsert): Promise<void> {

@@ -49,3 +49,12 @@ export const pgSpaceSyncCursor = pgTable(
   },
   (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
 )
+
+export const pgSpaceMemberSnapshot = pgTable(
+  'space_member_snapshot',
+  {
+    boundary: text('boundary').notNull(),
+    did: text('did').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.boundary, table.did] })],
+)
