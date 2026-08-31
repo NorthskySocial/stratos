@@ -602,6 +602,9 @@ importers:
       '@atproto/syntax':
         specifier: ^0.7.4
         version: 0.7.4
+      '@northskysocial/stratos-core':
+        specifier: workspace:*
+        version: link:../stratos-core
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1

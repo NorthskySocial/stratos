@@ -306,6 +306,52 @@ describe('SpaceSyncScheduler', () => {
     await scheduler.stop()
   })
 
+  it('limits the number of concurrently active member syncs', async () => {
+    const spike = makeTarget({ did: SPIKE_DID })
+    const faye = makeTarget({ did: FAYE_DID })
+    const jet = makeTarget({ did: JET_DID })
+    const membership = fakeMembership([successOutcome([spike, faye, jet])])
+    const gates = new Map([
+      [SPIKE_DID, deferred<SpaceSyncRunResult>()],
+      [FAYE_DID, deferred<SpaceSyncRunResult>()],
+      [JET_DID, deferred<SpaceSyncRunResult>()],
+    ])
+    let active = 0
+    let peak = 0
+    const runTarget = vi.fn(async (target: PollTarget) => {
+      active += 1
+      peak = Math.max(peak, active)
+      try {
+        return await gates.get(target.did)!.promise
+      } finally {
+        active -= 1
+      }
+    })
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner: { runTarget },
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      memberConcurrency: 2,
+      random: () => 0.5,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(runTarget).toHaveBeenCalledTimes(2)
+    expect(peak).toBe(2)
+
+    gates.get(SPIKE_DID)!.resolve(runSuccess(spike))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(runTarget).toHaveBeenCalledTimes(3)
+    expect(peak).toBe(2)
+
+    gates.get(FAYE_DID)!.resolve(runSuccess(faye))
+    gates.get(JET_DID)!.resolve(runSuccess(jet))
+    await vi.advanceTimersByTimeAsync(0)
+    await scheduler.stop()
+  })
+
   it('leaves no trace of a member sync past the point its budget aborted it', async () => {
     // Real timers: this test drives a real SpaceSyncer/SpaceSyncRunner pair
     // against a real SQLite store, and libsql's async I/O is not driven by
@@ -392,7 +438,7 @@ describe('SpaceSyncScheduler', () => {
         membership,
         runner: { runTarget },
         boundaries: [BEBOP_BOUNDARY],
-        intervalMs: 50,
+        intervalMs: 1_000,
         memberBudgetMs: 60,
         onMemberBudgetExceeded,
       })
@@ -417,13 +463,14 @@ describe('SpaceSyncScheduler', () => {
 
   it('counts a halted runner result separately from a failure', async () => {
     const spike = makeTarget({ did: SPIKE_DID })
-    const membership = fakeMembership([successOutcome([spike])])
+    const faye = makeTarget({ did: FAYE_DID })
+    const jet = makeTarget({ did: JET_DID })
+    const membership = fakeMembership([successOutcome([spike, faye, jet])])
     const runTarget = vi.fn(
-      async (): Promise<SpaceSyncRunResult> => ({
-        target: spike,
-        ok: false,
-        reason: 'halted',
-      }),
+      async (target: PollTarget): Promise<SpaceSyncRunResult> =>
+        target.did === SPIKE_DID
+          ? { target, ok: false, reason: 'halted' }
+          : { target, ok: false, reason: 'member-skip' },
     )
     const log = vi.fn()
 
@@ -440,11 +487,108 @@ describe('SpaceSyncScheduler', () => {
     await vi.advanceTimersByTimeAsync(1_000)
 
     expect(log).toHaveBeenCalledExactlyOnceWith({
-      targets: 1,
+      targets: 3,
       succeeded: 0,
-      failed: 0,
+      failed: 2,
       abandoned: 0,
       halted: 1,
+    })
+
+    await scheduler.stop()
+  })
+
+  it('does not dispatch targets after a stopped pass receives delayed membership results', async () => {
+    const spike = makeTarget()
+    const gate = deferred<BoundaryPassOutcome[]>()
+    const membership = { runPass: vi.fn(async () => gate.promise) }
+    const runner = fakeRunner()
+    const log = vi.fn()
+    const onStopTimedOut = vi.fn()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      stopGraceMs: 500,
+      random: () => 0.5,
+      log,
+      onStopTimedOut,
+    })
+    scheduler.start()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    const stopping = scheduler.stop()
+    await vi.advanceTimersByTimeAsync(500)
+    await stopping
+    gate.resolve([successOutcome([spike])])
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onStopTimedOut).toHaveBeenCalledOnce()
+    expect(runner.runTarget).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('does not dispatch queued targets after the stop grace aborts active work', async () => {
+    const spike = makeTarget({ did: SPIKE_DID })
+    const faye = makeTarget({ did: FAYE_DID })
+    const membership = fakeMembership([successOutcome([spike, faye])])
+    const runner = {
+      runTarget: vi.fn(
+        async (_target: PollTarget, signal?: AbortSignal) =>
+          await new Promise<SpaceSyncRunResult>((_resolve, reject) => {
+            signal?.addEventListener('abort', () =>
+              reject(new Error('aborted')),
+            )
+          }),
+      ),
+    }
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      memberConcurrency: 1,
+      stopGraceMs: 500,
+      random: () => 0.5,
+    })
+    scheduler.start()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    const stopping = scheduler.stop()
+    await vi.advanceTimersByTimeAsync(500)
+    await stopping
+
+    expect(runner.runTarget).toHaveBeenCalledExactlyOnceWith(
+      spike,
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('counts a rejected runner call as a failed target', async () => {
+    const spike = makeTarget()
+    const failure = new Error('runner contract violation')
+    const onError = vi.fn()
+    const log = vi.fn()
+    const scheduler = new SpaceSyncScheduler({
+      membership: fakeMembership([successOutcome([spike])]),
+      runner: { runTarget: vi.fn(async () => Promise.reject(failure)) },
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      random: () => 0.5,
+      onError,
+      log,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(onError).toHaveBeenCalledExactlyOnceWith(failure)
+    expect(log).toHaveBeenCalledExactlyOnceWith({
+      targets: 1,
+      succeeded: 0,
+      failed: 1,
+      abandoned: 0,
+      halted: 0,
     })
 
     await scheduler.stop()
@@ -519,6 +663,39 @@ describe('SpaceSyncScheduler', () => {
     // it late must not throw or otherwise surface after stop() gave up.
     gate.resolve([])
     await vi.advanceTimersByTimeAsync(0)
+  })
+
+  it('aborts active member polls after the stop grace period', async () => {
+    const spike = makeTarget()
+    const membership = fakeMembership([successOutcome([spike])])
+    let signal: AbortSignal | undefined
+    const runner = {
+      runTarget: vi.fn(
+        async (_target: PollTarget, nextSignal?: AbortSignal) => {
+          signal = nextSignal
+          return await new Promise<SpaceSyncRunResult>((_resolve, reject) => {
+            nextSignal?.addEventListener('abort', () =>
+              reject(new Error('aborted')),
+            )
+          })
+        },
+      ),
+    }
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      stopGraceMs: 500,
+      random: () => 0.5,
+    })
+    scheduler.start()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    const stopping = scheduler.stop()
+    await vi.advanceTimersByTimeAsync(500)
+    await stopping
+    expect(signal?.aborted).toBe(true)
   })
 
   it('stop() before start() resolves immediately without side effects', async () => {

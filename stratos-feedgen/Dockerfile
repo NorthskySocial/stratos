@@ -8,11 +8,13 @@
 #             -e FEEDGEN_SIGNING_KEY=<hex> \
 #             -e STRATOS_SERVICE_URL=https://stratos.example.com \
 #             -e STRATOS_SERVICE_DID=did:web:stratos.example.com \
-#             -e FEEDGEN_SQLITE_PATH=/app/data/feedgen.sqlite \
 #             -e FEEDGEN_FEEDS_FILE=/app/config/feeds.yaml \
 #             -v /path/to/feeds.yaml:/app/config/feeds.yaml:ro \
-#             -v feedgen-data:/app/data \
 #             stratos-feedgen
+#
+# Persistence is opt-in and retains private feed data:
+#             -e FEEDGEN_SQLITE_PATH=/app/data/feedgen.sqlite \
+#             -v feedgen-data:/app/data \
 
 # --- Build stage: install workspace deps and run esbuild bundle ---
 FROM node:24-alpine AS builder
@@ -58,7 +60,7 @@ RUN apk add --no-cache wget \
 # Bundled application (single ESM file + sourcemap).
 COPY --from=builder /app/stratos-feedgen/dist-bundle/ ./
 
-RUN mkdir -p /app/data /app/config && chown -R node:node /app/data /app/config
+RUN mkdir -p /app/config && chown -R node:node /app/config
 
 USER node
 

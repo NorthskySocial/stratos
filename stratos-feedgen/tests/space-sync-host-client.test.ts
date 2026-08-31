@@ -6,6 +6,7 @@ import {
   ServerResponse,
 } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { StratosError } from '@northskysocial/stratos-core'
 import {
   createDpopProof,
   generateDpopKeyPair,
@@ -418,7 +419,37 @@ describe('SpaceHostClient', () => {
       },
     )
 
-    it('defaults a malformed cid to null and omits an absent value field', async () => {
+    it.each([404, false, {}, undefined] as const)(
+      'rejects a non-string cid',
+      async (cid) => {
+        mock.handler = (_req, res) => {
+          res.setHeader('content-type', 'application/json')
+          res.end(
+            JSON.stringify({
+              ops: [
+                {
+                  rev: '1',
+                  collection: 'zone.stratos.feed.post',
+                  rkey: 'a1',
+                  cid,
+                },
+              ],
+            }),
+          )
+        }
+        const client = await createClient()
+        await expect(
+          client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+        ).rejects.toMatchObject({
+          name: 'SpaceHostInvalidResponseError',
+          message: expect.stringContaining(
+            'op at index 0 had an invalid "cid"',
+          ),
+        })
+      },
+    )
+
+    it('accepts a null cid for a deleted record', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(
@@ -428,7 +459,30 @@ describe('SpaceHostClient', () => {
                 rev: '1',
                 collection: 'zone.stratos.feed.post',
                 rkey: 'a1',
-                cid: 404,
+                cid: null,
+              },
+            ],
+          }),
+        )
+      }
+      const client = await createClient()
+
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).resolves.toMatchObject({ ops: [{ cid: null }] })
+    })
+
+    it('omits an absent inline value from a repo operation', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            ops: [
+              {
+                rev: '1',
+                collection: 'zone.stratos.feed.post',
+                rkey: 'a1',
+                cid: 'bafyA',
               },
             ],
           }),
@@ -439,15 +493,8 @@ describe('SpaceHostClient', () => {
         space: SPACE_URI,
         repo: REPO_DID,
       })
-      expect(result.ops).toEqual([
-        {
-          rev: '1',
-          collection: 'zone.stratos.feed.post',
-          rkey: 'a1',
-          cid: null,
-        },
-      ])
-      expect(Object.hasOwn(result.ops[0], 'value')).toBe(false)
+
+      expect(result.ops[0]).not.toHaveProperty('value')
     })
 
     it('treats a non-string cursor as absent', async () => {
@@ -715,6 +762,51 @@ describe('SpaceHostClient', () => {
       expect((err as Error).cause).toBeDefined()
     })
 
+    it('preserves a fetch error when the caller aborts the request', async () => {
+      const controller = new AbortController()
+      const abortError = new DOMException('aborted', 'AbortError')
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => ['8.8.8.8'],
+        fetch: async () => {
+          controller.abort()
+          throw abortError
+        },
+      })
+
+      await expect(
+        client.listRepoOps({
+          space: SPACE_URI,
+          repo: REPO_DID,
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(abortError)
+    })
+
+    it('preserves a body error when the caller aborts the request', async () => {
+      const controller = new AbortController()
+      const abortError = new DOMException('aborted', 'AbortError')
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          controller.abort()
+          stream.error(abortError)
+        },
+      })
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: async () => ['8.8.8.8'],
+        fetch: async () => new Response(body),
+      })
+
+      await expect(
+        client.listRepoOps({
+          space: SPACE_URI,
+          repo: REPO_DID,
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(abortError)
+    })
+
     it('treats a 2xx response with no body as an invalid response, not a crash', async () => {
       mock.handler = (_req, res) => {
         // A null-body status per the fetch spec: `res.body` is `null`, so
@@ -824,6 +916,8 @@ describe('space-sync error taxonomy', () => {
       expect(err.name).toBe(name)
       expect(err.url).toBe('https://nerv.example/xrpc/foo')
       expect(err).toBeInstanceOf(SpaceHostClientError)
+      expect(err).toBeInstanceOf(StratosError)
+      expect(err.code).toBe('SpaceHostClientError')
     }
   })
 

@@ -1,5 +1,5 @@
-// Generates src/lexicons.gen.ts by inlining the canonical Stratos lexicon JSON
-// documents (lexicons/zone/stratos/**) into a browser-safe TypeScript module.
+// Generates src/lexicons.gen.ts by inlining the Stratos lexicon JSON documents
+// into a browser-safe TypeScript module.
 //
 // The bundle is inlined (rather than importing JSON at runtime) so the published
 // package works from its compiled dist/ output without shipping JSON assets.
@@ -11,7 +11,10 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
-const lexiconsDir = resolve(scriptDir, '../../lexicons/zone/stratos')
+const lexiconDirs = [
+  resolve(scriptDir, '../../lexicons/zone/stratos'),
+  resolve(scriptDir, '../../lexicons-spaces/zone/stratos'),
+]
 const outFile = resolve(scriptDir, '../src/lexicons.gen.ts')
 
 function collectJsonFiles(dir) {
@@ -27,7 +30,8 @@ function collectJsonFiles(dir) {
   return found
 }
 
-const docs = collectJsonFiles(lexiconsDir)
+const docs = lexiconDirs
+  .flatMap(collectJsonFiles)
   .map((file) => {
     const raw = readFileSync(file, 'utf-8').trim()
     const id = JSON.parse(raw).id
@@ -41,7 +45,7 @@ const docs = collectJsonFiles(lexiconsDir)
 const banner = `/* eslint-disable */
 // AUTO-GENERATED FILE — DO NOT EDIT.
 // Regenerate with: pnpm --filter @northskysocial/stratos-client lexgen
-// Source: lexicons/zone/stratos/**/*.json
+// Source: lexicons*/zone/stratos/**/*.json
 `
 
 const body = `import type { LexiconDoc } from '@atproto/lexicon'

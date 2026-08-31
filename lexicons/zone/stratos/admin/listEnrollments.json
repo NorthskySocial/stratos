@@ -22,6 +22,15 @@
           "boundary": {
             "type": "string",
             "description": "Only return members holding this boundary."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Only return active or inactive enrollments."
+          },
+          "custody": {
+            "type": "string",
+            "enum": ["stratos", "pds"],
+            "description": "Only return enrollments with this repo custody."
           }
         }
       },
@@ -44,7 +53,7 @@
             },
             "total": {
               "type": "integer",
-              "description": "Total number of enrollments in the service. Absent when a boundary filter is applied."
+              "description": "Total number of enrollments in the service. Absent when any filter is applied."
             }
           }
         }
@@ -52,7 +61,7 @@
     },
     "enrollment": {
       "type": "object",
-      "required": ["did", "enrolledAt", "active", "boundaries"],
+      "required": ["did", "enrolledAt", "active", "custody", "boundaries"],
       "properties": {
         "did": {
           "type": "string",
@@ -71,6 +80,16 @@
         "isService": {
           "type": "boolean",
           "description": "Whether this is a service enrollment rather than a user."
+        },
+        "custody": {
+          "type": "string",
+          "enum": ["stratos", "pds"],
+          "description": "Who hosts the member repository."
+        },
+        "repoHost": {
+          "type": "string",
+          "format": "uri",
+          "description": "The repository host recorded for a PDS-custody member."
         },
         "boundaries": {
           "type": "array",

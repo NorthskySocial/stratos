@@ -139,7 +139,11 @@ export class MembershipTracker {
     // Departed dids carry the `BoundaryPassSuccess` they departed from
     // directly, so resolving one never needs a second, boundary-keyed lookup
     // back into `outcomes`.
-    const left: Array<{ outcome: BoundaryPassSuccess; did: string }> = []
+    const left: Array<{
+      outcome: BoundaryPassSuccess
+      did: string
+      spaceUri: string
+    }> = []
     const outcomes: BoundaryPassOutcome[] = []
 
     settled.forEach((result, i) => {
@@ -165,13 +169,18 @@ export class MembershipTracker {
         skippedNoHost: skippedNoHost.length,
         removed: [],
       }
-      const previousDids = new Set(previous.map((p) => p.did))
       // A DID absent from `polls` may simply be hostless this pass, or have
       // flipped custody away from `pds` — neither is a departure. Only a DID
       // missing from the completed listing entirely has left.
       const stillPresentDids = new Set(seenDids)
-      for (const did of previousDids) {
-        if (!stillPresentDids.has(did)) left.push({ outcome, did })
+      for (const previousPoll of previous) {
+        if (!stillPresentDids.has(previousPoll.did)) {
+          left.push({
+            outcome,
+            did: previousPoll.did,
+            spaceUri: previousPoll.spaceUri,
+          })
+        }
       }
       outcomes.push(outcome)
     })
@@ -184,7 +193,7 @@ export class MembershipTracker {
     // no fresh confirmation that they left, so we do not purge on that
     // boundary's account.
     const purgedActor = new Set<string>()
-    for (const { outcome, did } of left) {
+    for (const { outcome, did, spaceUri } of left) {
       const stillMember = [...this.lastPolls.values()].some((polls) =>
         polls.some((p) => p.did === did),
       )
@@ -193,6 +202,7 @@ export class MembershipTracker {
           did,
           outcome.boundary,
           'space-boundary-shrink',
+          spaceUri,
         )
         outcome.removed.push({ did, scope: 'boundary' })
         continue

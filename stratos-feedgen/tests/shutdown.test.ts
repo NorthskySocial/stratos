@@ -190,6 +190,31 @@ describe('createShutdownHandler', () => {
     expect(exit).toHaveBeenCalledWith(0)
   })
 
+  it('continues shutdown when the space sync scheduler misses the deadline', async () => {
+    const lines: CapturedLine[] = []
+    const exit = vi.fn()
+    const storeClose = vi.fn(async () => {})
+    const handler = createShutdownHandler({
+      spaceSyncScheduler: { stop: () => new Promise<void>(() => {}) },
+      store: { close: storeClose },
+      logger: captureLogger(lines),
+      drainTimeoutMs: 50,
+      exit,
+    })
+
+    await handler('SIGTERM')
+
+    expect(storeClose).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledWith(0)
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        obj: { timeoutMs: 50 },
+        msg: 'space sync scheduler drain deadline expired; continuing shutdown',
+      }),
+    )
+  })
+
   it('destroys sockets still open at the drain deadline and exits 0', async () => {
     const lines: CapturedLine[] = []
     const requestReceived = deferred()

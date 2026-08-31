@@ -4,6 +4,7 @@ import { TID } from '@atproto/common-web'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { ActorTransactor } from '../../actor-store-types.js'
 import {
+  assertStratosWriteAllowed,
   buildCommit,
   computeCid,
   encodeRecord,
@@ -376,16 +377,8 @@ export async function applyWritesBatch(
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
 
-  // A 'pds' custody actor keeps their repo on their own PDS and signs with
-  // their own key; Stratos must not also accept batched writes for it. See
-  // create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
-  if (enrollment?.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
-  }
+  assertStratosWriteAllowed(enrollment?.custody)
 
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(
     ctx,

@@ -1,6 +1,7 @@
 import { type Cid as CID } from '@atproto/lex-data'
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import {
+  assertStratosWriteAllowed,
   computeCid,
   encodeRecord,
   parseCid,
@@ -112,15 +113,8 @@ export async function updateRecord(
     )
   }
 
-  // A 'pds' custody actor keeps their repo on their own PDS and signs with
-  // their own key; Stratos must not also accept updates for it. See create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
-  if (enrollment?.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
-  }
+  assertStratosWriteAllowed(enrollment?.custody)
 
   const { recordBytes, cid } = await prepareUpdatePhases(
     ctx,

@@ -121,3 +121,14 @@ export class MissingAtprotoKeyError extends StratosError {
     this.name = 'MissingAtprotoKeyError'
   }
 }
+
+export class PdsCustodyWriteForbiddenError extends StratosError {
+  constructor(options?: { cause?: unknown }) {
+    super(
+      'This actor writes records to their own PDS',
+      'PdsCustodyWriteForbidden',
+      options,
+    )
+    this.name = 'PdsCustodyWriteForbiddenError'
+  }
+}

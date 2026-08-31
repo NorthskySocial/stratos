@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { PdsCustodyWriteForbiddenError } from '@northskysocial/stratos-core'
 import { applyWritesBatch } from '../src/api/records/batch.js'
 import type { BatchWriteOp } from '../src/api/records/batch.js'
 import type { AppContext } from '../src/context-types.js'
@@ -32,12 +32,12 @@ describe('applyWritesBatch pds-custody rejection', () => {
     })
 
     await expect(applyWritesBatch(ctx, CALLER_DID, buildOps())).rejects.toThrow(
-      InvalidRequestError,
+      PdsCustodyWriteForbiddenError,
     )
     await expect(
       applyWritesBatch(ctx, CALLER_DID, buildOps()),
     ).rejects.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
       message: 'This actor writes records to their own PDS',
     })
   })
@@ -70,7 +70,7 @@ describe('applyWritesBatch pds-custody rejection', () => {
     await expect(
       applyWritesBatch(ctx, CALLER_DID, buildOps()),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })
@@ -85,7 +85,18 @@ describe('applyWritesBatch pds-custody rejection', () => {
     await expect(
       applyWritesBatch(ctx, CALLER_DID, buildOps()),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
+    })
+    expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
+  })
+
+  it('allows a missing enrollment to reach the existing write path', async () => {
+    const ctx = buildContext(undefined)
+
+    await expect(
+      applyWritesBatch(ctx, CALLER_DID, buildOps()),
+    ).rejects.not.toMatchObject({
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })

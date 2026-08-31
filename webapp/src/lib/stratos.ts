@@ -39,6 +39,8 @@ export interface ServiceAttestation {
 
 export interface StratosEnrollment {
   service: string
+  custody: 'stratos' | 'pds'
+  repoHost?: string
   boundaries: Array<{ value: string }>
   signingKey: string
   attestation: ServiceAttestation | null
@@ -106,6 +108,8 @@ function parseEnrollmentRecord(
   if (typeof val.service !== 'string') return null
   return {
     service: val.service,
+    custody: val.custody === 'pds' ? 'pds' : 'stratos',
+    repoHost: typeof val.repoHost === 'string' ? val.repoHost : undefined,
     boundaries: Array.isArray(val.boundaries) ? val.boundaries : [],
     signingKey: (val.signingKey as string) ?? '',
     attestation: parseAttestation(val.attestation),

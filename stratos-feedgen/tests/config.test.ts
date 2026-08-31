@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  DEFAULT_SQLITE_PATH,
   DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS,
   DEFAULT_SPACE_SYNC_ENABLED,
   DEFAULT_SPACE_SYNC_INTERVAL_MS,
@@ -7,6 +8,7 @@ import {
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
   DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
   DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+  DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
   loadFeedgenConfig,
@@ -18,8 +20,43 @@ const baseEnv = {
   FEEDGEN_SIGNING_KEY: 'unused-by-this-test',
   STRATOS_SERVICE_URL: 'https://stratos.bebop.test',
   STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
-  FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
 }
+
+describe('loadFeedgenConfig SQLite storage', () => {
+  it('declares the in-memory SQLite default', async () => {
+    vi.resetModules()
+    const { DEFAULT_SQLITE_PATH: sqlitePath } = await import('../src/config.js')
+
+    expect(sqlitePath).toBe(':memory:')
+  })
+
+  it('uses the in-memory database when the path is unset or empty', () => {
+    expect(DEFAULT_SQLITE_PATH).toBe(':memory:')
+    expect(loadFeedgenConfig({ ...baseEnv }).sqlitePath).toBe(':memory:')
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_SQLITE_PATH: '' }).sqlitePath,
+    ).toBe(':memory:')
+  })
+
+  it('keeps an explicit SQLite path unchanged', () => {
+    const sqlitePath = ' /var/lib/feedgen/private.sqlite '
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_SQLITE_PATH: sqlitePath })
+        .sqlitePath,
+    ).toBe(sqlitePath)
+  })
+
+  it('still requires a Postgres URL for the Postgres backend', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_STORAGE_BACKEND: 'postgres',
+      }),
+    ).toThrow(
+      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+    )
+  })
+})
 
 describe('loadFeedgenConfig space-sync defaults', () => {
   it('applies every space-sync default when no env vars are set', () => {
@@ -33,6 +70,9 @@ describe('loadFeedgenConfig space-sync defaults', () => {
     )
     expect(cfg.spaceSyncMemberBudgetMs).toBe(
       DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+    )
+    expect(cfg.spaceSyncMemberConcurrency).toBe(
+      DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
     )
     expect(cfg.spaceSyncMaxRecordBytes).toBe(
       DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
@@ -68,6 +108,7 @@ describe('loadFeedgenConfig space-sync overrides', () => {
       FEEDGEN_SPACE_SYNC_MAX_PAGES: '4',
       FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS: '5000',
       FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS: '20000',
+      FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY: '3',
       FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES: '131072',
       FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER: '500',
     })
@@ -76,6 +117,7 @@ describe('loadFeedgenConfig space-sync overrides', () => {
     expect(cfg.spaceSyncMaxPages).toBe(4)
     expect(cfg.spaceSyncRequestTimeoutMs).toBe(5_000)
     expect(cfg.spaceSyncMemberBudgetMs).toBe(20_000)
+    expect(cfg.spaceSyncMemberConcurrency).toBe(3)
     expect(cfg.spaceSyncMaxRecordBytes).toBe(131_072)
     expect(cfg.spaceSyncMaxRecordsPerMember).toBe(500)
   })
@@ -87,6 +129,13 @@ describe('loadFeedgenConfig space-sync overrides', () => {
         FEEDGEN_SPACE_SYNC_PAGE_LIMIT: '0',
       }),
     ).toThrow(/FEEDGEN_SPACE_SYNC_PAGE_LIMIT/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY: '0',
+      }),
+    ).toThrow(/FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY/)
   })
 })
 

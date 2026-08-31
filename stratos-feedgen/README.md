@@ -75,12 +75,12 @@ flowchart TD
 
 ### Storage choices
 
-| Concern                        | Choice                               |
-| ------------------------------ | ------------------------------------ |
-| Post / boundary / cursor index | SQLite (WAL) via Drizzle             |
-| Blob cache                     | S3 or filestore                      |
-| Feed configuration             | Static — JSON/YAML file or env var   |
-| Viewer boundary cache          | In-process TTL + LRU (300 s default) |
+| Concern                        | Choice                                  |
+| ------------------------------ | --------------------------------------- |
+| Post / boundary / cursor index | SQLite in memory by default via Drizzle |
+| Blob cache                     | S3 or filestore                         |
+| Feed configuration             | Static — JSON/YAML file or env var      |
+| Viewer boundary cache          | In-process TTL + LRU (300 s default)    |
 
 ### Moderation labels
 
@@ -118,16 +118,30 @@ tests/
 
 ## Configuration
 
-| Env var                 | Required | Description                                                                    |
-| ----------------------- | -------- | ------------------------------------------------------------------------------ |
-| `FEEDGEN_SERVICE_DID`   | yes      | This feed generator's service DID (e.g. `did:web:feedgen.example.com`)         |
-| `FEEDGEN_SIGNING_KEY`   | yes      | Private signing key for this feed generator's service identity (hex secp256k1) |
-| `STRATOS_SERVICE_URL`   | yes      | Base URL of the upstream Stratos service                                       |
-| `STRATOS_SERVICE_DID`   | yes      | DID of the upstream Stratos service                                            |
-| `FEEDGEN_LOG_LEVEL`     | no       | Pino log level (default `info`; an empty value falls back to the default)      |
-| `FEEDGEN_METRICS_TOKEN` | no       | Bearer token required on `/metrics`; unset leaves the endpoint open            |
+| Env var                   | Required | Description                                                                    |
+| ------------------------- | -------- | ------------------------------------------------------------------------------ |
+| `FEEDGEN_SERVICE_DID`     | yes      | This feed generator's service DID (e.g. `did:web:feedgen.example.com`)         |
+| `FEEDGEN_SIGNING_KEY`     | yes      | Private signing key for this feed generator's service identity (hex secp256k1) |
+| `STRATOS_SERVICE_URL`     | yes      | Base URL of the upstream Stratos service                                       |
+| `STRATOS_SERVICE_DID`     | yes      | DID of the upstream Stratos service                                            |
+| `FEEDGEN_STORAGE_BACKEND` | no       | Storage backend: `sqlite` (default) or `postgres`                              |
+| `FEEDGEN_SQLITE_PATH`     | no       | SQLite location; unset or empty uses `:memory:`                                |
+| `FEEDGEN_POSTGRES_URL`    | postgres | Postgres connection URL; required with `FEEDGEN_STORAGE_BACKEND=postgres`      |
+| `FEEDGEN_LOG_LEVEL`       | no       | Pino log level (default `info`; an empty value falls back to the default)      |
+| `FEEDGEN_METRICS_TOKEN`   | no       | Bearer token required on `/metrics`; unset leaves the endpoint open            |
 
 Additional configuration (DB path, port, S3 cache settings, feed definitions, labeler DIDs) is added as the corresponding subsystems land.
+
+### Feed index durability
+
+SQLite uses `:memory:` by default. Feedgen loses its post, boundary, enrollment, and
+cursor index on restart, then rebuilds it from the Stratos replay streams. This keeps
+private feed content out of the container filesystem by default. The Compose overlay
+also sets the core-dump limit to zero because process memory can contain private content.
+
+To retain the index, set `FEEDGEN_SQLITE_PATH` to an explicit file path and mount durable
+storage for that path. This persists private records, boundaries, enrollments, and cursors;
+protect, encrypt, and manage that storage as private content.
 
 ## Observability
 

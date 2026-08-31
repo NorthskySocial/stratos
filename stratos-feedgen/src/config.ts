@@ -28,7 +28,7 @@ export interface FeedgenConfig {
   feedgenAllowedLxms: readonly string[]
   /** Storage backend selection. */
   storageBackend: StorageBackend
-  /** Path to SQLite database file (used when `storageBackend === 'sqlite'`). */
+  /** SQLite location used when `storageBackend === 'sqlite'`. */
   sqlitePath?: string
   /** Postgres connection URL (used when `storageBackend === 'postgres'`). */
   postgresUrl?: string
@@ -55,6 +55,8 @@ export interface FeedgenConfig {
   spaceSyncRequestTimeoutMs: number
   /** Time budget (ms) for one member in one pass. A member over budget is abandoned for that pass. */
   spaceSyncMemberBudgetMs: number
+  /** Maximum number of members synced concurrently in one pass. */
+  spaceSyncMemberConcurrency: number
   /** Max accepted size (bytes) of a single record fetched from a member's host. */
   spaceSyncMaxRecordBytes: number
   /** Max records indexed for one member in one pass. */
@@ -66,6 +68,7 @@ export interface FeedgenConfig {
 export type StorageBackend = 'sqlite' | 'postgres'
 
 export const DEFAULT_STORAGE_BACKEND: StorageBackend = 'sqlite'
+export const DEFAULT_SQLITE_PATH = ':memory:'
 export const DEFAULT_BOUNDARY_CACHE_TTL_MS = 300_000
 export const DEFAULT_BOUNDARY_CACHE_MAX = 10_000
 
@@ -84,6 +87,7 @@ export const DEFAULT_SPACE_SYNC_PAGE_LIMIT = 1_000
 export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
 export const DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS = 10_000
 export const DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS = 60_000
+export const DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY = 8
 export const DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES = 65_536
 export const DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER = 1_000
 export const DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS: ReadonlySet<string> =
@@ -97,15 +101,10 @@ export function loadFeedgenConfig(
   env: FeedgenEnv = process.env,
 ): FeedgenConfig {
   const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
-  const sqlitePath = env['FEEDGEN_SQLITE_PATH']
+  const sqlitePath = nonEmpty(env['FEEDGEN_SQLITE_PATH']) ?? DEFAULT_SQLITE_PATH
   const postgresUrl = env['FEEDGEN_POSTGRES_URL']
   const postgresSchema = env['FEEDGEN_POSTGRES_SCHEMA']
 
-  if (storageBackend === 'sqlite' && !sqlitePath) {
-    throw new Error(
-      'Missing required env var FEEDGEN_SQLITE_PATH for sqlite backend',
-    )
-  }
   if (storageBackend === 'postgres' && !postgresUrl) {
     throw new Error(
       'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
@@ -176,6 +175,11 @@ export function loadFeedgenConfig(
       env['FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS'],
       'FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS',
       DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+    ),
+    spaceSyncMemberConcurrency: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY'],
+      'FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY',
+      DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
     ),
     spaceSyncMaxRecordBytes: parsePositiveInt(
       env['FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES'],

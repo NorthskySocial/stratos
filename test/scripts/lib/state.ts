@@ -16,6 +16,11 @@ export interface UserState {
   records: Record<string, RecordRef>
 }
 
+export interface MixedModeState {
+  member: UserState
+  hostile: UserState
+}
+
 export interface TestState {
   users: Record<string, UserState>
   stratosRunning: boolean
@@ -23,6 +28,7 @@ export interface TestState {
   serviceDid?: string
   /** Admin session cookie captured by configure-boundaries.ts for later phases. */
   adminSessionCookie?: string
+  mixedMode?: MixedModeState
 }
 
 export function emptyState(): TestState {

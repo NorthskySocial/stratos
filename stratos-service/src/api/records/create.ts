@@ -2,6 +2,7 @@ import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import { TID } from '@atproto/common-web'
 import { AtUri } from '@atproto/syntax'
 import {
+  assertStratosWriteAllowed,
   computeCid,
   encodeRecord,
   parseCid,
@@ -94,16 +95,7 @@ export async function createRecord(
       'ServiceWriteForbidden',
     )
   }
-  // A 'pds' custody actor keeps their repo on their own PDS and signs with
-  // their own key. `getSignFn` mints a Stratos key when none exists, so
-  // without this gate the first write creates a second key and a Stratos repo
-  // that no attestation covers.
-  if (enrollment.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
-  }
+  assertStratosWriteAllowed(enrollment.custody)
 
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 

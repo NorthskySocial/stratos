@@ -81,7 +81,7 @@ async function start() {
     const serviceUrl = serviceListener.url()!
     console.log(`Service Tunnel URL: ${serviceUrl}`)
 
-    const derivedServiceDid = `did:web:${encodeURIComponent(new URL(serviceUrl).hostname)}`
+    const derivedServiceDid = `did:web:${encodeURIComponent(new URL(serviceUrl).host)}`
     console.log(`Derived Service DID: ${derivedServiceDid}`)
 
     // 3. Start a cloudflared quick tunnel for the webapp.
@@ -184,6 +184,10 @@ async function start() {
     if (fs.existsSync(clientMetadataTemplatePath)) {
       let content = fs.readFileSync(clientMetadataTemplatePath, 'utf8')
       content = content.replace(/VITE_WEBAPP_URL/g, webappUrl)
+      content = content.replace(
+        /VITE_STRATOS_SERVICE_DID_ENCODED/g,
+        encodeURIComponent(derivedServiceDid),
+      )
       fs.writeFileSync(clientMetadataPath, content)
       console.log(`Updated ${clientMetadataPath} with ${webappUrl}`)
     }

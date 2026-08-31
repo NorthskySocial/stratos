@@ -183,6 +183,7 @@ export class SpaceHostClient {
         },
       })
     } catch (err) {
+      if (signal?.aborted) throw err
       throw classifyFetchError(err, url.toString())
     }
 
@@ -191,6 +192,7 @@ export class SpaceHostClient {
       res.ok ? capBytes : ERROR_BODY_CAP_BYTES,
       url.toString(),
       !res.ok,
+      signal,
     )
     if (!res.ok) {
       throw buildRequestError(res.status, text, url.toString())
@@ -247,6 +249,7 @@ async function readBodyWithCap(
   capBytes: number,
   url: string,
   truncate = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   const body = res.body
   if (!body) return ''
@@ -272,6 +275,7 @@ async function readBodyWithCap(
     }
   } catch (err) {
     if (err instanceof SpaceHostResponseTooLargeError) throw err
+    if (signal?.aborted) throw err
     throw classifyFetchError(err, url)
   } finally {
     await reader.cancel().catch(() => {})
@@ -391,11 +395,17 @@ function decodeRepoOp(entry: unknown, index: number, url: string): RepoOpEntry {
       `op at index ${index} was missing a required field`,
     )
   }
+  if (cid !== null && typeof cid !== 'string') {
+    throw new SpaceHostInvalidResponseError(
+      url,
+      `op at index ${index} had an invalid "cid"`,
+    )
+  }
   return {
     rev,
     collection,
     rkey,
-    cid: typeof cid === 'string' ? cid : null,
+    cid,
     ...(value !== undefined ? { value } : {}),
   }
 }

@@ -1,4 +1,5 @@
 import { ENROLLMENT_MODE, EnrollmentConfig } from '../types.js'
+import { PdsCustodyWriteForbiddenError } from '../shared/errors.js'
 import type {
   Custody,
   EnrollmentValidationResult,
@@ -107,17 +108,23 @@ export function validateEnrollmentEligibility(
 
 /**
  * Decide which repo custody a new enrollment gets from its capability
- * probe verdict. Only a confirmed 'capable' result grants 'pds' custody --
- * 'not-capable' and 'unknown' both fall back to 'stratos' custody, since an
- * inconclusive probe must never be treated as a capability grant.
+ * probe verdict. An inconclusive result cannot safely select a custody class.
  *
  * @param spacesCapability - The enrolment-time capability probe verdict.
- * @returns The custody class for the new enrollment.
+ * @returns The custody class for the new enrollment, or undefined when the
+ * capability probe did not produce a usable result.
  */
 export function classifyCustody(
   spacesCapability: SpacesCapability | undefined,
-): Custody {
-  return spacesCapability === 'capable' ? 'pds' : 'stratos'
+): Custody | undefined {
+  if (spacesCapability === 'capable') return 'pds'
+  if (spacesCapability === 'not-capable') return 'stratos'
+  return undefined
+}
+
+/** Reject a Stratos write for an actor whose PDS owns their repository. */
+export function assertStratosWriteAllowed(custody: Custody | undefined): void {
+  if (custody === 'pds') throw new PdsCustodyWriteForbiddenError()
 }
 
 /**

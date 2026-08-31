@@ -1,14 +1,18 @@
 import express, { type Request, type Response } from 'express'
 import { Agent } from '@atproto/api'
+import { ensureValidDid } from '@atproto/syntax'
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
 import {
+  boundaryToSpaceUri,
   type Enrollment,
   EnrollmentDeniedError,
+  resolveRepoHost,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
-import { serviceDIDToRkey } from '../../oauth'
+import { serviceDIDToRkey, SPACE_TYPE } from '../../oauth'
+import { createRepoHostResolverDeps } from '../space-read/host-resolution.js'
 import { verifyEnrolled } from './internal/auth.js'
 
 const RESOLVE_CACHE_TTL_MS = 60 * 1000
@@ -91,6 +95,7 @@ export function registerEnrollmentHandlers(
   registerResolveEnrollmentsHandler(ctx, resolveCache)
   registerAdminBoundaryHandlers(ctx, resolveCache)
   registerListEnrollmentsHandler(ctx)
+  registerGetRepoHostHandler(ctx)
   registerListDomainsHandler(ctx)
 }
 
@@ -897,6 +902,8 @@ interface ListedEnrollment {
   enrolledAt: string
   active: boolean
   isService: boolean
+  custody: 'stratos' | 'pds'
+  repoHost?: string
   boundaries: string[]
 }
 
@@ -916,6 +923,8 @@ async function withBoundaries(
     enrolledAt: string
     active: boolean
     isService?: boolean
+    custody?: 'stratos' | 'pds'
+    repoHost?: string
   }>,
 ): Promise<ListedEnrollment[]> {
   const boundaries = await Promise.all(
@@ -926,6 +935,8 @@ async function withBoundaries(
     enrolledAt: row.enrolledAt,
     active: row.active,
     isService: row.isService ?? false,
+    custody: row.custody ?? 'stratos',
+    ...(row.repoHost ? { repoHost: row.repoHost } : {}),
     boundaries: boundaries[index],
   }))
 }
@@ -1126,7 +1137,22 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
         const wantActive =
           rawActive === undefined ? undefined : rawActive === 'true'
 
-        const filtered = rawBoundary !== undefined || wantActive !== undefined
+        const rawCustody = req.query.custody
+        if (
+          rawCustody !== undefined &&
+          rawCustody !== 'stratos' &&
+          rawCustody !== 'pds'
+        ) {
+          return res.status(400).json({
+            error: 'InvalidRequest',
+            message: "custody must be 'stratos' or 'pds'",
+          })
+        }
+
+        const filtered =
+          rawBoundary !== undefined ||
+          wantActive !== undefined ||
+          rawCustody !== undefined
         const { enrollments, hasMore, nextCursor } = filtered
           ? await collectFilteredPage(
               ctx,
@@ -1134,7 +1160,9 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
               (enrollment) =>
                 (rawBoundary === undefined ||
                   enrollment.boundaries.includes(rawBoundary)) &&
-                (wantActive === undefined || enrollment.active === wantActive),
+                (wantActive === undefined ||
+                  enrollment.active === wantActive) &&
+                (rawCustody === undefined || enrollment.custody === rawCustody),
               rawCursor,
             )
           : await collectPage(ctx, limit, rawCursor)
@@ -1161,6 +1189,92 @@ function registerListEnrollmentsHandler(ctx: AppContext): void {
         res.status(500).json({
           error: 'InternalError',
           message: 'Failed to list enrollments',
+        })
+      }
+    },
+  )
+}
+
+function registerGetRepoHostHandler(ctx: AppContext): void {
+  ctx.app.get(
+    '/xrpc/zone.stratos.admin.getRepoHost',
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.authVerifier.admin({ req, res })
+      } catch {
+        return res
+          .status(401)
+          .json({ error: 'AuthRequired', message: 'Admin auth required' })
+      }
+
+      const did = req.query.did
+      if (typeof did !== 'string' || did.length === 0) {
+        return res.status(400).json({
+          error: 'InvalidRequest',
+          message: 'did must be a non-empty string',
+        })
+      }
+      try {
+        ensureValidDid(did)
+      } catch {
+        return res.status(400).json({
+          error: 'InvalidRequest',
+          message: 'did must be a valid DID',
+        })
+      }
+
+      try {
+        const enrollment = await ctx.enrollmentStore.getEnrollment(did)
+        if (!enrollment) {
+          return res.status(404).json({
+            error: 'NotFound',
+            message: 'Enrollment not found',
+          })
+        }
+        const custody = enrollment.custody ?? 'stratos'
+        if (enrollment.isService || custody === 'stratos') {
+          return res.json({
+            did,
+            custody,
+            isService: enrollment.isService ?? false,
+            resolutions: [],
+          })
+        }
+
+        const boundaries = await ctx.enrollmentStore.getBoundaries(did)
+        const hostDeps = createRepoHostResolverDeps(
+          ctx.idResolver,
+          enrollment.repoHost,
+        )
+        const resolutions = await Promise.all(
+          boundaries.flatMap((boundary) => {
+            const result = boundaryToSpaceUri(boundary, SPACE_TYPE)
+            if (!result.ok) return []
+            return [
+              resolveRepoHost(result.value, did, hostDeps).then((resolved) => ({
+                boundary,
+                spaceUri: result.value,
+                ...(resolved
+                  ? { host: resolved.host, source: resolved.source }
+                  : {}),
+              })),
+            ]
+          }),
+        )
+        return res.json({
+          did,
+          custody,
+          isService: false,
+          resolutions,
+        })
+      } catch (err) {
+        ctx.logger?.error(
+          { err: err instanceof Error ? err.message : String(err), did },
+          'admin.getRepoHost failed',
+        )
+        return res.status(500).json({
+          error: 'InternalError',
+          message: 'Failed to resolve repository hosts',
         })
       }
     },
@@ -1276,6 +1390,10 @@ async function updatePdsEnrollmentRecord(
         signingKey: attestation.signingKey,
       },
       createdAt: new Date().toISOString(),
+      custody: enrollment.custody ?? 'stratos',
+      ...(enrollment.custody === 'pds' && enrollment.repoHost
+        ? { repoHost: enrollment.repoHost }
+        : {}),
     },
   })
 }

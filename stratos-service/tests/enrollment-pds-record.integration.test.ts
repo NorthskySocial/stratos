@@ -77,7 +77,10 @@ describe('handleCallback PDS Record', () => {
   })
 
   it('calls putEnrollmentRecord on new enrollment', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = {
+      sub: 'did:plc:alice',
+      getTokenInfo: vi.fn().mockResolvedValue({ scope: 'atproto' }),
+    }
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
@@ -104,7 +107,10 @@ describe('handleCallback PDS Record', () => {
   })
 
   it('calls putEnrollmentRecord on existing enrollment to ensure it exists', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = {
+      sub: 'did:plc:alice',
+      getTokenInfo: vi.fn().mockResolvedValue({ scope: 'atproto' }),
+    }
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
     mockEnrollmentStore.getEnrollment.mockResolvedValue({

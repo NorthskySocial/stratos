@@ -51,7 +51,12 @@ describe('Re-enrollment', () => {
       setBoundaries: vi.fn(),
     }
     mockOauthClient = {
-      callback: vi.fn().mockResolvedValue({ session: { sub: userDid } }),
+      callback: vi.fn().mockResolvedValue({
+        session: {
+          sub: userDid,
+          getTokenInfo: vi.fn().mockResolvedValue({ scope: 'atproto' }),
+        },
+      }),
       restore: vi.fn().mockResolvedValue({}),
       revoke: vi.fn().mockResolvedValue(undefined),
     }

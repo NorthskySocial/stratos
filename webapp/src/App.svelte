@@ -45,6 +45,7 @@
   let loading = $state(true)
   let loadingStatus = $state('Initializing session...')
   let initialStartupDone = false
+  let discoveryEpoch = 0
   let did = $state('')
   let handle = $state('')
 
@@ -149,38 +150,45 @@
     }
     loading = true
     loadingStatus = 'Discovering service...'
+    const epoch = ++discoveryEpoch
     try {
-      if (APPVIEW_URL) {
-        appviewAgent = createServiceAgent(session, APPVIEW_URL)
-      }
-
-      enrollment = await discoverStratosEnrollment(session)
-
-      const url = enrollment?.service ?? serviceUrl
+      const nextAppviewAgent = APPVIEW_URL
+        ? createServiceAgent(session, APPVIEW_URL)
+        : null
+      const nextEnrollment = await discoverStratosEnrollment(session)
+      const nextAttestationVerified = nextEnrollment
+        ? await verifyAttestation(session.sub, nextEnrollment)
+        : null
+      const url = nextEnrollment?.service ?? serviceUrl
+      let nextStratosStatus: StratosServiceStatus = {enrolled: false}
+      let nextServerDomains: string[] = []
+      let nextStratosAgent: Agent | null = null
       if (url) {
-        serviceUrl = url
-        stratosAgent = createStratosAgent(session, url)
+        nextStratosAgent = createStratosAgent(session, url)
 
         try {
-          stratosStatus = await checkStratosServiceStatus(url, session.sub)
-          serverDomains = await fetchServerDomains(url)
+          nextStratosStatus = await checkStratosServiceStatus(url, session.sub)
+          nextServerDomains = await fetchServerDomains(url)
         } catch (err) {
           console.error('Failed to check service status:', err)
-          stratosStatus = {enrolled: false}
+          nextStratosStatus = {enrolled: false}
         }
-      } else {
-        stratosStatus = {enrolled: false}
       }
 
-      if (enrollment) {
-        attestationVerified = await verifyAttestation(session.sub, enrollment)
-      } else {
-        attestationVerified = null
-      }
+      if (epoch !== discoveryEpoch) return
+      serviceUrl = url
+      appviewAgent = nextAppviewAgent
+      enrollment = nextEnrollment
+      attestationVerified = nextAttestationVerified
+      stratosAgent = nextStratosAgent
+      stratosStatus = nextStratosStatus
+      serverDomains = nextServerDomains
 
       await refreshFeed()
     } finally {
-      loading = false
+      if (epoch === discoveryEpoch) {
+        loading = false
+      }
     }
   }
 
@@ -189,34 +197,58 @@
    * and optionally Stratos posts if the Stratos agent is available.
    */
   async function refreshFeed() {
-    if (!session) {
+    const refreshSession = session
+    const epoch = discoveryEpoch
+    if (!refreshSession) {
+      return
+    }
+    const isCurrent = () =>
+      session === refreshSession && discoveryEpoch === epoch
+
+    if (!isCurrent()) {
       return
     }
     loading = true
     loadingStatus = 'Loading feed...'
     try {
       const publicPosts = appviewAgent
-        ? await fetchPublicPosts(appviewAgent, session.sub)
-        : await fetchRepoPublicPosts(configureAgent(new Agent(session)), session.sub)
+        ? await fetchPublicPosts(appviewAgent, refreshSession.sub)
+        : await fetchRepoPublicPosts(
+            configureAgent(new Agent(refreshSession)),
+            refreshSession.sub,
+          )
+
+      if (!isCurrent()) {
+        return
+      }
 
       let stratosPosts: FeedPost[] = []
       if (FEEDGEN_DID) {
-        const res = await fetchFeedgenPosts(session, FEEDGEN_DID, FEEDGEN_FEED)
+        const res = await fetchFeedgenPosts(
+          refreshSession,
+          FEEDGEN_DID,
+          FEEDGEN_FEED,
+        )
         stratosPosts = res.posts
       } else if (APPVIEW_URL) {
         const res = await fetchAppviewStratosPosts(
-          session,
+          refreshSession,
           APPVIEW_URL,
         )
         stratosPosts = res.posts
       } else if (stratosAgent) {
-        stratosPosts = await fetchStratosPosts(stratosAgent, session.sub)
+        stratosPosts = await fetchStratosPosts(stratosAgent, refreshSession.sub)
       }
 
+      if (!isCurrent()) {
+        return
+      }
       const unified = buildUnifiedFeed(publicPosts, stratosPosts)
       allPosts = resolveHandles(unified, did, handle)
     } finally {
-      loading = false
+      if (isCurrent()) {
+        loading = false
+      }
     }
   }
 
@@ -234,7 +266,7 @@
    */
   function handleSetServiceUrl(url: string) {
     serviceUrl = url
-    discoverAndLoad()
+    void discoverAndLoad()
   }
 
   /**
@@ -255,34 +287,31 @@
   /**
    * Handles signing out the user.
    */
+  function clearSession() {
+    discoveryEpoch += 1
+    session = null
+    enrollment = null
+    stratosStatus = null
+    attestationVerified = null
+    appviewAgent = null
+    stratosAgent = null
+    allPosts = []
+    handle = ''
+    did = ''
+    activeFeed = null
+    loading = false
+  }
+
   async function handleSignOut() {
     if (confirm('Are you sure you want to log out?')) {
+      clearSession()
       await signOut()
-      session = null
-      enrollment = null
-      stratosStatus = null
-      attestationVerified = null
-      appviewAgent = null
-      stratosAgent = null
-      allPosts = []
-      handle = ''
-      did = ''
-      activeFeed = null
     }
   }
 
   onMount(async () => {
     onSessionDeleted(() => {
-      session = null
-      enrollment = null
-      stratosStatus = null
-      attestationVerified = null
-      appviewAgent = null
-      stratosAgent = null
-      allPosts = []
-      handle = ''
-      did = ''
-      activeFeed = null
+      clearSession()
     })
 
     if (import.meta.env.DEV && initialStartupDone && session && (window as unknown as CustomWindow).__MOCK_SESSION__) {
@@ -328,7 +357,7 @@
                 <button class="sign-out" onclick={handleSignOut}>Log Out</button>
             </header>
 
-            <Composer {session} {enrollment} {stratosAgent} {replyingTo} onpost={refreshFeed}
+            <Composer {session} {enrollment} {attestationVerified} {stratosAgent} {replyingTo} onpost={refreshFeed}
                       oncancelreply={cancelReply}/>
 
             <div class="feed-tabs">
@@ -339,7 +368,7 @@
                 >
                     All
                 </button>
-                {#each enrolledDomains as domain}
+                    {#each enrolledDomains as domain (domain)}
                     <button
                             class="tab"
                             class:active={activeFeed === domain}

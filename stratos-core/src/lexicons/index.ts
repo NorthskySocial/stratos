@@ -2,6 +2,7 @@ import type { LexiconDoc } from '@atproto/lexicon'
 import { atprotoLexicons } from './atproto.js'
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
 import zoneStratosAdminListEnrollments from '../../../lexicons/zone/stratos/admin/listEnrollments.json' with { type: 'json' }
+import zoneStratosAdminGetRepoHost from '../../../lexicons/zone/stratos/admin/getRepoHost.json' with { type: 'json' }
 import zoneStratosAdminAddAdmin from '../../../lexicons/zone/stratos/admin/addAdmin.json' with { type: 'json' }
 import zoneStratosAdminListAdmins from '../../../lexicons/zone/stratos/admin/listAdmins.json' with { type: 'json' }
 import zoneStratosAdminRemoveAdmin from '../../../lexicons/zone/stratos/admin/removeAdmin.json' with { type: 'json' }
@@ -35,6 +36,7 @@ export const stratosLexicons: LexiconDoc[] = [
   ...atprotoLexicons,
   zoneStratosActorEnrollment as LexiconDoc,
   zoneStratosAdminListEnrollments as LexiconDoc,
+  zoneStratosAdminGetRepoHost as LexiconDoc,
   zoneStratosAdminAddAdmin as LexiconDoc,
   zoneStratosAdminListAdmins as LexiconDoc,
   zoneStratosAdminRemoveAdmin as LexiconDoc,

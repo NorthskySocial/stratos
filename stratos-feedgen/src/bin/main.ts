@@ -146,13 +146,16 @@ async function main(): Promise<void> {
     const failed = results.filter(
       (r): r is { boundary: string; reason: string } => 'reason' in r,
     )
-    const summary = `space credential warm-up: attempted=${results.length} acquired=${results.length - failed.length} failed=${failed.length}`
-    if (failed.length === 0) {
-      console.log(summary)
-    } else {
-      const detail = failed.map((f) => `${f.boundary}: ${f.reason}`).join('; ')
-      console.error(`${summary} (${detail})`)
+    const summary = {
+      attempted: results.length,
+      acquired: results.length - failed.length,
+      failed: failed.length,
     }
+    if (failed.length > 0) {
+      logger.warn(summary, 'space credential warm-up failed')
+      return
+    }
+    logger.info(summary, 'space credential warm-up completed')
   })
 
   const subscribeEnrollments =
@@ -244,6 +247,7 @@ async function main(): Promise<void> {
       boundaries: configuredBoundaries,
       intervalMs: cfg.spaceSyncIntervalMs,
       memberBudgetMs: cfg.spaceSyncMemberBudgetMs,
+      memberConcurrency: cfg.spaceSyncMemberConcurrency,
       log: (event) => logger.info({ ...event }, 'space sync pass completed'),
       onTickSkipped: () =>
         logger.warn({}, 'space sync tick skipped because a pass is active'),

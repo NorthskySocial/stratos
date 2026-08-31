@@ -10,6 +10,7 @@ const JITTER_FRACTION = 0.1
 
 const DEFAULT_INTERVAL_MS = 30_000
 const DEFAULT_MEMBER_BUDGET_MS = 60_000
+const DEFAULT_MEMBER_CONCURRENCY = 8
 const DEFAULT_STOP_GRACE_MS = 10_000
 
 export interface SpaceSyncPassLogEvent {
@@ -38,6 +39,8 @@ export interface SpaceSyncSchedulerDeps {
   intervalMs?: number
   /** Time budget (ms) for one member's sync within a pass. Default 60000. */
   memberBudgetMs?: number
+  /** Maximum number of member syncs active within one pass. Default 8. */
+  memberConcurrency?: number
   /** Grace period `stop()` waits for an in-flight pass before returning anyway. Default 10000. */
   stopGraceMs?: number
   /**
@@ -93,6 +96,7 @@ export class SpaceSyncScheduler {
   private readonly boundaries: Iterable<string>
   private readonly intervalMs: number
   private readonly memberBudgetMs: number
+  private readonly memberConcurrency: number
   private readonly stopGraceMs: number
   private readonly log: (event: SpaceSyncPassLogEvent) => void
   private readonly onTickSkipped: () => void
@@ -103,6 +107,7 @@ export class SpaceSyncScheduler {
 
   private timer: ReturnType<typeof setTimeout> | null = null
   private inFlight: Promise<void> | null = null
+  private activePassController: AbortController | null = null
   private stopped = true
 
   constructor(deps: SpaceSyncSchedulerDeps) {
@@ -111,6 +116,8 @@ export class SpaceSyncScheduler {
     this.boundaries = deps.boundaries
     this.intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS
     this.memberBudgetMs = deps.memberBudgetMs ?? DEFAULT_MEMBER_BUDGET_MS
+    this.memberConcurrency =
+      deps.memberConcurrency ?? DEFAULT_MEMBER_CONCURRENCY
     this.stopGraceMs = deps.stopGraceMs ?? DEFAULT_STOP_GRACE_MS
     this.log = deps.log ?? noop
     this.onTickSkipped = deps.onTickSkipped ?? noop
@@ -153,6 +160,7 @@ export class SpaceSyncScheduler {
     ])
     if (graceTimer) clearTimeout(graceTimer)
     if (outcome === 'timed-out') {
+      this.activePassController?.abort()
       this.onStopTimedOut()
     }
   }
@@ -186,32 +194,47 @@ export class SpaceSyncScheduler {
   }
 
   private async runPass(): Promise<void> {
+    const controller = new AbortController()
+    this.activePassController = controller
+    await this.runPassWithSignal(controller.signal)
+  }
+
+  private async runPassWithSignal(signal: AbortSignal): Promise<void> {
     const outcomes = await this.membership.runPass(this.boundaries)
+    if (signal.aborted) return
     const targets = outcomes.flatMap((outcome) => outcome.polls)
 
     let succeeded = 0
     let failed = 0
     let abandoned = 0
     let halted = 0
-    await Promise.all(
-      targets.map(async (target) => {
-        const outcome = await this.pollWithBudget(target)
-        if (outcome.status === 'abandoned') {
-          abandoned += 1
-          this.onMemberBudgetExceeded(target)
-        } else if (outcome.status === 'errored') {
-          failed += 1
-        } else if (!outcome.result.ok) {
-          if (outcome.result.reason === 'halted') {
-            halted += 1
-          } else {
+    let nextTarget = 0
+    const workers = Array.from(
+      { length: Math.min(this.memberConcurrency, targets.length) },
+      async () => {
+        while (nextTarget < targets.length) {
+          if (signal.aborted) return
+          const target = targets[nextTarget]!
+          nextTarget += 1
+          const outcome = await this.pollWithBudget(target, signal)
+          if (outcome.status === 'abandoned') {
+            abandoned += 1
+            this.onMemberBudgetExceeded(target)
+          } else if (outcome.status === 'errored') {
             failed += 1
+          } else if (!outcome.result.ok) {
+            if (outcome.result.reason === 'halted') {
+              halted += 1
+            } else {
+              failed += 1
+            }
+          } else {
+            succeeded += 1
           }
-        } else {
-          succeeded += 1
         }
-      }),
+      },
     )
+    await Promise.all(workers)
 
     this.log({ targets: targets.length, succeeded, failed, abandoned, halted })
   }
@@ -223,7 +246,10 @@ export class SpaceSyncScheduler {
    * left unobserved by the pass that abandoned it, but it is no longer left
    * running unbounded.
    */
-  private pollWithBudget(target: PollTarget): Promise<MemberPollOutcome> {
+  private pollWithBudget(
+    target: PollTarget,
+    passSignal: AbortSignal,
+  ): Promise<MemberPollOutcome> {
     return new Promise<MemberPollOutcome>((resolve) => {
       let settled = false
       const controller = new AbortController()
@@ -235,7 +261,7 @@ export class SpaceSyncScheduler {
       }, this.memberBudgetMs)
       timer.unref?.()
       this.runner
-        .runTarget(target, controller.signal)
+        .runTarget(target, AbortSignal.any([controller.signal, passSignal]))
         .then((result) => {
           if (settled) return
           settled = true

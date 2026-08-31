@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assertStratosWriteAllowed,
   classifyCustody,
   ENROLLMENT_MODE,
   EnrollmentConfig,
@@ -8,6 +9,7 @@ import {
   isPdsAllowed,
   reconcileCustody,
   validateEnrollmentEligibility,
+  PdsCustodyWriteForbiddenError,
 } from '../src/index.js'
 
 describe('Enrollment Domain Logic', () => {
@@ -211,12 +213,25 @@ describe('Enrollment Domain Logic', () => {
       expect(classifyCustody('not-capable')).toBe('stratos')
     })
 
-    it('falls back to stratos custody on an unknown verdict', () => {
-      expect(classifyCustody('unknown')).toBe('stratos')
+    it('does not select custody on an unknown verdict', () => {
+      expect(classifyCustody('unknown')).toBeUndefined()
     })
 
-    it('falls back to stratos custody when no verdict was recorded', () => {
-      expect(classifyCustody(undefined)).toBe('stratos')
+    it('does not select custody when no verdict was recorded', () => {
+      expect(classifyCustody(undefined)).toBeUndefined()
+    })
+  })
+
+  describe('assertStratosWriteAllowed', () => {
+    it('rejects a write when the PDS owns the repository', () => {
+      expect(() => assertStratosWriteAllowed('pds')).toThrow(
+        PdsCustodyWriteForbiddenError,
+      )
+    })
+
+    it('allows Stratos custody and legacy rows', () => {
+      expect(() => assertStratosWriteAllowed('stratos')).not.toThrow()
+      expect(() => assertStratosWriteAllowed(undefined)).not.toThrow()
     })
   })
 
