@@ -192,6 +192,41 @@ describe('Composer.svelte', () => {
     )
   })
 
+  it('previews custody from the granted space scope before enrollment', async () => {
+    const pdsPreview = render(Composer, {
+      props: props({
+        session: session(SPACE_WRITE_SCOPE),
+        enrollment: null,
+        attestationVerified: null,
+        stratosAgent: null,
+      }),
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /Your PDS will hold your private posts after enrollment/i,
+        ),
+      ).toBeInTheDocument(),
+    )
+    pdsPreview.unmount()
+
+    render(Composer, {
+      props: props({
+        session: session(),
+        enrollment: null,
+        attestationVerified: null,
+        stratosAgent: null,
+      }),
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /Stratos will hold your private posts after enrollment/i,
+        ),
+      ).toBeInTheDocument(),
+    )
+  })
+
   it('shows an image preview for Stratos custody and blocks image selection for PDS custody', async () => {
     const { unmount } = render(Composer, { props: props() })
     const image = new File(['misa'], 'misato.png', { type: 'image/png' })

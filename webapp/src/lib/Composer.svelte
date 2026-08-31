@@ -378,7 +378,7 @@
             {spaceWriteScope === 'granted'
               ? 'Your PDS will hold your private posts after enrollment.'
               : spaceWriteScope === 'missing'
-                ? 'Private posting needs a new space permission after enrollment.'
+                ? 'Stratos will hold your private posts after enrollment.'
                 : 'Private posting permission could not be verified.'}
         </p>
     {/if}
