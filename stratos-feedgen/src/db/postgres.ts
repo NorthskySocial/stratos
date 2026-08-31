@@ -201,17 +201,17 @@ export class PgFeedgenStore implements FeedgenStore {
   }
 
   async deletePostsByBoundary(boundary: string): Promise<number> {
-    return this.db.transaction(async (tx) => {
-      const scoped = await tx
-        .select({ uri: postBoundaryTbl.uri })
-        .from(postBoundaryTbl)
-        .where(eq(postBoundaryTbl.boundary, boundary))
-      if (scoped.length === 0) return 0
-      const uris = [...new Set(scoped.map((r) => r.uri))]
-      // FK ON DELETE CASCADE removes all boundary rows for these posts.
-      await tx.delete(postTbl).where(inArray(postTbl.uri, uris))
-      return uris.length
-    })
+    const deleted = await this.db
+      .delete(postTbl)
+      .where(
+        sql`EXISTS (
+        SELECT 1 FROM post_boundary scoped
+        WHERE scoped.uri = ${postTbl.uri}
+          AND scoped.boundary = ${boundary}
+      )`,
+      )
+      .returning({ uri: postTbl.uri })
+    return deleted.length
   }
 
   async deleteCursor(did: string): Promise<number> {
