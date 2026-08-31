@@ -503,32 +503,34 @@ describe('SpaceSyncScheduler', () => {
     const membership = { runPass: vi.fn(async () => gate.promise) }
     const runner = fakeRunner()
     const log = vi.fn()
-    const onStopTimedOut = vi.fn()
     const scheduler = new SpaceSyncScheduler({
       membership,
       runner,
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
-      stopGraceMs: 500,
       random: () => 0.5,
       log,
-      onStopTimedOut,
     })
     scheduler.start()
     await vi.advanceTimersByTimeAsync(1_000)
 
+    let stopSettled = false
     const stopping = scheduler.stop()
-    await vi.advanceTimersByTimeAsync(500)
-    await stopping
-    gate.resolve([successOutcome([spike])])
+    void stopping.then(() => {
+      stopSettled = true
+    })
+    scheduler.abortActivePass()
     await vi.advanceTimersByTimeAsync(0)
+    expect(stopSettled).toBe(false)
 
-    expect(onStopTimedOut).toHaveBeenCalledOnce()
+    gate.resolve([successOutcome([spike])])
+    await stopping
+
     expect(runner.runTarget).not.toHaveBeenCalled()
     expect(log).not.toHaveBeenCalled()
   })
 
-  it('does not dispatch queued targets after the stop grace aborts active work', async () => {
+  it('does not dispatch queued targets after the active pass is aborted', async () => {
     const spike = makeTarget({ did: SPIKE_DID })
     const faye = makeTarget({ did: FAYE_DID })
     const membership = fakeMembership([successOutcome([spike, faye])])
@@ -548,14 +550,14 @@ describe('SpaceSyncScheduler', () => {
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
       memberConcurrency: 1,
-      stopGraceMs: 500,
       random: () => 0.5,
     })
     scheduler.start()
     await vi.advanceTimersByTimeAsync(1_000)
 
     const stopping = scheduler.stop()
-    await vi.advanceTimersByTimeAsync(500)
+    scheduler.abortActivePass()
+    await vi.advanceTimersByTimeAsync(0)
     await stopping
 
     expect(runner.runTarget).toHaveBeenCalledExactlyOnceWith(
@@ -626,46 +628,52 @@ describe('SpaceSyncScheduler', () => {
     expect(membership.runPass).toHaveBeenCalledOnce()
   })
 
-  it('stop() gives up after stopGraceMs when the in-flight pass never settles', async () => {
-    const gate = deferred<BoundaryPassOutcome[]>()
-    const membership = { runPass: vi.fn(async () => gate.promise) }
-    const runner = fakeRunner()
-    const onStopTimedOut = vi.fn()
+  it('stop() drains a raw runner call after its member budget is abandoned', async () => {
+    const spike = makeTarget()
+    const gate = deferred<SpaceSyncRunResult>()
+    const runTarget = vi.fn(async () => gate.promise)
+    const onMemberBudgetExceeded = vi.fn()
+    const log = vi.fn()
 
     const scheduler = new SpaceSyncScheduler({
-      membership,
-      runner,
+      membership: fakeMembership([successOutcome([spike])]),
+      runner: { runTarget },
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
+      memberBudgetMs: 500,
       random: () => 0.5,
-      stopGraceMs: 500,
-      onStopTimedOut,
+      onMemberBudgetExceeded,
+      log,
     })
     scheduler.start()
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(membership.runPass).toHaveBeenCalledOnce()
+    expect(runTarget).toHaveBeenCalledOnce()
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onMemberBudgetExceeded).toHaveBeenCalledExactlyOnceWith(spike)
+    expect(log).toHaveBeenCalledExactlyOnceWith({
+      targets: 1,
+      succeeded: 0,
+      failed: 0,
+      abandoned: 1,
+      halted: 0,
+    })
 
     let stopSettled = false
     const stopping = scheduler.stop().then(() => {
       stopSettled = true
     })
 
-    await vi.advanceTimersByTimeAsync(499)
+    scheduler.abortActivePass()
+    await vi.advanceTimersByTimeAsync(100_000)
     expect(stopSettled).toBe(false)
-    expect(onStopTimedOut).not.toHaveBeenCalled()
 
-    await vi.advanceTimersByTimeAsync(1)
+    gate.resolve(runSuccess(spike))
     await stopping
     expect(stopSettled).toBe(true)
-    expect(onStopTimedOut).toHaveBeenCalledOnce()
-
-    // The wedged pass is left to settle on its own, unobserved — resolving
-    // it late must not throw or otherwise surface after stop() gave up.
-    gate.resolve([])
-    await vi.advanceTimersByTimeAsync(0)
   })
 
-  it('aborts active member polls after the stop grace period', async () => {
+  it('abortActivePass() cancels active member polls while stop() drains them', async () => {
     const spike = makeTarget()
     const membership = fakeMembership([successOutcome([spike])])
     let signal: AbortSignal | undefined
@@ -686,14 +694,14 @@ describe('SpaceSyncScheduler', () => {
       runner,
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
-      stopGraceMs: 500,
       random: () => 0.5,
     })
     scheduler.start()
     await vi.advanceTimersByTimeAsync(1_000)
 
     const stopping = scheduler.stop()
-    await vi.advanceTimersByTimeAsync(500)
+    scheduler.abortActivePass()
+    await vi.advanceTimersByTimeAsync(0)
     await stopping
     expect(signal?.aborted).toBe(true)
   })
@@ -708,6 +716,18 @@ describe('SpaceSyncScheduler', () => {
     })
 
     await scheduler.stop()
+    expect(membership.runPass).not.toHaveBeenCalled()
+  })
+
+  it('abortActivePass() before start() is a safe no-op', () => {
+    const membership = fakeMembership()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner: fakeRunner(),
+      boundaries: [BEBOP_BOUNDARY],
+    })
+
+    expect(() => scheduler.abortActivePass()).not.toThrow()
     expect(membership.runPass).not.toHaveBeenCalled()
   })
 

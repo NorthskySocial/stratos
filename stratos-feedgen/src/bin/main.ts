@@ -251,8 +251,6 @@ async function main(): Promise<void> {
       onMemberBudgetExceeded: (target) =>
         logger.warn({ target }, 'space member exceeded the sync budget'),
       onError: (err) => logger.error({ err }, 'space sync pass failed'),
-      onStopTimedOut: () =>
-        logger.warn({}, 'space sync shutdown grace period expired'),
     })
     shutdownDeps.spaceSyncScheduler = scheduler
     scheduler.start()
