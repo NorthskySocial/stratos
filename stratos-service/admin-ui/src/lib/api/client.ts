@@ -39,11 +39,31 @@ export interface EnrollmentStatusResponse {
   boundaries?: string[]
 }
 
+export type Custody = 'stratos' | 'pds'
+
+export type HostSource = 'authority-override' | 'did-document'
+
+export interface RepoHostResolution {
+  boundary: string
+  spaceUri: string
+  host?: string
+  source?: HostSource
+}
+
+export interface GetRepoHostResponse {
+  did: string
+  custody: Custody
+  isService: boolean
+  resolutions: RepoHostResolution[]
+}
+
 export interface EnrollmentSummary {
   did: string
   enrolledAt: string
   active: boolean
   isService: boolean
+  custody: Custody
+  repoHost?: string
   boundaries: string[]
 }
 
@@ -189,8 +209,8 @@ export function listDomains(): Promise<ListDomainsResponse> {
 
 /**
  * List enrolled members, newest page first by DID order.
- * @param options - Page size, resume cursor, and optional boundary/active
- * filters
+ * @param options - Page size, resume cursor, and optional space, active, or
+ * custody filters
  * @returns A page of members, a cursor when more follow, and the total when
  * unfiltered
  */
@@ -200,6 +220,7 @@ export function listEnrollments(
     cursor?: string
     boundary?: string
     active?: boolean
+    custody?: Custody
   } = {},
 ): Promise<ListEnrollmentsResponse> {
   const params = new URLSearchParams()
@@ -207,9 +228,21 @@ export function listEnrollments(
   if (options.cursor !== undefined) params.set('cursor', options.cursor)
   if (options.boundary !== undefined) params.set('boundary', options.boundary)
   if (options.active !== undefined) params.set('active', String(options.active))
+  if (options.custody !== undefined) params.set('custody', options.custody)
   const query = params.toString()
   return request<ListEnrollmentsResponse>(
     `/xrpc/zone.stratos.admin.listEnrollments${query ? `?${query}` : ''}`,
+  )
+}
+
+/**
+ * Resolve the repository host for every space a member holds.
+ * @param did - The member to inspect
+ * @returns The host resolution rows for the member's spaces
+ */
+export function getRepoHost(did: string): Promise<GetRepoHostResponse> {
+  return request<GetRepoHostResponse>(
+    `/xrpc/zone.stratos.admin.getRepoHost?did=${encodeURIComponent(did)}`,
   )
 }
 
