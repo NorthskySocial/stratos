@@ -9,11 +9,21 @@ import {
   SqliteFeedgenStore,
 } from '../src/db/index.js'
 import { Purger, type PurgeAudit } from '../src/purge/index.js'
+import { SpaceMutationFence } from '../src/space-sync/index.js'
 
 // ---- Fixtures ----------------------------------------------------------
 
 const SPIKE = 'did:plc:spikespiegel'
 const FAYE = 'did:plc:fayevalentine'
+const STRATOS_DID = 'did:web:stratos.test'
+const CREW_BOUNDARY = `${STRATOS_DID}/crew`
+const BOUNTY_BOUNDARY = `${STRATOS_DID}/bounty`
+const SPACE_BOUNDARY = `${STRATOS_DID}/space`
+const OTHER_BOUNDARY = `${STRATOS_DID}/other`
+
+function spaceUriFor(boundary: string): string {
+  return `at://${STRATOS_DID}/space/zone.stratos.space.feed/${boundary.split('/')[1]}`
+}
 
 let store: FeedgenStore
 const tmpDirs: string[] = []
@@ -74,21 +84,21 @@ afterEach(async () => {
 describe('Purger.purgeActor (unenroll)', () => {
   async function seed() {
     // Out of scope: everything for SPIKE.
-    await store.upsertPost(post(SPIKE, '1', ['crew', 'bounty']))
-    await store.upsertPost(post(SPIKE, '2', ['crew']))
+    await store.upsertPost(post(SPIKE, '1', [CREW_BOUNDARY, BOUNTY_BOUNDARY]))
+    await store.upsertPost(post(SPIKE, '2', [CREW_BOUNDARY]))
     await store.upsertCursor(SPIKE, 10, '2024-01-01T00:00:00.000Z')
     await store.upsertEnrolledActor({
       did: SPIKE,
-      boundaries: ['crew', 'bounty'],
+      boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
       enrolledAt: '2024-01-01T00:00:00.000Z',
       lastSeenAt: '2024-01-01T00:00:00.000Z',
     })
     // In scope: FAYE stays fully intact.
-    await store.upsertPost(post(FAYE, '1', ['crew']))
+    await store.upsertPost(post(FAYE, '1', [CREW_BOUNDARY]))
     await store.upsertCursor(FAYE, 5, '2024-01-01T00:00:00.000Z')
     await store.upsertEnrolledActor({
       did: FAYE,
-      boundaries: ['crew'],
+      boundaries: [CREW_BOUNDARY],
       enrolledAt: '2024-01-01T00:00:00.000Z',
       lastSeenAt: '2024-01-01T00:00:00.000Z',
     })
@@ -116,8 +126,12 @@ describe('Purger.purgeActor (unenroll)', () => {
       await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/2`),
     ).toBeNull()
     expect(
-      (await store.listPostsByBoundary({ boundary: 'bounty', limit: 10 }))
-        .posts,
+      (
+        await store.listPostsByBoundary({
+          boundary: BOUNTY_BOUNDARY,
+          limit: 10,
+        })
+      ).posts,
     ).toEqual([])
     // cursor gone
     expect(await store.getCursor(SPIKE)).toBeNull()
@@ -171,8 +185,7 @@ describe('Purger.purgeActor (unenroll)', () => {
 
   it('removes space-sync cursors held by the actor, leaving other members untouched', async () => {
     await seed()
-    const spaceUri =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    const spaceUri = spaceUriFor(CREW_BOUNDARY)
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,
@@ -222,17 +235,31 @@ describe('Purger.purgeActor (unenroll)', () => {
 
 describe('Purger.purgeActorBoundary (boundary shrink)', () => {
   it('purges posts left with no boundary; keeps multi-boundary posts and the actor snapshot', async () => {
-    // SPIKE leaves 'bounty'. p1 (bounty only) -> deleted; p2 (bounty+crew) ->
-    // survives, loses 'bounty'; FAYE untouched.
-    await store.upsertPost(post(SPIKE, '1', ['bounty']))
-    await store.upsertPost(post(SPIKE, '2', ['bounty', 'crew']))
+    // SPIKE leaves bounty. p1 (bounty only) -> deleted; p2 (bounty+crew) ->
+    // survives, loses bounty; FAYE untouched.
+    await store.upsertPost(post(SPIKE, '1', [BOUNTY_BOUNDARY]))
+    await store.upsertPost(post(SPIKE, '2', [BOUNTY_BOUNDARY, CREW_BOUNDARY]))
     await store.upsertEnrolledActor({
       did: SPIKE,
-      boundaries: ['bounty', 'crew'],
+      boundaries: [BOUNTY_BOUNDARY, CREW_BOUNDARY],
       enrolledAt: '2024-01-01T00:00:00.000Z',
       lastSeenAt: '2024-01-01T00:00:00.000Z',
     })
-    await store.upsertPost(post(FAYE, '1', ['bounty']))
+    await store.upsertPost(post(FAYE, '1', [BOUNTY_BOUNDARY]))
+    const bountySpaceUri = spaceUriFor(BOUNTY_BOUNDARY)
+    const crewSpaceUri = spaceUriFor(CREW_BOUNDARY)
+    await store.upsertSpaceCursor(
+      bountySpaceUri,
+      SPIKE,
+      'rev-bounty',
+      '2024-01-01T00:00:00.000Z',
+    )
+    await store.upsertSpaceCursor(
+      crewSpaceUri,
+      SPIKE,
+      'rev-crew',
+      '2024-01-01T00:00:00.000Z',
+    )
 
     const cache = makeCache()
     const audits: PurgeAudit[] = []
@@ -242,41 +269,52 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
       audit: (e) => audits.push(e),
     })
 
-    const counts = await purger.purgeActorBoundary(SPIKE, 'bounty')
+    const counts = await purger.purgeActorBoundary(SPIKE, BOUNTY_BOUNDARY)
 
     expect(
       await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/1`),
     ).toBeNull()
     const p2 = await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/2`)
-    expect(p2!.boundaries).toEqual(['crew'])
+    expect(p2!.boundaries).toEqual([CREW_BOUNDARY])
     // Actor is still enrolled -> snapshot untouched by this call.
     expect(await store.getEnrolledActor(SPIKE)).not.toBeNull()
-    // FAYE's membership in 'bounty' untouched.
+    // FAYE's membership in bounty is untouched.
     expect(
       (
-        await store.listPostsByBoundary({ boundary: 'bounty', limit: 10 })
+        await store.listPostsByBoundary({
+          boundary: BOUNTY_BOUNDARY,
+          limit: 10,
+        })
       ).posts.map((p) => p.uri),
     ).toEqual([`at://${FAYE}/zone.stratos.feed.post/1`])
+    // The deterministic cursor for the departed space is removed so a rejoin
+    // starts from a cold rebuild; unrelated space progress remains intact.
+    expect(await store.getSpaceCursor(bountySpaceUri, SPIKE)).toBeNull()
+    expect(await store.getSpaceCursor(crewSpaceUri, SPIKE)).toBe('rev-crew')
     expect(cache.invalidated).toEqual([SPIKE])
     expect(counts.posts).toBe(1)
+    expect(counts.spaceCursors).toBe(1)
     expect(audits[0]).toEqual({
       trigger: 'boundary-shrink',
       did: SPIKE,
-      boundary: 'bounty',
+      boundary: BOUNTY_BOUNDARY,
       counts,
     })
   })
 
   it('is idempotent', async () => {
-    await store.upsertPost(post(SPIKE, '1', ['bounty']))
+    await store.upsertPost(post(SPIKE, '1', [BOUNTY_BOUNDARY]))
     const purger = new Purger({ store, audit: () => {} })
-    expect((await purger.purgeActorBoundary(SPIKE, 'bounty')).posts).toBe(1)
-    expect((await purger.purgeActorBoundary(SPIKE, 'bounty')).posts).toBe(0)
+    expect(
+      (await purger.purgeActorBoundary(SPIKE, BOUNTY_BOUNDARY)).posts,
+    ).toBe(1)
+    expect(
+      (await purger.purgeActorBoundary(SPIKE, BOUNTY_BOUNDARY)).posts,
+    ).toBe(0)
   })
 
   it('drops the space-sync cursor after an invalid space commit', async () => {
-    const spaceUri =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    const spaceUri = spaceUriFor(CREW_BOUNDARY)
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,
@@ -284,9 +322,27 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
       '2024-01-01T00:00:00.000Z',
     )
     const audits: PurgeAudit[] = []
-    const purger = new Purger({ store, audit: (entry) => audits.push(entry) })
+    const mutationFence = new SpaceMutationFence()
+    const purger = new Purger({
+      store,
+      mutationFence,
+      audit: (entry) => audits.push(entry),
+    })
+    const revocationEpoch = mutationFence.captureRevocationEpoch()
+    const leases = await mutationFence.authorizeSnapshot({
+      boundary: CREW_BOUNDARY,
+      spaceUri,
+      dids: [SPIKE],
+      revocationEpoch,
+    })
+    const target = await mutationFence.issueRunLease({
+      did: SPIKE,
+      boundary: CREW_BOUNDARY,
+      spaceUri,
+      lease: leases.get(SPIKE),
+    })
 
-    const counts = await purger.purgeInvalidSpaceCommit(SPIKE, 'crew', spaceUri)
+    const counts = await purger.purgeInvalidSpaceCommit(target)
 
     expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
     expect(counts.spaceCursors).toBe(1)
@@ -294,15 +350,14 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
       {
         trigger: 'space-commit-invalid',
         did: SPIKE,
-        boundary: 'crew',
+        boundary: CREW_BOUNDARY,
         counts,
       },
     ])
   })
 
   it('drops the space-sync cursor after a space departure', async () => {
-    const spaceUri =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+    const spaceUri = spaceUriFor(CREW_BOUNDARY)
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,
@@ -312,7 +367,11 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     const audits: PurgeAudit[] = []
     const purger = new Purger({ store, audit: (entry) => audits.push(entry) })
 
-    const counts = await purger.purgeSpaceDeparture(SPIKE, 'crew', spaceUri)
+    const counts = await purger.purgeSpaceDeparture(
+      SPIKE,
+      CREW_BOUNDARY,
+      spaceUri,
+    )
 
     expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
     expect(counts.spaceCursors).toBe(1)
@@ -320,15 +379,14 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
       {
         trigger: 'space-boundary-shrink',
         did: SPIKE,
-        boundary: 'crew',
+        boundary: CREW_BOUNDARY,
         counts,
       },
     ])
   })
 
-  it('records a reconciliation boundary-shrink audit without dropping space cursors', async () => {
-    const spaceUri =
-      'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
+  it('records a reconciliation boundary-shrink audit and cold-rebuilds the deterministic space cursor', async () => {
+    const spaceUri = spaceUriFor(CREW_BOUNDARY)
     await store.upsertSpaceCursor(
       spaceUri,
       SPIKE,
@@ -338,15 +396,18 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     const audits: PurgeAudit[] = []
     const purger = new Purger({ store, audit: (entry) => audits.push(entry) })
 
-    const counts = await purger.purgeReconciledActorBoundary(SPIKE, 'crew')
+    const counts = await purger.purgeReconciledActorBoundary(
+      SPIKE,
+      CREW_BOUNDARY,
+    )
 
-    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBe('rev-1')
-    expect(counts.spaceCursors).toBe(0)
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    expect(counts.spaceCursors).toBe(1)
     expect(audits).toEqual([
       {
         trigger: 'reconcile-boundary-shrink',
         did: SPIKE,
-        boundary: 'crew',
+        boundary: CREW_BOUNDARY,
         counts,
       },
     ])
@@ -356,22 +417,43 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
 // ---- Boundary deletion (service-wide) ----------------------------------
 
 describe('Purger.purgeBoundary (space deleted service-wide)', () => {
-  it('purges every actor post scoped to the boundary; leaves cursors/snapshots', async () => {
-    await store.upsertPost(post(SPIKE, '1', ['space']))
-    await store.upsertPost(post(FAYE, '1', ['space', 'other']))
-    await store.upsertPost(post(FAYE, '2', ['other']))
+  it('purges every scoped post and space cursor; leaves actor cursors/snapshots', async () => {
+    await store.upsertPost(post(SPIKE, '1', [SPACE_BOUNDARY]))
+    await store.upsertPost(post(FAYE, '1', [SPACE_BOUNDARY, OTHER_BOUNDARY]))
+    await store.upsertPost(post(FAYE, '2', [OTHER_BOUNDARY]))
     await store.upsertCursor(SPIKE, 3, '2024-01-01T00:00:00.000Z')
     await store.upsertEnrolledActor({
       did: FAYE,
-      boundaries: ['other'],
+      boundaries: [OTHER_BOUNDARY],
       enrolledAt: '2024-01-01T00:00:00.000Z',
       lastSeenAt: '2024-01-01T00:00:00.000Z',
     })
 
+    const spaceUri = spaceUriFor(SPACE_BOUNDARY)
+    const otherSpaceUri = spaceUriFor(OTHER_BOUNDARY)
+    await store.upsertSpaceCursor(
+      spaceUri,
+      SPIKE,
+      'rev-spike',
+      '2024-01-01T00:00:00.000Z',
+    )
+    await store.upsertSpaceCursor(
+      spaceUri,
+      FAYE,
+      'rev-faye',
+      '2024-01-01T00:00:00.000Z',
+    )
+    await store.upsertSpaceCursor(
+      otherSpaceUri,
+      FAYE,
+      'rev-other',
+      '2024-01-01T00:00:00.000Z',
+    )
+
     const audits: PurgeAudit[] = []
     const purger = new Purger({ store, audit: (e) => audits.push(e) })
 
-    const counts = await purger.purgeBoundary('space')
+    const counts = await purger.purgeBoundary(SPACE_BOUNDARY)
 
     expect(
       await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/1`),
@@ -379,25 +461,29 @@ describe('Purger.purgeBoundary (space deleted service-wide)', () => {
     expect(
       await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
     ).toBeNull()
-    // A post only in 'other' survives.
+    // A post only in the other boundary survives.
     expect(
       await store.getPost(`at://${FAYE}/zone.stratos.feed.post/2`),
     ).not.toBeNull()
     // Cursor and enrolled snapshot are per-actor, left intact.
     expect(await store.getCursor(SPIKE)).toBe(3)
     expect(await store.getEnrolledActor(FAYE)).not.toBeNull()
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    expect(await store.getSpaceCursor(spaceUri, FAYE)).toBeNull()
+    expect(await store.getSpaceCursor(otherSpaceUri, FAYE)).toBe('rev-other')
     expect(counts.posts).toBe(2)
+    expect(counts.spaceCursors).toBe(2)
     expect(audits[0]).toEqual({
       trigger: 'boundary-deleted',
-      boundary: 'space',
+      boundary: SPACE_BOUNDARY,
       counts,
     })
   })
 
   it('is idempotent', async () => {
-    await store.upsertPost(post(SPIKE, '1', ['space']))
+    await store.upsertPost(post(SPIKE, '1', [SPACE_BOUNDARY]))
     const purger = new Purger({ store, audit: () => {} })
-    expect((await purger.purgeBoundary('space')).posts).toBe(1)
-    expect((await purger.purgeBoundary('space')).posts).toBe(0)
+    expect((await purger.purgeBoundary(SPACE_BOUNDARY)).posts).toBe(1)
+    expect((await purger.purgeBoundary(SPACE_BOUNDARY)).posts).toBe(0)
   })
 })
