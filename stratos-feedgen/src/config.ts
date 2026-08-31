@@ -83,6 +83,7 @@ export const DEFAULT_LOG_LEVEL = 'info'
 export const DEFAULT_SPACE_SYNC_ENABLED = true
 export const DEFAULT_SPACE_SYNC_INTERVAL_MS = 30_000
 export const DEFAULT_SPACE_SYNC_PAGE_LIMIT = 1_000
+export const MAX_SPACE_SYNC_PAGE_LIMIT = 1_000
 export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
 export const DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS = 10_000
 export const DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS = 60_000
@@ -160,10 +161,8 @@ export function loadFeedgenConfig(
       'FEEDGEN_SPACE_SYNC_INTERVAL_MS',
       DEFAULT_SPACE_SYNC_INTERVAL_MS,
     ),
-    spaceSyncPageLimit: parsePositiveInt(
+    spaceSyncPageLimit: parseSpaceSyncPageLimit(
       env['FEEDGEN_SPACE_SYNC_PAGE_LIMIT'],
-      'FEEDGEN_SPACE_SYNC_PAGE_LIMIT',
-      DEFAULT_SPACE_SYNC_PAGE_LIMIT,
     ),
     spaceSyncMaxPages: parsePositiveInt(
       env['FEEDGEN_SPACE_SYNC_MAX_PAGES'],
@@ -215,6 +214,20 @@ function parsePositiveInt(
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`Invalid ${name}: ${value} (expected positive integer)`)
+  }
+  return parsed
+}
+
+function parseSpaceSyncPageLimit(value: string | undefined): number {
+  const parsed = parsePositiveInt(
+    value,
+    'FEEDGEN_SPACE_SYNC_PAGE_LIMIT',
+    DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+  )
+  if (parsed > MAX_SPACE_SYNC_PAGE_LIMIT) {
+    throw new Error(
+      `Invalid FEEDGEN_SPACE_SYNC_PAGE_LIMIT: ${parsed} (maximum ${MAX_SPACE_SYNC_PAGE_LIMIT})`,
+    )
   }
   return parsed
 }
