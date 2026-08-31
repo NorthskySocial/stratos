@@ -4,6 +4,7 @@ import {
   computeCid,
   encodeRecord,
   parseCid,
+  PdsCustodyWriteForbiddenError,
   RepoWrite,
   StratosValidator,
 } from '@northskysocial/stratos-core'
@@ -116,10 +117,7 @@ export async function updateRecord(
   // their own key; Stratos must not also accept updates for it. See create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   if (enrollment?.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
+    throw new PdsCustodyWriteForbiddenError()
   }
 
   const { recordBytes, cid } = await prepareUpdatePhases(

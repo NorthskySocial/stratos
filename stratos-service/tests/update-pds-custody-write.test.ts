@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { PdsCustodyWriteForbiddenError } from '@northskysocial/stratos-core'
 import { updateRecord } from '../src/api/records/update.js'
 import type { AppContext } from '../src/context-types.js'
 
@@ -38,12 +38,12 @@ describe('updateRecord pds-custody rejection', () => {
     })
 
     await expect(updateRecord(ctx, buildInput(), CALLER_DID)).rejects.toThrow(
-      InvalidRequestError,
+      PdsCustodyWriteForbiddenError,
     )
     await expect(
       updateRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
       message: 'This actor writes records to their own PDS',
     })
   })
@@ -74,7 +74,7 @@ describe('updateRecord pds-custody rejection', () => {
     await expect(
       updateRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
   })
@@ -89,7 +89,18 @@ describe('updateRecord pds-custody rejection', () => {
     await expect(
       updateRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
+    })
+    expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
+  })
+
+  it('allows a missing enrollment to reach the existing write path', async () => {
+    const ctx = buildContext(undefined)
+
+    await expect(
+      updateRecord(ctx, buildInput(), CALLER_DID),
+    ).rejects.not.toMatchObject({
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorStore.exists).toHaveBeenCalledWith(CALLER_DID)
   })

@@ -55,6 +55,8 @@ export interface FeedgenConfig {
   spaceSyncRequestTimeoutMs: number
   /** Time budget (ms) for one member in one pass. A member over budget is abandoned for that pass. */
   spaceSyncMemberBudgetMs: number
+  /** Maximum number of members synced concurrently in one pass. */
+  spaceSyncMemberConcurrency: number
   /** Max accepted size (bytes) of a single record fetched from a member's host. */
   spaceSyncMaxRecordBytes: number
   /** Max records indexed for one member in one pass. */
@@ -84,6 +86,7 @@ export const DEFAULT_SPACE_SYNC_PAGE_LIMIT = 1_000
 export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
 export const DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS = 10_000
 export const DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS = 60_000
+export const DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY = 8
 export const DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES = 65_536
 export const DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER = 1_000
 export const DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS: ReadonlySet<string> =
@@ -176,6 +179,11 @@ export function loadFeedgenConfig(
       env['FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS'],
       'FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS',
       DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+    ),
+    spaceSyncMemberConcurrency: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY'],
+      'FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY',
+      DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
     ),
     spaceSyncMaxRecordBytes: parsePositiveInt(
       env['FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES'],

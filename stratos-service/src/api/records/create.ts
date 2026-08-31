@@ -5,6 +5,7 @@ import {
   computeCid,
   encodeRecord,
   parseCid,
+  PdsCustodyWriteForbiddenError,
   RepoWrite,
   StratosValidator,
 } from '@northskysocial/stratos-core'
@@ -99,10 +100,7 @@ export async function createRecord(
   // without this gate the first write creates a second key and a Stratos repo
   // that no attestation covers.
   if (enrollment.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
+    throw new PdsCustodyWriteForbiddenError()
   }
 
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)

@@ -160,6 +160,9 @@ export class SpaceSyncer {
     try {
       return await this.runSync(target, signal)
     } catch (err) {
+      if (signal?.aborted) {
+        return { target, ok: false, reason: 'aborted', error: err }
+      }
       if (err instanceof MalformedCursorError) {
         await this.store.deleteSpaceCursor(target.spaceUri, target.did)
         this.onError(target, err)
@@ -180,6 +183,7 @@ export class SpaceSyncer {
     const credential = await this.credentialManager.getCredential(
       target.boundary,
     )
+    assertNotAborted(signal)
     const client = this.createHostClient({
       hostOrigin: target.host,
       credentialProof: credential,

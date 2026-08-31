@@ -34,6 +34,7 @@ describe('loadFeedgenConfig space-sync defaults', () => {
     expect(cfg.spaceSyncMemberBudgetMs).toBe(
       DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
     )
+    expect(cfg.spaceSyncMemberConcurrency).toBe(8)
     expect(cfg.spaceSyncMaxRecordBytes).toBe(
       DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
     )
@@ -68,6 +69,7 @@ describe('loadFeedgenConfig space-sync overrides', () => {
       FEEDGEN_SPACE_SYNC_MAX_PAGES: '4',
       FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS: '5000',
       FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS: '20000',
+      FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY: '3',
       FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES: '131072',
       FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER: '500',
     })
@@ -76,6 +78,7 @@ describe('loadFeedgenConfig space-sync overrides', () => {
     expect(cfg.spaceSyncMaxPages).toBe(4)
     expect(cfg.spaceSyncRequestTimeoutMs).toBe(5_000)
     expect(cfg.spaceSyncMemberBudgetMs).toBe(20_000)
+    expect(cfg.spaceSyncMemberConcurrency).toBe(3)
     expect(cfg.spaceSyncMaxRecordBytes).toBe(131_072)
     expect(cfg.spaceSyncMaxRecordsPerMember).toBe(500)
   })
@@ -87,6 +90,13 @@ describe('loadFeedgenConfig space-sync overrides', () => {
         FEEDGEN_SPACE_SYNC_PAGE_LIMIT: '0',
       }),
     ).toThrow(/FEEDGEN_SPACE_SYNC_PAGE_LIMIT/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY: '0',
+      }),
+    ).toThrow(/FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY/)
   })
 })
 

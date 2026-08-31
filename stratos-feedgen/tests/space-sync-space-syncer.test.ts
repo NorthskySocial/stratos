@@ -965,6 +965,20 @@ describe('SpaceSyncer', () => {
       expect(store.upsertPost).not.toHaveBeenCalled()
     })
 
+    it('reports an aborted host request as caller cancellation', async () => {
+      const { syncer, client } = buildSyncer()
+      const controller = new AbortController()
+      client.listRepoOps.mockImplementation(async () => {
+        controller.abort()
+        throw new DOMException('aborted', 'AbortError')
+      })
+
+      const result = await syncer.syncTarget(makeTarget(), controller.signal)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.reason).toBe('aborted')
+    })
+
     it('forwards the signal to listRepoOps and getRecord', async () => {
       const { syncer, client } = buildSyncer()
       const controller = new AbortController()

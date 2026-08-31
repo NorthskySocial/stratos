@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { PdsCustodyWriteForbiddenError } from '@northskysocial/stratos-core'
 import { deleteRecord } from '../src/api/records/delete.js'
 import type { AppContext } from '../src/context-types.js'
 
@@ -31,12 +31,12 @@ describe('deleteRecord pds-custody rejection', () => {
     })
 
     await expect(deleteRecord(ctx, buildInput(), CALLER_DID)).rejects.toThrow(
-      InvalidRequestError,
+      PdsCustodyWriteForbiddenError,
     )
     await expect(
       deleteRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
       message: 'This actor writes records to their own PDS',
     })
   })
@@ -67,7 +67,7 @@ describe('deleteRecord pds-custody rejection', () => {
     await expect(
       deleteRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })
@@ -82,7 +82,18 @@ describe('deleteRecord pds-custody rejection', () => {
     await expect(
       deleteRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
+    })
+    expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
+  })
+
+  it('allows a missing enrollment to reach the existing write path', async () => {
+    const ctx = buildContext(undefined)
+
+    await expect(
+      deleteRecord(ctx, buildInput(), CALLER_DID),
+    ).rejects.not.toMatchObject({
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })

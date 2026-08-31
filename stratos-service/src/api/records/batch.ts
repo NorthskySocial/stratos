@@ -9,6 +9,7 @@ import {
   encodeRecord,
   MstWriteOp,
   parseCid,
+  PdsCustodyWriteForbiddenError,
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
@@ -381,10 +382,7 @@ export async function applyWritesBatch(
   // create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   if (enrollment?.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
+    throw new PdsCustodyWriteForbiddenError()
   }
 
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(

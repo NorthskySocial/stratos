@@ -1,14 +1,16 @@
+import { StratosError } from '@northskysocial/stratos-core'
+
 /**
  * Base class for every error `SpaceHostClient` throws. A foreign host is an
  * untrusted network peer, so every failure mode it can cause — bad data,
  * bad manners, or no response at all — gets its own typed error rather than
  * a raw `fetch` exception or a generic `Error`.
  */
-export abstract class SpaceHostClientError extends Error {
+export abstract class SpaceHostClientError extends StratosError {
   readonly url: string
 
   constructor(message: string, url: string, options?: ErrorOptions) {
-    super(message, options)
+    super(message, 'SpaceHostClientError', options)
     this.url = url
   }
 }

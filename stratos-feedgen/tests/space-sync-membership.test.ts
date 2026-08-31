@@ -269,6 +269,7 @@ describe('MembershipTracker', () => {
         SPIKE,
         BEBOP_BOUNDARY,
         'space-boundary-shrink',
+        bebopSpace,
       )
       expect(purger.purgeActor).not.toHaveBeenCalled()
       const bebopOutcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
