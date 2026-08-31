@@ -388,6 +388,44 @@ describe('MembershipTracker', () => {
       expect(purger.purgeSpaceActor).toHaveBeenCalledTimes(1)
       expect(purger.purgeSpaceActor).toHaveBeenCalledWith(FAYE)
     })
+
+    it('retries a departure when its purge fails', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          return calls === 1
+            ? {
+                repos: [
+                  {
+                    did: SPIKE,
+                    custody: 'pds',
+                    host: 'https://spike.example',
+                  },
+                ],
+              }
+            : { repos: [] }
+        }),
+      }
+      const purgeError = new Error('database unavailable')
+      const purger = fakePurger()
+      purger.purgeSpaceActor.mockRejectedValueOnce(purgeError)
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY])
+      await expect(tracker.runPass([BEBOP_BOUNDARY])).rejects.toBe(purgeError)
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      expect(purger.purgeSpaceActor).toHaveBeenCalledTimes(2)
+      expect(purger.purgeSpaceActor).toHaveBeenNthCalledWith(1, SPIKE)
+      expect(purger.purgeSpaceActor).toHaveBeenNthCalledWith(2, SPIKE)
+      const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
+    })
   })
 
   describe('presence without a poll target', () => {

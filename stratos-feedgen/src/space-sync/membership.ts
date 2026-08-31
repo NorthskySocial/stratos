@@ -158,6 +158,8 @@ export class MembershipTracker {
       spaceUri: string
     }> = []
     const outcomes: BoundaryPassOutcome[] = []
+    const nextMembership = new Map(this.lastMembership)
+    const completedMembership = new Map<string, BoundaryMembershipState>()
 
     settled.forEach((result, i) => {
       const boundary = boundaryList[i]
@@ -173,7 +175,9 @@ export class MembershipTracker {
       }
 
       const { polls, skippedNoHost, memberDids, spaceUri } = result.value
-      this.lastMembership.set(boundary, { polls, memberDids })
+      const membership = { polls, memberDids }
+      nextMembership.set(boundary, membership)
+      completedMembership.set(boundary, membership)
 
       const outcome: BoundaryPassSuccess = {
         boundary,
@@ -197,17 +201,16 @@ export class MembershipTracker {
       outcomes.push(outcome)
     })
 
-    // Resolve global presence only after every succeeded boundary above has
-    // published its fresh membership snapshot, so a did that still holds a
-    // different tracked boundary this pass is boundary-shrunk, not purged
-    // outright. A boundary that failed this pass keeps its stale entry in
-    // `lastMembership`, which counts as "still present" for this check — we
+    // Resolve global presence against every fresh successful snapshot, so a
+    // did that still holds a different tracked boundary this pass is
+    // boundary-shrunk, not purged outright. A boundary that failed this pass
+    // keeps its stale entry, which counts as "still present" for this check — we
     // have no fresh confirmation that they left, so we do not purge on that
     // boundary's account. Membership is deliberately independent of poll
     // targets: hostless and non-pds members still prevent an actor-wide purge.
     const purgedActor = new Set<string>()
     for (const { outcome, did, spaceUri } of left) {
-      const stillMember = [...this.lastMembership.values()].some((state) =>
+      const stillMember = [...nextMembership.values()].some((state) =>
         state.memberDids.has(did),
       )
       if (stillMember) {
@@ -220,6 +223,13 @@ export class MembershipTracker {
         purgedActor.add(did)
         await this.purger.purgeSpaceActor(did)
       }
+    }
+
+    // A completed listing becomes the departure baseline only after all
+    // removals derived from it succeed. If a purge fails, retaining the prior
+    // snapshots makes the next pass rediscover and retry the same departure.
+    for (const [boundary, membership] of completedMembership) {
+      this.lastMembership.set(boundary, membership)
     }
 
     for (const outcome of outcomes) {
