@@ -1,4 +1,9 @@
 import { isValidNsidStr, isValidRkey } from '@northskysocial/stratos-core'
+import {
+  DEFAULT_SPACE_SYNC_MAX_PAGES,
+  DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+  DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
+} from '../config.js'
 import type { FeedgenStore } from '../db/index.js'
 import {
   extractBlobRefs,
@@ -13,18 +18,6 @@ import {
 } from './host-client.js'
 import { MalformedCursorError } from './errors.js'
 import type { PollTarget } from './membership.js'
-
-/** Matches `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`'s planned default (WP6). */
-const DEFAULT_MAX_RECORD_BYTES = 65_536
-/** Pages fetched per target per pass, regardless of how many ops each page holds. */
-const DEFAULT_MAX_PAGES = 10
-/**
- * Indexed-record cap per member per pass. Set well above what the default
- * page settings (`DEFAULT_MAX_PAGES` pages of the host's own ~100-op page
- * default) would ever reach, so it rarely binds — it exists as an
- * independent circuit breaker, not the primary bound.
- */
-const DEFAULT_MAX_RECORDS_PER_MEMBER = 1000
 
 export interface SpaceSyncerDeps {
   store: Pick<
@@ -133,10 +126,11 @@ export class SpaceSyncer {
     this.credentialManager = deps.credentialManager
     this.createHostClient =
       deps.createHostClient ?? ((opts) => new SpaceHostClient(opts))
-    this.maxRecordBytes = deps.maxRecordBytes ?? DEFAULT_MAX_RECORD_BYTES
-    this.maxPages = deps.maxPages ?? DEFAULT_MAX_PAGES
+    this.maxRecordBytes =
+      deps.maxRecordBytes ?? DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES
+    this.maxPages = deps.maxPages ?? DEFAULT_SPACE_SYNC_MAX_PAGES
     this.maxRecordsPerMember =
-      deps.maxRecordsPerMember ?? DEFAULT_MAX_RECORDS_PER_MEMBER
+      deps.maxRecordsPerMember ?? DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER
     this.pageLimit = deps.pageLimit
     this.now = deps.now ?? (() => new Date().toISOString())
     this.log = deps.log ?? defaultLog
