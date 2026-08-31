@@ -1,12 +1,9 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import {
-  PdsCustodyWriteForbiddenError,
-  RepoWrite,
-  StratosValidator,
-} from '@northskysocial/stratos-core'
+import { RepoWrite, StratosValidator } from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
+import { assertStratosCustody } from './custody.js'
 import {
   sequenceChange,
   type SequenceTrace,
@@ -58,12 +55,8 @@ export async function deleteRecord(
     )
   }
 
-  // A 'pds' custody actor keeps their repo on their own PDS and signs with
-  // their own key; Stratos must not also accept deletes for it. See create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
-  if (enrollment?.custody === 'pds') {
-    throw new PdsCustodyWriteForbiddenError()
-  }
+  assertStratosCustody(enrollment)
 
   const uriStr = `at://${callerDid}/${collection}/${rkey}`
   const uri = new AtUriSyntax(uriStr)

@@ -43,6 +43,9 @@ import {
   UpstreamStratosClient,
 } from '../upstream/index.js'
 
+const MAX_WARM_UP_FAILURES = 10
+const MAX_WARM_UP_FIELD_LENGTH = 200
+
 async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
   const logger = createLogger(cfg.logLevel)
@@ -146,12 +149,20 @@ async function main(): Promise<void> {
     const failed = results.filter(
       (r): r is { boundary: string; reason: string } => 'reason' in r,
     )
-    const summary = `space credential warm-up: attempted=${results.length} acquired=${results.length - failed.length} failed=${failed.length}`
+    const context = {
+      attempted: results.length,
+      acquired: results.length - failed.length,
+      failed: failed.length,
+      failures: failed.slice(0, MAX_WARM_UP_FAILURES).map((failure) => ({
+        boundary: boundWarmUpField(failure.boundary),
+        reason: boundWarmUpField(failure.reason),
+      })),
+      omittedFailures: Math.max(0, failed.length - MAX_WARM_UP_FAILURES),
+    }
     if (failed.length === 0) {
-      console.log(summary)
+      logger.info(context, 'space credential warm-up completed')
     } else {
-      const detail = failed.map((f) => `${f.boundary}: ${f.reason}`).join('; ')
-      console.error(`${summary} (${detail})`)
+      logger.warn(context, 'space credential warm-up completed with failures')
     }
   })
 
@@ -256,6 +267,10 @@ async function main(): Promise<void> {
     scheduler.start()
     logger.info({}, 'space sync scheduler started')
   }
+}
+
+function boundWarmUpField(value: string): string {
+  return value.slice(0, MAX_WARM_UP_FIELD_LENGTH)
 }
 
 interface StartSubscriptionDeps {

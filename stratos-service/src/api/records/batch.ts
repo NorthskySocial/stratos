@@ -9,7 +9,6 @@ import {
   encodeRecord,
   MstWriteOp,
   parseCid,
-  PdsCustodyWriteForbiddenError,
   StratosValidator,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context.js'
@@ -22,6 +21,7 @@ import {
   type SequenceTrace,
 } from './types.js'
 import { ensureActorStoreExists } from './util.js'
+import { assertStratosCustody } from './custody.js'
 
 export type BatchAction = 'create' | 'update' | 'delete'
 
@@ -377,13 +377,8 @@ export async function applyWritesBatch(
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
 
-  // A 'pds' custody actor keeps their repo on their own PDS and signs with
-  // their own key; Stratos must not also accept batched writes for it. See
-  // create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
-  if (enrollment?.custody === 'pds') {
-    throw new PdsCustodyWriteForbiddenError()
-  }
+  assertStratosCustody(enrollment)
 
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(
     ctx,

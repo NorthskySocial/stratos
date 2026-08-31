@@ -606,7 +606,7 @@ describe('UpstreamStratosClient', () => {
 })
 
 describe('StratosInvalidResponseError', () => {
-  it('extends StratosError without changing StratosClientError', () => {
+  it('keeps upstream response failures in the domain error taxonomy', () => {
     const invalid = new StratosInvalidResponseError(
       'https://stratos.bebop.test/xrpc/zone.stratos.space.listSpaceRepos',
       'zone.stratos.space.listSpaceRepos',
@@ -623,7 +623,8 @@ describe('StratosInvalidResponseError', () => {
       lxm: 'zone.stratos.space.listSpaceRepos',
     })
     expect(invalid).toBeInstanceOf(StratosError)
-    expect(client).not.toBeInstanceOf(StratosError)
+    expect(client).toBeInstanceOf(StratosError)
+    expect(client.code).toBe('StratosClientError')
   })
 })
 
@@ -640,6 +641,8 @@ describe('StratosClientError', () => {
     expect(err.lxm).toBe('foo')
     expect(err.url).toBe('https://x/xrpc/foo')
     expect(err.name).toBe('StratosClientError')
+    expect(err).toBeInstanceOf(StratosError)
+    expect(err.code).toBe('StratosClientError')
   })
 })
 

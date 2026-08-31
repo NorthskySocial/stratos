@@ -78,10 +78,9 @@ export interface SpaceSyncRunnerDeps {
  * Composes the WP4 space poller with WP5 commit verification.
  *
  * `runTarget` is the unit WP6's scheduler calls once per poll target per
- * tick. There is no retry loop here: a halted target is simply not polled
- * again until its cooldown lapses, and a target with no cooldown is not
- * polled again until the next membership pass produces a fresh poll target
- * for it.
+ * tick. There is no retry loop here: an invalid commit halts its target for
+ * the current membership pass, and a completed membership refresh permits
+ * one fresh attempt.
  *
  * Failure streaks and halt cooldowns are the state that persists across
  * calls, and both are deliberately in-process only: MM-11 relies on
@@ -111,6 +110,10 @@ export class SpaceSyncRunner {
   private readonly capStopStreaks = new Map<string, Map<string, number>>()
   /** Epoch ms before which a target is skipped with no network call, keyed by space then member. */
   private readonly nextEligibleAt = new Map<string, Map<string, number>>()
+  /** Membership generation in which an invalid commit halted each target. */
+  private readonly invalidCommitPasses = new Map<string, Map<string, number>>()
+  /** Last completed membership generation, keyed by boundary. */
+  private readonly membershipPasses = new Map<string, number>()
 
   constructor(deps: SpaceSyncRunnerDeps) {
     this.syncer = deps.syncer
@@ -129,6 +132,14 @@ export class SpaceSyncRunner {
     this.now = deps.now ?? Date.now
   }
 
+  /** Permit invalid-commit retries only for boundaries refreshed successfully. */
+  completeMembershipPass(boundaries: Iterable<string>): void {
+    for (const boundary of boundaries) {
+      const generation = this.membershipPasses.get(boundary) ?? 0
+      this.membershipPasses.set(boundary, generation + 1)
+    }
+  }
+
   /**
    * Never throws — a failure to settle a bad commit (purge/cursor-drop) is
    * reported and swallowed rather than left to break a caller iterating a
@@ -144,6 +155,7 @@ export class SpaceSyncRunner {
     if (this.isHalted(target)) {
       return { target, ok: false, reason: 'halted' }
     }
+    const membershipPass = this.membershipPasses.get(target.boundary) ?? 0
 
     const result = await this.syncer.syncTarget(target, signal)
     if (!result.ok) return result
@@ -176,7 +188,11 @@ export class SpaceSyncRunner {
         return result
       }
 
-      return await this.settleVerifyFailure(target, verifyResult.reason)
+      return await this.settleVerifyFailure(
+        target,
+        verifyResult.reason,
+        membershipPass,
+      )
     } catch (err) {
       this.onError(target, err)
       return { target, ok: false, reason: 'member-skip', error: err }
@@ -206,6 +222,7 @@ export class SpaceSyncRunner {
   private async settleVerifyFailure(
     target: PollTarget,
     reason: CommitVerifyFailureReason,
+    membershipPass: number,
   ): Promise<SpaceSyncRunFailure> {
     await this.purger.purgeActorBoundary(
       target.did,
@@ -216,7 +233,7 @@ export class SpaceSyncRunner {
     this.onVerifyFailure({ target, reason })
 
     const streak = this.bumpStreak(target)
-    this.haltTarget(target, streak)
+    this.haltInvalidCommit(target, membershipPass)
     if (streak >= 2) {
       this.onConsecutiveFailure({ target, streak })
     }
@@ -230,8 +247,20 @@ export class SpaceSyncRunner {
   }
 
   private isHalted(target: PollTarget): boolean {
+    const invalidCommitPass = this.invalidCommitPasses
+      .get(target.spaceUri)
+      ?.get(target.did)
+    const membershipPass = this.membershipPasses.get(target.boundary) ?? 0
+    if (invalidCommitPass === membershipPass) return true
     const at = this.nextEligibleAt.get(target.spaceUri)?.get(target.did)
     return at !== undefined && this.now() < at
+  }
+
+  private haltInvalidCommit(target: PollTarget, membershipPass: number): void {
+    const byMember =
+      this.invalidCommitPasses.get(target.spaceUri) ?? new Map<string, number>()
+    byMember.set(target.did, membershipPass)
+    this.invalidCommitPasses.set(target.spaceUri, byMember)
   }
 
   private haltTarget(target: PollTarget, escalation: number): void {
@@ -270,6 +299,7 @@ export class SpaceSyncRunner {
   /** A verified sync proves the member is neither tampering nor merely busy. */
   private resetStreak(target: PollTarget): void {
     this.failureStreaks.get(target.spaceUri)?.delete(target.did)
+    this.invalidCommitPasses.get(target.spaceUri)?.delete(target.did)
     this.nextEligibleAt.get(target.spaceUri)?.delete(target.did)
     this.resetCapStopStreak(target)
   }

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  MembershipCursorStalledError,
+  MembershipPageLimitError,
   MembershipTracker,
   type BoundaryPassOutcome,
   type MembershipPassLogEvent,
@@ -675,7 +677,12 @@ describe('MembershipTracker', () => {
       const outcome = outcomeFor(outcomes, BEBOP_BOUNDARY)
       expect(outcome.ok).toBe(false)
       if (!outcome.ok) {
-        expect(String(outcome.error)).toContain('exceeded 2 pages')
+        expect(outcome.error).toBeInstanceOf(MembershipPageLimitError)
+        expect(outcome.error).toMatchObject({
+          code: 'MembershipPageLimit',
+          boundary: BEBOP_BOUNDARY,
+          limit: 2,
+        })
       }
       expect(outcome.polls).toEqual([])
       expect(client.listSpaceRepos).toHaveBeenCalledTimes(2)
@@ -706,7 +713,12 @@ describe('MembershipTracker', () => {
       const outcome = outcomeFor(outcomes, BEBOP_BOUNDARY)
       expect(outcome.ok).toBe(false)
       if (!outcome.ok) {
-        expect(String(outcome.error)).toContain('non-advancing cursor')
+        expect(outcome.error).toBeInstanceOf(MembershipCursorStalledError)
+        expect(outcome.error).toMatchObject({
+          code: 'MembershipCursorStalled',
+          boundary: BEBOP_BOUNDARY,
+          cursor: 'stuck',
+        })
       }
       expect(client.listSpaceRepos).toHaveBeenCalledTimes(2)
       expect(purger.purgeActor).not.toHaveBeenCalled()

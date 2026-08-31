@@ -16,6 +16,7 @@ import {
 const STRATOS_DID = 'did:web:stratos.test'
 const BEBOP_BOUNDARY = `${STRATOS_DID}/bebop-crew`
 const SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/bebop-crew`
+const NERV_BOUNDARY = `${STRATOS_DID}/nerv`
 const SPIKE_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
 const HOST = 'https://spike.example'
@@ -333,10 +334,7 @@ describe('SpaceSyncRunner', () => {
       })
 
       await runner.runTarget(makeTarget())
-      // A non-transient failure halts the target (H4); advance past its
-      // cooldown so the second call actually re-verifies instead of being
-      // skipped as halted.
-      clock.advance(5 * 60_000 + 1)
+      runner.completeMembershipPass([BEBOP_BOUNDARY])
       await runner.runTarget(makeTarget())
 
       expect(onConsecutiveFailure).toHaveBeenCalledTimes(1)
@@ -375,7 +373,7 @@ describe('SpaceSyncRunner', () => {
       })
 
       await runner.runTarget(makeTarget())
-      clock.advance(5 * 60_000 + 1)
+      runner.completeMembershipPass([BEBOP_BOUNDARY])
       await runner.runTarget(makeTarget())
       await runner.runTarget(makeTarget())
 
@@ -478,7 +476,7 @@ describe('SpaceSyncRunner', () => {
       const { runner } = buildRunner({ syncer, verifier, now: clock.now })
 
       await runner.runTarget(makeTarget())
-      clock.advance(5 * 60_000 + 1)
+      runner.completeMembershipPass([BEBOP_BOUNDARY])
       await runner.runTarget(makeTarget())
 
       expect(consoleWarn).toHaveBeenCalledWith(
@@ -542,7 +540,7 @@ describe('SpaceSyncRunner', () => {
     })
   })
 
-  describe('halt cooldown', () => {
+  describe('invalid-commit halt', () => {
     function failingVerifier() {
       const verifier = fakeVerifier()
       verifier.verify.mockResolvedValue({
@@ -576,7 +574,7 @@ describe('SpaceSyncRunner', () => {
       expect(verifier.verify).not.toHaveBeenCalled()
     })
 
-    it('re-polls once the cooldown has elapsed', async () => {
+    it('re-polls after the next completed membership pass', async () => {
       const syncer = fakeSyncer()
       syncer.syncTarget.mockResolvedValue(
         makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
@@ -586,7 +584,7 @@ describe('SpaceSyncRunner', () => {
       const { runner } = buildRunner({ syncer, verifier, now: clock.now })
 
       await runner.runTarget(makeTarget())
-      clock.advance(5 * 60_000 + 1)
+      runner.completeMembershipPass([BEBOP_BOUNDARY])
       syncer.syncTarget.mockClear()
       const result = await runner.runTarget(makeTarget())
 
@@ -595,40 +593,47 @@ describe('SpaceSyncRunner', () => {
       if (!result.ok) expect(result.reason).toBe('commit-verify-failed')
     })
 
-    it('resets escalation on success, so the next failure gets the base cooldown', async () => {
+    it('does not re-poll when only a different boundary completes', async () => {
       const syncer = fakeSyncer()
       syncer.syncTarget.mockResolvedValue(
         makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
       )
-      const verifier = fakeVerifier()
-      verifier.verify
-        .mockResolvedValueOnce({
-          ok: false,
-          reason: 'mac-mismatch',
-          transient: false,
-        })
-        .mockResolvedValueOnce({ ok: true })
-        .mockResolvedValue({
-          ok: false,
-          reason: 'mac-mismatch',
-          transient: false,
-        })
-      const clock = fakeClock()
-      const { runner } = buildRunner({ syncer, verifier, now: clock.now })
+      const verifier = failingVerifier()
+      const { runner } = buildRunner({ syncer, verifier })
 
-      await runner.runTarget(makeTarget()) // streak 1, base cooldown
-      clock.advance(5 * 60_000 + 1)
-      await runner.runTarget(makeTarget()) // success clears streak + cooldown
-      await runner.runTarget(makeTarget()) // fails again at streak 1, not 2
-
-      // If the escalation had not reset, this failure would need the
-      // doubled (10 minute) cooldown and still be halted here.
-      clock.advance(5 * 60_000 + 1)
+      await runner.runTarget(makeTarget())
+      runner.completeMembershipPass([NERV_BOUNDARY])
       syncer.syncTarget.mockClear()
       const result = await runner.runTarget(makeTarget())
 
-      expect(syncer.syncTarget).toHaveBeenCalledTimes(1)
-      expect(result.ok).toBe(false)
+      expect(syncer.syncTarget).not.toHaveBeenCalled()
+      expect(result).toEqual({
+        target: makeTarget(),
+        ok: false,
+        reason: 'halted',
+      })
+    })
+
+    it('does not re-poll on elapsed time without a membership pass', async () => {
+      const syncer = fakeSyncer()
+      syncer.syncTarget.mockResolvedValue(
+        makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
+      )
+      const verifier = failingVerifier()
+      const clock = fakeClock()
+      const { runner } = buildRunner({ syncer, verifier, now: clock.now })
+
+      await runner.runTarget(makeTarget())
+      clock.advance(24 * 60 * 60_000)
+      syncer.syncTarget.mockClear()
+      const result = await runner.runTarget(makeTarget())
+
+      expect(syncer.syncTarget).not.toHaveBeenCalled()
+      expect(result).toEqual({
+        target: makeTarget(),
+        ok: false,
+        reason: 'halted',
+      })
     })
   })
 
