@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import {
   DidNotFoundError,
@@ -108,9 +108,12 @@ async function signTestCommit(
 }
 
 function stubResolver(
-  resolve: (did: string) => Promise<string>,
+  resolve: (did: string, forceRefresh: boolean) => Promise<string>,
 ): CommitVerifierDeps['didResolver'] {
-  return { resolveAtprotoKey: async (did: string) => resolve(did) }
+  return {
+    resolveAtprotoKey: async (did: string, forceRefresh = false) =>
+      resolve(did, forceRefresh),
+  }
 }
 
 function buildVerifier(
@@ -153,7 +156,8 @@ describe('CommitVerifier', () => {
     const commit = await signTestCommit(keypair)
     const sig = Buffer.from((commit.sig as { $bytes: string }).$bytes, 'base64')
     commit.sig = bytesField(sig.subarray(0, 63))
-    const verifier = buildVerifier(stubResolver(async () => keypair.did()))
+    const resolveKey = vi.fn(async () => keypair.did())
+    const verifier = buildVerifier(stubResolver(resolveKey))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
 
@@ -162,6 +166,8 @@ describe('CommitVerifier', () => {
       reason: 'signature-invalid',
       transient: false,
     })
+    expect(resolveKey).toHaveBeenCalledOnce()
+    expect(resolveKey).toHaveBeenCalledWith(SPIKE_DID, false)
   })
 
   it('rejects a commit with a tampered mac', async () => {
@@ -223,7 +229,8 @@ describe('CommitVerifier', () => {
     const signingKey = await Secp256k1Keypair.create({ exportable: true })
     const otherKey = await Secp256k1Keypair.create({ exportable: true })
     const commit = await signTestCommit(signingKey)
-    const verifier = buildVerifier(stubResolver(async () => otherKey.did()))
+    const resolveKey = vi.fn(async () => otherKey.did())
+    const verifier = buildVerifier(stubResolver(resolveKey))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
 
@@ -232,6 +239,55 @@ describe('CommitVerifier', () => {
       reason: 'signature-invalid',
       transient: false,
     })
+    expect(resolveKey.mock.calls).toEqual([
+      [SPIKE_DID, false],
+      [SPIKE_DID, true],
+    ])
+  })
+
+  it('accepts a rotated signing key after one forced refresh', async () => {
+    const previousKey = await Secp256k1Keypair.create({ exportable: true })
+    const rotatedKey = await Secp256k1Keypair.create({ exportable: true })
+    const commit = await signTestCommit(rotatedKey)
+    const resolveKey = vi.fn(async (_did: string, forceRefresh: boolean) =>
+      forceRefresh ? rotatedKey.did() : previousKey.did(),
+    )
+    const verifier = buildVerifier(stubResolver(resolveKey))
+
+    const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
+
+    expect(result).toEqual({ ok: true })
+    expect(resolveKey.mock.calls).toEqual([
+      [SPIKE_DID, false],
+      [SPIKE_DID, true],
+    ])
+  })
+
+  it('defers a signature mismatch when the forced refresh fails transiently', async () => {
+    const previousKey = await Secp256k1Keypair.create({ exportable: true })
+    const rotatedKey = await Secp256k1Keypair.create({ exportable: true })
+    const commit = await signTestCommit(rotatedKey)
+    const refreshError = Object.assign(new Error('Service Unavailable'), {
+      status: 503,
+    })
+    const resolveKey = vi.fn(async (_did: string, forceRefresh: boolean) => {
+      if (forceRefresh) throw refreshError
+      return previousKey.did()
+    })
+    const verifier = buildVerifier(stubResolver(resolveKey))
+
+    const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'key-unresolvable',
+      transient: true,
+      error: refreshError,
+    })
+    expect(resolveKey.mock.calls).toEqual([
+      [SPIKE_DID, false],
+      [SPIKE_DID, true],
+    ])
   })
 
   it('rejects a missing commit', async () => {

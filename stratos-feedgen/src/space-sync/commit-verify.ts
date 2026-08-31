@@ -94,17 +94,8 @@ export class CommitVerifier {
       return { ok: false, reason: 'unsupported-version', transient: false }
     }
 
-    let didKey: string
-    try {
-      didKey = await this.didResolver.resolveAtprotoKey(authorDid)
-    } catch (error) {
-      return {
-        ok: false,
-        reason: 'key-unresolvable',
-        transient: isTransientResolutionError(error),
-        error,
-      }
-    }
+    const resolvedKey = await this.resolveKey(authorDid, false)
+    if (!resolvedKey.ok) return resolvedKey
 
     // Upstream's `verifyCommit` also checks `commit.rev !== ctx.rev` against
     // an independently-tracked expected revision. This poller has no such
@@ -131,24 +122,63 @@ export class CommitVerifier {
       return { ok: false, reason: 'mac-mismatch', transient: false }
     }
 
-    try {
-      parseDidKey(didKey)
-    } catch {
-      return { ok: false, reason: 'key-unresolvable', transient: false }
-    }
-
-    let validSig: boolean
-    try {
-      validSig = await verifySignature(didKey, ctxBytes, decoded.sig)
-    } catch {
+    const validSig = await verifyCommitSignature(
+      resolvedKey.didKey,
+      ctxBytes,
+      decoded.sig,
+    )
+    if (validSig === undefined) {
       return { ok: false, reason: 'signature-invalid', transient: false }
     }
-    if (!validSig) {
+    if (validSig) return { ok: true }
+
+    // A validly-shaped signature can mismatch after a DID-key rotation when
+    // the resolver still holds the previous document. Refresh exactly once
+    // before treating the mismatch as cryptographic evidence. Malformed
+    // signatures throw above and deliberately never reach this network call.
+    const refreshedKey = await this.resolveKey(authorDid, true)
+    if (!refreshedKey.ok) return refreshedKey
+
+    const validRefreshedSig = await verifyCommitSignature(
+      refreshedKey.didKey,
+      ctxBytes,
+      decoded.sig,
+    )
+    if (!validRefreshedSig) {
       return { ok: false, reason: 'signature-invalid', transient: false }
     }
 
     return { ok: true }
   }
+
+  private async resolveKey(
+    authorDid: string,
+    forceRefresh: boolean,
+  ): Promise<ResolvedCommitKey | CommitVerifyFailure> {
+    let didKey: string
+    try {
+      didKey = await this.didResolver.resolveAtprotoKey(authorDid, forceRefresh)
+    } catch (error) {
+      return {
+        ok: false,
+        reason: 'key-unresolvable',
+        transient: isTransientResolutionError(error),
+        error,
+      }
+    }
+
+    try {
+      parseDidKey(didKey)
+    } catch {
+      return { ok: false, reason: 'key-unresolvable', transient: false }
+    }
+    return { ok: true, didKey }
+  }
+}
+
+interface ResolvedCommitKey {
+  readonly ok: true
+  readonly didKey: string
 }
 
 interface CommitCtx {
@@ -238,6 +268,18 @@ function encodeCommitCtx(ctx: CommitCtx, ikm: Uint8Array): Uint8Array {
 function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false
   return timingSafeEqual(a, b)
+}
+
+async function verifyCommitSignature(
+  didKey: string,
+  ctxBytes: Uint8Array,
+  signature: Uint8Array,
+): Promise<boolean | undefined> {
+  try {
+    return await verifySignature(didKey, ctxBytes, signature)
+  } catch {
+    return undefined
+  }
 }
 
 function decodeSignedCommit(
