@@ -18,6 +18,10 @@
       "types": "./src/validation/index.ts",
       "import": "./src/validation/index.ts"
     },
+    "./spaces": {
+      "types": "./src/spaces/index.ts",
+      "import": "./src/spaces/index.ts"
+    },
     "./db": {
       "types": "./src/db/index.ts",
       "import": "./src/db/index.ts"
@@ -100,6 +104,10 @@
       "./validation": {
         "types": "./dist/validation/index.d.ts",
         "import": "./dist/validation/index.js"
+      },
+      "./spaces": {
+        "types": "./dist/spaces/index.d.ts",
+        "import": "./dist/spaces/index.js"
       },
       "./db": {
         "types": "./dist/db/index.d.ts",

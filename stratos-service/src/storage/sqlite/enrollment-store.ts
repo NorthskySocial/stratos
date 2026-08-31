@@ -63,6 +63,14 @@ export class SqliteEnrollmentStore
    * @param record - Enrollment record to store
    */
   async enroll(record: EnrollmentRecord): Promise<void> {
+    const custodyFields =
+      record.custody === undefined
+        ? {}
+        : {
+            custody: record.custody,
+            repoHost: record.repoHost ?? null,
+          }
+
     await this.db
       .insert(enrollment)
       .values({
@@ -73,8 +81,7 @@ export class SqliteEnrollmentStore
         active: record.active ? 'true' : 'false',
         enrollmentRkey: record.enrollmentRkey ?? null,
         isService: record.isService ?? false,
-        custody: record.custody ?? 'stratos',
-        repoHost: record.repoHost ?? null,
+        ...custodyFields,
         capabilityVerdict: record.capabilityVerdict ?? null,
       })
       .onConflictDoUpdate({
@@ -86,8 +93,7 @@ export class SqliteEnrollmentStore
           active: record.active ? 'true' : 'false',
           enrollmentRkey: record.enrollmentRkey ?? null,
           isService: record.isService ?? false,
-          custody: record.custody ?? 'stratos',
-          repoHost: record.repoHost ?? null,
+          ...custodyFields,
           capabilityVerdict: record.capabilityVerdict ?? null,
         },
       })
@@ -180,15 +186,35 @@ export class SqliteEnrollmentStore
     const limit = options?.limit ?? 50
     const cursor = options?.cursor
 
-    const conditions = [
-      cursor ? gt(enrollment.did, cursor) : undefined,
-      options?.activeOnly ? eq(enrollment.active, 'true') : undefined,
-    ].filter((c) => c !== undefined)
+    const conditions = [cursor ? gt(enrollment.did, cursor) : undefined].filter(
+      (condition) => condition !== undefined,
+    )
 
     const rows = await this.db
       .select()
       .from(enrollment)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(asc(enrollment.did))
+      .limit(limit)
+
+    return rows.map(toStoredEnrollment)
+  }
+
+  async listActiveEnrollments(
+    options?: ListEnrollmentsOptions,
+  ): Promise<StoredEnrollment[]> {
+    const limit = options?.limit ?? 50
+    const cursor = options?.cursor
+
+    const conditions = [
+      eq(enrollment.active, 'true'),
+      cursor ? gt(enrollment.did, cursor) : undefined,
+    ].filter((condition) => condition !== undefined)
+
+    const rows = await this.db
+      .select()
+      .from(enrollment)
+      .where(and(...conditions))
       .orderBy(asc(enrollment.did))
       .limit(limit)
 

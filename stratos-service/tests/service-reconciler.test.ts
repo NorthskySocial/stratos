@@ -27,6 +27,12 @@ class FakeEnrollmentStore implements EnrollmentStoreWriter {
     return [...this.enrollments.values()]
   }
 
+  async listActiveEnrollments(): Promise<StoredEnrollment[]> {
+    return [...this.enrollments.values()].filter(
+      (enrollment) => enrollment.active,
+    )
+  }
+
   async listServiceEnrollments(): Promise<StoredEnrollment[]> {
     return [...this.enrollments.values()].filter((e) => e.isService === true)
   }

@@ -63,10 +63,14 @@ services:
     restart: 'no'
     ports:
       - '3100:3100'
+      - '3010:3010'
+      - '3302:3302'
     env_file:
       - .env
     environment:
       STRATOS_PORT: 3100
+      STRATOS_DEV_MODE: 'true'
+      STRATOS_ENROLLMENT_MODE: open
       # The space-credential delegation path and client attestation need a
       # replay store for single-use tokens. Without it they fail closed, and
       # the feedgen never obtains a credential.
@@ -84,7 +88,7 @@ services:
       # verify the feedgen's inter-service JWTs without a network resolution
       # of its non-resolvable did:web. Bare boundary names are qualified
       # against the service DID at config load.
-      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:feedgen.test","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]}]'
+      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:feedgen.test","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]},{"did":"did:web:localhost%3A3302","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]}]'
     depends_on:
       ssl-init:
         condition: service_completed_successfully
@@ -101,6 +105,139 @@ services:
           '--tries=1',
           '--spider',
           'http://localhost:3100/health',
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  pds-spaces:
+    image: ghcr.io/bluesky-social/atproto:pds-spaces-alpha
+    container_name: stratos-test-pds-spaces
+    restart: 'no'
+    network_mode: service:stratos
+    depends_on:
+      stratos:
+        condition: service_started
+    environment:
+      PDS_PORT: 3010
+      PDS_HOSTNAME: localhost
+      PDS_DATA_DIRECTORY: /pds
+      PDS_BLOBSTORE_DISK_LOCATION: /pds/blocks
+      PDS_JWT_SECRET: spaces-test-jwt-secret-do-not-use-outside-tests
+      PDS_ADMIN_PASSWORD: spaces-test-admin
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: 3ee7e0ba1e6b6b1a8b0d8e4f7a2c9d1e5f8a3b6c9d2e5f8a1b4c7d0e3f6a9b2c
+      PDS_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+      PDS_INVITE_REQUIRED: 'true'
+      PDS_DEV_MODE: 'true'
+      PDS_SERVICE_HANDLE_DOMAINS: .spike.test
+      LOG_ENABLED: 'true'
+      LOG_LEVEL: info
+    volumes:
+      - ./test-data/pds-spaces:/pds
+
+  feedgen-webapp:
+    profiles: ['browser-e2e']
+    build:
+      context: ..
+      dockerfile: ./stratos-feedgen/Dockerfile
+      target: feedgen
+    container_name: stratos-test-feedgen-webapp
+    restart: 'no'
+    network_mode: service:stratos
+    environment:
+      FEEDGEN_SERVICE_DID: did:web:localhost%3A3302
+      FEEDGEN_SIGNING_KEY: 097ce261481a889a756db476dceb6cc57596541c264675e9712c7252cfd1183c
+      FEEDGEN_PUBLIC_URL: http://localhost:3302
+      FEEDGEN_PORT: 3302
+      FEEDGEN_SQLITE_PATH: /app/config/browser-e2e.sqlite
+      FEEDGEN_FEEDS_JSON: '{"feeds":[{"id":"swordsmith","boundary":"${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}/swordsmith"},{"id":"aekea","boundary":"${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}/aekea"}]}'
+      STRATOS_SERVICE_URL: http://localhost:3100
+      STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL:-http://127.0.0.1:3100}
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}
+      FEEDGEN_SPACE_SYNC_ENABLED: 'true'
+      FEEDGEN_SPACE_SYNC_INTERVAL_MS: '2000'
+      FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: http://localhost:3010
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3302/health',
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  webapp:
+    profiles: ['browser-e2e']
+    build:
+      context: ..
+      dockerfile: ./webapp/Dockerfile
+      args:
+        VITE_STRATOS_URL: ${STRATOS_PUBLIC_URL:-http://127.0.0.1:3100}
+        VITE_WEBAPP_URL: http://127.0.0.1:5173
+        VITE_STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}
+        VITE_FEEDGEN_DID: did:web:localhost%3A3302
+        VITE_FEEDGEN_FEED: swordsmith
+        VITE_ATPROTO_HANDLE_RESOLVER: https://${PDS_HOST}
+        VITE_ATPROTO_OAUTH_PROXY_URL: http://127.0.0.1:5173/pds
+    container_name: stratos-test-webapp
+    restart: 'no'
+    ports:
+      - '5173:80'
+    environment:
+      E2E_PDS_HOST: ${PDS_HOST}
+      E2E_PDS_URL: https://${PDS_HOST}
+    volumes:
+      - ./nginx/webapp-pds.conf:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost/',
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  webapp-pds:
+    profiles: ['browser-e2e']
+    build:
+      context: ..
+      dockerfile: ./webapp/Dockerfile
+      args:
+        VITE_STRATOS_URL: ${STRATOS_PUBLIC_URL}
+        VITE_WEBAPP_URL: http://127.0.0.1:5174
+        VITE_STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
+        VITE_FEEDGEN_DID: did:web:localhost%3A3302
+        VITE_FEEDGEN_FEED: swordsmith
+        VITE_ATPROTO_HANDLE_RESOLVER: http://localhost:3010
+        VITE_ATPROTO_OAUTH_PROXY_URL: http://127.0.0.1:5174/pds
+    container_name: stratos-test-webapp-pds
+    restart: 'no'
+    ports:
+      - '5174:80'
+    environment:
+      E2E_PDS_HOST: localhost:3010
+      E2E_PDS_URL: http://stratos:3010
+    volumes:
+      - ./nginx/webapp-pds.conf:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost/',
         ]
       interval: 2s
       timeout: 5s

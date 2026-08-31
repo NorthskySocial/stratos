@@ -17,7 +17,9 @@
 //   4d. spaces — space credentials, credential-authed read/sync, revocation
 //   4e. sync-stream — subscribeRecords consumer over the actor stream
 //   4f. feedgen — describeFeed/getFeed against a live feedgen instance
-//   5. teardown — stop Stratos, clean up
+//   4g. mixed-mode — spaces PDS custody, feedgen sync, and revocation
+//   4h. webapp mixed-mode — browser OAuth, custody routing, and rendered feed
+//   5. teardown — stop Stratos and spaces PDS, then clean up
 
 import {
   fail,
@@ -66,6 +68,11 @@ const phases: Phase[] = [
   ...(appviewMode
     ? [{ name: 'AppView Service-Auth Feed', script: 'test-appview-feed.ts' }]
     : []),
+  { name: 'Mixed Mode: Spaces PDS Custody', script: 'test-mixed-mode.ts' },
+  {
+    name: 'Webapp: Browser Mixed Custody',
+    script: 'test-webapp-mixed-mode.ts',
+  },
   { name: 'Admin API: Boundary Management', script: 'test-admin-api.ts' },
   { name: 'Admin UI: SPA Smoke Tests', script: 'test-admin-ui.ts' },
   { name: 'Unenrollment', script: 'test-unenrollment.ts' },
