@@ -536,7 +536,9 @@ describe('SpaceSyncScheduler', () => {
       runTarget: vi.fn(
         async (_target: PollTarget, signal?: AbortSignal) =>
           await new Promise<SpaceSyncRunResult>((_resolve, reject) => {
-            signal?.addEventListener('abort', () => reject(new Error('aborted')))
+            signal?.addEventListener('abort', () =>
+              reject(new Error('aborted')),
+            )
           }),
       ),
     }
