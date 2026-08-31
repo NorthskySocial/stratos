@@ -1,6 +1,10 @@
 import { lookup } from 'node:dns/promises'
 import { isIP, type LookupFunction } from 'node:net'
 import { Agent, type Dispatcher } from 'undici'
+import {
+  DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+  DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
+} from '../config.js'
 import type { SpaceCredentialProof } from '../upstream/index.js'
 import {
   InsecureHostOriginError,
@@ -18,11 +22,8 @@ import {
   SpaceNotFoundError,
 } from './errors.js'
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 /** Generous for a full page of ops; WP6 makes this configurable. */
 const DEFAULT_MAX_PAGE_BYTES = 1_048_576
-/** Matches `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`'s planned default (WP6). */
-const DEFAULT_MAX_RECORD_BYTES = 65_536
 const ERROR_BODY_CAP_BYTES = 4_096
 const PRIVATE_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x00000000, 0x00ffffff],
@@ -124,10 +125,12 @@ export class SpaceHostClient {
     this.hostOrigin = opts.hostOrigin
     this.credentialProof = opts.credentialProof
     this.fetchImpl = opts.fetch ?? fetch
-    this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.requestTimeoutMs =
+      opts.requestTimeoutMs ?? DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS
     this.allowHttpOrigins = opts.allowHttpOrigins ?? new Set()
     this.maxPageBytes = opts.maxPageBytes ?? DEFAULT_MAX_PAGE_BYTES
-    this.maxRecordBytes = opts.maxRecordBytes ?? DEFAULT_MAX_RECORD_BYTES
+    this.maxRecordBytes =
+      opts.maxRecordBytes ?? DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES
     this.resolveHost = opts.resolveHost ?? resolveHost
   }
 

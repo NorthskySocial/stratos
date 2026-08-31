@@ -1,3 +1,8 @@
+import {
+  DEFAULT_SPACE_SYNC_INTERVAL_MS,
+  DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+  DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
+} from '../config.js'
 import type { MembershipTracker, PollTarget } from './membership.js'
 import type { SpaceSyncRunner, SpaceSyncRunResult } from './sync-runner.js'
 
@@ -7,10 +12,6 @@ import type { SpaceSyncRunner, SpaceSyncRunResult } from './sync-runner.js'
  * `space-credential/manager.ts`'s desync rationale.
  */
 const JITTER_FRACTION = 0.1
-
-const DEFAULT_INTERVAL_MS = 30_000
-const DEFAULT_MEMBER_BUDGET_MS = 60_000
-const DEFAULT_MEMBER_CONCURRENCY = 8
 
 export interface SpaceSyncPassLogEvent {
   /** Poll targets produced by this pass's membership run. */
@@ -107,10 +108,11 @@ export class SpaceSyncScheduler {
     this.membership = deps.membership
     this.runner = deps.runner
     this.boundaries = deps.boundaries
-    this.intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS
-    this.memberBudgetMs = deps.memberBudgetMs ?? DEFAULT_MEMBER_BUDGET_MS
+    this.intervalMs = deps.intervalMs ?? DEFAULT_SPACE_SYNC_INTERVAL_MS
+    this.memberBudgetMs =
+      deps.memberBudgetMs ?? DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS
     this.memberConcurrency =
-      deps.memberConcurrency ?? DEFAULT_MEMBER_CONCURRENCY
+      deps.memberConcurrency ?? DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY
     this.log = deps.log ?? noop
     this.onTickSkipped = deps.onTickSkipped ?? noop
     this.onMemberBudgetExceeded = deps.onMemberBudgetExceeded ?? noop
