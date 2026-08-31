@@ -11,7 +11,6 @@ const JITTER_FRACTION = 0.1
 const DEFAULT_INTERVAL_MS = 30_000
 const DEFAULT_MEMBER_BUDGET_MS = 60_000
 const DEFAULT_MEMBER_CONCURRENCY = 8
-const DEFAULT_STOP_GRACE_MS = 10_000
 
 export interface SpaceSyncPassLogEvent {
   /** Poll targets produced by this pass's membership run. */
@@ -41,8 +40,6 @@ export interface SpaceSyncSchedulerDeps {
   memberBudgetMs?: number
   /** Maximum number of member syncs active within one pass. Default 8. */
   memberConcurrency?: number
-  /** Grace period `stop()` waits for an in-flight pass before returning anyway. Default 10000. */
-  stopGraceMs?: number
   /**
    * Structured per-pass summary sink. Called once per pass that starts.
    * Unlike its siblings elsewhere in `space-sync/`, this has no `console.*`
@@ -55,8 +52,6 @@ export interface SpaceSyncSchedulerDeps {
   onMemberBudgetExceeded?: (target: PollTarget) => void
   /** Called for a failure outside the per-member result channel: `membership.runPass` rejecting, or an injected callback throwing. */
   onError?: (err: unknown) => void
-  /** Called if `stop()`'s grace period elapses before the in-flight pass settles. Defaults to a no-op. */
-  onStopTimedOut?: () => void
   /** Injectable jitter source, `[0, 1)`. Defaults to `Math.random`. */
   random?: () => number
 }
@@ -85,10 +80,9 @@ type MemberPollOutcome =
  *   to completion unobserved — the next pass retries it from wherever it
  *   last completed, never from a state the abandoned call raced past.
  *
- * `stop()` waits for an in-flight pass to settle, up to `stopGraceMs`, then
- * returns regardless — a pass wedged on a call this scheduler does not
- * control (a hung `membership.runPass`, for instance) must not block process
- * shutdown forever.
+ * `stop()` drains the in-flight pass and every raw member sync. Shutdown can
+ * call `abortActivePass()` at its deadline, but still keeps the store open
+ * until work that ignores cancellation settles.
  */
 export class SpaceSyncScheduler {
   private readonly membership: SpaceSyncSchedulerDeps['membership']
@@ -97,16 +91,15 @@ export class SpaceSyncScheduler {
   private readonly intervalMs: number
   private readonly memberBudgetMs: number
   private readonly memberConcurrency: number
-  private readonly stopGraceMs: number
   private readonly log: (event: SpaceSyncPassLogEvent) => void
   private readonly onTickSkipped: () => void
   private readonly onMemberBudgetExceeded: (target: PollTarget) => void
   private readonly onError: (err: unknown) => void
-  private readonly onStopTimedOut: () => void
   private readonly random: () => number
 
   private timer: ReturnType<typeof setTimeout> | null = null
   private inFlight: Promise<void> | null = null
+  private readonly activeRunnerCalls = new Set<Promise<SpaceSyncRunResult>>()
   private activePassController: AbortController | null = null
   private stopped = true
 
@@ -118,12 +111,10 @@ export class SpaceSyncScheduler {
     this.memberBudgetMs = deps.memberBudgetMs ?? DEFAULT_MEMBER_BUDGET_MS
     this.memberConcurrency =
       deps.memberConcurrency ?? DEFAULT_MEMBER_CONCURRENCY
-    this.stopGraceMs = deps.stopGraceMs ?? DEFAULT_STOP_GRACE_MS
     this.log = deps.log ?? noop
     this.onTickSkipped = deps.onTickSkipped ?? noop
     this.onMemberBudgetExceeded = deps.onMemberBudgetExceeded ?? noop
     this.onError = deps.onError ?? noop
-    this.onStopTimedOut = deps.onStopTimedOut ?? noop
     this.random = deps.random ?? Math.random
   }
 
@@ -134,12 +125,7 @@ export class SpaceSyncScheduler {
     this.scheduleNext()
   }
 
-  /**
-   * Stops future ticks and waits for an in-flight pass to settle, up to
-   * `stopGraceMs`. On expiry this returns anyway and reports via
-   * `onStopTimedOut` — the pass is left to finish or fail on its own,
-   * unobserved, same as an abandoned member within a pass.
-   */
+  /** Stops future ticks and drains all work that can still access the store. */
   async stop(): Promise<void> {
     this.stopped = true
     if (this.timer) {
@@ -147,22 +133,15 @@ export class SpaceSyncScheduler {
       this.timer = null
     }
     const inFlight = this.inFlight
-    if (!inFlight) return
-
-    let graceTimer: ReturnType<typeof setTimeout> | undefined
-    const grace = new Promise<'timed-out'>((resolve) => {
-      graceTimer = setTimeout(() => resolve('timed-out'), this.stopGraceMs)
-      graceTimer.unref?.()
-    })
-    const outcome = await Promise.race([
-      inFlight.then(() => 'settled' as const),
-      grace,
-    ])
-    if (graceTimer) clearTimeout(graceTimer)
-    if (outcome === 'timed-out') {
-      this.activePassController?.abort()
-      this.onStopTimedOut()
+    if (inFlight) await inFlight
+    while (this.activeRunnerCalls.size > 0) {
+      await Promise.allSettled(this.activeRunnerCalls)
     }
+  }
+
+  /** Ask the active pass and its member syncs to stop at their next checkpoint. */
+  abortActivePass(): void {
+    this.activePassController?.abort()
   }
 
   private scheduleNext(): void {
@@ -260,8 +239,10 @@ export class SpaceSyncScheduler {
         resolve({ status: 'abandoned' })
       }, this.memberBudgetMs)
       timer.unref?.()
-      this.runner
-        .runTarget(target, AbortSignal.any([controller.signal, passSignal]))
+      this.runTrackedTarget(
+        target,
+        AbortSignal.any([controller.signal, passSignal]),
+      )
         .then((result) => {
           if (settled) return
           settled = true
@@ -281,6 +262,21 @@ export class SpaceSyncScheduler {
           resolve({ status: 'errored' })
         })
     })
+  }
+
+  private runTrackedTarget(
+    target: PollTarget,
+    signal: AbortSignal,
+  ): Promise<SpaceSyncRunResult> {
+    const call = Promise.resolve().then(() =>
+      this.runner.runTarget(target, signal),
+    )
+    this.activeRunnerCalls.add(call)
+    void call.then(
+      () => this.activeRunnerCalls.delete(call),
+      () => this.activeRunnerCalls.delete(call),
+    )
+    return call
   }
 }
 
