@@ -42,7 +42,6 @@ export interface FeedgenStartOptions {
 }
 
 interface SqliteArtifactSnapshot {
-  childTmpDir: ReadonlySet<string>
   feedgenCwd: ReadonlySet<string>
 }
 
@@ -64,10 +63,7 @@ export class FeedgenHarness {
 
   static async create(): Promise<FeedgenHarness> {
     const childTmpDir = await Deno.makeTempDir({ prefix: 'feedgen-e2e-tmp-' })
-    return new FeedgenHarness(
-      childTmpDir,
-      await snapshotSqliteArtifacts(childTmpDir),
-    )
+    return new FeedgenHarness(childTmpDir, await snapshotSqliteArtifacts())
   }
 
   async start(options: FeedgenStartOptions): Promise<void> {
@@ -90,6 +86,7 @@ export class FeedgenHarness {
         FEEDGEN_PUBLIC_URL: url,
         FEEDGEN_PORT: String(options.port),
         FEEDGEN_FEEDS_JSON: JSON.stringify({ feeds }),
+        FEEDGEN_SQLITE_PATH: `${this.childTmpDir}/feedgen-${startId}.sqlite`,
         TEMP: this.childTmpDir,
         TMP: this.childTmpDir,
         TMPDIR: this.childTmpDir,
@@ -200,7 +197,7 @@ export class FeedgenHarness {
   async cleanup(): Promise<void> {
     await this.stop()
     try {
-      await assertNoNewSqliteArtifacts(this.beforeArtifacts, this.childTmpDir)
+      await assertNoNewSqliteArtifacts(this.beforeArtifacts)
     } finally {
       await Deno.remove(this.childTmpDir, { recursive: true })
     }
@@ -265,29 +262,22 @@ function parseLogLine(line: string): Readonly<Record<string, unknown>> {
   return {}
 }
 
-async function snapshotSqliteArtifacts(
-  childTmpDir: string,
-): Promise<SqliteArtifactSnapshot> {
+async function snapshotSqliteArtifacts(): Promise<SqliteArtifactSnapshot> {
   return {
-    childTmpDir: await listSqliteArtifacts(childTmpDir),
     feedgenCwd: await listSqliteArtifacts(FEEDGEN_CWD),
   }
 }
 
 async function assertNoNewSqliteArtifacts(
   before: SqliteArtifactSnapshot,
-  childTmpDir: string,
 ): Promise<void> {
-  const after = await snapshotSqliteArtifacts(childTmpDir)
-  const created = [
-    ...new Set([
-      ...[...after.childTmpDir].filter((path) => !before.childTmpDir.has(path)),
-      ...[...after.feedgenCwd].filter((path) => !before.feedgenCwd.has(path)),
-    ]),
-  ]
+  const after = await snapshotSqliteArtifacts()
+  const created = [...after.feedgenCwd].filter(
+    (path) => !before.feedgenCwd.has(path),
+  )
   assert(
     created.length === 0,
-    'default SQLite creates no filesystem artifacts',
+    'feedgen SQLite stays inside its temporary test directory',
     created.join(', '),
   )
 }

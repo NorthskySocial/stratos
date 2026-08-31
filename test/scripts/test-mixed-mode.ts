@@ -1,5 +1,19 @@
 #!/usr/bin/env -S deno run -A
-// The writes that use password sessions do not test OAuth space-scope enforcement.
+/*
+ * WP0 findings:
+ * Q1: invite creation plus com.atproto.server.createAccount creates the local
+ * did:plc accounts; PDS_INVITE_REQUIRED and the admin password are in compose.
+ * Q2: Stratos accepts the member DID as the authorize input; this phase drives
+ * that real OAuth enrollment before it reads the PDS enrollment record.
+ * Q3: STRATOS_DEV_MODE enables OAuth allowHttp. The alpha PDS only preserves
+ * plain HTTP and its configured port for PDS_HOSTNAME=localhost, so it shares
+ * Stratos's network namespace and uses http://localhost:3010 from every
+ * identity-bearing path. PDS_DEV_MODE enables its local development flow, and
+ * open enrollment admits the fixture DID without a PDS endpoint allowlist.
+ * Password sessions bypass the alpha PDS space-scope check. Their access JWTs
+ * are not Stratos credentials, so this phase asserts that auth boundary and
+ * separately uses the dev-DID seam to reach the PDS-custody write guard.
+ */
 
 import { Secp256k1Keypair } from 'npm:@atproto/crypto'
 import { createServiceJwt } from 'npm:@atproto/xrpc-server'
@@ -17,6 +31,7 @@ import {
   FEEDGEN_DID,
   FEEDGEN_SIGNING_KEY,
   FeedgenHarness,
+  type FeedgenStartOptions,
   SPACE_COMMIT_TAMPER_MODULE,
 } from './lib/feedgen.ts'
 import { assert, fail, finish, pass, section } from './lib/log.ts'
@@ -45,8 +60,18 @@ const FEEDGEN_URL = `http://127.0.0.1:${FEEDGEN_PORT}`
 const COLLECTION = 'zone.stratos.feed.post'
 const GET_FEED_LXM = 'zone.stratos.feedgen.getFeed'
 const DNS_DECLARATION_NAME = '_lexicon.space.stratos.zone'
+const SPACE_DECLARATION_AUTHORITY_DID = 'did:plc:6uxgo3ypovauub7nblwylqyv'
 const PLC_DIRECTORY_URL =
   Deno.env.get('STRATOS_PLC_URL') ?? 'https://plc.directory'
+const MIXED_MODE_FEEDS = [
+  { id: 'swordsmith', boundary: DOMAINS.swordsmith },
+  { id: 'aekea', boundary: DOMAINS.aekea },
+]
+const SPACE_SYNC_ENV = {
+  FEEDGEN_SPACE_SYNC_ENABLED: 'true',
+  FEEDGEN_SPACE_SYNC_INTERVAL_MS: '500',
+  FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: PDS_SPACES_URL,
+}
 
 interface ListReposBody {
   repos?: Array<{
@@ -63,6 +88,7 @@ interface PostView {
   cid?: string
   author?: { did?: string }
   record?: Record<string, unknown>
+  boundaries?: string[]
 }
 
 interface GetFeedBody {
@@ -83,6 +109,16 @@ interface FeedStateResult {
 interface FeedPostsResult {
   posts: PostView[] | null
   response: GetFeedResponse
+}
+
+function feedgenStartOptions(
+  additionalEnv: Record<string, string> = {},
+): FeedgenStartOptions {
+  return {
+    port: FEEDGEN_PORT,
+    feeds: MIXED_MODE_FEEDS,
+    env: { ...SPACE_SYNC_ENV, ...additionalEnv },
+  }
 }
 
 function isSpaceSyncPass(event: {
@@ -227,10 +263,11 @@ async function getFeed(token: string, feed: string): Promise<GetFeedResponse> {
   }
 }
 
-async function waitForFeedPostPresent(
+async function waitForFeedPost(
   token: string,
   feed: string,
   uri: string,
+  matchesState: (found: boolean) => boolean,
 ): Promise<FeedStateResult> {
   const deadline = Date.now() + 30_000
   let response: GetFeedResponse = { status: 0, body: {} }
@@ -238,26 +275,7 @@ async function waitForFeedPostPresent(
     response = await getFeed(token, feed)
     const found =
       response.body.feed?.some((item) => item.post?.uri === uri) ?? false
-    if (response.status === 200 && found) {
-      return { matches: true, response }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  return { matches: false, response }
-}
-
-async function waitForFeedPostAbsent(
-  token: string,
-  feed: string,
-  uri: string,
-): Promise<FeedStateResult> {
-  const deadline = Date.now() + 30_000
-  let response: GetFeedResponse = { status: 0, body: {} }
-  while (Date.now() < deadline) {
-    response = await getFeed(token, feed)
-    const found =
-      response.body.feed?.some((item) => item.post?.uri === uri) ?? false
-    if (response.status === 200 && !found) {
+    if (response.status === 200 && matchesState(found)) {
       return { matches: true, response }
     }
     await new Promise((resolve) => setTimeout(resolve, 500))
@@ -301,13 +319,14 @@ async function waitForFeedPosts(
   return { posts: null, response }
 }
 
-async function attemptStratosWrite(
+async function postStratosRecord(
   did: string,
-): Promise<Record<string, unknown>> {
+  authorization: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const res = await fetch(`${STRATOS_URL}/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${did}`,
+      authorization,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
@@ -316,13 +335,33 @@ async function attemptStratosWrite(
       record: { $type: COLLECTION, text: 'Stratos must not own this write' },
     }),
   })
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  return {
+    status: res.status,
+    body: (await res.json().catch(() => ({}))) as Record<string, unknown>,
+  }
+}
+
+async function assertPdsPasswordSessionRejected(
+  did: string,
+  accessJwt: string,
+): Promise<void> {
+  const { status, body } = await postStratosRecord(did, `Bearer ${accessJwt}`)
   assert(
-    res.status === 400 && body['error'] === 'PdsCustodyWriteForbidden',
-    'Stratos rejects a dev-Bearer write for a PDS-custody member',
-    `status=${res.status} error=${body['error']}`,
+    status === 401 &&
+      body['error'] === 'AuthenticationRequired' &&
+      body['message'] === 'Authorization failed',
+    'Stratos rejects the PDS password-session JWT as a Stratos credential',
+    `status=${status} error=${body['error']} message=${body['message']}`,
   )
-  return body
+}
+
+async function assertPdsCustodyWriteRejected(did: string): Promise<void> {
+  const { status, body } = await postStratosRecord(did, `Bearer ${did}`)
+  assert(
+    status === 400 && body['error'] === 'PdsCustodyWriteForbidden',
+    'Stratos rejects its authenticated write path for a PDS-custody member',
+    `status=${status} error=${body['error']}`,
+  )
 }
 
 async function run(): Promise<void> {
@@ -344,6 +383,11 @@ async function run(): Promise<void> {
     )
     finish()
   }
+  assert(
+    fixture.member.did.startsWith('did:plc:') &&
+      fixture.hostile.did.startsWith('did:plc:'),
+    'the invite-backed spaces PDS account APIs created did:plc fixtures',
+  )
 
   const isMemberSpaceSync = (event: {
     fields: Readonly<Record<string, unknown>>
@@ -364,6 +408,11 @@ async function run(): Promise<void> {
   )
   const authorityDid = authorityDids[0]
   if (!authorityDid) throw new Error('DNS declaration has no authority DID')
+  assert(
+    authorityDid === SPACE_DECLARATION_AUTHORITY_DID,
+    'the DNS space declaration names the published lexicon authority DID',
+    `dns=${authorityDid} expected=${SPACE_DECLARATION_AUTHORITY_DID}`,
+  )
   const authorityPdsEndpoint = await resolveAuthorityPdsEndpoint(authorityDid)
   const declaration = await verifyPdsSpaceDeclaration(
     authorityPdsEndpoint,
@@ -524,7 +573,11 @@ async function run(): Promise<void> {
     boundary: { values: [{ value: DOMAINS.swordsmith }] },
     createdAt: new Date().toISOString(),
   })
-  await attemptStratosWrite(fixture.member.did)
+  await assertPdsPasswordSessionRejected(
+    fixture.member.did,
+    memberSession.accessJwt,
+  )
+  await assertPdsCustodyWriteRejected(fixture.member.did)
 
   const repoHost = await adminList(
     'zone.stratos.admin.getRepoHost',
@@ -552,18 +605,7 @@ async function run(): Promise<void> {
   }
   const feedgen = await FeedgenHarness.create()
   try {
-    await feedgen.start({
-      port: FEEDGEN_PORT,
-      feeds: [
-        { id: 'swordsmith', boundary: DOMAINS.swordsmith },
-        { id: 'aekea', boundary: DOMAINS.aekea },
-      ],
-      env: {
-        FEEDGEN_SPACE_SYNC_ENABLED: 'true',
-        FEEDGEN_SPACE_SYNC_INTERVAL_MS: '500',
-        FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: PDS_SPACES_URL,
-      },
-    })
+    await feedgen.start(feedgenStartOptions())
     await assertFeedgenWarmup(feedgen, 'initial mixed-mode')
     assert(
       await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
@@ -631,10 +673,20 @@ async function run(): Promise<void> {
     const stratosFeedPost = swordsmithPosts?.find(
       (post) => post.uri === stratosPost.uri,
     )
+    const claimedFeedPost = swordsmithPosts?.find(
+      (post) => post.uri === claimedPost.uri,
+    )
     assert(
       memberFeedPost?.author?.did === fixture.member.did &&
         stratosFeedPost?.author?.did === stratosAuthor.did,
       'the feed returns the PDS and Stratos authors for their custody records',
+    )
+    assert(
+      claimedFeedPost?.boundaries?.length === 1 &&
+        claimedFeedPost.boundaries[0] === DOMAINS.swordsmith &&
+        !claimedFeedPost.boundaries.includes(DOMAINS.aekea),
+      'the indexed claimed-boundary post carries only its derived boundary',
+      claimedFeedPost?.boundaries?.join(', '),
     )
     assert(
       !swordsmithPosts?.some((post) => post.uri === hostilePost.uri),
@@ -656,21 +708,13 @@ async function run(): Promise<void> {
     )
 
     await feedgen.stop()
-    await feedgen.start({
-      port: FEEDGEN_PORT,
-      feeds: [
-        { id: 'swordsmith', boundary: DOMAINS.swordsmith },
-        { id: 'aekea', boundary: DOMAINS.aekea },
-      ],
-      env: {
-        FEEDGEN_SPACE_SYNC_ENABLED: 'true',
-        FEEDGEN_SPACE_SYNC_INTERVAL_MS: '500',
-        FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: PDS_SPACES_URL,
+    await feedgen.start(
+      feedgenStartOptions({
         NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
         FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
         FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
-      },
-    })
+      }),
+    )
     await assertFeedgenWarmup(feedgen, 'quarantine mixed-mode')
     assert(
       await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
@@ -701,10 +745,11 @@ async function run(): Promise<void> {
         haltedPass.fields['failed'] === 0,
       'the live feedgen skips the quarantined PDS target on its next pass',
     )
-    const quarantinedFeedState = await waitForFeedPostAbsent(
+    const quarantinedFeedState = await waitForFeedPost(
       viewerToken,
       'swordsmith',
       memberPost.uri,
+      (found) => !found,
     )
     assert(
       quarantinedFeedState.matches,
@@ -718,18 +763,7 @@ async function run(): Promise<void> {
     )
     const memberSyncsBeforeRestart = feedgen.countLogs(isMemberSpaceSync)
     await feedgen.stop()
-    await feedgen.start({
-      port: FEEDGEN_PORT,
-      feeds: [
-        { id: 'swordsmith', boundary: DOMAINS.swordsmith },
-        { id: 'aekea', boundary: DOMAINS.aekea },
-      ],
-      env: {
-        FEEDGEN_SPACE_SYNC_ENABLED: 'true',
-        FEEDGEN_SPACE_SYNC_INTERVAL_MS: '500',
-        FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: PDS_SPACES_URL,
-      },
-    })
+    await feedgen.start(feedgenStartOptions())
     await assertFeedgenWarmup(feedgen, 'cold-restart mixed-mode')
     assert(
       await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
@@ -775,10 +809,11 @@ async function run(): Promise<void> {
       FEEDGEN_DID,
       GET_FEED_LXM,
     )
-    const restartFeedState = await waitForFeedPostPresent(
+    const restartFeedState = await waitForFeedPost(
       restartViewerToken,
       'swordsmith',
       memberPost.uri,
+      (found) => found,
     )
     assert(
       restartFeedState.matches,
@@ -828,10 +863,11 @@ async function run(): Promise<void> {
       FEEDGEN_DID,
       GET_FEED_LXM,
     )
-    const removedFeedState = await waitForFeedPostAbsent(
+    const removedFeedState = await waitForFeedPost(
       removalViewerToken,
       'swordsmith',
       memberPost.uri,
+      (found) => !found,
     )
     assert(
       removedFeedState.matches,

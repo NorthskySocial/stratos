@@ -402,44 +402,11 @@ function composeEnvironment(state: TestState): Record<string, string> {
   }
 }
 
-async function runCompose(
+async function runBrowserCompose(
   state: TestState,
-  action: 'start' | 'stop',
+  command: string[],
+  failureMessage: string,
 ): Promise<void> {
-  if (action === 'start') {
-    const removeResult = await new Deno.Command('docker-compose', {
-      args: [
-        '-f',
-        'docker-compose.test.yml',
-        '--profile',
-        'browser-e2e',
-        'rm',
-        '-sf',
-        'feedgen-webapp',
-      ],
-      cwd: TEST_ROOT,
-      env: composeEnvironment(state),
-      stdout: 'inherit',
-      stderr: 'piped',
-    }).output()
-    if (!removeResult.success) {
-      throw new Error(
-        `Browser feedgen reset failed: ${new TextDecoder().decode(removeResult.stderr)}`,
-      )
-    }
-  }
-  const command =
-    action === 'start'
-      ? [
-          'up',
-          '-d',
-          '--build',
-          '--no-deps',
-          'feedgen-webapp',
-          'webapp',
-          'webapp-pds',
-        ]
-      : ['stop', 'feedgen-webapp', 'webapp', 'webapp-pds']
   const result = await new Deno.Command('docker-compose', {
     args: [
       '-f',
@@ -455,9 +422,38 @@ async function runCompose(
   }).output()
   if (!result.success) {
     throw new Error(
-      `Browser services ${action} failed: ${new TextDecoder().decode(result.stderr)}`,
+      `${failureMessage}: ${new TextDecoder().decode(result.stderr)}`,
     )
   }
+}
+
+async function startBrowserServices(state: TestState): Promise<void> {
+  await runBrowserCompose(
+    state,
+    ['rm', '-sf', 'feedgen-webapp'],
+    'Browser feedgen reset failed',
+  )
+  await runBrowserCompose(
+    state,
+    [
+      'up',
+      '-d',
+      '--build',
+      '--no-deps',
+      'feedgen-webapp',
+      'webapp',
+      'webapp-pds',
+    ],
+    'Browser services start failed',
+  )
+}
+
+async function stopBrowserServices(state: TestState): Promise<void> {
+  await runBrowserCompose(
+    state,
+    ['stop', 'feedgen-webapp', 'webapp', 'webapp-pds'],
+    'Browser services stop failed',
+  )
 }
 
 async function newContext(browser: Browser): Promise<BrowserContext> {
@@ -483,7 +479,7 @@ async function run(): Promise<void> {
 
   try {
     info('Building and starting the browser E2E webapp and feedgen images')
-    await runCompose(state, 'start')
+    await startBrowserServices(state)
     assert(await waitForHealth(WEBAPP_URL), 'The production webapp is healthy')
     assert(
       await waitForHealth(PDS_WEBAPP_URL),
@@ -586,7 +582,7 @@ async function run(): Promise<void> {
     ])
     await browser?.close()
     try {
-      await runCompose(state, 'stop')
+      await stopBrowserServices(state)
     } catch (error) {
       fail(
         'Browser services stopped',
