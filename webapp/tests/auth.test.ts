@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Import AFTER mocking
 import {
   getSession,
+  getSpaceWriteScopeStatus,
   init,
+  SPACE_WRITE_SCOPE,
   onSessionDeleted,
   signIn,
   signOut,
@@ -103,5 +105,21 @@ describe('auth', () => {
 
     expect(callback).toHaveBeenCalled()
     expect(getSession()).toBeNull()
+  })
+
+  it('distinguishes a missing space scope from a scope lookup failure', async () => {
+    const missing = await getSpaceWriteScopeStatus({
+      getTokenInfo: vi.fn().mockResolvedValue({scope: 'atproto transition:generic'}),
+    } as never)
+    const unavailable = await getSpaceWriteScopeStatus({
+      getTokenInfo: vi.fn().mockRejectedValue(new Error('Nadia cannot reach the token endpoint')),
+    } as never)
+    const granted = await getSpaceWriteScopeStatus({
+      getTokenInfo: vi.fn().mockResolvedValue({scope: SPACE_WRITE_SCOPE}),
+    } as never)
+
+    expect(missing).toBe('missing')
+    expect(unavailable).toBe('unavailable')
+    expect(granted).toBe('granted')
   })
 })

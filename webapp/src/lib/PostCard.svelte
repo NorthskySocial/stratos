@@ -17,6 +17,18 @@
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
 
+  function safeUrl(value: string | undefined, allowBlob = false): string {
+    if (!value) return ''
+    try {
+      const url = new URL(value)
+      if (url.protocol === 'https:' || url.protocol === 'http:') return value
+      if (allowBlob && url.protocol === 'blob:') return value
+    } catch {
+      return ''
+    }
+    return ''
+  }
+
   /**
    * Get the URL for an image.
    * @param img - The image object.
@@ -25,17 +37,17 @@
   function getImageUrl(img: StratosImage): string {
     const cid = getCid(img.image)
     if (cid && imageUrls[cid]) {
-      return imageUrls[cid]
+      return safeUrl(imageUrls[cid], true)
     }
     // If hydrated fields are available, use them
     if (img.thumb) {
-      return img.thumb
+      return safeUrl(img.thumb)
     }
     if (img.fullsize) {
-      return img.fullsize
+      return safeUrl(img.fullsize)
     }
     if (typeof img.image === 'object' && img.image.url) {
-      return img.image.url
+      return safeUrl(img.image.url)
     }
     return ''
   }
@@ -263,7 +275,7 @@
                 <img src={getImageUrl(embed)} alt={embed.alt} class="post-image"/>
             </div>
         {:else if embed.$type === 'app.bsky.embed.external' && embed.external}
-            <a href={embed.external.uri} target="_blank" rel="noopener noreferrer"
+            <a href={safeUrl(embed.external.uri) || undefined} target="_blank" rel="noopener noreferrer"
                class="external-embed">
                 {#if embed.external.thumb}
                     {@const cid = getCid(embed.external.thumb)}
