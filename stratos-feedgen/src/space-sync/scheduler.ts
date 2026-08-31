@@ -164,7 +164,11 @@ export class SpaceSyncScheduler {
     // stays independent of how long any one pass takes.
     this.scheduleNext()
     if (this.inFlight) {
-      this.onTickSkipped()
+      try {
+        this.onTickSkipped()
+      } catch (err) {
+        this.onError(err)
+      }
       return
     }
     this.inFlight = this.runPass()

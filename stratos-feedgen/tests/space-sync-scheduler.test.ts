@@ -289,6 +289,33 @@ describe('SpaceSyncScheduler', () => {
     await scheduler.stop()
   })
 
+  it('routes a skipped-tick callback failure through onError', async () => {
+    const gate = deferred<BoundaryPassOutcome[]>()
+    const membership = { runPass: vi.fn(async () => gate.promise) }
+    const callbackError = new Error('tick callback failed')
+    const onError = vi.fn()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner: fakeRunner(),
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      random: () => 0.5,
+      onTickSkipped: () => {
+        throw callbackError
+      },
+      onError,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(onError).toHaveBeenCalledExactlyOnceWith(callbackError)
+    gate.resolve([])
+    await vi.advanceTimersByTimeAsync(0)
+    await scheduler.stop()
+  })
+
   it('abandons a member over its time budget so the pass completes without it', async () => {
     const spike = makeTarget({ did: SPIKE_DID })
     const faye = makeTarget({ did: FAYE_DID })
