@@ -43,8 +43,8 @@ function fakePurger() {
     boundaryCache: 0,
   }
   return {
-    purgeActor: vi.fn(async () => counts),
-    purgeActorBoundary: vi.fn(async () => counts),
+    purgeSpaceActor: vi.fn(async () => counts),
+    purgeSpaceDeparture: vi.fn(async () => counts),
   }
 }
 
@@ -215,13 +215,13 @@ describe('MembershipTracker', () => {
       expect(outcomes).toHaveLength(1)
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([])
-      expect(purger.purgeActor).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
     })
   })
 
   describe('member removal', () => {
-    it('purges via purgeActorBoundary when a member leaves one boundary but still holds another', async () => {
+    it('purges via purgeSpaceDeparture when a member leaves one boundary but still holds another', async () => {
       const bebopSpace = spaceUriFor(BEBOP_BOUNDARY)
       const nervSpace = spaceUriFor(NERV_BOUNDARY)
       const bebopCalls = { n: 0 }
@@ -267,20 +267,19 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
 
-      expect(purger.purgeActorBoundary).toHaveBeenCalledWith(
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledWith(
         SPIKE,
         BEBOP_BOUNDARY,
-        'space-boundary-shrink',
         bebopSpace,
       )
-      expect(purger.purgeActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
       const bebopOutcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(bebopOutcome.removed).toEqual([{ did: SPIKE, scope: 'boundary' }])
       const nervOutcome = expectSuccess(outcomeFor(outcomes, NERV_BOUNDARY))
       expect(nervOutcome.removed).toEqual([])
     })
 
-    it('falls back to purgeActor when a member leaves every tracked boundary', async () => {
+    it('falls back to purgeSpaceActor when a member leaves every tracked boundary', async () => {
       let calls = 0
       const client = {
         listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
@@ -308,13 +307,13 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
-      expect(purger.purgeActor).toHaveBeenCalledWith(SPIKE, 'space-unenroll')
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).toHaveBeenCalledWith(SPIKE)
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
 
-    it('falls back to purgeActor even when another boundary still has an unrelated member', async () => {
+    it('falls back to purgeSpaceActor even when another boundary still has an unrelated member', async () => {
       const bebopSpace = spaceUriFor(BEBOP_BOUNDARY)
       let bebopCalls = 0
       const client = {
@@ -356,8 +355,8 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
       await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
 
-      expect(purger.purgeActor).toHaveBeenCalledWith(SPIKE, 'space-unenroll')
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).toHaveBeenCalledWith(SPIKE)
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
     })
 
     it('purges a departed member only once even when they leave two boundaries in the same pass', async () => {
@@ -386,8 +385,8 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
       await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
 
-      expect(purger.purgeActor).toHaveBeenCalledTimes(1)
-      expect(purger.purgeActor).toHaveBeenCalledWith(FAYE, 'space-unenroll')
+      expect(purger.purgeSpaceActor).toHaveBeenCalledTimes(1)
+      expect(purger.purgeSpaceActor).toHaveBeenCalledWith(FAYE)
     })
   })
 
@@ -420,8 +419,8 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
-      expect(purger.purgeActor).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.polls).toEqual([])
       expect(outcome.skippedNoHost).toBe(1)
@@ -461,8 +460,8 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
-      expect(purger.purgeActor).toHaveBeenCalledWith(SPIKE, 'space-unenroll')
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).toHaveBeenCalledWith(SPIKE)
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
@@ -503,8 +502,8 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
-      expect(purger.purgeActor).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.polls).toEqual([])
       expect(outcome.removed).toEqual([])
@@ -551,8 +550,8 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
 
-      expect(purger.purgeActor).toHaveBeenCalledWith(SPIKE, 'space-unenroll')
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).toHaveBeenCalledWith(SPIKE)
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
@@ -593,13 +592,12 @@ describe('MembershipTracker', () => {
       await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
       const outcomes = await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
 
-      expect(purger.purgeActorBoundary).toHaveBeenCalledWith(
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledWith(
         SPIKE,
         BEBOP_BOUNDARY,
-        'space-boundary-shrink',
         bebopSpace,
       )
-      expect(purger.purgeActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
       const bebopOutcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(bebopOutcome.removed).toEqual([{ did: SPIKE, scope: 'boundary' }])
     })
@@ -684,8 +682,8 @@ describe('MembershipTracker', () => {
       const secondOutcome = outcomeFor(second, BEBOP_BOUNDARY)
       expect(secondOutcome.ok).toBe(false)
       expect(secondOutcome.polls).toEqual(firstOutcome.polls)
-      expect(purger.purgeActor).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
     })
   })
 
@@ -819,8 +817,8 @@ describe('MembershipTracker', () => {
       }
       expect(outcome.polls).toEqual([])
       expect(client.listSpaceRepos).toHaveBeenCalledTimes(2)
-      expect(purger.purgeActor).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
     })
 
     it('treats a non-advancing cursor as a failed pass', async () => {
@@ -854,8 +852,8 @@ describe('MembershipTracker', () => {
         })
       }
       expect(client.listSpaceRepos).toHaveBeenCalledTimes(2)
-      expect(purger.purgeActor).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
     })
   })
 })

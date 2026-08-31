@@ -28,9 +28,9 @@ export interface PollTarget {
 export interface RemovedMember {
   readonly did: string
   /**
-   * `'boundary'`: still a poll target in another tracked boundary, purged
-   * via `purgeActorBoundary`. `'actor'`: gone from every tracked boundary,
-   * purged via `purgeActor`.
+   * `'boundary'`: still a member of another tracked boundary, purged via
+   * `purgeSpaceDeparture`. `'actor'`: gone from every tracked boundary,
+   * purged via `purgeSpaceActor`.
    */
   readonly scope: 'actor' | 'boundary'
 }
@@ -66,7 +66,7 @@ export interface MembershipPassLogEvent {
 export interface MembershipTrackerDeps {
   client: Pick<UpstreamStratosClient, 'listSpaceRepos'>
   credentialManager: Pick<SpaceCredentialManager, 'getCredential'>
-  purger: Pick<Purger, 'purgeActor' | 'purgeActorBoundary'>
+  purger: Pick<Purger, 'purgeSpaceActor' | 'purgeSpaceDeparture'>
   /** Structured per-boundary summary sink. Defaults to `console.log(JSON.stringify(...))`. */
   log?: (event: MembershipPassLogEvent) => void
   /** Called when a boundary's enumeration fails this pass. Defaults to `console.error`. */
@@ -114,7 +114,10 @@ export class MembershipTracker {
     SpaceCredentialManager,
     'getCredential'
   >
-  private readonly purger: Pick<Purger, 'purgeActor' | 'purgeActorBoundary'>
+  private readonly purger: Pick<
+    Purger,
+    'purgeSpaceActor' | 'purgeSpaceDeparture'
+  >
   private readonly log: (event: MembershipPassLogEvent) => void
   private readonly onError: (boundary: string, err: unknown) => void
   private readonly maxEnumerationPages: number
@@ -208,19 +211,14 @@ export class MembershipTracker {
         state.memberDids.has(did),
       )
       if (stillMember) {
-        await this.purger.purgeActorBoundary(
-          did,
-          outcome.boundary,
-          'space-boundary-shrink',
-          spaceUri,
-        )
+        await this.purger.purgeSpaceDeparture(did, outcome.boundary, spaceUri)
         outcome.removed.push({ did, scope: 'boundary' })
         continue
       }
       outcome.removed.push({ did, scope: 'actor' })
       if (!purgedActor.has(did)) {
         purgedActor.add(did)
-        await this.purger.purgeActor(did, 'space-unenroll')
+        await this.purger.purgeSpaceActor(did)
       }
     }
 
