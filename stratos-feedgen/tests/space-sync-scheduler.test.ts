@@ -413,8 +413,8 @@ describe('SpaceSyncScheduler', () => {
       const jet = makeTarget({ did: JET_DID })
       const membership = fakeMembership([successOutcome([spike, jet])])
 
-      // Jet's host answers page one (one post, non-terminal cursor) so real
-      // progress lands in the store, then hangs on page two exactly like an
+      // Jet's host answers page one (one post, non-terminal cursor) so
+      // temporary progress lands in the store, then hangs on page two like an
       // unreachable fetch would — it only settles once the caller's own
       // signal aborts it, same as a real fetch under `AbortSignal.any`.
       const jetHostClient = {
@@ -465,7 +465,9 @@ describe('SpaceSyncScheduler', () => {
         // A member cut short by its budget never reaches a terminal page, so
         // neither verification nor a purge should ever run for it.
         verifier: { verify: refuses('verify') },
-        purger: { purgeActorBoundary: refuses('purgeActorBoundary') },
+        purger: {
+          purgeInvalidSpaceCommit: refuses('purgeInvalidSpaceCommit'),
+        },
       })
 
       const runTarget = vi.fn(
@@ -505,7 +507,7 @@ describe('SpaceSyncScheduler', () => {
       expect(
         await store.getPost(`${SPACE_URI}/${JET_DID}/${POST_COLLECTION}/r1`),
       ).not.toBeNull()
-      expect(await store.getSpaceCursor(SPACE_URI, JET_DID)).toBe('page-2')
+      expect(await store.getSpaceCursor(SPACE_URI, JET_DID)).toBeNull()
     } finally {
       await store.close()
       await rm(dir, { recursive: true, force: true })

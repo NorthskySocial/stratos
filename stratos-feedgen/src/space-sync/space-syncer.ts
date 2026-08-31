@@ -4,7 +4,7 @@ import {
   extractBlobRefs,
   pickSortAt,
   STRATOS_POST_COLLECTION,
-} from '../subscription/indexer.js'
+} from '../subscription/index.js'
 import type { SpaceCredentialManager } from '../space-credential/index.js'
 import {
   SpaceHostClient,
@@ -189,9 +189,12 @@ export class SpaceSyncer {
       credentialProof: credential,
     })
 
-    let cursor =
+    const startingCursor =
       (await this.store.getSpaceCursor(target.spaceUri, target.did)) ??
       undefined
+    assertNotAborted(signal)
+    let cursor = startingCursor
+    let cursorWasPersisted = false
     let pagesFetched = 0
     let recordsIndexed = 0
     let recordsDeleted = 0
@@ -200,48 +203,58 @@ export class SpaceSyncer {
     let finalCommit: Record<string, unknown> | undefined
     let stopReason: SpaceSyncSuccess['stopReason']
 
-    for (;;) {
-      const page = await client.listRepoOps({
-        space: target.spaceUri,
-        repo: target.did,
-        cursor,
-        limit: this.pageLimit,
-        signal,
-      })
-      pagesFetched += 1
-
-      const applied = await this.applyPage(target, client, page.ops, signal)
-      recordsIndexed += applied.indexed
-      recordsDeleted += applied.deleted
-      skippedOversized += applied.skippedOversized
-      skippedMalformed += applied.skippedMalformed
-
-      const isTerminal = page.cursor === undefined
-      if (page.cursor !== undefined) {
+    try {
+      for (;;) {
+        const page = await client.listRepoOps({
+          space: target.spaceUri,
+          repo: target.did,
+          cursor,
+          limit: this.pageLimit,
+          signal,
+        })
         assertNotAborted(signal)
-        await this.store.upsertSpaceCursor(
-          target.spaceUri,
-          target.did,
-          page.cursor,
-          this.now(),
-        )
-      } else if (page.commit) {
-        finalCommit = page.commit
-      }
-      cursor = page.cursor
+        pagesFetched += 1
 
-      if (isTerminal) {
-        stopReason = 'complete'
-        break
+        const applied = await this.applyPage(target, client, page.ops, signal)
+        assertNotAborted(signal)
+        recordsIndexed += applied.indexed
+        recordsDeleted += applied.deleted
+        skippedOversized += applied.skippedOversized
+        skippedMalformed += applied.skippedMalformed
+
+        const isTerminal = page.cursor === undefined
+        if (page.cursor !== undefined) {
+          await this.store.upsertSpaceCursor(
+            target.spaceUri,
+            target.did,
+            page.cursor,
+            this.now(),
+          )
+          cursorWasPersisted = true
+          assertNotAborted(signal)
+        } else if (page.commit) {
+          finalCommit = page.commit
+        }
+        cursor = page.cursor
+
+        if (isTerminal) {
+          stopReason = 'complete'
+          break
+        }
+        if (recordsIndexed >= this.maxRecordsPerMember) {
+          stopReason = 'per-member-cap'
+          break
+        }
+        if (pagesFetched >= this.maxPages) {
+          stopReason = 'max-pages'
+          break
+        }
       }
-      if (recordsIndexed >= this.maxRecordsPerMember) {
-        stopReason = 'per-member-cap'
-        break
+    } catch (err) {
+      if (cursorWasPersisted && signal?.aborted) {
+        await this.restoreCursor(target, startingCursor)
       }
-      if (pagesFetched >= this.maxPages) {
-        stopReason = 'max-pages'
-        break
-      }
+      throw err
     }
 
     const result: SpaceSyncSuccess = {
@@ -266,6 +279,22 @@ export class SpaceSyncer {
       stopReason,
     })
     return result
+  }
+
+  private async restoreCursor(
+    target: PollTarget,
+    startingCursor: string | undefined,
+  ): Promise<void> {
+    if (startingCursor === undefined) {
+      await this.store.deleteSpaceCursor(target.spaceUri, target.did)
+      return
+    }
+    await this.store.upsertSpaceCursor(
+      target.spaceUri,
+      target.did,
+      startingCursor,
+      this.now(),
+    )
   }
 
   /**

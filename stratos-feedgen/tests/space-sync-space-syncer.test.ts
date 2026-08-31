@@ -655,17 +655,24 @@ describe('SpaceSyncer', () => {
   })
 
   describe('max pages bound', () => {
-    it('stops after maxPages even if the host keeps paging', async () => {
-      const { syncer, client } = buildSyncer({ maxPages: 2 })
-      client.listRepoOps.mockResolvedValue(
-        makePage({ ops: [], cursor: 'always-more' }),
-      )
+    it('stops after maxPages and retains its resumable progress', async () => {
+      const { syncer, store, client } = buildSyncer({ maxPages: 2 })
+      client.listRepoOps
+        .mockResolvedValueOnce(makePage({ ops: [], cursor: 'page-2' }))
+        .mockResolvedValueOnce(makePage({ ops: [], cursor: 'page-3' }))
 
       const result = expectSuccess(await syncer.syncTarget(makeTarget()))
 
       expect(client.listRepoOps).toHaveBeenCalledTimes(2)
       expect(result.pagesFetched).toBe(2)
       expect(result.stopReason).toBe('max-pages')
+      expect(store.upsertSpaceCursor).toHaveBeenLastCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
+        'page-3',
+        FIXED_NOW,
+      )
+      expect(store.deleteSpaceCursor).not.toHaveBeenCalled()
     })
   })
 
@@ -920,7 +927,7 @@ describe('SpaceSyncer', () => {
   })
 
   describe('cancellation', () => {
-    it('stops at the next checkpoint once the signal aborts mid-sync, leaving the cursor at the last completed page', async () => {
+    it('restores an absent starting cursor when the signal aborts mid-sync', async () => {
       const { syncer, store, client } = buildSyncer()
       const controller = new AbortController()
       client.listRepoOps
@@ -948,6 +955,42 @@ describe('SpaceSyncer', () => {
         'page-2',
         FIXED_NOW,
       )
+      expect(store.deleteSpaceCursor).toHaveBeenCalledExactlyOnceWith(
+        SPACE_URI,
+        SPIKE_DID,
+      )
+    })
+
+    it('restores an existing starting cursor when the signal aborts mid-sync', async () => {
+      const store = fakeStore()
+      store.getSpaceCursor.mockResolvedValue('resume-cursor')
+      const { syncer, client } = buildSyncer({ store })
+      const controller = new AbortController()
+      client.listRepoOps
+        .mockResolvedValueOnce(makePage({ ops: [], cursor: 'page-2' }))
+        .mockImplementationOnce(async () => {
+          controller.abort()
+          return makePage({ ops: [] })
+        })
+
+      const result = await syncer.syncTarget(makeTarget(), controller.signal)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.reason).toBe('aborted')
+      expect(store.upsertSpaceCursor).toHaveBeenNthCalledWith(
+        1,
+        SPACE_URI,
+        SPIKE_DID,
+        'page-2',
+        FIXED_NOW,
+      )
+      expect(store.upsertSpaceCursor).toHaveBeenLastCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
+        'resume-cursor',
+        FIXED_NOW,
+      )
+      expect(store.deleteSpaceCursor).not.toHaveBeenCalled()
     })
 
     it('returns an aborted result immediately when the signal is already aborted before the first checkpoint', async () => {
@@ -963,6 +1006,7 @@ describe('SpaceSyncer', () => {
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.reason).toBe('aborted')
       expect(store.upsertPost).not.toHaveBeenCalled()
+      expect(store.deleteSpaceCursor).not.toHaveBeenCalled()
     })
 
     it('reports an aborted host request as caller cancellation', async () => {
