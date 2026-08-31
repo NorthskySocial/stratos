@@ -98,6 +98,15 @@ describe('loadFeedgenConfig space-sync overrides', () => {
       }),
     ).toThrow(/FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY/)
   })
+
+  it('rejects a page limit above the upstream maximum', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SPACE_SYNC_PAGE_LIMIT: '1001',
+      }),
+    ).toThrow(/FEEDGEN_SPACE_SYNC_PAGE_LIMIT.*maximum 1000/)
+  })
 })
 
 describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ENABLED', () => {
