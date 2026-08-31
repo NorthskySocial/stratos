@@ -107,12 +107,12 @@ describe('SQLite-specific behavior', () => {
 
     try {
       await first.upsertCursor(
-        'did:plc:linaminmay',
+        'did:plc:fayevalentine',
         7,
         '2024-01-01T00:00:00.000Z',
       )
-      expect(await first.getCursor('did:plc:linaminmay')).toBe(7)
-      expect(await second.getCursor('did:plc:linaminmay')).toBeNull()
+      expect(await first.getCursor('did:plc:fayevalentine')).toBe(7)
+      expect(await second.getCursor('did:plc:fayevalentine')).toBeNull()
     } finally {
       await first.close()
       await second.close()

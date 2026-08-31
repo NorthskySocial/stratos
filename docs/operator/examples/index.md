@@ -72,6 +72,9 @@ the documented `FEEDGEN_SQLITE_PATH` and `feedgen-data` volume entries in the ov
 That opt-in stores private records, boundaries, enrollments, and cursors, so protect the
 mounted storage as private content.
 
+Using `FEEDGEN_STORAGE_BACKEND=postgres` with `FEEDGEN_POSTGRES_URL` makes the same
+persistence choice in PostgreSQL. Protect that database as private content.
+
 A bare `docker compose -f docker-compose.yml -f docker-compose.feedgen.yml up -d` is not
 enough on its own: the feedgen's identity is derived from `FEEDGEN_HOST`
 (`FEEDGEN_SERVICE_DID=did:web:${FEEDGEN_HOST}`), and that host is the tunnel's ephemeral
