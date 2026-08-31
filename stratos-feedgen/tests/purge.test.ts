@@ -385,6 +385,69 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     ])
   })
 
+  it('keeps posts when cursor deletion fails, then deletes cursor before posts on retry', async () => {
+    const spaceUri = spaceUriFor(CREW_BOUNDARY)
+    const postUri = `at://${SPIKE}/zone.stratos.feed.post/1`
+    await store.upsertPost(post(SPIKE, '1', [CREW_BOUNDARY]))
+    await store.upsertSpaceCursor(
+      spaceUri,
+      SPIKE,
+      'rev-1',
+      '2024-01-01T00:00:00.000Z',
+    )
+    const cache = makeCache()
+    const audits: PurgeAudit[] = []
+    const cursorFailure = new Error('cursor delete failed')
+    const realDeleteSpaceCursor = store.deleteSpaceCursor.bind(store)
+    const deleteSpaceCursor = vi
+      .spyOn(store, 'deleteSpaceCursor')
+      .mockRejectedValueOnce(cursorFailure)
+      .mockImplementation(realDeleteSpaceCursor)
+    const deletePosts = vi.spyOn(store, 'deletePostsByDidBoundary')
+    const purger = new Purger({
+      store,
+      enrollmentCache: cache,
+      audit: (entry) => audits.push(entry),
+    })
+
+    await expect(
+      purger.purgeSpaceDeparture(SPIKE, CREW_BOUNDARY, spaceUri),
+    ).rejects.toBe(cursorFailure)
+
+    expect(cache.invalidate).toHaveBeenCalledOnce()
+    expect(cache.invalidate.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteSpaceCursor.mock.invocationCallOrder[0]!,
+    )
+    expect(deletePosts).not.toHaveBeenCalled()
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBe('rev-1')
+    expect(await store.getPost(postUri)).not.toBeNull()
+    expect(audits).toEqual([])
+
+    const counts = await purger.purgeSpaceDeparture(
+      SPIKE,
+      CREW_BOUNDARY,
+      spaceUri,
+    )
+
+    expect(deleteSpaceCursor).toHaveBeenCalledTimes(2)
+    expect(deletePosts).toHaveBeenCalledOnce()
+    expect(deleteSpaceCursor.mock.invocationCallOrder[1]).toBeLessThan(
+      deletePosts.mock.invocationCallOrder[0]!,
+    )
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    expect(await store.getPost(postUri)).toBeNull()
+    expect(counts.spaceCursors).toBe(1)
+    expect(counts.posts).toBe(1)
+    expect(audits).toEqual([
+      {
+        trigger: 'space-boundary-shrink',
+        did: SPIKE,
+        boundary: CREW_BOUNDARY,
+        counts,
+      },
+    ])
+  })
+
   it('records a reconciliation boundary-shrink audit and cold-rebuilds the deterministic space cursor', async () => {
     const spaceUri = spaceUriFor(CREW_BOUNDARY)
     await store.upsertSpaceCursor(
