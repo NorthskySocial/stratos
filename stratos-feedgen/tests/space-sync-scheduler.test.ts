@@ -21,6 +21,8 @@ import {
 const STRATOS_DID = 'did:web:stratos.test'
 const BEBOP_BOUNDARY = `${STRATOS_DID}/bebop-crew`
 const SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/bebop-crew`
+const NERV_BOUNDARY = `${STRATOS_DID}/nerv`
+const NERV_SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/nerv`
 const SPIKE_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
 const JET_DID = 'did:plc:jetblack'
@@ -96,6 +98,7 @@ function fakeMembership(outcomes: BoundaryPassOutcome[] = []) {
 
 function fakeRunner() {
   return {
+    completeMembershipPass: vi.fn(),
     runTarget: vi.fn(
       async (target: PollTarget): Promise<SpaceSyncRunResult> =>
         runSuccess(target),
@@ -134,6 +137,9 @@ describe('SpaceSyncScheduler', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(membership.runPass).toHaveBeenCalledExactlyOnceWith(boundaries)
+    expect(runner.completeMembershipPass).toHaveBeenCalledExactlyOnceWith([
+      BEBOP_BOUNDARY,
+    ])
     expect(runner.runTarget).toHaveBeenCalledExactlyOnceWith(
       spike,
       expect.any(AbortSignal),
@@ -145,6 +151,47 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 0,
       halted: 0,
     })
+
+    await scheduler.stop()
+  })
+
+  it('completes membership generations only for successful boundaries', async () => {
+    const spike = makeTarget()
+    const rei = makeTarget({
+      spaceUri: NERV_SPACE_URI,
+      boundary: NERV_BOUNDARY,
+      did: 'did:plc:reiayanami',
+    })
+    const membership = fakeMembership([
+      successOutcome([spike]),
+      {
+        boundary: NERV_BOUNDARY,
+        ok: false,
+        polls: [rei],
+        error: new Error('nerv membership unavailable'),
+      },
+    ])
+    const runner = fakeRunner()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: [BEBOP_BOUNDARY, NERV_BOUNDARY],
+      intervalMs: 1_000,
+      random: () => 0.5,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(runner.completeMembershipPass).toHaveBeenCalledExactlyOnceWith([
+      BEBOP_BOUNDARY,
+    ])
+    expect(runner.runTarget).toHaveBeenCalledTimes(2)
+    expect(runner.runTarget).toHaveBeenCalledWith(
+      spike,
+      expect.any(AbortSignal),
+    )
+    expect(runner.runTarget).toHaveBeenCalledWith(rei, expect.any(AbortSignal))
 
     await scheduler.stop()
   })
@@ -261,7 +308,7 @@ describe('SpaceSyncScheduler', () => {
 
     const scheduler = new SpaceSyncScheduler({
       membership,
-      runner: { runTarget },
+      runner: { completeMembershipPass: vi.fn(), runTarget },
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
       // Deliberately not a multiple of intervalMs: the abandon deadline
@@ -329,7 +376,7 @@ describe('SpaceSyncScheduler', () => {
     })
     const scheduler = new SpaceSyncScheduler({
       membership,
-      runner: { runTarget },
+      runner: { completeMembershipPass: vi.fn(), runTarget },
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
       memberConcurrency: 2,
@@ -436,7 +483,11 @@ describe('SpaceSyncScheduler', () => {
 
       const scheduler = new SpaceSyncScheduler({
         membership,
-        runner: { runTarget },
+        runner: {
+          completeMembershipPass: (boundaries) =>
+            jetRunner.completeMembershipPass(boundaries),
+          runTarget,
+        },
         boundaries: [BEBOP_BOUNDARY],
         intervalMs: 1_000,
         memberBudgetMs: 60,
@@ -476,7 +527,7 @@ describe('SpaceSyncScheduler', () => {
 
     const scheduler = new SpaceSyncScheduler({
       membership,
-      runner: { runTarget },
+      runner: { completeMembershipPass: vi.fn(), runTarget },
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
       random: () => 0.5,
@@ -535,6 +586,7 @@ describe('SpaceSyncScheduler', () => {
     const faye = makeTarget({ did: FAYE_DID })
     const membership = fakeMembership([successOutcome([spike, faye])])
     const runner = {
+      completeMembershipPass: vi.fn(),
       runTarget: vi.fn(
         async (_target: PollTarget, signal?: AbortSignal) =>
           await new Promise<SpaceSyncRunResult>((_resolve, reject) => {
@@ -573,7 +625,10 @@ describe('SpaceSyncScheduler', () => {
     const log = vi.fn()
     const scheduler = new SpaceSyncScheduler({
       membership: fakeMembership([successOutcome([spike])]),
-      runner: { runTarget: vi.fn(async () => Promise.reject(failure)) },
+      runner: {
+        completeMembershipPass: vi.fn(),
+        runTarget: vi.fn(async () => Promise.reject(failure)),
+      },
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
       random: () => 0.5,
@@ -637,7 +692,7 @@ describe('SpaceSyncScheduler', () => {
 
     const scheduler = new SpaceSyncScheduler({
       membership: fakeMembership([successOutcome([spike])]),
-      runner: { runTarget },
+      runner: { completeMembershipPass: vi.fn(), runTarget },
       boundaries: [BEBOP_BOUNDARY],
       intervalMs: 1_000,
       memberBudgetMs: 500,
@@ -678,6 +733,7 @@ describe('SpaceSyncScheduler', () => {
     const membership = fakeMembership([successOutcome([spike])])
     let signal: AbortSignal | undefined
     const runner = {
+      completeMembershipPass: vi.fn(),
       runTarget: vi.fn(
         async (_target: PollTarget, nextSignal?: AbortSignal) => {
           signal = nextSignal
@@ -771,9 +827,11 @@ describe('SpaceSyncScheduler', () => {
     await vi.advanceTimersByTimeAsync(1_000)
     expect(onError).toHaveBeenCalledExactlyOnceWith(failure)
     expect(log).not.toHaveBeenCalled()
+    expect(runner.completeMembershipPass).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(1_000)
     expect(runPass).toHaveBeenCalledTimes(2)
+    expect(runner.completeMembershipPass).toHaveBeenCalledExactlyOnceWith([])
     expect(log).toHaveBeenCalledExactlyOnceWith({
       targets: 0,
       succeeded: 0,

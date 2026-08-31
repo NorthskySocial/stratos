@@ -3,7 +3,7 @@ import { StratosError } from '@northskysocial/stratos-core'
 /**
  * Error thrown when the Stratos service returns a non-2xx response.
  */
-export class StratosClientError extends Error {
+export class StratosClientError extends StratosError {
   readonly status: number
   readonly body: string
   readonly url: string
@@ -18,6 +18,7 @@ export class StratosClientError extends Error {
   }) {
     super(
       opts.message ?? `Stratos request failed: ${opts.lxm} → ${opts.status}`,
+      'StratosClientError',
     )
     this.name = 'StratosClientError'
     this.status = opts.status

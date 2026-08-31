@@ -27,7 +27,7 @@ export interface SpaceSyncPassLogEvent {
 
 export interface SpaceSyncSchedulerDeps {
   membership: Pick<MembershipTracker, 'runPass'>
-  runner: Pick<SpaceSyncRunner, 'runTarget'>
+  runner: Pick<SpaceSyncRunner, 'completeMembershipPass' | 'runTarget'>
   /**
    * Boundaries polled each pass. Pass the same live boundary `Set` the rest
    * of the feedgen uses — each pass reads it fresh, so mutating it in place
@@ -181,6 +181,11 @@ export class SpaceSyncScheduler {
   private async runPassWithSignal(signal: AbortSignal): Promise<void> {
     const outcomes = await this.membership.runPass(this.boundaries)
     if (signal.aborted) return
+    this.runner.completeMembershipPass(
+      outcomes
+        .filter((outcome) => outcome.ok)
+        .map((outcome) => outcome.boundary),
+    )
     const targets = outcomes.flatMap((outcome) => outcome.polls)
 
     let succeeded = 0

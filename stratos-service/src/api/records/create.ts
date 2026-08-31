@@ -5,7 +5,6 @@ import {
   computeCid,
   encodeRecord,
   parseCid,
-  PdsCustodyWriteForbiddenError,
   RepoWrite,
   StratosValidator,
 } from '@northskysocial/stratos-core'
@@ -18,6 +17,7 @@ import {
   createRepoManager,
   ensureActorStoreExists as ensureStoreExists,
 } from './util.js'
+import { assertStratosCustody } from './custody.js'
 
 export interface CreateRecordInput {
   repo: string
@@ -95,13 +95,7 @@ export async function createRecord(
       'ServiceWriteForbidden',
     )
   }
-  // A 'pds' custody actor keeps their repo on their own PDS and signs with
-  // their own key. `getSignFn` mints a Stratos key when none exists, so
-  // without this gate the first write creates a second key and a Stratos repo
-  // that no attestation covers.
-  if (enrollment.custody === 'pds') {
-    throw new PdsCustodyWriteForbiddenError()
-  }
+  assertStratosCustody(enrollment)
 
   const actorSign = await ctx.actorSigner.getSignFn(callerDid)
 

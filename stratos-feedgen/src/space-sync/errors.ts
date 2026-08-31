@@ -1,11 +1,6 @@
 import { StratosError } from '@northskysocial/stratos-core'
 
-/**
- * Base class for every error `SpaceHostClient` throws. A foreign host is an
- * untrusted network peer, so every failure mode it can cause — bad data,
- * bad manners, or no response at all — gets its own typed error rather than
- * a raw `fetch` exception or a generic `Error`.
- */
+/** Keeps every untrusted-host failure in the domain error taxonomy. */
 export abstract class SpaceHostClientError extends StratosError {
   readonly url: string
 
@@ -154,5 +149,42 @@ export class PrivateHostOriginError extends SpaceHostClientError {
     super(`space host resolved to a private address: ${address}`, origin)
     this.name = 'PrivateHostOriginError'
     this.address = address
+  }
+}
+
+export abstract class MembershipEnumerationError extends StratosError {
+  readonly boundary: string
+
+  constructor(message: string, code: string, boundary: string) {
+    super(message, code)
+    this.boundary = boundary
+  }
+}
+
+export class MembershipPageLimitError extends MembershipEnumerationError {
+  readonly limit: number
+
+  constructor(boundary: string, limit: number) {
+    super(
+      `space membership enumeration for boundary ${boundary} exceeded ${limit} pages`,
+      'MembershipPageLimit',
+      boundary,
+    )
+    this.name = 'MembershipPageLimitError'
+    this.limit = limit
+  }
+}
+
+export class MembershipCursorStalledError extends MembershipEnumerationError {
+  readonly cursor: string
+
+  constructor(boundary: string, cursor: string) {
+    super(
+      `space membership enumeration for boundary ${boundary} received a non-advancing cursor`,
+      'MembershipCursorStalled',
+      boundary,
+    )
+    this.name = 'MembershipCursorStalledError'
+    this.cursor = cursor
   }
 }

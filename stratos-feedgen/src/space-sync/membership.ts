@@ -1,6 +1,10 @@
 import type { Purger } from '../purge/index.js'
 import type { SpaceCredentialManager } from '../space-credential/index.js'
 import type { UpstreamStratosClient } from '../upstream/index.js'
+import {
+  MembershipCursorStalledError,
+  MembershipPageLimitError,
+} from './errors.js'
 
 /** Rows requested per `listSpaceRepos` page. The lexicon's own maximum. */
 const PAGE_LIMIT = 1000
@@ -242,9 +246,7 @@ export class MembershipTracker {
     do {
       pages += 1
       if (pages > this.maxEnumerationPages) {
-        throw new Error(
-          `space membership enumeration for boundary ${boundary} exceeded ${this.maxEnumerationPages} pages`,
-        )
+        throw new MembershipPageLimitError(boundary, this.maxEnumerationPages)
       }
       const page = await this.client.listSpaceRepos(
         { space: credential.spaceUri, cursor, limit: PAGE_LIMIT },
@@ -271,9 +273,7 @@ export class MembershipTracker {
       // A host that returns the same cursor forever would otherwise spin
       // this loop indefinitely without ever tripping the page ceiling above.
       if (page.cursor !== undefined && page.cursor === cursor) {
-        throw new Error(
-          `space membership enumeration for boundary ${boundary} received a non-advancing cursor`,
-        )
+        throw new MembershipCursorStalledError(boundary, page.cursor)
       }
       cursor = page.cursor
     } while (cursor !== undefined)

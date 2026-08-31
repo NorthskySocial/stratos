@@ -5,7 +5,7 @@ import {
   Server,
   ServerResponse,
 } from 'node:http'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StratosError } from '@northskysocial/stratos-core'
 import {
   createDpopProof,
@@ -30,6 +30,7 @@ import {
   SpaceNotFoundError,
 } from '../src/space-sync/index.js'
 import type { SpaceHostClientOptions } from '../src/space-sync/index.js'
+import { createPinnedLookup } from '../src/space-sync/host-client.js'
 
 interface CapturedRequest {
   method: string
@@ -667,6 +668,65 @@ describe('SpaceHostClient', () => {
       ).resolves.toMatchObject({ ops: [] })
     })
 
+    it('pins the validated DNS answer into the request transport', async () => {
+      const resolveHost = vi.fn(async () => ['8.8.8.8'])
+      let dispatcher: unknown
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost,
+        fetch: async (_input, init) => {
+          dispatcher = (
+            init as (RequestInit & { dispatcher?: unknown }) | undefined
+          )?.dispatcher
+          return new Response(JSON.stringify({ ops: [] }))
+        },
+      })
+
+      await client.listRepoOps({ space: SPACE_URI, repo: REPO_DID })
+
+      expect(resolveHost).toHaveBeenCalledOnce()
+      expect(dispatcher).toBeDefined()
+    })
+
+    it('cannot replace a validated public answer before transport lookup', async () => {
+      const addresses = ['8.8.8.8']
+      const pinnedLookup = createPinnedLookup(addresses)
+      addresses[0] = '127.0.0.1'
+
+      const connected = await new Promise<{ address: string; family: number }>(
+        (resolve, reject) => {
+          pinnedLookup('nerv.example', {}, (err, address, family) => {
+            if (err) {
+              reject(err)
+              return
+            }
+            if (typeof address !== 'string' || family === undefined) {
+              reject(new Error('expected one pinned address'))
+              return
+            }
+            resolve({ address, family })
+          })
+        },
+      )
+
+      expect(connected).toEqual({ address: '8.8.8.8', family: 4 })
+    })
+
+    it('bounds a stalled DNS resolver with the request timeout', async () => {
+      const fetchImpl = vi.fn<typeof fetch>()
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        requestTimeoutMs: 25,
+        resolveHost: () => new Promise<readonly string[]>(() => {}),
+        fetch: fetchImpl,
+      })
+
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(SpaceHostTimeoutError)
+      expect(fetchImpl).not.toHaveBeenCalled()
+    })
+
     it('times out a hanging response', async () => {
       mock.handler = () => {
         // Never respond.
@@ -787,8 +847,8 @@ describe('SpaceHostClient', () => {
       const controller = new AbortController()
       const abortError = new DOMException('aborted', 'AbortError')
       const body = new ReadableStream<Uint8Array>({
-        start(stream) {
-          controller.abort()
+        pull(stream) {
+          controller.abort(abortError)
           stream.error(abortError)
         },
       })
@@ -861,15 +921,30 @@ describe('SpaceHostClient', () => {
         // Port 1 is on the fetch spec's forbidden-port list; the request
         // never leaves the local stack, but the failure is indistinguishable
         // from a foreign host that never accepts a connection.
-        hostOrigin: 'https://127.0.0.1:1',
+        hostOrigin: 'http://127.0.0.1:1',
         credentialProof: await makeCredentialProof(),
-        allowHttpOrigins: new Set(['https://127.0.0.1:1']),
+        allowHttpOrigins: new Set(['http://127.0.0.1:1']),
       })
       const err = await client
         .listRepoOps({ space: SPACE_URI, repo: REPO_DID })
         .catch((e: unknown) => e)
       expect(err).toBeInstanceOf(SpaceHostUnreachableError)
       expect((err as Error).cause).toBeDefined()
+    })
+
+    it('does not let an HTTP exception bypass HTTPS address validation', async () => {
+      const fetchImpl = vi.fn<typeof fetch>()
+      const client = new SpaceHostClient({
+        hostOrigin: 'https://127.0.0.1',
+        credentialProof: await makeCredentialProof(),
+        allowHttpOrigins: new Set(['https://127.0.0.1']),
+        fetch: fetchImpl,
+      })
+
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+      expect(fetchImpl).not.toHaveBeenCalled()
     })
 
     it('refuses a plain http origin outside the allowlist before any request leaves the process', async () => {

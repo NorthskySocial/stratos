@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises'
-import { isIP } from 'node:net'
+import { isIP, type LookupFunction } from 'node:net'
+import { Agent, type Dispatcher } from 'undici'
 import type { SpaceCredentialProof } from '../upstream/index.js'
 import {
   InsecureHostOriginError,
@@ -7,6 +8,7 @@ import {
   MalformedCursorError,
   PrivateHostOriginError,
   RepoNotFoundError,
+  SpaceHostClientError,
   SpaceHostInvalidResponseError,
   SpaceHostRedirectError,
   SpaceHostRequestError,
@@ -52,8 +54,11 @@ export interface SpaceHostClientOptions {
   maxPageBytes?: number
   /** Byte cap for a `getRecord` response body. */
   maxRecordBytes?: number
-  /** Injectable DNS resolver. */
-  resolveHost?: (hostname: string) => Promise<readonly string[]>
+  /** Injectable DNS resolver. The request signal bounds callers even when the resolver ignores it. */
+  resolveHost?: (
+    hostname: string,
+    signal?: AbortSignal,
+  ) => Promise<readonly string[]>
 }
 
 export interface ListRepoOpsOptions {
@@ -110,7 +115,10 @@ export class SpaceHostClient {
   private readonly allowHttpOrigins: ReadonlySet<string>
   private readonly maxPageBytes: number
   private readonly maxRecordBytes: number
-  private readonly resolveHost: (hostname: string) => Promise<readonly string[]>
+  private readonly resolveHost: (
+    hostname: string,
+    signal?: AbortSignal,
+  ) => Promise<readonly string[]>
 
   constructor(opts: SpaceHostClientOptions) {
     this.hostOrigin = opts.hostOrigin
@@ -159,7 +167,20 @@ export class SpaceHostClient {
     capBytes: number,
     signal?: AbortSignal,
   ): Promise<{ url: string; text: string }> {
-    const origin = await this.assertSecureOrigin()
+    const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs)
+    const requestSignal = signal
+      ? AbortSignal.any([timeoutSignal, signal])
+      : timeoutSignal
+    let validated: ValidatedOrigin
+    try {
+      validated = await this.assertSecureOrigin(requestSignal)
+    } catch (err) {
+      if (signal?.aborted) throw err
+      if (err instanceof SpaceHostClientError) throw err
+      throw classifyFetchError(err, this.hostOrigin)
+    }
+
+    const { origin } = validated
     const url = new URL(pathname, origin)
     for (const [key, value] of Object.entries(searchParams)) {
       if (value !== undefined) url.searchParams.set(key, value)
@@ -167,41 +188,48 @@ export class SpaceHostClient {
     const htu = `${origin}${pathname}`
     const dpop = await this.credentialProof.createPresentationProof('GET', htu)
 
-    const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs)
+    const dispatcher = validated.addresses
+      ? createPinnedDispatcher(validated.addresses)
+      : undefined
     let res: Response
     try {
-      res = await this.fetchImpl(url, {
+      const requestInit: RequestInit & { dispatcher?: Dispatcher } = {
         method: 'GET',
         redirect: 'error',
-        signal: signal
-          ? AbortSignal.any([timeoutSignal, signal])
-          : timeoutSignal,
+        signal: requestSignal,
         headers: {
           accept: 'application/json',
           authorization: `DPoP ${this.credentialProof.credential}`,
           dpop,
         },
-      })
+        ...(dispatcher ? { dispatcher } : {}),
+      }
+      res = await this.fetchImpl(url, requestInit as RequestInit)
+
+      const text = await readBodyWithCap(
+        res,
+        res.ok ? capBytes : ERROR_BODY_CAP_BYTES,
+        url.toString(),
+        !res.ok,
+        signal,
+      )
+      if (!res.ok) {
+        throw buildRequestError(res.status, text, url.toString())
+      }
+      return { url: url.toString(), text }
     } catch (err) {
       if (signal?.aborted) throw err
+      if (err instanceof SpaceHostClientError) throw err
       throw classifyFetchError(err, url.toString())
+    } finally {
+      await dispatcher?.destroy().catch(() => {})
     }
-
-    const text = await readBodyWithCap(
-      res,
-      res.ok ? capBytes : ERROR_BODY_CAP_BYTES,
-      url.toString(),
-      !res.ok,
-      signal,
-    )
-    if (!res.ok) {
-      throw buildRequestError(res.status, text, url.toString())
-    }
-    return { url: url.toString(), text }
   }
 
-  /** Validate the scheme and resolved addresses before any request. */
-  private async assertSecureOrigin(): Promise<string> {
+  /** Validate and pin the addresses before any HTTPS request. */
+  private async assertSecureOrigin(
+    signal: AbortSignal,
+  ): Promise<ValidatedOrigin> {
     let url: URL
     try {
       url = new URL(this.hostOrigin)
@@ -209,34 +237,87 @@ export class SpaceHostClient {
       throw new InvalidHostOriginError(this.hostOrigin, { cause: err })
     }
     const origin = url.origin
-    if (this.allowHttpOrigins.has(origin)) {
-      return origin
+    if (url.protocol === 'http:' && this.allowHttpOrigins.has(origin)) {
+      return { origin }
     }
     if (url.protocol !== 'https:') {
       throw new InsecureHostOriginError(origin)
     }
 
     const hostname = stripIpv6Brackets(url.hostname)
-    let addresses: readonly string[]
-    try {
-      addresses = isIP(hostname) ? [hostname] : await this.resolveHost(hostname)
-    } catch (err) {
-      throw new SpaceHostUnreachableError(origin, { cause: err })
-    }
+    const addresses = isIP(hostname)
+      ? [hostname]
+      : await abortable(this.resolveHost(hostname, signal), signal)
     if (addresses.length === 0) {
       throw new SpaceHostUnreachableError(origin, {
         cause: new Error('the host did not resolve to an address'),
       })
     }
-    // DNS can change after this check. The transport must add address pinning
-    // before this check can prevent rebinding during the request.
     for (const address of addresses) {
       if (isPrivateAddress(address)) {
         throw new PrivateHostOriginError(origin, address)
       }
     }
-    return origin
+    return { origin, addresses }
   }
+}
+
+interface ValidatedOrigin {
+  origin: string
+  /** Absent only for an exact plain-HTTP development exception. */
+  addresses?: readonly string[]
+}
+
+function createPinnedDispatcher(addresses: readonly string[]): Dispatcher {
+  return new Agent({ connect: { lookup: createPinnedLookup(addresses) } })
+}
+
+export function createPinnedLookup(
+  addresses: readonly string[],
+): LookupFunction {
+  const pinned = addresses.map((address) => ({
+    address,
+    family: isIP(address),
+  }))
+  const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
+    const requestedFamily =
+      options.family === 'IPv4'
+        ? 4
+        : options.family === 'IPv6'
+          ? 6
+          : options.family
+    const compatible = requestedFamily
+      ? pinned.filter(({ family }) => family === requestedFamily)
+      : pinned
+    if (compatible.length === 0) {
+      callback(new Error('the validated host has no compatible address'), '')
+      return
+    }
+    if (options.all) {
+      callback(null, compatible)
+      return
+    }
+    callback(null, compatible[0].address, compatible[0].family)
+  }
+  return pinnedLookup
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise<T>((resolve, reject) => {
+    const abort = (): void => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    void promise.then(
+      (value) => {
+        signal.removeEventListener('abort', abort)
+        resolve(value)
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', abort)
+        reject(err)
+      },
+    )
+  })
 }
 
 /**
@@ -410,7 +491,10 @@ function decodeRepoOp(entry: unknown, index: number, url: string): RepoOpEntry {
   }
 }
 
-async function resolveHost(hostname: string): Promise<readonly string[]> {
+async function resolveHost(
+  hostname: string,
+  _signal?: AbortSignal,
+): Promise<readonly string[]> {
   const addresses = await lookup(hostname, { all: true, verbatim: true })
   return addresses.map(({ address }) => address)
 }
