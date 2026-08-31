@@ -57,8 +57,9 @@ export interface BoundaryPassFailure {
 export type BoundaryPassOutcome = BoundaryPassSuccess | BoundaryPassFailure
 
 export interface MembershipPassLogEvent {
-  boundary: string
-  memberCount: number
+  successfulBoundaries: number
+  failedBoundaries: number
+  pollTargets: number
   skippedNoHost: number
   removed: number
 }
@@ -67,7 +68,7 @@ export interface MembershipTrackerDeps {
   client: Pick<UpstreamStratosClient, 'listSpaceRepos'>
   credentialManager: Pick<SpaceCredentialManager, 'getCredential'>
   purger: Pick<Purger, 'purgeSpaceActor' | 'purgeSpaceDeparture'>
-  /** Structured per-boundary summary sink. Defaults to `console.log(JSON.stringify(...))`. */
+  /** Structured whole-pass summary sink. Defaults to `console.log(JSON.stringify(...))`. */
   log?: (event: MembershipPassLogEvent) => void
   /** Called when a boundary's enumeration fails this pass. Defaults to `console.error`. */
   onError?: (boundary: string, err: unknown) => void
@@ -233,17 +234,29 @@ export class MembershipTracker {
     }
 
     for (const outcome of outcomes) {
-      if (outcome.ok) {
-        this.log({
-          boundary: outcome.boundary,
-          memberCount: outcome.polls.length,
-          skippedNoHost: outcome.skippedNoHost,
-          removed: outcome.removed.length,
-        })
-      } else {
+      if (!outcome.ok) {
         this.onError(outcome.boundary, outcome.error)
       }
     }
+    const successful = outcomes.filter(
+      (outcome): outcome is BoundaryPassSuccess => outcome.ok,
+    )
+    this.log({
+      successfulBoundaries: successful.length,
+      failedBoundaries: outcomes.length - successful.length,
+      pollTargets: successful.reduce(
+        (total, outcome) => total + outcome.polls.length,
+        0,
+      ),
+      skippedNoHost: successful.reduce(
+        (total, outcome) => total + outcome.skippedNoHost,
+        0,
+      ),
+      removed: successful.reduce(
+        (total, outcome) => total + outcome.removed.length,
+        0,
+      ),
+    })
 
     return outcomes
   }

@@ -183,13 +183,13 @@ describe('MembershipTracker', () => {
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.polls).toEqual([])
       expect(outcome.skippedNoHost).toBe(1)
-      expect(log).toHaveBeenCalledWith(
-        expect.objectContaining({
-          boundary: BEBOP_BOUNDARY,
-          memberCount: 0,
-          skippedNoHost: 1,
-        }),
-      )
+      expect(log).toHaveBeenCalledExactlyOnceWith({
+        successfulBoundaries: 1,
+        failedBoundaries: 0,
+        pollTargets: 0,
+        skippedNoHost: 1,
+        removed: 0,
+      })
     })
   })
 
@@ -748,8 +748,9 @@ describe('MembershipTracker', () => {
       expect(consoleLog).toHaveBeenCalledWith(
         JSON.stringify({
           msg: 'feedgen.space-membership-pass',
-          boundary: BEBOP_BOUNDARY,
-          memberCount: 1,
+          successfulBoundaries: 1,
+          failedBoundaries: 0,
+          pollTargets: 1,
           skippedNoHost: 0,
           removed: 0,
         }),
