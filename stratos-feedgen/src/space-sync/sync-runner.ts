@@ -13,14 +13,13 @@ import type {
 export type SpaceSyncRunFailureReason =
   | SpaceSyncFailure['reason']
   | 'commit-verify-failed'
-  | 'commit-verify-transient'
   | 'halted'
 
 export interface SpaceSyncRunFailure {
   readonly target: PollTarget
   readonly ok: false
   readonly reason: SpaceSyncRunFailureReason
-  /** Set only when `reason` is one of the `commit-verify-*` values. */
+  /** Set only when `reason` is `commit-verify-failed`. */
   readonly commitVerifyReason?: CommitVerifyFailureReason
   readonly error?: unknown
 }
