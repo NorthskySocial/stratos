@@ -1,6 +1,6 @@
 <script lang="ts">
   import {Agent} from '@atproto/api'
-  import type {FeedPost} from './feed'
+  import {authorFromUri, type FeedPost} from './feed'
   import {displayBoundary} from './boundary-display'
   import RecordInspector from './RecordInspector.svelte'
   import {getCid, type StratosImage} from './utils/cid'
@@ -215,15 +215,6 @@
   }
 
   /**
-   * Extract the parent author from a URI.
-   * @param uriStr - The URI to extract the parent author from.
-   * @returns The parent author.
-   */
-  function parentAuthor(uriStr: string): string {
-    return (uriStr || '').replace('at://', '').split('/')[0]
-  }
-
-  /**
    * Get the author handle for a post.
    * @returns The author handle for the post.
    */
@@ -237,7 +228,7 @@
 <article class="post-card" class:private={post.isPrivate}>
     {#if post.reply}
         <div class="reply-context">
-            ↩ replying to {shortDid(parentAuthor(post.reply.parent.uri))}
+            ↩ replying to {shortDid(authorFromUri(post.reply.parent.uri))}
         </div>
     {/if}
 

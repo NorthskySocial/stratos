@@ -22,6 +22,28 @@ describe('PostCard.svelte', () => {
     expect(screen.getByText('@alice.bsky.social')).toBeInTheDocument()
   })
 
+  it('attributes a space reply parent to its record author', () => {
+    render(PostCard, {
+      post: {
+        ...mockPost,
+        reply: {
+          root: { uri: mockPost.uri, cid: mockPost.cid },
+          parent: {
+            uri: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
+            cid: 'asuka-cid',
+          },
+        },
+      },
+      stratosAgent: null,
+      onreply: () => {},
+    })
+
+    expect(screen.getByText('↩ replying to did:plc:asuka')).toBeInTheDocument()
+    expect(
+      screen.queryByText(/replying to did:web:stratos\.example/),
+    ).not.toBeInTheDocument()
+  })
+
   it('removes unsafe schemes from record-derived URLs', () => {
     const postWithExternal = {
       ...mockPost,
