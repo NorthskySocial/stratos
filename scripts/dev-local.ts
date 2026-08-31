@@ -184,7 +184,10 @@ async function start() {
     if (fs.existsSync(clientMetadataTemplatePath)) {
       let content = fs.readFileSync(clientMetadataTemplatePath, 'utf8')
       content = content.replace(/VITE_WEBAPP_URL/g, webappUrl)
-      content = content.replace(/VITE_STRATOS_SERVICE_DID/g, derivedServiceDid)
+      content = content.replace(
+        /VITE_STRATOS_SERVICE_DID_ENCODED/g,
+        encodeURIComponent(derivedServiceDid),
+      )
       fs.writeFileSync(clientMetadataPath, content)
       console.log(`Updated ${clientMetadataPath} with ${webappUrl}`)
     }

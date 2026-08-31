@@ -9,7 +9,13 @@ let client: BrowserOAuthClient | null = null
 let currentSession: OAuthSession | null = null
 let sessionDeletedCallback: (() => void) | null = null
 
-export const SPACE_WRITE_SCOPE = `space:zone.stratos.space.feed?authority=${import.meta.env.VITE_STRATOS_SERVICE_DID}&collection=zone.stratos.feed.post&action=create&action=read`
+export function buildSpaceWriteScope(
+  serviceDid = import.meta.env.VITE_STRATOS_SERVICE_DID,
+): string {
+  return `space:zone.stratos.space.feed?authority=${encodeURIComponent(serviceDid ?? '')}&collection=zone.stratos.feed.post&action=read&action=create`
+}
+
+export const SPACE_WRITE_SCOPE = buildSpaceWriteScope()
 
 export type SpaceWriteScopeStatus = 'granted' | 'missing' | 'unavailable'
 
