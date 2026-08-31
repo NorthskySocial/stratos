@@ -74,6 +74,14 @@ export function createTestConfig(dataDir: string): StratosServiceConfig {
     },
     adminDids: [],
     allowedRedirectOrigins: [],
+    pdsSync: {
+      tickMs: 30_000,
+      backoffBaseMs: 30_000,
+      backoffCapMs: 3_600_000,
+      maxAttempts: 12,
+      claimLimit: 10,
+      attemptTimeoutMs: 30_000,
+    },
     dpop: {
       requireNonce: false,
     },

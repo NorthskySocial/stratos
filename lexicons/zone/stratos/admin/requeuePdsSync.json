@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.requeuePdsSync",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Move every terminally failed PDS enrollment-record sync job back to 'pending'. Use this after a fault that every attempt saw alike, such as a signing key rotation or clock skew, which marks many jobs failed at once. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["requeued"],
+          "properties": {
+            "requeued": {
+              "type": "integer",
+              "description": "Number of jobs moved from 'failed' back to 'pending'."
+            }
+          }
+        }
+      }
+    }
+  }
+}
