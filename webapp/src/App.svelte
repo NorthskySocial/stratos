@@ -45,6 +45,7 @@
   let loading = $state(true)
   let loadingStatus = $state('Initializing session...')
   let initialStartupDone = false
+  let discoveryEpoch = 0
   let did = $state('')
   let handle = $state('')
 
@@ -149,38 +150,45 @@
     }
     loading = true
     loadingStatus = 'Discovering service...'
+    const epoch = ++discoveryEpoch
     try {
-      if (APPVIEW_URL) {
-        appviewAgent = createServiceAgent(session, APPVIEW_URL)
-      }
-
-      enrollment = await discoverStratosEnrollment(session)
-
-      const url = enrollment?.service ?? serviceUrl
+      const nextAppviewAgent = APPVIEW_URL
+        ? createServiceAgent(session, APPVIEW_URL)
+        : null
+      const nextEnrollment = await discoverStratosEnrollment(session)
+      const nextAttestationVerified = nextEnrollment
+        ? await verifyAttestation(session.sub, nextEnrollment)
+        : null
+      const url = nextEnrollment?.service ?? serviceUrl
+      let nextStratosStatus: StratosServiceStatus = {enrolled: false}
+      let nextServerDomains: string[] = []
+      let nextStratosAgent: Agent | null = null
       if (url) {
-        serviceUrl = url
-        stratosAgent = createStratosAgent(session, url)
+        nextStratosAgent = createStratosAgent(session, url)
 
         try {
-          stratosStatus = await checkStratosServiceStatus(url, session.sub)
-          serverDomains = await fetchServerDomains(url)
+          nextStratosStatus = await checkStratosServiceStatus(url, session.sub)
+          nextServerDomains = await fetchServerDomains(url)
         } catch (err) {
           console.error('Failed to check service status:', err)
-          stratosStatus = {enrolled: false}
+          nextStratosStatus = {enrolled: false}
         }
-      } else {
-        stratosStatus = {enrolled: false}
       }
 
-      if (enrollment) {
-        attestationVerified = await verifyAttestation(session.sub, enrollment)
-      } else {
-        attestationVerified = null
-      }
+      if (epoch !== discoveryEpoch) return
+      serviceUrl = url
+      appviewAgent = nextAppviewAgent
+      enrollment = nextEnrollment
+      attestationVerified = nextAttestationVerified
+      stratosAgent = nextStratosAgent
+      stratosStatus = nextStratosStatus
+      serverDomains = nextServerDomains
 
       await refreshFeed()
     } finally {
-      loading = false
+      if (epoch === discoveryEpoch) {
+        loading = false
+      }
     }
   }
 
@@ -234,7 +242,7 @@
    */
   function handleSetServiceUrl(url: string) {
     serviceUrl = url
-    discoverAndLoad()
+    void discoverAndLoad()
   }
 
   /**
@@ -258,6 +266,7 @@
   async function handleSignOut() {
     if (confirm('Are you sure you want to log out?')) {
       await signOut()
+      discoveryEpoch += 1
       session = null
       enrollment = null
       stratosStatus = null
@@ -273,6 +282,7 @@
 
   onMount(async () => {
     onSessionDeleted(() => {
+      discoveryEpoch += 1
       session = null
       enrollment = null
       stratosStatus = null
@@ -328,7 +338,7 @@
                 <button class="sign-out" onclick={handleSignOut}>Log Out</button>
             </header>
 
-            <Composer {session} {enrollment} {stratosAgent} {replyingTo} onpost={refreshFeed}
+            <Composer {session} {enrollment} {attestationVerified} {stratosAgent} {replyingTo} onpost={refreshFeed}
                       oncancelreply={cancelReply}/>
 
             <div class="feed-tabs">
@@ -339,7 +349,7 @@
                 >
                     All
                 </button>
-                {#each enrolledDomains as domain}
+                    {#each enrolledDomains as domain (domain)}
                     <button
                             class="tab"
                             class:active={activeFeed === domain}

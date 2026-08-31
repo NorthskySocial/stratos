@@ -22,6 +22,30 @@ describe('PostCard.svelte', () => {
     expect(screen.getByText('@alice.bsky.social')).toBeInTheDocument()
   })
 
+  it('removes unsafe schemes from record-derived URLs', () => {
+    const postWithExternal = {
+      ...mockPost,
+      embed: {
+        $type: 'app.bsky.embed.external',
+        external: {
+          uri: 'javascript:alert(1)',
+          title: 'Unsafe link',
+          description: 'Untrusted record input',
+        },
+      },
+    }
+
+    render(PostCard, {
+      post: postWithExternal,
+      stratosAgent: null,
+      onreply: () => {},
+    })
+
+    expect(screen.getByText('Unsafe link').closest('a')).not.toHaveAttribute(
+      'href',
+    )
+  })
+
   it('handles image extraction from $link structure', () => {
     const postWithImage = {
       ...mockPost,

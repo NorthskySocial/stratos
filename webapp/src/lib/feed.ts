@@ -130,8 +130,10 @@ export interface ThreadNode {
  * @param uri - The At Protocol URI.
  * @returns The author DID.
  */
-function authorFromUri(uri: string): string {
-  return uri.replace('at://', '').split('/')[0]
+export function authorFromUri(uri: string): string {
+  const parts = uri.replace('at://', '').split('/')
+  if (parts[1] === 'space' && parts.length >= 7) return parts[4]
+  return parts[0]
 }
 
 /**
