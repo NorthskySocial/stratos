@@ -12,8 +12,14 @@ import {
   generateDpopKeyPair,
   type DpopKeyPair,
 } from '../src/space-credential/dpop.js'
+import {
+  DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+  DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+} from '../src/config.js'
 import type { SpaceCredentialProof } from '../src/upstream/index.js'
 import {
+  getRecordResponseByteLimit,
+  getRepoOpsResponseByteLimit,
   InsecureHostOriginError,
   InvalidHostOriginError,
   MalformedCursorError,
@@ -257,6 +263,50 @@ describe('SpaceHostClient', () => {
 
       const url2 = new URL(mock.requests[1].url, mock.baseUrl)
       expect(url2.searchParams.get('cursor')).toBe('1/0')
+    })
+
+    it('accepts a valid page over 1 MiB under the production-derived response cap', async () => {
+      const value = {
+        $type: 'zone.stratos.feed.post',
+        text: '',
+      }
+      const emptyValueBytes = Buffer.byteLength(JSON.stringify(value))
+      value.text = 'x'.repeat(
+        DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES - emptyValueBytes,
+      )
+      expect(Buffer.byteLength(JSON.stringify(value))).toBe(
+        DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+      )
+      const ops = Array.from({ length: 17 }, (_, index) => ({
+        rev: String(index + 1),
+        collection: 'zone.stratos.feed.post',
+        rkey: `a${index}`,
+        cid: `bafy${index}`,
+        value,
+      }))
+      const body = JSON.stringify({ ops })
+      const bodyBytes = Buffer.byteLength(body)
+      const maxPageBytes = getRepoOpsResponseByteLimit(
+        DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+        DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+      )
+      expect(bodyBytes).toBeGreaterThan(1_048_576)
+      expect(bodyBytes).toBeLessThanOrEqual(maxPageBytes)
+
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(body)
+      }
+      const client = await createClient({ maxPageBytes })
+
+      const result = await client.listRepoOps({
+        space: SPACE_URI,
+        repo: REPO_DID,
+        limit: DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+      })
+
+      expect(result.ops).toHaveLength(17)
+      expect(result.ops[0]?.value).toEqual(value)
     })
 
     it.each([
@@ -900,20 +950,28 @@ describe('SpaceHostClient', () => {
       ).rejects.toBeInstanceOf(SpaceHostInvalidResponseError)
     })
 
-    it('applies maxRecordBytes, not maxPageBytes, to getRecord', async () => {
-      const bigBody = JSON.stringify({
+    it('accepts a decoded record exactly at maxRecordBytes despite response framing', async () => {
+      const maxRecordBytes = 128
+      const value = {
+        $type: 'zone.stratos.feed.post',
+        text: '',
+      }
+      const emptyValueBytes = Buffer.byteLength(JSON.stringify(value))
+      value.text = 'x'.repeat(maxRecordBytes - emptyValueBytes)
+      expect(Buffer.byteLength(JSON.stringify(value))).toBe(maxRecordBytes)
+      const body = JSON.stringify({
         uri: 'at://x/y/z',
         cid: 'bafyA',
-        value: 'x'.repeat(1000),
+        value,
       })
+      expect(Buffer.byteLength(body)).toBeGreaterThan(maxRecordBytes)
+
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')
-        res.end(bigBody)
+        res.end(body)
       }
-      const client = await createClient({
-        maxPageBytes: 10_000_000,
-        maxRecordBytes: 64,
-      })
+      const client = await createClient({ maxRecordBytes })
+
       await expect(
         client.getRecord({
           space: SPACE_URI,
@@ -921,7 +979,40 @@ describe('SpaceHostClient', () => {
           collection: 'zone.stratos.feed.post',
           rkey: 'a1',
         }),
-      ).rejects.toBeInstanceOf(SpaceHostResponseTooLargeError)
+      ).resolves.toEqual({ uri: 'at://x/y/z', cid: 'bafyA', value })
+    })
+
+    it('caps getRecord after bounded envelope headroom, independently of maxPageBytes', async () => {
+      const maxRecordBytes = 64
+      const responseLimit = getRecordResponseByteLimit(maxRecordBytes)
+      const bigBody = JSON.stringify({
+        uri: 'at://x/y/z',
+        cid: 'bafyA',
+        value: 'x'.repeat(responseLimit),
+      })
+      expect(Buffer.byteLength(bigBody)).toBeGreaterThan(responseLimit)
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(bigBody)
+      }
+      const client = await createClient({
+        maxPageBytes: 10_000_000,
+        maxRecordBytes,
+      })
+
+      const err = await client
+        .getRecord({
+          space: SPACE_URI,
+          repo: REPO_DID,
+          collection: 'zone.stratos.feed.post',
+          rkey: 'a1',
+        })
+        .catch((reason: unknown) => reason)
+
+      expect(err).toBeInstanceOf(SpaceHostResponseTooLargeError)
+      expect((err as SpaceHostResponseTooLargeError).limitBytes).toBe(
+        responseLimit,
+      )
     })
 
     it('fails on a redirect instead of following it', async () => {

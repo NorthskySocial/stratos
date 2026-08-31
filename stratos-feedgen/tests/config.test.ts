@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
+  DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
   DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS,
   DEFAULT_SPACE_SYNC_ENABLED,
   DEFAULT_SPACE_SYNC_INTERVAL_MS,
@@ -9,6 +11,7 @@ import {
   DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
+  MAX_SPACE_MEMBERSHIP_PAGE_LIMIT,
   loadFeedgenConfig,
 } from '../src/config.js'
 
@@ -26,6 +29,12 @@ describe('loadFeedgenConfig space-sync defaults', () => {
     const cfg = loadFeedgenConfig({ ...baseEnv })
     expect(cfg.spaceSyncEnabled).toBe(DEFAULT_SPACE_SYNC_ENABLED)
     expect(cfg.spaceSyncIntervalMs).toBe(DEFAULT_SPACE_SYNC_INTERVAL_MS)
+    expect(cfg.spaceMembershipPageLimit).toBe(
+      DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
+    )
+    expect(cfg.spaceMembershipRequestTimeoutMs).toBe(
+      DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
+    )
     expect(cfg.spaceSyncPageLimit).toBe(DEFAULT_SPACE_SYNC_PAGE_LIMIT)
     expect(cfg.spaceSyncMaxPages).toBe(DEFAULT_SPACE_SYNC_MAX_PAGES)
     expect(cfg.spaceSyncRequestTimeoutMs).toBe(
@@ -52,10 +61,18 @@ describe('loadFeedgenConfig space-sync defaults', () => {
       ...baseEnv,
       FEEDGEN_SPACE_SYNC_ENABLED: '',
       FEEDGEN_SPACE_SYNC_INTERVAL_MS: '',
+      FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT: '',
+      FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS: '',
       FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: '',
     })
     expect(cfg.spaceSyncEnabled).toBe(DEFAULT_SPACE_SYNC_ENABLED)
     expect(cfg.spaceSyncIntervalMs).toBe(DEFAULT_SPACE_SYNC_INTERVAL_MS)
+    expect(cfg.spaceMembershipPageLimit).toBe(
+      DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
+    )
+    expect(cfg.spaceMembershipRequestTimeoutMs).toBe(
+      DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
+    )
     expect(cfg.spaceSyncAllowHttpOrigins.size).toBe(0)
   })
 })
@@ -65,6 +82,8 @@ describe('loadFeedgenConfig space-sync overrides', () => {
     const cfg = loadFeedgenConfig({
       ...baseEnv,
       FEEDGEN_SPACE_SYNC_INTERVAL_MS: '15000',
+      FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT: '200',
+      FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS: '4000',
       FEEDGEN_SPACE_SYNC_PAGE_LIMIT: '250',
       FEEDGEN_SPACE_SYNC_MAX_PAGES: '4',
       FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS: '5000',
@@ -74,6 +93,8 @@ describe('loadFeedgenConfig space-sync overrides', () => {
       FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER: '500',
     })
     expect(cfg.spaceSyncIntervalMs).toBe(15_000)
+    expect(cfg.spaceMembershipPageLimit).toBe(200)
+    expect(cfg.spaceMembershipRequestTimeoutMs).toBe(4_000)
     expect(cfg.spaceSyncPageLimit).toBe(250)
     expect(cfg.spaceSyncMaxPages).toBe(4)
     expect(cfg.spaceSyncRequestTimeoutMs).toBe(5_000)
@@ -84,6 +105,20 @@ describe('loadFeedgenConfig space-sync overrides', () => {
   })
 
   it('rejects a non-positive-integer override', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT: '0',
+      }),
+    ).toThrow(/FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS: '0',
+      }),
+    ).toThrow(/FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS/)
+
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
@@ -100,6 +135,15 @@ describe('loadFeedgenConfig space-sync overrides', () => {
   })
 
   it('rejects a page limit above the upstream maximum', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT: String(
+          MAX_SPACE_MEMBERSHIP_PAGE_LIMIT + 1,
+        ),
+      }),
+    ).toThrow(/FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT.*maximum 1000/)
+
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
