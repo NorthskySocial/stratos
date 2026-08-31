@@ -1,27 +1,12 @@
 #!/usr/bin/env -S deno run -A
-// Feedgen E2E — boundary-scoped hydrated feeds over the real service stack.
-//
-// Builds and launches the feedgen from its workspace package against the
-// running Stratos, then asserts the zone.stratos.feedgen.* lexicon contract:
-// describeFeed lists the configured feeds, getFeed returns hydrated postViews
-// only to viewers holding the feed's boundary, and the declared UnknownFeed /
-// BoundaryMismatch errors and the service-auth requirement are enforced.
-//
-// The feedgen's identity (did:web:feedgen.test) is declared to Stratos via
-// STRATOS_SERVICE_ENROLLMENTS in the compose files, with an inline did:key so
-// Stratos verifies its JWTs without resolving the non-resolvable did:web.
 
-import { DOMAINS, SERVICE_DID, STRATOS_URL, TEST_ROOT } from './lib/config.ts'
-import { loadState } from './lib/state.ts'
+import { DOMAINS } from './lib/config.ts'
+import { buildFeedgen, FEEDGEN_DID, FeedgenHarness } from './lib/feedgen.ts'
+import { assert, fail, finish, pass, section } from './lib/log.ts'
 import { createSession, getServiceAuth } from './lib/pds.ts'
+import { loadState } from './lib/state.ts'
 import { createRecord } from './lib/stratos.ts'
-import { assert, fail, finish, info, pass, section } from './lib/log.ts'
 
-const FEEDGEN_DID = 'did:web:feedgen.test'
-// Private key for the did:key declared in STRATOS_SERVICE_ENROLLMENTS
-// (docker-compose.test.yml / docker-compose.e2e.yml). Test-only material.
-const FEEDGEN_SIGNING_KEY =
-  '097ce261481a889a756db476dceb6cc57596541c264675e9712c7252cfd1183c'
 const FEEDGEN_PORT = 3300
 const FEEDGEN_URL = `http://127.0.0.1:${FEEDGEN_PORT}`
 const GET_FEED_LXM = 'zone.stratos.feedgen.getFeed'
@@ -36,7 +21,6 @@ interface PostView {
 }
 
 interface GetFeedBody {
-  cursor?: string
   feed: Array<{ post: PostView }>
 }
 
@@ -45,62 +29,11 @@ interface DescribeFeedBody {
   feeds: Array<{ id: string; boundary: string }>
 }
 
-async function buildFeedgen(): Promise<boolean> {
-  // Run the esbuild bundle, not the tsc build. The tsc dist keeps the bare
-  // stratos-core import, which resolves to workspace TS source that plain
-  // node cannot load. The bundle is the artifact the Docker image ships.
-  info('bundling stratos-feedgen (production esbuild bundle)')
-  const result = await new Deno.Command('pnpm', {
-    args: ['--filter', '@northskysocial/stratos-feedgen', 'bundle'],
-    cwd: `${TEST_ROOT}/..`,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }).output()
-  return result.success
-}
-
-function startFeedgen(sqlitePath: string): Deno.ChildProcess {
-  const feedsJson = JSON.stringify({
-    feeds: [
-      { id: 'swordsmith', boundary: DOMAINS.swordsmith },
-      { id: 'aekea', boundary: DOMAINS.aekea },
-    ],
-  })
-  return new Deno.Command('node', {
-    args: ['dist-bundle/main.mjs'],
-    cwd: `${TEST_ROOT}/../stratos-feedgen`,
-    env: {
-      FEEDGEN_SERVICE_DID: FEEDGEN_DID,
-      FEEDGEN_SIGNING_KEY,
-      FEEDGEN_PUBLIC_URL: FEEDGEN_URL,
-      FEEDGEN_PORT: String(FEEDGEN_PORT),
-      FEEDGEN_SQLITE_PATH: sqlitePath,
-      FEEDGEN_FEEDS_JSON: feedsJson,
-      STRATOS_SERVICE_URL: STRATOS_URL,
-      // Set this explicitly. `Deno.Command` merges the parent environment, and
-      // `.env` carries a placeholder STRATOS_PUBLIC_URL that would otherwise
-      // win and break every DPoP proof's `htu`.
-      STRATOS_PUBLIC_URL: STRATOS_URL,
-      STRATOS_SERVICE_DID: SERVICE_DID,
-    },
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }).spawn()
-}
-
-async function waitForHealth(timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${FEEDGEN_URL}/health`)
-      const body = (await res.json()) as { ok?: boolean }
-      if (res.ok && body.ok === true) return true
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  return false
+interface ReplayCheck {
+  authorDid: string
+  cid: string
+  uri: string
+  viewer: { did: string; handle: string; password: string }
 }
 
 async function mintViewerJwt(
@@ -115,177 +48,213 @@ async function getFeed(
   token: string | null,
   feed: string,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const params = new URLSearchParams({ feed })
   const headers: Record<string, string> = {}
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(
-    `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.getFeed?${params}`,
+    `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.getFeed?${new URLSearchParams({ feed })}`,
     { headers },
   )
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-  return { status: res.status, body }
+  return {
+    status: res.status,
+    body: (await res.json().catch(() => ({}))) as Record<string, unknown>,
+  }
 }
 
-/** Poll getFeed until the given post uri appears (indexing is async). */
 async function waitForPost(
   token: string,
   feed: string,
   uri: string,
-  timeoutMs: number,
 ): Promise<PostView | null> {
-  const deadline = Date.now() + timeoutMs
+  const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     const { status, body } = await getFeed(token, feed)
-    if (status === 200) {
-      const found = (body as unknown as GetFeedBody).feed?.find(
-        (item) => item.post?.uri === uri,
-      )
-      if (found) return found.post
-    }
-    await new Promise((r) => setTimeout(r, 500))
+    const post = (body as unknown as GetFeedBody).feed?.find(
+      (item) => item.post?.uri === uri,
+    )?.post
+    if (status === 200 && post) return post
+    await new Promise((resolve) => setTimeout(resolve, 500))
   }
   return null
 }
 
-interface FeedgenUsers {
-  rei: { did: string; handle: string; password: string }
-  sakura: { handle: string; password: string }
-  kaoruko: { handle: string; password: string }
-}
-
-async function run() {
+async function run(): Promise<void> {
   section('Phase 4f: Feedgen — describeFeed & getFeed')
-
   const state = await loadState()
-  const rei = state.users.rei // author, swordsmith
-  const sakura = state.users.sakura // shares swordsmith
-  const kaoruko = state.users.kaoruko // aekea only
+  const rei = state.users.rei
+  const sakura = state.users.sakura
+  const kaoruko = state.users.kaoruko
   if (!rei?.enrolled || !sakura?.enrolled || !kaoruko?.enrolled) {
     fail('Users rei, sakura, kaoruko must be enrolled — run earlier phases')
     finish()
   }
-
   if (!(await buildFeedgen())) {
     fail('stratos-feedgen bundle')
     finish()
   }
   pass('stratos-feedgen bundled')
 
-  const tmpDir = await Deno.makeTempDir({ prefix: 'feedgen-e2e-' })
-  const feedgen = startFeedgen(`${tmpDir}/feedgen.sqlite`)
-
-  // finish() calls Deno.exit, which skips finally blocks. Early aborts in
-  // exerciseFeedgen therefore return instead, so the child process and the
-  // temp dir are cleaned up before the summary runs.
+  const feedgen = await FeedgenHarness.create()
   try {
-    await exerciseFeedgen({ rei, sakura, kaoruko })
-  } finally {
-    info('stopping feedgen')
-    try {
-      feedgen.kill('SIGTERM')
-      await feedgen.status
-    } catch {
-      // already exited
+    await feedgen.start({ port: FEEDGEN_PORT })
+    await assertFeedgenWarmup(feedgen, 'initial')
+    const replay = await exerciseFeedgen(feedgen, { rei, sakura, kaoruko })
+    if (replay) {
+      await feedgen.stop()
+      await feedgen.start({ port: FEEDGEN_PORT })
+      await assertFeedgenWarmup(feedgen, 'restart')
+      await verifyReplay(feedgen, replay)
     }
-    await Deno.remove(tmpDir, { recursive: true }).catch(() => {})
+  } finally {
+    await feedgen.cleanup()
   }
-
   finish()
 }
 
-async function exerciseFeedgen({ rei, sakura, kaoruko }: FeedgenUsers) {
-  if (!(await waitForHealth(30_000))) {
+async function assertFeedgenWarmup(
+  feedgen: FeedgenHarness,
+  phase: string,
+): Promise<void> {
+  const warmup = await feedgen.waitForWarmup(30_000)
+  assert(
+    warmup.attempted === 2,
+    `${phase} credential warm-up attempts both configured boundaries`,
+    String(warmup.attempted),
+  )
+  assert(
+    warmup.acquired === 2,
+    `${phase} credential warm-up acquires both configured boundaries`,
+    String(warmup.acquired),
+  )
+  assert(
+    warmup.failed === 0,
+    `${phase} credential warm-up has no failed boundary`,
+    String(warmup.failed),
+  )
+}
+
+async function exerciseFeedgen(
+  feedgen: FeedgenHarness,
+  users: {
+    rei: { did: string; handle: string; password: string }
+    sakura: { did: string; handle: string; password: string }
+    kaoruko: { handle: string; password: string }
+  },
+): Promise<ReplayCheck | null> {
+  if (!(await feedgen.waitForHealth(FEEDGEN_PORT, 30_000))) {
     fail('feedgen /health did not become ready within 30s')
-    return
+    return null
   }
   pass('feedgen healthy', FEEDGEN_URL)
 
-  section('Fresh boundary-scoped post to index')
   const text = 'Totosai reforges Tessaiga at the swordsmith village'
-  let createdUri = ''
-  let createdCid = ''
+  let created: { uri: string; cid: string }
   try {
-    const created = await createRecord(rei.did, COLLECTION, {
+    created = await createRecord(users.rei.did, COLLECTION, {
       $type: COLLECTION,
       text,
       boundary: { values: [{ value: DOMAINS.swordsmith }] },
       createdAt: new Date().toISOString(),
     })
-    createdUri = created.uri
-    createdCid = created.cid
     pass('createRecord as rei (swordsmith boundary)', created.uri)
   } catch (err) {
     fail('createRecord as rei (swordsmith boundary)', String(err))
-    return
+    return null
   }
 
-  section('describeFeed lists the configured feeds (unauthenticated)')
   const describeRes = await fetch(
     `${FEEDGEN_URL}/xrpc/zone.stratos.feedgen.describeFeed`,
   )
   assert(describeRes.status === 200, 'describeFeed responds 200')
   const describe = (await describeRes.json()) as DescribeFeedBody
-  assert(
-    describe.did === FEEDGEN_DID,
-    'describeFeed.did is the feedgen DID',
-    describe.did,
-  )
-  for (const id of ['swordsmith', 'aekea']) {
-    const entry = describe.feeds?.find((f) => f.id === id)
+  assert(describe.did === FEEDGEN_DID, 'describeFeed.did is the feedgen DID')
+  for (const id of ['swordsmith', 'aekea'] as const) {
+    const entry = describe.feeds.find((feed) => feed.id === id)
     assert(
-      entry !== undefined && entry.boundary === DOMAINS[id as 'swordsmith'],
+      entry?.boundary === DOMAINS[id],
       `describeFeed lists feed "${id}" with its boundary`,
       entry?.boundary,
     )
   }
 
-  section('getFeed returns the hydrated post to a boundary member')
-  const sakuraJwt = await mintViewerJwt(sakura.handle, sakura.password)
-  const post = await waitForPost(sakuraJwt, 'swordsmith', createdUri, 30_000)
+  const sakuraJwt = await mintViewerJwt(
+    users.sakura.handle,
+    users.sakura.password,
+  )
+  const post = await waitForPost(sakuraJwt, 'swordsmith', created.uri)
   assert(
     post !== null,
     'shared-boundary viewer sees the fresh post',
-    createdUri,
+    created.uri,
   )
   if (post) {
-    assert(post.cid === createdCid, 'postView.cid matches the create', post.cid)
     assert(
-      post.author?.did === rei.did,
-      'postView.author.did is the author',
-      post.author?.did,
+      post.cid === created.cid,
+      'postView.cid matches the create',
+      post.cid,
     )
     assert(
-      post.record?.['text'] === text,
+      post.author.did === users.rei.did,
+      'postView.author.did is the author',
+    )
+    assert(
+      post.record['text'] === text,
       'postView.record is the hydrated record body',
     )
     assert(
       !Number.isNaN(Date.parse(post.indexedAt)),
       'postView.indexedAt is a datetime',
-      post.indexedAt,
     )
   }
 
-  section('Declared errors: BoundaryMismatch and UnknownFeed')
-  const kaorukoJwt = await mintViewerJwt(kaoruko.handle, kaoruko.password)
+  const kaorukoJwt = await mintViewerJwt(
+    users.kaoruko.handle,
+    users.kaoruko.password,
+  )
   const mismatch = await getFeed(kaorukoJwt, 'swordsmith')
   assert(
     mismatch.status === 400 && mismatch.body['error'] === 'BoundaryMismatch',
     'viewer without the boundary gets BoundaryMismatch',
-    `status=${mismatch.status} error=${mismatch.body['error']}`,
   )
   const unknown = await getFeed(sakuraJwt, 'yorozuya')
   assert(
     unknown.status === 400 && unknown.body['error'] === 'UnknownFeed',
     'unconfigured feed id gets UnknownFeed',
-    `status=${unknown.status} error=${unknown.body['error']}`,
+  )
+  const anonymous = await getFeed(null, 'swordsmith')
+  assert(
+    anonymous.status === 401,
+    'unauthenticated getFeed is rejected with 401',
   )
 
-  section('getFeed requires service-auth')
-  const anon = await getFeed(null, 'swordsmith')
+  return post
+    ? {
+        authorDid: users.rei.did,
+        cid: created.cid,
+        uri: created.uri,
+        viewer: users.sakura,
+      }
+    : null
+}
+
+async function verifyReplay(
+  feedgen: FeedgenHarness,
+  replay: ReplayCheck,
+): Promise<void> {
+  section('Restart replay rebuilds the in-memory feed index')
+  if (!(await feedgen.waitForHealth(FEEDGEN_PORT, 30_000))) {
+    fail('restarted feedgen /health did not become ready within 30s')
+    return
+  }
+  const token = await mintViewerJwt(
+    replay.viewer.handle,
+    replay.viewer.password,
+  )
+  const post = await waitForPost(token, 'swordsmith', replay.uri)
+  assert(post?.uri === replay.uri, 'same viewer sees the same URI after replay')
+  assert(post?.cid === replay.cid, 'same viewer sees the same CID after replay')
   assert(
-    anon.status === 401,
-    'unauthenticated getFeed is rejected with 401',
-    `status=${anon.status}`,
+    post?.author.did === replay.authorDid,
+    'same viewer sees the same author after replay',
   )
 }
 

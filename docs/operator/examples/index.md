@@ -65,6 +65,13 @@ overlay on top of the base stack. The overlay adds a `feedgen` service (SQLite-b
 an ephemeral Cloudflare tunnel so the feedgen's `did:web` document is reachable over
 HTTPS.
 
+Feedgen uses an in-memory SQLite index by default. A restart rebuilds its post, boundary,
+enrollment, and cursor index from Stratos replay streams. The overlay sets the core-dump
+limit to zero because the process can hold private content. To persist the index, uncomment
+the documented `FEEDGEN_SQLITE_PATH` and `feedgen-data` volume entries in the overlay.
+That opt-in stores private records, boundaries, enrollments, and cursors, so protect the
+mounted storage as private content.
+
 A bare `docker compose -f docker-compose.yml -f docker-compose.feedgen.yml up -d` is not
 enough on its own: the feedgen's identity is derived from `FEEDGEN_HOST`
 (`FEEDGEN_SERVICE_DID=did:web:${FEEDGEN_HOST}`), and that host is the tunnel's ephemeral
