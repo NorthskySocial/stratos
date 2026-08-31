@@ -1,6 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
+import {
+  DidNotFoundError,
+  PoorlyFormattedDidDocumentError,
+  PoorlyFormattedDidError,
+  UnsupportedDidMethodError,
+  UnsupportedDidWebPathError,
+} from '@atproto/identity'
 import { expand as hkdfExpand } from '@noble/hashes/hkdf'
 import { hmac } from '@noble/hashes/hmac'
 import { sha256 } from '@noble/hashes/sha256'
@@ -130,6 +137,22 @@ describe('CommitVerifier', () => {
     const tampered = Buffer.from(sig, 'base64')
     tampered[0] = tampered[0] ^ 0xff
     commit.sig = { $bytes: tampered.toString('base64') }
+    const verifier = buildVerifier(stubResolver(async () => keypair.did()))
+
+    const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'signature-invalid',
+      transient: false,
+    })
+  })
+
+  it('rejects a malformed compact signature without throwing', async () => {
+    const keypair = await Secp256k1Keypair.create({ exportable: true })
+    const commit = await signTestCommit(keypair)
+    const sig = Buffer.from((commit.sig as { $bytes: string }).$bytes, 'base64')
+    commit.sig = bytesField(sig.subarray(0, 63))
     const verifier = buildVerifier(stubResolver(async () => keypair.did()))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
@@ -322,14 +345,88 @@ describe('CommitVerifier', () => {
     })
   })
 
-  it('treats a DID-resolution failure as transient', async () => {
+  it.each([
+    [
+      'a retryable HTTP response',
+      Object.assign(new Error('Service Unavailable'), { status: 503 }),
+    ],
+    [
+      'a rate-limited HTTP response',
+      Object.assign(new Error('Too Many Requests'), { status: 429 }),
+    ],
+    ['an aborted request', new DOMException('timed out', 'AbortError')],
+    [
+      'a nested network error',
+      Object.assign(new Error('resolver request failed'), {
+        cause: Object.assign(new Error('dns lookup failed'), {
+          code: 'ENOTFOUND',
+        }),
+      }),
+    ],
+    ['a fetch failure', new TypeError('fetch failed')],
+  ])(
+    'treats %s as a transient resolver failure',
+    async (_label, resolveError) => {
+      const keypair = await Secp256k1Keypair.create({ exportable: true })
+      const commit = await signTestCommit(keypair)
+      const verifier = buildVerifier(
+        stubResolver(async () => {
+          throw resolveError
+        }),
+      )
+
+      const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
+
+      expect(result).toEqual({
+        ok: false,
+        reason: 'key-unresolvable',
+        transient: true,
+        error: resolveError,
+      })
+    },
+  )
+
+  it.each([
+    ['missing DID', new DidNotFoundError(SPIKE_DID)],
+    ['malformed DID', new PoorlyFormattedDidError(SPIKE_DID)],
+    [
+      'malformed DID document',
+      new PoorlyFormattedDidDocumentError(SPIKE_DID, {}),
+    ],
+    ['unsupported DID method', new UnsupportedDidMethodError(SPIKE_DID)],
+    ['unsupported did:web path', new UnsupportedDidWebPathError(SPIKE_DID)],
+    ['missing atproto key', new Error('Could not parse signingKey from doc')],
+    [
+      'non-retryable HTTP response',
+      Object.assign(new Error('Bad Request'), { status: 400 }),
+    ],
+  ])(
+    'treats %s as a permanent resolver failure',
+    async (_label, resolveError) => {
+      const keypair = await Secp256k1Keypair.create({ exportable: true })
+      const commit = await signTestCommit(keypair)
+      const verifier = buildVerifier(
+        stubResolver(async () => {
+          throw resolveError
+        }),
+      )
+
+      const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
+
+      expect(result).toEqual({
+        ok: false,
+        reason: 'key-unresolvable',
+        transient: false,
+        error: resolveError,
+      })
+    },
+  )
+
+  it('treats malformed resolved key material as non-transient', async () => {
     const keypair = await Secp256k1Keypair.create({ exportable: true })
     const commit = await signTestCommit(keypair)
-    const resolveError = new Error('plc directory unreachable')
     const verifier = buildVerifier(
-      stubResolver(async () => {
-        throw resolveError
-      }),
+      stubResolver(async () => 'did:key:not-valid'),
     )
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
@@ -337,8 +434,7 @@ describe('CommitVerifier', () => {
     expect(result).toEqual({
       ok: false,
       reason: 'key-unresolvable',
-      transient: true,
-      error: resolveError,
+      transient: false,
     })
   })
 
