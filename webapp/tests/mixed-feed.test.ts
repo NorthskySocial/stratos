@@ -1,5 +1,5 @@
-import {describe, expect, it, vi} from 'vitest'
-import {render, screen} from '@testing-library/svelte'
+import { describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/svelte'
 import Feed from '../src/lib/Feed.svelte'
 
 describe('Feed.svelte', () => {
