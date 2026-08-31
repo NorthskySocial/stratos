@@ -727,6 +727,26 @@ describe('SpaceHostClient', () => {
       expect(fetchImpl).not.toHaveBeenCalled()
     })
 
+    it('normalizes a non-Error caller abort reason', async () => {
+      const controller = new AbortController()
+      controller.abort('cancelled by the caller')
+      const client = await createClient({
+        hostOrigin: 'https://nerv.example',
+        resolveHost: () => new Promise<readonly string[]>(() => {}),
+      })
+
+      const err = await client
+        .listRepoOps({
+          space: SPACE_URI,
+          repo: REPO_DID,
+          signal: controller.signal,
+        })
+        .catch((reason: unknown) => reason)
+
+      expect(err).toBeInstanceOf(Error)
+      expect((err as Error).cause).toBe('cancelled by the caller')
+    })
+
     it('times out a hanging response', async () => {
       mock.handler = () => {
         // Never respond.

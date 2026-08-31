@@ -303,9 +303,9 @@ export function createPinnedLookup(
 }
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason)
+  if (signal.aborted) return Promise.reject(toError(signal.reason))
   return new Promise<T>((resolve, reject) => {
-    const abort = (): void => reject(signal.reason)
+    const abort = (): void => reject(toError(signal.reason))
     signal.addEventListener('abort', abort, { once: true })
     void promise.then(
       (value) => {
@@ -314,10 +314,16 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
       },
       (err: unknown) => {
         signal.removeEventListener('abort', abort)
-        reject(err)
+        reject(toError(err))
       },
     )
   })
+}
+
+function toError(reason: unknown): Error {
+  return reason instanceof Error
+    ? reason
+    : new Error('operation rejected with a non-Error reason', { cause: reason })
 }
 
 /**
