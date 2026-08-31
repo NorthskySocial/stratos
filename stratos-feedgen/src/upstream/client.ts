@@ -106,6 +106,7 @@ export interface ListSpaceReposOptions {
 /** Spec-shaped mirror of a `com.atproto.space.listRepos` entry, extended with `host`/`hostSource`. */
 export interface SpaceRepoEntry {
   did: string
+  /** Fail-closed normalization: anything except an explicit `pds` is `stratos`. */
   custody: Custody
   /** Present only for a stratos-custody member. */
   rev?: string
@@ -341,13 +342,6 @@ function decodeSpaceRepoEntry(
       `repo at index ${index} had no DID`,
     )
   }
-  if (raw.custody !== 'stratos' && raw.custody !== 'pds') {
-    throw new StratosInvalidResponseError(
-      url,
-      lxm,
-      `repo at index ${index} had invalid custody`,
-    )
-  }
   if (raw.rev !== undefined && typeof raw.rev !== 'string') {
     throw new StratosInvalidResponseError(
       url,
@@ -375,7 +369,7 @@ function decodeSpaceRepoEntry(
   }
   return {
     did: raw.did,
-    custody: raw.custody,
+    custody: raw.custody === 'pds' ? 'pds' : 'stratos',
     ...(raw.rev !== undefined ? { rev: raw.rev } : {}),
     ...(raw.host !== undefined ? { host: raw.host } : {}),
     ...(raw.hostSource !== undefined ? { hostSource: raw.hostSource } : {}),
