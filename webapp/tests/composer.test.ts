@@ -158,38 +158,77 @@ describe('Composer.svelte', () => {
     expect(body.record).not.toHaveProperty('embed')
   })
 
-  it('shows distinct guidance for a missing and an unavailable PDS space scope', async () => {
+  it('treats the local scope preview as advisory after enrollment', async () => {
+    const missingScopeSession = session()
     const missing = render(Composer, {
       props: props({
-        session: session(),
+        session: missingScopeSession,
         enrollment: enrollment('pds'),
         stratosAgent: null,
       }),
     })
     await waitFor(() =>
       expect(
-        screen.getByText(/requires a new space permission/i),
-      ).toBeInTheDocument(),
+        screen.getByRole('checkbox', { name: /Private/i }),
+      ).not.toBeDisabled(),
     )
-    expect(screen.getByRole('checkbox', { name: /Private/i })).not.toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /Private/i })).toBeDisabled()
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Rei writes without trusting the preview.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+    await waitFor(() =>
+      expect(missingScopeSession.fetchHandler).toHaveBeenCalledTimes(1),
+    )
+    expect(missingScopeSession.getTokenInfo).not.toHaveBeenCalled()
     missing.unmount()
 
+    const unavailableScopeSession = {
+      ...session(),
+      getTokenInfo: vi
+        .fn()
+        .mockRejectedValue(new Error('Misato lost the token')),
+    }
     render(Composer, {
       props: props({
-        session: {
-          ...session(),
-          getTokenInfo: vi
-            .fn()
-            .mockRejectedValue(new Error('Misato lost the token')),
-        },
+        session: unavailableScopeSession,
         enrollment: enrollment('pds'),
         stratosAgent: null,
       }),
     })
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Asuka writes while token info is unavailable.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
     await waitFor(() =>
-      expect(screen.getByText(/could not be verified/i)).toBeInTheDocument(),
+      expect(unavailableScopeSession.fetchHandler).toHaveBeenCalledTimes(1),
     )
+    expect(unavailableScopeSession.getTokenInfo).not.toHaveBeenCalled()
+  })
+
+  it('shows reauthorization guidance when the PDS rejects the space grant', async () => {
+    const pdsSession = session(SPACE_WRITE_SCOPE)
+    pdsSession.fetchHandler.mockResolvedValue(
+      new Response('Missing required scope', { status: 403 }),
+    )
+    render(Composer, {
+      props: props({
+        session: pdsSession,
+        enrollment: enrollment('pds'),
+        stratosAgent: null,
+      }),
+    })
+
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Rei needs a renewed grant.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/requires a new space permission/i),
+      ).toBeInTheDocument(),
+    )
+    expect(pdsSession.fetchHandler).toHaveBeenCalledTimes(1)
   })
 
   it('previews custody from the granted space scope before enrollment', async () => {
