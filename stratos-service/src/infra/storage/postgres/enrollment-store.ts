@@ -68,7 +68,8 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
 
     const conditions = [
       cursor ? gt(pgEnrollment.did, cursor) : undefined,
-    ].filter((condition) => condition !== undefined)
+      options?.activeOnly ? eq(pgEnrollment.active, 'true') : undefined,
+    ].filter((c) => c !== undefined)
 
     let query = this.db.select().from(pgEnrollment)
     if (conditions.length > 0) {
@@ -76,27 +77,6 @@ export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
     }
 
     const rows = await query.orderBy(asc(pgEnrollment.did)).limit(limit)
-
-    return rows.map(toStoredEnrollment)
-  }
-
-  async listActiveEnrollments(
-    options?: ListEnrollmentsOptions,
-  ): Promise<StoredEnrollment[]> {
-    const limit = options?.limit ?? 100
-    const cursor = options?.cursor
-
-    const conditions = [
-      eq(pgEnrollment.active, 'true'),
-      cursor ? gt(pgEnrollment.did, cursor) : undefined,
-    ].filter((condition) => condition !== undefined)
-
-    const rows = await this.db
-      .select()
-      .from(pgEnrollment)
-      .where(and(...conditions))
-      .orderBy(asc(pgEnrollment.did))
-      .limit(limit)
 
     return rows.map(toStoredEnrollment)
   }
@@ -185,14 +165,6 @@ export class PgEnrollmentStoreWriter
   implements EnrollmentStoreWriter
 {
   async enroll(data: StoredEnrollment): Promise<void> {
-    const custodyFields =
-      data.custody === undefined
-        ? {}
-        : {
-            custody: data.custody,
-            repoHost: data.repoHost ?? null,
-          }
-
     await this.db
       .insert(pgEnrollment)
       .values({
@@ -203,7 +175,8 @@ export class PgEnrollmentStoreWriter
         active: data.active ? 'true' : 'false',
         enrollmentRkey: data.enrollmentRkey ?? null,
         isService: data.isService ?? false,
-        ...custodyFields,
+        custody: data.custody ?? 'stratos',
+        repoHost: data.repoHost ?? null,
         capabilityVerdict: data.capabilityVerdict ?? null,
       })
       .onConflictDoUpdate({
@@ -215,7 +188,8 @@ export class PgEnrollmentStoreWriter
           active: data.active ? 'true' : 'false',
           enrollmentRkey: data.enrollmentRkey ?? null,
           isService: data.isService ?? false,
-          ...custodyFields,
+          custody: data.custody ?? 'stratos',
+          repoHost: data.repoHost ?? null,
           capabilityVerdict: data.capabilityVerdict ?? null,
         },
       })

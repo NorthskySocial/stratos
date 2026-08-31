@@ -81,7 +81,7 @@ async function start() {
     const serviceUrl = serviceListener.url()!
     console.log(`Service Tunnel URL: ${serviceUrl}`)
 
-    const derivedServiceDid = `did:web:${encodeURIComponent(new URL(serviceUrl).host)}`
+    const derivedServiceDid = `did:web:${encodeURIComponent(new URL(serviceUrl).hostname)}`
     console.log(`Derived Service DID: ${derivedServiceDid}`)
 
     // 3. Start a cloudflared quick tunnel for the webapp.

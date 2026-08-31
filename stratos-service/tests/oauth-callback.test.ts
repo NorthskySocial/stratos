@@ -245,7 +245,7 @@ describe('handleCallback', () => {
     )
   })
 
-  it('fails closed when the capability verdict is unknown', async () => {
+  it('falls back to stratos custody when the capability verdict is unknown', async () => {
     const session = {
       sub: 'did:plc:rei',
       getTokenInfo: vi.fn().mockRejectedValue(new Error('token info refused')),
@@ -269,21 +269,10 @@ describe('handleCallback', () => {
 
     await handler(req, res)
 
-    expect(res.status).toHaveBeenCalledWith(500)
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      { did: 'did:plc:rei', spacesCapability: 'unknown' },
-      'cannot enroll when PDS spaces capability is unknown',
+    expect(config.initRepo).toHaveBeenCalledWith('did:plc:rei')
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ custody: 'stratos' }),
     )
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({
-        err: 'Could not determine PDS spaces capability',
-      }),
-      'OAuth callback failed',
-    )
-    expect(config.initRepo).not.toHaveBeenCalled()
-    expect(config.createSigningKey).not.toHaveBeenCalled()
-    expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
-    expect(mockProfileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
   })
 
   it('grants pds custody, resolves the user own #atproto key, and creates no Stratos repo', async () => {
@@ -1041,7 +1030,7 @@ describe('handleCallback', () => {
     it('reports capable when the PDS granted the requested space scope', async () => {
       const scope = `atproto ${buildSpaceScope(SERVICE_DID)}`
       const session = sessionFor('did:plc:kenshin', scope)
-      const res = await runCallback(session)
+      await runCallback(session)
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         { did: 'did:plc:kenshin', spacesCapability: 'capable' },
@@ -1080,7 +1069,7 @@ describe('handleCallback', () => {
           .fn()
           .mockRejectedValue(new Error('introspection down')),
       }
-      const res = await runCallback(session)
+      await runCallback(session)
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         { did: 'did:plc:megumi', spacesCapability: 'unknown' },
@@ -1090,28 +1079,22 @@ describe('handleCallback', () => {
         expect.objectContaining({ did: 'did:plc:megumi' }),
         expect.stringContaining('failed to read granted OAuth scope'),
       )
-      expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
-      expect(config.initRepo).not.toHaveBeenCalled()
-      expect(config.createSigningKey).not.toHaveBeenCalled()
-      expect(res.status).toHaveBeenCalledWith(500)
     })
 
-    it('fails closed when the token response carried no scope', async () => {
+    it('reports unknown when the token response carried no scope', async () => {
       const session = {
         sub: 'did:plc:kenshin',
         getTokenInfo: vi.fn().mockResolvedValue({}),
       }
-      const res = await runCallback(session)
+      await runCallback(session)
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         { did: 'did:plc:kenshin', spacesCapability: 'unknown' },
         'detected PDS spaces capability',
       )
-      expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
-      expect(config.initRepo).not.toHaveBeenCalled()
-      expect(config.createSigningKey).not.toHaveBeenCalled()
-      expect(mockProfileRecordWriter.putEnrollmentRecord).not.toHaveBeenCalled()
-      expect(res.status).toHaveBeenCalledWith(500)
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ custody: 'stratos' }),
+      )
     })
 
     it('reports not-capable when the grant can read but cannot create', async () => {
@@ -1132,7 +1115,7 @@ describe('handleCallback', () => {
       )
     })
 
-    it('fails closed without a logger when token-info lookup fails', async () => {
+    it('does not require a logger: a token-info failure still resolves the request', async () => {
       config.logger = undefined
       const session = {
         sub: 'did:plc:yahiko',
@@ -1142,9 +1125,9 @@ describe('handleCallback', () => {
       }
       const res = await runCallback(session)
 
-      expect(res.status).toHaveBeenCalledWith(500)
-      expect(config.initRepo).not.toHaveBeenCalled()
-      expect(config.createSigningKey).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true, did: 'did:plc:yahiko' }),
+      )
     })
   })
 

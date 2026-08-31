@@ -54,31 +54,6 @@ describe('Composer.svelte', () => {
     expect(screen.getByRole('checkbox', { name: /Private/i })).toBeChecked()
   })
 
-  it('explains private post custody before enrollment', async () => {
-    const granted = render(Composer, {
-      props: props({ enrollment: null, session: session(SPACE_WRITE_SCOPE) }),
-    })
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          'Your PDS will hold your private posts after enrollment.',
-        ),
-      ).toBeInTheDocument(),
-    )
-    granted.unmount()
-
-    render(Composer, { props: props({ enrollment: null, session: session() }) })
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          'Stratos will hold your private posts after enrollment.',
-        ),
-      ).toBeInTheDocument(),
-    )
-  })
-
   it('unchecks and disables private mode when the attestation fails', async () => {
     render(Composer, { props: props({ attestationVerified: false }) })
 

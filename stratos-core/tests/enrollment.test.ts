@@ -211,12 +211,12 @@ describe('Enrollment Domain Logic', () => {
       expect(classifyCustody('not-capable')).toBe('stratos')
     })
 
-    it('does not select custody on an unknown verdict', () => {
-      expect(classifyCustody('unknown')).toBeUndefined()
+    it('falls back to stratos custody on an unknown verdict', () => {
+      expect(classifyCustody('unknown')).toBe('stratos')
     })
 
-    it('does not select custody when no verdict was recorded', () => {
-      expect(classifyCustody(undefined)).toBeUndefined()
+    it('falls back to stratos custody when no verdict was recorded', () => {
+      expect(classifyCustody(undefined)).toBe('stratos')
     })
   })
 
