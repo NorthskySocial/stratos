@@ -331,7 +331,7 @@
             {#if boundaryFilter && !domains.includes(boundaryFilter)}
               <!--
                 A filter from the URL may name a domain no longer in the
-                allowed list. Show it so the control cannot read "All domains"
+                allowed list. Show it so the control cannot read "All spaces"
                 while a filter is applied.
               -->
               <option value={boundaryFilter}>

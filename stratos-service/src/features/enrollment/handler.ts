@@ -4,6 +4,7 @@ import { ensureValidDid } from '@atproto/syntax'
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
 import {
   boundaryToSpaceUri,
+  type Custody,
   type Enrollment,
   EnrollmentDeniedError,
   resolveRepoHost,
@@ -12,7 +13,7 @@ import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
 import { serviceDIDToRkey, SPACE_TYPE } from '../../oauth'
-import { createRepoHostResolverDeps } from '../space-read/host-resolution.js'
+import { createRepoHostResolverDeps } from '../space-read/index.js'
 import { verifyEnrolled } from './internal/auth.js'
 import type { PdsSyncPageKey } from './internal/pds-sync-store.js'
 
@@ -890,7 +891,7 @@ interface ListedEnrollment {
   enrolledAt: string
   active: boolean
   isService: boolean
-  custody: 'stratos' | 'pds'
+  custody: Custody
   repoHost?: string
   boundaries: string[]
 }
@@ -911,7 +912,7 @@ async function withBoundaries(
     enrolledAt: string
     active: boolean
     isService?: boolean
-    custody?: 'stratos' | 'pds'
+    custody?: Custody
     repoHost?: string
   }>,
 ): Promise<ListedEnrollment[]> {

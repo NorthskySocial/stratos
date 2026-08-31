@@ -263,7 +263,7 @@ export const stratosLexicons: LexiconDoc[] = [
           },
           "custody": {
             "type": "string",
-            "enum": ["stratos", "pds"],
+            "knownValues": ["stratos", "pds"],
             "description": "Only return enrollments with this repo custody."
           }
         }
@@ -287,7 +287,7 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "total": {
               "type": "integer",
-              "description": "Total number of enrollments in the service. Absent when a boundary filter is applied."
+              "description": "Total number of enrollments in the service. Absent when any filter is applied."
             }
           }
         }
@@ -317,7 +317,7 @@ export const stratosLexicons: LexiconDoc[] = [
         },
         "custody": {
           "type": "string",
-          "enum": ["stratos", "pds"],
+          "knownValues": ["stratos", "pds"],
           "description": "Who hosts the member repository."
         },
         "repoHost": {
