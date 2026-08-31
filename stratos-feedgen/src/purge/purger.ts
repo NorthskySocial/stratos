@@ -104,9 +104,21 @@ export class Purger {
    * cursor and any cross-host space-sync cursors), the enrolled-actor
    * snapshot, the boundary-cache entry, and tear down the live syncer.
    */
-  async purgeActor(
+  async purgeActor(did: string): Promise<PurgeCounts> {
+    return this.purgeWholeActor(did, 'unenroll')
+  }
+
+  async purgeReconciledActor(did: string): Promise<PurgeCounts> {
+    return this.purgeWholeActor(did, 'reconcile-unenroll')
+  }
+
+  async purgeSpaceActor(did: string): Promise<PurgeCounts> {
+    return this.purgeWholeActor(did, 'space-unenroll')
+  }
+
+  private async purgeWholeActor(
     did: string,
-    trigger: 'unenroll' | 'reconcile-unenroll' | 'space-unenroll' = 'unenroll',
+    trigger: 'unenroll' | 'reconcile-unenroll' | 'space-unenroll',
   ): Promise<PurgeCounts> {
     // Stop ingestion first so no new records race the delete.
     this.actorPool?.removeActor(did)
@@ -131,11 +143,55 @@ export class Purger {
   async purgeActorBoundary(
     did: string,
     boundary: string,
+  ): Promise<PurgeCounts> {
+    return this.purgeActorBoundaryState(did, boundary, 'boundary-shrink')
+  }
+
+  async purgeReconciledActorBoundary(
+    did: string,
+    boundary: string,
+  ): Promise<PurgeCounts> {
+    return this.purgeActorBoundaryState(
+      did,
+      boundary,
+      'reconcile-boundary-shrink',
+    )
+  }
+
+  async purgeSpaceDeparture(
+    did: string,
+    boundary: string,
+    spaceUri: string,
+  ): Promise<PurgeCounts> {
+    return this.purgeActorBoundaryState(
+      did,
+      boundary,
+      'space-boundary-shrink',
+      spaceUri,
+    )
+  }
+
+  async purgeInvalidSpaceCommit(
+    did: string,
+    boundary: string,
+    spaceUri: string,
+  ): Promise<PurgeCounts> {
+    return this.purgeActorBoundaryState(
+      did,
+      boundary,
+      'space-commit-invalid',
+      spaceUri,
+    )
+  }
+
+  private async purgeActorBoundaryState(
+    did: string,
+    boundary: string,
     trigger:
       | 'boundary-shrink'
       | 'reconcile-boundary-shrink'
       | 'space-boundary-shrink'
-      | 'space-commit-invalid' = 'boundary-shrink',
+      | 'space-commit-invalid',
     spaceUri?: string,
   ): Promise<PurgeCounts> {
     const counts = zeroCounts()

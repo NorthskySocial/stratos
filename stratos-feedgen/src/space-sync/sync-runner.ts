@@ -55,7 +55,7 @@ const CAP_STOP_HALT_THRESHOLD = 3
 export interface SpaceSyncRunnerDeps {
   syncer: Pick<SpaceSyncer, 'syncTarget'>
   verifier: Pick<CommitVerifier, 'verify'>
-  purger: Pick<Purger, 'purgeActorBoundary'>
+  purger: Pick<Purger, 'purgeInvalidSpaceCommit'>
   /** Called once per non-transient verification failure. Defaults to `console.error`. */
   onVerifyFailure?: (event: SpaceCommitVerifyLogEvent) => void
   /** Called once per transient (DID-resolution) verification failure. Defaults to `console.warn`. */
@@ -224,10 +224,9 @@ export class SpaceSyncRunner {
     reason: CommitVerifyFailureReason,
     membershipPass: number,
   ): Promise<SpaceSyncRunFailure> {
-    await this.purger.purgeActorBoundary(
+    await this.purger.purgeInvalidSpaceCommit(
       target.did,
       target.boundary,
-      'space-commit-invalid',
       target.spaceUri,
     )
     this.onVerifyFailure({ target, reason })
