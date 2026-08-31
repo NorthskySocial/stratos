@@ -490,14 +490,27 @@ describe('UpstreamStratosClient', () => {
     })
 
     it.each([
+      ['absent', { did: 'did:plc:asuka' }],
+      ['unrecognized', { did: 'did:plc:asuka', custody: 'other' }],
+      ['malformed', { did: 'did:plc:asuka', custody: 42 }],
+    ])('normalizes %s custody to stratos', async (_name, repo) => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ repos: [repo] }))
+      }
+
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).resolves.toEqual({
+        repos: [{ did: 'did:plc:asuka', custody: 'stratos' }],
+      })
+    })
+
+    it.each([
       ['an array body', []],
       ['a missing repos field', {}],
       ['a non-object repo', { repos: [null] }],
       ['a repo without a DID', { repos: [{ custody: 'pds' }] }],
-      [
-        'an invalid custody value',
-        { repos: [{ did: 'did:plc:asuka', custody: 'other' }] },
-      ],
       [
         'an invalid host source',
         {

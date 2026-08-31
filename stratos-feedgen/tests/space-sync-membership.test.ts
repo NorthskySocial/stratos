@@ -428,6 +428,45 @@ describe('MembershipTracker', () => {
       expect(outcome.removed).toEqual([])
     })
 
+    it('purges a hostless member once a later complete pass confirms departure', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          if (calls === 1) {
+            return {
+              repos: [
+                {
+                  did: SPIKE,
+                  custody: 'pds',
+                  host: 'https://spike.example',
+                },
+              ],
+            }
+          }
+          if (calls === 2) {
+            return { repos: [{ did: SPIKE, custody: 'pds' }] }
+          }
+          return { repos: [] }
+        }),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY])
+      await tracker.runPass([BEBOP_BOUNDARY])
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      expect(purger.purgeActor).toHaveBeenCalledWith(SPIKE, 'space-unenroll')
+      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
+    })
+
     it('does not purge a member whose custody flips away from pds', async () => {
       let calls = 0
       const client = {
@@ -469,6 +508,100 @@ describe('MembershipTracker', () => {
       const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
       expect(outcome.polls).toEqual([])
       expect(outcome.removed).toEqual([])
+    })
+
+    it('purges a custody-changed member once a later complete pass confirms departure', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          if (calls === 1) {
+            return {
+              repos: [
+                {
+                  did: SPIKE,
+                  custody: 'pds',
+                  host: 'https://spike.example',
+                },
+              ],
+            }
+          }
+          if (calls === 2) {
+            return {
+              repos: [
+                {
+                  did: SPIKE,
+                  custody: 'stratos',
+                  host: 'https://spike.example',
+                },
+              ],
+            }
+          }
+          return { repos: [] }
+        }),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY])
+      await tracker.runPass([BEBOP_BOUNDARY])
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY])
+
+      expect(purger.purgeActor).toHaveBeenCalledWith(SPIKE, 'space-unenroll')
+      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      const outcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
+    })
+
+    it('boundary-purges a departed member still present but not pollable elsewhere', async () => {
+      const bebopSpace = spaceUriFor(BEBOP_BOUNDARY)
+      let bebopCalls = 0
+      const client = {
+        listSpaceRepos: vi.fn(
+          async (
+            opts: ListSpaceReposOptions,
+          ): Promise<ListSpaceReposResult> => {
+            if (opts.space !== bebopSpace) {
+              return { repos: [{ did: SPIKE, custody: 'stratos' }] }
+            }
+            bebopCalls += 1
+            return bebopCalls === 1
+              ? {
+                  repos: [
+                    {
+                      did: SPIKE,
+                      custody: 'pds',
+                      host: 'https://spike.example',
+                    },
+                  ],
+                }
+              : { repos: [] }
+          },
+        ),
+      }
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+      const outcomes = await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+
+      expect(purger.purgeActorBoundary).toHaveBeenCalledWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        'space-boundary-shrink',
+        bebopSpace,
+      )
+      expect(purger.purgeActor).not.toHaveBeenCalled()
+      const bebopOutcome = expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY))
+      expect(bebopOutcome.removed).toEqual([{ did: SPIKE, scope: 'boundary' }])
     })
   })
 

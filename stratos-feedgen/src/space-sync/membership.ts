@@ -78,13 +78,19 @@ export interface MembershipTrackerDeps {
 interface BoundaryEnumeration {
   polls: PollTarget[]
   skippedNoHost: string[]
+  spaceUri: string
   /**
    * Every DID seen in a completed listing, regardless of custody or host.
    * The presence signal for departure detection — `polls` alone only covers
    * the subset that is also pollable, and a DID can be absent from `polls`
    * for reasons (hostless, custody flip) that are not departure.
    */
-  seenDids: string[]
+  memberDids: Set<string>
+}
+
+interface BoundaryMembershipState {
+  polls: PollTarget[]
+  memberDids: Set<string>
 }
 
 /**
@@ -112,7 +118,7 @@ export class MembershipTracker {
   private readonly log: (event: MembershipPassLogEvent) => void
   private readonly onError: (boundary: string, err: unknown) => void
   private readonly maxEnumerationPages: number
-  private readonly lastPolls = new Map<string, PollTarget[]>()
+  private readonly lastMembership = new Map<string, BoundaryMembershipState>()
 
   constructor(deps: MembershipTrackerDeps) {
     this.client = deps.client
@@ -152,19 +158,19 @@ export class MembershipTracker {
 
     settled.forEach((result, i) => {
       const boundary = boundaryList[i]
-      const previous = this.lastPolls.get(boundary) ?? []
+      const previous = this.lastMembership.get(boundary)
       if (result.status === 'rejected') {
         outcomes.push({
           boundary,
           ok: false,
-          polls: previous,
+          polls: previous?.polls ?? [],
           error: result.reason,
         })
         return
       }
 
-      const { polls, skippedNoHost, seenDids } = result.value
-      this.lastPolls.set(boundary, polls)
+      const { polls, skippedNoHost, memberDids, spaceUri } = result.value
+      this.lastMembership.set(boundary, { polls, memberDids })
 
       const outcome: BoundaryPassSuccess = {
         boundary,
@@ -176,13 +182,12 @@ export class MembershipTracker {
       // A DID absent from `polls` may simply be hostless this pass, or have
       // flipped custody away from `pds` — neither is a departure. Only a DID
       // missing from the completed listing entirely has left.
-      const stillPresentDids = new Set(seenDids)
-      for (const previousPoll of previous) {
-        if (!stillPresentDids.has(previousPoll.did)) {
+      for (const did of previous?.memberDids ?? []) {
+        if (!memberDids.has(did)) {
           left.push({
             outcome,
-            did: previousPoll.did,
-            spaceUri: previousPoll.spaceUri,
+            did,
+            spaceUri,
           })
         }
       }
@@ -190,16 +195,17 @@ export class MembershipTracker {
     })
 
     // Resolve global presence only after every succeeded boundary above has
-    // published its fresh poll targets, so a did that still holds a
+    // published its fresh membership snapshot, so a did that still holds a
     // different tracked boundary this pass is boundary-shrunk, not purged
     // outright. A boundary that failed this pass keeps its stale entry in
-    // `lastPolls`, which counts as "still present" for this check — we have
-    // no fresh confirmation that they left, so we do not purge on that
-    // boundary's account.
+    // `lastMembership`, which counts as "still present" for this check — we
+    // have no fresh confirmation that they left, so we do not purge on that
+    // boundary's account. Membership is deliberately independent of poll
+    // targets: hostless and non-pds members still prevent an actor-wide purge.
     const purgedActor = new Set<string>()
     for (const { outcome, did, spaceUri } of left) {
-      const stillMember = [...this.lastPolls.values()].some((polls) =>
-        polls.some((p) => p.did === did),
+      const stillMember = [...this.lastMembership.values()].some((state) =>
+        state.memberDids.has(did),
       )
       if (stillMember) {
         await this.purger.purgeActorBoundary(
@@ -240,7 +246,7 @@ export class MembershipTracker {
     const credential = await this.credentialManager.getCredential(boundary)
     const polls: PollTarget[] = []
     const skippedNoHost: string[] = []
-    const seenDids: string[] = []
+    const memberDids = new Set<string>()
     let cursor: string | undefined
     let pages = 0
     do {
@@ -253,7 +259,7 @@ export class MembershipTracker {
         credential,
       )
       for (const row of page.repos) {
-        seenDids.push(row.did)
+        memberDids.add(row.did)
         // Fail closed: only an explicit 'pds' custody polls. Absent,
         // 'stratos', or any unrecognized value stays with the (unchanged)
         // subscription arm — but the did is still present in the space, so
@@ -277,7 +283,12 @@ export class MembershipTracker {
       }
       cursor = page.cursor
     } while (cursor !== undefined)
-    return { polls, skippedNoHost, seenDids }
+    return {
+      polls,
+      skippedNoHost,
+      spaceUri: credential.spaceUri,
+      memberDids,
+    }
   }
 }
 
