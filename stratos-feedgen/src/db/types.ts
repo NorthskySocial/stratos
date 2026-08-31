@@ -39,6 +39,12 @@ export interface EnrolledActorUpsert {
   lastSeenAt: string
 }
 
+export interface SpaceMemberSnapshot {
+  did: string
+  custody: Custody
+  host?: string
+}
+
 export interface ListPostsOpts {
   boundary: string
   limit: number
@@ -91,8 +97,11 @@ export interface FeedgenStore {
   getSpaceCursor: (spaceUri: string, did: string) => Promise<string | null>
 
   // completed space membership snapshots
-  listSpaceMembers: (boundary: string) => Promise<string[]>
-  replaceSpaceMembers: (boundary: string, dids: string[]) => Promise<void>
+  listSpaceMembers: (boundary: string) => Promise<SpaceMemberSnapshot[]>
+  replaceSpaceMembers: (
+    boundary: string,
+    members: SpaceMemberSnapshot[],
+  ) => Promise<void>
 
   // enrolled actor
   upsertEnrolledActor: (input: EnrolledActorUpsert) => Promise<void>
@@ -119,3 +128,4 @@ export function decodeCursor(
   if (!sortAt || !uri) return null
   return { sortAt, uri }
 }
+import type { Custody } from '@northskysocial/stratos-core'

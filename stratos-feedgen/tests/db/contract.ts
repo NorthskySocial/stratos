@@ -393,26 +393,46 @@ export function describeStoreContract(
 
       it('atomically replaces one boundary without changing another', async () => {
         await store.replaceSpaceMembers('bounty-hunters', [
-          VASH_DID,
-          FAYE_DID,
-          FAYE_DID,
+          { did: VASH_DID, custody: 'stratos' },
+          { did: FAYE_DID, custody: 'stratos' },
+          {
+            did: FAYE_DID,
+            custody: 'pds',
+            host: 'https://pds.faye.example',
+          },
         ])
-        await store.replaceSpaceMembers('nerv', [SHINJI_DID])
+        await store.replaceSpaceMembers('nerv', [
+          { did: SHINJI_DID, custody: 'pds' },
+        ])
 
         expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
-          FAYE_DID,
-          VASH_DID,
+          {
+            did: FAYE_DID,
+            custody: 'pds',
+            host: 'https://pds.faye.example',
+          },
+          { did: VASH_DID, custody: 'stratos' },
         ])
 
-        await store.replaceSpaceMembers('bounty-hunters', [SPIKE_DID])
-        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
-          SPIKE_DID,
+        await store.replaceSpaceMembers('bounty-hunters', [
+          { did: SPIKE_DID, custody: 'pds', host: 'https://pds.spike.example' },
         ])
-        expect(await store.listSpaceMembers('nerv')).toEqual([SHINJI_DID])
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
+          {
+            did: SPIKE_DID,
+            custody: 'pds',
+            host: 'https://pds.spike.example',
+          },
+        ])
+        expect(await store.listSpaceMembers('nerv')).toEqual([
+          { did: SHINJI_DID, custody: 'pds' },
+        ])
       })
 
       it('replaces a boundary with an empty snapshot', async () => {
-        await store.replaceSpaceMembers('bounty-hunters', [SPIKE_DID])
+        await store.replaceSpaceMembers('bounty-hunters', [
+          { did: SPIKE_DID, custody: 'pds' },
+        ])
         await store.replaceSpaceMembers('bounty-hunters', [])
         expect(await store.listSpaceMembers('bounty-hunters')).toEqual([])
       })

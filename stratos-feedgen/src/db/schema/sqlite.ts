@@ -61,6 +61,8 @@ export const spaceMemberSnapshot = sqliteTable(
   {
     boundary: text('boundary').notNull(),
     did: text('did').notNull(),
+    custody: text('custody', { enum: ['pds', 'stratos'] }).notNull(),
+    host: text('host'),
   },
   (table) => [primaryKey({ columns: [table.boundary, table.did] })],
 )
