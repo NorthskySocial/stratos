@@ -865,13 +865,21 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "postView": {
       "type": "object",
-      "required": ["uri", "cid", "author", "record", "indexedAt"],
+      "required": ["uri", "cid", "author", "record", "indexedAt", "boundaries"],
       "properties": {
-        "uri": { "type": "string", "format": "at-uri" },
+        "uri": {
+          "type": "string",
+          "description": "AT URI or permissioned space record URI."
+        },
         "cid": { "type": "string", "format": "cid" },
         "author": { "type": "ref", "ref": "#authorView" },
         "record": { "type": "unknown" },
-        "indexedAt": { "type": "string", "format": "datetime" }
+        "indexedAt": { "type": "string", "format": "datetime" },
+        "boundaries": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minLength": 1
+        }
       }
     },
     "authorView": {
