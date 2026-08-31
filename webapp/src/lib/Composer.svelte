@@ -35,15 +35,7 @@
   let error = $state('')
 
   let privatePostingDisabled = $derived(!enrollment || attestationVerified !== true)
-  let pdsScopeUnavailable = $derived(
-    enrollment?.custody === 'pds' &&
-      (spaceWriteScope === 'missing' || spaceWriteScope === 'unavailable'),
-  )
-  let privateModeUnavailable = $derived(privatePostingDisabled || pdsScopeUnavailable)
-  let privateModeDisabled = $derived(
-    privateModeUnavailable ||
-      (enrollment?.custody === 'pds' && spaceWriteScope === 'checking'),
-  )
+  let privateModeUnavailable = $derived(privatePostingDisabled)
   let pdsPrivatePost = $derived(
     isPrivate && enrollment?.custody === 'pds',
   )
@@ -59,6 +51,10 @@
   })
 
   $effect(() => {
+    if (enrollment !== null) {
+      spaceWriteScope = 'checking'
+      return
+    }
     let cancelled = false
     spaceWriteScope = 'checking'
     getSpaceWriteScopeStatus(session).then((status) => {
@@ -133,12 +129,6 @@
     }
     if (isPrivate && !selectedDomain) {
       error = 'Select an enrolled private space before posting.'
-      return
-    }
-    if (isPrivate && enrollment?.custody === 'pds' && spaceWriteScope !== 'granted') {
-      error = spaceWriteScope === 'missing'
-        ? 'Private posting requires a new space permission. Sign out and authorize the app again.'
-        : 'Private posting is unavailable because the space permission could not be verified.'
       return
     }
     if (isPrivate && enrollment?.custody === 'stratos' && !stratosAgent) {
@@ -267,7 +257,7 @@
     } catch (err) {
       console.error('Post failed:', err)
       const message = err instanceof Error ? err.message : 'Failed to create post'
-      if (pdsPrivatePost && message.includes('scope')) {
+      if (pdsPrivatePost && message.toLowerCase().includes('scope')) {
         error = 'Private posting requires a new space permission. Sign out and authorize the app again.'
       } else if (!isPrivate && message.includes('Missing required scope')) {
         error = 'Public posting is not available — this demo is for private data only.'
@@ -327,23 +317,17 @@
                 <span class="posting-note">Images are not available for PDS-hosted private posts yet.</span>
             {/if}
 
-            <label class="private-toggle" class:disabled={privateModeDisabled}>
+            <label class="private-toggle" class:disabled={privateModeUnavailable}>
                 <input
                         type="checkbox"
                         bind:checked={isPrivate}
-                        disabled={privateModeDisabled || posting}
+                        disabled={privateModeUnavailable || posting}
                 />
                 <span>Private</span>
                 {#if !enrollment}
                     <span class="tooltip">Enroll in Stratos to post privately</span>
                 {:else if privatePostingDisabled}
                     <span class="tooltip">Private posting requires a valid enrollment attestation</span>
-                {:else if enrollment?.custody === 'pds' && spaceWriteScope === 'checking'}
-                    <span class="tooltip">Checking the required space permission</span>
-                {:else if enrollment?.custody === 'pds' && spaceWriteScope === 'missing'}
-                    <span class="tooltip">Private posting requires a new space permission</span>
-                {:else if enrollment?.custody === 'pds' && spaceWriteScope === 'unavailable'}
-                    <span class="tooltip">The space permission could not be verified</span>
                 {/if}
             </label>
 
