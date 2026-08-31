@@ -20,6 +20,7 @@ import {
   ListPostsOpts,
   ListPostsResult,
   PostUpsert,
+  SpaceMemberSnapshot,
 } from './types.js'
 
 export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
@@ -102,6 +103,8 @@ export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
     CREATE TABLE IF NOT EXISTS space_member_snapshot (
       boundary TEXT NOT NULL,
       did TEXT NOT NULL,
+      custody TEXT NOT NULL,
+      host TEXT,
       PRIMARY KEY (boundary, did)
     )
   `)
@@ -377,26 +380,41 @@ export class SqliteFeedgenStore implements FeedgenStore {
     return rows.length === 0 ? null : rows[0].cursor
   }
 
-  async listSpaceMembers(boundary: string): Promise<string[]> {
+  async listSpaceMembers(boundary: string): Promise<SpaceMemberSnapshot[]> {
     const rows = await this.db
-      .select({ did: spaceMemberSnapshotTbl.did })
+      .select({
+        did: spaceMemberSnapshotTbl.did,
+        custody: spaceMemberSnapshotTbl.custody,
+        host: spaceMemberSnapshotTbl.host,
+      })
       .from(spaceMemberSnapshotTbl)
       .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
       .orderBy(asc(spaceMemberSnapshotTbl.did))
-    return rows.map(({ did }) => did)
+    return rows.map(({ did, custody, host }) => ({
+      did,
+      custody,
+      ...(host === null ? {} : { host }),
+    }))
   }
 
-  async replaceSpaceMembers(boundary: string, dids: string[]): Promise<void> {
-    const uniqueDids = [...new Set(dids)]
+  async replaceSpaceMembers(
+    boundary: string,
+    members: SpaceMemberSnapshot[],
+  ): Promise<void> {
+    const uniqueMembers = [
+      ...new Map(members.map((member) => [member.did, member])).values(),
+    ]
     await this.db.transaction(async (tx) => {
       await tx
         .delete(spaceMemberSnapshotTbl)
         .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
-      if (uniqueDids.length > 0) {
+      if (uniqueMembers.length > 0) {
         await tx.insert(spaceMemberSnapshotTbl).values(
-          uniqueDids.map((did) => ({
+          uniqueMembers.map((member) => ({
             boundary,
-            did,
+            did: member.did,
+            custody: member.custody,
+            host: member.host ?? null,
           })),
         )
       }
