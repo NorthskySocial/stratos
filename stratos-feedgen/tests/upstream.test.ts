@@ -342,6 +342,55 @@ describe('UpstreamStratosClient', () => {
         lxm: 'zone.stratos.space.getSpaceCredential',
       })
     })
+
+    it('aborts an unresponsive credential request at the configured timeout', async () => {
+      let receivedSignal: AbortSignal | null | undefined
+      const fetchImpl = async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> =>
+        new Promise<Response>((_resolve, reject) => {
+          receivedSignal = init?.signal
+          const signal = init?.signal
+          if (!signal) return
+          const rejectForAbort = () => reject(signal.reason)
+          if (signal.aborted) {
+            rejectForAbort()
+          } else {
+            signal.addEventListener('abort', rejectForAbort, { once: true })
+          }
+        })
+      const timeoutClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl,
+        requestTimeoutMs: 10,
+      })
+
+      const request = timeoutClient.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async () => 'proof',
+      })
+      let guardTimer!: ReturnType<typeof setTimeout>
+      const hangGuard = new Promise<never>((_resolve, reject) => {
+        guardTimer = setTimeout(
+          () => reject(new Error('getSpaceCredential did not time out')),
+          500,
+        )
+      })
+      try {
+        await expect(Promise.race([request, hangGuard])).rejects.toMatchObject({
+          name: 'TimeoutError',
+        })
+      } finally {
+        clearTimeout(guardTimer)
+      }
+      expect(receivedSignal).toBeInstanceOf(AbortSignal)
+      expect(receivedSignal?.aborted).toBe(true)
+    })
   })
 
   describe('listSpaceRepos', () => {
