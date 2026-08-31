@@ -361,13 +361,6 @@ async function handleNewEnrollment(deps: {
   } = deps
 
   const custody = classifyCustody(spacesCapability)
-  if (!custody) {
-    logger?.warn(
-      { did, spacesCapability },
-      'cannot enroll when PDS spaces capability is unknown',
-    )
-    throw new Error('Could not determine PDS spaces capability')
-  }
   const { userSigningKeyDid, repoHost } =
     custody === 'pds'
       ? await provisionPdsSigningKey(did, idResolver)

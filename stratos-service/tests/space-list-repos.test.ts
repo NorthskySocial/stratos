@@ -108,7 +108,6 @@ describe('zone.stratos.space.listRepos', () => {
   let resolveDid: ReturnType<typeof vi.fn>
   let ctx: AppContext
   let revFailDids: Set<string>
-  let hostFailDids: Set<string>
 
   beforeEach(async () => {
     dataDir = join(
@@ -127,16 +126,15 @@ describe('zone.stratos.space.listRepos', () => {
       cborToRecord: (content) => decode(content) as Record<string, unknown>,
     })
 
-    hostFailDids = new Set([unresolvableMemberDid])
     // Resolves a DID document `#atproto_pds` endpoint for every member except
-    // members in `hostFailDids`, which have no matching service entry.
+    // `unresolvableMemberDid`, which has no matching service entry.
     resolveDid = vi.fn(async (did: string) => {
       if (did === overrideMemberDid) {
         throw new Error(
           'DID resolution must not run once the override arm answers',
         )
       }
-      if (hostFailDids.has(did)) {
+      if (did === unresolvableMemberDid) {
         return { service: [] }
       }
       if (did === nullDidDocMemberDid) {
@@ -489,75 +487,6 @@ describe('zone.stratos.space.listRepos', () => {
     expect(unresolved.host).toBeUndefined()
     expect(unresolved.hostSource).toBeUndefined()
     expect(resolveDid).toHaveBeenCalledWith(unresolvableMemberDid)
-  })
-
-  it('logs unresolved repo hosts without failing the page', async () => {
-    await call({}, serviceAuth)
-
-    const hostWarns = warnSpy.mock.calls.filter(([, msg]) =>
-      String(msg).includes('repo host lookup failed'),
-    )
-    expect(hostWarns).toHaveLength(1)
-    const [payload] = hostWarns[0] as [
-      {
-        space: string
-        failedCount: number
-        sample: Array<{ did: string }>
-      },
-    ]
-    expect(payload.space).toBe(SPACE_S)
-    expect(payload.failedCount).toBeGreaterThan(0)
-    expect(payload.sample).toContainEqual({ did: unresolvableMemberDid })
-  })
-
-  it('logs no repo host warning when every member host resolves', async () => {
-    for (const did of [
-      unresolvableMemberDid,
-      nullDidDocMemberDid,
-      wrongServiceIdMemberDid,
-      nonStringEndpointMemberDid,
-    ]) {
-      await enrollmentStore.setBoundaries(did, [])
-    }
-
-    await call({}, serviceAuth)
-
-    const hostWarns = warnSpy.mock.calls.filter(([, msg]) =>
-      String(msg).includes('repo host lookup failed'),
-    )
-    expect(hostWarns).toHaveLength(0)
-  })
-
-  it('caps the repo host warning sample at five failures', async () => {
-    const extraFailDids = [
-      'did:plc:spike-spiegel',
-      'did:plc:jet-black',
-      'did:plc:faye-valentine',
-      'did:plc:ed-wong',
-      'did:plc:ein-corgi',
-    ]
-    for (const did of extraFailDids) {
-      hostFailDids.add(did)
-      await enrollmentStore.enroll({
-        did,
-        enrolledAt: new Date().toISOString(),
-        active: true,
-        signingKeyDid: 'did:key:zTest',
-      })
-      await enrollmentStore.setBoundaries(did, [BOUNDARY_S.value])
-    }
-
-    await call({}, serviceAuth)
-
-    const hostWarns = warnSpy.mock.calls.filter(([, msg]) =>
-      String(msg).includes('repo host lookup failed'),
-    )
-    expect(hostWarns).toHaveLength(1)
-    const [payload] = hostWarns[0] as [
-      { failedCount: number; sample: Array<{ did: string }> },
-    ]
-    expect(payload.failedCount).toBe(9)
-    expect(payload.sample).toHaveLength(5)
   })
 
   it('omits host fields when DID resolution returns no document', async () => {

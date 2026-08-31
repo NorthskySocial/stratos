@@ -18,7 +18,6 @@ RUN pnpm install --ignore-scripts
 
 # Copy lexicons (required by stratos-core lexicon imports)
 COPY lexicons/ ./lexicons/
-COPY lexicons-spaces/ ./lexicons-spaces/
 
 # Copy source code (after install, so cache invalidates only on source changes)
 COPY stratos-core/ ./stratos-core/
