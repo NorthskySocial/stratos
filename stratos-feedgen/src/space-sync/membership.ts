@@ -210,11 +210,17 @@ export class MembershipTracker {
     // boundary's account. Membership is deliberately independent of poll
     // targets: hostless and non-pds members still prevent an actor-wide purge.
     const purgedActor = new Set<string>()
+    const everyBoundaryKnown = boundaryList.every((boundary) =>
+      nextMembership.has(boundary),
+    )
     for (const { outcome, did, spaceUri } of left) {
       const stillMember = [...nextMembership.values()].some((state) =>
         state.memberDids.has(did),
       )
-      if (stillMember) {
+      // A boundary that has never completed has no snapshot to prove absence.
+      // Remove the confirmed departed boundary now, but reserve an actor-wide
+      // purge until every configured boundary has a known membership state.
+      if (stillMember || !everyBoundaryKnown) {
         await this.purger.purgeSpaceDeparture(did, outcome.boundary, spaceUri)
         outcome.removed.push({ did, scope: 'boundary' })
         continue
