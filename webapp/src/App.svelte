@@ -197,34 +197,58 @@
    * and optionally Stratos posts if the Stratos agent is available.
    */
   async function refreshFeed() {
-    if (!session) {
+    const refreshSession = session
+    const epoch = discoveryEpoch
+    if (!refreshSession) {
+      return
+    }
+    const isCurrent = () =>
+      session === refreshSession && discoveryEpoch === epoch
+
+    if (!isCurrent()) {
       return
     }
     loading = true
     loadingStatus = 'Loading feed...'
     try {
       const publicPosts = appviewAgent
-        ? await fetchPublicPosts(appviewAgent, session.sub)
-        : await fetchRepoPublicPosts(configureAgent(new Agent(session)), session.sub)
+        ? await fetchPublicPosts(appviewAgent, refreshSession.sub)
+        : await fetchRepoPublicPosts(
+            configureAgent(new Agent(refreshSession)),
+            refreshSession.sub,
+          )
+
+      if (!isCurrent()) {
+        return
+      }
 
       let stratosPosts: FeedPost[] = []
       if (FEEDGEN_DID) {
-        const res = await fetchFeedgenPosts(session, FEEDGEN_DID, FEEDGEN_FEED)
+        const res = await fetchFeedgenPosts(
+          refreshSession,
+          FEEDGEN_DID,
+          FEEDGEN_FEED,
+        )
         stratosPosts = res.posts
       } else if (APPVIEW_URL) {
         const res = await fetchAppviewStratosPosts(
-          session,
+          refreshSession,
           APPVIEW_URL,
         )
         stratosPosts = res.posts
       } else if (stratosAgent) {
-        stratosPosts = await fetchStratosPosts(stratosAgent, session.sub)
+        stratosPosts = await fetchStratosPosts(stratosAgent, refreshSession.sub)
       }
 
+      if (!isCurrent()) {
+        return
+      }
       const unified = buildUnifiedFeed(publicPosts, stratosPosts)
       allPosts = resolveHandles(unified, did, handle)
     } finally {
-      loading = false
+      if (isCurrent()) {
+        loading = false
+      }
     }
   }
 
@@ -263,36 +287,31 @@
   /**
    * Handles signing out the user.
    */
+  function clearSession() {
+    discoveryEpoch += 1
+    session = null
+    enrollment = null
+    stratosStatus = null
+    attestationVerified = null
+    appviewAgent = null
+    stratosAgent = null
+    allPosts = []
+    handle = ''
+    did = ''
+    activeFeed = null
+    loading = false
+  }
+
   async function handleSignOut() {
     if (confirm('Are you sure you want to log out?')) {
+      clearSession()
       await signOut()
-      discoveryEpoch += 1
-      session = null
-      enrollment = null
-      stratosStatus = null
-      attestationVerified = null
-      appviewAgent = null
-      stratosAgent = null
-      allPosts = []
-      handle = ''
-      did = ''
-      activeFeed = null
     }
   }
 
   onMount(async () => {
     onSessionDeleted(() => {
-      discoveryEpoch += 1
-      session = null
-      enrollment = null
-      stratosStatus = null
-      attestationVerified = null
-      appviewAgent = null
-      stratosAgent = null
-      allPosts = []
-      handle = ''
-      did = ''
-      activeFeed = null
+      clearSession()
     })
 
     if (import.meta.env.DEV && initialStartupDone && session && (window as unknown as CustomWindow).__MOCK_SESSION__) {

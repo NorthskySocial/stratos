@@ -8,6 +8,7 @@ interface FeedViewPost {
     record?: Record<string, unknown>
     indexedAt?: string
     author?: { did: string; handle: string }
+    boundaries?: unknown
   }
   reason?: unknown
 }
@@ -193,6 +194,12 @@ function mapFeedViewPosts(
     const val = item.post.record ?? {}
     const did = item.post.author?.did ?? authorFromUri(item.post.uri)
     const handle = item.post.author?.handle ?? ''
+    const responseBoundaries = item.post.boundaries
+    const boundaries = Array.isArray(responseBoundaries)
+      ? responseBoundaries.filter(
+          (boundary): boundary is string => typeof boundary === 'string',
+        )
+      : boundariesFromRecord(val)
 
     return [
       {
@@ -205,7 +212,7 @@ function mapFeedViewPosts(
         embed: val.embed as FeedPost['embed'],
         author: did,
         authorHandle: handle !== did ? handle : '',
-        boundaries: boundariesFromRecord(val),
+        boundaries,
       },
     ]
   })
