@@ -1,4 +1,4 @@
-import { verifySignature } from '@atproto/crypto'
+import { parseDidKey, verifySignature } from '@atproto/crypto'
 import type { DidResolver } from '@atproto/identity'
 import { expand as hkdfExpand } from '@noble/hashes/hkdf'
 import { hmac } from '@noble/hashes/hmac'
@@ -101,7 +101,7 @@ export class CommitVerifier {
       return {
         ok: false,
         reason: 'key-unresolvable',
-        transient: true,
+        transient: isTransientResolutionError(error),
         error,
       }
     }
@@ -131,7 +131,18 @@ export class CommitVerifier {
       return { ok: false, reason: 'mac-mismatch', transient: false }
     }
 
-    const validSig = await verifySignature(didKey, ctxBytes, decoded.sig)
+    try {
+      parseDidKey(didKey)
+    } catch {
+      return { ok: false, reason: 'key-unresolvable', transient: false }
+    }
+
+    let validSig: boolean
+    try {
+      validSig = await verifySignature(didKey, ctxBytes, decoded.sig)
+    } catch {
+      return { ok: false, reason: 'signature-invalid', transient: false }
+    }
     if (!validSig) {
       return { ok: false, reason: 'signature-invalid', transient: false }
     }
@@ -265,4 +276,84 @@ function decodeLexBytes(value: unknown): Uint8Array | undefined {
   // the string check above has run.
   if (typeof record.$bytes !== 'string') return undefined
   return Buffer.from(record.$bytes, 'base64')
+}
+
+const TRANSIENT_NETWORK_CODES = new Set([
+  'EAI_AGAIN',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+])
+
+/**
+ * Resolution failures are permanent unless they carry a known retryable
+ * shape. The pinned resolver collapses did:web non-2xx responses to
+ * `DidNotFoundError`, so this seam deliberately fails those closed too.
+ */
+function isTransientResolutionError(error: unknown): boolean {
+  const pending = [error]
+  const seen = new Set<unknown>()
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (typeof current !== 'object' || current === null || seen.has(current)) {
+      continue
+    }
+    seen.add(current)
+    const record = current as Record<string, unknown>
+    if (isRetryableResolutionError(record)) return true
+    if (record.cause !== undefined) pending.push(record.cause)
+    if (Array.isArray(record.errors)) {
+      const nestedErrors: readonly unknown[] = record.errors
+      for (const nestedError of nestedErrors) pending.push(nestedError)
+    }
+  }
+  return false
+}
+
+function isRetryableResolutionError(record: Record<string, unknown>): boolean {
+  return (
+    hasTransientErrorName(record.name) ||
+    hasRetryableHttpStatus(record.status) ||
+    hasTransientNetworkCode(record.code) ||
+    isFetchFailure(record)
+  )
+}
+
+function hasTransientErrorName(name: unknown): boolean {
+  return (
+    name === 'AbortError' || name === 'TimeoutError' || name === 'NetworkError'
+  )
+}
+
+function hasRetryableHttpStatus(status: unknown): boolean {
+  if (typeof status !== 'number') return false
+  return status === 408 || status === 429 || (status >= 500 && status <= 599)
+}
+
+function hasTransientNetworkCode(code: unknown): boolean {
+  return typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code)
+}
+
+function isFetchFailure(record: Record<string, unknown>): boolean {
+  if (record.name !== 'TypeError') return false
+  if (typeof record.message !== 'string') return false
+  return isFetchFailureMessage(record.message)
+}
+
+function isFetchFailureMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase()
+  return (
+    normalized === 'fetch failed' ||
+    normalized === 'failed to fetch' ||
+    normalized === 'networkerror when attempting to fetch resource.'
+  )
 }
