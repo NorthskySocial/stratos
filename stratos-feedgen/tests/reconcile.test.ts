@@ -278,7 +278,7 @@ describe('reconcile on reconnect', () => {
       actorPool: { removeActor: (did) => removedFromPool.push(did) },
       audit: () => {},
     })
-    const purgeActor = vi.spyOn(purger, 'purgeActor')
+    const purgeActor = vi.spyOn(purger, 'purgeReconciledActor')
 
     const trigger = createReconcileScheduler(async () => {
       await reconcileEnrollments(
@@ -291,7 +291,7 @@ describe('reconcile on reconnect', () => {
     await vi.waitFor(async () =>
       expect(await store.getEnrolledActor(SPIKE)).toBeNull(),
     )
-    expect(purgeActor).toHaveBeenCalledWith(SPIKE, 'reconcile-unenroll')
+    expect(purgeActor).toHaveBeenCalledWith(SPIKE)
     expect(removedFromPool).toEqual([SPIKE])
     expect(
       await store.getPost(`at://${SPIKE}/zone.stratos.feed.post/1`),
@@ -321,7 +321,7 @@ describe('reconcile on reconnect', () => {
       }),
     }
     const purger = new Purger({ store, audit: () => {} })
-    const purgeActor = vi.spyOn(purger, 'purgeActor')
+    const purgeActor = vi.spyOn(purger, 'purgeReconciledActor')
 
     const summary = await reconcileEnrollments(
       { store, purger, client, log: () => {} },
@@ -356,7 +356,7 @@ describe('reconcile on reconnect', () => {
         }),
       }
       const purger = new Purger({ store, audit: () => {} })
-      const purgeActor = vi.spyOn(purger, 'purgeActor')
+      const purgeActor = vi.spyOn(purger, 'purgeReconciledActor')
 
       const summary = await reconcileEnrollments(
         { store, purger, client, log: () => {} },
@@ -388,7 +388,7 @@ describe('reconcile on reconnect', () => {
       }),
     }
     const purger = new Purger({ store, audit: () => {} })
-    const purgeActorBoundary = vi.spyOn(purger, 'purgeActorBoundary')
+    const purgeActorBoundary = vi.spyOn(purger, 'purgeReconciledActorBoundary')
 
     const summary = await reconcileEnrollments(
       { store, purger, client, log: () => {} },
@@ -418,7 +418,7 @@ describe('reconcile on reconnect', () => {
       }),
     }
     const purger = new Purger({ store, audit: () => {} })
-    const purgeActor = vi.spyOn(purger, 'purgeActor')
+    const purgeActor = vi.spyOn(purger, 'purgeReconciledActor')
 
     const summary = await reconcileEnrollments(
       { store, purger, client, log: () => {} },
@@ -449,7 +449,7 @@ describe('reconcile on reconnect', () => {
       })),
     }
     const purger = new Purger({ store, audit: () => {} })
-    const purgeActor = vi.spyOn(purger, 'purgeActor')
+    const purgeActor = vi.spyOn(purger, 'purgeReconciledActor')
 
     const runs: unknown[] = []
     const trigger = createReconcileScheduler(async () => {

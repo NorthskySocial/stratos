@@ -80,7 +80,7 @@ export interface RepoOpEntry {
 
 export interface ListRepoOpsResult {
   ops: RepoOpEntry[]
-  /** Opaque signed-commit envelope. Decoded and verified in a later work package. */
+  /** Opaque signed-commit envelope verified on terminal pages by the sync runner. */
   commit?: Record<string, unknown>
   cursor?: string
 }
@@ -206,13 +206,9 @@ export class SpaceHostClient {
       }
       res = await this.fetchImpl(url, requestInit as RequestInit)
 
-      const text = await readBodyWithCap(
-        res,
-        res.ok ? capBytes : ERROR_BODY_CAP_BYTES,
-        url.toString(),
-        !res.ok,
-        signal,
-      )
+      const text = res.ok
+        ? await readSuccessfulBody(res, capBytes, url.toString(), signal)
+        : await readTruncatedErrorBody(res, url.toString(), signal)
       if (!res.ok) {
         throw buildRequestError(res.status, text, url.toString())
       }
@@ -331,15 +327,40 @@ function toError(reason: unknown): Error {
  * trusting `content-length` — a foreign host can send any header it likes.
  * Cancels the stream as soon as the cap is crossed.
  */
-async function readBodyWithCap(
+async function readSuccessfulBody(
   res: Response,
   capBytes: number,
   url: string,
-  truncate = false,
   signal?: AbortSignal,
 ): Promise<string> {
+  const result = await readBodyPrefix(res, capBytes, url, signal)
+  if (!result.complete) {
+    throw new SpaceHostResponseTooLargeError(url, capBytes)
+  }
+  return result.text
+}
+
+async function readTruncatedErrorBody(
+  res: Response,
+  url: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return (await readBodyPrefix(res, ERROR_BODY_CAP_BYTES, url, signal)).text
+}
+
+interface BodyPrefix {
+  text: string
+  complete: boolean
+}
+
+async function readBodyPrefix(
+  res: Response,
+  capBytes: number,
+  url: string,
+  signal?: AbortSignal,
+): Promise<BodyPrefix> {
   const body = res.body
-  if (!body) return ''
+  if (!body) return { text: '', complete: true }
 
   const decoder = new TextDecoder()
   const reader = body.getReader()
@@ -351,23 +372,21 @@ async function readBodyWithCap(
       if (done) break
       const remaining = capBytes - read
       if (value.byteLength > remaining) {
-        if (truncate && remaining > 0) {
+        if (remaining > 0) {
           text += decoder.decode(value.subarray(0, remaining), { stream: true })
         }
-        if (truncate) break
-        throw new SpaceHostResponseTooLargeError(url, capBytes)
+        return { text: text + decoder.decode(), complete: false }
       }
       read += value.byteLength
       text += decoder.decode(value, { stream: true })
     }
   } catch (err) {
-    if (err instanceof SpaceHostResponseTooLargeError) throw err
     if (signal?.aborted) throw err
     throw classifyFetchError(err, url)
   } finally {
     await reader.cancel().catch(() => {})
   }
-  return text + decoder.decode()
+  return { text: text + decoder.decode(), complete: true }
 }
 
 /**

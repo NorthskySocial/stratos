@@ -79,12 +79,11 @@ function fakeVerifier() {
 
 function fakePurger() {
   return {
-    purgeActorBoundary: vi.fn(
+    purgeInvalidSpaceCommit: vi.fn(
       async (
         _did: string,
         _boundary: string,
-        _trigger?: string,
-        _spaceUri?: string,
+        _spaceUri: string,
       ): Promise<PurgeCounts> => zeroCounts(),
     ),
   }
@@ -151,7 +150,7 @@ describe('SpaceSyncRunner', () => {
       expect(verifier.verify).toHaveBeenCalledWith(SPACE_URI, SPIKE_DID, {
         sig: 'abc',
       })
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
     })
   })
 
@@ -169,7 +168,7 @@ describe('SpaceSyncRunner', () => {
 
         expect(result).toBe(success)
         expect(verifier.verify).not.toHaveBeenCalled()
-        expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+        expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
       },
     )
   })
@@ -191,7 +190,7 @@ describe('SpaceSyncRunner', () => {
 
       expect(result).toBe(failure)
       expect(verifier.verify).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
     })
   })
 
@@ -216,10 +215,9 @@ describe('SpaceSyncRunner', () => {
 
       const result = await runner.runTarget(makeTarget())
 
-      expect(purger.purgeActorBoundary).toHaveBeenCalledWith(
+      expect(purger.purgeInvalidSpaceCommit).toHaveBeenCalledWith(
         SPIKE_DID,
         BEBOP_BOUNDARY,
-        'space-commit-invalid',
         SPACE_URI,
       )
       expect(onVerifyFailure).toHaveBeenCalledWith({
@@ -253,7 +251,7 @@ describe('SpaceSyncRunner', () => {
         SPIKE_DID,
         undefined,
       )
-      expect(purger.purgeActorBoundary).toHaveBeenCalledTimes(1)
+      expect(purger.purgeInvalidSpaceCommit).toHaveBeenCalledTimes(1)
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.reason).toBe('commit-verify-failed')
     })
@@ -283,7 +281,7 @@ describe('SpaceSyncRunner', () => {
       const result = await runner.runTarget(makeTarget())
 
       expect(result).toBe(success)
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
       expect(onVerifyTransient).toHaveBeenCalledWith(
         { target: makeTarget(), reason: 'key-unresolvable' },
         resolveError,
@@ -416,7 +414,7 @@ describe('SpaceSyncRunner', () => {
       })
       const purger = fakePurger()
       const purgeError = new Error('database unreachable')
-      purger.purgeActorBoundary.mockRejectedValue(purgeError)
+      purger.purgeInvalidSpaceCommit.mockRejectedValue(purgeError)
       const onError = vi.fn()
       const { runner } = buildRunner({ syncer, verifier, purger, onError })
 
@@ -527,7 +525,7 @@ describe('SpaceSyncRunner', () => {
       })
       const purger = fakePurger()
       const purgeError = new Error('database unreachable')
-      purger.purgeActorBoundary.mockRejectedValue(purgeError)
+      purger.purgeInvalidSpaceCommit.mockRejectedValue(purgeError)
       const { runner } = buildRunner({ syncer, verifier, purger })
 
       await runner.runTarget(makeTarget())
@@ -692,7 +690,7 @@ describe('SpaceSyncRunner', () => {
         reason: 'halted',
       })
       expect(syncer.syncTarget).not.toHaveBeenCalled()
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
     })
 
     it('resets the cap-stop streak after a non-cap stop', async () => {
@@ -762,7 +760,7 @@ describe('SpaceSyncRunner', () => {
         error: verifyError,
       })
       expect(onError).toHaveBeenCalledWith(makeTarget(), verifyError)
-      expect(purger.purgeActorBoundary).not.toHaveBeenCalled()
+      expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
     })
   })
 })

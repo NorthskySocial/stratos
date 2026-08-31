@@ -147,7 +147,7 @@ async function reconcileActor(
 
   if (!fresh.enrolled) {
     if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
-    const counts = await deps.purger.purgeActor(actor.did, 'reconcile-unenroll')
+    const counts = await deps.purger.purgeReconciledActor(actor.did)
     summary.unenrolled++
     summary.postsPurged += counts.posts
     return
@@ -163,10 +163,9 @@ async function reconcileActor(
     if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
     summary.shrunk++
     for (const boundary of lost) {
-      const counts = await deps.purger.purgeActorBoundary(
+      const counts = await deps.purger.purgeReconciledActorBoundary(
         actor.did,
         boundary,
-        'reconcile-boundary-shrink',
       )
       summary.postsPurged += counts.posts
     }
