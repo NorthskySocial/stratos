@@ -355,6 +355,67 @@ export function describeStoreContract(
           'vash-cursor',
         )
       })
+
+      it('deleteSpaceCursorsBySpace removes every member cursor in one space', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          VASH_DID,
+          'vash-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'other-space-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+
+        expect(await store.deleteSpaceCursorsBySpace(SPACE_URI)).toBe(2)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, VASH_DID)).toBeNull()
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBe(
+          'other-space-cursor',
+        )
+        expect(await store.deleteSpaceCursorsBySpace(SPACE_URI)).toBe(0)
+      })
+    })
+
+    describe('space member snapshot', () => {
+      it('returns an empty snapshot for an unknown boundary', async () => {
+        expect(await store.listSpaceMembers('unknown')).toEqual([])
+      })
+
+      it('atomically replaces one boundary without changing another', async () => {
+        await store.replaceSpaceMembers('bounty-hunters', [
+          VASH_DID,
+          FAYE_DID,
+          FAYE_DID,
+        ])
+        await store.replaceSpaceMembers('nerv', [SHINJI_DID])
+
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
+          FAYE_DID,
+          VASH_DID,
+        ])
+
+        await store.replaceSpaceMembers('bounty-hunters', [SPIKE_DID])
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
+          SPIKE_DID,
+        ])
+        expect(await store.listSpaceMembers('nerv')).toEqual([SHINJI_DID])
+      })
+
+      it('replaces a boundary with an empty snapshot', async () => {
+        await store.replaceSpaceMembers('bounty-hunters', [SPIKE_DID])
+        await store.replaceSpaceMembers('bounty-hunters', [])
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([])
+      })
     })
 
     describe('enrolled actor', () => {
@@ -497,6 +558,25 @@ export function describeStoreContract(
         )
         expect(await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')).toBe(0)
         expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
+      })
+
+      it('deletePostsByDidBoundary remains set-based beyond legacy SQLite bind limits', async () => {
+        const postCount = 1_100
+        for (let index = 0; index < postCount; index += 1) {
+          await store.upsertPost(
+            makePost({
+              uri: `at://${SPIKE_DID}/p/scale-${index}`,
+              boundaries: ['gone'],
+            }),
+          )
+        }
+
+        expect(await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')).toBe(
+          postCount,
+        )
+        expect(
+          await store.listPostsByBoundary({ boundary: 'gone', limit: 1 }),
+        ).toEqual({ posts: [] })
       })
 
       it('deletePostsByBoundary removes every actor post in a boundary service-wide', async () => {

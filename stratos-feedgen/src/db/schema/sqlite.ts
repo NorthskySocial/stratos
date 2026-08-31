@@ -55,3 +55,12 @@ export const spaceSyncCursor = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
 )
+
+export const spaceMemberSnapshot = sqliteTable(
+  'space_member_snapshot',
+  {
+    boundary: text('boundary').notNull(),
+    did: text('did').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.boundary, table.did] })],
+)

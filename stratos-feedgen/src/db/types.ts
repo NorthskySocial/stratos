@@ -74,6 +74,8 @@ export interface FeedgenStore {
   deleteSpaceCursor: (spaceUri: string, did: string) => Promise<number>
   /** Delete every space cursor held for `did`, across all spaces. Returns rows removed. */
   deleteSpaceCursors: (did: string) => Promise<number>
+  /** Delete every member cursor held for `spaceUri`. Returns rows removed. */
+  deleteSpaceCursorsBySpace: (spaceUri: string) => Promise<number>
 
   // sync cursor
   upsertCursor: (did: string, seq: number, updatedAt: string) => Promise<void>
@@ -87,6 +89,10 @@ export interface FeedgenStore {
     updatedAt: string,
   ) => Promise<void>
   getSpaceCursor: (spaceUri: string, did: string) => Promise<string | null>
+
+  // completed space membership snapshots
+  listSpaceMembers: (boundary: string) => Promise<string[]>
+  replaceSpaceMembers: (boundary: string, dids: string[]) => Promise<void>
 
   // enrolled actor
   upsertEnrolledActor: (input: EnrolledActorUpsert) => Promise<void>
