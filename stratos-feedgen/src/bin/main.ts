@@ -244,6 +244,7 @@ async function main(): Promise<void> {
       boundaries: configuredBoundaries,
       intervalMs: cfg.spaceSyncIntervalMs,
       memberBudgetMs: cfg.spaceSyncMemberBudgetMs,
+      memberConcurrency: cfg.spaceSyncMemberConcurrency,
       log: (event) => logger.info({ ...event }, 'space sync pass completed'),
       onTickSkipped: () =>
         logger.warn({}, 'space sync tick skipped because a pass is active'),

@@ -1,5 +1,9 @@
 import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
-import { RepoWrite, StratosValidator } from '@northskysocial/stratos-core'
+import {
+  PdsCustodyWriteForbiddenError,
+  RepoWrite,
+  StratosValidator,
+} from '@northskysocial/stratos-core'
 import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context.js'
 import { createRepoManager } from './util.js'
@@ -58,10 +62,7 @@ export async function deleteRecord(
   // their own key; Stratos must not also accept deletes for it. See create.ts.
   const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
   if (enrollment?.custody === 'pds') {
-    throw new InvalidRequestError(
-      'This actor writes records to their own PDS',
-      'PdsCustodyWriteForbidden',
-    )
+    throw new PdsCustodyWriteForbiddenError()
   }
 
   const uriStr = `at://${callerDid}/${collection}/${rkey}`

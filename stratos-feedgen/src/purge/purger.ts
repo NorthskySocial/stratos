@@ -127,11 +127,6 @@ export class Purger {
    * (the actor is still enrolled) — the caller updates it separately. The
    * boundary cache is invalidated so viewer resolution reflects the change.
    *
-   * `spaceUri` is only consulted for the `space-commit-invalid` trigger: a
-   * failed commit verification also drops the space-sync cursor for that
-   * (space, actor) pair, so a retry re-fetches from scratch rather than
-   * resuming past the point verification stopped trusting. Other triggers
-   * have no single space in scope and leave cursor state untouched.
    */
   async purgeActorBoundary(
     did: string,
@@ -145,7 +140,7 @@ export class Purger {
   ): Promise<PurgeCounts> {
     const counts = zeroCounts()
     counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)
-    if (trigger === 'space-commit-invalid' && spaceUri) {
+    if (spaceUri) {
       counts.spaceCursors = await this.store.deleteSpaceCursor(spaceUri, did)
     }
     counts.boundaryCache = this.invalidate(did)

@@ -6,6 +6,7 @@ import {
   InvalidIdentifierError,
   MstError,
   NotEnrolledError,
+  PdsCustodyWriteForbiddenError,
   RecordNotFoundError,
   StratosError,
 } from '../src'
@@ -67,5 +68,13 @@ describe('Domain Errors', () => {
     const error = new BlobAccessDeniedError('bafybeig')
     expect(error.message).toBe('Access denied to blob: bafybeig')
     expect(error.code).toBe('BlobAccessDenied')
+  })
+
+  it('PdsCustodyWriteForbiddenError preserves the XRPC error details', () => {
+    const error = new PdsCustodyWriteForbiddenError()
+    expect(error).toBeInstanceOf(StratosError)
+    expect(error.name).toBe('PdsCustodyWriteForbiddenError')
+    expect(error.message).toBe('This actor writes records to their own PDS')
+    expect(error.code).toBe('PdsCustodyWriteForbidden')
   })
 })

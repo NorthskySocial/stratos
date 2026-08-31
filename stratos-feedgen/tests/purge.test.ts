@@ -296,7 +296,7 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     expect(counts.spaceCursors).toBe(0)
   })
 
-  it('leaves the space-sync cursor alone for a boundary-shrink trigger even with a spaceUri', async () => {
+  it('drops the space-sync cursor for a boundary-shrink trigger with a spaceUri', async () => {
     const spaceUri =
       'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
     await store.upsertSpaceCursor(
@@ -314,8 +314,8 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
       spaceUri,
     )
 
-    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBe('rev-1')
-    expect(counts.spaceCursors).toBe(0)
+    expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    expect(counts.spaceCursors).toBe(1)
   })
 })
 

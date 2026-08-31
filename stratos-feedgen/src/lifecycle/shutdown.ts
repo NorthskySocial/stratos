@@ -56,7 +56,11 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       }
       await awaitStartup(deps.startup, drainTimeoutMs, deps.logger)
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
-      await deps.spaceSyncScheduler?.stop()
+      await stopSpaceSyncScheduler(
+        deps.spaceSyncScheduler,
+        drainTimeoutMs,
+        deps.logger,
+      )
       await deps.actorPool?.stop()
       await deps.store?.close()
       deps.logger.info({ signal }, 'shutdown complete')
@@ -150,6 +154,21 @@ async function stopServiceStream(
     logger.warn(
       { timeoutMs },
       'service stream drain deadline expired; continuing shutdown',
+    )
+  }
+}
+
+async function stopSpaceSyncScheduler(
+  scheduler: ShutdownDeps['spaceSyncScheduler'],
+  timeoutMs: number,
+  logger: Logger,
+): Promise<void> {
+  if (!scheduler) return
+  const stopped = scheduler.stop()
+  if ((await raceDeadline(stopped, timeoutMs)) === 'timeout') {
+    logger.warn(
+      { timeoutMs },
+      'space sync scheduler drain deadline expired; continuing shutdown',
     )
   }
 }

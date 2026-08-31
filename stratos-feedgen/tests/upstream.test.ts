@@ -7,6 +7,7 @@ import {
 } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
+import { StratosError } from '@northskysocial/stratos-core'
 
 import {
   UpstreamStratosClient,
@@ -601,6 +602,28 @@ describe('UpstreamStratosClient', () => {
       expect(jti2).toBeTruthy()
       expect(jti1).not.toBe(jti2)
     })
+  })
+})
+
+describe('StratosInvalidResponseError', () => {
+  it('extends StratosError without changing StratosClientError', () => {
+    const invalid = new StratosInvalidResponseError(
+      'https://stratos.bebop.test/xrpc/zone.stratos.space.listSpaceRepos',
+      'zone.stratos.space.listSpaceRepos',
+      'repos was not an array',
+    )
+    expect(invalid.message).toBe(
+      'Stratos response was invalid: repos was not an array (https://stratos.bebop.test/xrpc/zone.stratos.space.listSpaceRepos)',
+    )
+    expect(invalid.code).toBe('StratosInvalidResponse')
+    const client = new StratosClientError({
+      status: 500,
+      body: '',
+      url: 'https://stratos.bebop.test',
+      lxm: 'zone.stratos.space.listSpaceRepos',
+    })
+    expect(invalid).toBeInstanceOf(StratosError)
+    expect(client).not.toBeInstanceOf(StratosError)
   })
 })
 

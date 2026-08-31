@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { PdsCustodyWriteForbiddenError } from '@northskysocial/stratos-core'
 import { createRecord } from '../src/api/records/create.js'
 import type { AppContext } from '../src/context-types.js'
 
@@ -35,11 +35,14 @@ describe('createRecord pds-custody rejection', () => {
     })
 
     await expect(createRecord(ctx, buildInput(), CALLER_DID)).rejects.toThrow(
-      InvalidRequestError,
+      PdsCustodyWriteForbiddenError,
     )
     await expect(
       createRecord(ctx, buildInput(), CALLER_DID),
-    ).rejects.toMatchObject({ customErrorName: 'PdsCustodyWriteForbidden' })
+    ).rejects.toMatchObject({
+      code: 'PdsCustodyWriteForbidden',
+      message: 'This actor writes records to their own PDS',
+    })
   })
 
   it('never reaches the signer, so no Stratos key is minted', async () => {
@@ -70,7 +73,7 @@ describe('createRecord pds-custody rejection', () => {
     await expect(
       createRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })
@@ -85,7 +88,7 @@ describe('createRecord pds-custody rejection', () => {
     await expect(
       createRecord(ctx, buildInput(), CALLER_DID),
     ).rejects.not.toMatchObject({
-      customErrorName: 'PdsCustodyWriteForbidden',
+      code: 'PdsCustodyWriteForbidden',
     })
     expect(ctx.actorSigner.getSignFn).toHaveBeenCalledWith(CALLER_DID)
   })
