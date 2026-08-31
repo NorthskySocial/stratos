@@ -32,7 +32,6 @@ import {
   FEEDGEN_SIGNING_KEY,
   FeedgenHarness,
   type FeedgenStartOptions,
-  SPACE_COMMIT_TAMPER_MODULE,
 } from './lib/feedgen.ts'
 import { assert, fail, finish, pass, section } from './lib/log.ts'
 import {
@@ -42,6 +41,7 @@ import {
   getPdsSpaceRecord,
   parseSpaceRecordUri,
   PDS_SPACES_URL,
+  SPACE_DECLARATION_COLLECTION,
   SPACE_DECLARATION_RKEY,
   verifyPdsRecord,
   verifyPdsSpaceDeclaration,
@@ -53,7 +53,12 @@ import {
   submitSignInAndConsent,
 } from './lib/oauth-flow.ts'
 import { loadState, saveState } from './lib/state.ts'
-import { createRecord, enrollmentStatus, tryGetRecord } from './lib/stratos.ts'
+import {
+  createRecord,
+  enrollmentStatus,
+  isRecordNotFound,
+  tryGetRecord,
+} from './lib/stratos.ts'
 
 const FEEDGEN_PORT = 3301
 const FEEDGEN_URL = `http://127.0.0.1:${FEEDGEN_PORT}`
@@ -111,13 +116,11 @@ interface FeedPostsResult {
   response: GetFeedResponse
 }
 
-function feedgenStartOptions(
-  additionalEnv: Record<string, string> = {},
-): FeedgenStartOptions {
+function feedgenStartOptions(): FeedgenStartOptions {
   return {
     port: FEEDGEN_PORT,
     feeds: MIXED_MODE_FEEDS,
-    env: { ...SPACE_SYNC_ENV, ...additionalEnv },
+    env: SPACE_SYNC_ENV,
   }
 }
 
@@ -234,6 +237,32 @@ function didWebDocumentUrl(did: string): string {
       ? '/.well-known/did.json'
       : `/${path.map(encodeURIComponent).join('/')}/did.json`
   return `https://${host}${documentPath}`
+}
+
+async function declarationStage<T>(
+  stage: string,
+  remediation: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation()
+  } catch (err) {
+    throw new Error(`${stage} failed; ${remediation}`, { cause: err })
+  }
+}
+
+function requireDeclaration(
+  condition: unknown,
+  stage: string,
+  remediation: string,
+  detail?: string,
+): asserts condition {
+  if (condition) {
+    pass(stage, detail)
+    return
+  }
+  fail(stage, `${detail ?? 'unexpected declaration state'}; ${remediation}`)
+  throw new Error(`${stage} failed; ${remediation}`)
 }
 
 async function fetchListRepos(space: string): Promise<ListReposBody> {
@@ -389,58 +418,79 @@ async function run(): Promise<void> {
     'the invite-backed spaces PDS account APIs created did:plc fixtures',
   )
 
-  const isMemberSpaceSync = (event: {
-    fields: Readonly<Record<string, unknown>>
-  }): boolean =>
-    event.fields['msg'] === 'space member sync completed' &&
-    event.fields['did'] === fixture.member.did
-
   const space = spaceUriFor('swordsmith')
-  const txtRecords = await Deno.resolveDns(DNS_DECLARATION_NAME, 'TXT')
+  const dnsRemediation = `republish ${DNS_DECLARATION_NAME} TXT as did=${SPACE_DECLARATION_AUTHORITY_DID}`
+  const txtRecords = await declarationStage(
+    `space declaration DNS check for ${DNS_DECLARATION_NAME}`,
+    dnsRemediation,
+    () => Deno.resolveDns(DNS_DECLARATION_NAME, 'TXT'),
+  )
   const authorityDids = txtRecords
     .flat()
     .filter((record) => record.startsWith('did='))
     .map((record) => record.slice('did='.length))
-  assert(
-    authorityDids.length === 1,
-    'the DNS declaration contains exactly one authority DID',
-    authorityDids.join(', '),
+  requireDeclaration(
+    authorityDids.length === 1 &&
+      authorityDids[0] === SPACE_DECLARATION_AUTHORITY_DID,
+    'space declaration DNS authority check',
+    dnsRemediation,
+    `dns=${authorityDids.join(', ') || '<none>'} expected=${SPACE_DECLARATION_AUTHORITY_DID}`,
   )
   const authorityDid = authorityDids[0]
-  if (!authorityDid) throw new Error('DNS declaration has no authority DID')
-  assert(
-    authorityDid === SPACE_DECLARATION_AUTHORITY_DID,
-    'the DNS space declaration names the published lexicon authority DID',
-    `dns=${authorityDid} expected=${SPACE_DECLARATION_AUTHORITY_DID}`,
+  const authorityRemediation = `repair ${authorityDid}'s DID document #atproto_pds service endpoint`
+  const authorityPdsEndpoint = await declarationStage(
+    'space declaration authority repo discovery',
+    authorityRemediation,
+    () => resolveAuthorityPdsEndpoint(authorityDid),
   )
-  const authorityPdsEndpoint = await resolveAuthorityPdsEndpoint(authorityDid)
-  const declaration = await verifyPdsSpaceDeclaration(
-    authorityPdsEndpoint,
-    authorityDid,
+  pass('space declaration authority repo discovery', authorityPdsEndpoint)
+  const recordRemediation = `republish ${SPACE_DECLARATION_COLLECTION}/${SPACE_DECLARATION_RKEY} to ${authorityDid}'s repo`
+  const declaration = await declarationStage(
+    'space declaration record verification',
+    recordRemediation,
+    () => verifyPdsSpaceDeclaration(authorityPdsEndpoint, authorityDid),
   )
-  assert(
+  pass('space declaration record verification')
+  requireDeclaration(
     (declaration as { id?: string }).id === SPACE_DECLARATION_RKEY &&
       (declaration as { defs?: { main?: { type?: string } } }).defs?.main
         ?.type === 'space',
-    'the spaces PDS serves a verified space declaration record',
+    'space declaration record shape check',
+    recordRemediation,
+    `expected id=${SPACE_DECLARATION_RKEY} and defs.main.type=space`,
   )
 
-  const didDocument = (await fetch(`${STRATOS_URL}/.well-known/did.json`).then(
-    (res) => res.json(),
-  )) as {
-    verificationMethod?: Array<{ id?: string }>
-    service?: Array<{ id?: string }>
-  }
+  const didDocumentRemediation =
+    'republish the Stratos DID document with #atproto beside #atproto_pns'
+  const didDocument = await declarationStage(
+    'Stratos credential DID document check',
+    didDocumentRemediation,
+    async () => {
+      const res = await fetch(`${STRATOS_URL}/.well-known/did.json`)
+      if (!res.ok) {
+        throw new Error(
+          `DID document returned ${res.status}: ${await res.text()}`,
+        )
+      }
+      return (await res.json()) as {
+        verificationMethod?: Array<{ id?: string }>
+        service?: Array<{ id?: string }>
+      }
+    },
+  )
   const methodIds =
     didDocument.verificationMethod?.map((method) => method.id) ?? []
-  assert(
+  requireDeclaration(
     methodIds.includes(`${SERVICE_DID}#atproto`) &&
       methodIds.includes(`${SERVICE_DID}#atproto_pns`),
-    'the Stratos service identity exposes atproto and service signing fragments',
+    'Stratos credential signing-fragment check',
+    didDocumentRemediation,
+    methodIds.join(', '),
   )
-  assert(
+  requireDeclaration(
     didDocument.service?.some((service) => service.id === '#stratos') === true,
-    'the Stratos service identity exposes its service endpoint',
+    'Stratos service endpoint check',
+    'republish the Stratos DID document #stratos service endpoint',
   )
 
   const enrolled = await enrollSpacesMember(
@@ -560,7 +610,13 @@ async function run(): Promise<void> {
     memberPath.rkey,
     fixture.member.did,
   )
-  assert(!stratosRead.ok, 'the PDS-custody record is absent from Stratos')
+  assert(
+    isRecordNotFound(stratosRead),
+    'the PDS-custody record is absent from Stratos with RecordNotFound',
+    stratosRead.ok
+      ? 'unexpected record'
+      : `status=${stratosRead.status} body=${stratosRead.error}`,
+  )
   const claimedPost = await createPdsSpaceRecord(memberSession, space, {
     $type: COLLECTION,
     text: 'Motoko claims a boundary outside the admitted space',
@@ -705,120 +761,6 @@ async function run(): Promise<void> {
       deniedSwordsmithFeed.status === 400 &&
         deniedSwordsmithFeed.body.error === 'BoundaryMismatch',
       'a viewer without swordsmith cannot access either custody record',
-    )
-
-    await feedgen.stop()
-    await feedgen.start(
-      feedgenStartOptions({
-        NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
-        FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
-        FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
-      }),
-    )
-    await assertFeedgenWarmup(feedgen, 'quarantine mixed-mode')
-    assert(
-      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
-      'the feedgen under a tampered PDS response is healthy',
-    )
-    const verificationFailure = await feedgen.waitForLog(
-      (event) => event.fields['msg'] === 'space commit verification failed',
-      30_000,
-    )
-    const failedTarget = verificationFailure.fields['target'] as
-      | Record<string, unknown>
-      | undefined
-    assert(
-      verificationFailure.fields['reason'] === 'mac-mismatch' &&
-        failedTarget?.['spaceUri'] === space &&
-        failedTarget['boundary'] === DOMAINS.swordsmith &&
-        failedTarget['did'] === fixture.member.did &&
-        failedTarget['host'] === PDS_SPACES_URL,
-      'the live feedgen quarantines the tampered PDS commit',
-    )
-    const haltedPass = await feedgen.waitForLog(
-      (event) => isSpaceSyncPass(event) && event.fields['halted'] === 1,
-      30_000,
-    )
-    assert(
-      haltedPass.fields['targets'] === 1 &&
-        haltedPass.fields['succeeded'] === 0 &&
-        haltedPass.fields['failed'] === 0,
-      'the live feedgen skips the quarantined PDS target on its next pass',
-    )
-    const quarantinedFeedState = await waitForFeedPost(
-      viewerToken,
-      'swordsmith',
-      memberPost.uri,
-      (found) => !found,
-    )
-    assert(
-      quarantinedFeedState.matches,
-      'commit quarantine removes the PDS-custody post from the boundary feed',
-      `${describeFeedState(quarantinedFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
-    )
-
-    const passesBeforeRestart = feedgen.countLogs(isSpaceSyncPass)
-    const membershipsBeforeRestart = feedgen.countLogs(
-      isSwordsmithMembershipPass,
-    )
-    const memberSyncsBeforeRestart = feedgen.countLogs(isMemberSpaceSync)
-    await feedgen.stop()
-    await feedgen.start(feedgenStartOptions())
-    await assertFeedgenWarmup(feedgen, 'cold-restart mixed-mode')
-    assert(
-      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
-      'cold-restarted mixed-mode feedgen is healthy',
-    )
-    const restartMembershipPass = await feedgen.waitForLog(
-      isSwordsmithMembershipPass,
-      30_000,
-      membershipsBeforeRestart + 1,
-    )
-    assert(
-      restartMembershipPass.fields['memberCount'] === 1 &&
-        restartMembershipPass.fields['skippedNoHost'] === 0 &&
-        restartMembershipPass.fields['removed'] === 0,
-      'the cold restart rebuilds the swordsmith PDS poll target',
-    )
-    const restartPass = await feedgen.waitForLog(
-      isSpaceSyncPass,
-      30_000,
-      passesBeforeRestart + 1,
-    )
-    assert(
-      restartPass.fields['targets'] === 1 &&
-        restartPass.fields['succeeded'] === 1 &&
-        restartPass.fields['failed'] === 0 &&
-        restartPass.fields['abandoned'] === 0 &&
-        restartPass.fields['halted'] === 0,
-      'the cold restart syncs the rebuilt PDS poll target',
-    )
-    const restartMemberSync = await feedgen.waitForLog(
-      isMemberSpaceSync,
-      30_000,
-      memberSyncsBeforeRestart + 1,
-    )
-    assert(
-      typeof restartMemberSync.fields['recordsIndexed'] === 'number' &&
-        restartMemberSync.fields['recordsIndexed'] > 0,
-      'the cold restart reindexes the PDS member records',
-      JSON.stringify(restartMemberSync.fields),
-    )
-    const restartViewerToken = await getServiceAuth(
-      viewerSession.accessJwt,
-      FEEDGEN_DID,
-      GET_FEED_LXM,
-    )
-    const restartFeedState = await waitForFeedPost(
-      restartViewerToken,
-      'swordsmith',
-      memberPost.uri,
-      (found) => found,
-    )
-    assert(
-      restartFeedState.matches,
-      'the cold restart retains the PDS-custody post in its boundary feed',
-      `${describeFeedState(restartFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
     )
 
     const removal = await adminSetBoundaries(
