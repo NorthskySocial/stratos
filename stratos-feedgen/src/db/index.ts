@@ -1,4 +1,4 @@
-import type { FeedgenConfig } from '../config.js'
+import { assertDistinctSqlitePaths, type FeedgenConfig } from '../config.js'
 import { createPgDb, migratePgDb, PgFeedgenStore } from './postgres.js'
 import {
   createSqliteDb,
@@ -23,8 +23,11 @@ export async function createFeedgenStore(
     if (!cfg.membershipSqlitePath) {
       throw new Error('membershipSqlitePath is required for sqlite backend')
     }
-    if (cfg.membershipSqlitePath === cfg.sqlitePath) {
-      throw new Error('membershipSqlitePath must differ from sqlitePath')
+    if (cfg.membershipSqlitePath.startsWith(':memory:')) {
+      throw new Error('membershipSqlitePath must be a file path')
+    }
+    if (cfg.sqlitePath !== ':memory:') {
+      assertDistinctSqlitePaths(cfg.sqlitePath, cfg.membershipSqlitePath)
     }
     const recordDb = createSqliteDb(cfg.sqlitePath)
     const membershipDb = createSqliteDb(cfg.membershipSqlitePath)

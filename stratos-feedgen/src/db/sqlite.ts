@@ -1,4 +1,6 @@
 import { Client, createClient } from '@libsql/client'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
 import {
@@ -37,7 +39,7 @@ const LEGACY_MEMBERSHIP_IMPORT_KEY = 'legacy-record-store-imported'
 
 export function createSqliteDb(location: string): SqliteDb {
   const client = createClient({
-    url: location === ':memory:' ? ':memory:' : `file:${location}`,
+    url: sqliteClientUrl(location),
   })
   const baseDb = drizzle({ client, schema: sqliteSchema })
   const db = baseDb as unknown as SqliteDb
@@ -52,6 +54,12 @@ export function createSqliteDb(location: string): SqliteDb {
     await db.run(sql.raw('PRAGMA foreign_keys = ON'))
   })()
   return db
+}
+
+function sqliteClientUrl(location: string): string {
+  return location === ':memory:'
+    ? ':memory:'
+    : pathToFileURL(resolve(location)).href
 }
 
 /** Migrate the materialized record index and the cursors that checkpoint it. */

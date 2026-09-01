@@ -1,4 +1,6 @@
 import { isIP } from 'node:net'
+import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { parseCommaList } from '@northskysocial/stratos-core'
 
 /**
@@ -259,15 +261,69 @@ function resolveMembershipSqlitePath(
     )
   }
   const membershipPath = configuredPath ?? `${sqlitePath}.membership`
-  if (membershipPath === ':memory:') {
+  if (membershipPath.startsWith(':memory:')) {
     throw new Error('FEEDGEN_MEMBERSHIP_SQLITE_PATH must be a file path')
   }
-  if (membershipPath === sqlitePath) {
+  if (sqlitePath !== ':memory:') {
+    assertDistinctSqlitePaths(sqlitePath, membershipPath)
+  }
+  return membershipPath
+}
+
+/**
+ * Reject two spellings that resolve to the same SQLite file. Keeping cursor
+ * state out of durable control storage depends on these files being distinct.
+ */
+export function assertDistinctSqlitePaths(
+  recordPath: string,
+  membershipPath: string,
+): void {
+  if (
+    canonicalSqlitePath(recordPath) === canonicalSqlitePath(membershipPath) ||
+    sameExistingFile(recordPath, membershipPath)
+  ) {
     throw new Error(
       'FEEDGEN_MEMBERSHIP_SQLITE_PATH must differ from FEEDGEN_SQLITE_PATH',
     )
   }
-  return membershipPath
+}
+
+function sameExistingFile(left: string, right: string): boolean {
+  try {
+    const leftStat = statSync(left)
+    const rightStat = statSync(right)
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
+  } catch (err) {
+    if ((err as { code?: string }).code === 'ENOENT') return false
+    throw err
+  }
+}
+
+function canonicalSqlitePath(location: string): string {
+  const absolute = resolve(location)
+  const missingSegments: string[] = []
+  let existingPath = absolute
+  for (;;) {
+    try {
+      // A leaf symlink can become an alias after startup. Reject it rather
+      // than accepting a path whose durable/ephemeral identity can change.
+      if (
+        missingSegments.length === 0 &&
+        lstatSync(existingPath).isSymbolicLink()
+      ) {
+        throw new Error(
+          `SQLite storage path must not be a symbolic link: ${location}`,
+        )
+      }
+      return join(realpathSync.native(existingPath), ...missingSegments)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      const parent = dirname(existingPath)
+      if (parent === existingPath) return absolute
+      missingSegments.unshift(basename(existingPath))
+      existingPath = parent
+    }
+  }
 }
 
 /** Treat an empty env var the same as an unset one. */

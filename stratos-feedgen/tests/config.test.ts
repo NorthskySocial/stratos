@@ -1,3 +1,12 @@
+import {
+  linkSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
@@ -59,6 +68,14 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       }),
     ).toThrow(/must be a file path/)
 
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: ':memory:?cache=shared',
+      }),
+    ).toThrow(/must be a file path/)
+
     expect(
       loadFeedgenConfig({
         ...baseEnv,
@@ -75,6 +92,50 @@ describe('loadFeedgenConfig SQLite storage split', () => {
         FEEDGEN_MEMBERSHIP_SQLITE_PATH: baseEnv.FEEDGEN_SQLITE_PATH,
       }),
     ).toThrow(/must differ/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
+      }),
+    ).toThrow(/must differ/)
+  })
+
+  it('rejects a membership database symlink', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'feedgen-config-'))
+    const recordPath = join(directory, 'record.sqlite')
+    const membershipPath = join(directory, 'membership.sqlite')
+    try {
+      symlinkSync(recordPath, membershipPath)
+      expect(() =>
+        loadFeedgenConfig({
+          ...baseEnv,
+          FEEDGEN_SQLITE_PATH: recordPath,
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+        }),
+      ).toThrow(/symbolic link/)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects membership and record hard links to the same file', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'feedgen-config-'))
+    const recordPath = join(directory, 'record.sqlite')
+    const membershipPath = join(directory, 'membership.sqlite')
+    try {
+      writeFileSync(recordPath, '')
+      linkSync(recordPath, membershipPath)
+      expect(() =>
+        loadFeedgenConfig({
+          ...baseEnv,
+          FEEDGEN_SQLITE_PATH: recordPath,
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+        }),
+      ).toThrow(/must differ/)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 })
 
