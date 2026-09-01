@@ -26,6 +26,8 @@ export interface SpaceSyncPassLogEvent {
   halted: number
   /** Oversized records skipped across every successful target. */
   skippedOversized: number
+  /** Malformed operations skipped across every successful target. */
+  skippedMalformed: number
   /** Successful targets that stopped at the configured page ceiling. */
   maxPageStops: number
   /** Successful targets that reached their per-pass record cap. */
@@ -205,6 +207,7 @@ export class SpaceSyncScheduler {
     let abandoned = 0
     let halted = 0
     let skippedOversized = 0
+    let skippedMalformed = 0
     let maxPageStops = 0
     let capped = 0
     let nextTarget = 0
@@ -235,6 +238,7 @@ export class SpaceSyncScheduler {
           } else {
             succeeded += 1
             skippedOversized += outcome.result.skippedOversized
+            skippedMalformed += outcome.result.skippedMalformed
             if (outcome.result.stopReason === 'max-pages') maxPageStops += 1
             if (outcome.result.stopReason === 'per-member-cap') capped += 1
           }
@@ -251,6 +255,7 @@ export class SpaceSyncScheduler {
         abandoned,
         halted,
         skippedOversized,
+        skippedMalformed,
         maxPageStops,
         capped,
       })
