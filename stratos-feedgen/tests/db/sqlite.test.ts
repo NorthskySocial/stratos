@@ -32,6 +32,16 @@ function sqliteConfig(recordPath: string, membershipPath: string) {
   })
 }
 
+function inMemorySqliteConfig(membershipPath: string) {
+  return loadFeedgenConfig({
+    FEEDGEN_SERVICE_DID: 'did:web:feedgen.bebop.test',
+    FEEDGEN_SIGNING_KEY: 'unused-by-this-test',
+    STRATOS_SERVICE_URL: 'https://stratos.bebop.test',
+    STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
+    FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+  })
+}
+
 async function listSqliteArtifacts(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true })
   const artifacts = await Promise.all(
@@ -175,6 +185,60 @@ describe('SQLite-specific behavior', () => {
     )
     expect(await store.getCursor('did:plc:idempotent')).toBe(1)
     await store.close()
+  })
+
+  it('resets the in-memory record projection but keeps membership snapshots', async () => {
+    const membershipPath = await makeTempDbPath()
+    const did = 'did:plc:spikespiegel'
+    const spaceUri = `at://${did}/zone.stratos.space/bebop`
+    const indexedAt = '2024-01-01T00:00:00.000Z'
+    const postUri = `at://${did}/zone.stratos.feed.post/1`
+    const firstStore = await createFeedgenStore(
+      inMemorySqliteConfig(membershipPath),
+    )
+
+    await firstStore.upsertPost({
+      uri: postUri,
+      did,
+      cid: 'bafyrecord',
+      sortAt: indexedAt,
+      indexedAt,
+      record: { text: 'See you, space cowboy.' },
+      blobRefs: [],
+      boundaries: ['bounty-hunters'],
+    })
+    await firstStore.upsertCursor(did, 42, indexedAt)
+    await firstStore.upsertSpaceCursor(spaceUri, did, 'cursor-42', indexedAt)
+    await firstStore.upsertEnrolledActor({
+      did,
+      boundaries: ['bounty-hunters'],
+      enrolledAt: indexedAt,
+      lastSeenAt: indexedAt,
+    })
+    await firstStore.replaceSpaceMembers('bounty-hunters', [
+      { did, custody: 'pds', host: 'https://bebop.example' },
+    ])
+    await firstStore.close()
+
+    const restartedStore = await createFeedgenStore(
+      inMemorySqliteConfig(membershipPath),
+    )
+    try {
+      expect(await restartedStore.getPost(postUri)).toBeNull()
+      expect(await restartedStore.getCursor(did)).toBeNull()
+      expect(await restartedStore.getSpaceCursor(spaceUri, did)).toBeNull()
+      expect(await restartedStore.getEnrolledActor(did)).toEqual({
+        did,
+        boundaries: ['bounty-hunters'],
+        enrolledAt: indexedAt,
+        lastSeenAt: indexedAt,
+      })
+      expect(await restartedStore.listSpaceMembers('bounty-hunters')).toEqual([
+        { did, custody: 'pds', host: 'https://bebop.example' },
+      ])
+    } finally {
+      await restartedStore.close()
+    }
   })
 
   it('persists only membership snapshots when the record store resets', async () => {

@@ -41,6 +41,9 @@ services:
       STRATOS_SERVICE_URL: http://stratos:3100
       STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
       FEEDGEN_STORAGE_BACKEND: sqlite
+      # The materialized record projection and its replay cursors stay in
+      # memory. Persist only the membership/control recovery snapshot.
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: /app/data/feedgen-membership.sqlite
       FEEDGEN_FEEDS_FILE: /app/config/feeds.yaml
       FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true'
       FEEDGEN_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
@@ -48,6 +51,7 @@ services:
       core: 0
     volumes:
       - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
+      - feedgen-control:/app/data
     depends_on:
       stratos:
         condition: service_healthy
@@ -65,3 +69,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
+
+volumes:
+  feedgen-control:
