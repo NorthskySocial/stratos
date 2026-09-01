@@ -31,6 +31,11 @@ export interface FeedgenConfig {
   storageBackend: StorageBackend
   /** Path to SQLite database file (used when `storageBackend === 'sqlite'`). */
   sqlitePath?: string
+  /**
+   * Path to the SQLite database holding durable enrollment and space-membership
+   * snapshots. This must differ from `sqlitePath`.
+   */
+  membershipSqlitePath?: string
   /** Postgres connection URL (used when `storageBackend === 'postgres'`). */
   postgresUrl?: string
   /** Optional Postgres schema name. Defaults to `public` when omitted. */
@@ -107,25 +112,19 @@ export interface FeedgenEnv {
   [key: string]: string | undefined
 }
 
+type StorageConfig = Pick<
+  FeedgenConfig,
+  | 'storageBackend'
+  | 'sqlitePath'
+  | 'membershipSqlitePath'
+  | 'postgresUrl'
+  | 'postgresSchema'
+>
+
 export function loadFeedgenConfig(
   env: FeedgenEnv = process.env,
 ): FeedgenConfig {
-  const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
-  const sqlitePath = env['FEEDGEN_SQLITE_PATH']
-  const postgresUrl = env['FEEDGEN_POSTGRES_URL']
-  const postgresSchema = env['FEEDGEN_POSTGRES_SCHEMA']
-
-  if (storageBackend === 'sqlite' && !sqlitePath) {
-    throw new Error(
-      'Missing required env var FEEDGEN_SQLITE_PATH for sqlite backend',
-    )
-  }
-  if (storageBackend === 'postgres' && !postgresUrl) {
-    throw new Error(
-      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
-    )
-  }
-
+  const storage = loadStorageConfig(env)
   const feedgenServiceDid = requireEnv(env, 'FEEDGEN_SERVICE_DID')
 
   return {
@@ -144,10 +143,7 @@ export function loadFeedgenConfig(
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
     feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
     feedgenAllowedLxms: DEFAULT_ALLOWED_LXMS,
-    storageBackend,
-    sqlitePath,
-    postgresUrl,
-    postgresSchema,
+    ...storage,
     boundaryCacheTtlMs: parsePositiveInt(
       env['FEEDGEN_BOUNDARY_CACHE_TTL_MS'],
       'FEEDGEN_BOUNDARY_CACHE_TTL_MS',
@@ -219,6 +215,59 @@ export function loadFeedgenConfig(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
     ),
   }
+}
+
+function loadStorageConfig(env: FeedgenEnv): StorageConfig {
+  const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
+  const sqlitePath = env['FEEDGEN_SQLITE_PATH']
+  const postgresUrl = env['FEEDGEN_POSTGRES_URL']
+  if (storageBackend === 'sqlite' && !sqlitePath) {
+    throw new Error(
+      'Missing required env var FEEDGEN_SQLITE_PATH for sqlite backend',
+    )
+  }
+  if (storageBackend === 'postgres' && !postgresUrl) {
+    throw new Error(
+      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+    )
+  }
+  return {
+    storageBackend,
+    sqlitePath,
+    membershipSqlitePath:
+      storageBackend === 'sqlite'
+        ? resolveMembershipSqlitePath(
+            sqlitePath,
+            nonEmpty(env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']),
+          )
+        : undefined,
+    postgresUrl,
+    postgresSchema: env['FEEDGEN_POSTGRES_SCHEMA'],
+  }
+}
+
+function resolveMembershipSqlitePath(
+  sqlitePath: string | undefined,
+  configuredPath: string | undefined,
+): string {
+  if (!sqlitePath) {
+    throw new Error('sqlitePath is required for sqlite backend')
+  }
+  if (sqlitePath === ':memory:' && !configuredPath) {
+    throw new Error(
+      'Missing required env var FEEDGEN_MEMBERSHIP_SQLITE_PATH when FEEDGEN_SQLITE_PATH is :memory:',
+    )
+  }
+  const membershipPath = configuredPath ?? `${sqlitePath}.membership`
+  if (membershipPath === ':memory:') {
+    throw new Error('FEEDGEN_MEMBERSHIP_SQLITE_PATH must be a file path')
+  }
+  if (membershipPath === sqlitePath) {
+    throw new Error(
+      'FEEDGEN_MEMBERSHIP_SQLITE_PATH must differ from FEEDGEN_SQLITE_PATH',
+    )
+  }
+  return membershipPath
 }
 
 /** Treat an empty env var the same as an unset one. */

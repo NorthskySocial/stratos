@@ -24,6 +24,60 @@ const baseEnv = {
   FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
 }
 
+describe('loadFeedgenConfig SQLite storage split', () => {
+  it('derives a distinct sibling database for durable membership snapshots', () => {
+    const cfg = loadFeedgenConfig({ ...baseEnv })
+
+    expect(cfg.sqlitePath).toBe('/tmp/feedgen-bebop.sqlite')
+    expect(cfg.membershipSqlitePath).toBe(
+      '/tmp/feedgen-bebop.sqlite.membership',
+    )
+  })
+
+  it('keeps an explicitly configured membership database path', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/var/lib/feedgen/membership.sqlite',
+    })
+
+    expect(cfg.membershipSqlitePath).toBe('/var/lib/feedgen/membership.sqlite')
+  })
+
+  it('requires an explicit disk membership path for an in-memory record index', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+      }),
+    ).toThrow(/FEEDGEN_MEMBERSHIP_SQLITE_PATH/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: ':memory:',
+      }),
+    ).toThrow(/must be a file path/)
+
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/var/lib/feedgen/membership.sqlite',
+      }).membershipSqlitePath,
+    ).toBe('/var/lib/feedgen/membership.sqlite')
+  })
+
+  it('rejects a membership database that aliases the record database', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: baseEnv.FEEDGEN_SQLITE_PATH,
+      }),
+    ).toThrow(/must differ/)
+  })
+})
+
 describe('loadFeedgenConfig space-sync defaults', () => {
   it('leaves request-timeout headroom above worst-case default host resolution', () => {
     const resolverWorkers = 10

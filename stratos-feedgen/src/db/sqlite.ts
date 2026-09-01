@@ -33,6 +33,8 @@ export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
   _initialized: Promise<void>
 }
 
+const LEGACY_MEMBERSHIP_IMPORT_KEY = 'legacy-record-store-imported'
+
 export function createSqliteDb(location: string): SqliteDb {
   const client = createClient({
     url: location === ':memory:' ? ':memory:' : `file:${location}`,
@@ -52,7 +54,8 @@ export function createSqliteDb(location: string): SqliteDb {
   return db
 }
 
-export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
+/** Migrate the materialized record index and the cursors that checkpoint it. */
+export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
   await db._initialized
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS post (
@@ -88,20 +91,25 @@ export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
     )
   `)
   await db.run(sql`
-    CREATE TABLE IF NOT EXISTS enrolled_actor (
-      did TEXT PRIMARY KEY,
-      boundariesJson TEXT NOT NULL,
-      enrolledAt TEXT NOT NULL,
-      lastSeenAt TEXT NOT NULL
-    )
-  `)
-  await db.run(sql`
     CREATE TABLE IF NOT EXISTS space_sync_cursor (
       spaceUri TEXT NOT NULL,
       did TEXT NOT NULL,
       cursor TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       PRIMARY KEY (spaceUri, did)
+    )
+  `)
+}
+
+/** Migrate durable enrollment and completed space-membership snapshots. */
+export async function migrateMembershipSqliteDb(db: SqliteDb): Promise<void> {
+  await db._initialized
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS enrolled_actor (
+      did TEXT PRIMARY KEY,
+      boundariesJson TEXT NOT NULL,
+      enrolledAt TEXT NOT NULL,
+      lastSeenAt TEXT NOT NULL
     )
   `)
   await db.run(sql`
@@ -135,13 +143,95 @@ export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
       PRIMARY KEY (boundary, did)
     )
   `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS feedgen_membership_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `)
+}
+
+/**
+ * Carry forward membership baselines from a legacy one-file store exactly
+ * once. Cursors are intentionally not copied: they remain co-durable with
+ * the materialized records in the record store.
+ */
+export async function importLegacyMembershipSnapshots(
+  recordDb: SqliteDb,
+  membershipDb: SqliteDb,
+): Promise<void> {
+  if (recordDb === membershipDb) return
+  const marker = await membershipDb.all<{ value: string }>(sql`
+    SELECT value
+    FROM feedgen_membership_metadata
+    WHERE key = ${LEGACY_MEMBERSHIP_IMPORT_KEY}
+  `)
+  if (marker.length > 0) return
+
+  const [hasEnrolledActors, hasSpaceMembers] = await Promise.all([
+    sqliteTableExists(recordDb, 'enrolled_actor'),
+    sqliteTableExists(recordDb, 'space_member_snapshot'),
+  ])
+  const [actors, members] = await Promise.all([
+    hasEnrolledActors
+      ? recordDb.select().from(enrolledActorTbl)
+      : Promise.resolve([]),
+    hasSpaceMembers
+      ? recordDb.select().from(spaceMemberSnapshotTbl)
+      : Promise.resolve([]),
+  ])
+
+  await membershipDb.transaction(async (tx) => {
+    if (actors.length > 0) {
+      await tx.insert(enrolledActorTbl).values(actors).onConflictDoNothing()
+    }
+    for (
+      let offset = 0;
+      offset < members.length;
+      offset += SPACE_MEMBER_INSERT_CHUNK_SIZE
+    ) {
+      await tx
+        .insert(spaceMemberSnapshotTbl)
+        .values(members.slice(offset, offset + SPACE_MEMBER_INSERT_CHUNK_SIZE))
+        .onConflictDoNothing()
+    }
+    await tx.run(sql`
+      INSERT INTO feedgen_membership_metadata (key, value)
+      VALUES (${LEGACY_MEMBERSHIP_IMPORT_KEY}, '1')
+      ON CONFLICT(key) DO NOTHING
+    `)
+  })
+}
+
+/**
+ * Backwards-compatible all-in-one migration for direct store construction.
+ * Production opens the record and membership databases independently.
+ */
+export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
+  await migrateRecordSqliteDb(db)
+  await migrateMembershipSqliteDb(db)
+}
+
+async function sqliteTableExists(
+  db: SqliteDb,
+  table: string,
+): Promise<boolean> {
+  const rows = await db.all<{ name: string }>(sql`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = ${table}
+  `)
+  return rows.length > 0
 }
 
 export class SqliteFeedgenStore implements FeedgenStore {
-  constructor(private readonly db: SqliteDb) {}
+  constructor(
+    private readonly recordDb: SqliteDb,
+    private readonly membershipDb: SqliteDb = recordDb,
+  ) {}
 
   async upsertPost(input: PostUpsert): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    await this.recordDb.transaction(async (tx) => {
       await tx
         .insert(postTbl)
         .values({
@@ -177,12 +267,12 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deletePost(uri: string): Promise<void> {
-    await this.db.delete(postTbl).where(eq(postTbl.uri, uri))
+    await this.recordDb.delete(postTbl).where(eq(postTbl.uri, uri))
   }
 
   async deletePostsByDid(did: string): Promise<number> {
     // FK ON DELETE CASCADE removes the matching post_boundary rows.
-    const res = await this.db.delete(postTbl).where(eq(postTbl.did, did))
+    const res = await this.recordDb.delete(postTbl).where(eq(postTbl.did, did))
     return res.rowsAffected
   }
 
@@ -190,7 +280,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     did: string,
     boundary: string,
   ): Promise<number> {
-    return this.db.transaction(async (tx) => {
+    return this.recordDb.transaction(async (tx) => {
       // Delete posts for which the removed boundary is the last one. Testing
       // for that boundary before deletion keeps pre-existing boundaryless
       // posts out of scope without materializing every URI into SQL binds.
@@ -233,7 +323,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     shouldCommit: () => boolean,
   ): Promise<GuardedBoundaryDeleteResult> {
     try {
-      return await this.db.transaction(async (tx) => {
+      return await this.recordDb.transaction(async (tx) => {
         const cursorDelete = await tx
           .delete(spaceSyncCursorTbl)
           .where(
@@ -302,7 +392,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     // FK ON DELETE CASCADE removes every boundary row for matching posts.
     // Keep the selection in SQL so a large space never becomes an unbounded
     // application-side URI list or exceeds the backend's bind limit.
-    const res = await this.db.delete(postTbl).where(sql`EXISTS (
+    const res = await this.recordDb.delete(postTbl).where(sql`EXISTS (
       SELECT 1 FROM post_boundary scoped
       WHERE scoped.uri = ${postTbl.uri}
         AND scoped.boundary = ${boundary}
@@ -311,14 +401,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deleteCursor(did: string): Promise<number> {
-    const res = await this.db
+    const res = await this.recordDb
       .delete(syncCursorTbl)
       .where(eq(syncCursorTbl.did, did))
     return res.rowsAffected
   }
 
   async deleteSpaceCursor(spaceUri: string, did: string): Promise<number> {
-    const res = await this.db
+    const res = await this.recordDb
       .delete(spaceSyncCursorTbl)
       .where(
         and(
@@ -330,14 +420,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deleteSpaceCursors(did: string): Promise<number> {
-    const res = await this.db
+    const res = await this.recordDb
       .delete(spaceSyncCursorTbl)
       .where(eq(spaceSyncCursorTbl.did, did))
     return res.rowsAffected
   }
 
   async deleteSpaceCursorsBySpace(spaceUri: string): Promise<number> {
-    const res = await this.db
+    const res = await this.recordDb
       .delete(spaceSyncCursorTbl)
       .where(eq(spaceSyncCursorTbl.spaceUri, spaceUri))
     return res.rowsAffected
@@ -611,13 +701,13 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async getPost(uri: string): Promise<IndexedPost | null> {
-    const rows = await this.db
+    const rows = await this.recordDb
       .select()
       .from(postTbl)
       .where(eq(postTbl.uri, uri))
       .limit(1)
     if (rows.length === 0) return null
-    const boundaries = await this.db
+    const boundaries = await this.recordDb
       .select({ boundary: postBoundaryTbl.boundary })
       .from(postBoundaryTbl)
       .where(eq(postBoundaryTbl.uri, uri))
@@ -638,7 +728,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
           ),
         )
       : undefined
-    const rows = await this.db
+    const rows = await this.recordDb
       .select({
         uri: postTbl.uri,
         did: postTbl.did,
@@ -676,7 +766,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     uris: string[],
   ): Promise<Map<string, string[]>> {
     if (uris.length === 0) return new Map()
-    const rows = await this.db
+    const rows = await this.recordDb
       .select({
         uri: postBoundaryTbl.uri,
         boundary: postBoundaryTbl.boundary,
@@ -697,7 +787,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     seq: number,
     updatedAt: string,
   ): Promise<void> {
-    await this.db
+    await this.recordDb
       .insert(syncCursorTbl)
       .values({ did, seq, updatedAt })
       .onConflictDoUpdate({
@@ -707,7 +797,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async getCursor(did: string): Promise<number | null> {
-    const rows = await this.db
+    const rows = await this.recordDb
       .select({ seq: syncCursorTbl.seq })
       .from(syncCursorTbl)
       .where(eq(syncCursorTbl.did, did))
@@ -721,7 +811,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     cursor: string,
     updatedAt: string,
   ): Promise<void> {
-    await this.db
+    await this.recordDb
       .insert(spaceSyncCursorTbl)
       .values({ spaceUri, did, cursor, updatedAt })
       .onConflictDoUpdate({
@@ -731,7 +821,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async getSpaceCursor(spaceUri: string, did: string): Promise<string | null> {
-    const rows = await this.db
+    const rows = await this.recordDb
       .select({ cursor: spaceSyncCursorTbl.cursor })
       .from(spaceSyncCursorTbl)
       .where(
@@ -745,7 +835,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async listSpaceMembers(boundary: string): Promise<SpaceMemberSnapshot[]> {
-    const rows = await this.db
+    const rows = await this.membershipDb
       .select({
         did: spaceMemberSnapshotTbl.did,
         custody: spaceMemberSnapshotTbl.custody,
@@ -768,7 +858,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     const uniqueMembers = [
       ...new Map(members.map((member) => [member.did, member])).values(),
     ]
-    await this.db.transaction(async (tx) => {
+    await this.membershipDb.transaction(async (tx) => {
       await tx
         .delete(spaceMemberSnapshotTbl)
         .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
@@ -795,7 +885,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
 
   async upsertEnrolledActor(input: EnrolledActorUpsert): Promise<void> {
     const boundariesJson = JSON.stringify(input.boundaries)
-    await this.db
+    await this.membershipDb
       .insert(enrolledActorTbl)
       .values({
         did: input.did,
@@ -814,7 +904,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async getEnrolledActor(did: string): Promise<EnrolledActor | null> {
-    const rows = await this.db
+    const rows = await this.membershipDb
       .select()
       .from(enrolledActorTbl)
       .where(eq(enrolledActorTbl.did, did))
@@ -824,16 +914,21 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async listEnrolledActors(): Promise<EnrolledActor[]> {
-    const rows = await this.db.select().from(enrolledActorTbl)
+    const rows = await this.membershipDb.select().from(enrolledActorTbl)
     return rows.map(rowToEnrolledActor)
   }
 
   async deleteEnrolledActor(did: string): Promise<void> {
-    await this.db.delete(enrolledActorTbl).where(eq(enrolledActorTbl.did, did))
+    await this.membershipDb
+      .delete(enrolledActorTbl)
+      .where(eq(enrolledActorTbl.did, did))
   }
 
   async close(): Promise<void> {
-    this.db._client.close()
+    this.recordDb._client.close()
+    if (this.membershipDb !== this.recordDb) {
+      this.membershipDb._client.close()
+    }
   }
 }
 
