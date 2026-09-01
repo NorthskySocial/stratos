@@ -561,6 +561,16 @@ OAuth metadata and scope selector UI.
 | `repo:zone.stratos.feed.post`            | Read/write Stratos posts            | Requires `repo:zone.stratos.actor.enrollment` |
 | `rpc:zone.stratos.feedgen.getFeed?aud=*` | Call any feed generator's `getFeed` | None                                          |
 
+### Feed response records
+
+`zone.stratos.feedgen.getFeed` returns hydrated post views from both custody
+classes. A post view's `uri` is either a conventional `at://` record URI or a
+permissioned space record URI. Its required `boundaries` array contains the
+service-qualified boundaries used to admit that indexed record to the feed.
+Clients should use `post.author.did` for attribution instead of deriving the
+author from a fixed URI segment, because space record URIs place the member DID
+after the space authority and key.
+
 ### Scope utilities
 
 ```typescript

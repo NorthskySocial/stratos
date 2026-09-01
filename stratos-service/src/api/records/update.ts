@@ -11,6 +11,7 @@ import { AtUri as AtUriSyntax } from '@atproto/syntax'
 import type { AppContext } from '../../context-types.js'
 import { validateWritableRecord, withConcurrencyRetry } from './validation.js'
 import { createRepoManager } from './util.js'
+import { assertStratosCustody } from './custody.js'
 import {
   sequenceChange,
   type SequenceTrace,
@@ -111,6 +112,9 @@ export async function updateRecord(
       'InvalidCollection',
     )
   }
+
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  assertStratosCustody(enrollment)
 
   const { recordBytes, cid } = await prepareUpdatePhases(
     ctx,

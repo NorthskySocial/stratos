@@ -240,6 +240,398 @@ export function describeStoreContract(
       })
     })
 
+    describe('space sync cursor', () => {
+      const SPACE_URI = `at://${SPIKE_DID}/space/feed/bounty-hunters`
+      const OTHER_SPACE_URI = `at://${SPIKE_DID}/space/feed/syndicate`
+
+      it('upserts and reads back', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('cursor-1')
+      })
+
+      it('returns null for unknown (space, member) pair', async () => {
+        expect(
+          await store.getSpaceCursor(SPACE_URI, 'did:plc:unknown'),
+        ).toBeNull()
+      })
+
+      it('overwrites on conflict', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'cursor-2',
+          '2024-01-02T00:00:00.000Z',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('cursor-2')
+      })
+
+      it('scopes cursors independently per (space, member) pair', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          VASH_DID,
+          'vash-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'other-space-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe(
+          'faye-cursor',
+        )
+        expect(await store.getSpaceCursor(SPACE_URI, VASH_DID)).toBe(
+          'vash-cursor',
+        )
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBe(
+          'other-space-cursor',
+        )
+      })
+
+      it('deleteSpaceCursor removes one pair only and is idempotent', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'other-space-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.deleteSpaceCursor(SPACE_URI, FAYE_DID)).toBe(1)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBe(
+          'other-space-cursor',
+        )
+        // second call is a no-op
+        expect(await store.deleteSpaceCursor(SPACE_URI, FAYE_DID)).toBe(0)
+      })
+
+      it('deleteSpaceCursors removes every cursor held for a did across spaces', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'faye-cursor-2',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          VASH_DID,
+          'vash-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        expect(await store.deleteSpaceCursors(FAYE_DID)).toBe(2)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBeNull()
+        // VASH's cursor in the same space is untouched.
+        expect(await store.getSpaceCursor(SPACE_URI, VASH_DID)).toBe(
+          'vash-cursor',
+        )
+      })
+
+      it('deleteSpaceCursorsBySpace removes every member cursor in one space', async () => {
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          FAYE_DID,
+          'faye-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          SPACE_URI,
+          VASH_DID,
+          'vash-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+        await store.upsertSpaceCursor(
+          OTHER_SPACE_URI,
+          FAYE_DID,
+          'other-space-cursor',
+          '2024-01-01T00:00:00.000Z',
+        )
+
+        expect(await store.deleteSpaceCursorsBySpace(SPACE_URI)).toBe(2)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, VASH_DID)).toBeNull()
+        expect(await store.getSpaceCursor(OTHER_SPACE_URI, FAYE_DID)).toBe(
+          'other-space-cursor',
+        )
+        expect(await store.deleteSpaceCursorsBySpace(SPACE_URI)).toBe(0)
+      })
+    })
+
+    describe('unverified space sync staging', () => {
+      const SPACE_URI = `at://${SPIKE_DID}/space/feed/bounty-hunters`
+      const BOUNDARY = 'bounty-hunters'
+      const STAGED_URI = `at://${FAYE_DID}/zone.stratos.feed.post/staged`
+      const DELETED_URI = `at://${FAYE_DID}/zone.stratos.feed.post/deleted`
+
+      function stagedPost(overrides: Partial<PostUpsert> = {}): PostUpsert {
+        return makePost({
+          uri: STAGED_URI,
+          did: FAYE_DID,
+          cid: 'bafystaged',
+          record: { text: 'The stage is not a feed.' },
+          boundaries: [BOUNDARY],
+          ...overrides,
+        })
+      }
+
+      it('keeps staged updates and tombstones invisible until promotion', async () => {
+        const deletedPost = makePost({
+          uri: DELETED_URI,
+          did: FAYE_DID,
+          boundaries: [BOUNDARY],
+        })
+        await store.upsertPost(deletedPost)
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [
+            { kind: 'upsert', post: stagedPost() },
+            { kind: 'delete', uri: DELETED_URI },
+          ],
+          nextCursor: 'page-2',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        expect(await store.getPost(STAGED_URI)).toBeNull()
+        expect(await store.getPost(DELETED_URI)).not.toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('page-2')
+
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+        await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
+
+        expect(await store.getPost(DELETED_URI)).toBeNull()
+        expect(await store.getPost(STAGED_URI)).toMatchObject({
+          uri: STAGED_URI,
+          boundaries: [BOUNDARY],
+        })
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('page-2')
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+      })
+
+      it('drops staged state with a malformed cursor reset', async () => {
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [{ kind: 'upsert', post: stagedPost() }],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        await store.resetSpaceSyncState(SPACE_URI, FAYE_DID)
+        await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
+
+        expect(await store.getPost(STAGED_URI)).toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+      })
+
+      it('keeps a partial stage but resets a pending terminal stage', async () => {
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [{ kind: 'upsert', post: stagedPost() }],
+          nextCursor: 'page-2',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('page-2')
+
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(true)
+        await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
+
+        expect(await store.getPost(STAGED_URI)).toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+      })
+
+      it('clears a terminal marker when staged state is purged', async () => {
+        const stageTerminalMarker = async (): Promise<void> => {
+          await store.stageSpaceSyncPage({
+            spaceUri: SPACE_URI,
+            did: FAYE_DID,
+            boundary: BOUNDARY,
+            mutations: [],
+            updatedAt: '2024-01-01T00:00:00.000Z',
+          })
+        }
+
+        await stageTerminalMarker()
+        await store.deleteSpaceSyncStage(SPACE_URI, FAYE_DID)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+
+        await stageTerminalMarker()
+        await store.deleteSpaceSyncStages(FAYE_DID)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+
+        await stageTerminalMarker()
+        await store.deleteSpaceSyncStagesBySpace(SPACE_URI)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+      })
+
+      it('clears staged state when a guarded boundary purge commits', async () => {
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [{ kind: 'upsert', post: stagedPost() }],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        expect(
+          await store.deleteActorBoundaryStateGuarded(
+            SPACE_URI,
+            FAYE_DID,
+            BOUNDARY,
+            () => true,
+          ),
+        ).toMatchObject({ committed: true })
+        await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
+
+        expect(await store.getPost(STAGED_URI)).toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+      })
+    })
+
+    describe('space member snapshot', () => {
+      it('returns an empty snapshot for an unknown boundary', async () => {
+        expect(await store.listSpaceMembers('unknown')).toEqual([])
+      })
+
+      it('atomically replaces one boundary without changing another', async () => {
+        await store.replaceSpaceMembers('bounty-hunters', [
+          { did: VASH_DID, custody: 'stratos' },
+          { did: FAYE_DID, custody: 'stratos' },
+          {
+            did: FAYE_DID,
+            custody: 'pds',
+            host: 'https://pds.faye.example',
+          },
+        ])
+        await store.replaceSpaceMembers('nerv', [
+          { did: SHINJI_DID, custody: 'pds' },
+        ])
+
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
+          {
+            did: FAYE_DID,
+            custody: 'pds',
+            host: 'https://pds.faye.example',
+          },
+          { did: VASH_DID, custody: 'stratos' },
+        ])
+
+        await store.replaceSpaceMembers('bounty-hunters', [
+          { did: SPIKE_DID, custody: 'pds', host: 'https://pds.spike.example' },
+        ])
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([
+          {
+            did: SPIKE_DID,
+            custody: 'pds',
+            host: 'https://pds.spike.example',
+          },
+        ])
+        expect(await store.listSpaceMembers('nerv')).toEqual([
+          { did: SHINJI_DID, custody: 'pds' },
+        ])
+      })
+
+      it('replaces a boundary with an empty snapshot', async () => {
+        await store.replaceSpaceMembers('bounty-hunters', [
+          { did: SPIKE_DID, custody: 'pds' },
+        ])
+        await store.replaceSpaceMembers('bounty-hunters', [])
+        expect(await store.listSpaceMembers('bounty-hunters')).toEqual([])
+      })
+
+      it('persists a default-cap snapshot without exceeding bind limits', async () => {
+        const memberCount = 10_000
+        await store.replaceSpaceMembers(
+          'bounty-hunters',
+          Array.from({ length: memberCount }, (_, index) => ({
+            did: `did:plc:member${index.toString().padStart(5, '0')}`,
+            custody: index % 2 === 0 ? ('pds' as const) : ('stratos' as const),
+            ...(index % 2 === 0
+              ? { host: `https://pds-${index}.example` }
+              : {}),
+          })),
+        )
+
+        const stored = await store.listSpaceMembers('bounty-hunters')
+        expect(stored).toHaveLength(memberCount)
+        expect(stored[0]).toEqual({
+          did: 'did:plc:member00000',
+          custody: 'pds',
+          host: 'https://pds-0.example',
+        })
+        expect(stored.at(-1)).toEqual({
+          did: 'did:plc:member09999',
+          custody: 'stratos',
+        })
+      })
+    })
+
     describe('enrolled actor', () => {
       it('upserts and reads back', async () => {
         const a = makeActor()
@@ -381,6 +773,62 @@ export function describeStoreContract(
         expect(await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')).toBe(0)
         expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
       })
+
+      it('guarded actor-boundary deletion commits or rolls back cursor and posts together', async () => {
+        const spaceUri = `at://${SPIKE_DID}/zone.stratos.space.feed/gone`
+        const post = makePost({
+          uri: `at://${SPIKE_DID}/p/guarded`,
+          boundaries: ['gone'],
+        })
+        await store.upsertPost(post)
+        await store.upsertSpaceCursor(
+          spaceUri,
+          SPIKE_DID,
+          'cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+
+        expect(
+          await store.deleteActorBoundaryStateGuarded(
+            spaceUri,
+            SPIKE_DID,
+            'gone',
+            () => false,
+          ),
+        ).toEqual({ committed: false, posts: 0, spaceCursors: 0 })
+        expect(await store.getPost(post.uri)).not.toBeNull()
+        expect(await store.getSpaceCursor(spaceUri, SPIKE_DID)).toBe('cursor-1')
+
+        expect(
+          await store.deleteActorBoundaryStateGuarded(
+            spaceUri,
+            SPIKE_DID,
+            'gone',
+            () => true,
+          ),
+        ).toEqual({ committed: true, posts: 1, spaceCursors: 1 })
+        expect(await store.getPost(post.uri)).toBeNull()
+        expect(await store.getSpaceCursor(spaceUri, SPIKE_DID)).toBeNull()
+      })
+
+      it('deletePostsByDidBoundary remains set-based beyond legacy SQLite bind limits', async () => {
+        const postCount = 1_100
+        for (let index = 0; index < postCount; index += 1) {
+          await store.upsertPost(
+            makePost({
+              uri: `at://${SPIKE_DID}/p/scale-${index}`,
+              boundaries: ['gone'],
+            }),
+          )
+        }
+
+        expect(await store.deletePostsByDidBoundary(SPIKE_DID, 'gone')).toBe(
+          postCount,
+        )
+        expect(
+          await store.listPostsByBoundary({ boundary: 'gone', limit: 1 }),
+        ).toEqual({ posts: [] })
+      }, 15_000)
 
       it('deletePostsByBoundary removes every actor post in a boundary service-wide', async () => {
         await store.upsertPost(

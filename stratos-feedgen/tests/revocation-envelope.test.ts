@@ -26,8 +26,8 @@ import type { ResolveEnrollmentsResult } from '../src/upstream/index.js'
  */
 
 const VIEWER = 'did:plc:viewer'
-const BOUNDARY_A = 'nerv.tokyo.jp/alpha'
-const BOUNDARY_B = 'nerv.tokyo.jp/beta'
+const BOUNDARY_A = 'did:web:nerv.tokyo.jp/alpha'
+const BOUNDARY_B = 'did:web:nerv.tokyo.jp/beta'
 const ONE_HOUR_MS = 60 * 60 * 1000
 
 // ---- Fake service-stream WebSocket (mirrors service-stream.test.ts) --------

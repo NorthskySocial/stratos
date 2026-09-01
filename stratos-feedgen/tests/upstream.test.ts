@@ -7,10 +7,12 @@ import {
 } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
+import { StratosError } from '@northskysocial/stratos-core'
 
 import {
   UpstreamStratosClient,
   StratosClientError,
+  StratosInvalidResponseError,
   describeUpstreamError,
 } from '../src/upstream/index.js'
 
@@ -340,6 +342,326 @@ describe('UpstreamStratosClient', () => {
         lxm: 'zone.stratos.space.getSpaceCredential',
       })
     })
+
+    it('aborts an unresponsive credential request at the configured timeout', async () => {
+      let receivedSignal: AbortSignal | null | undefined
+      const fetchImpl = async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> =>
+        new Promise<Response>((_resolve, reject) => {
+          receivedSignal = init?.signal
+          const signal = init?.signal
+          if (!signal) return
+          const rejectForAbort = () => reject(signal.reason)
+          if (signal.aborted) {
+            rejectForAbort()
+          } else {
+            signal.addEventListener('abort', rejectForAbort, { once: true })
+          }
+        })
+      const timeoutClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl,
+        requestTimeoutMs: 10,
+      })
+
+      const request = timeoutClient.getSpaceCredential({
+        space: 'at://did:web:stratos.test/space/zone.stratos.space.feed/spike',
+        delegationToken: 'delegation-token-value',
+        buildMintProof: async () => 'proof',
+      })
+      let guardTimer!: ReturnType<typeof setTimeout>
+      const hangGuard = new Promise<never>((_resolve, reject) => {
+        guardTimer = setTimeout(
+          () => reject(new Error('getSpaceCredential did not time out')),
+          500,
+        )
+      })
+      try {
+        await expect(Promise.race([request, hangGuard])).rejects.toMatchObject({
+          name: 'TimeoutError',
+        })
+      } finally {
+        clearTimeout(guardTimer)
+      }
+      expect(receivedSignal).toBeInstanceOf(AbortSignal)
+      expect(receivedSignal?.aborted).toBe(true)
+    })
+  })
+
+  describe('listSpaceRepos', () => {
+    function fakeCredentialProof(credential = 'space-credential-value') {
+      const proofCalls: Array<{ htm: string; htu: string }> = []
+      return {
+        credential,
+        proofCalls,
+        createPresentationProof: async (htm: string, htu: string) => {
+          proofCalls.push({ htm, htu })
+          return `presentation-proof-for-${htm}-${htu}`
+        },
+      }
+    }
+
+    const SPACE_URI =
+      'at://did:web:stratos.test/space/zone.stratos.space.feed/spike'
+
+    it('GETs the mirror with a DPoP credential header and a presentation proof', async () => {
+      const credentialProof = fakeCredentialProof()
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            repos: [
+              {
+                did: 'did:plc:asuka',
+                custody: 'pds',
+                host: 'https://nerv.example',
+                hostSource: 'did-document',
+              },
+            ],
+          }),
+        )
+      }
+      const result = await client.listSpaceRepos(
+        { space: SPACE_URI },
+        credentialProof,
+      )
+      expect(result.repos).toEqual([
+        {
+          did: 'did:plc:asuka',
+          custody: 'pds',
+          host: 'https://nerv.example',
+          hostSource: 'did-document',
+        },
+      ])
+      expect(mock.requests).toHaveLength(1)
+      const req = mock.requests[0]
+      expect(req.method).toBe('GET')
+      expect(req.url).toBe(
+        '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
+      )
+      expect(req.headers.authorization).toBe('DPoP space-credential-value')
+      expect(req.headers.accept).toBe('application/json')
+      expect(req.headers.dpop).toBe(
+        `presentation-proof-for-GET-${mock.baseUrl}/xrpc/zone.stratos.space.listRepos`,
+      )
+      expect(credentialProof.proofCalls).toEqual([
+        {
+          htm: 'GET',
+          htu: `${mock.baseUrl}/xrpc/zone.stratos.space.listRepos`,
+        },
+      ])
+    })
+
+    it('sends limit and cursor as query params when provided', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ repos: [], cursor: 'next-cursor' }))
+      }
+      const result = await client.listSpaceRepos(
+        { space: SPACE_URI, limit: 50, cursor: 'prev-cursor' },
+        fakeCredentialProof(),
+      )
+      expect(result).toEqual({ repos: [], cursor: 'next-cursor' })
+      const url = new URL(mock.requests[0].url, mock.baseUrl)
+      expect(url.searchParams.get('limit')).toBe('50')
+      expect(url.searchParams.get('cursor')).toBe('prev-cursor')
+    })
+
+    it('builds the presentation proof htu from publicUrl, not serviceUrl', async () => {
+      const publicClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        publicUrl: 'https://stratos.public.test',
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+      })
+      const credentialProof = fakeCredentialProof()
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ repos: [] }))
+      }
+      await publicClient.listSpaceRepos({ space: SPACE_URI }, credentialProof)
+      expect(mock.requests[0].url).toBe(
+        '/xrpc/zone.stratos.space.listRepos?space=at%3A%2F%2Fdid%3Aweb%3Astratos.test%2Fspace%2Fzone.stratos.space.feed%2Fspike',
+      )
+      expect(credentialProof.proofCalls).toEqual([
+        {
+          htm: 'GET',
+          htu: 'https://stratos.public.test/xrpc/zone.stratos.space.listRepos',
+        },
+      ])
+    })
+
+    it('throws StratosClientError on non-2xx (e.g. AuthRequired)', async () => {
+      mock.handler = (_req, res) => {
+        res.statusCode = 401
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'AuthRequired' }))
+      }
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).rejects.toMatchObject({
+        name: 'StratosClientError',
+        status: 401,
+        lxm: 'zone.stratos.space.listRepos',
+      })
+    })
+
+    it('sets a timeout signal on the membership request', async () => {
+      const fetchImpl = async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal)
+        return new Response(JSON.stringify({ repos: [] }), {
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      const timeoutClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl,
+        requestTimeoutMs: 50,
+      })
+      await expect(
+        timeoutClient.listSpaceRepos(
+          { space: SPACE_URI },
+          fakeCredentialProof(),
+        ),
+      ).resolves.toEqual({ repos: [] })
+    })
+
+    it('combines caller cancellation with the membership request timeout', async () => {
+      let receivedSignal: AbortSignal | null | undefined
+      let markRequestStarted!: () => void
+      const requestStarted = new Promise<void>((resolve) => {
+        markRequestStarted = resolve
+      })
+      const fetchImpl = async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> =>
+        new Promise<Response>((_resolve, reject) => {
+          receivedSignal = init?.signal
+          markRequestStarted()
+          const signal = init?.signal
+          if (!signal) return
+          const rejectForAbort = () => reject(signal.reason)
+          if (signal.aborted) {
+            rejectForAbort()
+          } else {
+            signal.addEventListener('abort', rejectForAbort, { once: true })
+          }
+        })
+      const cancellableClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl,
+        requestTimeoutMs: 60_000,
+      })
+      const controller = new AbortController()
+
+      const request = cancellableClient
+        .listSpaceRepos(
+          { space: SPACE_URI },
+          fakeCredentialProof(),
+          controller.signal,
+        )
+        .catch((cause: unknown) => cause)
+      await requestStarted
+      controller.abort()
+
+      const error = await request
+      expect(error).toMatchObject({ name: 'AbortError' })
+      expect(receivedSignal).toBeInstanceOf(AbortSignal)
+      expect(receivedSignal).not.toBe(controller.signal)
+      expect(receivedSignal?.aborted).toBe(true)
+    })
+
+    it.each([
+      ['absent', { did: 'did:plc:asuka' }],
+      ['unrecognized', { did: 'did:plc:asuka', custody: 'other' }],
+      ['malformed', { did: 'did:plc:asuka', custody: 42 }],
+    ])('normalizes %s custody to stratos', async (_name, repo) => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ repos: [repo] }))
+      }
+
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).resolves.toEqual({
+        repos: [{ did: 'did:plc:asuka', custody: 'stratos' }],
+      })
+    })
+
+    it.each([
+      ['an array body', []],
+      ['a missing repos field', {}],
+      ['a non-object repo', { repos: [null] }],
+      ['a repo without a DID', { repos: [{ custody: 'pds' }] }],
+      [
+        'an invalid host source',
+        {
+          repos: [
+            {
+              did: 'did:plc:asuka',
+              custody: 'pds',
+              hostSource: 'unknown',
+            },
+          ],
+        },
+      ],
+      ['a non-string cursor', { repos: [], cursor: 42 }],
+    ] as const)('rejects %s', async (_name, body) => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(body))
+      }
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).rejects.toBeInstanceOf(StratosInvalidResponseError)
+    })
+
+    it('rejects a non-JSON response with the typed response error', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'text/plain')
+        res.end('not JSON')
+      }
+      await expect(
+        client.listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof()),
+      ).rejects.toBeInstanceOf(StratosInvalidResponseError)
+    })
+
+    it('does not classify a body timeout as an invalid response', async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new DOMException('timed out', 'TimeoutError'))
+        },
+      })
+      const timeoutClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: async () => new Response(body),
+      })
+      const err = await timeoutClient
+        .listSpaceRepos({ space: SPACE_URI }, fakeCredentialProof())
+        .catch((cause: unknown) => cause)
+      expect(err).toBeInstanceOf(DOMException)
+      expect((err as Error).name).toBe('TimeoutError')
+      expect(err).not.toBeInstanceOf(StratosInvalidResponseError)
+    })
   })
 
   describe('trailing slash normalization', () => {
@@ -394,6 +716,29 @@ describe('UpstreamStratosClient', () => {
   })
 })
 
+describe('StratosInvalidResponseError', () => {
+  it('keeps upstream response failures in the domain error taxonomy', () => {
+    const invalid = new StratosInvalidResponseError(
+      'https://stratos.bebop.test/xrpc/zone.stratos.space.listSpaceRepos',
+      'zone.stratos.space.listSpaceRepos',
+      'repos was not an array',
+    )
+    expect(invalid.message).toBe(
+      'Stratos response was invalid: repos was not an array (https://stratos.bebop.test/xrpc/zone.stratos.space.listSpaceRepos)',
+    )
+    expect(invalid.code).toBe('StratosInvalidResponse')
+    const client = new StratosClientError({
+      status: 500,
+      body: '',
+      url: 'https://stratos.bebop.test',
+      lxm: 'zone.stratos.space.listSpaceRepos',
+    })
+    expect(invalid).toBeInstanceOf(StratosError)
+    expect(client).toBeInstanceOf(StratosError)
+    expect(client.code).toBe('StratosClientError')
+  })
+})
+
 describe('StratosClientError', () => {
   it('exposes status, body, lxm, url', () => {
     const err = new StratosClientError({
@@ -407,6 +752,8 @@ describe('StratosClientError', () => {
     expect(err.lxm).toBe('foo')
     expect(err.url).toBe('https://x/xrpc/foo')
     expect(err.name).toBe('StratosClientError')
+    expect(err).toBeInstanceOf(StratosError)
+    expect(err.code).toBe('StratosClientError')
   })
 })
 

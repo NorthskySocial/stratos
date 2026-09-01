@@ -28,6 +28,7 @@ export interface PostView {
   author: { did: string; handle?: string }
   record: Record<string, unknown>
   indexedAt: string
+  boundaries: string[]
 }
 
 export interface FeedViewPost {
@@ -100,6 +101,7 @@ function toFeedViewPost(post: IndexedPost): FeedViewPost {
       author: { did: post.did },
       record: post.record,
       indexedAt: post.indexedAt,
+      boundaries: post.boundaries,
     },
   }
 }

@@ -9,6 +9,10 @@ export interface ShutdownDeps {
    */
   startup?: Promise<void> | null
   serviceStream?: { stop: () => void | Promise<void> } | null
+  spaceSyncScheduler?: {
+    stop: () => Promise<void>
+    abortActivePass: () => void
+  } | null
   actorPool?: { stop: () => Promise<void> } | null
   store?: { close: () => Promise<void> } | null
   logger: Logger
@@ -55,6 +59,11 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       }
       await awaitStartup(deps.startup, drainTimeoutMs, deps.logger)
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
+      await stopSpaceSyncScheduler(
+        deps.spaceSyncScheduler,
+        drainTimeoutMs,
+        deps.logger,
+      )
       await deps.actorPool?.stop()
       await deps.store?.close()
       deps.logger.info({ signal }, 'shutdown complete')
@@ -149,6 +158,23 @@ async function stopServiceStream(
       { timeoutMs },
       'service stream drain deadline expired; continuing shutdown',
     )
+  }
+}
+
+async function stopSpaceSyncScheduler(
+  scheduler: ShutdownDeps['spaceSyncScheduler'],
+  timeoutMs: number,
+  logger: Logger,
+): Promise<void> {
+  if (!scheduler) return
+  const stopped = scheduler.stop()
+  if ((await raceDeadline(stopped, timeoutMs)) === 'timeout') {
+    logger.warn(
+      { timeoutMs },
+      'space sync scheduler drain deadline expired; aborting active pass',
+    )
+    scheduler.abortActivePass()
+    await stopped
   }
 }
 

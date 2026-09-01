@@ -104,6 +104,12 @@ describe('createShutdownHandler', () => {
           events.push('serviceStream.stop')
         },
       },
+      spaceSyncScheduler: {
+        stop: async () => {
+          events.push('spaceSyncScheduler.stop')
+        },
+        abortActivePass: vi.fn(),
+      },
       actorPool: {
         stop: async () => {
           events.push('pool.stop.start')
@@ -133,6 +139,7 @@ describe('createShutdownHandler', () => {
     await done
     expect(events).toEqual([
       'serviceStream.stop',
+      'spaceSyncScheduler.stop',
       'pool.stop.start',
       'pool.stop.end',
       'store.close',
@@ -147,6 +154,98 @@ describe('createShutdownHandler', () => {
     // The drain deadline timer must be cleared once the drain wins the race.
     expect(clearTimeoutSpy).toHaveBeenCalled()
     clearTimeoutSpy.mockRestore()
+  })
+
+  it('stops the space sync scheduler before closing the store', async () => {
+    const events: string[] = []
+    const schedulerDrain = deferred()
+    const exit = vi.fn()
+    const handler = createShutdownHandler({
+      spaceSyncScheduler: {
+        stop: async () => {
+          events.push('scheduler.stop.start')
+          await schedulerDrain.promise
+          events.push('scheduler.stop.end')
+        },
+        abortActivePass: vi.fn(),
+      },
+      store: {
+        close: async () => {
+          events.push('store.close')
+        },
+      },
+      logger: nullLogger,
+      exit,
+    })
+
+    const done = handler('SIGTERM')
+    await vi.waitFor(() => expect(events).toContain('scheduler.stop.start'))
+    expect(events).toEqual(['scheduler.stop.start'])
+    schedulerDrain.resolve()
+    await done
+
+    expect(events).toEqual([
+      'scheduler.stop.start',
+      'scheduler.stop.end',
+      'store.close',
+    ])
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it('aborts the space sync scheduler at the deadline and keeps the store open until it drains', async () => {
+    vi.useFakeTimers()
+    try {
+      const events: string[] = []
+      const lines: CapturedLine[] = []
+      const exit = vi.fn()
+      const schedulerDrain = deferred()
+      const handler = createShutdownHandler({
+        spaceSyncScheduler: {
+          stop: () => {
+            events.push('scheduler.stop')
+            return schedulerDrain.promise
+          },
+          abortActivePass: () => {
+            events.push('scheduler.abort')
+          },
+        },
+        store: {
+          close: async () => {
+            events.push('store.close')
+          },
+        },
+        logger: captureLogger(lines),
+        drainTimeoutMs: 50,
+        exit,
+      })
+
+      const done = handler('SIGTERM')
+      await vi.advanceTimersByTimeAsync(49)
+      expect(events).toEqual(['scheduler.stop'])
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(events).toEqual(['scheduler.stop', 'scheduler.abort'])
+      expect(exit).not.toHaveBeenCalled()
+
+      schedulerDrain.resolve()
+      await done
+
+      expect(events).toEqual([
+        'scheduler.stop',
+        'scheduler.abort',
+        'store.close',
+      ])
+      expect(exit).toHaveBeenCalledWith(0)
+      expect(lines).toContainEqual(
+        expect.objectContaining({
+          level: 'warn',
+          obj: { timeoutMs: 50 },
+          msg: 'space sync scheduler drain deadline expired; aborting active pass',
+        }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('destroys sockets still open at the drain deadline and exits 0', async () => {
@@ -432,33 +531,45 @@ describe('createShutdownHandler', () => {
     expect(exit).toHaveBeenCalledWith(0)
   })
 
-  it('exits 1 immediately on a second signal', async () => {
-    const lines: CapturedLine[] = []
-    const { httpServer } = await listen((_req, res) => res.end())
-    const exit = vi.fn()
-    const poolDrain = deferred()
-    const storeClose = vi.fn(async () => {})
-    const handler = createShutdownHandler({
-      httpServer,
-      actorPool: { stop: () => poolDrain.promise },
-      store: { close: storeClose },
-      logger: captureLogger(lines),
-      exit,
-    })
+  it('exits 1 on a second signal while the scheduler ignores cancellation', async () => {
+    vi.useFakeTimers()
+    try {
+      const lines: CapturedLine[] = []
+      const exit = vi.fn()
+      const schedulerDrain = deferred()
+      const abortActivePass = vi.fn()
+      const storeClose = vi.fn(async () => {})
+      const handler = createShutdownHandler({
+        spaceSyncScheduler: {
+          stop: () => schedulerDrain.promise,
+          abortActivePass,
+        },
+        store: { close: storeClose },
+        logger: captureLogger(lines),
+        drainTimeoutMs: 50,
+        exit,
+      })
 
-    const first = handler('SIGTERM')
-    await handler('SIGINT')
-    expect(exit).toHaveBeenCalledWith(1)
-    const warns = lines.filter((l) => l.level === 'warn')
-    expect(warns).toHaveLength(1)
-    expect(warns[0]?.msg).toBe('second shutdown signal; forcing exit')
-    expect(warns[0]?.obj['signal']).toBe('SIGINT')
+      const first = handler('SIGTERM')
+      await vi.advanceTimersByTimeAsync(50)
+      expect(abortActivePass).toHaveBeenCalledOnce()
+      expect(storeClose).not.toHaveBeenCalled()
 
-    poolDrain.resolve()
-    await first
-    expect(exit).toHaveBeenLastCalledWith(0)
-    expect(storeClose).toHaveBeenCalledTimes(1)
-    expect(lines.filter((l) => l.level === 'error')).toEqual([])
+      await handler('SIGINT')
+      expect(exit).toHaveBeenCalledWith(1)
+      const secondSignal = lines.find(
+        (line) => line.msg === 'second shutdown signal; forcing exit',
+      )
+      expect(secondSignal?.obj['signal']).toBe('SIGINT')
+
+      schedulerDrain.resolve()
+      await first
+      expect(exit).toHaveBeenLastCalledWith(0)
+      expect(storeClose).toHaveBeenCalledTimes(1)
+      expect(lines.filter((l) => l.level === 'error')).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('exits 1 when a shutdown step fails', async () => {

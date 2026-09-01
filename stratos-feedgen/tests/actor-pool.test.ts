@@ -88,6 +88,14 @@ function findSyncer(did: string): FakeSyncer {
   return s
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 describe('ActorPool', () => {
   it('addActor is idempotent and tracks active actors', () => {
     const pool = makePool()
@@ -251,6 +259,65 @@ describe('ActorPool', () => {
     releaseDrain()
     await stopping
     expect(drained).toBe(true)
+  })
+
+  it('removeActorAndDrain awaits both old and new same-DID retirements', async () => {
+    const did = 'did:plc:motokokusanagi'
+    const drains = [
+      { started: deferred(), release: deferred(), finished: deferred() },
+      { started: deferred(), release: deferred(), finished: deferred() },
+    ]
+    let generation = 0
+    const pool = new ActorPool(
+      {
+        stratosServiceUrl: 'http://stratos.test',
+        mintToken: async () => 'tok',
+        connectDelayMs: 0,
+        idleEvictionMs: 0,
+      },
+      {
+        store,
+        indexer,
+        syncerFactory: (config) => {
+          const syncer = new FakeSyncer(config)
+          const drain = drains[generation++]
+          if (!drain) throw new Error('unexpected extra syncer generation')
+          syncer.drainAndStop = async (): Promise<void> => {
+            drain.started.resolve()
+            await drain.release.promise
+            drain.finished.resolve()
+          }
+          return syncer as unknown as ActorSyncer
+        },
+      },
+    )
+    pool.start()
+
+    pool.addActor(did)
+    pool.removeActor(did)
+    await drains[0].started.promise
+
+    pool.addActor(did)
+    expect(pool.getActiveActors()).toEqual([did])
+    expect(FakeSyncer.instances).toHaveLength(2)
+
+    let removalResolved = false
+    const removal = pool.removeActorAndDrain(did).then(() => {
+      removalResolved = true
+    })
+    await drains[1].started.promise
+
+    drains[1].release.resolve()
+    await drains[1].finished.promise
+    await new Promise((resolve) => setImmediate(resolve))
+    const resolvedBeforeOldDrain = removalResolved
+
+    drains[0].release.resolve()
+    await drains[0].finished.promise
+    await removal
+
+    expect(resolvedBeforeOldDrain).toBe(false)
+    expect(removalResolved).toBe(true)
   })
 
   it('routes a retired drain rejection to onError and stop() still resolves', async () => {

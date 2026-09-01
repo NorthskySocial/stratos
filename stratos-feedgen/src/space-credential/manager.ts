@@ -10,8 +10,7 @@ import { mintDelegationToken } from './delegation.js'
 
 /**
  * Holds and refreshes the space credential this feedgen needs to read a
- * member's repo as a spaces syncer (consumed by MM-06; not wired into the
- * sync path here).
+ * member's repo as a spaces syncer.
  *
  * One credential is held per boundary, bound to a single DPoP key generated
  * once for the manager's lifetime. Mints a fresh credential on first use,
@@ -24,7 +23,7 @@ import { mintDelegationToken } from './delegation.js'
  * `stratos-service/src/oauth/client.ts`'s `SPACE_TYPE` — the only space type
  * Stratos currently hosts.
  */
-const SPACE_TYPE = 'zone.stratos.space.feed'
+export const STRATOS_FEED_SPACE_TYPE = 'zone.stratos.space.feed'
 
 /** Refresh once within this many ms of expiry. Small relative to the 2h server-side default TTL. */
 export const DEFAULT_REFRESH_MARGIN_MS = 5 * 60_000
@@ -110,23 +109,34 @@ export class SpaceCredentialManager {
    * failure with a still-valid held credential returns that credential
    * instead — it was already verified and has not expired.
    */
-  async getCredential(boundary: string): Promise<HeldSpaceCredential> {
+  async getCredential(
+    boundary: string,
+    signal?: AbortSignal,
+  ): Promise<HeldSpaceCredential> {
+    signal?.throwIfAborted()
     const existing = this.held.get(boundary)
     if (existing && !this.needsRefresh(existing)) {
       return this.toHeld(boundary, existing)
     }
 
-    const inflight = this.inflight.get(boundary)
-    if (inflight) return inflight
+    let mint = this.inflight.get(boundary)
+    if (!mint) {
+      const startedMint = this.refresh(boundary, existing)
+      mint = startedMint
+      this.inflight.set(boundary, startedMint)
+      void startedMint.then(
+        () => this.clearInflight(boundary, startedMint),
+        () => this.clearInflight(boundary, startedMint),
+      )
+    }
+    return await waitForCredential(mint, signal)
+  }
 
-    const promise = this.refresh(boundary, existing)
-    this.inflight.set(boundary, promise)
-    try {
-      return await promise
-    } finally {
-      // Unlike `EnrollmentManager`, nothing else writes to `inflight` for a
-      // boundary already in flight — no `invalidate()` exists here to detach
-      // an entry — so the slot always still holds this promise.
+  private clearInflight(
+    boundary: string,
+    settled: Promise<HeldSpaceCredential>,
+  ): void {
+    if (this.inflight.get(boundary) === settled) {
       this.inflight.delete(boundary)
     }
   }
@@ -154,7 +164,7 @@ export class SpaceCredentialManager {
   }
 
   private async mint(boundary: string): Promise<HeldState> {
-    const spaceUriResult = boundaryToSpaceUri(boundary, SPACE_TYPE)
+    const spaceUriResult = boundaryToSpaceUri(boundary, STRATOS_FEED_SPACE_TYPE)
     if (!spaceUriResult.ok) {
       throw new Error(
         `cannot map boundary "${boundary}" to a space URI: ${spaceUriResult.error.message}`,
@@ -203,6 +213,37 @@ export class SpaceCredentialManager {
       },
     }
   }
+}
+
+function waitForCredential<T>(
+  credential: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return credential
+  signal.throwIfAborted()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort)
+      reject(asError(signal.reason, 'space credential wait aborted'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    void credential.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(asError(err, 'space credential mint failed'))
+      },
+    )
+  })
+}
+
+function asError(reason: unknown, message: string): Error {
+  return reason instanceof Error
+    ? reason
+    : new Error(message, { cause: reason })
 }
 
 /**

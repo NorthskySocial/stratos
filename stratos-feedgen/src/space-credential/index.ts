@@ -5,7 +5,11 @@ export {
   mintDelegationToken,
 } from './delegation.js'
 export type { MintDelegationTokenInput } from './delegation.js'
-export { DEFAULT_REFRESH_MARGIN_MS, SpaceCredentialManager } from './manager.js'
+export {
+  DEFAULT_REFRESH_MARGIN_MS,
+  SpaceCredentialManager,
+  STRATOS_FEED_SPACE_TYPE,
+} from './manager.js'
 export type {
   HeldSpaceCredential,
   SpaceCredentialManagerOptions,
