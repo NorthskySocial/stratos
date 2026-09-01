@@ -93,9 +93,7 @@ export class FeedgenHarness {
         TEMP: this.childTmpDir,
         TMP: this.childTmpDir,
         TMPDIR: this.childTmpDir,
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipSqlitePath(
-          this.childTmpDir,
-        ),
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipSqlitePath(this.childTmpDir),
         STRATOS_SERVICE_URL: STRATOS_URL,
         STRATOS_PUBLIC_URL: STRATOS_URL,
         STRATOS_SERVICE_DID: SERVICE_DID,
