@@ -62,7 +62,7 @@ function sqliteClientUrl(location: string): string {
     : pathToFileURL(resolve(location)).href
 }
 
-/** Migrate the materialized record index and the cursors that checkpoint it. */
+/** Migrate the materialized record index and its checkpointed sync state. */
 export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
   await db._initialized
   await db.run(sql`
@@ -107,19 +107,6 @@ export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
       PRIMARY KEY (spaceUri, did)
     )
   `)
-}
-
-/** Migrate durable enrollment and completed space-membership snapshots. */
-export async function migrateMembershipSqliteDb(db: SqliteDb): Promise<void> {
-  await db._initialized
-  await db.run(sql`
-    CREATE TABLE IF NOT EXISTS enrolled_actor (
-      did TEXT PRIMARY KEY,
-      boundariesJson TEXT NOT NULL,
-      enrolledAt TEXT NOT NULL,
-      lastSeenAt TEXT NOT NULL
-    )
-  `)
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS space_sync_stage (
       spaceUri TEXT NOT NULL,
@@ -140,6 +127,19 @@ export async function migrateMembershipSqliteDb(db: SqliteDb): Promise<void> {
       spaceUri TEXT NOT NULL,
       did TEXT NOT NULL,
       PRIMARY KEY (spaceUri, did)
+    )
+  `)
+}
+
+/** Migrate durable enrollment and completed space-membership snapshots. */
+export async function migrateMembershipSqliteDb(db: SqliteDb): Promise<void> {
+  await db._initialized
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS enrolled_actor (
+      did TEXT PRIMARY KEY,
+      boundariesJson TEXT NOT NULL,
+      enrolledAt TEXT NOT NULL,
+      lastSeenAt TEXT NOT NULL
     )
   `)
   await db.run(sql`
@@ -442,7 +442,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async stageSpaceSyncPage(input: SpaceSyncStagePage): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    await this.recordDb.transaction(async (tx) => {
       for (const mutation of input.mutations) {
         if (mutation.kind === 'delete') {
           await tx
@@ -534,7 +534,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async promoteSpaceSyncStage(spaceUri: string, did: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    await this.recordDb.transaction(async (tx) => {
       const stages = await tx
         .select()
         .from(spaceSyncStageTbl)
@@ -603,7 +603,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
     spaceUri: string,
     did: string,
   ): Promise<boolean> {
-    return this.db.transaction(async (tx) => {
+    return this.recordDb.transaction(async (tx) => {
       const pending = await tx
         .delete(spaceSyncPendingVerificationTbl)
         .where(
@@ -634,7 +634,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async resetSpaceSyncState(spaceUri: string, did: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    await this.recordDb.transaction(async (tx) => {
       await tx
         .delete(spaceSyncPendingVerificationTbl)
         .where(
@@ -663,7 +663,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deleteSpaceSyncStage(spaceUri: string, did: string): Promise<number> {
-    return this.db.transaction(async (tx) => {
+    return this.recordDb.transaction(async (tx) => {
       const deleted = await tx
         .delete(spaceSyncStageTbl)
         .where(
@@ -685,7 +685,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deleteSpaceSyncStages(did: string): Promise<number> {
-    return this.db.transaction(async (tx) => {
+    return this.recordDb.transaction(async (tx) => {
       const deleted = await tx
         .delete(spaceSyncStageTbl)
         .where(eq(spaceSyncStageTbl.did, did))
@@ -697,7 +697,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deleteSpaceSyncStagesBySpace(spaceUri: string): Promise<number> {
-    return this.db.transaction(async (tx) => {
+    return this.recordDb.transaction(async (tx) => {
       const deleted = await tx
         .delete(spaceSyncStageTbl)
         .where(eq(spaceSyncStageTbl.spaceUri, spaceUri))
