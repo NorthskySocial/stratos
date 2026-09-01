@@ -7,20 +7,6 @@
 //   --appview  Bring up the AppView stack and run the service-auth subscription
 //              feed phase. Implies the PostgreSQL backend.
 //
-// Phases:
-//   1. setup — create PDS accounts, start Stratos
-//   2. enrollment — OAuth enrollment via Playwright
-//   3. boundaries — configure per-user boundaries via the admin API
-//   4. posts — post CRUD + boundary access control
-//   4b. dpop — record CRUD through the production DPoP auth path
-//   4c. blobs — blob upload and boundary-scoped getBlob access
-//   4d. spaces — space credentials, credential-authed read/sync, revocation
-//   4e. sync-stream — subscribeRecords consumer over the actor stream
-//   4f. feedgen — describeFeed/getFeed against a live feedgen instance
-//   4g. mixed-mode — spaces PDS custody, feedgen sync, and revocation
-//   4h. webapp mixed-mode — browser OAuth, custody routing, and rendered feed
-//   5. teardown — stop Stratos and spaces PDS, then clean up
-
 import {
   fail,
   failureCount,

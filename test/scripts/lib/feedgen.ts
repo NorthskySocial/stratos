@@ -133,9 +133,12 @@ export class FeedgenHarness {
     timeoutMs: number,
     occurrence = 1,
   ): Promise<FeedgenLogEvent> {
+    const startId = this.startId
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      const matched = this.logs.filter(predicate)[occurrence - 1]
+      const matched = this.logs.filter(
+        (event) => event.startId === startId && predicate(event),
+      )[occurrence - 1]
       if (matched) return matched
       await delay(100)
     }
