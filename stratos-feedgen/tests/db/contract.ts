@@ -580,6 +580,43 @@ export function describeStoreContract(
         expect(await store.getPost(`at://${SPIKE_DID}/p/1`)).not.toBeNull()
       })
 
+      it('guarded actor-boundary deletion commits or rolls back cursor and posts together', async () => {
+        const spaceUri = `at://${SPIKE_DID}/zone.stratos.space.feed/gone`
+        const post = makePost({
+          uri: `at://${SPIKE_DID}/p/guarded`,
+          boundaries: ['gone'],
+        })
+        await store.upsertPost(post)
+        await store.upsertSpaceCursor(
+          spaceUri,
+          SPIKE_DID,
+          'cursor-1',
+          '2024-01-01T00:00:00.000Z',
+        )
+
+        expect(
+          await store.deleteActorBoundaryStateGuarded(
+            spaceUri,
+            SPIKE_DID,
+            'gone',
+            () => false,
+          ),
+        ).toEqual({ committed: false, posts: 0, spaceCursors: 0 })
+        expect(await store.getPost(post.uri)).not.toBeNull()
+        expect(await store.getSpaceCursor(spaceUri, SPIKE_DID)).toBe('cursor-1')
+
+        expect(
+          await store.deleteActorBoundaryStateGuarded(
+            spaceUri,
+            SPIKE_DID,
+            'gone',
+            () => true,
+          ),
+        ).toEqual({ committed: true, posts: 1, spaceCursors: 1 })
+        expect(await store.getPost(post.uri)).toBeNull()
+        expect(await store.getSpaceCursor(spaceUri, SPIKE_DID)).toBeNull()
+      })
+
       it('deletePostsByDidBoundary remains set-based beyond legacy SQLite bind limits', async () => {
         const postCount = 1_100
         for (let index = 0; index < postCount; index += 1) {

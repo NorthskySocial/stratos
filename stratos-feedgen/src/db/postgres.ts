@@ -16,6 +16,7 @@ import {
   EnrolledActor,
   EnrolledActorUpsert,
   FeedgenStore,
+  GuardedBoundaryDeleteResult,
   IndexedPost,
   ListPostsOpts,
   ListPostsResult,
@@ -198,6 +199,66 @@ export class PgFeedgenStore implements FeedgenStore {
       )
       return deleted.length
     })
+  }
+
+  async deleteActorBoundaryStateGuarded(
+    spaceUri: string,
+    did: string,
+    boundary: string,
+    shouldCommit: () => boolean,
+  ): Promise<GuardedBoundaryDeleteResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const cursorDelete = await tx
+          .delete(spaceSyncCursorTbl)
+          .where(
+            and(
+              eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+              eq(spaceSyncCursorTbl.did, did),
+            ),
+          )
+          .returning({ did: spaceSyncCursorTbl.did })
+        const postDelete = await tx
+          .delete(postTbl)
+          .where(
+            and(
+              eq(postTbl.did, did),
+              sql`EXISTS (
+                SELECT 1 FROM post_boundary target
+                WHERE target.uri = ${postTbl.uri}
+                  AND target.boundary = ${boundary}
+              )`,
+              sql`NOT EXISTS (
+                SELECT 1 FROM post_boundary other
+                WHERE other.uri = ${postTbl.uri}
+                  AND other.boundary <> ${boundary}
+              )`,
+            ),
+          )
+          .returning({ uri: postTbl.uri })
+        await tx.delete(postBoundaryTbl).where(
+          and(
+            eq(postBoundaryTbl.boundary, boundary),
+            sql`EXISTS (
+              SELECT 1 FROM post authored
+              WHERE authored.uri = ${postBoundaryTbl.uri}
+                AND authored.did = ${did}
+            )`,
+          ),
+        )
+        if (!shouldCommit()) throw new GuardedBoundaryDeleteAbortedError()
+        return {
+          committed: true,
+          posts: postDelete.length,
+          spaceCursors: cursorDelete.length,
+        }
+      })
+    } catch (err) {
+      if (err instanceof GuardedBoundaryDeleteAbortedError) {
+        return { committed: false, posts: 0, spaceCursors: 0 }
+      }
+      throw err
+    }
   }
 
   async deletePostsByBoundary(boundary: string): Promise<number> {
@@ -469,6 +530,8 @@ export class PgFeedgenStore implements FeedgenStore {
     await this.db._client.end()
   }
 }
+
+class GuardedBoundaryDeleteAbortedError extends Error {}
 
 function rowToPost(
   row: {
