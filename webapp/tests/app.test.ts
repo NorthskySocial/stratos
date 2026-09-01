@@ -164,16 +164,13 @@ describe('App.svelte', () => {
         ),
       )
       await waitFor(() =>
-        expect(
-          screen.getByPlaceholderText('Write a post…'),
-        ).not.toBeDisabled(),
+        expect(screen.getByPlaceholderText('Write a post…')).not.toBeDisabled(),
       )
     }
 
-    await fireEvent.input(
-      screen.getByPlaceholderText('Stratos Service URL'),
-      { target: { value: 'https://stratos.example' } },
-    )
+    await fireEvent.input(screen.getByPlaceholderText('Stratos Service URL'), {
+      target: { value: 'https://stratos.example' },
+    })
     await fireEvent.click(screen.getByRole('button', { name: 'Set URL' }))
     await waitFor(() =>
       expect(appState.fetchRepoPublicPosts).toHaveBeenCalledTimes(2),
