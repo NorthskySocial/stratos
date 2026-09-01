@@ -72,6 +72,14 @@ function makePage(
   }
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 function fakeStore() {
   return {
     upsertPost: vi.fn(async (_input: PostUpsert): Promise<void> => {}),
@@ -258,6 +266,28 @@ describe('SpaceSyncer', () => {
         expect.objectContaining({ cid: CID_TWO }),
       )
       expect(result.recordsIndexed).toBe(1)
+    })
+
+    it('does not revive a valid op superseded by a malformed final CID', async () => {
+      const { syncer, store, client } = buildSyncer()
+      client.listRepoOps.mockResolvedValue(
+        makePage({
+          ops: [
+            baseOp({ cid: CID_ONE, value: makePostRecord({ text: 'old' }) }),
+            baseOp({
+              cid: 'not-a-cid',
+              value: makePostRecord({ text: 'new' }),
+            }),
+          ],
+        }),
+      )
+
+      const result = expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(result.skippedMalformed).toBe(1)
+      expect(result.recordsIndexed).toBe(0)
+      expect(client.getRecord).not.toHaveBeenCalled()
+      expect(store.upsertPost).not.toHaveBeenCalled()
     })
   })
 
@@ -1023,6 +1053,48 @@ describe('SpaceSyncer', () => {
   })
 
   describe('cancellation', () => {
+    it('restores the starting cursor when cancellation lands as a cursor write completes', async () => {
+      const store = fakeStore()
+      let storedCursor: string | null = 'resume-cursor'
+      const cursorWriteStarted = deferred()
+      const releaseCursorWrite = deferred()
+      store.getSpaceCursor.mockImplementation(async () => storedCursor)
+      store.upsertSpaceCursor.mockImplementation(
+        async (_spaceUri, _did, cursor) => {
+          storedCursor = cursor
+          if (cursor === 'page-2') {
+            cursorWriteStarted.resolve()
+            await releaseCursorWrite.promise
+          }
+        },
+      )
+      store.deleteSpaceCursor.mockImplementation(async () => {
+        storedCursor = null
+        return 1
+      })
+      const { syncer, client } = buildSyncer({ store })
+      const controller = new AbortController()
+      client.listRepoOps.mockResolvedValue(
+        makePage({ ops: [], cursor: 'page-2' }),
+      )
+
+      const sync = syncer.syncTarget(makeTarget(), controller.signal)
+      await cursorWriteStarted.promise
+      controller.abort()
+      releaseCursorWrite.resolve()
+      const result = await sync
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.reason).toBe('aborted')
+      expect(storedCursor).toBe('resume-cursor')
+      expect(store.upsertSpaceCursor).toHaveBeenLastCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
+        'resume-cursor',
+        FIXED_NOW,
+      )
+    })
+
     it('restores an absent starting cursor when the signal aborts mid-sync', async () => {
       const { syncer, store, client } = buildSyncer()
       const controller = new AbortController()

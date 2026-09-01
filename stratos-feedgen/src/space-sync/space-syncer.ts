@@ -266,6 +266,7 @@ export class SpaceSyncer {
           signal,
         )
         cursorWasPersisted ||= progress.cursorPersisted
+        assertNotAborted(signal)
         finalCommit = progress.finalCommit
         cursor = page.cursor
 
@@ -330,7 +331,6 @@ export class SpaceSyncer {
         this.now(),
       ),
     )
-    assertNotAborted(signal)
     return { cursorPersisted: true }
   }
 
@@ -353,10 +353,10 @@ export class SpaceSyncer {
   }
 
   /**
-   * Applies one page's ops. Ops are validated, narrowed to
-   * `zone.stratos.feed.post`, and coalesced to the last op per
-   * `(collection, rkey)` before any `getRecord` fallback runs, so a
-   * superseded op in the same page never costs a network call.
+   * Applies one page's ops. Ops are coalesced to the last op per
+   * `(collection, rkey)`, then validated and narrowed to
+   * `zone.stratos.feed.post` before any `getRecord` fallback runs, so an
+   * invalid winner cannot reveal a superseded op from the same page.
    */
   private async applyPage(
     target: PollTarget,
@@ -366,7 +366,7 @@ export class SpaceSyncer {
   ): Promise<AppliedPage> {
     let skippedMalformed = 0
     const valid: RepoOpEntry[] = []
-    for (const op of ops) {
+    for (const op of selectLastOpPerPath(ops)) {
       if (!isValidNsidStr(op.collection) || !isValidRkey(op.rkey)) {
         skippedMalformed += 1
         continue
@@ -385,12 +385,11 @@ export class SpaceSyncer {
     const posts = valid.filter(
       (op) => op.collection === STRATOS_POST_COLLECTION,
     )
-    const winners = selectLastOpPerPath(posts)
 
     let indexed = 0
     let deleted = 0
     let skippedOversized = 0
-    for (const op of winners) {
+    for (const op of posts) {
       assertNotAborted(signal)
       const uri = `${target.spaceUri}/${target.did}/${op.collection}/${op.rkey}`
       if (op.cid === null) {
