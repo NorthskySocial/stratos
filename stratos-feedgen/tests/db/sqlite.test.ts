@@ -192,18 +192,18 @@ describe('SQLite-specific behavior', () => {
     await restartedSplitStore.close()
 
     const membershipDb = createSqliteDb(membershipPath)
+    await membershipDb._initialized
     expect(
       await membershipDb.all<{ name: string }>(sql`
         SELECT name
         FROM sqlite_master
-        WHERE type = 'table' AND name = 'sync_cursor'
-      `),
-    ).toEqual([])
-    expect(
-      await membershipDb.all<{ name: string }>(sql`
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table' AND name = 'space_sync_cursor'
+        WHERE type = 'table'
+          AND name IN (
+            'sync_cursor',
+            'space_sync_cursor',
+            'space_sync_pending_verification',
+            'space_sync_stage'
+          )
       `),
     ).toEqual([])
     membershipDb._client.close()
