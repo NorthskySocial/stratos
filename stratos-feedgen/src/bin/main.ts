@@ -22,6 +22,7 @@ import {
   Purger,
   reconcileEnrollments,
 } from '../purge/index.js'
+import { SpaceMutationFence } from '../mutation-fence.js'
 import { createFeedgenServer } from '../server.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
@@ -30,7 +31,6 @@ import {
   getRepoOpsResponseByteLimit,
   MembershipTracker,
   SpaceHostClient,
-  SpaceMutationFence,
   SpaceSyncer,
   SpaceSyncRunner,
   SpaceSyncScheduler,

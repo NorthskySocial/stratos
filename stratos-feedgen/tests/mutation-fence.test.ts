@@ -1,9 +1,10 @@
+import { StratosError } from '@northskysocial/stratos-core'
 import { describe, expect, it, vi } from 'vitest'
 import {
   SpaceAuthorizationRevokedError,
   SpaceMutationFence,
   type SpaceAuthorizationTarget,
-} from '../src/space-sync/index.js'
+} from '../src/mutation-fence.js'
 
 const SPIKE = 'did:plc:spikespiegel'
 const FAYE = 'did:plc:fayevalentine'
@@ -42,6 +43,21 @@ async function authorize(
 }
 
 describe('SpaceMutationFence', () => {
+  it('reports revoked authorization as a stable Stratos domain error', async () => {
+    const fence = new SpaceMutationFence()
+    const target = await authorize(fence)
+    const revoked = fence.issueRunLease({
+      ...target,
+      lease: { ...target.lease!, generation: -1 },
+    })
+
+    await expect(revoked).rejects.toMatchObject({
+      name: 'SpaceAuthorizationRevokedError',
+      code: 'SpaceAuthorizationRevoked',
+    })
+    await expect(revoked).rejects.toBeInstanceOf(StratosError)
+  })
+
   it('tracks only active live mutations for the same DID', () => {
     const fence = new SpaceMutationFence()
 
