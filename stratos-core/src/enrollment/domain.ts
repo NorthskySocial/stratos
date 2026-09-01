@@ -110,9 +110,6 @@ export function validateEnrollmentEligibility(
  * probe verdict. Only a confirmed 'capable' result grants 'pds' custody --
  * 'not-capable' and 'unknown' both fall back to 'stratos' custody, since an
  * inconclusive probe must never be treated as a capability grant.
- *
- * @param spacesCapability - The enrolment-time capability probe verdict.
- * @returns The custody class for the new enrollment.
  */
 export function classifyCustody(
   spacesCapability: SpacesCapability | undefined,
@@ -132,10 +129,6 @@ export function classifyCustody(
  * An 'unknown' verdict, or no verdict at all, reports the current custody as
  * still wanted -- losing the answer is not the same as learning the answer
  * is no, and a transient introspection failure must not read as divergence.
- *
- * @param current - The enrollment's currently stored custody class.
- * @param verdict - The capability verdict this re-auth observed.
- * @returns The custody class the verdict would grant, for comparison only.
  */
 export function reconcileCustody(
   current: Custody,

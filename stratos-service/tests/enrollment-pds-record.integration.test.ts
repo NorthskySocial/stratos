@@ -77,7 +77,7 @@ describe('handleCallback PDS Record', () => {
   })
 
   it('calls putEnrollmentRecord on new enrollment', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = { sub: 'did:plc:usagi' }
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
 
@@ -94,7 +94,7 @@ describe('handleCallback PDS Record', () => {
     await handler(req, res)
 
     expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
-      'did:plc:alice',
+      'did:plc:usagi',
       expect.any(String),
       expect.objectContaining({
         service: 'http://localhost:3100',
@@ -104,11 +104,11 @@ describe('handleCallback PDS Record', () => {
   })
 
   it('calls putEnrollmentRecord on existing enrollment to ensure it exists', async () => {
-    const session = { sub: 'did:plc:alice' }
+    const session = { sub: 'did:plc:usagi' }
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
     mockEnrollmentStore.getEnrollment.mockResolvedValue({
-      did: 'did:plc:alice',
+      did: 'did:plc:usagi',
       active: true,
       enrollmentRkey: 'localhost-3100',
       signingKeyDid: 'did:key:zQ3sh...',
@@ -128,7 +128,7 @@ describe('handleCallback PDS Record', () => {
     await handler(req, res)
 
     expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
-      'did:plc:alice',
+      'did:plc:usagi',
       'localhost-3100',
       expect.objectContaining({
         service: 'http://localhost:3100',
