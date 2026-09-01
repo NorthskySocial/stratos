@@ -1,5 +1,6 @@
 import { extractBoundaries } from '@northskysocial/stratos-core'
 import type { BlobRef, FeedgenStore } from '../db/index.js'
+import type { ReplayAuthorizer } from './replay-authorizer.js'
 
 export const STRATOS_POST_COLLECTION = 'zone.stratos.feed.post'
 
@@ -27,11 +28,26 @@ export interface SubscriptionIndexerHooks {
   onPostIndexed?: () => void
 }
 
+export interface SubscriptionIndexerOptions extends SubscriptionIndexerHooks {
+  /**
+   * Optional while older callers are migrated. When present, replayed post
+   * boundaries are narrowed to the actor's current authorization before
+   * persistence.
+   */
+  replayAuthorizer?: ReplayAuthorizer
+}
+
 export class SubscriptionIndexer {
+  private readonly hooks: SubscriptionIndexerHooks
+  private readonly replayAuthorizer?: ReplayAuthorizer
+
   constructor(
     private store: FeedgenStore,
-    private hooks?: SubscriptionIndexerHooks,
-  ) {}
+    options: SubscriptionIndexerOptions = {},
+  ) {
+    this.hooks = options
+    this.replayAuthorizer = options.replayAuthorizer
+  }
 
   /**
    * Apply a single decoded commit to the store. All ops belonging to the
@@ -53,7 +69,17 @@ export class SubscriptionIndexer {
       if (op.record['$type'] !== STRATOS_POST_COLLECTION) continue
       const uri = `at://${did}/${path}`
       const sortAt = pickSortAt(op.record, time)
-      const boundaries = extractBoundaries(op.record)
+      const recordBoundaries = extractBoundaries(op.record)
+      const boundaries = this.replayAuthorizer
+        ? await this.replayAuthorizer.authorize(did, recordBoundaries)
+        : recordBoundaries
+      // An authorizer's empty result is a current-authority denial. Deleting
+      // any historical copy makes replay fail closed; the commit can then
+      // advance without reintroducing the forbidden record.
+      if (this.replayAuthorizer && boundaries.length === 0) {
+        await this.store.deletePost(uri)
+        continue
+      }
       const blobRefs = extractBlobRefs(op.record)
       await this.store.upsertPost({
         uri,
@@ -65,7 +91,7 @@ export class SubscriptionIndexer {
         blobRefs,
         boundaries,
       })
-      this.hooks?.onPostIndexed?.()
+      this.hooks.onPostIndexed?.()
     }
     await this.store.upsertCursor(did, seq, time)
   }
