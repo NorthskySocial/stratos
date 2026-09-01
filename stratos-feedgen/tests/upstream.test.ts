@@ -169,17 +169,19 @@ describe('UpstreamStratosClient', () => {
     })
 
     it('bounds the authority request with the configured timeout', async () => {
-      const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        expect(init?.signal).toBeInstanceOf(AbortSignal)
-        return new Response(
-          JSON.stringify({
-            did: 'did:plc:user',
-            enrolled: true,
-            boundaries: ['engineering'],
-          }),
-          { headers: { 'content-type': 'application/json' } },
-        )
-      })
+      const fetchImpl = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          expect(init?.signal).toBeInstanceOf(AbortSignal)
+          return new Response(
+            JSON.stringify({
+              did: 'did:plc:user',
+              enrolled: true,
+              boundaries: ['engineering'],
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          )
+        },
+      )
       const timedClient = new UpstreamStratosClient({
         serviceUrl: mock.baseUrl,
         serviceDid: STRATOS_DID,
