@@ -56,6 +56,12 @@ export interface ListPostsResult {
   cursor?: string
 }
 
+export interface GuardedBoundaryDeleteResult {
+  committed: boolean
+  posts: number
+  spaceCursors: number
+}
+
 export interface FeedgenStore {
   // posts
   upsertPost: (input: PostUpsert) => Promise<void>
@@ -72,6 +78,17 @@ export interface FeedgenStore {
    * number of posts fully deleted.
    */
   deletePostsByDidBoundary: (did: string, boundary: string) => Promise<number>
+  /**
+   * Atomically delete one actor's space cursor and boundary-scoped post state.
+   * The final synchronous guard is evaluated after both deletes; a false
+   * result rolls the transaction back and reports `committed: false`.
+   */
+  deleteActorBoundaryStateGuarded: (
+    spaceUri: string,
+    did: string,
+    boundary: string,
+    shouldCommit: () => boolean,
+  ) => Promise<GuardedBoundaryDeleteResult>
   /** Delete every post scoped (in any actor) to `boundary`, service-wide. Returns rows removed. */
   deletePostsByBoundary: (boundary: string) => Promise<number>
   /** Delete the sync cursor for `did`. Returns rows removed (0 or 1). */
