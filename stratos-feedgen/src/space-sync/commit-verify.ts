@@ -1,9 +1,9 @@
 import { parseDidKey, verifySignature } from '@atproto/crypto'
-import type { DidResolver } from '@atproto/identity'
 import { expand as hkdfExpand } from '@noble/hashes/hkdf'
 import { hmac } from '@noble/hashes/hmac'
 import { sha256 } from '@noble/hashes/sha256'
 import { timingSafeEqual } from 'node:crypto'
+import type { CommitKeyResolver } from './commit-key-resolver.js'
 
 /**
  * Wire version this verifier accepts. Matches `COMMIT_VERSION` in
@@ -13,7 +13,7 @@ import { timingSafeEqual } from 'node:crypto'
 const COMMIT_VERSION = 1
 
 export interface CommitVerifierDeps {
-  didResolver: Pick<DidResolver, 'resolveAtprotoKey'>
+  didResolver: CommitKeyResolver
 }
 
 export type CommitVerifyFailureReason =
@@ -94,7 +94,7 @@ export class CommitVerifier {
       return { ok: false, reason: 'unsupported-version', transient: false }
     }
 
-    const resolvedKey = await this.resolveKey(authorDid, false)
+    const resolvedKey = await this.resolveKey(authorDid)
     if (!resolvedKey.ok) return resolvedKey
 
     // Upstream's `verifyCommit` also checks `commit.rev !== ctx.rev` against
@@ -136,7 +136,7 @@ export class CommitVerifier {
     // the resolver still holds the previous document. Refresh exactly once
     // before treating the mismatch as cryptographic evidence. Malformed
     // signatures throw above and deliberately never reach this network call.
-    const refreshedKey = await this.resolveKey(authorDid, true)
+    const refreshedKey = await this.refreshKey(authorDid)
     if (!refreshedKey.ok) return refreshedKey
 
     const validRefreshedSig = await verifyCommitSignature(
@@ -151,13 +151,28 @@ export class CommitVerifier {
     return { ok: true }
   }
 
-  private async resolveKey(
+  private resolveKey(
     authorDid: string,
-    forceRefresh: boolean,
+  ): Promise<ResolvedCommitKey | CommitVerifyFailure> {
+    return this.resolveKeyWith(() =>
+      this.didResolver.resolveAtprotoKey(authorDid),
+    )
+  }
+
+  private refreshKey(
+    authorDid: string,
+  ): Promise<ResolvedCommitKey | CommitVerifyFailure> {
+    return this.resolveKeyWith(() =>
+      this.didResolver.refreshAtprotoKey(authorDid),
+    )
+  }
+
+  private async resolveKeyWith(
+    resolve: () => Promise<string>,
   ): Promise<ResolvedCommitKey | CommitVerifyFailure> {
     let didKey: string
     try {
-      didKey = await this.didResolver.resolveAtprotoKey(authorDid, forceRefresh)
+      didKey = await resolve()
     } catch (error) {
       return {
         ok: false,

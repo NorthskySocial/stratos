@@ -17,6 +17,7 @@ const STRATOS_DID = 'did:web:stratos.test'
 const BEBOP_BOUNDARY = `${STRATOS_DID}/bebop-crew`
 const SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/bebop-crew`
 const NERV_BOUNDARY = `${STRATOS_DID}/nerv`
+const NERV_SPACE_URI = `at://${STRATOS_DID}/space/zone.stratos.space.feed/nerv`
 const SPIKE_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
 const HOST = 'https://spike.example'
@@ -123,6 +124,15 @@ function buildRunner(opts: BuildRunnerOptions = {}): {
     onError: opts.onError,
   })
   return { runner, syncer, purger, verifier }
+}
+
+function completeMembership(
+  runner: SpaceSyncRunner,
+  polls: PollTarget[] = [makeTarget()],
+): void {
+  runner.completeMembershipPass([
+    { boundary: BEBOP_BOUNDARY, spaceUri: SPACE_URI, polls },
+  ])
 }
 
 describe('SpaceSyncRunner', () => {
@@ -316,7 +326,7 @@ describe('SpaceSyncRunner', () => {
       })
 
       await runner.runTarget(makeTarget())
-      runner.completeMembershipPass([BEBOP_BOUNDARY])
+      completeMembership(runner)
       await runner.runTarget(makeTarget())
 
       expect(onConsecutiveFailure).toHaveBeenCalledTimes(1)
@@ -353,7 +363,7 @@ describe('SpaceSyncRunner', () => {
       })
 
       await runner.runTarget(makeTarget())
-      runner.completeMembershipPass([BEBOP_BOUNDARY])
+      completeMembership(runner)
       await runner.runTarget(makeTarget())
       await runner.runTarget(makeTarget())
 
@@ -455,7 +465,7 @@ describe('SpaceSyncRunner', () => {
       const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
-      runner.completeMembershipPass([BEBOP_BOUNDARY])
+      completeMembership(runner)
       await runner.runTarget(makeTarget())
 
       expect(consoleWarn).toHaveBeenCalledWith(
@@ -561,7 +571,7 @@ describe('SpaceSyncRunner', () => {
       const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
-      runner.completeMembershipPass([BEBOP_BOUNDARY])
+      completeMembership(runner)
       syncer.syncTarget.mockClear()
       const result = await runner.runTarget(makeTarget())
 
@@ -579,7 +589,9 @@ describe('SpaceSyncRunner', () => {
       const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
-      runner.completeMembershipPass([NERV_BOUNDARY])
+      runner.completeMembershipPass([
+        { boundary: NERV_BOUNDARY, spaceUri: NERV_SPACE_URI, polls: [] },
+      ])
       syncer.syncTarget.mockClear()
       const result = await runner.runTarget(makeTarget())
 
@@ -609,6 +621,28 @@ describe('SpaceSyncRunner', () => {
         ok: false,
         reason: 'halted',
       })
+    })
+
+    it('forgets invalid-commit state when a completed pass reports departure', async () => {
+      const syncer = fakeSyncer()
+      syncer.syncTarget.mockResolvedValue(
+        makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
+      )
+      const verifier = failingVerifier()
+      const onConsecutiveFailure = vi.fn()
+      const { runner } = buildRunner({
+        syncer,
+        verifier,
+        onConsecutiveFailure,
+      })
+
+      await runner.runTarget(makeTarget())
+      completeMembership(runner, [])
+      completeMembership(runner)
+      await runner.runTarget(makeTarget())
+
+      expect(syncer.syncTarget).toHaveBeenCalledTimes(2)
+      expect(onConsecutiveFailure).not.toHaveBeenCalled()
     })
   })
 
@@ -701,6 +735,32 @@ describe('SpaceSyncRunner', () => {
 
       expect(onCapStopStreak).toHaveBeenCalledTimes(3)
       expect(onCapStopStreak).toHaveBeenNthCalledWith(3, {
+        target: makeTarget(),
+        streak: 1,
+      })
+    })
+
+    it('forgets a cap streak when a completed pass reports departure', async () => {
+      const syncer = fakeSyncer()
+      syncer.syncTarget.mockResolvedValue(
+        makeSyncSuccess({
+          stopReason: 'per-member-cap',
+          finalCommit: undefined,
+        }),
+      )
+      const onCapStopStreak = vi.fn()
+      const { runner } = buildRunner({ syncer, onCapStopStreak })
+
+      await runner.runTarget(makeTarget())
+      completeMembership(runner, [])
+      completeMembership(runner)
+      await runner.runTarget(makeTarget())
+
+      expect(onCapStopStreak).toHaveBeenNthCalledWith(1, {
+        target: makeTarget(),
+        streak: 1,
+      })
+      expect(onCapStopStreak).toHaveBeenNthCalledWith(2, {
         target: makeTarget(),
         streak: 1,
       })

@@ -1084,6 +1084,57 @@ describe('MembershipTracker', () => {
   })
 
   describe('authorization revocation', () => {
+    it('does not persist a snapshot when cancellation lands during authorization', async () => {
+      const authorizationStarted = deferred()
+      const releaseAuthorization = deferred()
+      const controller = new AbortController()
+      const mutationFence = {
+        captureRevocationEpoch: vi.fn(() => 0),
+        authorizeSnapshot: vi.fn(async () => {
+          authorizationStarted.resolve()
+          await releaseAuthorization.promise
+          return new Map([
+            [
+              SPIKE,
+              {
+                spaceUri: spaceUriFor(BEBOP_BOUNDARY),
+                did: SPIKE,
+                generation: 1,
+              },
+            ],
+          ])
+        }),
+      }
+      const snapshotStore = fakeSnapshotStore()
+      const tracker = new MembershipTracker({
+        client: {
+          listSpaceRepos: vi.fn(
+            async (): Promise<ListSpaceReposResult> => ({
+              repos: [
+                {
+                  did: SPIKE,
+                  custody: 'pds',
+                  host: 'https://spike.example',
+                },
+              ],
+            }),
+          ),
+        },
+        credentialManager: fakeCredentialManager(),
+        purger: fakePurger(),
+        mutationFence,
+        snapshotStore,
+      })
+
+      const pass = tracker.runPass([BEBOP_BOUNDARY], controller.signal)
+      await authorizationStarted.promise
+      controller.abort()
+      releaseAuthorization.resolve()
+
+      await expect(pass).rejects.toMatchObject({ name: 'AbortError' })
+      expect(snapshotStore.replaceSpaceMembers).not.toHaveBeenCalled()
+    })
+
     it('does not reauthorize an enumeration that began before revocation', async () => {
       const enumerationStarted = deferred()
       const releaseEnumeration = deferred()
@@ -1234,7 +1285,50 @@ describe('MembershipTracker', () => {
         2,
         expect.objectContaining({ cursor: 'page-2' }),
         expect.anything(),
+        undefined,
       )
+    })
+
+    it('stops before the next page or any mutation when membership is aborted', async () => {
+      const controller = new AbortController()
+      const client = {
+        listSpaceRepos: vi.fn(
+          async (
+            _opts: ListSpaceReposOptions,
+            _credential: unknown,
+            signal?: AbortSignal,
+          ): Promise<ListSpaceReposResult> => {
+            expect(signal).toBe(controller.signal)
+            controller.abort()
+            return {
+              repos: [
+                { did: SPIKE, custody: 'pds', host: 'https://spike.example' },
+              ],
+              cursor: 'page-2',
+            }
+          },
+        ),
+      }
+      const purger = fakePurger()
+      const snapshotStore = fakeSnapshotStore()
+      const onError = vi.fn()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        snapshotStore,
+        onError,
+      })
+
+      await expect(
+        tracker.runPass([BEBOP_BOUNDARY], controller.signal),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+
+      expect(client.listSpaceRepos).toHaveBeenCalledOnce()
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
+      expect(snapshotStore.replaceSpaceMembers).not.toHaveBeenCalled()
+      expect(onError).not.toHaveBeenCalled()
     })
   })
 

@@ -60,6 +60,7 @@ describe('createCommitKeyResolver', () => {
 
       await expect(resolution).rejects.toMatchObject({
         name: 'DidWebHttpError',
+        code: 'DidWebHttpError',
         status,
       })
       expect(source.resolveAtprotoKey).not.toHaveBeenCalled()
@@ -90,7 +91,7 @@ describe('createCommitKeyResolver', () => {
     )
   })
 
-  it('shares the source cache and bypasses it on a forced key refresh', async () => {
+  it('shares the source cache and bypasses it through the refresh method', async () => {
     const source = sourceResolver()
     const previousKey = await Secp256k1Keypair.create({ exportable: true })
     const rotatedKey = await Secp256k1Keypair.create({ exportable: true })
@@ -110,7 +111,7 @@ describe('createCommitKeyResolver', () => {
     await expect(resolver.resolveAtprotoKey(JULIA_DID)).resolves.toBe(
       previousKey.did(),
     )
-    await expect(resolver.resolveAtprotoKey(JULIA_DID, true)).resolves.toBe(
+    await expect(resolver.refreshAtprotoKey(JULIA_DID)).resolves.toBe(
       rotatedKey.did(),
     )
 
@@ -120,7 +121,7 @@ describe('createCommitKeyResolver', () => {
     )
   })
 
-  it('delegates non-did:web keys and the force-refresh request unchanged', async () => {
+  it('delegates non-did:web key refreshes to the source refresh path', async () => {
     const didKey = await Secp256k1Keypair.create({ exportable: true })
     const source = sourceResolver()
     source.resolveAtprotoKey.mockResolvedValue(didKey.did())
@@ -129,9 +130,9 @@ describe('createCommitKeyResolver', () => {
     })
     const resolver = createCommitKeyResolver(source, { fetch })
 
-    await expect(
-      resolver.resolveAtprotoKey('did:plc:jetblack', true),
-    ).resolves.toBe(didKey.did())
+    await expect(resolver.refreshAtprotoKey('did:plc:jetblack')).resolves.toBe(
+      didKey.did(),
+    )
 
     expect(source.resolveAtprotoKey).toHaveBeenCalledWith(
       'did:plc:jetblack',

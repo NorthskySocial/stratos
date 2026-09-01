@@ -42,6 +42,12 @@ export interface SpaceCapStopStreakLogEvent {
   streak: number
 }
 
+export interface CompletedMembershipBoundary {
+  boundary: string
+  spaceUri: string
+  polls: readonly PollTarget[]
+}
+
 export interface SpaceSyncRunnerDeps {
   syncer: Pick<SpaceSyncer, 'syncTarget'>
   verifier: Pick<CommitVerifier, 'verify'>
@@ -109,11 +115,17 @@ export class SpaceSyncRunner {
     this.onError = deps.onError ?? defaultOnError
   }
 
-  /** Permit invalid-commit retries only for boundaries refreshed successfully. */
-  completeMembershipPass(boundaries: Iterable<string>): void {
-    for (const boundary of boundaries) {
+  /** Permit retries and discard state only for boundaries refreshed successfully. */
+  completeMembershipPass(
+    completedBoundaries: Iterable<CompletedMembershipBoundary>,
+  ): void {
+    for (const { boundary, spaceUri, polls } of completedBoundaries) {
       const generation = this.membershipPasses.get(boundary) ?? 0
       this.membershipPasses.set(boundary, generation + 1)
+      const activeDids = new Set(polls.map((poll) => poll.did))
+      pruneSpaceState(this.failureStreaks, spaceUri, activeDids)
+      pruneSpaceState(this.capStopStreaks, spaceUri, activeDids)
+      pruneSpaceState(this.invalidCommitPasses, spaceUri, activeDids)
     }
   }
 
@@ -257,15 +269,39 @@ export class SpaceSyncRunner {
   }
 
   private resetCapStopStreak(target: PollTarget): void {
-    this.capStopStreaks.get(target.spaceUri)?.delete(target.did)
+    deleteMemberState(this.capStopStreaks, target.spaceUri, target.did)
   }
 
   /** A verified sync proves the member is neither tampering nor merely busy. */
   private resetStreak(target: PollTarget): void {
-    this.failureStreaks.get(target.spaceUri)?.delete(target.did)
-    this.invalidCommitPasses.get(target.spaceUri)?.delete(target.did)
+    deleteMemberState(this.failureStreaks, target.spaceUri, target.did)
+    deleteMemberState(this.invalidCommitPasses, target.spaceUri, target.did)
     this.resetCapStopStreak(target)
   }
+}
+
+function pruneSpaceState<T>(
+  state: Map<string, Map<string, T>>,
+  spaceUri: string,
+  activeDids: ReadonlySet<string>,
+): void {
+  const byMember = state.get(spaceUri)
+  if (!byMember) return
+  for (const did of byMember.keys()) {
+    if (!activeDids.has(did)) byMember.delete(did)
+  }
+  if (byMember.size === 0) state.delete(spaceUri)
+}
+
+function deleteMemberState<T>(
+  state: Map<string, Map<string, T>>,
+  spaceUri: string,
+  did: string,
+): void {
+  const byMember = state.get(spaceUri)
+  if (!byMember) return
+  byMember.delete(did)
+  if (byMember.size === 0) state.delete(spaceUri)
 }
 
 function defaultOnVerifyFailure(event: SpaceCommitVerifyLogEvent): void {

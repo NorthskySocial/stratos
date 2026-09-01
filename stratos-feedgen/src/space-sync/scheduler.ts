@@ -3,7 +3,11 @@ import {
   DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
   DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
 } from '../config.js'
-import type { MembershipTracker, PollTarget } from './membership.js'
+import type {
+  BoundaryPassOutcome,
+  MembershipTracker,
+  PollTarget,
+} from './membership.js'
 import type { SpaceSyncRunner, SpaceSyncRunResult } from './sync-runner.js'
 
 /**
@@ -14,23 +18,14 @@ import type { SpaceSyncRunner, SpaceSyncRunResult } from './sync-runner.js'
 const JITTER_FRACTION = 0.1
 
 export interface SpaceSyncPassLogEvent {
-  /** Poll targets produced by this pass's membership run. */
   targets: number
-  /** Targets whose sync completed within budget and reported success. */
   succeeded: number
-  /** Targets whose sync completed within budget but reported failure. */
   failed: number
-  /** Targets abandoned for exceeding the member time budget this pass. */
   abandoned: number
-  /** Targets skipped with no network call because they are in a halt cooldown. */
   halted: number
-  /** Oversized records skipped across every successful target. */
   skippedOversized: number
-  /** Malformed operations skipped across every successful target. */
   skippedMalformed: number
-  /** Successful targets that stopped at the configured page ceiling. */
   maxPageStops: number
-  /** Successful targets that reached their per-pass record cap. */
   capped: number
 }
 
@@ -43,11 +38,8 @@ export interface SpaceSyncSchedulerDeps {
    * is picked up on the next pass with no extra wiring.
    */
   boundaries: Iterable<string>
-  /** Target interval (ms) between passes, before jitter. Default 30000. */
   intervalMs?: number
-  /** Time budget (ms) for one member's sync within a pass. Default 60000. */
   memberBudgetMs?: number
-  /** Maximum number of member syncs active within one pass. Default 8. */
   memberConcurrency?: number
   /**
    * Structured per-pass summary sink. Called once per pass that starts.
@@ -57,11 +49,9 @@ export interface SpaceSyncSchedulerDeps {
   log?: (event: SpaceSyncPassLogEvent) => void
   /** Called once per tick that arrives while the previous pass is still in flight. That tick is skipped, not queued. */
   onTickSkipped?: () => void
-  /** Called once per member abandoned this pass for exceeding `memberBudgetMs`. */
   onMemberBudgetExceeded?: (target: PollTarget) => void
   /** Called for a failure outside the per-member result channel: `membership.runPass` rejecting, or an injected callback throwing. */
   onError?: (err: unknown) => void
-  /** Injectable jitter source, `[0, 1)`. Defaults to `Math.random`. */
   random?: () => number
 }
 
@@ -189,16 +179,32 @@ export class SpaceSyncScheduler {
   private async runPass(): Promise<void> {
     const controller = new AbortController()
     this.activePassController = controller
-    await this.runPassWithSignal(controller.signal)
+    try {
+      await this.runPassWithSignal(controller.signal)
+    } finally {
+      if (this.activePassController === controller) {
+        this.activePassController = null
+      }
+    }
   }
 
   private async runPassWithSignal(signal: AbortSignal): Promise<void> {
-    const outcomes = await this.membership.runPass(this.boundaries)
+    let outcomes: BoundaryPassOutcome[]
+    try {
+      outcomes = await this.membership.runPass(this.boundaries, signal)
+    } catch (err) {
+      if (signal.aborted) return
+      throw err
+    }
     if (signal.aborted) return
     this.runner.completeMembershipPass(
       outcomes
         .filter((outcome) => outcome.ok)
-        .map((outcome) => outcome.boundary),
+        .map(({ boundary, spaceUri, polls }) => ({
+          boundary,
+          spaceUri,
+          polls,
+        })),
     )
     const targets = outcomes.flatMap((outcome) => outcome.polls)
 
@@ -246,6 +252,7 @@ export class SpaceSyncScheduler {
       },
     )
     await Promise.all(workers)
+    if (isAbortRequested(signal)) return
 
     try {
       this.log({
@@ -302,7 +309,7 @@ export class SpaceSyncScheduler {
           // own abort taking effect, not a new failure, so it is dropped
           // rather than reported.
           if (settled) return
-          this.reportError(err)
+          if (!passSignal.aborted) this.reportError(err)
           settled = true
           clearTimeout(timer)
           resolve({ status: 'errored' })
@@ -335,3 +342,7 @@ export class SpaceSyncScheduler {
 }
 
 function noop(): void {}
+
+function isAbortRequested(signal: AbortSignal): boolean {
+  return signal.aborted
+}
