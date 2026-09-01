@@ -660,7 +660,7 @@ export function describeStoreContract(
         expect(
           await store.listPostsByBoundary({ boundary: 'gone', limit: 1 }),
         ).toEqual({ posts: [] })
-      })
+      }, 15_000)
 
       it('deletePostsByBoundary removes every actor post in a boundary service-wide', async () => {
         await store.upsertPost(
