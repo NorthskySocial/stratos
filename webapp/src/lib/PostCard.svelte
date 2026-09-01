@@ -52,7 +52,6 @@
     if (cid && imageUrls[cid]) {
       return safeHttpOrBlobUrl(imageUrls[cid])
     }
-    // If hydrated fields are available, use them
     if (img.thumb) {
       return safeHttpUrl(img.thumb)
     }

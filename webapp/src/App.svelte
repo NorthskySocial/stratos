@@ -305,6 +305,7 @@
     appviewAgent = null
     stratosAgent = null
     allPosts = []
+    replyingTo = null
     handle = ''
     did = ''
     activeFeed = null

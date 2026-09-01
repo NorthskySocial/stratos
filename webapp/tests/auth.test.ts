@@ -128,14 +128,14 @@ describe('auth', () => {
   })
 
   it('uses a canonical, encoded scope for a port-bearing service DID', async () => {
-    vi.stubEnv('VITE_STRATOS_SERVICE_DID', 'did:web:localhost%3A3100')
+    vi.stubEnv('VITE_STRATOS_SERVICE_DID', 'did:web:motoko.test%3A3100')
     vi.resetModules()
     const { getSpaceWriteScopeStatus, SPACE_WRITE_SCOPE } =
       await import('../src/lib/auth')
     const getTokenInfo = vi.fn().mockResolvedValue({ scope: SPACE_WRITE_SCOPE })
 
     expect(SPACE_WRITE_SCOPE).toBe(
-      'space:zone.stratos.space.feed?authority=did%3Aweb%3Alocalhost%253A3100&collection=zone.stratos.feed.post&action=read&action=create',
+      'space:zone.stratos.space.feed?authority=did%3Aweb%3Amotoko.test%253A3100&collection=zone.stratos.feed.post&action=read&action=create',
     )
     await expect(
       getSpaceWriteScopeStatus({ getTokenInfo } as never),
