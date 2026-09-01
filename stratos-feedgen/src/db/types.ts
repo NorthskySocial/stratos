@@ -132,6 +132,14 @@ export interface FeedgenStore {
   // unverified PDS-hosted space sync data
   stageSpaceSyncPage: (input: SpaceSyncStagePage) => Promise<void>
   promoteSpaceSyncStage: (spaceUri: string, did: string) => Promise<void>
+  /**
+   * Drop staged state only when a terminal page awaits verification. Returns
+   * whether it reset, so an ordinary partial page keeps its cursor.
+   */
+  resetPendingSpaceSyncState: (
+    spaceUri: string,
+    did: string,
+  ) => Promise<boolean>
   /** Drop both unverified page state and its resumable cursor. */
   resetSpaceSyncState: (spaceUri: string, did: string) => Promise<void>
   deleteSpaceSyncStage: (spaceUri: string, did: string) => Promise<number>

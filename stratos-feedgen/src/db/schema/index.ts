@@ -6,6 +6,7 @@ import {
   post,
   postBoundary,
   spaceMemberSnapshot,
+  spaceSyncPendingVerification,
   spaceSyncStage,
   spaceSyncCursor,
   syncCursor,
@@ -15,6 +16,7 @@ import {
   pgPost,
   pgPostBoundary,
   pgSpaceMemberSnapshot,
+  pgSpaceSyncPendingVerification,
   pgSpaceSyncStage,
   pgSpaceSyncCursor,
   pgSyncCursor,
@@ -27,6 +29,7 @@ export const sqliteSchema = {
   enrolledActor,
   spaceSyncCursor,
   spaceSyncStage,
+  spaceSyncPendingVerification,
   spaceMemberSnapshot,
 }
 
@@ -37,5 +40,6 @@ export const pgSchema = {
   enrolledActor: pgEnrolledActor,
   spaceSyncCursor: pgSpaceSyncCursor,
   spaceSyncStage: pgSpaceSyncStage,
+  spaceSyncPendingVerification: pgSpaceSyncPendingVerification,
   spaceMemberSnapshot: pgSpaceMemberSnapshot,
 }

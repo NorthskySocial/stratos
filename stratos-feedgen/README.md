@@ -85,7 +85,8 @@ Both arms share the purge path, so unenrollment, boundary loss, malformed
 cursors, and invalid foreign commits clear derived state when detected. A
 foreign-repo delta stays in `space_sync_stage` and is never served until the
 host's terminal commit verifies. Verified promotion applies staged updates and
-tombstones atomically to the index.
+tombstones atomically to the index. A fresh run resets staged state only when
+a terminal page awaits verification; capped pages retain their cursor.
 
 ### Auth flow
 

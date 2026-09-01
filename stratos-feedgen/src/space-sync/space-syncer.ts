@@ -34,6 +34,7 @@ export interface SpaceSyncerDeps {
     FeedgenStore,
     | 'getSpaceCursor'
     | 'stageSpaceSyncPage'
+    | 'resetPendingSpaceSyncState'
     | 'resetSpaceSyncState'
     | 'promoteSpaceSyncStage'
   >
@@ -75,8 +76,9 @@ export interface SpaceSyncFailure {
    * `'malformed-cursor'`: the host rejected the stored cursor; it has been
    * dropped with its unverified page state so the next pass starts that
    * (space, member) pair cold. `'aborted'`: the caller's `signal` fired
-   * before the sync reached a terminal or capped stopping point. Durable
-   * staged pages remain unserved until a later terminal commit verifies.
+   * before the sync reached a terminal or capped stopping point. Partial
+   * staged pages remain resumable. A fresh run discards state only if a
+   * terminal page was awaiting verification.
    * `'member-skip'`: any other failure (unreachable host, missing repo,
    * timeout, oversized page, invalid response). The stored cursor is left
    * untouched.
@@ -210,6 +212,9 @@ export class SpaceSyncer {
       credentialProof: credential,
     })
 
+    await this.mutationFence.mutate(target, signal, () =>
+      this.store.resetPendingSpaceSyncState(target.spaceUri, target.did),
+    )
     let cursor =
       (await this.store.getSpaceCursor(target.spaceUri, target.did)) ??
       undefined

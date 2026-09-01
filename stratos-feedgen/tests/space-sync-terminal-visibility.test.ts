@@ -14,6 +14,7 @@ import {
   SpaceSyncer,
   SpaceSyncRunner,
   type CommitVerifyResult,
+  type ListRepoOpsOptions,
   type ListRepoOpsResult,
   type PollTarget,
 } from '../src/space-sync/index.js'
@@ -26,6 +27,7 @@ const HOST = 'https://spike.example'
 const POST_COLLECTION = 'zone.stratos.feed.post'
 const POST_URI = `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jxyz`
 const TERMINAL_POST_URI = `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jabc`
+const FRESH_POST_URI = `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jfresh`
 const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
 const NOW = '2024-06-01T00:00:00.000Z'
 
@@ -106,6 +108,7 @@ function buildRunner(
       commit: { sig: 'terminal' },
     },
   ],
+  onListRepoOps?: (options: ListRepoOpsOptions) => void,
 ): SpaceSyncRunner {
   let pageIndex = 0
   const syncer = new SpaceSyncer({
@@ -121,7 +124,10 @@ function buildRunner(
     },
     mutationFence,
     createHostClient: () => ({
-      listRepoOps: vi.fn(async () => pages[pageIndex++] ?? { ops: [] }),
+      listRepoOps: vi.fn(async (options: ListRepoOpsOptions) => {
+        onListRepoOps?.(options)
+        return pages[pageIndex++] ?? { ops: [] }
+      }),
       getRecord: vi.fn(),
     }),
     now: () => NOW,
@@ -188,6 +194,108 @@ describe('space sync terminal visibility', () => {
       reason: 'member-skip',
     })
     expect(await store.getPost(POST_URI)).toBeNull()
+  })
+
+  it('does not let a fresh run promote a terminal stage awaiting stale verification', async () => {
+    const mutationFence = new SpaceMutationFence()
+    const verificationStarted = deferred<void>()
+    const staleVerification = deferred<CommitVerifyResult>()
+    const staleVerifier = {
+      verify: vi.fn(async () => {
+        verificationStarted.resolve()
+        return staleVerification.promise
+      }),
+    }
+    const staleRunner = buildRunner(mutationFence, staleVerifier, [
+      {
+        ops: [
+          {
+            rev: '1',
+            collection: POST_COLLECTION,
+            rkey: '3jxyz',
+            cid: CID,
+            value: {
+              $type: POST_COLLECTION,
+              text: 'The stale page stays unserved.',
+              createdAt: NOW,
+            },
+          },
+        ],
+        cursor: 'page-2',
+      },
+      {
+        ops: [
+          {
+            rev: '2',
+            collection: POST_COLLECTION,
+            rkey: '3jabc',
+            cid: CID,
+            value: {
+              $type: POST_COLLECTION,
+              text: 'The stale terminal page stays unserved.',
+              createdAt: NOW,
+            },
+          },
+        ],
+        commit: { sig: 'stale-terminal' },
+      },
+    ])
+    const target = await issueRunTarget(mutationFence)
+
+    const staleRun = staleRunner.runTarget(target)
+    await verificationStarted.promise
+
+    const cursors: Array<string | undefined> = []
+    const freshVerifier = {
+      verify: vi.fn(async (): Promise<CommitVerifyResult> => ({ ok: true })),
+    }
+    const freshRunner = buildRunner(
+      mutationFence,
+      freshVerifier,
+      [
+        {
+          ops: [
+            {
+              rev: '3',
+              collection: POST_COLLECTION,
+              rkey: '3jfresh',
+              cid: CID,
+              value: {
+                $type: POST_COLLECTION,
+                text: 'The fresh terminal page is served.',
+                createdAt: NOW,
+              },
+            },
+          ],
+          commit: { sig: 'fresh-terminal' },
+        },
+      ],
+      (options) => cursors.push(options.cursor),
+    )
+
+    await expect(freshRunner.runTarget(target)).resolves.toMatchObject({
+      ok: true,
+    })
+    expect(cursors).toEqual([undefined])
+    expect(await store.getPost(POST_URI)).toBeNull()
+    expect(await store.getPost(TERMINAL_POST_URI)).toBeNull()
+    expect(await store.getPost(FRESH_POST_URI)).toMatchObject({
+      uri: FRESH_POST_URI,
+      boundaries: [BOUNDARY],
+    })
+
+    staleVerification.resolve({
+      ok: false,
+      reason: 'mac-mismatch',
+      transient: false,
+    })
+    await expect(staleRun).resolves.toMatchObject({
+      ok: false,
+      reason: 'member-skip',
+    })
+    expect(await store.getPost(FRESH_POST_URI)).toMatchObject({
+      uri: FRESH_POST_URI,
+    })
   })
 
   it('never serves a prior staged page when terminal commit verification fails', async () => {

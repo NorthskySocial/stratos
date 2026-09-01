@@ -73,6 +73,15 @@ export const spaceSyncStage = sqliteTable(
   (table) => [primaryKey({ columns: [table.spaceUri, table.did, table.uri] })],
 )
 
+export const spaceSyncPendingVerification = sqliteTable(
+  'space_sync_pending_verification',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)
+
 export const spaceMemberSnapshot = sqliteTable(
   'space_member_snapshot',
   {

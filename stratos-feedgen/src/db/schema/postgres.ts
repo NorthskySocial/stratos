@@ -74,6 +74,15 @@ export const pgSpaceSyncStage = pgTable(
   (table) => [primaryKey({ columns: [table.spaceUri, table.did, table.uri] })],
 )
 
+export const pgSpaceSyncPendingVerification = pgTable(
+  'space_sync_pending_verification',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)
+
 export const pgSpaceMemberSnapshot = pgTable(
   'space_member_snapshot',
   {
