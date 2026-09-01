@@ -851,6 +851,69 @@ describe('MembershipTracker', () => {
       expect(outcome.removed).toEqual([{ did: SPIKE, scope: 'actor' }])
     })
 
+    it('purges old Stratos state before accepting a PDS custody transition', async () => {
+      let calls = 0
+      const client = {
+        listSpaceRepos: vi.fn(async (): Promise<ListSpaceReposResult> => {
+          calls += 1
+          return calls === 1
+            ? { repos: [{ did: SPIKE, custody: 'stratos' }] }
+            : {
+                repos: [
+                  {
+                    did: SPIKE,
+                    custody: 'pds',
+                    host: 'https://spike.example',
+                  },
+                ],
+              }
+        }),
+      }
+      const mutationFence = new SpaceMutationFence()
+      const purger = fakePurger()
+      purger.purgeSpaceDeparture.mockImplementation(
+        async (did, boundary, spaceUri) =>
+          mutationFence.revokeSpace(did, boundary, spaceUri, async () =>
+            zeroPurgeCounts(),
+          ),
+      )
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        mutationFence,
+      })
+
+      const first = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      expect(first.polls).toEqual([])
+
+      const changed = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        spaceUriFor(BEBOP_BOUNDARY),
+      )
+      expect(changed.polls).toEqual([])
+
+      const fresh = expectSuccess(
+        outcomeFor(await tracker.runPass([BEBOP_BOUNDARY]), BEBOP_BOUNDARY),
+      )
+      expect(fresh.polls).toEqual([
+        expect.objectContaining({
+          did: SPIKE,
+          host: 'https://spike.example',
+          lease: expect.objectContaining({
+            spaceUri: spaceUriFor(BEBOP_BOUNDARY),
+          }),
+        }),
+      ])
+    })
+
     it('purges the old PDS space before accepting a Stratos custody transition', async () => {
       let calls = 0
       const client = {
