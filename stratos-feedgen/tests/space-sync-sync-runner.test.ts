@@ -80,23 +80,14 @@ function fakeVerifier() {
 function fakePurger() {
   return {
     purgeInvalidSpaceCommit: vi.fn(
-      async (
-        _did: string,
-        _boundary: string,
-        _spaceUri: string,
-      ): Promise<PurgeCounts> => zeroCounts(),
+      async (_target: PollTarget): Promise<PurgeCounts> => zeroCounts(),
     ),
   }
 }
 
-/** A controllable clock for exercising the halt cooldown deterministically. */
-function fakeClock(startMs = 0) {
-  let current = startMs
+function passThroughMutationFence(): SpaceSyncRunnerDeps['mutationFence'] {
   return {
-    now: () => current,
-    advance(ms: number): void {
-      current += ms
-    },
+    issueRunLease: async (target) => target,
   }
 }
 
@@ -109,7 +100,6 @@ interface BuildRunnerOptions {
   onConsecutiveFailure?: SpaceSyncRunnerDeps['onConsecutiveFailure']
   onCapStopStreak?: SpaceSyncRunnerDeps['onCapStopStreak']
   onError?: SpaceSyncRunnerDeps['onError']
-  now?: SpaceSyncRunnerDeps['now']
 }
 
 function buildRunner(opts: BuildRunnerOptions = {}): {
@@ -125,12 +115,12 @@ function buildRunner(opts: BuildRunnerOptions = {}): {
     syncer,
     verifier,
     purger,
+    mutationFence: passThroughMutationFence(),
     onVerifyFailure: opts.onVerifyFailure,
     onVerifyTransient: opts.onVerifyTransient,
     onConsecutiveFailure: opts.onConsecutiveFailure,
     onCapStopStreak: opts.onCapStopStreak,
     onError: opts.onError,
-    now: opts.now,
   })
   return { runner, syncer, purger, verifier }
 }
@@ -215,11 +205,7 @@ describe('SpaceSyncRunner', () => {
 
       const result = await runner.runTarget(makeTarget())
 
-      expect(purger.purgeInvalidSpaceCommit).toHaveBeenCalledWith(
-        SPIKE_DID,
-        BEBOP_BOUNDARY,
-        SPACE_URI,
-      )
+      expect(purger.purgeInvalidSpaceCommit).toHaveBeenCalledWith(makeTarget())
       expect(onVerifyFailure).toHaveBeenCalledWith({
         target: makeTarget(),
         reason: 'mac-mismatch',
@@ -323,12 +309,10 @@ describe('SpaceSyncRunner', () => {
       })
       const onConsecutiveFailure =
         vi.fn<(event: SpaceCommitConsecutiveFailureLogEvent) => void>()
-      const clock = fakeClock()
       const { runner } = buildRunner({
         syncer,
         verifier,
         onConsecutiveFailure,
-        now: clock.now,
       })
 
       await runner.runTarget(makeTarget())
@@ -362,12 +346,10 @@ describe('SpaceSyncRunner', () => {
         })
       const onConsecutiveFailure =
         vi.fn<(event: SpaceCommitConsecutiveFailureLogEvent) => void>()
-      const clock = fakeClock()
       const { runner } = buildRunner({
         syncer,
         verifier,
         onConsecutiveFailure,
-        now: clock.now,
       })
 
       await runner.runTarget(makeTarget())
@@ -470,8 +452,7 @@ describe('SpaceSyncRunner', () => {
         reason: 'mac-mismatch',
         transient: false,
       })
-      const clock = fakeClock()
-      const { runner } = buildRunner({ syncer, verifier, now: clock.now })
+      const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
       runner.completeMembershipPass([BEBOP_BOUNDARY])
@@ -555,8 +536,7 @@ describe('SpaceSyncRunner', () => {
         makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
       )
       const verifier = failingVerifier()
-      const clock = fakeClock()
-      const { runner } = buildRunner({ syncer, verifier, now: clock.now })
+      const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
       syncer.syncTarget.mockClear()
@@ -578,8 +558,7 @@ describe('SpaceSyncRunner', () => {
         makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
       )
       const verifier = failingVerifier()
-      const clock = fakeClock()
-      const { runner } = buildRunner({ syncer, verifier, now: clock.now })
+      const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
       runner.completeMembershipPass([BEBOP_BOUNDARY])
@@ -618,11 +597,9 @@ describe('SpaceSyncRunner', () => {
         makeSyncSuccess({ finalCommit: { sig: 'abc' } }),
       )
       const verifier = failingVerifier()
-      const clock = fakeClock()
-      const { runner } = buildRunner({ syncer, verifier, now: clock.now })
+      const { runner } = buildRunner({ syncer, verifier })
 
       await runner.runTarget(makeTarget())
-      clock.advance(24 * 60 * 60_000)
       syncer.syncTarget.mockClear()
       const result = await runner.runTarget(makeTarget())
 
@@ -646,11 +623,9 @@ describe('SpaceSyncRunner', () => {
       )
       const onCapStopStreak =
         vi.fn<(event: SpaceCapStopStreakLogEvent) => void>()
-      const clock = fakeClock()
       const { runner, verifier } = buildRunner({
         syncer,
         onCapStopStreak,
-        now: clock.now,
       })
 
       await runner.runTarget(makeTarget())
@@ -667,7 +642,7 @@ describe('SpaceSyncRunner', () => {
       expect(verifier.verify).not.toHaveBeenCalled()
     })
 
-    it('halts the member without purging after 3 consecutive per-member-cap stops', async () => {
+    it('keeps the member eligible after repeated per-member-cap stops', async () => {
       const syncer = fakeSyncer()
       syncer.syncTarget.mockResolvedValue(
         makeSyncSuccess({
@@ -675,8 +650,7 @@ describe('SpaceSyncRunner', () => {
           finalCommit: undefined,
         }),
       )
-      const clock = fakeClock()
-      const { runner, purger } = buildRunner({ syncer, now: clock.now })
+      const { runner, purger } = buildRunner({ syncer })
 
       await runner.runTarget(makeTarget())
       await runner.runTarget(makeTarget())
@@ -684,12 +658,8 @@ describe('SpaceSyncRunner', () => {
       syncer.syncTarget.mockClear()
       const result = await runner.runTarget(makeTarget())
 
-      expect(result).toEqual({
-        target: makeTarget(),
-        ok: false,
-        reason: 'halted',
-      })
-      expect(syncer.syncTarget).not.toHaveBeenCalled()
+      expect(result.ok).toBe(true)
+      expect(syncer.syncTarget).toHaveBeenCalledTimes(1)
       expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
     })
 
@@ -719,11 +689,9 @@ describe('SpaceSyncRunner', () => {
         )
       const onCapStopStreak =
         vi.fn<(event: SpaceCapStopStreakLogEvent) => void>()
-      const clock = fakeClock()
       const { runner } = buildRunner({
         syncer,
         onCapStopStreak,
-        now: clock.now,
       })
 
       await runner.runTarget(makeTarget())

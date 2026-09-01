@@ -9,6 +9,7 @@ import {
 } from '../src/db/index.js'
 import {
   SpaceSyncer,
+  SpaceMutationFence,
   SpaceSyncRunner,
   SpaceSyncScheduler,
   type BoundaryPassOutcome,
@@ -28,6 +29,7 @@ const FAYE_DID = 'did:plc:fayevalentine'
 const JET_DID = 'did:plc:jetblack'
 const HOST = 'https://spike.example'
 const POST_COLLECTION = 'zone.stratos.feed.post'
+const POST_CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
 
 function makeTarget(overrides: Partial<PollTarget> = {}): PollTarget {
   return {
@@ -49,7 +51,10 @@ function successOutcome(polls: PollTarget[]): BoundaryPassSuccess {
   }
 }
 
-function runSuccess(target: PollTarget): SpaceSyncRunResult {
+function runSuccess(
+  target: PollTarget,
+  overrides: Partial<Extract<SpaceSyncRunResult, { ok: true }>> = {},
+): SpaceSyncRunResult {
   return {
     target,
     ok: true,
@@ -59,6 +64,7 @@ function runSuccess(target: PollTarget): SpaceSyncRunResult {
     skippedOversized: 0,
     skippedMalformed: 0,
     stopReason: 'complete',
+    ...overrides,
   }
 }
 
@@ -150,6 +156,9 @@ describe('SpaceSyncScheduler', () => {
       failed: 0,
       abandoned: 0,
       halted: 0,
+      skippedOversized: 0,
+      maxPageStops: 0,
+      capped: 0,
     })
 
     await scheduler.stop()
@@ -193,6 +202,49 @@ describe('SpaceSyncScheduler', () => {
     )
     expect(runner.runTarget).toHaveBeenCalledWith(rei, expect.any(AbortSignal))
 
+    await scheduler.stop()
+  })
+
+  it('aggregates oversized skips and bounded-stop reasons across the pass', async () => {
+    const spike = makeTarget({ did: SPIKE_DID })
+    const faye = makeTarget({ did: FAYE_DID })
+    const jet = makeTarget({ did: JET_DID })
+    const log = vi.fn()
+    const runner = fakeRunner()
+    runner.runTarget.mockImplementation(async (target) => {
+      if (target.did === SPIKE_DID) {
+        return runSuccess(target, {
+          skippedOversized: 2,
+          stopReason: 'max-pages',
+        })
+      }
+      if (target.did === FAYE_DID) {
+        return runSuccess(target, { stopReason: 'per-member-cap' })
+      }
+      return runSuccess(target)
+    })
+    const scheduler = new SpaceSyncScheduler({
+      membership: fakeMembership([successOutcome([spike, faye, jet])]),
+      runner,
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      random: () => 0.5,
+      log,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(log).toHaveBeenCalledExactlyOnceWith({
+      targets: 3,
+      succeeded: 3,
+      failed: 0,
+      abandoned: 0,
+      halted: 0,
+      skippedOversized: 2,
+      maxPageStops: 1,
+      capped: 1,
+    })
     await scheduler.stop()
   })
 
@@ -316,6 +368,89 @@ describe('SpaceSyncScheduler', () => {
     await scheduler.stop()
   })
 
+  it('keeps the pass active until sibling workers settle when the budget callback throws', async () => {
+    const spike = makeTarget({ did: SPIKE_DID })
+    const faye = makeTarget({ did: FAYE_DID })
+    const jet = makeTarget({ did: JET_DID })
+    const membership = fakeMembership([successOutcome([spike, faye, jet])])
+    const spikeGate = deferred<SpaceSyncRunResult>()
+    const fayeGate = deferred<SpaceSyncRunResult>()
+    const jetGate = deferred<SpaceSyncRunResult>()
+    const runner = {
+      completeMembershipPass: vi.fn(),
+      runTarget: vi.fn((target: PollTarget) => {
+        if (target.did === SPIKE_DID) return spikeGate.promise
+        if (target.did === FAYE_DID) return fayeGate.promise
+        return jetGate.promise
+      }),
+    }
+    const callbackError = new Error('budget observer failed')
+    const onError = vi.fn()
+    const onTickSkipped = vi.fn()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_500,
+      memberBudgetMs: 1_000,
+      memberConcurrency: 2,
+      random: () => 0.5,
+      onMemberBudgetExceeded: (target) => {
+        if (target.did === SPIKE_DID) throw callbackError
+      },
+      onTickSkipped,
+      onError,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(runner.runTarget).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(900)
+    fayeGate.resolve(runSuccess(faye))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(runner.runTarget).toHaveBeenCalledTimes(3)
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(onError).toHaveBeenCalledExactlyOnceWith(callbackError)
+
+    // Jet's later budget is still outstanding, so the regular tick must see
+    // this pass as active even though Spike's observer threw.
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onTickSkipped).toHaveBeenCalledOnce()
+    expect(membership.runPass).toHaveBeenCalledOnce()
+
+    await vi.advanceTimersByTimeAsync(400)
+    spikeGate.resolve(runSuccess(spike))
+    jetGate.resolve(runSuccess(jet))
+    await vi.advanceTimersByTimeAsync(0)
+    await scheduler.stop()
+  })
+
+  it('routes a pass-log callback failure through onError and remains schedulable', async () => {
+    const logError = new Error('pass log failed')
+    const onError = vi.fn()
+    const membership = fakeMembership()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner: fakeRunner(),
+      boundaries: [],
+      intervalMs: 1_000,
+      random: () => 0.5,
+      log: () => {
+        throw logError
+      },
+      onError,
+    })
+    scheduler.start()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(onError).toHaveBeenCalledExactlyOnceWith(logError)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(membership.runPass).toHaveBeenCalledTimes(2)
+
+    await scheduler.stop()
+  })
+
   it('abandons a member over its time budget so the pass completes without it', async () => {
     const spike = makeTarget({ did: SPIKE_DID })
     const faye = makeTarget({ did: FAYE_DID })
@@ -368,6 +503,9 @@ describe('SpaceSyncScheduler', () => {
       failed: 0,
       abandoned: 1,
       halted: 0,
+      skippedOversized: 0,
+      maxPageStops: 0,
+      capped: 0,
     })
 
     // Jet's own call finishing late, after abandonment, must not surface as
@@ -437,7 +575,14 @@ describe('SpaceSyncScheduler', () => {
     const store = new SqliteFeedgenStore(db)
     try {
       const spike = makeTarget({ did: SPIKE_DID })
-      const jet = makeTarget({ did: JET_DID })
+      const mutationFence = new SpaceMutationFence()
+      const leases = await mutationFence.authorizeSnapshot({
+        boundary: BEBOP_BOUNDARY,
+        spaceUri: SPACE_URI,
+        dids: [JET_DID],
+        revocationEpoch: mutationFence.captureRevocationEpoch(),
+      })
+      const jet = makeTarget({ did: JET_DID, lease: leases.get(JET_DID) })
       const membership = fakeMembership([successOutcome([spike, jet])])
 
       // Jet's host answers page one (one post, non-terminal cursor) so
@@ -454,7 +599,7 @@ describe('SpaceSyncScheduler', () => {
                     rev: '1',
                     collection: POST_COLLECTION,
                     rkey: 'r1',
-                    cid: 'cid-1',
+                    cid: POST_CID,
                     value: { $type: POST_COLLECTION, text: 'partial' },
                   },
                 ],
@@ -477,6 +622,7 @@ describe('SpaceSyncScheduler', () => {
       const jetRunner = new SpaceSyncRunner({
         syncer: new SpaceSyncer({
           store,
+          mutationFence,
           credentialManager: {
             getCredential: vi.fn(async (boundary: string) => ({
               boundary,
@@ -495,6 +641,7 @@ describe('SpaceSyncScheduler', () => {
         purger: {
           purgeInvalidSpaceCommit: refuses('purgeInvalidSpaceCommit'),
         },
+        mutationFence,
       })
 
       const runTarget = vi.fn(
@@ -572,6 +719,9 @@ describe('SpaceSyncScheduler', () => {
       failed: 2,
       abandoned: 0,
       halted: 1,
+      skippedOversized: 0,
+      maxPageStops: 0,
+      capped: 0,
     })
 
     await scheduler.stop()
@@ -675,6 +825,9 @@ describe('SpaceSyncScheduler', () => {
       failed: 1,
       abandoned: 0,
       halted: 0,
+      skippedOversized: 0,
+      maxPageStops: 0,
+      capped: 0,
     })
 
     await scheduler.stop()
@@ -741,6 +894,9 @@ describe('SpaceSyncScheduler', () => {
       failed: 0,
       abandoned: 1,
       halted: 0,
+      skippedOversized: 0,
+      maxPageStops: 0,
+      capped: 0,
     })
 
     let stopSettled = false
@@ -867,6 +1023,9 @@ describe('SpaceSyncScheduler', () => {
       failed: 0,
       abandoned: 0,
       halted: 0,
+      skippedOversized: 0,
+      maxPageStops: 0,
+      capped: 0,
     })
 
     await scheduler.stop()

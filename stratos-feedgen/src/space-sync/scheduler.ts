@@ -24,6 +24,12 @@ export interface SpaceSyncPassLogEvent {
   abandoned: number
   /** Targets skipped with no network call because they are in a halt cooldown. */
   halted: number
+  /** Oversized records skipped across every successful target. */
+  skippedOversized: number
+  /** Successful targets that stopped at the configured page ceiling. */
+  maxPageStops: number
+  /** Successful targets that reached their per-pass record cap. */
+  capped: number
 }
 
 export interface SpaceSyncSchedulerDeps {
@@ -149,7 +155,7 @@ export class SpaceSyncScheduler {
   private scheduleNext(): void {
     if (this.stopped) return
     this.timer = setTimeout(() => this.onTick(), this.jitteredDelay())
-    this.timer.unref?.()
+    this.timer.unref()
   }
 
   private jitteredDelay(): number {
@@ -167,12 +173,12 @@ export class SpaceSyncScheduler {
       try {
         this.onTickSkipped()
       } catch (err) {
-        this.onError(err)
+        this.reportError(err)
       }
       return
     }
     this.inFlight = this.runPass()
-      .catch((err: unknown) => this.onError(err))
+      .catch((err: unknown) => this.reportError(err))
       .finally(() => {
         this.inFlight = null
       })
@@ -198,18 +204,26 @@ export class SpaceSyncScheduler {
     let failed = 0
     let abandoned = 0
     let halted = 0
+    let skippedOversized = 0
+    let maxPageStops = 0
+    let capped = 0
     let nextTarget = 0
     const workers = Array.from(
       { length: Math.min(this.memberConcurrency, targets.length) },
       async () => {
         while (nextTarget < targets.length) {
           if (signal.aborted) return
-          const target = targets[nextTarget]!
+          const target = targets.at(nextTarget)
           nextTarget += 1
+          if (!target) return
           const outcome = await this.pollWithBudget(target, signal)
           if (outcome.status === 'abandoned') {
             abandoned += 1
-            this.onMemberBudgetExceeded(target)
+            try {
+              this.onMemberBudgetExceeded(target)
+            } catch (err) {
+              this.reportError(err)
+            }
           } else if (outcome.status === 'errored') {
             failed += 1
           } else if (!outcome.result.ok) {
@@ -220,13 +234,29 @@ export class SpaceSyncScheduler {
             }
           } else {
             succeeded += 1
+            skippedOversized += outcome.result.skippedOversized
+            if (outcome.result.stopReason === 'max-pages') maxPageStops += 1
+            if (outcome.result.stopReason === 'per-member-cap') capped += 1
           }
         }
       },
     )
     await Promise.all(workers)
 
-    this.log({ targets: targets.length, succeeded, failed, abandoned, halted })
+    try {
+      this.log({
+        targets: targets.length,
+        succeeded,
+        failed,
+        abandoned,
+        halted,
+        skippedOversized,
+        maxPageStops,
+        capped,
+      })
+    } catch (err) {
+      this.reportError(err)
+    }
   }
 
   /**
@@ -249,7 +279,7 @@ export class SpaceSyncScheduler {
         controller.abort()
         resolve({ status: 'abandoned' })
       }, this.memberBudgetMs)
-      timer.unref?.()
+      timer.unref()
       this.runTrackedTarget(
         target,
         AbortSignal.any([controller.signal, passSignal]),
@@ -267,7 +297,7 @@ export class SpaceSyncScheduler {
           // own abort taking effect, not a new failure, so it is dropped
           // rather than reported.
           if (settled) return
-          this.onError(err)
+          this.reportError(err)
           settled = true
           clearTimeout(timer)
           resolve({ status: 'errored' })
@@ -288,6 +318,14 @@ export class SpaceSyncScheduler {
       () => this.activeRunnerCalls.delete(call),
     )
     return call
+  }
+
+  private reportError(err: unknown): void {
+    try {
+      this.onError(err)
+    } catch {
+      // An error observer cannot be allowed to break scheduler liveness.
+    }
   }
 }
 

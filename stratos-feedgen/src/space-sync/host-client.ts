@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP, type LookupFunction } from 'node:net'
 import { Agent, type Dispatcher } from 'undici'
 import {
+  DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
 } from '../config.js'
@@ -22,9 +23,13 @@ import {
   SpaceNotFoundError,
 } from './errors.js'
 
-/** Generous for a full page of ops; WP6 makes this configurable. */
-const DEFAULT_MAX_PAGE_BYTES = 1_048_576
 const ERROR_BODY_CAP_BYTES = 4_096
+const JSON_ENVELOPE_BYTES = 16_384
+const OP_METADATA_BYTES = 2_048
+const DEFAULT_MAX_PAGE_BYTES = getRepoOpsResponseByteLimit(
+  DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+  DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+)
 const PRIVATE_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x00000000, 0x00ffffff],
   [0x0a000000, 0x0affffff],
@@ -53,7 +58,7 @@ export interface SpaceHostClientOptions {
   allowHttpOrigins?: ReadonlySet<string>
   /** Byte cap for a `listRepoOps` page response body. */
   maxPageBytes?: number
-  /** Byte cap for a `getRecord` response body. */
+  /** Byte cap for the decoded record value; response framing gets bounded headroom. */
   maxRecordBytes?: number
   /** Injectable DNS resolver. The request signal bounds callers even when the resolver ignores it. */
   resolveHost?: (
@@ -129,8 +134,9 @@ export class SpaceHostClient {
       opts.requestTimeoutMs ?? DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS
     this.allowHttpOrigins = opts.allowHttpOrigins ?? new Set()
     this.maxPageBytes = opts.maxPageBytes ?? DEFAULT_MAX_PAGE_BYTES
-    this.maxRecordBytes =
-      opts.maxRecordBytes ?? DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES
+    this.maxRecordBytes = getRecordResponseByteLimit(
+      opts.maxRecordBytes ?? DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+    )
     this.resolveHost = opts.resolveHost ?? resolveHost
   }
 
@@ -259,6 +265,28 @@ export class SpaceHostClient {
     }
     return { origin, addresses }
   }
+}
+
+/**
+ * Bound a page body from the configured record/page limits while leaving
+ * room for each operation's revision/path/CID fields and the JSON envelope.
+ */
+export function getRepoOpsResponseByteLimit(
+  pageLimit: number,
+  maxRecordBytes: number,
+): number {
+  return boundedByteLimit(
+    JSON_ENVELOPE_BYTES + pageLimit * (maxRecordBytes + OP_METADATA_BYTES),
+  )
+}
+
+/** Leave bounded room for `{uri,cid,value}` around a near-limit value. */
+export function getRecordResponseByteLimit(maxRecordBytes: number): number {
+  return boundedByteLimit(maxRecordBytes + JSON_ENVELOPE_BYTES)
+}
+
+function boundedByteLimit(value: number): number {
+  return Number.isSafeInteger(value) ? value : Number.MAX_SAFE_INTEGER
 }
 
 interface ValidatedOrigin {

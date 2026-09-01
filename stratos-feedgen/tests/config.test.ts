@@ -25,6 +25,18 @@ const baseEnv = {
 }
 
 describe('loadFeedgenConfig space-sync defaults', () => {
+  it('leaves request-timeout headroom above worst-case default host resolution', () => {
+    const resolverWorkers = 10
+    const resolverTimeoutMs = 3_000
+    const resolverOnlyWorstCaseMs =
+      Math.ceil(DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT / resolverWorkers) *
+      resolverTimeoutMs
+
+    expect(DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS).toBeGreaterThan(
+      resolverOnlyWorstCaseMs,
+    )
+  })
+
   it('applies every space-sync default when no env vars are set', () => {
     const cfg = loadFeedgenConfig({ ...baseEnv })
     expect(cfg.spaceSyncEnabled).toBe(DEFAULT_SPACE_SYNC_ENABLED)

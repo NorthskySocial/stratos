@@ -617,6 +617,85 @@ describe('MembershipTracker', () => {
         expectSuccess(outcomeFor(outcomes, BEBOP_BOUNDARY)).removed,
       ).toEqual([{ did: SPIKE, scope: 'boundary' }])
     })
+
+    it('persists joins alongside deferred departures across a restart', async () => {
+      const bebopSpace = spaceUriFor(BEBOP_BOUNDARY)
+      const nervSpace = spaceUriFor(NERV_BOUNDARY)
+      let pass = 1
+      const client = {
+        listSpaceRepos: vi.fn(
+          async (
+            opts: ListSpaceReposOptions,
+          ): Promise<ListSpaceReposResult> => {
+            if (pass === 1) {
+              return opts.space === bebopSpace
+                ? {
+                    repos: [
+                      {
+                        did: SPIKE,
+                        custody: 'pds',
+                        host: 'https://spike.example',
+                      },
+                    ],
+                  }
+                : { repos: [] }
+            }
+            if (pass === 2) {
+              if (opts.space === nervSpace) {
+                throw new Error('nerv membership unavailable')
+              }
+              return {
+                repos: [
+                  {
+                    did: FAYE,
+                    custody: 'pds',
+                    host: 'https://faye.example',
+                  },
+                ],
+              }
+            }
+            return { repos: [] }
+          },
+        ),
+      }
+      const snapshotStore = fakeSnapshotStore()
+      const purger = fakePurger()
+      const tracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger,
+        snapshotStore,
+        onError: vi.fn(),
+      })
+
+      await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+      pass = 2
+      await tracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+
+      expect(purger.purgeSpaceDeparture).toHaveBeenCalledExactlyOnceWith(
+        SPIKE,
+        BEBOP_BOUNDARY,
+        bebopSpace,
+      )
+      expect(await snapshotStore.listSpaceMembers(BEBOP_BOUNDARY)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ did: SPIKE }),
+          expect.objectContaining({ did: FAYE }),
+        ]),
+      )
+
+      pass = 3
+      const restartedPurger = fakePurger()
+      const restartedTracker = new MembershipTracker({
+        client,
+        credentialManager: fakeCredentialManager(),
+        purger: restartedPurger,
+        snapshotStore,
+      })
+      await restartedTracker.runPass([BEBOP_BOUNDARY, NERV_BOUNDARY])
+
+      expect(restartedPurger.purgeSpaceActor).toHaveBeenCalledWith(FAYE)
+    })
   })
 
   describe('presence without a poll target', () => {

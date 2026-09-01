@@ -10,8 +10,7 @@ import { mintDelegationToken } from './delegation.js'
 
 /**
  * Holds and refreshes the space credential this feedgen needs to read a
- * member's repo as a spaces syncer (consumed by MM-06; not wired into the
- * sync path here).
+ * member's repo as a spaces syncer.
  *
  * One credential is held per boundary, bound to a single DPoP key generated
  * once for the manager's lifetime. Mints a fresh credential on first use,
@@ -24,7 +23,7 @@ import { mintDelegationToken } from './delegation.js'
  * `stratos-service/src/oauth/client.ts`'s `SPACE_TYPE` — the only space type
  * Stratos currently hosts.
  */
-const SPACE_TYPE = 'zone.stratos.space.feed'
+export const STRATOS_FEED_SPACE_TYPE = 'zone.stratos.space.feed'
 
 /** Refresh once within this many ms of expiry. Small relative to the 2h server-side default TTL. */
 export const DEFAULT_REFRESH_MARGIN_MS = 5 * 60_000
@@ -154,7 +153,7 @@ export class SpaceCredentialManager {
   }
 
   private async mint(boundary: string): Promise<HeldState> {
-    const spaceUriResult = boundaryToSpaceUri(boundary, SPACE_TYPE)
+    const spaceUriResult = boundaryToSpaceUri(boundary, STRATOS_FEED_SPACE_TYPE)
     if (!spaceUriResult.ok) {
       throw new Error(
         `cannot map boundary "${boundary}" to a space URI: ${spaceUriResult.error.message}`,

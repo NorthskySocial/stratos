@@ -12,6 +12,7 @@ import {
   createReconcileScheduler,
   Purger,
   reconcileEnrollments,
+  type PurgeAudit,
 } from '../src/purge/index.js'
 import { SpaceMutationFence } from '../src/space-sync/index.js'
 import type { ResolveEnrollmentsResult } from '../src/upstream/index.js'
@@ -22,6 +23,8 @@ const VASH = 'did:plc:vashstampede' // unchanged, still in scope
 const STRATOS_DID = 'did:web:stratos.test'
 const CREW_BOUNDARY = `${STRATOS_DID}/crew`
 const BOUNTY_BOUNDARY = `${STRATOS_DID}/bounty`
+const BOUNTY_SPACE =
+  'at://did:web:stratos.test/space/zone.stratos.space.feed/bounty'
 
 let store: FeedgenStore
 const tmpDirs: string[] = []
@@ -79,6 +82,13 @@ describe('reconcileEnrollments', () => {
     await store.upsertCursor(SPIKE, 1, '2024-01-01T00:00:00.000Z')
     await store.upsertPost(post(FAYE, '1', [BOUNTY_BOUNDARY])) // out of scope after shrink
     await store.upsertPost(post(FAYE, '2', [CREW_BOUNDARY])) // stays
+    await store.upsertCursor(FAYE, 9, '2024-01-01T00:00:00.000Z')
+    await store.upsertSpaceCursor(
+      BOUNTY_SPACE,
+      FAYE,
+      'rev-9',
+      '2024-01-01T00:00:00.000Z',
+    )
     await store.upsertPost(post(VASH, '1', [CREW_BOUNDARY])) // stays
 
     const configured = new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY])
@@ -116,6 +126,8 @@ describe('reconcileEnrollments', () => {
     expect((await store.getEnrolledActor(FAYE))!.boundaries).toEqual([
       CREW_BOUNDARY,
     ])
+    expect(await store.getCursor(FAYE)).toBe(9)
+    expect(await store.getSpaceCursor(BOUNTY_SPACE, FAYE)).toBeNull()
     // VASH untouched.
     expect(
       await store.getPost(`at://${VASH}/zone.stratos.feed.post/1`),
@@ -222,50 +234,56 @@ describe('reconcileEnrollments', () => {
   })
 
   it('persists boundary expansions so a later shrink is purged', async () => {
-    // Run 1: fresh state expands from crew to crew+bounty. No loss is
-    // detected, but the snapshot must still be persisted, otherwise the next
-    // run diffs against the stale set and never notices losing bounty.
-    await store.upsertEnrolledActor(actor(FAYE, [CREW_BOUNDARY]))
-    const expandClient = {
-      resolveEnrollments: vi.fn(async (did: string) => ({
-        did,
-        enrolled: true,
-        boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
-      })),
-    }
-    const purger = new Purger({ store, audit: () => {} })
-    await reconcileEnrollments(
-      { store, purger, client: expandClient, log: () => {} },
-      new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
-    )
-    expect((await store.getEnrolledActor(FAYE))?.boundaries.sort()).toEqual(
-      [BOUNTY_BOUNDARY, CREW_BOUNDARY].sort(),
-    )
+    vi.useFakeTimers({ now: new Date('2026-08-24T12:00:00.000Z') })
+    try {
+      // Run 1: fresh state expands from crew to crew+bounty. No loss is
+      // detected, but the snapshot must still be persisted, otherwise the next
+      // run diffs against the stale set and never notices losing bounty.
+      await store.upsertEnrolledActor(actor(FAYE, [CREW_BOUNDARY]))
+      const expandClient = {
+        resolveEnrollments: vi.fn(async (did: string) => ({
+          did,
+          enrolled: true,
+          boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
+        })),
+      }
+      const purger = new Purger({ store, audit: () => {} })
+      await reconcileEnrollments(
+        { store, purger, client: expandClient, log: () => {} },
+        new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+      )
+      expect((await store.getEnrolledActor(FAYE))?.boundaries.sort()).toEqual(
+        [BOUNTY_BOUNDARY, CREW_BOUNDARY].sort(),
+      )
+      vi.advanceTimersByTime(1)
 
-    // Posts indexed under the expanded boundary while it was held.
-    await store.upsertPost(post(FAYE, '1', [BOUNTY_BOUNDARY]))
+      // Posts indexed under the expanded boundary while it was held.
+      await store.upsertPost(post(FAYE, '1', [BOUNTY_BOUNDARY]))
 
-    // Run 2: bounty is revoked. Because the expansion was persisted, the
-    // diff sees the loss and purges the boundary's posts.
-    const shrinkClient = {
-      resolveEnrollments: vi.fn(async (did: string) => ({
-        did,
-        enrolled: true,
-        boundaries: [CREW_BOUNDARY],
-      })),
+      // Run 2: bounty is revoked. Because the expansion was persisted, the
+      // diff sees the loss and purges the boundary's posts.
+      const shrinkClient = {
+        resolveEnrollments: vi.fn(async (did: string) => ({
+          did,
+          enrolled: true,
+          boundaries: [CREW_BOUNDARY],
+        })),
+      }
+      const summary = await reconcileEnrollments(
+        { store, purger, client: shrinkClient, log: () => {} },
+        new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+      )
+      expect(summary.shrunk).toBe(1)
+      expect(summary.postsPurged).toBe(1)
+      expect(
+        await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
+      ).toBeNull()
+      expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual([
+        CREW_BOUNDARY,
+      ])
+    } finally {
+      vi.useRealTimers()
     }
-    const summary = await reconcileEnrollments(
-      { store, purger, client: shrinkClient, log: () => {} },
-      new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
-    )
-    expect(summary.shrunk).toBe(1)
-    expect(summary.postsPurged).toBe(1)
-    expect(
-      await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
-    ).toBeNull()
-    expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual([
-      CREW_BOUNDARY,
-    ])
   })
 })
 
@@ -424,7 +442,7 @@ describe('reconcile on reconnect', () => {
     ])
   })
 
-  it('holds the DID mutation scope from the freshness reread through purge and snapshot update', async () => {
+  it('gives a queued live boundary frame precedence over a stale reconcile result', async () => {
     await store.upsertEnrolledActor(
       actor(FAYE, [CREW_BOUNDARY, BOUNTY_BOUNDARY]),
     )
@@ -432,30 +450,28 @@ describe('reconcile on reconnect', () => {
 
     const mutationFence = new SpaceMutationFence()
     const purger = new Purger({ store, mutationFence, audit: () => {} })
-    const originalGetEnrolledActor = store.getEnrolledActor.bind(store)
-    let releaseFreshnessRead!: () => void
-    const freshnessReadMayReturn = new Promise<void>((resolve) => {
-      releaseFreshnessRead = resolve
+    let releaseDrain!: () => void
+    const drainMayReturn = new Promise<void>((resolve) => {
+      releaseDrain = resolve
     })
-    let markFreshnessRead!: () => void
-    const freshnessRead = new Promise<void>((resolve) => {
-      markFreshnessRead = resolve
+    let markDrainStarted!: () => void
+    const drainStarted = new Promise<void>((resolve) => {
+      markDrainStarted = resolve
     })
-    let heldFreshnessRead = false
-    vi.spyOn(store, 'getEnrolledActor').mockImplementation(async (did) => {
-      const current = await originalGetEnrolledActor(did)
-      if (did === FAYE && !heldFreshnessRead) {
-        heldFreshnessRead = true
-        markFreshnessRead()
-        await freshnessReadMayReturn
-      }
-      return current
-    })
+    const actorPool = {
+      removeActorAndDrain: vi.fn(async () => {
+        markDrainStarted()
+        await drainMayReturn
+      }),
+      addActor: vi.fn(),
+    }
 
     const reconcile = reconcileEnrollments(
       {
         store,
         purger,
+        mutationFence,
+        actorPool,
         client: {
           resolveEnrollments: async (did) => ({
             did,
@@ -467,29 +483,196 @@ describe('reconcile on reconnect', () => {
       },
       new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
     )
-    await freshnessRead
+    await drainStarted
 
     let liveUpdateEntered = false
-    const liveUpdate = mutationFence.withDidScope(FAYE, async () => {
-      liveUpdateEntered = true
-      await store.upsertEnrolledActor({
-        did: FAYE,
-        boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
-        enrolledAt: '2024-01-01T00:00:00.000Z',
-        lastSeenAt: '2027-01-01T00:00:00.000Z',
-      })
-    })
+    mutationFence.beginDidMutation(FAYE)
+    const liveUpdate = (async () => {
+      try {
+        await mutationFence.withDidScope(FAYE, async () => {
+          liveUpdateEntered = true
+          await store.upsertEnrolledActor({
+            did: FAYE,
+            boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
+            enrolledAt: '2024-01-01T00:00:00.000Z',
+            lastSeenAt: '2027-01-01T00:00:00.000Z',
+          })
+        })
+      } finally {
+        mutationFence.endDidMutation(FAYE)
+      }
+    })()
 
     try {
       await Promise.resolve()
       expect(liveUpdateEntered).toBe(false)
     } finally {
-      releaseFreshnessRead()
+      releaseDrain()
     }
 
     const [summary] = await Promise.all([reconcile, liveUpdate])
-    expect(summary.shrunk).toBe(1)
+    expect(summary.shrunk).toBe(0)
     expect(liveUpdateEntered).toBe(true)
+    expect(
+      await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
+    ).not.toBeNull()
+    expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual([
+      CREW_BOUNDARY,
+      BOUNTY_BOUNDARY,
+    ])
+  })
+
+  it('does not let unrelated live DID activity block reconciliation', async () => {
+    await store.upsertEnrolledActor(
+      actor(FAYE, [CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+    )
+    await store.upsertPost(post(FAYE, '1', [BOUNTY_BOUNDARY]))
+
+    const mutationFence = new SpaceMutationFence()
+    const purger = new Purger({ store, mutationFence, audit: () => {} })
+    mutationFence.beginDidMutation(SPIKE)
+    try {
+      const summary = await reconcileEnrollments(
+        {
+          store,
+          purger,
+          mutationFence,
+          client: {
+            resolveEnrollments: async (did) => ({
+              did,
+              enrolled: true,
+              boundaries: [CREW_BOUNDARY],
+            }),
+          },
+          log: () => {},
+        },
+        new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+      )
+
+      expect(summary.shrunk).toBe(1)
+      expect(
+        await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
+      ).toBeNull()
+    } finally {
+      mutationFence.endDidMutation(SPIKE)
+    }
+  })
+
+  it('rolls back an in-flight boundary purge when a live frame becomes pending', async () => {
+    await store.upsertEnrolledActor(
+      actor(FAYE, [CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+    )
+    await store.upsertPost(post(FAYE, '1', [BOUNTY_BOUNDARY]))
+    await store.upsertSpaceCursor(
+      BOUNTY_SPACE,
+      FAYE,
+      'rev-7',
+      '2024-01-01T00:00:00.000Z',
+    )
+
+    const mutationFence = new SpaceMutationFence()
+    const audits: PurgeAudit[] = []
+    const purger = new Purger({
+      store,
+      mutationFence,
+      audit: (entry) => audits.push(entry),
+    })
+    const originalGuardedDelete =
+      store.deleteActorBoundaryStateGuarded.bind(store)
+    let liveUpdate: Promise<void> | undefined
+    vi.spyOn(store, 'deleteActorBoundaryStateGuarded').mockImplementation(
+      (spaceUri, did, boundary, shouldCommit) =>
+        originalGuardedDelete(spaceUri, did, boundary, () => {
+          mutationFence.beginDidMutation(FAYE)
+          liveUpdate = (async () => {
+            try {
+              await mutationFence.withDidScope(FAYE, async () => {
+                await store.upsertEnrolledActor({
+                  did: FAYE,
+                  boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
+                  enrolledAt: '2024-01-01T00:00:00.000Z',
+                  lastSeenAt: '2027-01-01T00:00:00.000Z',
+                })
+              })
+            } finally {
+              mutationFence.endDidMutation(FAYE)
+            }
+          })()
+          return shouldCommit()
+        }),
+    )
+
+    const summary = await reconcileEnrollments(
+      {
+        store,
+        purger,
+        mutationFence,
+        actorPool: {
+          removeActorAndDrain: vi.fn(async () => {}),
+          addActor: vi.fn(),
+        },
+        client: {
+          resolveEnrollments: async (did) => ({
+            did,
+            enrolled: true,
+            boundaries: [CREW_BOUNDARY],
+          }),
+        },
+        log: () => {},
+      },
+      new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+    )
+    if (!liveUpdate) throw new Error('live update was not queued')
+    await liveUpdate
+
+    expect(summary.shrunk).toBe(0)
+    expect(summary.postsPurged).toBe(0)
+    expect(audits).toEqual([])
+    expect(
+      await store.getPost(`at://${FAYE}/zone.stratos.feed.post/1`),
+    ).not.toBeNull()
+    expect(await store.getSpaceCursor(BOUNTY_SPACE, FAYE)).toBe('rev-7')
+    expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual([
+      CREW_BOUNDARY,
+      BOUNTY_BOUNDARY,
+    ])
+  })
+
+  it('propagates a guarded boundary-delete failure without auditing success', async () => {
+    await store.upsertEnrolledActor(
+      actor(FAYE, [CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+    )
+    const mutationFence = new SpaceMutationFence()
+    const audits: PurgeAudit[] = []
+    const purger = new Purger({
+      store,
+      mutationFence,
+      audit: (entry) => audits.push(entry),
+    })
+    const deleteError = new Error('boundary transaction failed')
+    vi.spyOn(store, 'deleteActorBoundaryStateGuarded').mockRejectedValueOnce(
+      deleteError,
+    )
+
+    await expect(
+      reconcileEnrollments(
+        {
+          store,
+          purger,
+          mutationFence,
+          client: {
+            resolveEnrollments: async (did) => ({
+              did,
+              enrolled: true,
+              boundaries: [CREW_BOUNDARY],
+            }),
+          },
+          log: () => {},
+        },
+        new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+      ),
+    ).rejects.toBe(deleteError)
+    expect(audits).toEqual([])
     expect((await store.getEnrolledActor(FAYE))?.boundaries).toEqual([
       CREW_BOUNDARY,
       BOUNTY_BOUNDARY,
