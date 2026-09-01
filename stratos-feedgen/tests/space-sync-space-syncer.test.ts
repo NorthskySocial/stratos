@@ -123,6 +123,9 @@ function fakeStore() {
     resetSpaceSyncState: vi.fn(async (spaceUri: string, did: string) => {
       await deleteSpaceCursor(spaceUri, did)
     }),
+    resetPendingSpaceSyncState: vi.fn(
+      async (_spaceUri: string, _did: string): Promise<boolean> => false,
+    ),
     promoteSpaceSyncStage: vi.fn(
       async (_spaceUri: string, _did: string): Promise<void> => {},
     ),
@@ -1096,6 +1099,35 @@ describe('SpaceSyncer', () => {
 
       expect(client.listRepoOps).toHaveBeenCalledWith(
         expect.objectContaining({ limit: 50 }),
+      )
+    })
+  })
+
+  describe('pending terminal recovery', () => {
+    it('checks pending terminal state before it reads the resume cursor', async () => {
+      const store = fakeStore()
+      const calls: string[] = []
+      store.resetPendingSpaceSyncState.mockImplementation(
+        async (): Promise<boolean> => {
+          calls.push('reset')
+          return true
+        },
+      )
+      store.getSpaceCursor.mockImplementation(
+        async (): Promise<string | null> => {
+          calls.push('cursor')
+          return null
+        },
+      )
+      const { syncer, client } = buildSyncer({ store })
+      client.listRepoOps.mockResolvedValue(makePage({ ops: [] }))
+
+      expectSuccess(await syncer.syncTarget(makeTarget()))
+
+      expect(calls).toEqual(['reset', 'cursor'])
+      expect(store.resetPendingSpaceSyncState).toHaveBeenCalledWith(
+        SPACE_URI,
+        SPIKE_DID,
       )
     })
   })

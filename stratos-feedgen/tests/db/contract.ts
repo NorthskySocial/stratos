@@ -426,6 +426,13 @@ export function describeStoreContract(
         expect(await store.getPost(DELETED_URI)).not.toBeNull()
         expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('page-2')
 
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
         await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
 
         expect(await store.getPost(DELETED_URI)).toBeNull()
@@ -434,9 +441,31 @@ export function describeStoreContract(
           boundaries: [BOUNDARY],
         })
         expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('page-2')
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
       })
 
       it('drops staged state with a malformed cursor reset', async () => {
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [{ kind: 'upsert', post: stagedPost() }],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        await store.resetSpaceSyncState(SPACE_URI, FAYE_DID)
+        await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
+
+        expect(await store.getPost(STAGED_URI)).toBeNull()
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+      })
+
+      it('keeps a partial stage but resets a pending terminal stage', async () => {
         await store.stageSpaceSyncPage({
           spaceUri: SPACE_URI,
           did: FAYE_DID,
@@ -446,11 +475,56 @@ export function describeStoreContract(
           updatedAt: '2024-01-01T00:00:00.000Z',
         })
 
-        await store.resetSpaceSyncState(SPACE_URI, FAYE_DID)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+        expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBe('page-2')
+
+        await store.stageSpaceSyncPage({
+          spaceUri: SPACE_URI,
+          did: FAYE_DID,
+          boundary: BOUNDARY,
+          mutations: [],
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        })
+
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(true)
         await store.promoteSpaceSyncStage(SPACE_URI, FAYE_DID)
 
         expect(await store.getPost(STAGED_URI)).toBeNull()
         expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+      })
+
+      it('clears a terminal marker when staged state is purged', async () => {
+        const stageTerminalMarker = async (): Promise<void> => {
+          await store.stageSpaceSyncPage({
+            spaceUri: SPACE_URI,
+            did: FAYE_DID,
+            boundary: BOUNDARY,
+            mutations: [],
+            updatedAt: '2024-01-01T00:00:00.000Z',
+          })
+        }
+
+        await stageTerminalMarker()
+        await store.deleteSpaceSyncStage(SPACE_URI, FAYE_DID)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+
+        await stageTerminalMarker()
+        await store.deleteSpaceSyncStages(FAYE_DID)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
+
+        await stageTerminalMarker()
+        await store.deleteSpaceSyncStagesBySpace(SPACE_URI)
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
       })
 
       it('clears staged state when a guarded boundary purge commits', async () => {
@@ -459,7 +533,6 @@ export function describeStoreContract(
           did: FAYE_DID,
           boundary: BOUNDARY,
           mutations: [{ kind: 'upsert', post: stagedPost() }],
-          nextCursor: 'page-2',
           updatedAt: '2024-01-01T00:00:00.000Z',
         })
 
@@ -475,6 +548,9 @@ export function describeStoreContract(
 
         expect(await store.getPost(STAGED_URI)).toBeNull()
         expect(await store.getSpaceCursor(SPACE_URI, FAYE_DID)).toBeNull()
+        expect(
+          await store.resetPendingSpaceSyncState(SPACE_URI, FAYE_DID),
+        ).toBe(false)
       })
     })
 

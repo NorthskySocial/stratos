@@ -6,6 +6,7 @@ import {
   post as postTbl,
   postBoundary as postBoundaryTbl,
   spaceMemberSnapshot as spaceMemberSnapshotTbl,
+  spaceSyncPendingVerification as spaceSyncPendingVerificationTbl,
   spaceSyncStage as spaceSyncStageTbl,
   spaceSyncCursor as spaceSyncCursorTbl,
   syncCursor as syncCursorTbl,
@@ -116,6 +117,13 @@ export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
       recordJson TEXT,
       blobRefsJson TEXT,
       PRIMARY KEY (spaceUri, did, uri)
+    )
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS space_sync_pending_verification (
+      spaceUri TEXT NOT NULL,
+      did TEXT NOT NULL,
+      PRIMARY KEY (spaceUri, did)
     )
   `)
   await db.run(sql`
@@ -240,6 +248,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
             and(
               eq(spaceSyncStageTbl.spaceUri, spaceUri),
               eq(spaceSyncStageTbl.did, did),
+            ),
+          )
+        await tx
+          .delete(spaceSyncPendingVerificationTbl)
+          .where(
+            and(
+              eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+              eq(spaceSyncPendingVerificationTbl.did, did),
             ),
           )
         const postDelete = await tx.delete(postTbl).where(
@@ -410,6 +426,12 @@ export class SqliteFeedgenStore implements FeedgenStore {
             set: { cursor: input.nextCursor, updatedAt: input.updatedAt },
           })
       }
+      if (input.nextCursor === undefined) {
+        await tx
+          .insert(spaceSyncPendingVerificationTbl)
+          .values({ spaceUri: input.spaceUri, did: input.did })
+          .onConflictDoNothing()
+      }
     })
   }
 
@@ -468,11 +490,61 @@ export class SqliteFeedgenStore implements FeedgenStore {
             eq(spaceSyncStageTbl.did, did),
           ),
         )
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+    })
+  }
+
+  async resetPendingSpaceSyncState(
+    spaceUri: string,
+    did: string,
+  ): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const pending = await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+      if (pending.rowsAffected === 0) return false
+      await tx
+        .delete(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncCursorTbl)
+        .where(
+          and(
+            eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+            eq(spaceSyncCursorTbl.did, did),
+          ),
+        )
+      return true
     })
   }
 
   async resetSpaceSyncState(spaceUri: string, did: string): Promise<void> {
     await this.db.transaction(async (tx) => {
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
       await tx
         .delete(spaceSyncStageTbl)
         .where(
@@ -493,29 +565,49 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async deleteSpaceSyncStage(spaceUri: string, did: string): Promise<number> {
-    const res = await this.db
-      .delete(spaceSyncStageTbl)
-      .where(
-        and(
-          eq(spaceSyncStageTbl.spaceUri, spaceUri),
-          eq(spaceSyncStageTbl.did, did),
-        ),
-      )
-    return res.rowsAffected
+    return this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+      return deleted.rowsAffected
+    })
   }
 
   async deleteSpaceSyncStages(did: string): Promise<number> {
-    const res = await this.db
-      .delete(spaceSyncStageTbl)
-      .where(eq(spaceSyncStageTbl.did, did))
-    return res.rowsAffected
+    return this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(spaceSyncStageTbl)
+        .where(eq(spaceSyncStageTbl.did, did))
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(eq(spaceSyncPendingVerificationTbl.did, did))
+      return deleted.rowsAffected
+    })
   }
 
   async deleteSpaceSyncStagesBySpace(spaceUri: string): Promise<number> {
-    const res = await this.db
-      .delete(spaceSyncStageTbl)
-      .where(eq(spaceSyncStageTbl.spaceUri, spaceUri))
-    return res.rowsAffected
+    return this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(spaceSyncStageTbl)
+        .where(eq(spaceSyncStageTbl.spaceUri, spaceUri))
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri))
+      return deleted.rowsAffected
+    })
   }
 
   async getPost(uri: string): Promise<IndexedPost | null> {
