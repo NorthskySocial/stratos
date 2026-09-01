@@ -37,6 +37,7 @@ import {
 } from '../space-sync/index.js'
 import {
   ActorPool,
+  CurrentMembershipReplayAuthorizer,
   intersectsBoundaries,
   ServiceStream,
   SubscriptionIndexer,
@@ -132,8 +133,14 @@ async function main(): Promise<void> {
   logger.info({ port }, 'stratos-feedgen listening')
 
   const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
+  const replayAuthorizer = new CurrentMembershipReplayAuthorizer({
+    store,
+    client: upstream,
+    configuredBoundaries,
+  })
   const indexer = new SubscriptionIndexer(store, {
     onPostIndexed: () => metrics.indexPostsTotal.inc(),
+    replayAuthorizer,
   })
 
   // Best-effort warm-up: a boundary this feedgen has no membership for yet
