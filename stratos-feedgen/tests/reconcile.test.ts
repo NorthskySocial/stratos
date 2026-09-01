@@ -133,6 +133,8 @@ describe('reconcileEnrollments', () => {
       await store.getPost(`at://${VASH}/zone.stratos.feed.post/1`),
     ).not.toBeNull()
 
+    expect(summary.total).toBe(3)
+    expect(summary.truncated).toBe(false)
     expect(summary.examined).toBe(3)
     expect(summary.unenrolled).toBe(1)
     expect(summary.shrunk).toBe(1)
@@ -161,6 +163,8 @@ describe('reconcileEnrollments', () => {
       { maxActors: 4, batchSize: 2 },
     )
     expect(summary.examined).toBe(4)
+    expect(summary.total).toBe(10)
+    expect(summary.truncated).toBe(true)
     expect(client.resolveEnrollments).toHaveBeenCalledTimes(4)
   })
 

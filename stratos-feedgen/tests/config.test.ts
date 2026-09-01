@@ -96,6 +96,7 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
+        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
         FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
       }),
     ).toThrow(/must differ/)

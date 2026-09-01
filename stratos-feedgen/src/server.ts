@@ -13,6 +13,7 @@ import {
 } from './api/index.js'
 import { FEEDGEN_LEXICONS } from './lexicon/index.js'
 import type { FeedgenMetrics, SubscriptionStatus } from './metrics.js'
+import type { FeedReadiness } from './readiness.js'
 import {
   getRequestContext,
   requestIdMiddleware,
@@ -41,6 +42,8 @@ export interface FeedgenServerDeps {
   metricsToken?: string
   /** Late-bound subscription state reported by `/health`. */
   subscriptionStatus?: SubscriptionStatus
+  /** Optional fail-closed gate for projections pending authorization replay. */
+  feedReadiness?: FeedReadiness
 }
 
 export interface FeedgenHttpServer {
@@ -64,6 +67,7 @@ export function createFeedgenServer(
     store: deps.store,
     enrollmentManager: deps.enrollmentManager,
     verifier: deps.verifier,
+    readiness: deps.feedReadiness,
   })
 
   registerDescribeFeedHandler(xrpc, {

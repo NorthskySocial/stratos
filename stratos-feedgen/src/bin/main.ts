@@ -23,6 +23,7 @@ import {
   reconcileEnrollments,
 } from '../purge/index.js'
 import { SpaceMutationFence } from '../mutation-fence.js'
+import { FeedReadinessGate } from '../readiness.js'
 import { createFeedgenServer } from '../server.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
@@ -107,6 +108,9 @@ async function main(): Promise<void> {
   const store = await createFeedgenStore(cfg)
   shutdownDeps.store = store
   const spaceMutationFence = new SpaceMutationFence()
+  // Never serve the local projection until the enrollment stream has opened
+  // and a complete current-authority reconciliation has finished.
+  const feedReadiness = new FeedReadinessGate()
 
   const verifier = createFeedRequestVerifier({
     feedgenDid: cfg.feedgenServiceDid,
@@ -126,6 +130,7 @@ async function main(): Promise<void> {
     metrics,
     metricsToken: cfg.metricsToken,
     subscriptionStatus,
+    feedReadiness,
   })
 
   const httpServer = await server.listen(port)
@@ -134,7 +139,6 @@ async function main(): Promise<void> {
 
   const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
   const replayAuthorizer = new CurrentMembershipReplayAuthorizer({
-    store,
     client: upstream,
     configuredBoundaries,
   })
@@ -198,6 +202,7 @@ async function main(): Promise<void> {
       metrics,
       shutdownDeps,
       spaceMutationFence,
+      feedReadiness,
     })
     // Shutdown awaits this barrier before it closes the store. The swallow
     // keeps a startup failure out of the panic path; main's catch reports it.
@@ -317,6 +322,7 @@ interface StartSubscriptionDeps {
   metrics: FeedgenMetrics
   shutdownDeps: ShutdownDeps
   spaceMutationFence: SpaceMutationFence
+  feedReadiness: FeedReadinessGate
 }
 
 /**
@@ -331,7 +337,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
 }> {
   const { cfg, upstream, store, indexer, enrollmentManager, logger, metrics } =
     deps
-  const { configuredBoundaries, spaceMutationFence } = deps
+  const { configuredBoundaries, spaceMutationFence, feedReadiness } = deps
 
   const pool = new ActorPool(
     {
@@ -372,7 +378,8 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // via batching so upstream resolves don't fan out unbounded on large
   // tenants.
   const runReconcile = async (): Promise<void> => {
-    await reconcileEnrollments(
+    const generation = feedReadiness.beginReconciliation()
+    const summary = await reconcileEnrollments(
       {
         store,
         purger,
@@ -390,6 +397,13 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
         maxActors: parseIntEnv(process.env['FEEDGEN_RECONCILE_MAX_ACTORS']),
       },
     )
+    const released = feedReadiness.completeReconciliation(generation, summary)
+    if (!released && (summary.errors > 0 || summary.truncated)) {
+      logger.warn(
+        { ...summary },
+        'feed remains unavailable until enrollment reconciliation is complete',
+      )
+    }
   }
   await runReconcile()
   const triggerReconcile = createReconcileScheduler(runReconcile, (err) => {
@@ -454,8 +468,10 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     {
       stratosServiceUrl: cfg.stratosServiceUrl,
       mintToken: () => upstream.mintServiceAuthToken(),
-      onReconnectScheduled: () =>
-        metrics.reconnectsTotal.inc({ kind: 'service' }),
+      onReconnectScheduled: () => {
+        feedReadiness.markUnavailable()
+        metrics.reconnectsTotal.inc({ kind: 'service' })
+      },
     },
     {
       onEnroll: async (did, boundaries) => {
@@ -482,6 +498,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       // The scheduler coalesces, so a healthy boot pays one bounded extra
       // run.
       onSessionEstablished: () => {
+        feedReadiness.markSessionEstablished()
         triggerReconcile()
       },
     },
