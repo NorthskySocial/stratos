@@ -1,3 +1,4 @@
+import { isIP } from 'node:net'
 import { parseCommaList } from '@northskysocial/stratos-core'
 
 /**
@@ -65,7 +66,7 @@ export interface FeedgenConfig {
   spaceSyncMaxRecordBytes: number
   /** Max records indexed for one member in one pass. */
   spaceSyncMaxRecordsPerMember: number
-  /** Exact `http://` origins allowed for member hosts. `https://` origins are always allowed. */
+  /** Exact literal-loopback `http://` origins allowed for member hosts. `https://` origins are always allowed. */
   spaceSyncAllowHttpOrigins: ReadonlySet<string>
 }
 
@@ -274,9 +275,9 @@ function parseBoolean(
 
 /**
  * Parses `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS` into the exact set of
- * `http://` origins a member host is allowed to use. `https://` origins are
- * always allowed and never belong in this list, so an entry that isn't a
- * bare `http://` origin fails fast at load rather than being ignored.
+ * literal loopback `http://` origins a member host is allowed to use.
+ * `https://` origins are always allowed and never belong in this list, so an
+ * entry that is not a bare loopback `http://` origin fails fast at load.
  */
 function parseAllowHttpOrigins(value: string | undefined): ReadonlySet<string> {
   if (value === undefined || value === '') {
@@ -309,7 +310,27 @@ function parseHttpOrigin(entry: string): string {
       `Invalid ${name} entry "${entry}": expected a bare origin with no path, query, or userinfo`,
     )
   }
+  if (!isLoopbackHttpHostname(url.hostname)) {
+    throw new Error(
+      `Invalid ${name} entry "${entry}": expected a literal loopback origin (localhost, 127.0.0.0/8, or [::1])`,
+    )
+  }
   return url.origin
+}
+
+function isLoopbackHttpHostname(hostname: string): boolean {
+  const normalized = stripIpv6Brackets(hostname)
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    (isIP(normalized) === 4 && normalized.startsWith('127.'))
+  )
+}
+
+function stripIpv6Brackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname
 }
 
 function parseStorageBackend(value: string | undefined): StorageBackend {

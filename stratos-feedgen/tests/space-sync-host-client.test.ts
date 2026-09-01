@@ -1072,6 +1072,53 @@ describe('SpaceHostClient', () => {
       expect(mock.requests).toHaveLength(0)
     })
 
+    it('refuses an allowlisted remote http origin before creating a presentation proof or sending a request', async () => {
+      const credentialProof = await makeCredentialProof()
+      const createPresentationProof = vi.spyOn(
+        credentialProof,
+        'createPresentationProof',
+      )
+      const fetchImpl = vi.fn<typeof fetch>()
+      const client = new SpaceHostClient({
+        hostOrigin: 'http://bebop.test',
+        credentialProof,
+        allowHttpOrigins: new Set(['http://bebop.test']),
+        fetch: fetchImpl,
+      })
+
+      await expect(
+        client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(InsecureHostOriginError)
+      expect(createPresentationProof).not.toHaveBeenCalled()
+      expect(fetchImpl).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      'http://localhost:3010',
+      'http://127.0.0.1:3010',
+      'http://[::1]:3010',
+    ])(
+      'allows an explicit literal-loopback http origin: %s',
+      async (origin) => {
+        const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+          new Response(JSON.stringify({ ops: [] }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        const client = new SpaceHostClient({
+          hostOrigin: origin,
+          credentialProof: await makeCredentialProof(),
+          allowHttpOrigins: new Set([origin]),
+          fetch: fetchImpl,
+        })
+
+        await expect(
+          client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+        ).resolves.toEqual({ ops: [] })
+        expect(fetchImpl).toHaveBeenCalledOnce()
+      },
+    )
+
     it('allows a plain http origin explicitly on the allowlist', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')

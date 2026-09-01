@@ -201,16 +201,32 @@ describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ENABLED', () => {
 })
 
 describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS', () => {
-  it('parses a comma list of bare http origins into a Set of exact origins', () => {
+  it('parses a comma list of bare literal-loopback http origins into a Set of exact origins', () => {
     const cfg = loadFeedgenConfig({
       ...baseEnv,
       FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS:
-        'http://jet.bebop.test, http://faye.bebop.test:8080',
+        'http://localhost, http://127.0.0.1:8080, http://[::1]:9090',
     })
     expect(cfg.spaceSyncAllowHttpOrigins).toEqual(
-      new Set(['http://jet.bebop.test', 'http://faye.bebop.test:8080']),
+      new Set([
+        'http://localhost',
+        'http://127.0.0.1:8080',
+        'http://[::1]:9090',
+      ]),
     )
   })
+
+  it.each(['http://bebop.test', 'http://sub.localhost'])(
+    'rejects a non-literal loopback origin: %s',
+    (origin) => {
+      expect(() =>
+        loadFeedgenConfig({
+          ...baseEnv,
+          FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS: origin,
+        }),
+      ).toThrow(/literal loopback origin/)
+    },
+  )
 
   it('rejects an https:// entry, since https is always allowed and never belongs in this list', () => {
     expect(() =>

@@ -153,34 +153,34 @@ tests/
 
 ## Configuration
 
-| Env var                                       | Required    | Description                                                                      |
-| --------------------------------------------- | ----------- | -------------------------------------------------------------------------------- |
-| `FEEDGEN_SERVICE_DID`                         | yes         | Feed generator service DID                                                       |
-| `FEEDGEN_PUBLIC_URL`                          | no          | Public base URL; derived from a `did:web` service DID when omitted               |
-| `FEEDGEN_SIGNING_KEY`                         | yes         | Private secp256k1 service-signing key                                            |
-| `STRATOS_SERVICE_URL`                         | yes         | Request base URL of the authority Stratos service                                |
-| `STRATOS_PUBLIC_URL`                          | no          | Public Stratos origin used in DPoP `htu`; defaults to `STRATOS_SERVICE_URL`      |
-| `STRATOS_SERVICE_DID`                         | yes         | DID of the authority Stratos service                                             |
-| `FEEDGEN_PLC_URL`                             | no          | PLC directory used for commit-key resolution (default `https://plc.directory`)   |
-| `FEEDGEN_STORAGE_BACKEND`                     | no          | `sqlite` (default) or `postgres`                                                 |
-| `FEEDGEN_SQLITE_PATH`                         | conditional | Required for the SQLite backend                                                  |
-| `FEEDGEN_POSTGRES_URL`                        | conditional | Required for the Postgres backend                                                |
-| `FEEDGEN_POSTGRES_SCHEMA`                     | no          | Postgres schema (default `public`)                                               |
-| `FEEDGEN_SUBSCRIBE_ENROLLMENTS`               | no          | Set `false` to disable the Stratos subscription arm                              |
-| `FEEDGEN_SPACE_SYNC_ENABLED`                  | no          | Enable the PDS-custody polling arm (default `true`)                              |
-| `FEEDGEN_SPACE_SYNC_INTERVAL_MS`              | no          | Target interval between jittered passes (default `30000`)                        |
-| `FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT`         | no          | Members requested per authority page, `1..1000` (default `100`)                  |
-| `FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS` | no          | Timeout for membership listing and credential mint requests (default `60000`)    |
-| `FEEDGEN_SPACE_SYNC_PAGE_LIMIT`               | no          | Ops requested per page, `1..1000` (default `1000`)                               |
-| `FEEDGEN_SPACE_SYNC_MAX_PAGES`                | no          | Pages per member per pass (default `10`)                                         |
-| `FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS`       | no          | Timeout for one foreign-host request (default `10000`)                           |
-| `FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS`         | no          | Whole-member time budget per pass (default `60000`)                              |
-| `FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY`       | no          | Concurrent member syncs (default `8`)                                            |
-| `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`         | no          | Maximum decoded record size (default `65536`)                                    |
-| `FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER`   | no          | Indexed-record cap per member and pass (default `1000`)                          |
-| `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS`         | no          | Comma-separated exact `http://` origins; empty by default, HTTPS always accepted |
-| `FEEDGEN_LOG_LEVEL`                           | no          | Pino level (default `info`)                                                      |
-| `FEEDGEN_METRICS_TOKEN`                       | no          | Bearer token for `/metrics`; unset leaves the endpoint open                      |
+| Env var                                       | Required    | Description                                                                    |
+| --------------------------------------------- | ----------- | ------------------------------------------------------------------------------ |
+| `FEEDGEN_SERVICE_DID`                         | yes         | Feed generator service DID                                                     |
+| `FEEDGEN_PUBLIC_URL`                          | no          | Public base URL; derived from a `did:web` service DID when omitted             |
+| `FEEDGEN_SIGNING_KEY`                         | yes         | Private secp256k1 service-signing key                                          |
+| `STRATOS_SERVICE_URL`                         | yes         | Request base URL of the authority Stratos service                              |
+| `STRATOS_PUBLIC_URL`                          | no          | Public Stratos origin used in DPoP `htu`; defaults to `STRATOS_SERVICE_URL`    |
+| `STRATOS_SERVICE_DID`                         | yes         | DID of the authority Stratos service                                           |
+| `FEEDGEN_PLC_URL`                             | no          | PLC directory used for commit-key resolution (default `https://plc.directory`) |
+| `FEEDGEN_STORAGE_BACKEND`                     | no          | `sqlite` (default) or `postgres`                                               |
+| `FEEDGEN_SQLITE_PATH`                         | conditional | Required for the SQLite backend                                                |
+| `FEEDGEN_POSTGRES_URL`                        | conditional | Required for the Postgres backend                                              |
+| `FEEDGEN_POSTGRES_SCHEMA`                     | no          | Postgres schema (default `public`)                                             |
+| `FEEDGEN_SUBSCRIBE_ENROLLMENTS`               | no          | Set `false` to disable the Stratos subscription arm                            |
+| `FEEDGEN_SPACE_SYNC_ENABLED`                  | no          | Enable the PDS-custody polling arm (default `true`)                            |
+| `FEEDGEN_SPACE_SYNC_INTERVAL_MS`              | no          | Target interval between jittered passes (default `30000`)                      |
+| `FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT`         | no          | Members requested per authority page, `1..1000` (default `100`)                |
+| `FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS` | no          | Timeout for membership listing and credential mint requests (default `60000`)  |
+| `FEEDGEN_SPACE_SYNC_PAGE_LIMIT`               | no          | Ops requested per page, `1..1000` (default `1000`)                             |
+| `FEEDGEN_SPACE_SYNC_MAX_PAGES`                | no          | Pages per member per pass (default `10`)                                       |
+| `FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS`       | no          | Timeout for one foreign-host request (default `10000`)                         |
+| `FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS`         | no          | Whole-member time budget per pass (default `60000`)                            |
+| `FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY`       | no          | Concurrent member syncs (default `8`)                                          |
+| `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`         | no          | Maximum decoded record size (default `65536`)                                  |
+| `FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER`   | no          | Indexed-record cap per member and pass (default `1000`)                        |
+| `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS`         | no          | Loopback `http://` only: `localhost`, `127/8`, `[::1]`; HTTPS always allowed   |
+| `FEEDGEN_LOG_LEVEL`                           | no          | Pino level (default `info`)                                                    |
+| `FEEDGEN_METRICS_TOKEN`                       | no          | Bearer token for `/metrics`; unset leaves the endpoint open                    |
 
 ## Observability
 

@@ -51,9 +51,9 @@ export interface SpaceHostClientOptions {
   /** Abort a request that runs longer than this. */
   requestTimeoutMs?: number
   /**
-   * Origins allowed over plain http despite not being https, matched by
-   * exact `new URL(...).origin`. Empty by default — a foreign host is
-   * untrusted, so plain http takes an explicit, per-origin opt-in.
+   * Literal loopback origins allowed over plain http, matched by exact
+   * `new URL(...).origin`. Empty by default. A credential never crosses a
+   * remote plain-http connection.
    */
   allowHttpOrigins?: ReadonlySet<string>
   /** Byte cap for a `listRepoOps` page response body. */
@@ -110,8 +110,8 @@ export interface GetRecordResult {
  * Reads a member's repo from an arbitrary host origin, discovered from that
  * member's own DID document. That host is an untrusted network peer — its
  * operator controls it for their own DID — so every request here is
- * time-bounded, refuses redirects, is https-only unless explicitly
- * allowlisted, and caps the response body it will read.
+ * time-bounded, refuses redirects, is https-only except for configured
+ * literal loopback origins, and caps the response body it will read.
  */
 export class SpaceHostClient {
   private readonly hostOrigin: string
@@ -242,7 +242,11 @@ export class SpaceHostClient {
       throw new InvalidHostOriginError(this.hostOrigin, { cause: err })
     }
     const origin = url.origin
-    if (url.protocol === 'http:' && this.allowHttpOrigins.has(origin)) {
+    if (
+      url.protocol === 'http:' &&
+      this.allowHttpOrigins.has(origin) &&
+      isLoopbackHttpHostname(url.hostname)
+    ) {
       return { origin }
     }
     if (url.protocol !== 'https:') {
@@ -559,6 +563,15 @@ function stripIpv6Brackets(hostname: string): string {
   return hostname.startsWith('[') && hostname.endsWith(']')
     ? hostname.slice(1, -1)
     : hostname
+}
+
+function isLoopbackHttpHostname(hostname: string): boolean {
+  const normalized = stripIpv6Brackets(hostname)
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    (isIP(normalized) === 4 && normalized.startsWith('127.'))
+  )
 }
 
 function isPrivateAddress(address: string): boolean {
