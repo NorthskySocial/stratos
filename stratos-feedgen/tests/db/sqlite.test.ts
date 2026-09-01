@@ -300,6 +300,72 @@ describe('SQLite-specific behavior', () => {
     await restartedStore.close()
   })
 
+  it('keeps unverified space sync state in the record database', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    const store = await createFeedgenStore(
+      sqliteConfig(recordPath, membershipPath),
+    )
+    const did = 'did:plc:spikespiegel'
+    const spaceUri = `at://${did}/zone.stratos.space/bebop`
+    const postUri = `at://${did}/zone.stratos.feed.post/staged`
+    const indexedAt = '2024-01-01T00:00:00.000Z'
+
+    try {
+      await store.stageSpaceSyncPage({
+        spaceUri,
+        did,
+        boundary: 'bounty-hunters',
+        mutations: [{ kind: 'delete', uri: postUri }],
+        nextCursor: 'cursor-1',
+        updatedAt: indexedAt,
+      })
+      await store.stageSpaceSyncPage({
+        spaceUri,
+        did,
+        boundary: 'bounty-hunters',
+        mutations: [],
+        updatedAt: indexedAt,
+      })
+
+      expect(await store.getSpaceCursor(spaceUri, did)).toBe('cursor-1')
+    } finally {
+      await store.close()
+    }
+
+    const recordDb = createSqliteDb(recordPath)
+    const membershipDb = createSqliteDb(membershipPath)
+    try {
+      expect(
+        await recordDb.all<{ uri: string }>(sql`
+          SELECT uri
+          FROM space_sync_stage
+        `),
+      ).toEqual([{ uri: postUri }])
+      expect(
+        await recordDb.all<{ did: string }>(sql`
+          SELECT did
+          FROM space_sync_pending_verification
+        `),
+      ).toEqual([{ did }])
+      expect(
+        await membershipDb.all<{ name: string }>(sql`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table'
+            AND name IN (
+              'space_sync_cursor',
+              'space_sync_pending_verification',
+              'space_sync_stage'
+            )
+        `),
+      ).toEqual([])
+    } finally {
+      recordDb._client.close()
+      membershipDb._client.close()
+    }
+  })
+
   it('imports legacy membership snapshots once without moving cursors', async () => {
     const legacyPath = await makeTempDbPath()
     const membershipPath = await makeTempDbPath()
