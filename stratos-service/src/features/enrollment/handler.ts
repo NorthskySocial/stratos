@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from 'express'
-import { Agent } from '@atproto/api'
 import { ensureValidDid } from '@atproto/syntax'
 import { InvalidRequestError, Server as XrpcServer } from '@atproto/xrpc-server'
 import {
@@ -12,7 +11,7 @@ import {
 import type { AppContext } from '../../context-types.js'
 import { type XrpcServerInternal } from '../../api/types.js'
 import { createXrpcHandler } from '../../api/util.js'
-import { serviceDIDToRkey, SPACE_TYPE } from '../../oauth'
+import { SPACE_TYPE } from '../../oauth'
 import { createRepoHostResolverDeps } from '../space-read/index.js'
 import { verifyEnrolled } from './internal/auth.js'
 import type { PdsSyncPageKey } from './internal/pds-sync-store.js'
