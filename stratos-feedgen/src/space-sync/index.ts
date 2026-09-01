@@ -42,13 +42,13 @@ export type {
 export {
   SpaceAuthorizationRevokedError,
   SpaceMutationFence,
-} from './mutation-fence.js'
+} from '../mutation-fence.js'
 export type {
   DidMutationScope,
   SpaceAuthorizationLease,
   SpaceAuthorizationSnapshot,
   SpaceAuthorizationTarget,
-} from './mutation-fence.js'
+} from '../mutation-fence.js'
 export { SpaceSyncer } from './space-syncer.js'
 export type {
   SpaceSyncFailure,

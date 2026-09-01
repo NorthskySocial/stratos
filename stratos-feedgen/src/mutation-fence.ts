@@ -1,3 +1,5 @@
+import { StratosError } from '@northskysocial/stratos-core'
+
 export interface SpaceAuthorizationLease {
   readonly spaceUri: string
   readonly did: string
@@ -32,10 +34,11 @@ interface AuthorizationState {
 }
 
 /** Raised when a queued mutation wakes after its membership lease was revoked. */
-export class SpaceAuthorizationRevokedError extends Error {
+export class SpaceAuthorizationRevokedError extends StratosError {
   constructor(target: SpaceAuthorizationTarget) {
     super(
       `space authorization was revoked for ${target.did} in ${target.spaceUri}`,
+      'SpaceAuthorizationRevoked',
     )
     this.name = 'SpaceAuthorizationRevokedError'
   }

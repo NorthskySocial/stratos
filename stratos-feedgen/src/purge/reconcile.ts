@@ -1,8 +1,5 @@
 import type { EnrolledActor, FeedgenStore } from '../db/index.js'
-import type {
-  DidMutationScope,
-  SpaceMutationFence,
-} from '../space-sync/index.js'
+import type { DidMutationScope, SpaceMutationFence } from '../mutation-fence.js'
 import type { ActorPool } from '../subscription/index.js'
 import type { ResolveEnrollmentsResult } from '../upstream/index.js'
 import type { PurgeCounts, Purger } from './purger.js'

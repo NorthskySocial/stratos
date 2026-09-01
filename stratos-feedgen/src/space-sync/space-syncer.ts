@@ -30,7 +30,7 @@ import type { PollTarget } from './membership.js'
 import {
   SpaceAuthorizationRevokedError,
   type SpaceMutationFence,
-} from './mutation-fence.js'
+} from '../mutation-fence.js'
 
 export interface SpaceSyncerDeps {
   store: Pick<

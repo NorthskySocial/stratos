@@ -1,16 +1,16 @@
 import type { Purger } from '../purge/index.js'
 import type { FeedgenStore, SpaceMemberSnapshot } from '../db/index.js'
 import { DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT } from '../config.js'
+import {
+  SpaceMutationFence,
+  type SpaceAuthorizationLease,
+} from '../mutation-fence.js'
 import type { SpaceCredentialManager } from '../space-credential/index.js'
 import type { UpstreamStratosClient } from '../upstream/index.js'
 import {
   MembershipCursorStalledError,
   MembershipPageLimitError,
 } from './errors.js'
-import {
-  SpaceMutationFence,
-  type SpaceAuthorizationLease,
-} from './mutation-fence.js'
 
 /**
  * Page ceiling for one boundary's enumeration. At the default 100 rows per

@@ -1,11 +1,11 @@
 import { boundaryToSpaceUri } from '@northskysocial/stratos-core'
 import type { FeedgenStore } from '../db/index.js'
-import { STRATOS_FEED_SPACE_TYPE } from '../space-credential/index.js'
 import {
   type DidMutationScope,
   SpaceMutationFence,
   type SpaceAuthorizationTarget,
-} from '../space-sync/mutation-fence.js'
+} from '../mutation-fence.js'
+import { STRATOS_FEED_SPACE_TYPE } from '../space-credential/index.js'
 
 /**
  * The subset of `EnrollmentManager` the purger needs: dropping a viewer's

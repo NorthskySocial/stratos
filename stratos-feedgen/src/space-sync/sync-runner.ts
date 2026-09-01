@@ -1,10 +1,10 @@
 import type { Purger } from '../purge/index.js'
+import type { SpaceMutationFence } from '../mutation-fence.js'
 import {
   CommitVerifier,
   type CommitVerifyFailureReason,
 } from './commit-verify.js'
 import type { PollTarget } from './membership.js'
-import type { SpaceMutationFence } from './mutation-fence.js'
 import type {
   SpaceSyncer,
   SpaceSyncFailure,
