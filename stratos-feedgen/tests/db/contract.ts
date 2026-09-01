@@ -436,6 +436,32 @@ export function describeStoreContract(
         await store.replaceSpaceMembers('bounty-hunters', [])
         expect(await store.listSpaceMembers('bounty-hunters')).toEqual([])
       })
+
+      it('persists a default-cap snapshot without exceeding bind limits', async () => {
+        const memberCount = 10_000
+        await store.replaceSpaceMembers(
+          'bounty-hunters',
+          Array.from({ length: memberCount }, (_, index) => ({
+            did: `did:plc:member${index.toString().padStart(5, '0')}`,
+            custody: index % 2 === 0 ? ('pds' as const) : ('stratos' as const),
+            ...(index % 2 === 0
+              ? { host: `https://pds-${index}.example` }
+              : {}),
+          })),
+        )
+
+        const stored = await store.listSpaceMembers('bounty-hunters')
+        expect(stored).toHaveLength(memberCount)
+        expect(stored[0]).toEqual({
+          did: 'did:plc:member00000',
+          custody: 'pds',
+          host: 'https://pds-0.example',
+        })
+        expect(stored.at(-1)).toEqual({
+          did: 'did:plc:member09999',
+          custody: 'stratos',
+        })
+      })
     })
 
     describe('enrolled actor', () => {
