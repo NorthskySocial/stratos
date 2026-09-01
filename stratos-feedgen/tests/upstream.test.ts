@@ -538,6 +538,55 @@ describe('UpstreamStratosClient', () => {
       ).resolves.toEqual({ repos: [] })
     })
 
+    it('combines caller cancellation with the membership request timeout', async () => {
+      let receivedSignal: AbortSignal | null | undefined
+      let markRequestStarted!: () => void
+      const requestStarted = new Promise<void>((resolve) => {
+        markRequestStarted = resolve
+      })
+      const fetchImpl = async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> =>
+        new Promise<Response>((_resolve, reject) => {
+          receivedSignal = init?.signal
+          markRequestStarted()
+          const signal = init?.signal
+          if (!signal) return
+          const rejectForAbort = () => reject(signal.reason)
+          if (signal.aborted) {
+            rejectForAbort()
+          } else {
+            signal.addEventListener('abort', rejectForAbort, { once: true })
+          }
+        })
+      const cancellableClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl,
+        requestTimeoutMs: 60_000,
+      })
+      const controller = new AbortController()
+
+      const request = cancellableClient
+        .listSpaceRepos(
+          { space: SPACE_URI },
+          fakeCredentialProof(),
+          controller.signal,
+        )
+        .catch((cause: unknown) => cause)
+      await requestStarted
+      controller.abort()
+
+      const error = await request
+      expect(error).toMatchObject({ name: 'AbortError' })
+      expect(receivedSignal).toBeInstanceOf(AbortSignal)
+      expect(receivedSignal).not.toBe(controller.signal)
+      expect(receivedSignal?.aborted).toBe(true)
+    })
+
     it.each([
       ['absent', { did: 'did:plc:asuka' }],
       ['unrecognized', { did: 'did:plc:asuka', custody: 'other' }],

@@ -3,16 +3,22 @@ import {
   PoorlyFormattedDidError,
   UnsupportedDidWebPathError,
   type DidCache,
+  type DidResolver,
 } from '@atproto/identity'
+import { StratosError } from '@northskysocial/stratos-core'
 
 const DEFAULT_DID_WEB_TIMEOUT_MS = 3_000
 const DID_WEB_DOCUMENT_PATH = '/.well-known/did.json'
 
 export interface CommitKeyResolver {
-  resolveAtprotoKey: (did: string, forceRefresh?: boolean) => Promise<string>
+  resolveAtprotoKey: (did: string) => Promise<string>
+  refreshAtprotoKey: (did: string) => Promise<string>
 }
 
-export interface CommitKeyResolverSource extends CommitKeyResolver {
+export interface CommitKeyResolverSource extends Pick<
+  DidResolver,
+  'resolveAtprotoKey'
+> {
   readonly cache?: DidCache
 }
 
@@ -41,18 +47,25 @@ export function createCommitKeyResolver(
   )
 
   return {
-    resolveAtprotoKey: (did, forceRefresh = false) =>
+    resolveAtprotoKey: (did) =>
       did.startsWith('did:web:')
-        ? didWebResolver.resolveAtprotoKey(did, forceRefresh)
-        : source.resolveAtprotoKey(did, forceRefresh),
+        ? didWebResolver.resolveAtprotoKey(did)
+        : source.resolveAtprotoKey(did),
+    refreshAtprotoKey: (did) =>
+      did.startsWith('did:web:')
+        ? didWebResolver.resolveAtprotoKey(did, true)
+        : source.resolveAtprotoKey(did, true),
   }
 }
 
-class DidWebHttpError extends Error {
+class DidWebHttpError extends StratosError {
   readonly status: number
 
   constructor(did: string, status: number) {
-    super(`DID web resolution failed for ${did} with HTTP ${status}`)
+    super(
+      `DID web resolution failed for ${did} with HTTP ${status}`,
+      'DidWebHttpError',
+    )
     this.name = 'DidWebHttpError'
     this.status = status
   }

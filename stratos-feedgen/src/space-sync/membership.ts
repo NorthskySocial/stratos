@@ -43,6 +43,7 @@ export interface RemovedMember {
 
 export interface BoundaryPassSuccess {
   readonly boundary: string
+  readonly spaceUri: string
   readonly ok: true
   /** Current `pds`-custody poll targets for this boundary, after this pass. */
   readonly polls: PollTarget[]
@@ -191,23 +192,35 @@ export class MembershipTracker {
    * who left one completed boundary but still holds another tracked
    * boundary is boundary-shrunk, not fully purged.
    */
-  async runPass(boundaries: Iterable<string>): Promise<BoundaryPassOutcome[]> {
+  async runPass(
+    boundaries: Iterable<string>,
+    signal?: AbortSignal,
+  ): Promise<BoundaryPassOutcome[]> {
+    signal?.throwIfAborted()
     const boundaryList = [...boundaries]
-    await this.loadPersistedMembership(boundaryList)
+    await this.loadPersistedMembership(boundaryList, signal)
+    signal?.throwIfAborted()
     const settled = await Promise.allSettled(
-      boundaryList.map((boundary) => this.enumerateBoundary(boundary)),
+      boundaryList.map((boundary) => this.enumerateBoundary(boundary, signal)),
     )
-    const everyBoundaryCompletedThisPass = settled.every(
-      (result) => result.status === 'fulfilled',
-    )
+    signal?.throwIfAborted()
     const prepared = this.preparePass(boundaryList, settled)
-    await this.purgeHostChanges(prepared.completed)
-    const deferred = await this.purgeDepartures(
-      prepared.left,
-      prepared.nextMembership,
-      everyBoundaryCompletedThisPass,
-    )
-    await this.publishCompleted(prepared.completed, deferred)
+    await this.purgeHostChanges(prepared.completed, signal)
+    signal?.throwIfAborted()
+    let deferred: ReadonlySet<string>
+    if (everyBoundaryCompleted(settled)) {
+      await this.purgeCompletePassDepartures(
+        prepared.left,
+        prepared.nextMembership,
+        signal,
+      )
+      deferred = new Set()
+    } else {
+      deferred = await this.purgePartialPassDepartures(prepared.left, signal)
+    }
+    signal?.throwIfAborted()
+    await this.publishCompleted(prepared.completed, deferred, signal)
+    signal?.throwIfAborted()
     this.reportPass(prepared.outcomes)
     return prepared.outcomes
   }
@@ -243,6 +256,7 @@ export class MembershipTracker {
       nextMembership.set(boundary, membership)
       const outcome: BoundaryPassSuccess = {
         boundary,
+        spaceUri: enumeration.spaceUri,
         ok: true,
         polls: membership.polls,
         skippedNoHost: enumeration.skippedNoHost.length,
@@ -261,10 +275,13 @@ export class MembershipTracker {
 
   private async purgeHostChanges(
     completed: readonly CompletedBoundary[],
+    signal?: AbortSignal,
   ): Promise<void> {
     for (const { enumeration } of completed) {
+      signal?.throwIfAborted()
       const previous = this.lastMembership.get(enumeration.boundary)
       for (const [did, prior] of previous?.members ?? []) {
+        signal?.throwIfAborted()
         const current = enumeration.members.get(did)
         if (current && pdsStateChanged(prior, current)) {
           await this.purger.purgeSpaceDeparture(
@@ -277,20 +294,18 @@ export class MembershipTracker {
     }
   }
 
-  private async purgeDepartures(
+  private async purgeCompletePassDepartures(
     left: readonly DepartedMember[],
     nextMembership: ReadonlyMap<string, BoundaryMembershipState>,
-    everyBoundaryCompleted: boolean,
-  ): Promise<ReadonlySet<string>> {
-    const deferred = everyBoundaryCompleted
-      ? new Set<string>()
-      : new Set(left.map(({ outcome }) => outcome.boundary))
+    signal?: AbortSignal,
+  ): Promise<void> {
     const purgedActor = new Set<string>()
     for (const { outcome, did, spaceUri } of left) {
+      signal?.throwIfAborted()
       const stillMember = [...nextMembership.values()].some((state) =>
         state.members.has(did),
       )
-      if (stillMember || !everyBoundaryCompleted) {
+      if (stillMember) {
         await this.purger.purgeSpaceDeparture(did, outcome.boundary, spaceUri)
         outcome.removed.push({ did, scope: 'boundary' })
       } else {
@@ -301,20 +316,36 @@ export class MembershipTracker {
         }
       }
     }
+  }
+
+  private async purgePartialPassDepartures(
+    left: readonly DepartedMember[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string>> {
+    const deferred = new Set<string>()
+    for (const { outcome, did, spaceUri } of left) {
+      signal?.throwIfAborted()
+      deferred.add(outcome.boundary)
+      await this.purger.purgeSpaceDeparture(did, outcome.boundary, spaceUri)
+      outcome.removed.push({ did, scope: 'boundary' })
+    }
     return deferred
   }
 
   private async publishCompleted(
     completed: readonly CompletedBoundary[],
     deferred: ReadonlySet<string>,
+    signal?: AbortSignal,
   ): Promise<void> {
     for (const { enumeration, membership, outcome } of completed) {
+      signal?.throwIfAborted()
       const leases = await this.mutationFence.authorizeSnapshot({
         boundary: enumeration.boundary,
         spaceUri: enumeration.spaceUri,
         dids: enumeration.polls.map((poll) => poll.did),
         revocationEpoch: enumeration.revocationEpoch,
       })
+      signal?.throwIfAborted()
       for (const poll of enumeration.polls) {
         const lease = leases.get(poll.did)
         if (lease) outcome.polls.push({ ...poll, lease })
@@ -324,10 +355,12 @@ export class MembershipTracker {
         membership,
         deferred,
       )
+      signal?.throwIfAborted()
       await this.snapshotStore.replaceSpaceMembers(enumeration.boundary, [
         ...remembered.members.values(),
       ])
       this.lastMembership.set(enumeration.boundary, remembered)
+      signal?.throwIfAborted()
     }
   }
 
@@ -362,13 +395,20 @@ export class MembershipTracker {
 
   private async enumerateBoundary(
     boundary: string,
+    signal?: AbortSignal,
   ): Promise<BoundaryEnumeration> {
+    signal?.throwIfAborted()
     const revocationEpoch = this.mutationFence.captureRevocationEpoch()
-    const credential = await this.credentialManager.getCredential(boundary)
+    const credential = await this.credentialManager.getCredential(
+      boundary,
+      signal,
+    )
+    signal?.throwIfAborted()
     const members = new Map<string, SpaceMemberSnapshot>()
     let cursor: string | undefined
     let pages = 0
     do {
+      signal?.throwIfAborted()
       pages += 1
       if (pages > this.maxEnumerationPages) {
         throw new MembershipPageLimitError(boundary, this.maxEnumerationPages)
@@ -376,7 +416,9 @@ export class MembershipTracker {
       const page = await this.client.listSpaceRepos(
         { space: credential.spaceUri, cursor, limit: this.pageLimit },
         credential,
+        signal,
       )
+      signal?.throwIfAborted()
       for (const row of page.repos) {
         members.set(row.did, {
           did: row.did,
@@ -420,11 +462,14 @@ export class MembershipTracker {
 
   private async loadPersistedMembership(
     boundaries: readonly string[],
+    signal?: AbortSignal,
   ): Promise<void> {
     await Promise.all(
       boundaries.map(async (boundary) => {
+        signal?.throwIfAborted()
         if (this.lastMembership.has(boundary)) return
         const members = await this.snapshotStore.listSpaceMembers(boundary)
+        signal?.throwIfAborted()
         this.lastMembership.set(boundary, {
           polls: [],
           members: new Map(members.map((member) => [member.did, member])),
@@ -447,6 +492,12 @@ class InMemorySnapshotStore {
   ): Promise<void> {
     this.members.set(boundary, members)
   }
+}
+
+function everyBoundaryCompleted(
+  settled: readonly PromiseSettledResult<BoundaryEnumeration>[],
+): boolean {
+  return settled.every((result) => result.status === 'fulfilled')
 }
 
 function preserveHostAcrossHostlessSnapshot(

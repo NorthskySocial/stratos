@@ -109,23 +109,34 @@ export class SpaceCredentialManager {
    * failure with a still-valid held credential returns that credential
    * instead — it was already verified and has not expired.
    */
-  async getCredential(boundary: string): Promise<HeldSpaceCredential> {
+  async getCredential(
+    boundary: string,
+    signal?: AbortSignal,
+  ): Promise<HeldSpaceCredential> {
+    signal?.throwIfAborted()
     const existing = this.held.get(boundary)
     if (existing && !this.needsRefresh(existing)) {
       return this.toHeld(boundary, existing)
     }
 
-    const inflight = this.inflight.get(boundary)
-    if (inflight) return inflight
+    let mint = this.inflight.get(boundary)
+    if (!mint) {
+      const startedMint = this.refresh(boundary, existing)
+      mint = startedMint
+      this.inflight.set(boundary, startedMint)
+      void startedMint.then(
+        () => this.clearInflight(boundary, startedMint),
+        () => this.clearInflight(boundary, startedMint),
+      )
+    }
+    return await waitForCredential(mint, signal)
+  }
 
-    const promise = this.refresh(boundary, existing)
-    this.inflight.set(boundary, promise)
-    try {
-      return await promise
-    } finally {
-      // Unlike `EnrollmentManager`, nothing else writes to `inflight` for a
-      // boundary already in flight — no `invalidate()` exists here to detach
-      // an entry — so the slot always still holds this promise.
+  private clearInflight(
+    boundary: string,
+    settled: Promise<HeldSpaceCredential>,
+  ): void {
+    if (this.inflight.get(boundary) === settled) {
       this.inflight.delete(boundary)
     }
   }
@@ -202,6 +213,37 @@ export class SpaceCredentialManager {
       },
     }
   }
+}
+
+function waitForCredential<T>(
+  credential: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return credential
+  signal.throwIfAborted()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort)
+      reject(asError(signal.reason, 'space credential wait aborted'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    void credential.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(asError(err, 'space credential mint failed'))
+      },
+    )
+  })
+}
+
+function asError(reason: unknown, message: string): Error {
+  return reason instanceof Error
+    ? reason
+    : new Error(message, { cause: reason })
 }
 
 /**

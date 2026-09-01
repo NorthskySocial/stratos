@@ -72,6 +72,7 @@ export type {
 } from './commit-key-resolver.js'
 export { SpaceSyncRunner } from './sync-runner.js'
 export type {
+  CompletedMembershipBoundary,
   SpaceCapStopStreakLogEvent,
   SpaceCommitConsecutiveFailureLogEvent,
   SpaceCommitVerifyLogEvent,

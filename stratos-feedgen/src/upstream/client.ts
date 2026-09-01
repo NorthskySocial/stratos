@@ -254,6 +254,7 @@ export class UpstreamStratosClient {
   async listSpaceRepos(
     opts: ListSpaceReposOptions,
     credentialProof: SpaceCredentialProof,
+    signal?: AbortSignal,
   ): Promise<ListSpaceReposResult> {
     const path = `/xrpc/${LXM.listSpaceRepos}`
     const url = new URL(`${this.serviceUrl}${path}`)
@@ -268,13 +269,19 @@ export class UpstreamStratosClient {
     // Same htu convention as getSpaceCredential: verified against publicUrl,
     // not the address this client actually sends the request to.
     const htu = `${this.publicUrl}${path}`
+    signal?.throwIfAborted()
+    const presentationProof = await credentialProof.createPresentationProof(
+      'GET',
+      htu,
+    )
+    signal?.throwIfAborted()
     const res = await this.fetchImpl(url, {
       method: 'GET',
-      signal: AbortSignal.timeout(this.requestTimeoutMs),
+      signal: requestSignal(this.requestTimeoutMs, signal),
       headers: {
         accept: 'application/json',
         authorization: `DPoP ${credentialProof.credential}`,
-        dpop: await credentialProof.createPresentationProof('GET', htu),
+        dpop: presentationProof,
       },
     })
     await throwIfNotOk(res, url.toString(), lxm)
@@ -301,6 +308,11 @@ export class UpstreamStratosClient {
       keypair: this.keypair,
     })
   }
+}
+
+function requestSignal(timeoutMs: number, caller?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs)
+  return caller ? AbortSignal.any([caller, timeout]) : timeout
 }
 
 function decodeListSpaceRepos(

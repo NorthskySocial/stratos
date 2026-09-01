@@ -8,6 +8,7 @@ import {
   SqliteFeedgenStore,
 } from '../src/db/index.js'
 import {
+  MembershipTracker,
   SpaceSyncer,
   SpaceMutationFence,
   SpaceSyncRunner,
@@ -44,6 +45,7 @@ function makeTarget(overrides: Partial<PollTarget> = {}): PollTarget {
 function successOutcome(polls: PollTarget[]): BoundaryPassSuccess {
   return {
     boundary: BEBOP_BOUNDARY,
+    spaceUri: SPACE_URI,
     ok: true,
     polls,
     skippedNoHost: 0,
@@ -96,8 +98,10 @@ function deferred<T>(): {
 function fakeMembership(outcomes: BoundaryPassOutcome[] = []) {
   return {
     runPass: vi.fn(
-      async (_boundaries: Iterable<string>): Promise<BoundaryPassOutcome[]> =>
-        outcomes,
+      async (
+        _boundaries: Iterable<string>,
+        _signal?: AbortSignal,
+      ): Promise<BoundaryPassOutcome[]> => outcomes,
     ),
   }
 }
@@ -142,9 +146,12 @@ describe('SpaceSyncScheduler', () => {
     expect(membership.runPass).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(1)
-    expect(membership.runPass).toHaveBeenCalledExactlyOnceWith(boundaries)
+    expect(membership.runPass).toHaveBeenCalledExactlyOnceWith(
+      boundaries,
+      expect.any(AbortSignal),
+    )
     expect(runner.completeMembershipPass).toHaveBeenCalledExactlyOnceWith([
-      BEBOP_BOUNDARY,
+      { boundary: BEBOP_BOUNDARY, spaceUri: SPACE_URI, polls: [spike] },
     ])
     expect(runner.runTarget).toHaveBeenCalledExactlyOnceWith(
       spike,
@@ -194,7 +201,7 @@ describe('SpaceSyncScheduler', () => {
     await vi.advanceTimersByTimeAsync(1_000)
 
     expect(runner.completeMembershipPass).toHaveBeenCalledExactlyOnceWith([
-      BEBOP_BOUNDARY,
+      { boundary: BEBOP_BOUNDARY, spaceUri: SPACE_URI, polls: [spike] },
     ])
     expect(runner.runTarget).toHaveBeenCalledTimes(2)
     expect(runner.runTarget).toHaveBeenCalledWith(
@@ -762,6 +769,73 @@ describe('SpaceSyncScheduler', () => {
     await stopping
 
     expect(runner.runTarget).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('cancels a hanging membership credential wait without side effects', async () => {
+    const credentialStarted = deferred<void>()
+    const credentialManager = {
+      getCredential: vi.fn(
+        async (_boundary: string, signal?: AbortSignal): Promise<never> => {
+          credentialStarted.resolve(undefined)
+          if (!signal) throw new Error('membership signal was not provided')
+          return await new Promise<never>((_resolve, reject) => {
+            const rejectForAbort = () => reject(signal.reason)
+            if (signal.aborted) {
+              rejectForAbort()
+            } else {
+              signal.addEventListener('abort', rejectForAbort, { once: true })
+            }
+          })
+        },
+      ),
+    }
+    const client = { listSpaceRepos: vi.fn() }
+    const purger = {
+      purgeSpaceActor: vi.fn(),
+      purgeSpaceDeparture: vi.fn(),
+    }
+    const snapshotStore = {
+      listSpaceMembers: vi.fn(async () => []),
+      replaceSpaceMembers: vi.fn(),
+    }
+    const membershipOnError = vi.fn()
+    const membership = new MembershipTracker({
+      client,
+      credentialManager,
+      purger,
+      snapshotStore,
+      onError: membershipOnError,
+    })
+    const runner = fakeRunner()
+    const onError = vi.fn()
+    const log = vi.fn()
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: [BEBOP_BOUNDARY],
+      intervalMs: 1_000,
+      random: () => 0.5,
+      onError,
+      log,
+    })
+    scheduler.start()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await credentialStarted.promise
+
+    const stopping = scheduler.stop()
+    scheduler.abortActivePass()
+    await vi.advanceTimersByTimeAsync(0)
+    await stopping
+
+    expect(client.listSpaceRepos).not.toHaveBeenCalled()
+    expect(purger.purgeSpaceActor).not.toHaveBeenCalled()
+    expect(purger.purgeSpaceDeparture).not.toHaveBeenCalled()
+    expect(snapshotStore.replaceSpaceMembers).not.toHaveBeenCalled()
+    expect(runner.completeMembershipPass).not.toHaveBeenCalled()
+    expect(runner.runTarget).not.toHaveBeenCalled()
+    expect(membershipOnError).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
     expect(log).not.toHaveBeenCalled()
   })
 

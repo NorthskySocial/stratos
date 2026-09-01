@@ -108,11 +108,12 @@ async function signTestCommit(
 }
 
 function stubResolver(
-  resolve: (did: string, forceRefresh: boolean) => Promise<string>,
+  resolve: (did: string) => Promise<string>,
+  refresh: (did: string) => Promise<string> = resolve,
 ): CommitVerifierDeps['didResolver'] {
   return {
-    resolveAtprotoKey: async (did: string, forceRefresh = false) =>
-      resolve(did, forceRefresh),
+    resolveAtprotoKey: resolve,
+    refreshAtprotoKey: refresh,
   }
 }
 
@@ -167,7 +168,7 @@ describe('CommitVerifier', () => {
       transient: false,
     })
     expect(resolveKey).toHaveBeenCalledOnce()
-    expect(resolveKey).toHaveBeenCalledWith(SPIKE_DID, false)
+    expect(resolveKey).toHaveBeenCalledWith(SPIKE_DID)
   })
 
   it('rejects a commit with a tampered mac', async () => {
@@ -239,28 +240,22 @@ describe('CommitVerifier', () => {
       reason: 'signature-invalid',
       transient: false,
     })
-    expect(resolveKey.mock.calls).toEqual([
-      [SPIKE_DID, false],
-      [SPIKE_DID, true],
-    ])
+    expect(resolveKey.mock.calls).toEqual([[SPIKE_DID], [SPIKE_DID]])
   })
 
   it('accepts a rotated signing key after one forced refresh', async () => {
     const previousKey = await Secp256k1Keypair.create({ exportable: true })
     const rotatedKey = await Secp256k1Keypair.create({ exportable: true })
     const commit = await signTestCommit(rotatedKey)
-    const resolveKey = vi.fn(async (_did: string, forceRefresh: boolean) =>
-      forceRefresh ? rotatedKey.did() : previousKey.did(),
-    )
-    const verifier = buildVerifier(stubResolver(resolveKey))
+    const resolveKey = vi.fn(async () => previousKey.did())
+    const refreshKey = vi.fn(async () => rotatedKey.did())
+    const verifier = buildVerifier(stubResolver(resolveKey, refreshKey))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
 
     expect(result).toEqual({ ok: true })
-    expect(resolveKey.mock.calls).toEqual([
-      [SPIKE_DID, false],
-      [SPIKE_DID, true],
-    ])
+    expect(resolveKey).toHaveBeenCalledExactlyOnceWith(SPIKE_DID)
+    expect(refreshKey).toHaveBeenCalledExactlyOnceWith(SPIKE_DID)
   })
 
   it('defers a signature mismatch when the forced refresh fails transiently', async () => {
@@ -270,11 +265,11 @@ describe('CommitVerifier', () => {
     const refreshError = Object.assign(new Error('Service Unavailable'), {
       status: 503,
     })
-    const resolveKey = vi.fn(async (_did: string, forceRefresh: boolean) => {
-      if (forceRefresh) throw refreshError
-      return previousKey.did()
+    const resolveKey = vi.fn(async () => previousKey.did())
+    const refreshKey = vi.fn(async () => {
+      throw refreshError
     })
-    const verifier = buildVerifier(stubResolver(resolveKey))
+    const verifier = buildVerifier(stubResolver(resolveKey, refreshKey))
 
     const result = await verifier.verify(SPACE_URI, SPIKE_DID, commit)
 
@@ -284,10 +279,8 @@ describe('CommitVerifier', () => {
       transient: true,
       error: refreshError,
     })
-    expect(resolveKey.mock.calls).toEqual([
-      [SPIKE_DID, false],
-      [SPIKE_DID, true],
-    ])
+    expect(resolveKey).toHaveBeenCalledExactlyOnceWith(SPIKE_DID)
+    expect(refreshKey).toHaveBeenCalledExactlyOnceWith(SPIKE_DID)
   })
 
   it('rejects a missing commit', async () => {
