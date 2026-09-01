@@ -283,7 +283,7 @@ export class MembershipTracker {
       for (const [did, prior] of previous?.members ?? []) {
         signal?.throwIfAborted()
         const current = enumeration.members.get(did)
-        if (current && pdsStateChanged(prior, current)) {
+        if (current && syncSourceChanged(prior, current)) {
           await this.purger.purgeSpaceDeparture(
             did,
             enumeration.boundary,
@@ -519,12 +519,12 @@ function preserveHostAcrossHostlessSnapshot(
   return preserved
 }
 
-function pdsStateChanged(
+function syncSourceChanged(
   previous: SpaceMemberSnapshot,
   current: SpaceMemberSnapshot,
 ): boolean {
-  if (previous.custody !== 'pds') return false
-  if (current.custody !== 'pds') return true
+  if (previous.custody !== current.custody) return true
+  if (current.custody !== 'pds') return false
   return Boolean(
     previous.host && current.host && previous.host !== current.host,
   )
