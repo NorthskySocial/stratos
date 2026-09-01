@@ -65,12 +65,27 @@ overlay on top of the base stack. The overlay adds a `feedgen` service (SQLite-b
 an ephemeral Cloudflare tunnel so the feedgen's `did:web` document is reachable over
 HTTPS.
 
-Feedgen uses an in-memory SQLite index by default. A restart rebuilds its post, boundary,
-enrollment, and cursor index from Stratos replay streams. The overlay sets the core-dump
-limit to zero because the process can hold private content. To persist the index, uncomment
-the documented `FEEDGEN_SQLITE_PATH` and `feedgen-data` volume entries in the overlay.
-That opt-in stores private records, boundaries, enrollments, and cursors, so protect the
-mounted storage as private content.
+Feedgen uses an in-memory SQLite index by default. A restart rebuilds its posts,
+boundaries, enrollments, membership snapshots, and cursors through the custody-aware
+subscription and space-poller ingestion arms. The overlay sets the core-dump limit to
+zero because the process can hold private content. To persist the index, add a
+deployment-specific Compose override:
+
+```yaml
+services:
+  feedgen:
+    environment:
+      FEEDGEN_SQLITE_PATH: /app/data/feedgen.sqlite
+    volumes:
+      - feedgen-data:/app/data
+
+volumes:
+  feedgen-data:
+```
+
+Layer that file after `docker-compose.feedgen.yml`. This opt-in stores private records,
+boundaries, enrollments, membership snapshots, and cursors, so protect the mounted
+storage as private content.
 
 Using `FEEDGEN_STORAGE_BACKEND=postgres` with `FEEDGEN_POSTGRES_URL` makes the same
 persistence choice in PostgreSQL. Protect that database as private content.

@@ -41,16 +41,11 @@ services:
       STRATOS_SERVICE_URL: http://stratos:3100
       STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
       FEEDGEN_STORAGE_BACKEND: sqlite
-      # Set an explicit path and mount storage to persist private feed data.
-      # FEEDGEN_SQLITE_PATH: /app/data/feedgen.sqlite
       FEEDGEN_FEEDS_FILE: /app/config/feeds.yaml
       FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true'
       FEEDGEN_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
     ulimits:
       core: 0
-    # Persistence is opt-in because the database contains private records.
-    # volumes:
-    #   - feedgen-data:/app/data
     volumes:
       - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
     depends_on:
@@ -70,7 +65,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
-
-# To retain data across restarts, uncomment this with the feedgen volume above.
-# volumes:
-#   feedgen-data:

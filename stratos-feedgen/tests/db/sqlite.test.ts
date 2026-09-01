@@ -71,13 +71,16 @@ describe('SQLite-specific behavior', () => {
 
   it('uses memory journal mode for an in-memory database', async () => {
     const db = createSqliteDb(':memory:')
-    await db._initialized
-    const result = await db.get<{ journal_mode: string }>(
-      sql`PRAGMA journal_mode`,
-    )
-    expect(result?.journal_mode).toBe('memory')
-    db._client.close()
-    db._memoryAnchor?.close()
+    const store = new SqliteFeedgenStore(db)
+    try {
+      await db._initialized
+      const result = await db.get<{ journal_mode: string }>(
+        sql`PRAGMA journal_mode`,
+      )
+      expect(result?.journal_mode).toBe('memory')
+    } finally {
+      await store.close()
+    }
   })
 
   it('creates no filesystem artifact for the generated in-memory URI', async () => {
