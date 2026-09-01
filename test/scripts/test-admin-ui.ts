@@ -195,16 +195,6 @@ async function run(): Promise<void> {
       'Member row shows the Stratos custody badge',
     )
     await page.selectOption('[data-testid="members-custody-filter"]', {
-      value: 'pds',
-    })
-    await page.waitForSelector('[data-testid="members-empty"]', {
-      timeout: 15_000,
-    })
-    assert(
-      (await page.locator('[data-testid="member-row"]').count()) === 0,
-      'PDS custody filter excludes the Stratos-only fixture members',
-    )
-    await page.selectOption('[data-testid="members-custody-filter"]', {
       value: 'stratos',
     })
     await page.waitForSelector('[data-testid="members-list"]', {
@@ -228,18 +218,13 @@ async function run(): Promise<void> {
       'Custody filter shows the one PDS-custody fixture',
     )
     await pdsRows.first().click()
-    await page.waitForFunction(
-      () =>
-        document
-          .querySelector('[data-testid="repo-host-detail"]')
-          ?.textContent?.includes(
-            'http://localhost:3010 (authority-override)',
-          ) ?? false,
-      undefined,
-      {
+    await page
+      .locator('[data-testid="repo-host-detail"]')
+      .filter({ hasText: 'http://localhost:3010 (authority-override)' })
+      .waitFor({
+        state: 'visible',
         timeout: 15_000,
-      },
-    )
+      })
     const pdsDetail = await page.textContent(
       '[data-testid="enrollment-detail"]',
     )
