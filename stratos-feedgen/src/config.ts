@@ -47,6 +47,10 @@ export interface FeedgenConfig {
   spaceSyncEnabled: boolean
   /** Target interval (ms) between space-sync passes, before jitter. */
   spaceSyncIntervalMs: number
+  /** Rows requested per space-membership enumeration page. */
+  spaceMembershipPageLimit: number
+  /** Timeout (ms) for one membership listing or credential-mint request. */
+  spaceMembershipRequestTimeoutMs: number
   /** Max ops requested per `listRepoOps` page when syncing a member. */
   spaceSyncPageLimit: number
   /** Max pages fetched for one member in one pass. */
@@ -82,6 +86,11 @@ export const DEFAULT_LOG_LEVEL = 'info'
 
 export const DEFAULT_SPACE_SYNC_ENABLED = true
 export const DEFAULT_SPACE_SYNC_INTERVAL_MS = 30_000
+export const DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT = 100
+export const MAX_SPACE_MEMBERSHIP_PAGE_LIMIT = 1_000
+// listRepos may resolve PDS hosts in ten-worker batches; keep headroom above
+// the 30s resolver-only worst case for a default 100-row page.
+export const DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS = 60_000
 export const DEFAULT_SPACE_SYNC_PAGE_LIMIT = 1_000
 export const MAX_SPACE_SYNC_PAGE_LIMIT = 1_000
 export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
@@ -161,6 +170,17 @@ export function loadFeedgenConfig(
       'FEEDGEN_SPACE_SYNC_INTERVAL_MS',
       DEFAULT_SPACE_SYNC_INTERVAL_MS,
     ),
+    spaceMembershipPageLimit: parseBoundedPositiveInt(
+      env['FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT'],
+      'FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT',
+      DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
+      MAX_SPACE_MEMBERSHIP_PAGE_LIMIT,
+    ),
+    spaceMembershipRequestTimeoutMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS'],
+      'FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS',
+      DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
+    ),
     spaceSyncPageLimit: parseSpaceSyncPageLimit(
       env['FEEDGEN_SPACE_SYNC_PAGE_LIMIT'],
     ),
@@ -219,15 +239,23 @@ function parsePositiveInt(
 }
 
 function parseSpaceSyncPageLimit(value: string | undefined): number {
-  const parsed = parsePositiveInt(
+  return parseBoundedPositiveInt(
     value,
     'FEEDGEN_SPACE_SYNC_PAGE_LIMIT',
     DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+    MAX_SPACE_SYNC_PAGE_LIMIT,
   )
-  if (parsed > MAX_SPACE_SYNC_PAGE_LIMIT) {
-    throw new Error(
-      `Invalid FEEDGEN_SPACE_SYNC_PAGE_LIMIT: ${parsed} (maximum ${MAX_SPACE_SYNC_PAGE_LIMIT})`,
-    )
+}
+
+function parseBoundedPositiveInt(
+  value: string | undefined,
+  name: string,
+  fallback: number,
+  maximum: number,
+): number {
+  const parsed = parsePositiveInt(value, name, fallback)
+  if (parsed > maximum) {
+    throw new Error(`Invalid ${name}: ${parsed} (maximum ${maximum})`)
   }
   return parsed
 }

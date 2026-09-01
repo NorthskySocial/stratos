@@ -35,7 +35,7 @@ export interface UpstreamStratosClientOptions {
   keypair: Keypair
   /** Optional fetch implementation override (test injection). */
   fetch?: typeof fetch
-  /** Timeout for the space membership request. */
+  /** Timeout for membership listing and credential-mint requests. */
   requestTimeoutMs?: number
 }
 
@@ -230,6 +230,7 @@ export class UpstreamStratosClient {
     const htu = `${this.publicUrl}${path}`
     const res = await this.fetchImpl(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
         'content-type': 'application/json',
         accept: 'application/json',

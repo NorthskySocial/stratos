@@ -1,5 +1,10 @@
-import { isValidNsidStr, isValidRkey } from '@northskysocial/stratos-core'
 import {
+  isValidNsidStr,
+  isValidRkey,
+  parseCid,
+} from '@northskysocial/stratos-core'
+import {
+  DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_MAX_PAGES,
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
   DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
@@ -12,12 +17,20 @@ import {
 } from '../subscription/index.js'
 import type { SpaceCredentialManager } from '../space-credential/index.js'
 import {
+  getRepoOpsResponseByteLimit,
   SpaceHostClient,
   type RepoOpEntry,
   type SpaceHostClientOptions,
 } from './host-client.js'
-import { MalformedCursorError } from './errors.js'
+import {
+  MalformedCursorError,
+  SpaceHostInvalidResponseError,
+} from './errors.js'
 import type { PollTarget } from './membership.js'
+import {
+  SpaceAuthorizationRevokedError,
+  type SpaceMutationFence,
+} from './mutation-fence.js'
 
 export interface SpaceSyncerDeps {
   store: Pick<
@@ -29,6 +42,7 @@ export interface SpaceSyncerDeps {
     | 'deleteSpaceCursor'
   >
   credentialManager: Pick<SpaceCredentialManager, 'getCredential'>
+  mutationFence: Pick<SpaceMutationFence, 'mutate' | 'compensate'>
   /** Injectable host-client factory (test seam). Defaults to `new SpaceHostClient(opts)`. */
   createHostClient?: (
     opts: SpaceHostClientOptions,
@@ -37,12 +51,10 @@ export interface SpaceSyncerDeps {
   maxRecordBytes?: number
   maxPages?: number
   maxRecordsPerMember?: number
-  /** Forwarded as `listRepoOps`'s `limit`. Unset defers to the host's own default page size. */
+  /** Upper bound forwarded as `listRepoOps`'s `limit`. */
   pageLimit?: number
   /** Injectable clock for tests. Returns an ISO-8601 timestamp. */
   now?: () => string
-  /** Structured per-target summary sink. Defaults to `console.log(JSON.stringify(...))`. */
-  log?: (event: SpaceSyncLogEvent) => void
   /** Called once per failed target. Defaults to `console.error`. */
   onError?: (target: PollTarget, err: unknown) => void
 }
@@ -79,22 +91,16 @@ export interface SpaceSyncFailure {
 
 export type SpaceSyncResult = SpaceSyncSuccess | SpaceSyncFailure
 
-export interface SpaceSyncLogEvent {
-  spaceUri: string
-  did: string
-  pagesFetched: number
-  recordsIndexed: number
-  recordsDeleted: number
-  skippedOversized: number
-  skippedMalformed: number
-  stopReason: 'complete' | 'max-pages' | 'per-member-cap'
-}
-
 interface AppliedPage {
   indexed: number
   deleted: number
   skippedOversized: number
   skippedMalformed: number
+}
+
+interface PageProgress {
+  cursorPersisted: boolean
+  finalCommit?: Record<string, unknown>
 }
 
 /**
@@ -110,30 +116,39 @@ interface AppliedPage {
 export class SpaceSyncer {
   private readonly store: SpaceSyncerDeps['store']
   private readonly credentialManager: SpaceSyncerDeps['credentialManager']
+  private readonly mutationFence: SpaceSyncerDeps['mutationFence']
   private readonly createHostClient: (
     opts: SpaceHostClientOptions,
   ) => Pick<SpaceHostClient, 'listRepoOps' | 'getRecord'>
   private readonly maxRecordBytes: number
   private readonly maxPages: number
   private readonly maxRecordsPerMember: number
-  private readonly pageLimit: number | undefined
+  private readonly pageLimit: number
   private readonly now: () => string
-  private readonly log: (event: SpaceSyncLogEvent) => void
   private readonly onError: (target: PollTarget, err: unknown) => void
 
   constructor(deps: SpaceSyncerDeps) {
     this.store = deps.store
     this.credentialManager = deps.credentialManager
-    this.createHostClient =
-      deps.createHostClient ?? ((opts) => new SpaceHostClient(opts))
+    this.mutationFence = deps.mutationFence
     this.maxRecordBytes =
       deps.maxRecordBytes ?? DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES
     this.maxPages = deps.maxPages ?? DEFAULT_SPACE_SYNC_MAX_PAGES
     this.maxRecordsPerMember =
       deps.maxRecordsPerMember ?? DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER
-    this.pageLimit = deps.pageLimit
+    this.pageLimit = deps.pageLimit ?? DEFAULT_SPACE_SYNC_PAGE_LIMIT
+    this.createHostClient =
+      deps.createHostClient ??
+      ((opts) =>
+        new SpaceHostClient({
+          ...opts,
+          maxPageBytes: getRepoOpsResponseByteLimit(
+            this.pageLimit,
+            this.maxRecordBytes,
+          ),
+          maxRecordBytes: this.maxRecordBytes,
+        }))
     this.now = deps.now ?? (() => new Date().toISOString())
-    this.log = deps.log ?? defaultLog
     this.onError = deps.onError ?? defaultOnError
   }
 
@@ -158,7 +173,27 @@ export class SpaceSyncer {
         return { target, ok: false, reason: 'aborted', error: err }
       }
       if (err instanceof MalformedCursorError) {
-        await this.store.deleteSpaceCursor(target.spaceUri, target.did)
+        try {
+          await this.mutationFence.mutate(target, signal, () =>
+            this.store.deleteSpaceCursor(target.spaceUri, target.did),
+          )
+        } catch (mutationError) {
+          if (signal?.aborted) {
+            return {
+              target,
+              ok: false,
+              reason: 'aborted',
+              error: mutationError,
+            }
+          }
+          this.onError(target, mutationError)
+          return {
+            target,
+            ok: false,
+            reason: 'member-skip',
+            error: mutationError,
+          }
+        }
         this.onError(target, err)
         return { target, ok: false, reason: 'malformed-cursor', error: err }
       }
@@ -199,14 +234,22 @@ export class SpaceSyncer {
 
     try {
       for (;;) {
+        const remainingRecords = this.maxRecordsPerMember - recordsIndexed
+        const requestLimit = Math.min(this.pageLimit, remainingRecords)
         const page = await client.listRepoOps({
           space: target.spaceUri,
           repo: target.did,
           cursor,
-          limit: this.pageLimit,
+          limit: requestLimit,
           signal,
         })
         assertNotAborted(signal)
+        if (page.ops.length > requestLimit) {
+          throw new SpaceHostInvalidResponseError(
+            target.host,
+            `listRepoOps returned ${page.ops.length} ops for requested limit ${requestLimit}`,
+          )
+        }
         pagesFetched += 1
 
         const applied = await this.applyPage(target, client, page.ops, signal)
@@ -216,22 +259,17 @@ export class SpaceSyncer {
         skippedOversized += applied.skippedOversized
         skippedMalformed += applied.skippedMalformed
 
-        const isTerminal = page.cursor === undefined
-        if (page.cursor !== undefined) {
-          await this.store.upsertSpaceCursor(
-            target.spaceUri,
-            target.did,
-            page.cursor,
-            this.now(),
-          )
-          cursorWasPersisted = true
-          assertNotAborted(signal)
-        } else if (page.commit) {
-          finalCommit = page.commit
-        }
+        const progress = await this.persistPageProgress(
+          target,
+          page.cursor,
+          page.commit,
+          signal,
+        )
+        cursorWasPersisted ||= progress.cursorPersisted
+        finalCommit = progress.finalCommit
         cursor = page.cursor
 
-        if (isTerminal) {
+        if (page.cursor === undefined) {
           stopReason = 'complete'
           break
         }
@@ -246,7 +284,13 @@ export class SpaceSyncer {
       }
     } catch (err) {
       if (cursorWasPersisted && signal?.aborted) {
-        await this.restoreCursor(target, startingCursor)
+        try {
+          await this.restoreCursor(target, startingCursor)
+        } catch (restoreError) {
+          if (!(restoreError instanceof SpaceAuthorizationRevokedError)) {
+            throw restoreError
+          }
+        }
       }
       throw err
     }
@@ -262,33 +306,50 @@ export class SpaceSyncer {
       stopReason,
       ...(finalCommit ? { finalCommit } : {}),
     }
-    this.log({
-      spaceUri: target.spaceUri,
-      did: target.did,
-      pagesFetched,
-      recordsIndexed,
-      recordsDeleted,
-      skippedOversized,
-      skippedMalformed,
-      stopReason,
-    })
     return result
+  }
+
+  private async persistPageProgress(
+    target: PollTarget,
+    nextCursor: string | undefined,
+    commit: Record<string, unknown> | undefined,
+    signal?: AbortSignal,
+  ): Promise<PageProgress> {
+    if (nextCursor === undefined) {
+      return commit
+        ? { cursorPersisted: false, finalCommit: commit }
+        : {
+            cursorPersisted: false,
+          }
+    }
+    await this.mutationFence.mutate(target, signal, () =>
+      this.store.upsertSpaceCursor(
+        target.spaceUri,
+        target.did,
+        nextCursor,
+        this.now(),
+      ),
+    )
+    assertNotAborted(signal)
+    return { cursorPersisted: true }
   }
 
   private async restoreCursor(
     target: PollTarget,
     startingCursor: string | undefined,
   ): Promise<void> {
-    if (startingCursor === undefined) {
-      await this.store.deleteSpaceCursor(target.spaceUri, target.did)
-      return
-    }
-    await this.store.upsertSpaceCursor(
-      target.spaceUri,
-      target.did,
-      startingCursor,
-      this.now(),
-    )
+    await this.mutationFence.compensate(target, async () => {
+      if (startingCursor === undefined) {
+        await this.store.deleteSpaceCursor(target.spaceUri, target.did)
+        return
+      }
+      await this.store.upsertSpaceCursor(
+        target.spaceUri,
+        target.did,
+        startingCursor,
+        this.now(),
+      )
+    })
   }
 
   /**
@@ -310,7 +371,15 @@ export class SpaceSyncer {
         skippedMalformed += 1
         continue
       }
-      valid.push(op)
+      if (op.cid === null) {
+        valid.push(op)
+        continue
+      }
+      try {
+        valid.push({ ...op, cid: parseCid(op.cid).toString() })
+      } catch {
+        skippedMalformed += 1
+      }
     }
 
     const posts = valid.filter(
@@ -325,12 +394,21 @@ export class SpaceSyncer {
       assertNotAborted(signal)
       const uri = `${target.spaceUri}/${target.did}/${op.collection}/${op.rkey}`
       if (op.cid === null) {
-        await this.store.deletePost(uri)
+        await this.mutationFence.mutate(target, signal, () =>
+          this.store.deletePost(uri),
+        )
         deleted += 1
         continue
       }
       const cid = op.cid
-      const value = await this.resolveValue(target, client, op, signal)
+      const value = await this.resolveValue(
+        target,
+        client,
+        op,
+        uri,
+        cid,
+        signal,
+      )
       if (value === undefined) {
         skippedMalformed += 1
         continue
@@ -340,7 +418,7 @@ export class SpaceSyncer {
         continue
       }
       const nowIso = this.now()
-      await this.store.upsertPost({
+      const post = {
         uri,
         did: target.did,
         cid,
@@ -349,7 +427,10 @@ export class SpaceSyncer {
         record: value,
         blobRefs: extractBlobRefs(value),
         boundaries: [target.boundary],
-      })
+      }
+      await this.mutationFence.mutate(target, signal, () =>
+        this.store.upsertPost(post),
+      )
       indexed += 1
     }
     return { indexed, deleted, skippedOversized, skippedMalformed }
@@ -359,10 +440,12 @@ export class SpaceSyncer {
     target: PollTarget,
     client: Pick<SpaceHostClient, 'listRepoOps' | 'getRecord'>,
     op: RepoOpEntry,
+    expectedUri: string,
+    expectedCid: string,
     signal?: AbortSignal,
   ): Promise<Record<string, unknown> | undefined> {
     if (op.value !== undefined) {
-      return isRecordValue(op.value) ? op.value : undefined
+      return isPostRecordValue(op.value) ? op.value : undefined
     }
     const fetched = await client.getRecord({
       space: target.spaceUri,
@@ -371,7 +454,10 @@ export class SpaceSyncer {
       rkey: op.rkey,
       signal,
     })
-    return isRecordValue(fetched.value) ? fetched.value : undefined
+    if (fetched.uri !== expectedUri || fetched.cid !== expectedCid) {
+      return undefined
+    }
+    return isPostRecordValue(fetched.value) ? fetched.value : undefined
   }
 }
 
@@ -395,8 +481,13 @@ function selectLastOpPerPath(ops: RepoOpEntry[]): RepoOpEntry[] {
   return [...byPath.values()]
 }
 
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+function isPostRecordValue(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>)['$type'] === STRATOS_POST_COLLECTION
+  )
 }
 
 function recordByteSize(value: Record<string, unknown>): number {
@@ -412,10 +503,6 @@ function clampSortAt(sortAt: string, nowIso: string): string {
   const nowMs = Date.parse(nowIso)
   if (!Number.isFinite(parsed) || parsed > nowMs) return nowIso
   return sortAt
-}
-
-function defaultLog(event: SpaceSyncLogEvent): void {
-  console.log(JSON.stringify({ msg: 'feedgen.space-sync-pass', ...event }))
 }
 
 function defaultOnError(target: PollTarget, err: unknown): void {

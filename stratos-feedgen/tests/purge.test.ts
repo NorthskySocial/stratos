@@ -528,7 +528,7 @@ describe('Purger.purgeBoundary (space deleted service-wide)', () => {
     expect(
       await store.getPost(`at://${FAYE}/zone.stratos.feed.post/2`),
     ).not.toBeNull()
-    // Cursor and enrolled snapshot are per-actor, left intact.
+    // Subscription cursor and enrolled snapshot are per-actor, left intact.
     expect(await store.getCursor(SPIKE)).toBe(3)
     expect(await store.getEnrolledActor(FAYE)).not.toBeNull()
     expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()

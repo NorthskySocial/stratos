@@ -1,4 +1,11 @@
+import { boundaryToSpaceUri } from '@northskysocial/stratos-core'
 import type { FeedgenStore } from '../db/index.js'
+import { STRATOS_FEED_SPACE_TYPE } from '../space-credential/index.js'
+import {
+  type DidMutationScope,
+  SpaceMutationFence,
+  type SpaceAuthorizationTarget,
+} from '../space-sync/mutation-fence.js'
 
 /**
  * The subset of `EnrollmentManager` the purger needs: dropping a viewer's
@@ -16,6 +23,7 @@ export interface BoundaryCacheInvalidator {
  */
 export interface ActorRemover {
   removeActor: (did: string) => void
+  removeActorAndDrain?: (did: string) => Promise<void>
 }
 
 /** Structured audit-log record emitted for every purge action. */
@@ -48,8 +56,15 @@ export interface PurgeCounts {
   boundaryCache: number
 }
 
+export interface GuardedBoundaryPurgeResult {
+  committed: boolean
+  counts: PurgeCounts
+}
+
 export interface PurgerDeps {
   store: FeedgenStore
+  /** Shared with membership and the space syncer in production. */
+  mutationFence?: SpaceMutationFence
   /** In-memory viewer→boundaries cache (`EnrollmentManager`). Optional. */
   enrollmentCache?: BoundaryCacheInvalidator
   /** Live per-actor syncer pool (`ActorPool`). Optional. */
@@ -86,15 +101,24 @@ function zeroCounts(): PurgeCounts {
  */
 export class Purger {
   private readonly store: FeedgenStore
+  private readonly mutationFence: SpaceMutationFence
   private readonly enrollmentCache?: BoundaryCacheInvalidator
   private readonly actorPool?: ActorRemover
   private readonly audit: (entry: PurgeAudit) => void
 
   constructor(deps: PurgerDeps) {
     this.store = deps.store
+    this.mutationFence = deps.mutationFence ?? new SpaceMutationFence()
     this.enrollmentCache = deps.enrollmentCache
     this.actorPool = deps.actorPool
     this.audit = deps.audit ?? defaultAudit
+  }
+
+  async withDidScope<T>(
+    did: string,
+    operation: (scope: DidMutationScope) => Promise<T>,
+  ): Promise<T> {
+    return this.mutationFence.withDidScope(did, operation)
   }
 
   /**
@@ -120,14 +144,52 @@ export class Purger {
     did: string,
     trigger: 'unenroll' | 'reconcile-unenroll' | 'space-unenroll',
   ): Promise<PurgeCounts> {
-    // Stop ingestion first so no new records race the delete.
-    this.actorPool?.removeActor(did)
-    const counts = zeroCounts()
-    counts.posts = await this.store.deletePostsByDid(did)
+    return this.mutationFence.withDidScope(did, (scope) =>
+      this.purgeWholeActorWithinScope(scope, trigger),
+    )
+  }
+
+  async purgeReconciledActorWithinScope(
+    scope: DidMutationScope,
+  ): Promise<PurgeCounts> {
+    return this.purgeWholeActorWithinScope(scope, 'reconcile-unenroll')
+  }
+
+  async purgeReconciledActorAfterDrainWithinScope(
+    scope: DidMutationScope,
+  ): Promise<PurgeCounts> {
+    return this.mutationFence.revokeActorWithinScope(scope, () =>
+      this.deleteWholeActorState(scope.did, 'reconcile-unenroll'),
+    )
+  }
+
+  private async purgeWholeActorWithinScope(
+    scope: DidMutationScope,
+    trigger: 'unenroll' | 'reconcile-unenroll' | 'space-unenroll',
+  ): Promise<PurgeCounts> {
+    return this.mutationFence.revokeActorWithinScope(scope, async () => {
+      const counts = zeroCounts()
+      counts.boundaryCache = this.invalidate(scope.did)
+      // Stop ingestion first so no new records race the delete.
+      if (this.actorPool?.removeActorAndDrain) {
+        await this.actorPool.removeActorAndDrain(scope.did)
+      } else {
+        this.actorPool?.removeActor(scope.did)
+      }
+      return this.deleteWholeActorState(scope.did, trigger, counts)
+    })
+  }
+
+  private async deleteWholeActorState(
+    did: string,
+    trigger: 'unenroll' | 'reconcile-unenroll' | 'space-unenroll',
+    counts = zeroCounts(),
+  ): Promise<PurgeCounts> {
+    counts.boundaryCache ||= this.invalidate(did)
     counts.cursors = await this.store.deleteCursor(did)
     counts.spaceCursors = await this.store.deleteSpaceCursors(did)
+    counts.posts = await this.store.deletePostsByDid(did)
     counts.enrolledActors = await this.deleteEnrolledActor(did)
-    counts.boundaryCache = this.invalidate(did)
     this.audit({ trigger, did, counts })
     return counts
   }
@@ -144,17 +206,89 @@ export class Purger {
     did: string,
     boundary: string,
   ): Promise<PurgeCounts> {
-    return this.purgeActorBoundaryState(did, boundary, 'boundary-shrink')
+    return this.mutationFence.withDidScope(did, (scope) =>
+      this.purgeActorBoundaryWithinScope(scope, boundary),
+    )
+  }
+
+  async purgeActorBoundaryWithinScope(
+    scope: DidMutationScope,
+    boundary: string,
+  ): Promise<PurgeCounts> {
+    return this.purgeBoundaryWithinScope(scope, boundary, 'boundary-shrink')
   }
 
   async purgeReconciledActorBoundary(
     did: string,
     boundary: string,
   ): Promise<PurgeCounts> {
-    return this.purgeActorBoundaryState(
-      did,
+    return this.mutationFence.withDidScope(did, (scope) =>
+      this.purgeReconciledActorBoundaryWithinScope(scope, boundary),
+    )
+  }
+
+  async purgeReconciledActorBoundaryWithinScope(
+    scope: DidMutationScope,
+    boundary: string,
+  ): Promise<PurgeCounts> {
+    return this.purgeBoundaryWithinScope(
+      scope,
       boundary,
       'reconcile-boundary-shrink',
+    )
+  }
+
+  /**
+   * Reconcile-only boundary purge whose store transaction commits only while
+   * the caller's fresh snapshot still wins over queued live enrollment work.
+   */
+  async purgeReconciledActorBoundaryGuardedWithinScope(
+    scope: DidMutationScope,
+    boundary: string,
+    shouldCommit: () => boolean,
+  ): Promise<GuardedBoundaryPurgeResult> {
+    const spaceUri = spaceUriForBoundary(boundary)
+    return this.mutationFence.revokeSpaceWithinScope(
+      scope,
+      boundary,
+      spaceUri,
+      async () => {
+        const counts = zeroCounts()
+        const boundaryCache = this.invalidate(scope.did)
+        const deleted = await this.store.deleteActorBoundaryStateGuarded(
+          spaceUri,
+          scope.did,
+          boundary,
+          shouldCommit,
+        )
+        if (!deleted.committed) return { committed: false, counts }
+
+        counts.boundaryCache = boundaryCache
+        counts.posts = deleted.posts
+        counts.spaceCursors = deleted.spaceCursors
+        this.audit({
+          trigger: 'reconcile-boundary-shrink',
+          did: scope.did,
+          boundary,
+          counts,
+        })
+        return { committed: true, counts }
+      },
+    )
+  }
+
+  private async purgeBoundaryWithinScope(
+    scope: DidMutationScope,
+    boundary: string,
+    trigger: 'boundary-shrink' | 'reconcile-boundary-shrink',
+  ): Promise<PurgeCounts> {
+    const spaceUri = spaceUriForBoundary(boundary)
+    return this.mutationFence.revokeSpaceWithinScope(
+      scope,
+      boundary,
+      spaceUri,
+      () =>
+        this.purgeActorBoundaryState(scope.did, boundary, trigger, spaceUri),
     )
   }
 
@@ -163,24 +297,26 @@ export class Purger {
     boundary: string,
     spaceUri: string,
   ): Promise<PurgeCounts> {
-    return this.purgeActorBoundaryState(
-      did,
-      boundary,
-      'space-boundary-shrink',
-      spaceUri,
+    return this.mutationFence.revokeSpace(did, boundary, spaceUri, () =>
+      this.purgeActorBoundaryState(
+        did,
+        boundary,
+        'space-boundary-shrink',
+        spaceUri,
+      ),
     )
   }
 
   async purgeInvalidSpaceCommit(
-    did: string,
-    boundary: string,
-    spaceUri: string,
+    target: SpaceAuthorizationTarget,
   ): Promise<PurgeCounts> {
-    return this.purgeActorBoundaryState(
-      did,
-      boundary,
-      'space-commit-invalid',
-      spaceUri,
+    return this.mutationFence.revokeSpaceForRun(target, () =>
+      this.purgeActorBoundaryState(
+        target.did,
+        target.boundary,
+        'space-commit-invalid',
+        target.spaceUri,
+      ),
     )
   }
 
@@ -195,26 +331,30 @@ export class Purger {
     spaceUri?: string,
   ): Promise<PurgeCounts> {
     const counts = zeroCounts()
-    counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)
+    counts.boundaryCache = this.invalidate(did)
     if (spaceUri) {
       counts.spaceCursors = await this.store.deleteSpaceCursor(spaceUri, did)
     }
-    counts.boundaryCache = this.invalidate(did)
+    counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)
     this.audit({ trigger, did, boundary, counts })
     return counts
   }
 
   /**
    * A boundary/space was deleted service-wide: purge every record, derived
-   * entry, and blob ref scoped to `boundary` across ALL actors. Cursors and
-   * enrolled-actor snapshots are per-actor (not per-boundary) so they are left
-   * intact — an actor may still hold other in-scope boundaries.
+   * entry, blob ref, and deterministic cursor for that space across ALL
+   * actors. Subscription cursors and enrolled-actor snapshots remain intact —
+   * an actor may still hold other in-scope boundaries.
    */
   async purgeBoundary(boundary: string): Promise<PurgeCounts> {
-    const counts = zeroCounts()
-    counts.posts = await this.store.deletePostsByBoundary(boundary)
-    this.audit({ trigger: 'boundary-deleted', boundary, counts })
-    return counts
+    const spaceUri = spaceUriForBoundary(boundary)
+    return this.mutationFence.revokeBoundaryForAll(boundary, async () => {
+      const counts = zeroCounts()
+      counts.spaceCursors = await this.store.deleteSpaceCursorsBySpace(spaceUri)
+      counts.posts = await this.store.deletePostsByBoundary(boundary)
+      this.audit({ trigger: 'boundary-deleted', boundary, counts })
+      return counts
+    })
   }
 
   private async deleteEnrolledActor(did: string): Promise<number> {
@@ -229,6 +369,12 @@ export class Purger {
     this.enrollmentCache.invalidate(did)
     return 1
   }
+}
+
+function spaceUriForBoundary(boundary: string): string {
+  const result = boundaryToSpaceUri(boundary, STRATOS_FEED_SPACE_TYPE)
+  if (result.ok) return result.value
+  throw new Error(result.error.message)
 }
 
 function defaultAudit(entry: PurgeAudit): void {

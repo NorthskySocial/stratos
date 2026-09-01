@@ -1,4 +1,8 @@
-export { SpaceHostClient } from './host-client.js'
+export {
+  getRecordResponseByteLimit,
+  getRepoOpsResponseByteLimit,
+  SpaceHostClient,
+} from './host-client.js'
 export type {
   GetRecordOptions,
   GetRecordResult,
@@ -35,10 +39,19 @@ export type {
   PollTarget,
   RemovedMember,
 } from './membership.js'
+export {
+  SpaceAuthorizationRevokedError,
+  SpaceMutationFence,
+} from './mutation-fence.js'
+export type {
+  DidMutationScope,
+  SpaceAuthorizationLease,
+  SpaceAuthorizationSnapshot,
+  SpaceAuthorizationTarget,
+} from './mutation-fence.js'
 export { SpaceSyncer } from './space-syncer.js'
 export type {
   SpaceSyncFailure,
-  SpaceSyncLogEvent,
   SpaceSyncResult,
   SpaceSyncerDeps,
   SpaceSyncSuccess,
@@ -51,6 +64,12 @@ export type {
   CommitVerifyResult,
   CommitVerifySuccess,
 } from './commit-verify.js'
+export { createCommitKeyResolver } from './commit-key-resolver.js'
+export type {
+  CommitKeyResolver,
+  CommitKeyResolverOptions,
+  CommitKeyResolverSource,
+} from './commit-key-resolver.js'
 export { SpaceSyncRunner } from './sync-runner.js'
 export type {
   SpaceCapStopStreakLogEvent,

@@ -6,6 +6,7 @@ import {
 } from '../src/space-sync/index.js'
 
 const SPIKE = 'did:plc:spikespiegel'
+const FAYE = 'did:plc:fayevalentine'
 const CREW_BOUNDARY = 'did:web:stratos.test/crew'
 const CREW_SPACE =
   'at://did:web:stratos.test/space/zone.stratos.space.feed/crew'
@@ -41,6 +42,24 @@ async function authorize(
 }
 
 describe('SpaceMutationFence', () => {
+  it('tracks only active live mutations for the same DID', () => {
+    const fence = new SpaceMutationFence()
+
+    fence.beginDidMutation(SPIKE)
+    fence.beginDidMutation(SPIKE)
+    fence.beginDidMutation(FAYE)
+
+    expect(fence.hasPendingDidMutation(SPIKE)).toBe(true)
+    expect(fence.hasPendingDidMutation(FAYE)).toBe(true)
+    fence.endDidMutation(SPIKE)
+    expect(fence.hasPendingDidMutation(SPIKE)).toBe(true)
+    fence.endDidMutation(SPIKE)
+    expect(fence.hasPendingDidMutation(SPIKE)).toBe(false)
+    expect(fence.hasPendingDidMutation(FAYE)).toBe(true)
+    fence.endDidMutation(FAYE)
+    expect(fence.hasPendingDidMutation(FAYE)).toBe(false)
+  })
+
   it('settles an aborted queued write before a queued departure purge without resurrecting state', async () => {
     const fence = new SpaceMutationFence()
     const target = await fence.issueRunLease(await authorize(fence))
@@ -130,5 +149,33 @@ describe('SpaceMutationFence', () => {
       did: SPIKE,
       spaceUri: CREW_SPACE,
     })
+  })
+
+  it('rejects authorization queued before a concurrent revocation commits', async () => {
+    const fence = new SpaceMutationFence()
+    const scopeHeld = deferred<void>()
+    const releaseScope = deferred<void>()
+    const holdingScope = fence.withDidScope(SPIKE, async () => {
+      scopeHeld.resolve()
+      await releaseScope.promise
+    })
+    await scopeHeld.promise
+
+    const authorizing = fence.authorizeSnapshot({
+      boundary: CREW_BOUNDARY,
+      spaceUri: CREW_SPACE,
+      dids: [SPIKE],
+      revocationEpoch: fence.captureRevocationEpoch(),
+    })
+    // Let authorization enqueue its DID-scoped commit behind the held scope.
+    await Promise.resolve()
+
+    const purge = vi.fn(async () => {})
+    const revoking = fence.revokeSpace(SPIKE, CREW_BOUNDARY, CREW_SPACE, purge)
+    releaseScope.resolve()
+
+    const [leases] = await Promise.all([authorizing, revoking, holdingScope])
+    expect(leases.has(SPIKE)).toBe(false)
+    expect(purge).toHaveBeenCalledOnce()
   })
 })

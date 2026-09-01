@@ -71,6 +71,7 @@ export class ActorPool {
   private evictionTimer: ReturnType<typeof setInterval> | null = null
   /** Drains of syncers retired outside `stop()`; awaited at shutdown. */
   private retiring = new Set<Promise<void>>()
+  private retiringByDid = new Map<string, Set<Promise<void>>>()
 
   constructor(
     private config: ActorPoolConfig,
@@ -141,18 +142,31 @@ export class ActorPool {
 
   /** Stop and remove a syncer; promote a waiting actor if one is queued. */
   removeActor(did: string): void {
+    void this.detachActor(did)
+  }
+
+  /** Stop/remove an actor and wait until its already-entered commit is durable. */
+  async removeActorAndDrain(did: string): Promise<void> {
+    const detached = this.detachActor(did)
+    const drains = new Set(this.retiringByDid.get(did) ?? [])
+    if (detached) drains.add(detached)
+    await Promise.all(drains)
+  }
+
+  private detachActor(did: string): Promise<void> | undefined {
     this.requested.delete(did)
     const syncer = this.active.get(did)
     if (syncer) {
-      this.retire(syncer)
+      const drain = this.retire(did, syncer)
       this.active.delete(did)
       this.promoteNext()
-      return
+      return drain
     }
     const idx = this.waiting.indexOf(did)
     if (idx >= 0) {
       this.waiting.splice(idx, 1)
     }
+    return undefined
   }
 
   getActiveActors(): string[] {
@@ -199,7 +213,7 @@ export class ActorPool {
       const did = idle[i].did
       const syncer = this.active.get(did)
       if (!syncer) continue
-      this.retire(syncer)
+      void this.retire(did, syncer)
       this.active.delete(did)
       // Keep `requested` — the actor is still enrolled, just cycled out.
       this.waiting.push(did)
@@ -253,12 +267,22 @@ export class ActorPool {
    * `stop()` can await in-flight commit applies from retired syncers —
    * otherwise a late apply races the store close.
    */
-  private retire(syncer: ActorSyncer): void {
+  private retire(did: string, syncer: ActorSyncer): Promise<void> {
     const drain = syncer.drainAndStop().catch((err: unknown) => {
       this.deps.onError?.(err as Error)
     })
     this.retiring.add(drain)
-    void drain.then(() => this.retiring.delete(drain))
+    const actorDrains = this.retiringByDid.get(did) ?? new Set()
+    actorDrains.add(drain)
+    this.retiringByDid.set(did, actorDrains)
+    void drain.then(() => {
+      this.retiring.delete(drain)
+      actorDrains.delete(drain)
+      if (actorDrains.size === 0) {
+        this.retiringByDid.delete(did)
+      }
+    })
+    return drain
   }
 
   private promoteNext(): void {

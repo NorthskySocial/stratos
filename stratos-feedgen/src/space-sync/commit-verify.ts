@@ -338,8 +338,8 @@ const TRANSIENT_NETWORK_CODES = new Set([
 
 /**
  * Resolution failures are permanent unless they carry a known retryable
- * shape. The pinned resolver collapses did:web non-2xx responses to
- * `DidNotFoundError`, so this seam deliberately fails those closed too.
+ * shape. The production commit-key resolver preserves retryable did:web HTTP
+ * statuses so outages reach this classifier without looking like a 404.
  */
 function isTransientResolutionError(error: unknown): boolean {
   const pending = [error]
