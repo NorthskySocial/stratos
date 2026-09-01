@@ -15,6 +15,7 @@ import {
   DOMAINS,
   STRATOS_URL,
 } from './lib/config.ts'
+import { PDS_SPACES_URL } from './lib/mixed-mode-pds.ts'
 import { loadState } from './lib/state.ts'
 import { assert, dim, fail, finish, section } from './lib/log.ts'
 
@@ -220,7 +221,7 @@ async function run(): Promise<void> {
     await pdsRows.first().click()
     await page
       .locator('[data-testid="repo-host-detail"]')
-      .filter({ hasText: 'http://localhost:3010 (authority-override)' })
+      .filter({ hasText: `${PDS_SPACES_URL} (authority-override)` })
       .waitFor({
         state: 'visible',
         timeout: 15_000,
@@ -230,7 +231,7 @@ async function run(): Promise<void> {
     )
     assert(
       pdsDetail?.includes(pdsFixture.did) === true &&
-        pdsDetail.includes('http://localhost:3010') &&
+        pdsDetail.includes(PDS_SPACES_URL) &&
         pdsDetail.includes('authority-override'),
       'PDS-custody detail shows the enrollment host and resolution source',
     )

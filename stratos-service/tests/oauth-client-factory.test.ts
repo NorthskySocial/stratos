@@ -34,11 +34,11 @@ function config(
 ): StratosServiceConfig {
   return {
     service: {
-      did: 'did:web:localhost%3A3100',
+      did: 'did:web:motoko.spike.test%3A3100',
       serviceFragment: 'atproto_pns',
       port: 3100,
-      publicUrl: 'http://localhost:3100',
-      repoUrl: 'http://localhost:3100',
+      publicUrl: 'http://motoko.spike.test:3100',
+      repoUrl: 'http://motoko.spike.test:3100',
     },
     stratos,
     oauth: {},

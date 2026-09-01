@@ -34,6 +34,31 @@ export interface PdsSpaceRecord extends SpaceRecord {
   value: Record<string, unknown>
 }
 
+export async function waitForPdsSpacesReady(
+  timeoutMs = 30_000,
+  intervalMs = 500,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let lastFailure = 'not reachable'
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${PDS_SPACES_URL}/xrpc/_health`)
+      if (response.ok) {
+        await response.body?.cancel()
+        return
+      }
+      lastFailure = `status ${response.status}`
+      await response.body?.cancel()
+    } catch (error) {
+      lastFailure = String(error)
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  throw new Error(
+    `spaces PDS did not become ready within ${timeoutMs}ms: ${lastFailure}`,
+  )
+}
+
 function adminAuthorization(): string {
   return `Basic ${btoa(`admin:${PDS_SPACES_ADMIN_PASSWORD}`)}`
 }

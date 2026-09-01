@@ -8,7 +8,10 @@ import { waitForHealthy } from './lib/stratos.ts'
 import { loadState, saveState, type TestState } from './lib/state.ts'
 import { error, fail, info, pass, section, warn } from './lib/log.ts'
 import { isAppview, isPostgres } from './lib/backend.ts'
-import { createPdsAccount } from './lib/mixed-mode-pds.ts'
+import {
+  createPdsAccount,
+  waitForPdsSpacesReady,
+} from './lib/mixed-mode-pds.ts'
 
 async function prepareTestDataDir() {
   info('Preparing test-data directory...')
@@ -235,6 +238,10 @@ async function run() {
     fail('Stratos did not become healthy', String(err))
     throw err
   }
+
+  info('Waiting for spaces PDS to become ready...')
+  await waitForPdsSpacesReady()
+  pass('Spaces PDS is ready')
 
   await createMixedModeAccounts(state)
 
