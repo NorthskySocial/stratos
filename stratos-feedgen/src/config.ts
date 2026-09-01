@@ -1,3 +1,6 @@
+import { isIP } from 'node:net'
+import { parseCommaList } from '@northskysocial/stratos-core'
+
 /**
  * Configuration for the Stratos feed generator.
  *
@@ -40,6 +43,31 @@ export interface FeedgenConfig {
   logLevel: string
   /** Bearer token required on `/metrics`. Unset: the endpoint is open. */
   metricsToken?: string
+
+  /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
+  spaceSyncEnabled: boolean
+  /** Target interval (ms) between space-sync passes, before jitter. */
+  spaceSyncIntervalMs: number
+  /** Rows requested per space-membership enumeration page. */
+  spaceMembershipPageLimit: number
+  /** Timeout (ms) for one membership listing or credential-mint request. */
+  spaceMembershipRequestTimeoutMs: number
+  /** Max ops requested per `listRepoOps` page when syncing a member. */
+  spaceSyncPageLimit: number
+  /** Max pages fetched for one member in one pass. */
+  spaceSyncMaxPages: number
+  /** Timeout (ms) for a single outbound request to a member's host. */
+  spaceSyncRequestTimeoutMs: number
+  /** Time budget (ms) for one member in one pass. A member over budget is abandoned for that pass. */
+  spaceSyncMemberBudgetMs: number
+  /** Maximum number of members synced concurrently in one pass. */
+  spaceSyncMemberConcurrency: number
+  /** Max accepted size (bytes) of a single record fetched from a member's host. */
+  spaceSyncMaxRecordBytes: number
+  /** Max records indexed for one member in one pass. */
+  spaceSyncMaxRecordsPerMember: number
+  /** Exact literal-loopback `http://` origins allowed for member hosts. `https://` origins are always allowed. */
+  spaceSyncAllowHttpOrigins: ReadonlySet<string>
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
@@ -56,6 +84,24 @@ export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
 export const DEFAULT_PLC_URL = 'https://plc.directory'
 
 export const DEFAULT_LOG_LEVEL = 'info'
+
+export const DEFAULT_SPACE_SYNC_ENABLED = true
+export const DEFAULT_SPACE_SYNC_INTERVAL_MS = 30_000
+export const DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT = 100
+export const MAX_SPACE_MEMBERSHIP_PAGE_LIMIT = 1_000
+// listRepos may resolve PDS hosts in ten-worker batches; keep headroom above
+// the 30s resolver-only worst case for a default 100-row page.
+export const DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS = 60_000
+export const DEFAULT_SPACE_SYNC_PAGE_LIMIT = 1_000
+export const MAX_SPACE_SYNC_PAGE_LIMIT = 1_000
+export const DEFAULT_SPACE_SYNC_MAX_PAGES = 10
+export const DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS = 10_000
+export const DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS = 60_000
+export const DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY = 8
+export const DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES = 65_536
+export const DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER = 1_000
+export const DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS: ReadonlySet<string> =
+  new Set()
 
 export interface FeedgenEnv {
   [key: string]: string | undefined
@@ -114,6 +160,64 @@ export function loadFeedgenConfig(
     ),
     logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
     metricsToken: nonEmpty(env['FEEDGEN_METRICS_TOKEN']),
+
+    spaceSyncEnabled: parseBoolean(
+      env['FEEDGEN_SPACE_SYNC_ENABLED'],
+      'FEEDGEN_SPACE_SYNC_ENABLED',
+      DEFAULT_SPACE_SYNC_ENABLED,
+    ),
+    spaceSyncIntervalMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_INTERVAL_MS'],
+      'FEEDGEN_SPACE_SYNC_INTERVAL_MS',
+      DEFAULT_SPACE_SYNC_INTERVAL_MS,
+    ),
+    spaceMembershipPageLimit: parseBoundedPositiveInt(
+      env['FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT'],
+      'FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT',
+      DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
+      MAX_SPACE_MEMBERSHIP_PAGE_LIMIT,
+    ),
+    spaceMembershipRequestTimeoutMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS'],
+      'FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS',
+      DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
+    ),
+    spaceSyncPageLimit: parseSpaceSyncPageLimit(
+      env['FEEDGEN_SPACE_SYNC_PAGE_LIMIT'],
+    ),
+    spaceSyncMaxPages: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MAX_PAGES'],
+      'FEEDGEN_SPACE_SYNC_MAX_PAGES',
+      DEFAULT_SPACE_SYNC_MAX_PAGES,
+    ),
+    spaceSyncRequestTimeoutMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS'],
+      'FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS',
+      DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
+    ),
+    spaceSyncMemberBudgetMs: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS'],
+      'FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS',
+      DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+    ),
+    spaceSyncMemberConcurrency: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY'],
+      'FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY',
+      DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
+    ),
+    spaceSyncMaxRecordBytes: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES'],
+      'FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES',
+      DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
+    ),
+    spaceSyncMaxRecordsPerMember: parsePositiveInt(
+      env['FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER'],
+      'FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER',
+      DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
+    ),
+    spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
+      env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
+    ),
   }
 }
 
@@ -133,6 +237,100 @@ function parsePositiveInt(
     throw new Error(`Invalid ${name}: ${value} (expected positive integer)`)
   }
   return parsed
+}
+
+function parseSpaceSyncPageLimit(value: string | undefined): number {
+  return parseBoundedPositiveInt(
+    value,
+    'FEEDGEN_SPACE_SYNC_PAGE_LIMIT',
+    DEFAULT_SPACE_SYNC_PAGE_LIMIT,
+    MAX_SPACE_SYNC_PAGE_LIMIT,
+  )
+}
+
+function parseBoundedPositiveInt(
+  value: string | undefined,
+  name: string,
+  fallback: number,
+  maximum: number,
+): number {
+  const parsed = parsePositiveInt(value, name, fallback)
+  if (parsed > maximum) {
+    throw new Error(`Invalid ${name}: ${parsed} (maximum ${maximum})`)
+  }
+  return parsed
+}
+
+function parseBoolean(
+  value: string | undefined,
+  name: string,
+  fallback: boolean,
+): boolean {
+  if (value === undefined || value === '') return fallback
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true') return true
+  if (normalized === 'false') return false
+  throw new Error(`Invalid ${name}: ${value} (expected 'true' or 'false')`)
+}
+
+/**
+ * Parses `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS` into the exact set of
+ * literal loopback `http://` origins a member host is allowed to use.
+ * `https://` origins are always allowed and never belong in this list, so an
+ * entry that is not a bare loopback `http://` origin fails fast at load.
+ */
+function parseAllowHttpOrigins(value: string | undefined): ReadonlySet<string> {
+  if (value === undefined || value === '') {
+    return DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS
+  }
+  return new Set(parseCommaList(value).map(parseHttpOrigin))
+}
+
+function parseHttpOrigin(entry: string): string {
+  const name = 'FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'
+  let url: URL
+  try {
+    url = new URL(entry)
+  } catch {
+    throw new Error(`Invalid ${name} entry "${entry}": not a valid URL`)
+  }
+  if (url.protocol !== 'http:') {
+    throw new Error(
+      `Invalid ${name} entry "${entry}": expected an http:// origin (https is always allowed)`,
+    )
+  }
+  const isBareOrigin =
+    url.username === '' &&
+    url.password === '' &&
+    url.pathname === '/' &&
+    url.search === '' &&
+    url.hash === ''
+  if (!isBareOrigin) {
+    throw new Error(
+      `Invalid ${name} entry "${entry}": expected a bare origin with no path, query, or userinfo`,
+    )
+  }
+  if (!isLoopbackHttpHostname(url.hostname)) {
+    throw new Error(
+      `Invalid ${name} entry "${entry}": expected a literal loopback origin (localhost, 127.0.0.0/8, or [::1])`,
+    )
+  }
+  return url.origin
+}
+
+function isLoopbackHttpHostname(hostname: string): boolean {
+  const normalized = stripIpv6Brackets(hostname)
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    (isIP(normalized) === 4 && normalized.startsWith('127.'))
+  )
+}
+
+function stripIpv6Brackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname
 }
 
 function parseStorageBackend(value: string | undefined): StorageBackend {

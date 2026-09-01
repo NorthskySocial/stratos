@@ -1,4 +1,11 @@
-import { index, integer, pgTable, primaryKey, text } from 'drizzle-orm/pg-core'
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+} from 'drizzle-orm/pg-core'
 
 export const pgPost = pgTable(
   'post',
@@ -38,3 +45,51 @@ export const pgEnrolledActor = pgTable('enrolled_actor', {
   enrolledAt: text('enrolledAt').notNull(),
   lastSeenAt: text('lastSeenAt').notNull(),
 })
+
+export const pgSpaceSyncCursor = pgTable(
+  'space_sync_cursor',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+    cursor: text('cursor').notNull(),
+    updatedAt: text('updatedAt').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)
+
+export const pgSpaceSyncStage = pgTable(
+  'space_sync_stage',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+    uri: text('uri').notNull(),
+    boundary: text('boundary').notNull(),
+    deleted: boolean('deleted').notNull(),
+    cid: text('cid'),
+    sortAt: text('sortAt'),
+    indexedAt: text('indexedAt'),
+    recordJson: text('recordJson'),
+    blobRefsJson: text('blobRefsJson'),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did, table.uri] })],
+)
+
+export const pgSpaceSyncPendingVerification = pgTable(
+  'space_sync_pending_verification',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)
+
+export const pgSpaceMemberSnapshot = pgTable(
+  'space_member_snapshot',
+  {
+    boundary: text('boundary').notNull(),
+    did: text('did').notNull(),
+    custody: text('custody', { enum: ['pds', 'stratos'] }).notNull(),
+    host: text('host'),
+  },
+  (table) => [primaryKey({ columns: [table.boundary, table.did] })],
+)

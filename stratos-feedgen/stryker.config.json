@@ -12,6 +12,7 @@
     "src/subscription/actor-syncer.ts",
     "src/subscription/service-stream.ts",
     "src/upstream/client.ts",
+    "src/space-sync/**/*.ts",
     "src/space-credential/**/*.ts",
     "src/purge/**/*.ts",
     "src/enrollment/**/*.ts",

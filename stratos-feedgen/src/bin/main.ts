@@ -22,8 +22,19 @@ import {
   Purger,
   reconcileEnrollments,
 } from '../purge/index.js'
+import { SpaceMutationFence } from '../mutation-fence.js'
 import { createFeedgenServer } from '../server.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
+import {
+  CommitVerifier,
+  createCommitKeyResolver,
+  getRepoOpsResponseByteLimit,
+  MembershipTracker,
+  SpaceHostClient,
+  SpaceSyncer,
+  SpaceSyncRunner,
+  SpaceSyncScheduler,
+} from '../space-sync/index.js'
 import {
   ActorPool,
   intersectsBoundaries,
@@ -34,6 +45,9 @@ import {
   describeUpstreamError,
   UpstreamStratosClient,
 } from '../upstream/index.js'
+
+const MAX_WARM_UP_FAILURES = 10
+const MAX_WARM_UP_FIELD_LENGTH = 200
 
 async function main(): Promise<void> {
   const cfg = loadFeedgenConfig()
@@ -55,6 +69,7 @@ async function main(): Promise<void> {
   const keypair = await Secp256k1Keypair.import(cfg.feedgenSigningKey)
   const publicKeyMultibase = keypair.did().slice('did:key:'.length)
   const idResolver = createIdResolver(cfg)
+  const commitKeyResolver = createCommitKeyResolver(idResolver.did)
 
   const upstream = new UpstreamStratosClient({
     serviceUrl: cfg.stratosServiceUrl,
@@ -62,6 +77,7 @@ async function main(): Promise<void> {
     serviceDid: cfg.stratosServiceDid,
     feedgenDid: cfg.feedgenServiceDid,
     keypair,
+    requestTimeoutMs: cfg.spaceMembershipRequestTimeoutMs,
   })
 
   const subscriptionStatus: SubscriptionStatus = {
@@ -80,9 +96,6 @@ async function main(): Promise<void> {
     },
   })
 
-  // Held for the syncer this feedgen becomes in MM-06; not yet on the sync
-  // path. Constructing it here so credential acquisition is exercised at
-  // startup rather than the first time something needs it.
   const spaceCredentialManager = new SpaceCredentialManager({
     client: upstream,
     signingKey: keypair,
@@ -92,6 +105,7 @@ async function main(): Promise<void> {
 
   const store = await createFeedgenStore(cfg)
   shutdownDeps.store = store
+  const spaceMutationFence = new SpaceMutationFence()
 
   const verifier = createFeedRequestVerifier({
     feedgenDid: cfg.feedgenServiceDid,
@@ -123,9 +137,9 @@ async function main(): Promise<void> {
   })
 
   // Best-effort warm-up: a boundary this feedgen has no membership for yet
-  // (or a mint failure) must not block startup or crash the process. MM-06
-  // will make actual sync depend on a held credential; here we only prove
-  // acquisition works. Emit one completion event, not one line per boundary.
+  // (or a mint failure) must not block startup or crash the process. The sync
+  // path still acquires credentials on demand; this only reduces first-pass
+  // mint latency. Emit one completion event, not one line per boundary.
   // Log the acquired count too. A summary with only failures makes a warm-up
   // that never ran look the same as one that worked.
   void Promise.all(
@@ -141,12 +155,20 @@ async function main(): Promise<void> {
     const failed = results.filter(
       (r): r is { boundary: string; reason: string } => 'reason' in r,
     )
-    const summary = `space credential warm-up: attempted=${results.length} acquired=${results.length - failed.length} failed=${failed.length}`
+    const context = {
+      attempted: results.length,
+      acquired: results.length - failed.length,
+      failed: failed.length,
+      failures: failed.slice(0, MAX_WARM_UP_FAILURES).map((failure) => ({
+        boundary: boundWarmUpField(failure.boundary),
+        reason: boundWarmUpField(failure.reason),
+      })),
+      omittedFailures: Math.max(0, failed.length - MAX_WARM_UP_FAILURES),
+    }
     if (failed.length === 0) {
-      console.log(summary)
+      logger.info(context, 'space credential warm-up completed')
     } else {
-      const detail = failed.map((f) => `${f.boundary}: ${f.reason}`).join('; ')
-      console.error(`${summary} (${detail})`)
+      logger.warn(context, 'space credential warm-up completed with failures')
     }
   })
 
@@ -155,6 +177,7 @@ async function main(): Promise<void> {
   let subscription: {
     serviceStream: ServiceStream
     actorPool: ActorPool
+    purger: Purger
   } | null = null
   if (subscribeEnrollments) {
     const starting = startSubscription({
@@ -167,6 +190,7 @@ async function main(): Promise<void> {
       logger,
       metrics,
       shutdownDeps,
+      spaceMutationFence,
     })
     // Shutdown awaits this barrier before it closes the store. The swallow
     // keeps a startup failure out of the panic path; main's catch reports it.
@@ -178,6 +202,101 @@ async function main(): Promise<void> {
   }
   subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
   subscriptionStatus.actorPool = subscription?.actorPool ?? null
+
+  if (cfg.spaceSyncEnabled) {
+    const purger =
+      subscription?.purger ??
+      new Purger({
+        store,
+        mutationFence: spaceMutationFence,
+        enrollmentCache: enrollmentManager,
+        audit: (entry) => logger.info({ ...entry }, 'feedgen purge'),
+      })
+    const membership = new MembershipTracker({
+      client: upstream,
+      credentialManager: spaceCredentialManager,
+      purger,
+      snapshotStore: store,
+      mutationFence: spaceMutationFence,
+      pageLimit: cfg.spaceMembershipPageLimit,
+      log: (event) =>
+        logger.info({ ...event }, 'space membership pass completed'),
+      onError: (boundary, err) =>
+        logger.error({ boundary, err }, 'space membership pass failed'),
+    })
+    const syncer = new SpaceSyncer({
+      store,
+      credentialManager: spaceCredentialManager,
+      mutationFence: spaceMutationFence,
+      createHostClient: (options) =>
+        new SpaceHostClient({
+          ...options,
+          requestTimeoutMs: cfg.spaceSyncRequestTimeoutMs,
+          allowHttpOrigins: cfg.spaceSyncAllowHttpOrigins,
+          maxPageBytes: getRepoOpsResponseByteLimit(
+            cfg.spaceSyncPageLimit,
+            cfg.spaceSyncMaxRecordBytes,
+          ),
+          maxRecordBytes: cfg.spaceSyncMaxRecordBytes,
+        }),
+      maxRecordBytes: cfg.spaceSyncMaxRecordBytes,
+      maxPages: cfg.spaceSyncMaxPages,
+      maxRecordsPerMember: cfg.spaceSyncMaxRecordsPerMember,
+      pageLimit: cfg.spaceSyncPageLimit,
+      onError: (target, err) =>
+        logger.error({ target, err }, 'space member sync failed'),
+    })
+    const runner = new SpaceSyncRunner({
+      syncer,
+      verifier: new CommitVerifier({ didResolver: commitKeyResolver }),
+      purger,
+      mutationFence: spaceMutationFence,
+      onVerifyFailure: (event) =>
+        logger.error({ ...event }, 'space commit verification failed'),
+      onVerifyTransient: (event, err) =>
+        logger.warn({ ...event, err }, 'space commit verification deferred'),
+      onConsecutiveFailure: (event) =>
+        logger.warn(
+          { ...event },
+          'space commit verification failed on consecutive passes',
+        ),
+      onError: (target, err) =>
+        logger.error({ target, err }, 'space sync runner failed'),
+    })
+    const scheduler = new SpaceSyncScheduler({
+      membership,
+      runner,
+      boundaries: configuredBoundaries,
+      intervalMs: cfg.spaceSyncIntervalMs,
+      memberBudgetMs: cfg.spaceSyncMemberBudgetMs,
+      memberConcurrency: cfg.spaceSyncMemberConcurrency,
+      log: (event) => {
+        const context = { ...event }
+        if (
+          event.skippedOversized > 0 ||
+          event.skippedMalformed > 0 ||
+          event.maxPageStops > 0 ||
+          event.capped > 0
+        ) {
+          logger.warn(context, 'space sync pass completed with limits')
+        } else {
+          logger.info(context, 'space sync pass completed')
+        }
+      },
+      onTickSkipped: () =>
+        logger.warn({}, 'space sync tick skipped because a pass is active'),
+      onMemberBudgetExceeded: (target) =>
+        logger.warn({ target }, 'space member exceeded the sync budget'),
+      onError: (err) => logger.error({ err }, 'space sync pass failed'),
+    })
+    shutdownDeps.spaceSyncScheduler = scheduler
+    scheduler.start()
+    logger.info({}, 'space sync scheduler started')
+  }
+}
+
+function boundWarmUpField(value: string): string {
+  return value.slice(0, MAX_WARM_UP_FIELD_LENGTH)
 }
 
 interface StartSubscriptionDeps {
@@ -190,6 +309,7 @@ interface StartSubscriptionDeps {
   logger: Logger
   metrics: FeedgenMetrics
   shutdownDeps: ShutdownDeps
+  spaceMutationFence: SpaceMutationFence
 }
 
 /**
@@ -200,10 +320,11 @@ interface StartSubscriptionDeps {
 async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream: ServiceStream
   actorPool: ActorPool
+  purger: Purger
 }> {
   const { cfg, upstream, store, indexer, enrollmentManager, logger, metrics } =
     deps
-  const { configuredBoundaries } = deps
+  const { configuredBoundaries, spaceMutationFence } = deps
 
   const pool = new ActorPool(
     {
@@ -232,6 +353,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
 
   const purger = new Purger({
     store,
+    mutationFence: spaceMutationFence,
     enrollmentCache: enrollmentManager,
     actorPool: pool,
     audit: (entry) => logger.info({ ...entry }, 'feedgen purge'),
@@ -247,6 +369,8 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       {
         store,
         purger,
+        mutationFence: spaceMutationFence,
+        actorPool: pool,
         client: upstream,
         log: (summary) =>
           logger.info({ ...summary }, 'enrollment reconciliation completed'),
@@ -282,31 +406,40 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     did: string,
     boundaries: string[],
   ): Promise<void> => {
-    const now = new Date().toISOString()
-    const existing = await store.getEnrolledActor(did)
-    if (existing) {
-      const nextSet = new Set(boundaries)
-      const lost = existing.boundaries.filter(
-        (b) => configuredBoundaries.has(b) && !nextSet.has(b),
-      )
-      for (const boundary of lost) {
-        await purger.purgeActorBoundary(did, boundary)
-      }
-    }
-    await store.upsertEnrolledActor({
-      did,
-      boundaries,
-      enrolledAt: existing?.enrolledAt ?? now,
-      lastSeenAt: now,
-    })
-    // The boundary cache may hold a stale set for this viewer. `purgeActorBoundary`
-    // already invalidates when a boundary is lost; invalidate here too so a pure
-    // grow (no lost boundary) still evicts the stale entry.
-    enrollmentManager.invalidate(did)
-    if (intersectsBoundaries(boundaries, configuredBoundaries)) {
-      pool.addActor(did)
-    } else {
-      pool.removeActor(did)
+    spaceMutationFence.beginDidMutation(did)
+    try {
+      await spaceMutationFence.withDidScope(did, async (scope) => {
+        const now = new Date().toISOString()
+        const existing = await store.getEnrolledActor(did)
+        if (existing) {
+          const nextSet = new Set(boundaries)
+          const lost = existing.boundaries.filter(
+            (b) => configuredBoundaries.has(b) && !nextSet.has(b),
+          )
+          if (lost.length > 0) {
+            await pool.removeActorAndDrain(did)
+          }
+          for (const boundary of lost) {
+            await purger.purgeActorBoundaryWithinScope(scope, boundary)
+          }
+        }
+        await store.upsertEnrolledActor({
+          did,
+          boundaries,
+          enrolledAt: existing?.enrolledAt ?? now,
+          lastSeenAt: now,
+        })
+        // The boundary cache may hold a stale set for this viewer. The purge
+        // already invalidates on shrink; invalidate here too for a pure grow.
+        enrollmentManager.invalidate(did)
+        if (intersectsBoundaries(boundaries, configuredBoundaries)) {
+          pool.addActor(did)
+        } else {
+          pool.removeActor(did)
+        }
+      })
+    } finally {
+      spaceMutationFence.endDidMutation(did)
     }
   }
 
@@ -329,7 +462,12 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       },
       onUnenroll: async (did) => {
         // purgeActor invalidates the boundary cache as part of the purge.
-        await purger.purgeActor(did)
+        spaceMutationFence.beginDidMutation(did)
+        try {
+          await purger.purgeActor(did)
+        } finally {
+          spaceMutationFence.endDidMutation(did)
+        }
       },
       // Every open triggers a reconcile: a reconnect can hide a missed
       // unenroll, and the startup reconcile can itself run against a
@@ -348,7 +486,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream.start()
   logger.info({}, 'service enrollment subscription started')
 
-  return { serviceStream, actorPool: pool }
+  return { serviceStream, actorPool: pool, purger }
 }
 
 function parsePort(value: string | undefined): number | undefined {

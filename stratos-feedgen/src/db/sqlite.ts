@@ -5,6 +5,10 @@ import {
   enrolledActor as enrolledActorTbl,
   post as postTbl,
   postBoundary as postBoundaryTbl,
+  spaceMemberSnapshot as spaceMemberSnapshotTbl,
+  spaceSyncPendingVerification as spaceSyncPendingVerificationTbl,
+  spaceSyncStage as spaceSyncStageTbl,
+  spaceSyncCursor as spaceSyncCursorTbl,
   syncCursor as syncCursorTbl,
 } from './schema/sqlite.js'
 import { sqliteSchema } from './schema/index.js'
@@ -14,10 +18,14 @@ import {
   EnrolledActor,
   EnrolledActorUpsert,
   FeedgenStore,
+  GuardedBoundaryDeleteResult,
   IndexedPost,
   ListPostsOpts,
   ListPostsResult,
   PostUpsert,
+  SPACE_MEMBER_INSERT_CHUNK_SIZE,
+  SpaceMemberSnapshot,
+  SpaceSyncStagePage,
 } from './types.js'
 
 export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
@@ -87,6 +95,46 @@ export async function migrateSqliteDb(db: SqliteDb): Promise<void> {
       lastSeenAt TEXT NOT NULL
     )
   `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS space_sync_cursor (
+      spaceUri TEXT NOT NULL,
+      did TEXT NOT NULL,
+      cursor TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      PRIMARY KEY (spaceUri, did)
+    )
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS space_sync_stage (
+      spaceUri TEXT NOT NULL,
+      did TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      boundary TEXT NOT NULL,
+      deleted INTEGER NOT NULL,
+      cid TEXT,
+      sortAt TEXT,
+      indexedAt TEXT,
+      recordJson TEXT,
+      blobRefsJson TEXT,
+      PRIMARY KEY (spaceUri, did, uri)
+    )
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS space_sync_pending_verification (
+      spaceUri TEXT NOT NULL,
+      did TEXT NOT NULL,
+      PRIMARY KEY (spaceUri, did)
+    )
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS space_member_snapshot (
+      boundary TEXT NOT NULL,
+      did TEXT NOT NULL,
+      custody TEXT NOT NULL,
+      host TEXT,
+      PRIMARY KEY (boundary, did)
+    )
+  `)
 }
 
 export class SqliteFeedgenStore implements FeedgenStore {
@@ -143,60 +191,123 @@ export class SqliteFeedgenStore implements FeedgenStore {
     boundary: string,
   ): Promise<number> {
     return this.db.transaction(async (tx) => {
-      // Only posts that actually held `boundary` are candidates for orphan
-      // deletion - a pre-existing boundaryless post for this DID must not be
-      // swept up by dropping an unrelated boundary.
-      const candidates = await tx
-        .select({ uri: postBoundaryTbl.uri })
-        .from(postBoundaryTbl)
-        .innerJoin(postTbl, eq(postTbl.uri, postBoundaryTbl.uri))
-        .where(
-          and(eq(postTbl.did, did), eq(postBoundaryTbl.boundary, boundary)),
-        )
-      if (candidates.length === 0) return 0
-      const uris = candidates.map((c) => c.uri)
-      // Drop this DID's membership in `boundary` from the index.
-      await tx
-        .delete(postBoundaryTbl)
-        .where(
-          and(
-            eq(postBoundaryTbl.boundary, boundary),
-            inArray(postBoundaryTbl.uri, uris),
-          ),
-        )
-      // Delete only those candidates now left with no boundary rows at all.
-      const orphaned = await tx
-        .select({ uri: postTbl.uri })
-        .from(postTbl)
-        .where(
-          and(
-            inArray(postTbl.uri, uris),
-            sql`NOT EXISTS (SELECT 1 FROM post_boundary pb WHERE pb.uri = ${postTbl.uri})`,
-          ),
-        )
-      if (orphaned.length === 0) return 0
-      await tx.delete(postTbl).where(
-        inArray(
-          postTbl.uri,
-          orphaned.map((r) => r.uri),
+      // Delete posts for which the removed boundary is the last one. Testing
+      // for that boundary before deletion keeps pre-existing boundaryless
+      // posts out of scope without materializing every URI into SQL binds.
+      const deleted = await tx.delete(postTbl).where(
+        and(
+          eq(postTbl.did, did),
+          sql`EXISTS (
+            SELECT 1 FROM post_boundary target
+            WHERE target.uri = ${postTbl.uri}
+              AND target.boundary = ${boundary}
+          )`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM post_boundary other
+            WHERE other.uri = ${postTbl.uri}
+              AND other.boundary <> ${boundary}
+          )`,
         ),
       )
-      return orphaned.length
+
+      // Multi-boundary posts survived the first statement; remove only their
+      // lost boundary membership with a set-based author filter.
+      await tx.delete(postBoundaryTbl).where(
+        and(
+          eq(postBoundaryTbl.boundary, boundary),
+          sql`EXISTS (
+            SELECT 1 FROM post authored
+            WHERE authored.uri = ${postBoundaryTbl.uri}
+              AND authored.did = ${did}
+          )`,
+        ),
+      )
+      return deleted.rowsAffected
     })
   }
 
+  async deleteActorBoundaryStateGuarded(
+    spaceUri: string,
+    did: string,
+    boundary: string,
+    shouldCommit: () => boolean,
+  ): Promise<GuardedBoundaryDeleteResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const cursorDelete = await tx
+          .delete(spaceSyncCursorTbl)
+          .where(
+            and(
+              eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+              eq(spaceSyncCursorTbl.did, did),
+            ),
+          )
+        await tx
+          .delete(spaceSyncStageTbl)
+          .where(
+            and(
+              eq(spaceSyncStageTbl.spaceUri, spaceUri),
+              eq(spaceSyncStageTbl.did, did),
+            ),
+          )
+        await tx
+          .delete(spaceSyncPendingVerificationTbl)
+          .where(
+            and(
+              eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+              eq(spaceSyncPendingVerificationTbl.did, did),
+            ),
+          )
+        const postDelete = await tx.delete(postTbl).where(
+          and(
+            eq(postTbl.did, did),
+            sql`EXISTS (
+              SELECT 1 FROM post_boundary target
+              WHERE target.uri = ${postTbl.uri}
+                AND target.boundary = ${boundary}
+            )`,
+            sql`NOT EXISTS (
+              SELECT 1 FROM post_boundary other
+              WHERE other.uri = ${postTbl.uri}
+                AND other.boundary <> ${boundary}
+            )`,
+          ),
+        )
+        await tx.delete(postBoundaryTbl).where(
+          and(
+            eq(postBoundaryTbl.boundary, boundary),
+            sql`EXISTS (
+              SELECT 1 FROM post authored
+              WHERE authored.uri = ${postBoundaryTbl.uri}
+                AND authored.did = ${did}
+            )`,
+          ),
+        )
+        if (!shouldCommit()) throw new GuardedBoundaryDeleteAbortedError()
+        return {
+          committed: true,
+          posts: postDelete.rowsAffected,
+          spaceCursors: cursorDelete.rowsAffected,
+        }
+      })
+    } catch (err) {
+      if (err instanceof GuardedBoundaryDeleteAbortedError) {
+        return { committed: false, posts: 0, spaceCursors: 0 }
+      }
+      throw err
+    }
+  }
+
   async deletePostsByBoundary(boundary: string): Promise<number> {
-    return this.db.transaction(async (tx) => {
-      const scoped = await tx
-        .select({ uri: postBoundaryTbl.uri })
-        .from(postBoundaryTbl)
-        .where(eq(postBoundaryTbl.boundary, boundary))
-      if (scoped.length === 0) return 0
-      const uris = [...new Set(scoped.map((r) => r.uri))]
-      // FK ON DELETE CASCADE removes all boundary rows for these posts.
-      await tx.delete(postTbl).where(inArray(postTbl.uri, uris))
-      return uris.length
-    })
+    // FK ON DELETE CASCADE removes every boundary row for matching posts.
+    // Keep the selection in SQL so a large space never becomes an unbounded
+    // application-side URI list or exceeds the backend's bind limit.
+    const res = await this.db.delete(postTbl).where(sql`EXISTS (
+      SELECT 1 FROM post_boundary scoped
+      WHERE scoped.uri = ${postTbl.uri}
+        AND scoped.boundary = ${boundary}
+    )`)
+    return res.rowsAffected
   }
 
   async deleteCursor(did: string): Promise<number> {
@@ -204,6 +315,299 @@ export class SqliteFeedgenStore implements FeedgenStore {
       .delete(syncCursorTbl)
       .where(eq(syncCursorTbl.did, did))
     return res.rowsAffected
+  }
+
+  async deleteSpaceCursor(spaceUri: string, did: string): Promise<number> {
+    const res = await this.db
+      .delete(spaceSyncCursorTbl)
+      .where(
+        and(
+          eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+          eq(spaceSyncCursorTbl.did, did),
+        ),
+      )
+    return res.rowsAffected
+  }
+
+  async deleteSpaceCursors(did: string): Promise<number> {
+    const res = await this.db
+      .delete(spaceSyncCursorTbl)
+      .where(eq(spaceSyncCursorTbl.did, did))
+    return res.rowsAffected
+  }
+
+  async deleteSpaceCursorsBySpace(spaceUri: string): Promise<number> {
+    const res = await this.db
+      .delete(spaceSyncCursorTbl)
+      .where(eq(spaceSyncCursorTbl.spaceUri, spaceUri))
+    return res.rowsAffected
+  }
+
+  async stageSpaceSyncPage(input: SpaceSyncStagePage): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const mutation of input.mutations) {
+        if (mutation.kind === 'delete') {
+          await tx
+            .insert(spaceSyncStageTbl)
+            .values({
+              spaceUri: input.spaceUri,
+              did: input.did,
+              uri: mutation.uri,
+              boundary: input.boundary,
+              deleted: true,
+              cid: null,
+              sortAt: null,
+              indexedAt: null,
+              recordJson: null,
+              blobRefsJson: null,
+            })
+            .onConflictDoUpdate({
+              target: [
+                spaceSyncStageTbl.spaceUri,
+                spaceSyncStageTbl.did,
+                spaceSyncStageTbl.uri,
+              ],
+              set: {
+                boundary: input.boundary,
+                deleted: true,
+                cid: null,
+                sortAt: null,
+                indexedAt: null,
+                recordJson: null,
+                blobRefsJson: null,
+              },
+            })
+          continue
+        }
+
+        const { post } = mutation
+        await tx
+          .insert(spaceSyncStageTbl)
+          .values({
+            spaceUri: input.spaceUri,
+            did: input.did,
+            uri: post.uri,
+            boundary: input.boundary,
+            deleted: false,
+            cid: post.cid,
+            sortAt: post.sortAt,
+            indexedAt: post.indexedAt,
+            recordJson: JSON.stringify(post.record),
+            blobRefsJson: JSON.stringify(post.blobRefs),
+          })
+          .onConflictDoUpdate({
+            target: [
+              spaceSyncStageTbl.spaceUri,
+              spaceSyncStageTbl.did,
+              spaceSyncStageTbl.uri,
+            ],
+            set: {
+              boundary: input.boundary,
+              deleted: false,
+              cid: post.cid,
+              sortAt: post.sortAt,
+              indexedAt: post.indexedAt,
+              recordJson: JSON.stringify(post.record),
+              blobRefsJson: JSON.stringify(post.blobRefs),
+            },
+          })
+      }
+      if (input.nextCursor !== undefined) {
+        await tx
+          .insert(spaceSyncCursorTbl)
+          .values({
+            spaceUri: input.spaceUri,
+            did: input.did,
+            cursor: input.nextCursor,
+            updatedAt: input.updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: [spaceSyncCursorTbl.spaceUri, spaceSyncCursorTbl.did],
+            set: { cursor: input.nextCursor, updatedAt: input.updatedAt },
+          })
+      }
+      if (input.nextCursor === undefined) {
+        await tx
+          .insert(spaceSyncPendingVerificationTbl)
+          .values({ spaceUri: input.spaceUri, did: input.did })
+          .onConflictDoNothing()
+      }
+    })
+  }
+
+  async promoteSpaceSyncStage(spaceUri: string, did: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const stages = await tx
+        .select()
+        .from(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      for (const stage of stages) {
+        if (stage.deleted) {
+          await tx.delete(postTbl).where(eq(postTbl.uri, stage.uri))
+          continue
+        }
+        const post = stageRowToPost(stage)
+        await tx
+          .insert(postTbl)
+          .values({
+            uri: post.uri,
+            did: post.did,
+            cid: post.cid,
+            sortAt: post.sortAt,
+            indexedAt: post.indexedAt,
+            recordJson: JSON.stringify(post.record),
+            blobRefsJson: JSON.stringify(post.blobRefs),
+          })
+          .onConflictDoUpdate({
+            target: postTbl.uri,
+            set: {
+              did: post.did,
+              cid: post.cid,
+              sortAt: post.sortAt,
+              indexedAt: post.indexedAt,
+              recordJson: JSON.stringify(post.record),
+              blobRefsJson: JSON.stringify(post.blobRefs),
+            },
+          })
+        await tx
+          .delete(postBoundaryTbl)
+          .where(eq(postBoundaryTbl.uri, post.uri))
+        await tx.insert(postBoundaryTbl).values({
+          uri: post.uri,
+          boundary: stage.boundary,
+        })
+      }
+      await tx
+        .delete(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+    })
+  }
+
+  async resetPendingSpaceSyncState(
+    spaceUri: string,
+    did: string,
+  ): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const pending = await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+      if (pending.rowsAffected === 0) return false
+      await tx
+        .delete(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncCursorTbl)
+        .where(
+          and(
+            eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+            eq(spaceSyncCursorTbl.did, did),
+          ),
+        )
+      return true
+    })
+  }
+
+  async resetSpaceSyncState(spaceUri: string, did: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncCursorTbl)
+        .where(
+          and(
+            eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+            eq(spaceSyncCursorTbl.did, did),
+          ),
+        )
+    })
+  }
+
+  async deleteSpaceSyncStage(spaceUri: string, did: string): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(spaceSyncStageTbl)
+        .where(
+          and(
+            eq(spaceSyncStageTbl.spaceUri, spaceUri),
+            eq(spaceSyncStageTbl.did, did),
+          ),
+        )
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(
+          and(
+            eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri),
+            eq(spaceSyncPendingVerificationTbl.did, did),
+          ),
+        )
+      return deleted.rowsAffected
+    })
+  }
+
+  async deleteSpaceSyncStages(did: string): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(spaceSyncStageTbl)
+        .where(eq(spaceSyncStageTbl.did, did))
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(eq(spaceSyncPendingVerificationTbl.did, did))
+      return deleted.rowsAffected
+    })
+  }
+
+  async deleteSpaceSyncStagesBySpace(spaceUri: string): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(spaceSyncStageTbl)
+        .where(eq(spaceSyncStageTbl.spaceUri, spaceUri))
+      await tx
+        .delete(spaceSyncPendingVerificationTbl)
+        .where(eq(spaceSyncPendingVerificationTbl.spaceUri, spaceUri))
+      return deleted.rowsAffected
+    })
   }
 
   async getPost(uri: string): Promise<IndexedPost | null> {
@@ -311,6 +715,84 @@ export class SqliteFeedgenStore implements FeedgenStore {
     return rows.length === 0 ? null : rows[0].seq
   }
 
+  async upsertSpaceCursor(
+    spaceUri: string,
+    did: string,
+    cursor: string,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.db
+      .insert(spaceSyncCursorTbl)
+      .values({ spaceUri, did, cursor, updatedAt })
+      .onConflictDoUpdate({
+        target: [spaceSyncCursorTbl.spaceUri, spaceSyncCursorTbl.did],
+        set: { cursor, updatedAt },
+      })
+  }
+
+  async getSpaceCursor(spaceUri: string, did: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ cursor: spaceSyncCursorTbl.cursor })
+      .from(spaceSyncCursorTbl)
+      .where(
+        and(
+          eq(spaceSyncCursorTbl.spaceUri, spaceUri),
+          eq(spaceSyncCursorTbl.did, did),
+        ),
+      )
+      .limit(1)
+    return rows.length === 0 ? null : rows[0].cursor
+  }
+
+  async listSpaceMembers(boundary: string): Promise<SpaceMemberSnapshot[]> {
+    const rows = await this.db
+      .select({
+        did: spaceMemberSnapshotTbl.did,
+        custody: spaceMemberSnapshotTbl.custody,
+        host: spaceMemberSnapshotTbl.host,
+      })
+      .from(spaceMemberSnapshotTbl)
+      .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
+      .orderBy(asc(spaceMemberSnapshotTbl.did))
+    return rows.map(({ did, custody, host }) => ({
+      did,
+      custody,
+      ...(host === null ? {} : { host }),
+    }))
+  }
+
+  async replaceSpaceMembers(
+    boundary: string,
+    members: SpaceMemberSnapshot[],
+  ): Promise<void> {
+    const uniqueMembers = [
+      ...new Map(members.map((member) => [member.did, member])).values(),
+    ]
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(spaceMemberSnapshotTbl)
+        .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
+      for (
+        let offset = 0;
+        offset < uniqueMembers.length;
+        offset += SPACE_MEMBER_INSERT_CHUNK_SIZE
+      ) {
+        const chunk = uniqueMembers.slice(
+          offset,
+          offset + SPACE_MEMBER_INSERT_CHUNK_SIZE,
+        )
+        await tx.insert(spaceMemberSnapshotTbl).values(
+          chunk.map((member) => ({
+            boundary,
+            did: member.did,
+            custody: member.custody,
+            host: member.host ?? null,
+          })),
+        )
+      }
+    })
+  }
+
   async upsertEnrolledActor(input: EnrolledActorUpsert): Promise<void> {
     const boundariesJson = JSON.stringify(input.boundaries)
     await this.db
@@ -355,6 +837,8 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 }
 
+class GuardedBoundaryDeleteAbortedError extends Error {}
+
 function rowToPost(
   row: {
     uri: string
@@ -376,6 +860,39 @@ function rowToPost(
     record: JSON.parse(row.recordJson) as Record<string, unknown>,
     blobRefs: JSON.parse(row.blobRefsJson) as IndexedPost['blobRefs'],
     boundaries,
+  }
+}
+
+function stageRowToPost(row: {
+  uri: string
+  did: string
+  boundary: string
+  deleted: boolean
+  cid: string | null
+  sortAt: string | null
+  indexedAt: string | null
+  recordJson: string | null
+  blobRefsJson: string | null
+}): PostUpsert {
+  if (
+    row.deleted ||
+    row.cid === null ||
+    row.sortAt === null ||
+    row.indexedAt === null ||
+    row.recordJson === null ||
+    row.blobRefsJson === null
+  ) {
+    throw new Error(`invalid staged post ${row.uri}`)
+  }
+  return {
+    uri: row.uri,
+    did: row.did,
+    cid: row.cid,
+    sortAt: row.sortAt,
+    indexedAt: row.indexedAt,
+    record: JSON.parse(row.recordJson) as Record<string, unknown>,
+    blobRefs: JSON.parse(row.blobRefsJson) as PostUpsert['blobRefs'],
+    boundaries: [row.boundary],
   }
 }
 

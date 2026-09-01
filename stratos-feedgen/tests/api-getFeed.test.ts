@@ -164,18 +164,42 @@ describe('zone.stratos.feedgen.getFeed', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       cursor?: string
-      feed: Array<{ post: { uri: string; author: { did: string } } }>
+      feed: Array<{
+        post: { uri: string; author: { did: string }; boundaries: string[] }
+      }>
     }
     expect(body.cursor).toBe('next')
     expect(body.feed).toHaveLength(2)
     expect(body.feed[0]?.post.uri).toBe(posts[0]?.uri)
     expect(body.feed[0]?.post.author.did).toBe(VIEWER_DID)
+    expect(body.feed[0]?.post.boundaries).toEqual(['engineering'])
     expect(body.feed[1]?.post.author.did).toBe(FAYE_DID)
     expect(ctx.listPosts).toHaveBeenCalledWith({
       boundary: 'engineering',
       limit: 10,
       cursor: undefined,
     })
+  })
+
+  it('returns a permissioned space record URI', async () => {
+    const post = makePost(
+      'at://did:web:feedgen.spiegelcorp.test/space/zone.stratos.space.feed/engineering/did:plc:fayevalentine/zone.stratos.feed.post/1',
+      FAYE_DID,
+      '2025-01-01T00:01:00.000Z',
+    )
+    ctx = await startServer({ posts: [post] })
+
+    const res = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed`,
+      { headers: { authorization: 'Bearer test-token' } },
+    )
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      feed: Array<{ post: { uri: string; author: { did: string } } }>
+    }
+    expect(body.feed[0]?.post.uri).toBe(post.uri)
+    expect(body.feed[0]?.post.author.did).toBe(FAYE_DID)
   })
 
   it('rejects unknown feed ids with UnknownFeed', async () => {

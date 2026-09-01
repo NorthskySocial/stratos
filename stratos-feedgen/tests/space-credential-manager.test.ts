@@ -169,6 +169,41 @@ describe('SpaceCredentialManager', () => {
       expect(held2.credential).toBe('shared-cred')
       expect(client.getSpaceCredential).toHaveBeenCalledTimes(1)
     })
+
+    it('cancels one waiter without cancelling or detaching the shared mint', async () => {
+      let resolveCall!: (value: GetSpaceCredentialResult) => void
+      const pending = new Promise<GetSpaceCredentialResult>((resolve) => {
+        resolveCall = resolve
+      })
+      const { manager, client } = await makeManager({
+        getSpaceCredential: async () => pending,
+      })
+      const controller = new AbortController()
+
+      const cancelled = manager
+        .getCredential(BEBOP_BOUNDARY, controller.signal)
+        .catch((cause: unknown) => cause)
+      await vi.waitFor(() =>
+        expect(client.getSpaceCredential).toHaveBeenCalledOnce(),
+      )
+      controller.abort()
+      await expect(cancelled).resolves.toMatchObject({ name: 'AbortError' })
+
+      const survivingWaiter = manager.getCredential(BEBOP_BOUNDARY)
+      expect(client.getSpaceCredential).toHaveBeenCalledOnce()
+      resolveCall({
+        credential: 'shared-after-cancel',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      })
+
+      await expect(survivingWaiter).resolves.toMatchObject({
+        credential: 'shared-after-cancel',
+      })
+      await expect(
+        manager.getCredential(BEBOP_BOUNDARY),
+      ).resolves.toMatchObject({ credential: 'shared-after-cancel' })
+      expect(client.getSpaceCredential).toHaveBeenCalledOnce()
+    })
   })
 
   describe('refresh before expiry', () => {

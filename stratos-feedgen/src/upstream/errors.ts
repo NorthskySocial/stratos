@@ -1,7 +1,9 @@
+import { StratosError } from '@northskysocial/stratos-core'
+
 /**
  * Error thrown when the Stratos service returns a non-2xx response.
  */
-export class StratosClientError extends Error {
+export class StratosClientError extends StratosError {
   readonly status: number
   readonly body: string
   readonly url: string
@@ -16,11 +18,33 @@ export class StratosClientError extends Error {
   }) {
     super(
       opts.message ?? `Stratos request failed: ${opts.lxm} → ${opts.status}`,
+      'StratosClientError',
     )
     this.name = 'StratosClientError'
     this.status = opts.status
     this.body = opts.body
     this.url = opts.url
     this.lxm = opts.lxm
+  }
+}
+
+export class StratosInvalidResponseError extends StratosError {
+  readonly url: string
+  readonly lxm: string
+
+  constructor(
+    url: string,
+    lxm: string,
+    reason: string,
+    options?: ErrorOptions,
+  ) {
+    super(
+      `Stratos response was invalid: ${reason} (${url})`,
+      'StratosInvalidResponse',
+      options,
+    )
+    this.name = 'StratosInvalidResponseError'
+    this.url = url
+    this.lxm = lxm
   }
 }

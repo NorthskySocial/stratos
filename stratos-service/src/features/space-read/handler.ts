@@ -8,6 +8,7 @@ import {
   resolveRepoHost,
   spaceUriToBoundary,
   StratosValidator,
+  type Custody,
   type StoredEnrollment,
 } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
@@ -63,6 +64,7 @@ interface ListSpaceReposParams {
 
 interface RepoEntry {
   did: string
+  custody: Custody
   rev?: string
   host?: string
   hostSource?: 'authority-override' | 'did-document'
@@ -383,13 +385,20 @@ async function buildRepoEntry(
   member: StoredEnrollment,
   revFailures: RevLookupFailure[],
 ): Promise<RepoEntry> {
-  const hostDeps = createRepoHostResolverDeps(ctx.idResolver, member.repoHost)
+  const custody = member.custody ?? 'stratos'
   const [resolvedHost, rev] = await Promise.all([
-    resolveRepoHost(space, member.did, hostDeps),
+    custody === 'pds'
+      ? resolveRepoHost(
+          space,
+          member.did,
+          createRepoHostResolverDeps(ctx.idResolver, member.repoHost),
+        )
+      : undefined,
     getStratosRev(ctx, member, revFailures),
   ])
   return {
     did: member.did,
+    custody,
     ...(rev ? { rev } : {}),
     ...(resolvedHost
       ? { host: resolvedHost.host, hostSource: resolvedHost.source }

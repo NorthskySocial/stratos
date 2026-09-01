@@ -21,6 +21,7 @@ import {
   type SequenceTrace,
 } from './types.js'
 import { ensureActorStoreExists } from './util.js'
+import { assertStratosCustody } from './custody.js'
 
 export type BatchAction = 'create' | 'update' | 'delete'
 
@@ -375,6 +376,10 @@ export async function applyWritesBatch(
     queuedAtMs: Date.now(),
   }
   ctx.writeRateLimiter.assertWriteAllowed(callerDid, ops.length)
+
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  assertStratosCustody(enrollment)
+
   const precomputed: PrecomputedBatchOp[] = await calculatePrecomputed(
     ctx,
     callerDid,

@@ -1,6 +1,8 @@
 import type { EnrolledActor, FeedgenStore } from '../db/index.js'
+import type { DidMutationScope, SpaceMutationFence } from '../mutation-fence.js'
+import type { ActorPool } from '../subscription/index.js'
 import type { ResolveEnrollmentsResult } from '../upstream/index.js'
-import type { Purger } from './purger.js'
+import type { PurgeCounts, Purger } from './purger.js'
 
 export interface ReconcileEnrollmentsClient {
   resolveEnrollments: (did: string) => Promise<ResolveEnrollmentsResult>
@@ -9,6 +11,8 @@ export interface ReconcileEnrollmentsClient {
 export interface ReconcileDeps {
   store: FeedgenStore
   purger: Purger
+  mutationFence?: Pick<SpaceMutationFence, 'hasPendingDidMutation'>
+  actorPool?: Pick<ActorPool, 'addActor' | 'removeActorAndDrain'>
   client: ReconcileEnrollmentsClient
   /** Structured summary sink. Defaults to `console.log(JSON.stringify(...))`. */
   log?: (summary: ReconcileSummary) => void
@@ -95,7 +99,10 @@ export async function reconcileEnrollments(
     // but apply the purges (writes) sequentially: the store may be a single
     // SQLite connection that cannot run overlapping write transactions.
     type Resolved =
-      | { actor: EnrolledActor; fresh: ResolveEnrollmentsResult }
+      | {
+          actor: EnrolledActor
+          fresh: ResolveEnrollmentsResult
+        }
       | { actor: EnrolledActor; error: Error }
     const resolved = await Promise.all(
       batch.map(async (actor): Promise<Resolved> => {
@@ -139,52 +146,164 @@ export async function reconcileEnrollments(
 async function reconcileActor(
   deps: ReconcileDeps,
   configuredBoundaries: Set<string>,
-  entry: { actor: EnrolledActor; fresh: ResolveEnrollmentsResult },
+  entry: {
+    actor: EnrolledActor
+    fresh: ResolveEnrollmentsResult
+  },
   summary: ReconcileSummary,
   runStartedAt: string,
 ): Promise<void> {
   const { actor, fresh } = entry
+  await deps.purger.withDidScope(actor.did, (scope) =>
+    reconcileActorWithinScope(
+      deps,
+      configuredBoundaries,
+      actor,
+      fresh,
+      summary,
+      runStartedAt,
+      scope,
+    ),
+  )
+}
 
+async function reconcileActorWithinScope(
+  deps: ReconcileDeps,
+  configuredBoundaries: Set<string>,
+  actor: EnrolledActor,
+  fresh: ResolveEnrollmentsResult,
+  summary: ReconcileSummary,
+  runStartedAt: string,
+  scope: DidMutationScope,
+): Promise<void> {
+  if (didMutationPending(deps, actor.did)) return
   if (!fresh.enrolled) {
-    if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
-    const counts = await deps.purger.purgeActor(actor.did, 'reconcile-unenroll')
-    summary.unenrolled++
-    summary.postsPurged += counts.posts
+    await reconcileUnenrolledActor(deps, actor, summary, runStartedAt, scope)
     return
   }
 
-  // Still enrolled: purge any configured boundary the actor held before but
-  // no longer does, then refresh the persisted snapshot.
+  await reconcileEnrolledActor(
+    deps,
+    configuredBoundaries,
+    actor,
+    fresh,
+    summary,
+    runStartedAt,
+    scope,
+  )
+}
+
+async function reconcileUnenrolledActor(
+  deps: ReconcileDeps,
+  actor: EnrolledActor,
+  summary: ReconcileSummary,
+  runStartedAt: string,
+  scope: DidMutationScope,
+): Promise<void> {
+  if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
+  if (didMutationPending(deps, actor.did)) return
+  let counts: PurgeCounts
+  if (deps.actorPool) {
+    await deps.actorPool.removeActorAndDrain(actor.did)
+    if (didMutationPending(deps, actor.did)) return
+    counts = await deps.purger.purgeReconciledActorAfterDrainWithinScope(scope)
+  } else {
+    counts = await deps.purger.purgeReconciledActorWithinScope(scope)
+  }
+  summary.unenrolled++
+  summary.postsPurged += counts.posts
+}
+
+async function reconcileEnrolledActor(
+  deps: ReconcileDeps,
+  configuredBoundaries: Set<string>,
+  actor: EnrolledActor,
+  fresh: ResolveEnrollmentsResult,
+  summary: ReconcileSummary,
+  runStartedAt: string,
+  scope: DidMutationScope,
+): Promise<void> {
+  const lost = lostConfiguredBoundaries(actor, fresh, configuredBoundaries)
+  const canContinue = await purgeLostBoundaries(
+    deps,
+    actor,
+    lost,
+    summary,
+    runStartedAt,
+    scope,
+  )
+  if (!canContinue || !enrollmentChanged(actor, fresh, lost)) return
+  if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
+  if (didMutationPending(deps, actor.did)) return
+  await deps.store.upsertEnrolledActor({
+    did: actor.did,
+    boundaries: fresh.boundaries,
+    enrolledAt: actor.enrolledAt,
+    lastSeenAt: new Date().toISOString(),
+  })
+  if (didMutationPending(deps, actor.did)) return
+  if (fresh.boundaries.some((boundary) => configuredBoundaries.has(boundary))) {
+    deps.actorPool?.addActor(actor.did)
+  }
+}
+
+function lostConfiguredBoundaries(
+  actor: EnrolledActor,
+  fresh: ResolveEnrollmentsResult,
+  configuredBoundaries: ReadonlySet<string>,
+): string[] {
   const freshSet = new Set(fresh.boundaries)
-  const lost = actor.boundaries.filter(
+  return actor.boundaries.filter(
     (b) => configuredBoundaries.has(b) && !freshSet.has(b),
   )
-  if (lost.length > 0) {
-    if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) return
-    summary.shrunk++
-    for (const boundary of lost) {
-      const counts = await deps.purger.purgeActorBoundary(
-        actor.did,
-        boundary,
-        'reconcile-boundary-shrink',
-      )
-      summary.postsPurged += counts.posts
-    }
-  }
+}
 
+function enrollmentChanged(
+  actor: EnrolledActor,
+  fresh: ResolveEnrollmentsResult,
+  lost: readonly string[],
+): boolean {
   const persistedSet = new Set(actor.boundaries)
-  const changed =
+  return (
     lost.length > 0 ||
     fresh.boundaries.length !== actor.boundaries.length ||
     fresh.boundaries.some((b) => !persistedSet.has(b))
-  if (changed) {
-    await deps.store.upsertEnrolledActor({
-      did: actor.did,
-      boundaries: fresh.boundaries,
-      enrolledAt: actor.enrolledAt,
-      lastSeenAt: new Date().toISOString(),
-    })
+  )
+}
+
+async function purgeLostBoundaries(
+  deps: ReconcileDeps,
+  actor: EnrolledActor,
+  lost: readonly string[],
+  summary: ReconcileSummary,
+  runStartedAt: string,
+  scope: DidMutationScope,
+): Promise<boolean> {
+  if (lost.length === 0) return true
+  if (await touchedSinceRunStart(deps.store, actor.did, runStartedAt)) {
+    return false
   }
+  if (didMutationPending(deps, actor.did)) return false
+  await deps.actorPool?.removeActorAndDrain(actor.did)
+  if (didMutationPending(deps, actor.did)) return false
+  for (const boundary of lost) {
+    if (didMutationPending(deps, actor.did)) return false
+    const result =
+      await deps.purger.purgeReconciledActorBoundaryGuardedWithinScope(
+        scope,
+        boundary,
+        () => !didMutationPending(deps, actor.did),
+      )
+    if (!result.committed) return false
+    summary.postsPurged += result.counts.posts
+    if (didMutationPending(deps, actor.did)) return false
+  }
+  summary.shrunk++
+  return true
+}
+
+function didMutationPending(deps: ReconcileDeps, did: string): boolean {
+  return deps.mutationFence?.hasPendingDidMutation(did) ?? false
 }
 
 /**
