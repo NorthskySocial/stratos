@@ -21,6 +21,7 @@ import {
   ListPostsOpts,
   ListPostsResult,
   PostUpsert,
+  SPACE_MEMBER_INSERT_CHUNK_SIZE,
   SpaceMemberSnapshot,
 } from './types.js'
 
@@ -474,9 +475,17 @@ export class PgFeedgenStore implements FeedgenStore {
       await tx
         .delete(spaceMemberSnapshotTbl)
         .where(eq(spaceMemberSnapshotTbl.boundary, boundary))
-      if (uniqueMembers.length > 0) {
+      for (
+        let offset = 0;
+        offset < uniqueMembers.length;
+        offset += SPACE_MEMBER_INSERT_CHUNK_SIZE
+      ) {
+        const chunk = uniqueMembers.slice(
+          offset,
+          offset + SPACE_MEMBER_INSERT_CHUNK_SIZE,
+        )
         await tx.insert(spaceMemberSnapshotTbl).values(
-          uniqueMembers.map((member) => ({
+          chunk.map((member) => ({
             boundary,
             did: member.did,
             custody: member.custody,

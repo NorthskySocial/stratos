@@ -1,3 +1,8 @@
+import type { Custody } from '@northskysocial/stratos-core'
+
+/** Four values are bound per row; 200 stays below conservative SQLite caps. */
+export const SPACE_MEMBER_INSERT_CHUNK_SIZE = 200
+
 export interface BlobRef {
   cid: string
   mimeType?: string
@@ -145,4 +150,3 @@ export function decodeCursor(
   if (!sortAt || !uri) return null
   return { sortAt, uri }
 }
-import type { Custody } from '@northskysocial/stratos-core'
