@@ -1,4 +1,11 @@
-import { index, integer, pgTable, primaryKey, text } from 'drizzle-orm/pg-core'
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+} from 'drizzle-orm/pg-core'
 
 export const pgPost = pgTable(
   'post',
@@ -48,6 +55,23 @@ export const pgSpaceSyncCursor = pgTable(
     updatedAt: text('updatedAt').notNull(),
   },
   (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
+)
+
+export const pgSpaceSyncStage = pgTable(
+  'space_sync_stage',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+    uri: text('uri').notNull(),
+    boundary: text('boundary').notNull(),
+    deleted: boolean('deleted').notNull(),
+    cid: text('cid'),
+    sortAt: text('sortAt'),
+    indexedAt: text('indexedAt'),
+    recordJson: text('recordJson'),
+    blobRefsJson: text('blobRefsJson'),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did, table.uri] })],
 )
 
 export const pgSpaceMemberSnapshot = pgTable(

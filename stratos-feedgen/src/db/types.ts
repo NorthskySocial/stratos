@@ -30,6 +30,30 @@ export interface PostUpsert {
   boundaries: string[]
 }
 
+/** One unverified operation from a PDS-hosted space sync page. */
+export type SpaceSyncStageMutation =
+  | {
+      kind: 'upsert'
+      post: PostUpsert
+    }
+  | {
+      kind: 'delete'
+      uri: string
+    }
+
+/**
+ * A page is durable before its cursor advances, but it remains invisible until
+ * the host's terminal commit verifies.
+ */
+export interface SpaceSyncStagePage {
+  spaceUri: string
+  did: string
+  boundary: string
+  mutations: readonly SpaceSyncStageMutation[]
+  nextCursor?: string
+  updatedAt: string
+}
+
 export interface EnrolledActor {
   did: string
   boundaries: string[]
@@ -104,6 +128,15 @@ export interface FeedgenStore {
   deleteSpaceCursors: (did: string) => Promise<number>
   /** Delete every member cursor held for `spaceUri`. Returns rows removed. */
   deleteSpaceCursorsBySpace: (spaceUri: string) => Promise<number>
+
+  // unverified PDS-hosted space sync data
+  stageSpaceSyncPage: (input: SpaceSyncStagePage) => Promise<void>
+  promoteSpaceSyncStage: (spaceUri: string, did: string) => Promise<void>
+  /** Drop both unverified page state and its resumable cursor. */
+  resetSpaceSyncState: (spaceUri: string, did: string) => Promise<void>
+  deleteSpaceSyncStage: (spaceUri: string, did: string) => Promise<number>
+  deleteSpaceSyncStages: (did: string) => Promise<number>
+  deleteSpaceSyncStagesBySpace: (spaceUri: string) => Promise<number>
 
   // sync cursor
   upsertCursor: (did: string, seq: number, updatedAt: string) => Promise<void>

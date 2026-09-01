@@ -56,6 +56,23 @@ export const spaceSyncCursor = sqliteTable(
   (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
 )
 
+export const spaceSyncStage = sqliteTable(
+  'space_sync_stage',
+  {
+    spaceUri: text('spaceUri').notNull(),
+    did: text('did').notNull(),
+    uri: text('uri').notNull(),
+    boundary: text('boundary').notNull(),
+    deleted: integer('deleted', { mode: 'boolean' }).notNull(),
+    cid: text('cid'),
+    sortAt: text('sortAt'),
+    indexedAt: text('indexedAt'),
+    recordJson: text('recordJson'),
+    blobRefsJson: text('blobRefsJson'),
+  },
+  (table) => [primaryKey({ columns: [table.spaceUri, table.did, table.uri] })],
+)
+
 export const spaceMemberSnapshot = sqliteTable(
   'space_member_snapshot',
   {

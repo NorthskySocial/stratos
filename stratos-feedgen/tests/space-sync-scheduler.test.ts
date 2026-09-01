@@ -575,7 +575,7 @@ describe('SpaceSyncScheduler', () => {
     await scheduler.stop()
   })
 
-  it('leaves no trace of a member sync past the point its budget aborted it', async () => {
+  it('keeps a budget-aborted page durable but unserved', async () => {
     // Real timers: this test drives a real SpaceSyncer/SpaceSyncRunner pair
     // against a real SQLite store, and libsql's async I/O is not driven by
     // vitest's fake-timer microtask flushing.
@@ -596,10 +596,9 @@ describe('SpaceSyncScheduler', () => {
       const jet = makeTarget({ did: JET_DID, lease: leases.get(JET_DID) })
       const membership = fakeMembership([successOutcome([spike, jet])])
 
-      // Jet's host answers page one (one post, non-terminal cursor) so
-      // temporary progress lands in the store, then hangs on page two like an
-      // unreachable fetch would — it only settles once the caller's own
-      // signal aborts it, same as a real fetch under `AbortSignal.any`.
+      // Jet's host answers page one (one post, non-terminal cursor), then
+      // hangs on page two like an unreachable fetch would. Its unverified
+      // first-page delta must remain durable but never become feed-visible.
       const jetHostClient = {
         listRepoOps: vi.fn(
           async (opts: { cursor?: string; signal?: AbortSignal }) => {
@@ -688,11 +687,12 @@ describe('SpaceSyncScheduler', () => {
       await scheduler.stop()
 
       expect(onMemberBudgetExceeded).toHaveBeenCalledExactlyOnceWith(jet)
-      // Page one's write landed before the abort.
+      // Page one staged atomically with its cursor before the abort, but its
+      // unverified delta is not feed-visible.
       expect(
         await store.getPost(`${SPACE_URI}/${JET_DID}/${POST_COLLECTION}/r1`),
-      ).not.toBeNull()
-      expect(await store.getSpaceCursor(SPACE_URI, JET_DID)).toBeNull()
+      ).toBeNull()
+      expect(await store.getSpaceCursor(SPACE_URI, JET_DID)).toBe('page-2')
     } finally {
       await store.close()
       await rm(dir, { recursive: true, force: true })

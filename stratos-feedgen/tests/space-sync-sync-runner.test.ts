@@ -63,6 +63,9 @@ function fakeSyncer() {
     syncTarget: vi.fn<(target: PollTarget) => Promise<SpaceSyncResult>>(
       async () => makeSyncSuccess(),
     ),
+    promoteVerifiedStage: vi.fn(
+      async (_target: PollTarget): Promise<void> => {},
+    ),
   }
 }
 
@@ -150,6 +153,7 @@ describe('SpaceSyncRunner', () => {
       expect(verifier.verify).toHaveBeenCalledWith(SPACE_URI, SPIKE_DID, {
         sig: 'abc',
       })
+      expect(syncer.promoteVerifiedStage).toHaveBeenCalledWith(makeTarget())
       expect(purger.purgeInvalidSpaceCommit).not.toHaveBeenCalled()
     })
   })

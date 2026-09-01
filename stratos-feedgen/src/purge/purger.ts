@@ -186,6 +186,7 @@ export class Purger {
     counts = zeroCounts(),
   ): Promise<PurgeCounts> {
     counts.boundaryCache ||= this.invalidate(did)
+    await this.store.deleteSpaceSyncStages(did)
     counts.cursors = await this.store.deleteCursor(did)
     counts.spaceCursors = await this.store.deleteSpaceCursors(did)
     counts.posts = await this.store.deletePostsByDid(did)
@@ -333,6 +334,7 @@ export class Purger {
     const counts = zeroCounts()
     counts.boundaryCache = this.invalidate(did)
     if (spaceUri) {
+      await this.store.deleteSpaceSyncStage(spaceUri, did)
       counts.spaceCursors = await this.store.deleteSpaceCursor(spaceUri, did)
     }
     counts.posts = await this.store.deletePostsByDidBoundary(did, boundary)
@@ -350,6 +352,7 @@ export class Purger {
     const spaceUri = spaceUriForBoundary(boundary)
     return this.mutationFence.revokeBoundaryForAll(boundary, async () => {
       const counts = zeroCounts()
+      await this.store.deleteSpaceSyncStagesBySpace(spaceUri)
       counts.spaceCursors = await this.store.deleteSpaceCursorsBySpace(spaceUri)
       counts.posts = await this.store.deletePostsByBoundary(boundary)
       this.audit({ trigger: 'boundary-deleted', boundary, counts })

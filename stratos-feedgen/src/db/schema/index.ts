@@ -6,6 +6,7 @@ import {
   post,
   postBoundary,
   spaceMemberSnapshot,
+  spaceSyncStage,
   spaceSyncCursor,
   syncCursor,
 } from './sqlite.js'
@@ -14,6 +15,7 @@ import {
   pgPost,
   pgPostBoundary,
   pgSpaceMemberSnapshot,
+  pgSpaceSyncStage,
   pgSpaceSyncCursor,
   pgSyncCursor,
 } from './postgres.js'
@@ -24,6 +26,7 @@ export const sqliteSchema = {
   syncCursor,
   enrolledActor,
   spaceSyncCursor,
+  spaceSyncStage,
   spaceMemberSnapshot,
 }
 
@@ -33,5 +36,6 @@ export const pgSchema = {
   syncCursor: pgSyncCursor,
   enrolledActor: pgEnrolledActor,
   spaceSyncCursor: pgSpaceSyncCursor,
+  spaceSyncStage: pgSpaceSyncStage,
   spaceMemberSnapshot: pgSpaceMemberSnapshot,
 }

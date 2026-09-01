@@ -209,6 +209,35 @@ describe('Purger.purgeActor (unenroll)', () => {
     expect(audits[0]!.counts.spaceCursors).toBe(1)
   })
 
+  it('removes unverified space-sync deltas held by the actor', async () => {
+    const spaceUri = spaceUriFor(CREW_BOUNDARY)
+    const spikePost = post(SPIKE, 'staged', [CREW_BOUNDARY])
+    const fayePost = post(FAYE, 'staged', [CREW_BOUNDARY])
+    await store.stageSpaceSyncPage({
+      spaceUri,
+      did: SPIKE,
+      boundary: CREW_BOUNDARY,
+      mutations: [{ kind: 'upsert', post: spikePost }],
+      nextCursor: 'spike-cursor',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    })
+    await store.stageSpaceSyncPage({
+      spaceUri,
+      did: FAYE,
+      boundary: CREW_BOUNDARY,
+      mutations: [{ kind: 'upsert', post: fayePost }],
+      nextCursor: 'faye-cursor',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    })
+
+    await new Purger({ store, audit: () => {} }).purgeActor(SPIKE)
+    await store.promoteSpaceSyncStage(spaceUri, SPIKE)
+    await store.promoteSpaceSyncStage(spaceUri, FAYE)
+
+    expect(await store.getPost(spikePost.uri)).toBeNull()
+    expect(await store.getPost(fayePost.uri)).not.toBeNull()
+  })
+
   it.each([
     {
       operation: 'reconcile',
@@ -313,7 +342,7 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     ).toBe(0)
   })
 
-  it('drops the space-sync cursor after an invalid space commit', async () => {
+  it('drops the cursor and staged delta after an invalid space commit', async () => {
     const spaceUri = spaceUriFor(CREW_BOUNDARY)
     await store.upsertSpaceCursor(
       spaceUri,
@@ -321,6 +350,15 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
       'rev-1',
       '2024-01-01T00:00:00.000Z',
     )
+    const stagedPost = post(SPIKE, 'staged', [CREW_BOUNDARY])
+    await store.stageSpaceSyncPage({
+      spaceUri,
+      did: SPIKE,
+      boundary: CREW_BOUNDARY,
+      mutations: [{ kind: 'upsert', post: stagedPost }],
+      nextCursor: 'rev-2',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    })
     const audits: PurgeAudit[] = []
     const mutationFence = new SpaceMutationFence()
     const purger = new Purger({
@@ -345,6 +383,8 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     const counts = await purger.purgeInvalidSpaceCommit(target)
 
     expect(await store.getSpaceCursor(spaceUri, SPIKE)).toBeNull()
+    await store.promoteSpaceSyncStage(spaceUri, SPIKE)
+    expect(await store.getPost(stagedPost.uri)).toBeNull()
     expect(counts.spaceCursors).toBe(1)
     expect(audits).toEqual([
       {
@@ -548,5 +588,34 @@ describe('Purger.purgeBoundary (space deleted service-wide)', () => {
     const purger = new Purger({ store, audit: () => {} })
     expect((await purger.purgeBoundary(SPACE_BOUNDARY)).posts).toBe(1)
     expect((await purger.purgeBoundary(SPACE_BOUNDARY)).posts).toBe(0)
+  })
+
+  it('removes every staged delta for the deleted space', async () => {
+    const spaceUri = spaceUriFor(SPACE_BOUNDARY)
+    const spikePost = post(SPIKE, 'staged', [SPACE_BOUNDARY])
+    const fayePost = post(FAYE, 'staged', [SPACE_BOUNDARY])
+    await store.stageSpaceSyncPage({
+      spaceUri,
+      did: SPIKE,
+      boundary: SPACE_BOUNDARY,
+      mutations: [{ kind: 'upsert', post: spikePost }],
+      nextCursor: 'spike-cursor',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    })
+    await store.stageSpaceSyncPage({
+      spaceUri,
+      did: FAYE,
+      boundary: SPACE_BOUNDARY,
+      mutations: [{ kind: 'upsert', post: fayePost }],
+      nextCursor: 'faye-cursor',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    })
+
+    await new Purger({ store, audit: () => {} }).purgeBoundary(SPACE_BOUNDARY)
+    await store.promoteSpaceSyncStage(spaceUri, SPIKE)
+    await store.promoteSpaceSyncStage(spaceUri, FAYE)
+
+    expect(await store.getPost(spikePost.uri)).toBeNull()
+    expect(await store.getPost(fayePost.uri)).toBeNull()
   })
 })
