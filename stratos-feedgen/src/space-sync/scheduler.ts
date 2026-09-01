@@ -252,7 +252,9 @@ export class SpaceSyncScheduler {
       },
     )
     await Promise.all(workers)
-    if (isAbortRequested(signal)) return
+    // The signal can abort while member promises are settling.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (signal.aborted) return
 
     try {
       this.log({
@@ -342,7 +344,3 @@ export class SpaceSyncScheduler {
 }
 
 function noop(): void {}
-
-function isAbortRequested(signal: AbortSignal): boolean {
-  return signal.aborted
-}
