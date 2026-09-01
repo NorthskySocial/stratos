@@ -248,14 +248,14 @@ describe('feed extended logic', () => {
             feed: [
               {
                 post: {
-                  uri: 'at://did:web:service.test/space/zone.stratos.space.feed/engineering/did:plc:motoko/zone.stratos.feed.post/1',
+                  uri: 'at://did:web:section-9.test/space/zone.stratos.space.feed/section-9/did:plc:motoko/zone.stratos.feed.post/1',
                   cid: 'cid1',
                   record: {
                     text: 'Motoko posts from the PDS space.',
                     createdAt: '2024-01-01T12:00:00Z',
                   },
                   author: { did: 'did:plc:motoko' },
-                  boundaries: ['engineering'],
+                  boundaries: ['section-9'],
                 },
               },
             ],
@@ -265,17 +265,17 @@ describe('feed extended logic', () => {
 
       const result = await fetchFeedgenPosts(
         mockSession,
-        'did:web:feedgen.test',
-        'engineering',
+        'did:web:batou.test',
+        'section-9',
       )
 
       expect(result.posts).toHaveLength(1)
-      expect(result.posts[0]?.boundaries).toEqual(['engineering'])
+      expect(result.posts[0]?.boundaries).toEqual(['section-9'])
       expect(mockSession.fetchHandler).toHaveBeenCalledWith(
         expect.stringContaining('/xrpc/zone.stratos.feedgen.getFeed'),
         expect.objectContaining({
           headers: {
-            'atproto-proxy': 'did:web:feedgen.test#stratos_feedgen',
+            'atproto-proxy': 'did:web:batou.test#stratos_feedgen',
           },
           method: 'GET',
         }),
