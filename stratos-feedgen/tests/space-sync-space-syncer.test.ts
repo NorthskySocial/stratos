@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { PostUpsert } from '../src/db/index.js'
+import type { PostUpsert, SpaceSyncStagePage } from '../src/db/index.js'
 import {
   MalformedCursorError,
   RepoNotFoundError,
@@ -81,22 +81,50 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 function fakeStore() {
+  const upsertPost = vi.fn(async (_input: PostUpsert): Promise<void> => {})
+  const deletePost = vi.fn(async (_uri: string): Promise<void> => {})
+  const getSpaceCursor = vi.fn(
+    async (_spaceUri: string, _did: string): Promise<string | null> => null,
+  )
+  const upsertSpaceCursor = vi.fn(
+    async (
+      _spaceUri: string,
+      _did: string,
+      _cursor: string,
+      _updatedAt: string,
+    ): Promise<void> => {},
+  )
+  const deleteSpaceCursor = vi.fn(
+    async (_spaceUri: string, _did: string): Promise<number> => 1,
+  )
   return {
-    upsertPost: vi.fn(async (_input: PostUpsert): Promise<void> => {}),
-    deletePost: vi.fn(async (_uri: string): Promise<void> => {}),
-    getSpaceCursor: vi.fn(
-      async (_spaceUri: string, _did: string): Promise<string | null> => null,
-    ),
-    upsertSpaceCursor: vi.fn(
-      async (
-        _spaceUri: string,
-        _did: string,
-        _cursor: string,
-        _updatedAt: string,
-      ): Promise<void> => {},
-    ),
-    deleteSpaceCursor: vi.fn(
-      async (_spaceUri: string, _did: string): Promise<number> => 1,
+    upsertPost,
+    deletePost,
+    getSpaceCursor,
+    upsertSpaceCursor,
+    deleteSpaceCursor,
+    stageSpaceSyncPage: vi.fn(async (input: SpaceSyncStagePage) => {
+      for (const mutation of input.mutations) {
+        if (mutation.kind === 'delete') {
+          await deletePost(mutation.uri)
+        } else {
+          await upsertPost(mutation.post)
+        }
+      }
+      if (input.nextCursor !== undefined) {
+        await upsertSpaceCursor(
+          input.spaceUri,
+          input.did,
+          input.nextCursor,
+          input.updatedAt,
+        )
+      }
+    }),
+    resetSpaceSyncState: vi.fn(async (spaceUri: string, did: string) => {
+      await deleteSpaceCursor(spaceUri, did)
+    }),
+    promoteSpaceSyncStage: vi.fn(
+      async (_spaceUri: string, _did: string): Promise<void> => {},
     ),
   }
 }
@@ -132,7 +160,6 @@ function passThroughMutationFence(): SpaceSyncerDeps['mutationFence'] {
       signal?.throwIfAborted()
       return mutation()
     },
-    compensate: async (_target, mutation) => mutation(),
   }
 }
 
@@ -205,6 +232,27 @@ describe('SpaceSyncer', () => {
         record: makePostRecord(),
         blobRefs: [],
         boundaries: [BEBOP_BOUNDARY],
+      })
+      expect(store.stageSpaceSyncPage).toHaveBeenCalledWith({
+        spaceUri: SPACE_URI,
+        did: SPIKE_DID,
+        boundary: BEBOP_BOUNDARY,
+        mutations: [
+          {
+            kind: 'upsert',
+            post: {
+              uri: `${SPACE_URI}/${SPIKE_DID}/${POST_COLLECTION}/3jxyz`,
+              did: SPIKE_DID,
+              cid: CID_ONE,
+              sortAt: FIXED_NOW,
+              indexedAt: FIXED_NOW,
+              record: makePostRecord(),
+              blobRefs: [],
+              boundaries: [BEBOP_BOUNDARY],
+            },
+          },
+        ],
+        updatedAt: FIXED_NOW,
       })
       expect(client.getRecord).not.toHaveBeenCalled()
     })
@@ -1053,7 +1101,7 @@ describe('SpaceSyncer', () => {
   })
 
   describe('cancellation', () => {
-    it('restores the starting cursor when cancellation lands as a cursor write completes', async () => {
+    it('keeps the staged page cursor when cancellation lands as its write completes', async () => {
       const store = fakeStore()
       let storedCursor: string | null = 'resume-cursor'
       const cursorWriteStarted = deferred()
@@ -1086,16 +1134,16 @@ describe('SpaceSyncer', () => {
 
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.reason).toBe('aborted')
-      expect(storedCursor).toBe('resume-cursor')
+      expect(storedCursor).toBe('page-2')
       expect(store.upsertSpaceCursor).toHaveBeenLastCalledWith(
         SPACE_URI,
         SPIKE_DID,
-        'resume-cursor',
+        'page-2',
         FIXED_NOW,
       )
     })
 
-    it('restores an absent starting cursor when the signal aborts mid-sync', async () => {
+    it('keeps an absent starting cursor after staging progress before cancellation', async () => {
       const { syncer, store, client } = buildSyncer()
       const controller = new AbortController()
       client.listRepoOps
@@ -1123,13 +1171,10 @@ describe('SpaceSyncer', () => {
         'page-2',
         FIXED_NOW,
       )
-      expect(store.deleteSpaceCursor).toHaveBeenCalledExactlyOnceWith(
-        SPACE_URI,
-        SPIKE_DID,
-      )
+      expect(store.deleteSpaceCursor).not.toHaveBeenCalled()
     })
 
-    it('restores an existing starting cursor when the signal aborts mid-sync', async () => {
+    it('keeps an existing cursor advanced by staged progress after cancellation', async () => {
       const store = fakeStore()
       store.getSpaceCursor.mockResolvedValue('resume-cursor')
       const { syncer, client } = buildSyncer({ store })
@@ -1152,12 +1197,7 @@ describe('SpaceSyncer', () => {
         'page-2',
         FIXED_NOW,
       )
-      expect(store.upsertSpaceCursor).toHaveBeenLastCalledWith(
-        SPACE_URI,
-        SPIKE_DID,
-        'resume-cursor',
-        FIXED_NOW,
-      )
+      expect(store.upsertSpaceCursor).toHaveBeenCalledTimes(1)
       expect(store.deleteSpaceCursor).not.toHaveBeenCalled()
     })
 

@@ -29,6 +29,7 @@ flowchart TD
     SpaceScheduler[Bounded space-sync scheduler]
     MemberHost[Member repo host<br/>listRepoOps + getRecord]
     SpaceCursor[(space_sync_cursor<br/>space + member)]
+    SpaceStage[(space_sync_stage<br/>unverified delta)]
     Purger[Revocation and commit-failure purge]
 
     Client -->|DPoP / OAuth| PDS
@@ -48,12 +49,15 @@ flowchart TD
     SpaceMembership -->|DPoP space credential| ResolveEnr
     SpaceMembership --> SpaceScheduler
     SpaceScheduler -->|DPoP space credential| MemberHost
-    MemberHost --> Index
+    MemberHost --> SpaceStage
+    SpaceStage -->|verified terminal commit| Index
     SpaceScheduler --> SpaceCursor
+    SpaceScheduler --> SpaceStage
     SvcSub --> Purger
     SpaceMembership --> Purger
     Purger --> Index
     Purger --> SpaceCursor
+    Purger --> SpaceStage
 
     classDef client fill:#fde2e4,stroke:#c98a93,color:#3a2a2d
     classDef pds fill:#fad2e1,stroke:#c79bb1,color:#3a2a35
@@ -66,7 +70,7 @@ flowchart TD
     class Client client
     class PDS pds
     class FG,Verify fg
-    class Index,Enrolled,SpaceCursor store
+    class Index,Enrolled,SpaceCursor,SpaceStage store
     class BCache,S3,Blob cache
     class Hydrate,ResolveEnr,StratosBlob,MemberHost upstream
     class SvcSub,ActorSub,SpaceMembership,SpaceScheduler,Purger worker
@@ -76,12 +80,12 @@ flowchart TD
 events, maintains `enrolled_actor`, and starts or stops per-actor WebSocket
 subscriptions. The PDS-custody arm enumerates each configured space with
 `zone.stratos.space.listRepos`, polls only explicit `custody=pds` members, and
-applies `listRepoOps`/`getRecord` results with a cursor per `(space, member)`.
-Both arms share the purge path, so unenrollment, boundary loss, and invalid
-foreign commits remove indexed state when detected. Foreign-repo pages are
-applied incrementally, so records from pre-terminal pages can be visible before
-the terminal commit is verified; verification and purge are not a pre-serve
-barrier.
+stages `listRepoOps`/`getRecord` deltas with a cursor per `(space, member)`.
+Both arms share the purge path, so unenrollment, boundary loss, malformed
+cursors, and invalid foreign commits clear derived state when detected. A
+foreign-repo delta stays in `space_sync_stage` and is never served until the
+host's terminal commit verifies. Verified promotion applies staged updates and
+tombstones atomically to the index.
 
 ### Auth flow
 
@@ -102,16 +106,17 @@ barrier.
 
 ### Storage choices
 
-| Concern                              | Choice                                                     |
-| ------------------------------------ | ---------------------------------------------------------- |
-| Post / boundary / subscription index | SQLite or Postgres via the shared feedgen store            |
-| Foreign-repo cursor                  | `space_sync_cursor`, keyed by space URI and member DID     |
-| Membership snapshot                  | SQLite/Postgres; replaced after a complete successful pass |
-| Authorization leases and halt state  | In process; rebuilt from authoritative membership on boot  |
-| Space credentials and DPoP keys      | In process; refreshed before expiry, never persisted       |
-| Blob cache                           | S3 or filestore                                            |
-| Feed configuration                   | Static — JSON/YAML file or env var                         |
-| Viewer boundary cache                | In-process TTL + LRU (300 s default)                       |
+| Concern                              | Choice                                                        |
+| ------------------------------------ | ------------------------------------------------------------- |
+| Post / boundary / subscription index | SQLite or Postgres via the shared feedgen store               |
+| Foreign-repo cursor                  | `space_sync_cursor`, keyed by space URI and member DID        |
+| Unverified foreign-repo delta        | `space_sync_stage`, promoted only after terminal verification |
+| Membership snapshot                  | SQLite/Postgres; replaced after a complete successful pass    |
+| Authorization leases and halt state  | In process; rebuilt from authoritative membership on boot     |
+| Space credentials and DPoP keys      | In process; refreshed before expiry, never persisted          |
+| Blob cache                           | S3 or filestore                                               |
+| Feed configuration                   | Static — JSON/YAML file or env var                            |
+| Viewer boundary cache                | In-process TTL + LRU (300 s default)                          |
 
 ### Moderation labels
 

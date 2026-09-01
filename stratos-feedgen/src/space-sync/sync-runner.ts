@@ -49,7 +49,7 @@ export interface CompletedMembershipBoundary {
 }
 
 export interface SpaceSyncRunnerDeps {
-  syncer: Pick<SpaceSyncer, 'syncTarget'>
+  syncer: Pick<SpaceSyncer, 'syncTarget' | 'promoteVerifiedStage'>
   verifier: Pick<CommitVerifier, 'verify'>
   purger: Pick<Purger, 'purgeInvalidSpaceCommit'>
   mutationFence: Pick<SpaceMutationFence, 'issueRunLease'>
@@ -173,6 +173,7 @@ export class SpaceSyncRunner {
         result.finalCommit,
       )
       if (verifyResult.ok) {
+        await this.syncer.promoteVerifiedStage(runTarget)
         this.resetStreak(runTarget)
         return result
       }

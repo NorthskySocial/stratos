@@ -9,7 +9,7 @@ import {
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
   DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
 } from '../config.js'
-import type { FeedgenStore } from '../db/index.js'
+import type { FeedgenStore, SpaceSyncStageMutation } from '../db/index.js'
 import {
   extractBlobRefs,
   pickSortAt,
@@ -27,22 +27,18 @@ import {
   SpaceHostInvalidResponseError,
 } from './errors.js'
 import type { PollTarget } from './membership.js'
-import {
-  SpaceAuthorizationRevokedError,
-  type SpaceMutationFence,
-} from '../mutation-fence.js'
+import type { SpaceMutationFence } from '../mutation-fence.js'
 
 export interface SpaceSyncerDeps {
   store: Pick<
     FeedgenStore,
-    | 'upsertPost'
-    | 'deletePost'
     | 'getSpaceCursor'
-    | 'upsertSpaceCursor'
-    | 'deleteSpaceCursor'
+    | 'stageSpaceSyncPage'
+    | 'resetSpaceSyncState'
+    | 'promoteSpaceSyncStage'
   >
   credentialManager: Pick<SpaceCredentialManager, 'getCredential'>
-  mutationFence: Pick<SpaceMutationFence, 'mutate' | 'compensate'>
+  mutationFence: Pick<SpaceMutationFence, 'mutate'>
   /** Injectable host-client factory (test seam). Defaults to `new SpaceHostClient(opts)`. */
   createHostClient?: (
     opts: SpaceHostClientOptions,
@@ -77,10 +73,10 @@ export interface SpaceSyncFailure {
   readonly ok: false
   /**
    * `'malformed-cursor'`: the host rejected the stored cursor; it has been
-   * dropped so the next pass starts that (space, member) pair cold.
-   * `'aborted'`: the caller's `signal` fired before the sync reached a
-   * terminal or capped stopping point. The stored cursor is left untouched —
-   * an abandoned pass never mutates state past the point it was cut off.
+   * dropped with its unverified page state so the next pass starts that
+   * (space, member) pair cold. `'aborted'`: the caller's `signal` fired
+   * before the sync reached a terminal or capped stopping point. Durable
+   * staged pages remain unserved until a later terminal commit verifies.
    * `'member-skip'`: any other failure (unreachable host, missing repo,
    * timeout, oversized page, invalid response). The stored cursor is left
    * untouched.
@@ -96,16 +92,12 @@ interface AppliedPage {
   deleted: number
   skippedOversized: number
   skippedMalformed: number
-}
-
-interface PageProgress {
-  cursorPersisted: boolean
-  finalCommit?: Record<string, unknown>
+  mutations: SpaceSyncStageMutation[]
 }
 
 /**
  * Polls one `pds`-custody member's repo for `zone.stratos.feed.post` ops and
- * applies them to the local index.
+ * stages them until a terminal commit proves the host's result.
  *
  * Boundary is never read from the record or from `extractBoundaries` here —
  * a repo host does not authorize writes against the space authority, so a
@@ -175,7 +167,7 @@ export class SpaceSyncer {
       if (err instanceof MalformedCursorError) {
         try {
           await this.mutationFence.mutate(target, signal, () =>
-            this.store.deleteSpaceCursor(target.spaceUri, target.did),
+            this.store.resetSpaceSyncState(target.spaceUri, target.did),
           )
         } catch (mutationError) {
           if (signal?.aborted) {
@@ -218,12 +210,10 @@ export class SpaceSyncer {
       credentialProof: credential,
     })
 
-    const startingCursor =
+    let cursor =
       (await this.store.getSpaceCursor(target.spaceUri, target.did)) ??
       undefined
     assertNotAborted(signal)
-    let cursor = startingCursor
-    let cursorWasPersisted = false
     let pagesFetched = 0
     let recordsIndexed = 0
     let recordsDeleted = 0
@@ -232,68 +222,54 @@ export class SpaceSyncer {
     let finalCommit: Record<string, unknown> | undefined
     let stopReason: SpaceSyncSuccess['stopReason']
 
-    try {
-      for (;;) {
-        const remainingRecords = this.maxRecordsPerMember - recordsIndexed
-        const requestLimit = Math.min(this.pageLimit, remainingRecords)
-        const page = await client.listRepoOps({
-          space: target.spaceUri,
-          repo: target.did,
-          cursor,
-          limit: requestLimit,
-          signal,
-        })
-        assertNotAborted(signal)
-        if (page.ops.length > requestLimit) {
-          throw new SpaceHostInvalidResponseError(
-            target.host,
-            `listRepoOps returned ${page.ops.length} ops for requested limit ${requestLimit}`,
-          )
-        }
-        pagesFetched += 1
-
-        const applied = await this.applyPage(target, client, page.ops, signal)
-        assertNotAborted(signal)
-        recordsIndexed += applied.indexed
-        recordsDeleted += applied.deleted
-        skippedOversized += applied.skippedOversized
-        skippedMalformed += applied.skippedMalformed
-
-        const progress = await this.persistPageProgress(
-          target,
-          page.cursor,
-          page.commit,
-          signal,
+    for (;;) {
+      const remainingRecords = this.maxRecordsPerMember - recordsIndexed
+      const requestLimit = Math.min(this.pageLimit, remainingRecords)
+      const page = await client.listRepoOps({
+        space: target.spaceUri,
+        repo: target.did,
+        cursor,
+        limit: requestLimit,
+        signal,
+      })
+      assertNotAborted(signal)
+      if (page.ops.length > requestLimit) {
+        throw new SpaceHostInvalidResponseError(
+          target.host,
+          `listRepoOps returned ${page.ops.length} ops for requested limit ${requestLimit}`,
         )
-        cursorWasPersisted ||= progress.cursorPersisted
-        assertNotAborted(signal)
-        finalCommit = progress.finalCommit
-        cursor = page.cursor
+      }
+      pagesFetched += 1
 
-        if (page.cursor === undefined) {
-          stopReason = 'complete'
-          break
-        }
-        if (recordsIndexed >= this.maxRecordsPerMember) {
-          stopReason = 'per-member-cap'
-          break
-        }
-        if (pagesFetched >= this.maxPages) {
-          stopReason = 'max-pages'
-          break
-        }
+      const applied = await this.applyPage(target, client, page.ops, signal)
+      assertNotAborted(signal)
+      recordsIndexed += applied.indexed
+      recordsDeleted += applied.deleted
+      skippedOversized += applied.skippedOversized
+      skippedMalformed += applied.skippedMalformed
+
+      finalCommit = await this.persistPageProgress(
+        target,
+        applied.mutations,
+        page.cursor,
+        page.commit,
+        signal,
+      )
+      assertNotAborted(signal)
+      cursor = page.cursor
+
+      if (page.cursor === undefined) {
+        stopReason = 'complete'
+        break
       }
-    } catch (err) {
-      if (cursorWasPersisted && signal?.aborted) {
-        try {
-          await this.restoreCursor(target, startingCursor)
-        } catch (restoreError) {
-          if (!(restoreError instanceof SpaceAuthorizationRevokedError)) {
-            throw restoreError
-          }
-        }
+      if (recordsIndexed >= this.maxRecordsPerMember) {
+        stopReason = 'per-member-cap'
+        break
       }
-      throw err
+      if (pagesFetched >= this.maxPages) {
+        stopReason = 'max-pages'
+        break
+      }
     }
 
     const result: SpaceSyncSuccess = {
@@ -312,44 +288,29 @@ export class SpaceSyncer {
 
   private async persistPageProgress(
     target: PollTarget,
+    mutations: readonly SpaceSyncStageMutation[],
     nextCursor: string | undefined,
     commit: Record<string, unknown> | undefined,
     signal?: AbortSignal,
-  ): Promise<PageProgress> {
-    if (nextCursor === undefined) {
-      return commit
-        ? { cursorPersisted: false, finalCommit: commit }
-        : {
-            cursorPersisted: false,
-          }
-    }
+  ): Promise<Record<string, unknown> | undefined> {
     await this.mutationFence.mutate(target, signal, () =>
-      this.store.upsertSpaceCursor(
-        target.spaceUri,
-        target.did,
-        nextCursor,
-        this.now(),
-      ),
+      this.store.stageSpaceSyncPage({
+        spaceUri: target.spaceUri,
+        did: target.did,
+        boundary: target.boundary,
+        mutations,
+        ...(nextCursor === undefined ? {} : { nextCursor }),
+        updatedAt: this.now(),
+      }),
     )
-    return { cursorPersisted: true }
+    return nextCursor === undefined ? commit : undefined
   }
 
-  private async restoreCursor(
-    target: PollTarget,
-    startingCursor: string | undefined,
-  ): Promise<void> {
-    await this.mutationFence.compensate(target, async () => {
-      if (startingCursor === undefined) {
-        await this.store.deleteSpaceCursor(target.spaceUri, target.did)
-        return
-      }
-      await this.store.upsertSpaceCursor(
-        target.spaceUri,
-        target.did,
-        startingCursor,
-        this.now(),
-      )
-    })
+  /** Called by the runner only after it verifies this target's terminal commit. */
+  async promoteVerifiedStage(target: PollTarget): Promise<void> {
+    await this.mutationFence.mutate(target, undefined, () =>
+      this.store.promoteSpaceSyncStage(target.spaceUri, target.did),
+    )
   }
 
   /**
@@ -389,13 +350,12 @@ export class SpaceSyncer {
     let indexed = 0
     let deleted = 0
     let skippedOversized = 0
+    const mutations: SpaceSyncStageMutation[] = []
     for (const op of posts) {
       assertNotAborted(signal)
       const uri = `${target.spaceUri}/${target.did}/${op.collection}/${op.rkey}`
       if (op.cid === null) {
-        await this.mutationFence.mutate(target, signal, () =>
-          this.store.deletePost(uri),
-        )
+        mutations.push({ kind: 'delete', uri })
         deleted += 1
         continue
       }
@@ -427,12 +387,16 @@ export class SpaceSyncer {
         blobRefs: extractBlobRefs(value),
         boundaries: [target.boundary],
       }
-      await this.mutationFence.mutate(target, signal, () =>
-        this.store.upsertPost(post),
-      )
+      mutations.push({ kind: 'upsert', post })
       indexed += 1
     }
-    return { indexed, deleted, skippedOversized, skippedMalformed }
+    return {
+      indexed,
+      deleted,
+      skippedOversized,
+      skippedMalformed,
+      mutations,
+    }
   }
 
   private async resolveValue(
