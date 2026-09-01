@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run -A
 
 import { DOMAINS } from './lib/config.ts'
+import { adminGetBoundaries, adminSetBoundaries } from './lib/admin.ts'
 import { buildFeedgen, FEEDGEN_DID, FeedgenHarness } from './lib/feedgen.ts'
 import { assert, fail, finish, pass, section } from './lib/log.ts'
 import { createSession, getServiceAuth } from './lib/pds.ts'
@@ -64,8 +65,9 @@ async function waitForPost(
   token: string,
   feed: string,
   uri: string,
+  timeoutMs = 30_000,
 ): Promise<PostView | null> {
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const { status, body } = await getFeed(token, feed)
     const post = (body as unknown as GetFeedBody).feed?.find(
@@ -77,14 +79,37 @@ async function waitForPost(
   return null
 }
 
+async function waitForFeedReadiness(
+  token: string,
+  feed: string,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const { status } = await getFeed(token, feed)
+    if (status === 200) return true
+    if (status !== 503) return false
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  return false
+}
+
 async function run(): Promise<void> {
   section('Phase 4f: Feedgen — describeFeed & getFeed')
   const state = await loadState()
   const rei = state.users.rei
   const sakura = state.users.sakura
   const kaoruko = state.users.kaoruko
-  if (!rei?.enrolled || !sakura?.enrolled || !kaoruko?.enrolled) {
-    fail('Users rei, sakura, kaoruko must be enrolled — run earlier phases')
+  const adminSessionCookie = state.adminSessionCookie
+  if (
+    !rei?.enrolled ||
+    !sakura?.enrolled ||
+    !kaoruko?.enrolled ||
+    !adminSessionCookie
+  ) {
+    fail(
+      'Users rei, sakura, kaoruko and an admin session must be available — run earlier phases',
+    )
     finish()
   }
   if (!(await buildFeedgen())) {
@@ -103,6 +128,7 @@ async function run(): Promise<void> {
       await feedgen.start({ port: FEEDGEN_PORT })
       await assertFeedgenWarmup(feedgen, 'restart')
       await verifyReplay(feedgen, replay)
+      await verifyReplayAuthorization(feedgen, replay, adminSessionCookie)
     }
   } finally {
     await feedgen.cleanup()
@@ -256,6 +282,82 @@ async function verifyReplay(
     post?.author.did === replay.authorDid,
     'same viewer sees the same author after replay',
   )
+}
+
+async function verifyReplayAuthorization(
+  feedgen: FeedgenHarness,
+  replay: ReplayCheck,
+  adminSessionCookie: string,
+): Promise<void> {
+  section('Replay admission uses current author membership')
+  const originalBoundaries = await adminGetBoundaries(
+    replay.authorDid,
+    adminSessionCookie,
+  )
+  assert(
+    originalBoundaries?.includes(DOMAINS.swordsmith),
+    'author holds swordsmith before the replay-authorization check',
+    originalBoundaries?.join(', '),
+  )
+  if (!originalBoundaries?.includes(DOMAINS.swordsmith)) return
+
+  await feedgen.stop()
+  let boundariesChanged = false
+  try {
+    const change = await adminSetBoundaries(
+      replay.authorDid,
+      [DOMAINS.aekea],
+      adminSessionCookie,
+    )
+    boundariesChanged = change.status === 200
+    assert(
+      boundariesChanged,
+      'admin moves the author from swordsmith to aekea while feedgen is stopped',
+      `status=${change.status}`,
+    )
+    if (!boundariesChanged) return
+
+    await feedgen.start({ port: FEEDGEN_PORT })
+    await assertFeedgenWarmup(feedgen, 'stale-membership replay')
+    if (!(await feedgen.waitForHealth(FEEDGEN_PORT, 30_000))) {
+      fail('feedgen /health did not become ready for replay authorization')
+      return
+    }
+    const token = await mintViewerJwt(
+      replay.viewer.handle,
+      replay.viewer.password,
+    )
+    const feedReady = await waitForFeedReadiness(token, 'swordsmith')
+    assert(
+      feedReady,
+      'feed reads become ready before replay authorization is evaluated',
+    )
+    if (!feedReady) return
+    const resurrected = await waitForPost(
+      token,
+      'swordsmith',
+      replay.uri,
+      15_000,
+    )
+    assert(
+      resurrected === null,
+      'a historical swordsmith post is denied after the author loses swordsmith',
+      resurrected?.uri,
+    )
+  } finally {
+    if (boundariesChanged) {
+      const restore = await adminSetBoundaries(
+        replay.authorDid,
+        originalBoundaries,
+        adminSessionCookie,
+      )
+      assert(
+        restore.status === 200,
+        'admin restores the author boundaries after replay authorization',
+        `status=${restore.status}`,
+      )
+    }
+  }
 }
 
 run().catch((err) => {

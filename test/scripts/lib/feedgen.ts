@@ -84,7 +84,7 @@ export class FeedgenHarness {
       stdout: 'piped',
       stderr: 'piped',
       env: {
-        ...withoutInheritedSqlitePath(),
+        ...withoutInheritedSqlitePaths(),
         FEEDGEN_SERVICE_DID: FEEDGEN_DID,
         FEEDGEN_SIGNING_KEY,
         FEEDGEN_PUBLIC_URL: url,
@@ -93,6 +93,9 @@ export class FeedgenHarness {
         TEMP: this.childTmpDir,
         TMP: this.childTmpDir,
         TMPDIR: this.childTmpDir,
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipSqlitePath(
+          this.childTmpDir,
+        ),
         STRATOS_SERVICE_URL: STRATOS_URL,
         STRATOS_PUBLIC_URL: STRATOS_URL,
         STRATOS_SERVICE_DID: SERVICE_DID,
@@ -230,9 +233,10 @@ export async function buildFeedgen(): Promise<boolean> {
   return result.success
 }
 
-function withoutInheritedSqlitePath(): Record<string, string> {
+function withoutInheritedSqlitePaths(): Record<string, string> {
   const env = Deno.env.toObject()
   delete env['FEEDGEN_SQLITE_PATH']
+  delete env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']
   return env
 }
 
@@ -282,17 +286,27 @@ async function assertNoNewSqliteArtifacts(
   childTmpDir: string,
 ): Promise<void> {
   const after = await snapshotSqliteArtifacts(childTmpDir)
+  const controlPath = membershipSqlitePath(childTmpDir)
+  const allowedControlArtifacts = new Set([
+    controlPath,
+    ...SQLITE_SIDECAR_SUFFIXES.map((suffix) => `${controlPath}${suffix}`),
+  ])
   const created = [
-    ...new Set([
-      ...[...after.childTmpDir].filter((path) => !before.childTmpDir.has(path)),
-      ...[...after.feedgenCwd].filter((path) => !before.feedgenCwd.has(path)),
-    ]),
+    ...[...after.childTmpDir].filter(
+      (path) =>
+        !before.childTmpDir.has(path) && !allowedControlArtifacts.has(path),
+    ),
+    ...[...after.feedgenCwd].filter((path) => !before.feedgenCwd.has(path)),
   ]
   assert(
     created.length === 0,
-    'default SQLite creates no filesystem artifacts',
+    'default record SQLite creates no filesystem artifacts',
     created.join(', '),
   )
+}
+
+function membershipSqlitePath(childTmpDir: string): string {
+  return `${childTmpDir}/feedgen-membership.sqlite`
 }
 
 async function listSqliteArtifacts(directory: string): Promise<Set<string>> {
