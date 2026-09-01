@@ -46,6 +46,7 @@
   let loadingStatus = $state('Initializing session...')
   let initialStartupDone = false
   let discoveryEpoch = 0
+  let feedRefreshEpoch = 0
   let did = $state('')
   let handle = $state('')
 
@@ -151,6 +152,7 @@
     loading = true
     loadingStatus = 'Discovering service...'
     const epoch = ++discoveryEpoch
+    const startingFeedRefreshEpoch = feedRefreshEpoch
     try {
       const nextAppviewAgent = APPVIEW_URL
         ? createServiceAgent(session, APPVIEW_URL)
@@ -186,7 +188,10 @@
 
       await refreshFeed()
     } finally {
-      if (epoch === discoveryEpoch) {
+      if (
+        epoch === discoveryEpoch &&
+        feedRefreshEpoch === startingFeedRefreshEpoch
+      ) {
         loading = false
       }
     }
@@ -198,12 +203,15 @@
    */
   async function refreshFeed() {
     const refreshSession = session
-    const epoch = discoveryEpoch
     if (!refreshSession) {
       return
     }
+    const discovery = discoveryEpoch
+    const refresh = ++feedRefreshEpoch
     const isCurrent = () =>
-      session === refreshSession && discoveryEpoch === epoch
+      session === refreshSession &&
+      discoveryEpoch === discovery &&
+      feedRefreshEpoch === refresh
 
     if (!isCurrent()) {
       return
@@ -289,6 +297,7 @@
    */
   function clearSession() {
     discoveryEpoch += 1
+    feedRefreshEpoch += 1
     session = null
     enrollment = null
     stratosStatus = null
