@@ -274,6 +274,7 @@ async function main(): Promise<void> {
         const context = { ...event }
         if (
           event.skippedOversized > 0 ||
+          event.skippedMalformed > 0 ||
           event.maxPageStops > 0 ||
           event.capped > 0
         ) {

@@ -157,6 +157,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 0,
       halted: 0,
       skippedOversized: 0,
+      skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
     })
@@ -205,7 +206,7 @@ describe('SpaceSyncScheduler', () => {
     await scheduler.stop()
   })
 
-  it('aggregates oversized skips and bounded-stop reasons across the pass', async () => {
+  it('aggregates skipped records and bounded-stop reasons across the pass', async () => {
     const spike = makeTarget({ did: SPIKE_DID })
     const faye = makeTarget({ did: FAYE_DID })
     const jet = makeTarget({ did: JET_DID })
@@ -215,6 +216,7 @@ describe('SpaceSyncScheduler', () => {
       if (target.did === SPIKE_DID) {
         return runSuccess(target, {
           skippedOversized: 2,
+          skippedMalformed: 3,
           stopReason: 'max-pages',
         })
       }
@@ -242,6 +244,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 0,
       halted: 0,
       skippedOversized: 2,
+      skippedMalformed: 3,
       maxPageStops: 1,
       capped: 1,
     })
@@ -504,6 +507,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 1,
       halted: 0,
       skippedOversized: 0,
+      skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
     })
@@ -720,6 +724,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 0,
       halted: 1,
       skippedOversized: 0,
+      skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
     })
@@ -826,6 +831,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 0,
       halted: 0,
       skippedOversized: 0,
+      skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
     })
@@ -895,6 +901,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 1,
       halted: 0,
       skippedOversized: 0,
+      skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
     })
@@ -1024,6 +1031,7 @@ describe('SpaceSyncScheduler', () => {
       abandoned: 0,
       halted: 0,
       skippedOversized: 0,
+      skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
     })
