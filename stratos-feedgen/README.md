@@ -191,16 +191,17 @@ tests/
 
 ### Feed index durability
 
-SQLite uses `:memory:` for the record index by default. Feedgen loses its post, boundary,
-enrollment, and foreign-repo cursor index on restart, then rebuilds it through the
+SQLite uses `:memory:` for the record index by default. Feedgen loses cached posts,
+boundaries, enrollments, and foreign-repo cursors on restart, then rebuilds them through the
 custody-aware subscription and space-poller ingestion arms. This keeps private feed content
-out of the container filesystem by default. The membership snapshot stays in its separate
-durable SQLite store. The Compose overlay also sets the core-dump limit to zero because
-process memory can contain private content.
+out of the container filesystem by default. Membership snapshots remain in their separate
+durable SQLite store for restart recovery and fast in-memory lookup. The Compose overlay also
+sets the core-dump limit to zero because process memory can contain private content.
 
-To retain the index, set `FEEDGEN_SQLITE_PATH` to an explicit file path and mount durable
-storage for that path. This persists private records, boundaries, enrollments, and cursors;
-protect, encrypt, and manage that storage as private content.
+To retain the record index, set `FEEDGEN_SQLITE_PATH` to an explicit file path and mount
+durable storage for that path. This persists private records, boundaries, enrollments, and
+cursors; protect, encrypt, and manage that storage as private content. Set
+`FEEDGEN_MEMBERSHIP_SQLITE_PATH` to durable storage for membership snapshots.
 
 Selecting `FEEDGEN_STORAGE_BACKEND=postgres` and setting `FEEDGEN_POSTGRES_URL` is the
 equivalent persistent-storage decision. Treat that database as private content too.
