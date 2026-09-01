@@ -31,6 +31,7 @@ async function startServer(opts?: {
   viewerBoundaries?: string[]
   posts?: IndexedPost[]
   nextCursor?: string
+  readiness?: { isReady(): boolean }
   /** Override verifier to simulate auth failure or alternative viewer DIDs. */
   verifier?: FeedRequestVerifier
 }): Promise<TestServerCtx> {
@@ -79,6 +80,7 @@ async function startServer(opts?: {
       typeof createFeedgenServer
     >[0]['enrollmentManager'],
     verifier,
+    feedReadiness: opts?.readiness,
   })
 
   const httpServer = await server.listen(0, '127.0.0.1')
@@ -139,6 +141,30 @@ describe('zone.stratos.feedgen.getFeed', () => {
       limit: 50,
       cursor: undefined,
     })
+  })
+
+  it('fails closed while replay authorization is not ready', async () => {
+    ctx = await startServer({
+      readiness: { isReady: () => false },
+      posts: [
+        makePost(
+          'at://did:plc:fayevalentine/zone.stratos.feed.post/1',
+          FAYE_DID,
+          '2025-01-01T00:00:00.000Z',
+        ),
+      ],
+    })
+
+    const res = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed`,
+      { headers: { authorization: 'Bearer test-token' } },
+    )
+
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { error: string; message: string }
+    expect(body.error).toBe('FeedNotReady')
+    expect(ctx.resolveBoundaries).not.toHaveBeenCalled()
+    expect(ctx.listPosts).not.toHaveBeenCalled()
   })
 
   it('returns hydrated feedViewPosts with cursor', async () => {

@@ -1,9 +1,13 @@
-import type { Server as XrpcServer } from '@atproto/xrpc-server'
+import {
+  NotEnoughResourcesError,
+  type Server as XrpcServer,
+} from '@atproto/xrpc-server'
 import type { FeedgenStore, IndexedPost } from '../../db/index.js'
 import { decodeCursor, encodeCursor } from '../../db/index.js'
 import type { EnrollmentManager } from '../../enrollment/index.js'
 import type { FeedRegistry } from '../../feeds/index.js'
 import { NSID } from '../../lexicon/index.js'
+import type { FeedReadiness } from '../../readiness.js'
 import {
   BoundaryMismatchError,
   UnknownFeedError,
@@ -20,6 +24,8 @@ export interface GetFeedDeps {
   store: Pick<FeedgenStore, 'listPostsByBoundary'>
   enrollmentManager: Pick<EnrollmentManager, 'getBoundaries'>
   verifier: FeedRequestVerifier
+  /** Omitted means the caller has no replay-readiness requirement. */
+  readiness?: FeedReadiness
 }
 
 export interface PostView {
@@ -47,6 +53,13 @@ export function registerGetFeedHandler(
   server.method(NSID.getFeed, {
     auth: toXrpcAuthVerifier(deps.verifier),
     handler: async ({ params, auth }) => {
+      if (deps.readiness !== undefined && !deps.readiness.isReady()) {
+        throw new NotEnoughResourcesError(
+          'Feed is unavailable while authorization state is reconciling',
+          'FeedNotReady',
+        )
+      }
+
       const { viewerDid } = auth.credentials
       const feedId = params['feed'] as string
       const limit = clampLimit(params['limit'])

@@ -66,7 +66,6 @@ function makeIndexer(
 } {
   const resolver = vi.fn(resolveEnrollments)
   const authorizer = new CurrentMembershipReplayAuthorizer({
-    store,
     client: { resolveEnrollments: resolver },
     configuredBoundaries: [ALPHA, BETA],
   })
@@ -123,21 +122,24 @@ afterEach(async () => {
 })
 
 describe('CurrentMembershipReplayAuthorizer', () => {
-  it('uses a matching local snapshot after its first authoritative resolve', async () => {
+  it('re-resolves every admission even when a local snapshot stays unchanged', async () => {
     await store.upsertEnrolledActor(enrollment([ALPHA]))
-    const { indexer, resolveEnrollments } = makeIndexer(async () =>
-      resolution([ALPHA]),
-    )
+    const resolutions = [resolution([ALPHA]), resolution([BETA])]
+    const { indexer, resolveEnrollments } = makeIndexer(async () => {
+      const next = resolutions.shift()
+      if (!next) throw new Error('unexpected authority resolve')
+      return next
+    })
 
     await applyPost(indexer, 1, [ALPHA, UNCONFIGURED])
-    await applyPost(indexer, 2, [ALPHA], 'update')
+    await applyPost(indexer, 2, [BETA], 'update')
 
-    expect(resolveEnrollments).toHaveBeenCalledOnce()
-    expect((await store.getPost(URI))?.boundaries).toEqual([ALPHA])
+    expect(resolveEnrollments).toHaveBeenCalledTimes(2)
+    expect((await store.getPost(URI))?.boundaries).toEqual([BETA])
     expect(await store.getCursor(FAYE)).toBe(2)
   })
 
-  it('resolves directly when no local snapshot exists', async () => {
+  it('resolves directly when no persisted snapshot exists', async () => {
     const { indexer, resolveEnrollments } = makeIndexer(async () =>
       resolution([ALPHA]),
     )
@@ -149,7 +151,7 @@ describe('CurrentMembershipReplayAuthorizer', () => {
     expect((await store.getPost(URI))?.boundaries).toEqual([ALPHA])
   })
 
-  it('resolves directly when the local snapshot is empty', async () => {
+  it('resolves directly despite an empty persisted snapshot', async () => {
     await store.upsertEnrolledActor(enrollment([]))
     const { indexer, resolveEnrollments } = makeIndexer(async () =>
       resolution([ALPHA]),
@@ -161,7 +163,19 @@ describe('CurrentMembershipReplayAuthorizer', () => {
     expect((await store.getPost(URI))?.boundaries).toEqual([ALPHA])
   })
 
-  it('denies a historical alpha post after membership changed to beta', async () => {
+  it('checks authority before denying a record with no configured boundary', async () => {
+    const { indexer, resolveEnrollments } = makeIndexer(async () =>
+      resolution([ALPHA]),
+    )
+
+    await applyPost(indexer, 1, [UNCONFIGURED])
+
+    expect(resolveEnrollments).toHaveBeenCalledOnce()
+    expect(await store.getPost(URI)).toBeNull()
+    expect(await store.getCursor(FAYE)).toBe(1)
+  })
+
+  it('denies a historical alpha post when current authority grants beta', async () => {
     await seedPost([ALPHA])
     await store.upsertCursor(FAYE, 7, '2024-01-01T00:00:00.000Z')
     await store.upsertEnrolledActor(enrollment([BETA]))
@@ -176,7 +190,7 @@ describe('CurrentMembershipReplayAuthorizer', () => {
     expect(await store.getCursor(FAYE)).toBe(8)
   })
 
-  it('does not trust a matching stale snapshot and retains its direct denial', async () => {
+  it('does not trust a matching stale snapshot on later admissions', async () => {
     await seedPost([ALPHA])
     await store.upsertEnrolledActor(enrollment([ALPHA]))
     const { indexer, resolveEnrollments } = makeIndexer(async () =>
@@ -186,12 +200,12 @@ describe('CurrentMembershipReplayAuthorizer', () => {
     await applyPost(indexer, 8, [ALPHA], 'update')
     await applyPost(indexer, 9, [BETA])
 
-    expect(resolveEnrollments).toHaveBeenCalledOnce()
+    expect(resolveEnrollments).toHaveBeenCalledTimes(2)
     expect((await store.getPost(URI))?.boundaries).toEqual([BETA])
     expect(await store.getCursor(FAYE)).toBe(9)
   })
 
-  it('admits a newly granted beta post after an alpha to alpha-plus-beta change', async () => {
+  it('admits a newly granted beta post from current authority', async () => {
     await store.upsertEnrolledActor(enrollment([ALPHA]))
     const { indexer, resolveEnrollments } = makeIndexer(async () =>
       resolution([ALPHA, BETA]),
@@ -204,7 +218,7 @@ describe('CurrentMembershipReplayAuthorizer', () => {
     expect(await store.getCursor(FAYE)).toBe(1)
   })
 
-  it('resolves again when a later local snapshot disagrees with authority', async () => {
+  it('takes fresh authority over a later persisted snapshot change', async () => {
     await store.upsertEnrolledActor(enrollment([ALPHA]))
     const resolutions = [resolution([ALPHA]), resolution([BETA])]
     const { indexer, resolveEnrollments } = makeIndexer(async () => {
@@ -221,7 +235,7 @@ describe('CurrentMembershipReplayAuthorizer', () => {
     expect((await store.getPost(URI))?.boundaries).toEqual([BETA])
   })
 
-  it('re-resolves when an absent snapshot becomes an enrolled empty snapshot', async () => {
+  it('takes fresh authority when persisted enrollment changes', async () => {
     const resolutions = [resolution([ALPHA]), resolution([])]
     const { indexer, resolveEnrollments } = makeIndexer(async () => {
       const next = resolutions.shift()

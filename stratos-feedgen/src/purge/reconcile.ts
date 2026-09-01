@@ -28,6 +28,10 @@ export interface ReconcileOptions {
 }
 
 export interface ReconcileSummary {
+  /** Actors present in the persisted snapshot before any optional cap. */
+  total: number
+  /** Whether `maxActors` left part of that snapshot unchecked. */
+  truncated: boolean
   /** Actors examined this run. */
   examined: number
   /** Actors fully purged because they are no longer enrolled. */
@@ -86,6 +90,8 @@ export async function reconcileEnrollments(
   const actors = maxActors > 0 ? all.slice(0, maxActors) : all
 
   const summary: ReconcileSummary = {
+    total: all.length,
+    truncated: actors.length < all.length,
     examined: 0,
     unenrolled: 0,
     shrunk: 0,
