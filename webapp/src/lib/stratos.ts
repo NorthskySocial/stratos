@@ -174,6 +174,7 @@ export async function discoverStratosEnrollment(
             preferred.uri.split('/').pop()!,
           )
         }
+        return null
       }
       // Otherwise return the first one
       const first = res.data.records[0]
