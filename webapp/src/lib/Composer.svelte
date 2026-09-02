@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import {Agent} from '@atproto/api'
   import type {OAuthSession} from '@atproto/oauth-client-browser'
   import type {StratosEnrollment} from './stratos'
@@ -33,6 +34,8 @@
   let spaceWriteScope = $state<SpaceWriteScopeStatus | 'checking'>('checking')
 
   let error = $state('')
+  let status = $state('')
+  let textArea = $state<HTMLTextAreaElement>()
 
   let privatePostingDisabled = $derived(!enrollment || attestationVerified !== true)
   let privateModeUnavailable = $derived(privatePostingDisabled)
@@ -76,6 +79,12 @@
   $effect(() => {
     if (replyingTo?.isPrivate && !privateModeUnavailable) {
       isPrivate = true
+    }
+  })
+
+  $effect(() => {
+    if (replyingTo) {
+      void tick().then(() => textArea?.focus())
     }
   })
 
@@ -137,6 +146,7 @@
     }
     posting = true
     error = ''
+    status = 'Creating post.'
 
     try {
       const now = new Date().toISOString()
@@ -254,6 +264,7 @@
       clearImage()
       oncancelreply()
       onpost()
+      status = 'Post created.'
     } catch (err) {
       console.error('Post failed:', err)
       const message = err instanceof Error ? err.message : 'Failed to create post'
@@ -262,7 +273,7 @@
       } else if (!isPrivate && message.includes('Missing required scope')) {
         error = 'Public posting is not available — this demo is for private data only.'
       } else {
-        error = message
+        error = 'Could not create the post. Try again.'
       }
     } finally {
       posting = false
@@ -270,27 +281,35 @@
   }
 </script>
 
-<div class="composer">
+<div class="composer" aria-busy={posting}>
     {#if replyingTo}
         <div class="reply-indicator">
             <span>Replying to @{replyingTo.authorHandle || shortDid(replyingTo.author)}</span>
-            <button class="cancel-reply" onclick={oncancelreply}>✕</button>
+            <button class="cancel-reply" onclick={oncancelreply} aria-label="Cancel reply">✕</button>
         </div>
     {/if}
 
+    <label class="sr-only" for="post-text">Post text</label>
     <textarea
+            id="post-text"
+            bind:this={textArea}
             bind:value={text}
             placeholder={isPrivate ? `Post to ${selectedDomain ? displayBoundary(selectedDomain) : 'private'}…` : 'Write a post…'}
             disabled={posting}
             rows="3"
+            aria-invalid={Boolean(error)}
+            aria-describedby="post-guidance"
     ></textarea>
+    <p id="post-guidance" class="sr-only">Maximum {CHAR_LIMIT} characters.</p>
 
     {#if imagePreview}
         <div class="image-preview-container">
             <img src={imagePreview} alt="Preview" class="image-preview"/>
-            <button class="remove-image" onclick={clearImage} disabled={posting}>✕</button>
+            <button class="remove-image" onclick={clearImage} disabled={posting} aria-label="Remove image">✕</button>
             <div class="alt-text-container">
+                <label class="sr-only" for="image-alt-text">Image description</label>
                 <input
+                        id="image-alt-text"
                         type="text"
                         bind:value={altText}
                         placeholder="Add alt text…"
@@ -305,13 +324,15 @@
         <div class="left-actions">
             <label class="image-upload" class:disabled={posting || pdsPrivatePost}>
                 <input
+                        id="image-upload"
                         type="file"
                         accept="image/*"
                         onchange={handleFileChange}
                         disabled={posting || pdsPrivatePost}
-                        style="display: none;"
+                        class="file-input"
                 />
-                <span class="icon">🖼️</span>
+                <span class="icon" aria-hidden="true">🖼️</span>
+                <span class="sr-only">Add image</span>
             </label>
             {#if pdsPrivatePost}
                 <span class="posting-note">Images are not available for PDS-hosted private posts yet.</span>
@@ -322,17 +343,20 @@
                         type="checkbox"
                         bind:checked={isPrivate}
                         disabled={privateModeUnavailable || posting}
+                        aria-describedby={privateModeUnavailable ? 'private-posting-help' : undefined}
                 />
                 <span>Private</span>
-                {#if !enrollment}
-                    <span class="tooltip">Enroll in Stratos to post privately</span>
-                {:else if privatePostingDisabled}
-                    <span class="tooltip">Private posting requires a valid enrollment attestation</span>
-                {/if}
             </label>
+            {#if !enrollment}
+                <p id="private-posting-help" class="posting-note">Enroll in Stratos to post privately.</p>
+            {:else if privatePostingDisabled}
+                <p id="private-posting-help" class="posting-note">Private posting requires a valid enrollment attestation.</p>
+            {/if}
 
             {#if isPrivate && domains.length > 0}
+                <label class="sr-only" for="private-space">Private space</label>
                 <select
+                        id="private-space"
                         class="domain-select"
                         bind:value={selectedDomain}
                         disabled={posting}
@@ -346,7 +370,7 @@
 
         <button onclick={handlePost}
                 disabled={posting || (!text.trim() && !selectedFile) || charsRemaining < 0}>
-      <span class="char-count" class:near-limit={charsRemaining < 20}
+      <span class="char-count" aria-hidden="true" class:near-limit={charsRemaining < 20}
             class:over-limit={charsRemaining < 0}>
         {charsRemaining}
       </span>
@@ -355,8 +379,9 @@
     </div>
 
     {#if error}
-        <p class="error">{error}</p>
+        <p class="error" role="alert">{error}</p>
     {/if}
+    <p class="sr-only" role="status">{status}</p>
     {#if !enrollment && spaceWriteScope !== 'checking'}
         <p class="posting-note">
             {spaceWriteScope === 'granted'
@@ -416,6 +441,15 @@
         outline: none;
         border-color: #0066ff;
         box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.15);
+    }
+
+    textarea:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    button:focus-visible,
+    .image-upload:focus-within {
+        outline: 3px solid #1d4ed8;
+        outline-offset: 2px;
     }
 
     .image-preview-container {
@@ -498,6 +532,19 @@
         font-size: 1.2rem;
     }
 
+    .file-input,
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
     .image-upload:hover:not(.disabled) {
         background: #f3f4f6;
     }
@@ -524,24 +571,6 @@
     .private-toggle input:checked + span {
         color: #8b5cf6;
         font-weight: 600;
-    }
-
-    .tooltip {
-        display: none;
-        position: absolute;
-        bottom: 100%;
-        left: 0;
-        background: #333;
-        color: white;
-        padding: 0.3rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        white-space: nowrap;
-        margin-bottom: 0.3rem;
-    }
-
-    .private-toggle.disabled:hover .tooltip {
-        display: block;
     }
 
     .domain-select {

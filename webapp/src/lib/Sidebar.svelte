@@ -36,7 +36,7 @@
   let inputUrl = $derived(serviceUrl)
 </script>
 
-<nav class="sidebar-nav">
+<nav class="sidebar-nav" aria-label="Stratos account and feed controls">
   <div class="user-section">
     <div class="handle">@{handle}</div>
 
@@ -101,11 +101,13 @@
       {:else}
         <div class="url-config">
           <input
+            id="service-url"
             type="text"
             placeholder="Stratos Service URL"
             bind:value={inputUrl}
             class="url-input"
           />
+          <label class="sr-only" for="service-url">Stratos service URL</label>
           <button
             class="set-url-btn"
             disabled={!inputUrl}
@@ -130,6 +132,7 @@
       class="feed-btn"
       class:active={activeFeed === null}
       onclick={() => onSelectFeed(null)}
+      aria-pressed={activeFeed === null}
     >
       All domains
     </button>
@@ -138,6 +141,7 @@
         class="feed-btn"
         class:active={activeFeed === domain}
         onclick={() => onSelectFeed(domain)}
+        aria-pressed={activeFeed === domain}
       >
         {displayBoundary(domain)}
       </button>
@@ -238,7 +242,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #999;
+    color: #666;
     margin-bottom: 0.15rem;
   }
 
@@ -356,7 +360,7 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #888;
+    color: #666;
     font-weight: 600;
   }
 
@@ -421,7 +425,25 @@
 
   .muted {
     margin: 0;
-    color: #aaa;
+    color: #666;
     font-size: 0.82rem;
+  }
+
+  button:focus-visible,
+  input:focus-visible {
+    outline: 3px solid #1d4ed8;
+    outline-offset: 2px;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>
