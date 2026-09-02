@@ -59,6 +59,7 @@ describe('handleCallback PDS Record', () => {
       oauthClient: mockOauthClient,
       enrollmentStore: mockEnrollmentStore,
       enrollmentValidator: mockEnrollmentValidator,
+      enrollmentEvents: { emit: vi.fn() },
       idResolver: mockIdResolver,
       enrollmentConfig: mockEnrollmentConfig,
       profileRecordWriter: mockProfileRecordWriter,
