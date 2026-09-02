@@ -149,7 +149,7 @@ services:
       FEEDGEN_SIGNING_KEY: 097ce261481a889a756db476dceb6cc57596541c264675e9712c7252cfd1183c
       FEEDGEN_PUBLIC_URL: http://localhost:3302
       FEEDGEN_PORT: 3302
-      FEEDGEN_SQLITE_PATH: /app/config/browser-e2e.sqlite
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: /app/data/feedgen-membership.sqlite
       FEEDGEN_FEEDS_JSON: '{"feeds":[{"id":"swordsmith","boundary":"${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}/swordsmith"},{"id":"aekea","boundary":"${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}/aekea"}]}'
       STRATOS_SERVICE_URL: http://localhost:3100
       STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL:-http://127.0.0.1:3100}

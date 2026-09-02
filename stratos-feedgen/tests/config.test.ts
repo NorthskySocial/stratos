@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_SQLITE_PATH,
   DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
   DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
   DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS,
@@ -18,6 +19,7 @@ import {
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
   DEFAULT_SPACE_SYNC_MAX_RECORDS_PER_MEMBER,
   DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
+  DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
   MAX_SPACE_MEMBERSHIP_PAGE_LIMIT,
@@ -30,12 +32,27 @@ const baseEnv = {
   FEEDGEN_SIGNING_KEY: 'unused-by-this-test',
   STRATOS_SERVICE_URL: 'https://stratos.bebop.test',
   STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
-  FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+  FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop-membership.sqlite',
 }
 
 describe('loadFeedgenConfig SQLite storage split', () => {
+  it('declares the in-memory record-index default', () => {
+    expect(DEFAULT_SQLITE_PATH).toBe(':memory:')
+  })
+
+  it('uses the in-memory record index when the path is unset or empty', () => {
+    expect(loadFeedgenConfig({ ...baseEnv }).sqlitePath).toBe(':memory:')
+    expect(
+      loadFeedgenConfig({ ...baseEnv, FEEDGEN_SQLITE_PATH: '' }).sqlitePath,
+    ).toBe(':memory:')
+  })
+
   it('derives a distinct sibling database for durable membership snapshots', () => {
-    const cfg = loadFeedgenConfig({ ...baseEnv })
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
+    })
 
     expect(cfg.sqlitePath).toBe('/tmp/feedgen-bebop.sqlite')
     expect(cfg.membershipSqlitePath).toBe(
@@ -57,6 +74,7 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       loadFeedgenConfig({
         ...baseEnv,
         FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
       }),
     ).toThrow(/FEEDGEN_MEMBERSHIP_SQLITE_PATH/)
 
@@ -89,7 +107,8 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: baseEnv.FEEDGEN_SQLITE_PATH,
+        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
       }),
     ).toThrow(/must differ/)
 
@@ -138,6 +157,17 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       rmSync(directory, { recursive: true, force: true })
     }
   })
+
+  it('still requires a Postgres URL for the Postgres backend', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_STORAGE_BACKEND: 'postgres',
+      }),
+    ).toThrow(
+      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+    )
+  })
 })
 
 describe('loadFeedgenConfig space-sync defaults', () => {
@@ -171,7 +201,9 @@ describe('loadFeedgenConfig space-sync defaults', () => {
     expect(cfg.spaceSyncMemberBudgetMs).toBe(
       DEFAULT_SPACE_SYNC_MEMBER_BUDGET_MS,
     )
-    expect(cfg.spaceSyncMemberConcurrency).toBe(8)
+    expect(cfg.spaceSyncMemberConcurrency).toBe(
+      DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
+    )
     expect(cfg.spaceSyncMaxRecordBytes).toBe(
       DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
     )

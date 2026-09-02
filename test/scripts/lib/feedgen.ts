@@ -9,6 +9,11 @@ const MAX_LOG_LINES = 500
 export const FEEDGEN_DID = 'did:web:feedgen.test'
 export const FEEDGEN_SIGNING_KEY =
   '097ce261481a889a756db476dceb6cc57596541c264675e9712c7252cfd1183c'
+export const SPACE_COMMIT_TAMPER_MODULE = new URL(
+  './tamper-space-commit.mjs',
+  import.meta.url,
+).href
+
 export interface FeedDefinition {
   id: string
   boundary: string
@@ -37,6 +42,7 @@ export interface FeedgenStartOptions {
 }
 
 interface SqliteArtifactSnapshot {
+  childTmpDir: ReadonlySet<string>
   feedgenCwd: ReadonlySet<string>
 }
 
@@ -58,7 +64,10 @@ export class FeedgenHarness {
 
   static async create(): Promise<FeedgenHarness> {
     const childTmpDir = await Deno.makeTempDir({ prefix: 'feedgen-e2e-tmp-' })
-    return new FeedgenHarness(childTmpDir, await snapshotSqliteArtifacts())
+    return new FeedgenHarness(
+      childTmpDir,
+      await snapshotSqliteArtifacts(childTmpDir),
+    )
   }
 
   async start(options: FeedgenStartOptions): Promise<void> {
@@ -75,16 +84,16 @@ export class FeedgenHarness {
       stdout: 'piped',
       stderr: 'piped',
       env: {
-        ...withoutInheritedSqlitePath(),
+        ...withoutInheritedSqlitePaths(),
         FEEDGEN_SERVICE_DID: FEEDGEN_DID,
         FEEDGEN_SIGNING_KEY,
         FEEDGEN_PUBLIC_URL: url,
         FEEDGEN_PORT: String(options.port),
         FEEDGEN_FEEDS_JSON: JSON.stringify({ feeds }),
-        FEEDGEN_SQLITE_PATH: `${this.childTmpDir}/feedgen-${startId}.sqlite`,
         TEMP: this.childTmpDir,
         TMP: this.childTmpDir,
         TMPDIR: this.childTmpDir,
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipSqlitePath(this.childTmpDir),
         STRATOS_SERVICE_URL: STRATOS_URL,
         STRATOS_PUBLIC_URL: STRATOS_URL,
         STRATOS_SERVICE_DID: SERVICE_DID,
@@ -184,6 +193,10 @@ export class FeedgenHarness {
     )
   }
 
+  countLogs(predicate: (event: FeedgenLogEvent) => boolean): number {
+    return this.logs.filter(predicate).length
+  }
+
   recentLogLines(limit = 20): string[] {
     return this.logs.slice(-limit).map((event) => event.line)
   }
@@ -191,7 +204,7 @@ export class FeedgenHarness {
   async cleanup(): Promise<void> {
     await this.stop()
     try {
-      await assertNoNewSqliteArtifacts(this.beforeArtifacts)
+      await assertNoNewSqliteArtifacts(this.beforeArtifacts, this.childTmpDir)
     } finally {
       await Deno.remove(this.childTmpDir, { recursive: true })
     }
@@ -218,9 +231,10 @@ export async function buildFeedgen(): Promise<boolean> {
   return result.success
 }
 
-function withoutInheritedSqlitePath(): Record<string, string> {
+function withoutInheritedSqlitePaths(): Record<string, string> {
   const env = Deno.env.toObject()
   delete env['FEEDGEN_SQLITE_PATH']
+  delete env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']
   return env
 }
 
@@ -256,24 +270,41 @@ function parseLogLine(line: string): Readonly<Record<string, unknown>> {
   return {}
 }
 
-async function snapshotSqliteArtifacts(): Promise<SqliteArtifactSnapshot> {
+async function snapshotSqliteArtifacts(
+  childTmpDir: string,
+): Promise<SqliteArtifactSnapshot> {
   return {
+    childTmpDir: await listSqliteArtifacts(childTmpDir),
     feedgenCwd: await listSqliteArtifacts(FEEDGEN_CWD),
   }
 }
 
 async function assertNoNewSqliteArtifacts(
   before: SqliteArtifactSnapshot,
+  childTmpDir: string,
 ): Promise<void> {
-  const after = await snapshotSqliteArtifacts()
-  const created = [...after.feedgenCwd].filter(
-    (path) => !before.feedgenCwd.has(path),
-  )
+  const after = await snapshotSqliteArtifacts(childTmpDir)
+  const controlPath = membershipSqlitePath(childTmpDir)
+  const allowedControlArtifacts = new Set([
+    controlPath,
+    ...SQLITE_SIDECAR_SUFFIXES.map((suffix) => `${controlPath}${suffix}`),
+  ])
+  const created = [
+    ...[...after.childTmpDir].filter(
+      (path) =>
+        !before.childTmpDir.has(path) && !allowedControlArtifacts.has(path),
+    ),
+    ...[...after.feedgenCwd].filter((path) => !before.feedgenCwd.has(path)),
+  ]
   assert(
     created.length === 0,
-    'feedgen SQLite stays inside its temporary test directory',
+    'default record SQLite creates no filesystem artifacts',
     created.join(', '),
   )
+}
+
+function membershipSqlitePath(childTmpDir: string): string {
+  return `${childTmpDir}/feedgen-membership.sqlite`
 }
 
 async function listSqliteArtifacts(directory: string): Promise<Set<string>> {
