@@ -131,6 +131,7 @@ describe('handleCallback', () => {
       enrollmentValidator: mockEnrollmentValidator,
       profileRecordWriter: mockProfileRecordWriter,
       logger: mockLogger,
+      enrollmentEvents: { emit: vi.fn() },
       baseUrl: 'http://localhost:3100',
       allowedRedirectOrigins: [],
       serviceEndpoint: 'http://localhost:3100',
@@ -443,6 +444,36 @@ describe('handleCallback', () => {
         message: 'Already enrolled in Stratos',
       }),
     )
+  })
+
+  it('emits a boundary change after reauthorization updates enrollment boundaries', async () => {
+    const session = sessionFor('did:plc:alice')
+    mockOauthClient.callback.mockResolvedValue({ session })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+    mockEnrollmentStore.getEnrollment.mockResolvedValue({
+      did: 'did:plc:alice',
+      active: true,
+      enrollmentRkey: 'did:web:previous-service.test',
+      signingKeyDid: 'did:key:zQ3sh...',
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    mockEnrollmentStore.getBoundaries = vi.fn().mockResolvedValue([])
+    mockEnrollmentStore.setBoundaries = vi.fn()
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    config.autoEnrollDomains = ['swordsmith']
+
+    await callHandler(handleCallback(config), makeReq(), makeRes())
+
+    expect(config.enrollmentEvents.emit).toHaveBeenCalledWith('enrollment', {
+      did: 'did:plc:alice',
+      action: 'boundaries',
+      boundaries: ['swordsmith'],
+      priorBoundaries: [],
+      time: expect.any(String),
+    })
   })
 
   it('denies enrollment if not allowed', async () => {

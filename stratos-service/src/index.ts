@@ -397,6 +397,7 @@ export class StratosServer {
       autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
       allowedRedirectOrigins: cfg.allowedRedirectOrigins,
       logger: ctx.logger,
+      enrollmentEvents: ctx.enrollmentEvents,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
       profileRecordWriter: ctx.profileRecordWriter,
