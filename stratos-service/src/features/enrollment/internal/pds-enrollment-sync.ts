@@ -73,6 +73,10 @@ export async function syncEnrollmentRecordToPds(
           signingKey: attestation.signingKey,
         },
         createdAt: new Date().toISOString(),
+        custody: enrollment.custody ?? 'stratos',
+        ...(enrollment.custody === 'pds' && enrollment.repoHost
+          ? { repoHost: enrollment.repoHost }
+          : {}),
       },
     },
     { signal },

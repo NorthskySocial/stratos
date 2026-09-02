@@ -33,7 +33,7 @@
     onSetServiceUrl,
   }: Props = $props()
 
-  let inputUrl = $state(serviceUrl)
+  let inputUrl = $derived(serviceUrl)
 </script>
 
 <nav class="sidebar-nav">
@@ -52,6 +52,16 @@
             <span class="badge unverified" title="Attestation could not be verified">⚠</span>
           {/if}
         </div>
+        <div class="custody-status">
+          <span class="enrollment-label">Record custody</span>
+          <span>{enrollment.custody === 'pds' ? 'PDS' : 'Stratos service'}</span>
+        </div>
+        <!-- Custody is not covered by the enrollment attestation. -->
+        {#if attestationVerified === false}
+          <p class="attestation-failure" role="alert">
+            The enrollment attestation could not be verified. Private posting is disabled.
+          </p>
+        {/if}
       {:else}
         <div class="status not-enrolled">
           <span class="dot"></span>
@@ -93,13 +103,13 @@
           <input
             type="text"
             placeholder="Stratos Service URL"
-            bind:value={inputUrl.value}
+            bind:value={inputUrl}
             class="url-input"
           />
           <button
             class="set-url-btn"
-            disabled={!inputUrl.value}
-            onclick={() => onSetServiceUrl?.(inputUrl.value)}
+            disabled={!inputUrl}
+            onclick={() => onSetServiceUrl?.(inputUrl)}
           >
             Set URL
           </button>
@@ -123,7 +133,7 @@
     >
       All domains
     </button>
-    {#each enrolledDomains as domain}
+    {#each enrolledDomains as domain (domain)}
       <button
         class="feed-btn"
         class:active={activeFeed === domain}
@@ -152,7 +162,7 @@
       <p class="muted">No domains discovered</p>
     {:else}
       <div class="domain-list">
-        {#each allDomains as domain}
+        {#each allDomains as domain (domain)}
           <span
             class="domain-tag"
             class:enrolled-tag={enrolledDomains.includes(domain)}
@@ -171,7 +181,7 @@
     <div class="section">
       <h3 class="section-title">Your Domains</h3>
       <div class="domain-list">
-        {#each enrolledDomains as domain}
+        {#each enrolledDomains as domain (domain)}
           <span class="domain-tag enrolled-tag">{displayBoundary(domain)}</span>
         {/each}
       </div>
@@ -260,6 +270,26 @@
     border-radius: 6px;
     margin-top: 0.4rem;
     line-height: 1.3;
+  }
+
+  .custody-status {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    color: #444;
+    font-size: 0.82rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .attestation-failure {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    color: #b91c1c;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    margin: 0.35rem 0 0;
+    padding: 0.4rem 0.5rem;
   }
 
   .enroll-btn {

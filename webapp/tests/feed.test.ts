@@ -6,6 +6,7 @@ import {
   feedStats,
   resolveHandles,
   groupIntoThreads,
+  authorFromUri,
   type FeedPost,
 } from '../src/lib/feed'
 
@@ -23,6 +24,19 @@ const createPost = (overrides: Partial<FeedPost> = {}): FeedPost => ({
 })
 
 describe('feed logic', () => {
+  describe('authorFromUri', () => {
+    it('extracts authors from custody and space record URIs', () => {
+      expect(
+        authorFromUri(
+          'at://did:web:stratos.example/space/zone.stratos.space.feed/engineering/did:plc:faye/zone.stratos.feed.post/1',
+        ),
+      ).toBe('did:plc:faye')
+      expect(authorFromUri('at://did:plc:spike/zone.stratos.feed.post/1')).toBe(
+        'did:plc:spike',
+      )
+    })
+  })
+
   describe('buildUnifiedFeed', () => {
     it('combines and sorts posts by date descending', () => {
       const p1 = createPost({

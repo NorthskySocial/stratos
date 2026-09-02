@@ -1,7 +1,7 @@
 /* eslint-disable */
 // AUTO-GENERATED FILE — DO NOT EDIT.
 // Regenerate with: pnpm --filter @northskysocial/stratos-client lexgen
-// Source: lexicons/zone/stratos/**/*.json
+// Source: lexicons*/zone/stratos/**/*.json
 
 import type { LexiconDoc } from '@atproto/lexicon'
 
@@ -1153,6 +1153,19 @@ export const stratosLexicons: LexiconDoc[] = [
           }
         }
       }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.space.feed",
+  "defs": {
+    "main": {
+      "type": "space",
+      "description": "A members-only Stratos post feed",
+      "key": "any",
+      "name": "Stratos Feed",
+      "collections": ["zone.stratos.feed.post"]
     }
   }
 },

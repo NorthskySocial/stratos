@@ -122,6 +122,8 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       signingKeyDid: 'did:key:zSailorMoon',
       active: true,
       boundaries: [ENGINEERING],
+      custody: 'pds',
+      repoHost: 'https://pds.juban.tokyo.jp',
     })
   })
 
@@ -161,6 +163,8 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       boundaries: Array<{ value: string }>
       signingKey: string
       service: string
+      custody: 'pds'
+      repoHost: string
       attestation: { sig: Uint8Array; signingKey: string }
     }
     const values = record.boundaries.map((b) => b.value)
@@ -170,6 +174,8 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     expect(values).toContain(RESERVED)
     expect(record.signingKey).toBe('did:key:zSailorMoon')
     expect(record.service).toBe('https://stratos.example.com')
+    expect(record.custody).toBe('pds')
+    expect(record.repoHost).toBe('https://pds.juban.tokyo.jp')
     expect(record.attestation.signingKey).toBe('did:key:zServiceKey')
     expect(Array.from(record.attestation.sig)).toEqual([1, 2, 3])
   })

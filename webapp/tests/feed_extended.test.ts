@@ -4,6 +4,7 @@ import {
   fetchPublicPosts,
   fetchStratosPosts,
   fetchAppviewStratosPosts,
+  fetchFeedgenPosts,
   findPost,
   type FeedPost,
 } from '../src/lib/feed'
@@ -235,6 +236,50 @@ describe('feed extended logic', () => {
         'https://appview.stratos.actor',
       )
       expect(result.posts).toEqual([])
+    })
+  })
+
+  describe('fetchFeedgenPosts', () => {
+    it('uses feedgen boundaries for a PDS-custody post', async () => {
+      const mockSession = {
+        fetchHandler: vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            feed: [
+              {
+                post: {
+                  uri: 'at://did:web:section-9.test/space/zone.stratos.space.feed/section-9/did:plc:motoko/zone.stratos.feed.post/1',
+                  cid: 'cid1',
+                  record: {
+                    text: 'Motoko posts from the PDS space.',
+                    createdAt: '2024-01-01T12:00:00Z',
+                  },
+                  author: { did: 'did:plc:motoko' },
+                  boundaries: ['section-9'],
+                },
+              },
+            ],
+          }),
+        }),
+      } as unknown as OAuthSession
+
+      const result = await fetchFeedgenPosts(
+        mockSession,
+        'did:web:batou.test',
+        'section-9',
+      )
+
+      expect(result.posts).toHaveLength(1)
+      expect(result.posts[0]?.boundaries).toEqual(['section-9'])
+      expect(mockSession.fetchHandler).toHaveBeenCalledWith(
+        expect.stringContaining('/xrpc/zone.stratos.feedgen.getFeed'),
+        expect.objectContaining({
+          headers: {
+            'atproto-proxy': 'did:web:batou.test#stratos_feedgen',
+          },
+          method: 'GET',
+        }),
+      )
     })
   })
 

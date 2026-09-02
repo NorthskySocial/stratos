@@ -79,6 +79,7 @@ describe('stratos logic', () => {
       const enrollment = await discoverStratosEnrollment(mockSession)
       expect(enrollment).not.toBeNull()
       expect(enrollment?.service).toBe('https://stratos.example.com')
+      expect(enrollment?.custody).toBe('stratos')
       expect(enrollment?.rkey).toBe('1')
       expect(mockAgent.com.atproto.repo.listRecords).toHaveBeenCalled()
     })
@@ -91,6 +92,8 @@ describe('stratos logic', () => {
           uri: 'at://did:plc:user1/zone.stratos.actor.enrollment/did:web:test.stratos.actor',
           value: {
             service: 'https://stratos.example.com',
+            custody: 'pds',
+            repoHost: 'https://pds.example.com',
             boundaries: [{ value: 'eng' }],
             signingKey: 'key1',
             createdAt: '2024-01-01T12:00:00Z',
@@ -102,6 +105,8 @@ describe('stratos logic', () => {
       expect(enrollment).not.toBeNull()
       expect(enrollment?.service).toBe('https://stratos.example.com')
       expect(enrollment?.rkey).toBe('did:web:test.stratos.actor')
+      expect(enrollment?.custody).toBe('pds')
+      expect(enrollment?.repoHost).toBe('https://pds.example.com')
       expect(mockAgent.com.atproto.repo.getRecord).toHaveBeenCalledWith({
         repo: 'did:plc:user1',
         collection: 'zone.stratos.actor.enrollment',
@@ -225,6 +230,7 @@ describe('stratos logic', () => {
     it('returns false if no attestation', async () => {
       const enrollment: StratosEnrollment = {
         service: 'https://s1.com',
+        custody: 'stratos',
         boundaries: [],
         signingKey: 'k1',
         attestation: null,
@@ -241,6 +247,7 @@ describe('stratos logic', () => {
 
       const enrollment: StratosEnrollment = {
         service: 'https://s1.com',
+        custody: 'stratos',
         boundaries: [{ value: 'eng' }],
         signingKey: 'k1',
         attestation: {
