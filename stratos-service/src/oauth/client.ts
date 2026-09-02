@@ -219,6 +219,8 @@ export interface OAuthClientConfig {
   logoUri?: string
   tosUri?: string
   policyUri?: string
+  /** Allow loopback HTTP only for the local development OAuth flow. */
+  allowHttp?: boolean
 }
 
 /**
@@ -465,6 +467,7 @@ export async function createOAuthClient(
     },
 
     fetch,
+    ...(config.allowHttp === true ? { allowHttp: true } : {}),
   })
 }
 

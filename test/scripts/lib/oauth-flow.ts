@@ -25,7 +25,10 @@ export async function handleNgrokInterstitial(page: Page, label: string) {
   const ngrokButton = await page.$(
     'button:has-text("Visit Site"), button:has-text("Visit the site")',
   )
-  if (!ngrokButton && !page.url().includes('ngrok-free.app')) {
+  const isNgrokFreeDomain = ['ngrok-free.app', 'ngrok-free.dev'].some(
+    (domain) => page.url().includes(domain),
+  )
+  if (!ngrokButton && !isNgrokFreeDomain) {
     return
   }
 
@@ -117,17 +120,23 @@ export async function submitSignInAndConsent(
     await page.keyboard.press('Enter')
   }
 
-  await page.waitForURL(
-    (url: URL) => {
-      const s = url.toString()
-      return (
-        s.includes('/oauth/callback') ||
-        s.includes('authorize') ||
-        s.includes('consent')
-      )
-    },
-    { timeout: 15_000 },
+  const consentButton = page.locator(
+    'button:has-text("Accept"), button:has-text("Authorize"), button:has-text("Allow")',
   )
+  const signInError = page.getByText(/Wrong identifier or password/i)
+  await Promise.race([
+    page.waitForURL(
+      (url: URL) => {
+        const urlText = url.toString()
+        return isFinalUrl(urlText) || urlText.includes('/oauth/callback')
+      },
+      { timeout: 15_000 },
+    ),
+    consentButton.waitFor({ state: 'visible', timeout: 15_000 }),
+    signInError.waitFor({ state: 'visible', timeout: 15_000 }).then(() => {
+      throw new Error('OAuth sign-in rejected the supplied credentials')
+    }),
+  ])
 
   dim(`${label}: After sign-in URL: ${page.url()}`)
   await screenshot(page, `${label}-03-after-signin`)

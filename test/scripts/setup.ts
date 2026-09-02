@@ -8,6 +8,10 @@ import { waitForHealthy } from './lib/stratos.ts'
 import { loadState, saveState, type TestState } from './lib/state.ts'
 import { error, fail, info, pass, section, warn } from './lib/log.ts'
 import { isAppview, isPostgres } from './lib/backend.ts'
+import {
+  createPdsAccount,
+  waitForPdsSpacesReady,
+} from './lib/mixed-mode-pds.ts'
 
 async function prepareTestDataDir() {
   info('Preparing test-data directory...')
@@ -23,8 +27,12 @@ async function prepareTestDataDir() {
     }
   }
   await Deno.mkdir(TEST_DATA_DIR, { recursive: true })
+  const pdsSpacesDataDir = `${TEST_DATA_DIR}/pds-spaces`
+  await Deno.mkdir(pdsSpacesDataDir, { recursive: true })
 
-  const chmod = new Deno.Command('chmod', { args: ['777', TEST_DATA_DIR] })
+  const chmod = new Deno.Command('chmod', {
+    args: ['777', TEST_DATA_DIR, pdsSpacesDataDir],
+  })
   await chmod.output()
 }
 
@@ -69,6 +77,44 @@ async function createPdsAccounts(state: TestState) {
       throw err
     }
   }
+}
+
+async function createMixedModeAccounts(state: TestState) {
+  section('Creating spaces PDS accounts')
+  const accounts = [
+    {
+      key: 'member' as const,
+      handle: 'motoko.spike.test',
+      email: 'motoko@example.com',
+      password: 'test-motoko-spaces-2026!',
+    },
+    {
+      key: 'hostile' as const,
+      handle: 'batou.spike.test',
+      email: 'batou@example.com',
+      password: 'test-batou-spaces-2026!',
+    },
+  ]
+  const created = await Promise.all(
+    accounts.map(async ({ key, handle, email, password }) => {
+      const account = await createPdsAccount(handle, email, password)
+      return [
+        key,
+        {
+          did: account.did,
+          handle: account.handle,
+          password: account.password,
+          enrolled: false,
+          records: {},
+        },
+      ] as const
+    }),
+  )
+  state.mixedMode = {
+    member: created.find(([key]) => key === 'member')![1],
+    hostile: created.find(([key]) => key === 'hostile')![1],
+  }
+  pass('Created spaces PDS member fixtures')
 }
 
 function getEnvVars(state: TestState): Record<string, string> {
@@ -128,11 +174,11 @@ async function startStratos(envVars: Record<string, string>) {
   }
   composeArgs.push('up', '-d', '--build', '--force-recreate')
   if (isAppview()) {
-    composeArgs.push('--wait', 'postgres', 'stratos', 'appview')
+    composeArgs.push('--wait', 'postgres', 'stratos', 'pds-spaces', 'appview')
   } else if (isPostgres()) {
-    composeArgs.push('postgres', 'stratos')
+    composeArgs.push('postgres', 'stratos', 'pds-spaces')
   } else {
-    composeArgs.push('stratos')
+    composeArgs.push('stratos', 'pds-spaces')
   }
 
   const compose = new Deno.Command('docker-compose', {
@@ -162,7 +208,6 @@ async function run() {
 
   const state: TestState = await loadState()
   await createPdsAccounts(state)
-
   await saveState(state)
   info(
     `State saved — DIDs: ${Object.values(state.users)
@@ -193,6 +238,12 @@ async function run() {
     fail('Stratos did not become healthy', String(err))
     throw err
   }
+
+  info('Waiting for spaces PDS to become ready...')
+  await waitForPdsSpacesReady()
+  pass('Spaces PDS is ready')
+
+  await createMixedModeAccounts(state)
 
   state.serviceDid = envVars['STRATOS_SERVICE_DID']
   state.stratosRunning = true

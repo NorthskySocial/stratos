@@ -26,9 +26,15 @@ async function deleteTestAccounts() {
 }
 
 async function stopDockerCompose() {
-  info('Stopping Stratos container...')
+  info('Stopping Stratos and spaces PDS containers...')
   try {
-    const composeArgs = ['compose', '-f', 'docker-compose.test.yml']
+    const composeArgs = [
+      'compose',
+      '-f',
+      'docker-compose.test.yml',
+      '--profile',
+      'browser-e2e',
+    ]
     if (isAppview()) composeArgs.push('-f', 'docker-compose.e2e.yml')
     else if (isPostgres()) composeArgs.push('-f', 'docker-compose.postgres.yml')
     composeArgs.push('stop')

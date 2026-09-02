@@ -27,6 +27,7 @@ function oauthClientConfig(cfg: StratosServiceConfig): OAuthClientConfig {
     logoUri: cfg.oauth.logoUri,
     tosUri: cfg.oauth.tosUri,
     policyUri: cfg.oauth.policyUri,
+    ...(cfg.stratos.devMode === true ? { allowHttp: true } : {}),
   }
 }
 
