@@ -6,7 +6,7 @@
 #
 # Used by the `feedgen` service in docker-compose.yml via FEEDGEN_FEEDS_FILE.
 feeds:
-  - id: engineering
-    boundary: example.com/engineering
-    displayName: Engineering
+  - id: swordsmith
+    boundary: swordsmith
+    displayName: Swordsmith
     description: Local feedgen test feed
