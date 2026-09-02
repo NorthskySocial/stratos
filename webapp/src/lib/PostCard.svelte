@@ -305,6 +305,8 @@
                     class:active={inspectorOpen}
                     onclick={() => inspectorOpen = !inspectorOpen}
                     title="Inspect PDS stub vs Stratos record"
+                    aria-label="Inspect record custody"
+                    aria-expanded={inspectorOpen}
             >🔍
             </button>
         {/if}
@@ -325,6 +327,11 @@
     .post-card.private {
         border-left: 3px solid #8b5cf6;
         background: #faf5ff;
+    }
+
+    button:focus-visible {
+        outline: 3px solid #1d4ed8;
+        outline-offset: 2px;
     }
 
     .reply-context {

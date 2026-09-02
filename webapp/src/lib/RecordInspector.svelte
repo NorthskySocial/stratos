@@ -17,6 +17,7 @@
 
   const ctx = getContext<{ session: OAuthSession; serviceUrl: string }>('stratos-inspector')
 
+  let dialog = $state<HTMLDialogElement>()
   let loading = $state(true)
   let result: InspectorResult | null = $state(null)
 
@@ -41,17 +42,20 @@
     }
   }
 
-  function handleBackdropClick(e: MouseEvent) {
-    if (e.target === e.currentTarget) onclose()
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose()
-  }
-
   $effect(() => {
     void load()
   })
+
+  $effect(() => {
+    if (dialog && !dialog.open) {
+      dialog.showModal()
+    }
+  })
+
+  function handleCancel(event: Event) {
+    event.preventDefault()
+    dialog?.close()
+  }
 
   function stubValueOnly(data: Record<string, unknown> | null): unknown {
     if (!data) return null
@@ -59,20 +63,17 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<div class="overlay" role="button" tabindex="-1" onclick={handleBackdropClick}>
-  <div class="modal">
+<dialog bind:this={dialog} class="modal" aria-labelledby="inspector-title" aria-busy={loading} oncancel={handleCancel} onclose={onclose}>
     <div class="modal-header">
       <div>
-        <h2 class="modal-title">Record Inspector</h2>
+        <h2 id="inspector-title" class="modal-title">Record Inspector</h2>
         <p class="modal-subtitle">PDS stub → Stratos hydration reference chain</p>
       </div>
-      <button class="close-btn" onclick={onclose}>&times;</button>
+      <button class="close-btn" type="button" onclick={() => dialog?.close()} aria-label="Close record inspector">&times;</button>
     </div>
 
     {#if loading}
-      <div class="modal-loading">
+      <div class="modal-loading" role="status">
         <span class="spinner"></span> Fetching records…
       </div>
     {:else if result}
@@ -118,22 +119,11 @@
         </div>
       </div>
     {/if}
-  </div>
-</div>
+</dialog>
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 2rem;
-  }
-
   .modal {
+    border: 0;
     background: #fff;
     border-radius: 10px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
@@ -143,6 +133,10 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  .modal::backdrop {
+    background: rgba(0, 0, 0, 0.5);
   }
 
   .modal-header {
@@ -181,6 +175,11 @@
   .close-btn:hover {
     color: #374151;
     background: #f3f4f6;
+  }
+
+  .close-btn:focus-visible {
+    outline: 3px solid #1d4ed8;
+    outline-offset: 2px;
   }
 
   .modal-loading {

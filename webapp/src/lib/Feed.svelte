@@ -38,7 +38,7 @@
 
 <div class="feed">
     {#if loading}
-        <div class="loading">Loading posts…</div>
+        <div class="loading" role="status">Loading posts…</div>
     {:else if posts.length === 0}
         <div class="empty">No posts yet. Create your first post above!</div>
     {:else}
@@ -60,7 +60,7 @@
     .empty {
         padding: 2rem;
         text-align: center;
-        color: #888;
+        color: #666;
         font-size: 0.9rem;
     }
 
