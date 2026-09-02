@@ -117,7 +117,7 @@ describe('stratos logic', () => {
       setStratosServiceDid(undefined)
     })
 
-    it('falls back to listRecords if getRecord fails when STRATOS_SERVICE_DID is set', async () => {
+    it('returns null when only unrelated enrollments exist', async () => {
       setStratosServiceDid('did:web:test.stratos.actor')
 
       mockAgent.com.atproto.repo.getRecord.mockRejectedValue(
@@ -140,11 +140,47 @@ describe('stratos logic', () => {
       })
 
       const enrollment = await discoverStratosEnrollment(mockSession)
-      expect(enrollment).not.toBeNull()
-      expect(enrollment?.service).toBe('https://fallback.example.com')
-      expect(enrollment?.rkey).toBe('fallback-key')
+      expect(enrollment).toBeNull()
       expect(mockAgent.com.atproto.repo.getRecord).toHaveBeenCalled()
       expect(mockAgent.com.atproto.repo.listRecords).toHaveBeenCalled()
+
+      setStratosServiceDid(undefined)
+    })
+
+    it('finds the configured enrollment when listRecords includes other services', async () => {
+      setStratosServiceDid('did:web:test.stratos.actor')
+
+      mockAgent.com.atproto.repo.getRecord.mockRejectedValue(
+        new Error('Not found'),
+      )
+      mockAgent.com.atproto.repo.listRecords.mockResolvedValue({
+        data: {
+          records: [
+            {
+              uri: 'at://did:plc:user1/zone.stratos.actor.enrollment/stale-service',
+              value: {
+                service: 'https://stale.example.com',
+                boundaries: [],
+                signingKey: 'stale-key',
+                createdAt: '2024-01-01T13:00:00Z',
+              },
+            },
+            {
+              uri: 'at://did:plc:user1/zone.stratos.actor.enrollment/did:web:test.stratos.actor',
+              value: {
+                service: 'https://stratos.example.com',
+                boundaries: [{ value: 'eng' }],
+                signingKey: 'current-key',
+                createdAt: '2024-01-01T14:00:00Z',
+              },
+            },
+          ],
+        },
+      })
+
+      const enrollment = await discoverStratosEnrollment(mockSession)
+      expect(enrollment?.service).toBe('https://stratos.example.com')
+      expect(enrollment?.rkey).toBe('did:web:test.stratos.actor')
 
       setStratosServiceDid(undefined)
     })
