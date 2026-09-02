@@ -153,4 +153,39 @@ describe('auth', () => {
     ).resolves.toBe('missing')
     vi.unstubAllEnvs()
   })
+  it('uses the default handle resolver when the build argument is empty', async () => {
+    vi.stubEnv('VITE_ATPROTO_HANDLE_RESOLVER', '')
+    vi.resetModules()
+    const auth = await import('../src/lib/auth')
+
+    await auth.init()
+
+    expect(BrowserOAuthClient).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        handleResolver: 'https://bsky.social',
+        allowHttp: true,
+        clientMetadata: expect.objectContaining({
+          scope: expect.stringContaining(SPACE_WRITE_SCOPE),
+        }),
+      }),
+    )
+    vi.unstubAllEnvs()
+  })
+
+  it('keeps the loopback redirect URI stable during an OAuth callback', async () => {
+    window.history.replaceState({}, '', '/?code=Masami&state=Fuu')
+    vi.resetModules()
+    const auth = await import('../src/lib/auth')
+
+    await auth.init()
+
+    expect(BrowserOAuthClient).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        clientMetadata: expect.objectContaining({
+          redirect_uris: ['http://127.0.0.1:3000/'],
+        }),
+      }),
+    )
+    window.history.replaceState({}, '', '/')
+  })
 })

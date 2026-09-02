@@ -127,17 +127,20 @@ async function run(): Promise<void> {
     `status=${unauthList.status}`,
   )
 
+  const pdsFixture = state.mixedMode?.member
   const pdsMembers = await adminList(
     'zone.stratos.admin.listEnrollments?custody=pds',
     sessionCookie,
   )
   const pdsMembersBody = pdsMembers.body as {
-    enrollments?: Array<{ custody?: string }>
+    enrollments?: Array<{ did?: string; custody?: string }>
   }
   assert(
     pdsMembers.status === 200 &&
-      (pdsMembersBody.enrollments?.length ?? 0) === 0,
-    'listEnrollments returns an empty PDS-custody partition before the PDS fixture',
+      (pdsMembersBody.enrollments?.length ?? 0) === 1 &&
+      pdsMembersBody.enrollments?.[0]?.did === pdsFixture?.did &&
+      pdsMembersBody.enrollments?.[0]?.custody === 'pds',
+    'listEnrollments returns the one PDS-custody fixture',
     `status=${pdsMembers.status}, returned=${pdsMembersBody.enrollments?.length ?? 0}`,
   )
 

@@ -15,6 +15,7 @@ import {
   DOMAINS,
   STRATOS_URL,
 } from './lib/config.ts'
+import { PDS_SPACES_URL } from './lib/mixed-mode-pds.ts'
 import { loadState } from './lib/state.ts'
 import { assert, dim, fail, finish, section } from './lib/log.ts'
 
@@ -92,7 +93,8 @@ async function run(): Promise<void> {
   const state = await loadState()
   const operator = state.users[ADMIN_OPERATOR_KEY]
   const target = state.users[ADMIN_TARGET_KEY]
-  if (!operator || !target) {
+  const pdsFixture = state.mixedMode?.member
+  if (!operator || !target || !pdsFixture) {
     fail(
       'Missing operator/target user state',
       `operator=${ADMIN_OPERATOR_KEY}, target=${ADMIN_TARGET_KEY} — run setup.ts first`,
@@ -194,16 +196,6 @@ async function run(): Promise<void> {
       'Member row shows the Stratos custody badge',
     )
     await page.selectOption('[data-testid="members-custody-filter"]', {
-      value: 'pds',
-    })
-    await page.waitForSelector('[data-testid="members-empty"]', {
-      timeout: 15_000,
-    })
-    assert(
-      (await page.locator('[data-testid="member-row"]').count()) === 0,
-      'PDS custody filter excludes the Stratos-only fixture members',
-    )
-    await page.selectOption('[data-testid="members-custody-filter"]', {
       value: 'stratos',
     })
     await page.waitForSelector('[data-testid="members-list"]', {
@@ -213,6 +205,39 @@ async function run(): Promise<void> {
       (await page.locator('[data-testid="member-row"]').count()) > 0,
       'Custody filter keeps Stratos-custody members visible',
     )
+    await page.selectOption('[data-testid="members-custody-filter"]', {
+      value: 'pds',
+    })
+    await page.waitForSelector('[data-testid="members-list"]', {
+      timeout: 15_000,
+    })
+    const pdsRows = page.locator('[data-testid="member-row"]')
+    assert(
+      (await pdsRows.count()) === 1 &&
+        (await pdsRows.first().textContent())?.includes(pdsFixture.did) ===
+          true,
+      'Custody filter shows the one PDS-custody fixture',
+    )
+    await pdsRows.first().click()
+    await page
+      .locator('[data-testid="repo-host-detail"]')
+      .filter({ hasText: `${PDS_SPACES_URL} (authority-override)` })
+      .waitFor({
+        state: 'visible',
+        timeout: 15_000,
+      })
+    const pdsDetail = await page.textContent(
+      '[data-testid="enrollment-detail"]',
+    )
+    assert(
+      pdsDetail?.includes(pdsFixture.did) === true &&
+        pdsDetail.includes(PDS_SPACES_URL) &&
+        pdsDetail.includes('authority-override'),
+      'PDS-custody detail shows the enrollment host and resolution source',
+    )
+    await page.selectOption('[data-testid="members-custody-filter"]', {
+      value: 'stratos',
+    })
     await screenshot(page, 'admin-ui-02-member-list')
 
     await targetRow.first().click()

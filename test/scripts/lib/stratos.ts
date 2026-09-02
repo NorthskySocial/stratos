@@ -151,15 +151,16 @@ export async function getRecord(
 }
 
 /** Try to get a record, returns null on error (used for negative tests) */
+export type TryGetRecordResult =
+  | { ok: true; data: GetRecordResponse }
+  | { ok: false; status: number; error: string }
+
 export async function tryGetRecord(
   repo: string,
   collection: string,
   rkey: string,
   callerDid?: string,
-): Promise<
-  | { ok: true; data: GetRecordResponse }
-  | { ok: false; status: number; error: string }
-> {
+): Promise<TryGetRecordResult> {
   const params = new URLSearchParams({ repo, collection, rkey })
   const headers: Record<string, string> = {}
   if (callerDid) {
@@ -178,6 +179,21 @@ export async function tryGetRecord(
   }
 
   return { ok: true, data: (await res.json()) as GetRecordResponse }
+}
+
+export function isRecordNotFound(result: TryGetRecordResult): boolean {
+  if (result.ok || result.status !== 400) return false
+  try {
+    const body = JSON.parse(result.error) as {
+      error?: unknown
+      message?: unknown
+    }
+    return (
+      body.error === 'RecordNotFound' && body.message === 'Record not found'
+    )
+  } catch {
+    return false
+  }
 }
 
 interface ListRecordsResponse {
