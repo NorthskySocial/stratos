@@ -1237,7 +1237,13 @@ function registerGetRepoHostHandler(ctx: AppContext): void {
         const resolutions = await Promise.all(
           boundaries.flatMap((boundary) => {
             const result = boundaryToSpaceUri(boundary, SPACE_TYPE)
-            if (!result.ok) return []
+            if (!result.ok) {
+              ctx.logger?.warn(
+                { did, boundary },
+                'admin.getRepoHost could not convert boundary to a space URI',
+              )
+              return []
+            }
             return [
               resolveRepoHost(result.value, did, hostDeps).then((resolved) => ({
                 boundary,
