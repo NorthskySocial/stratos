@@ -77,9 +77,11 @@ function storedEnrollment(
 function createCtx(opts: {
   enrollmentStore?: Partial<EnrollmentStore>
   adminAuthFails?: boolean
+  idResolver?: AppContext['idResolver']
 }): {
   app: express.Application
   enrollmentStore: AppContext['enrollmentStore']
+  logger: { warn: ReturnType<typeof vi.fn> }
 } {
   const enrollmentStore = {
     isEnrolled: vi.fn(async () => true),
@@ -99,6 +101,12 @@ function createCtx(opts: {
   const app = express()
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
 
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }
   const ctx = {
     app,
     enrollmentStore,
@@ -119,20 +127,20 @@ function createCtx(opts: {
       optionalStandard: vi.fn(async () => ({ credentials: { did: null } })),
     },
     serviceDid: NERV,
+    idResolver:
+      opts.idResolver ??
+      ({
+        did: { resolve: vi.fn(async () => undefined) },
+      } as unknown as AppContext['idResolver']),
     cfg: {
       service: { publicUrl: 'https://stratos.example.com' },
       stratos: { serviceDid: NERV, allowedDomains: [`${NERV}/general`] },
     },
-    logger: {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn(),
-    },
+    logger,
   } as unknown as AppContext
 
   registerEnrollmentHandlers({ method: vi.fn() } as never, ctx)
-  return { app, enrollmentStore }
+  return { app, enrollmentStore, logger }
 }
 
 const ROUTE = '/xrpc/zone.stratos.admin.listEnrollments'
@@ -155,7 +163,11 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
           storedEnrollment('did:plc:motoko', { isService: true }),
           // Older rows predate the isService column, so the key is absent
           // rather than false; the handler must still report a boolean.
-          storedEnrollment('did:plc:faye', { isService: undefined }),
+          storedEnrollment('did:plc:faye', {
+            isService: undefined,
+            custody: 'pds',
+            repoHost: 'https://pds.faye.example',
+          }),
         ]),
         getBoundaries: vi.fn(async (did: string) =>
           did === 'did:plc:usagi'
@@ -176,6 +188,7 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
           enrolledAt: '2026-01-01T00:00:00.000Z',
           active: true,
           isService: false,
+          custody: 'stratos',
           boundaries: [`${NERV}/general`, `${NERV}/swordsmith`],
         },
         {
@@ -183,6 +196,7 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
           enrolledAt: '2026-01-01T00:00:00.000Z',
           active: true,
           isService: true,
+          custody: 'stratos',
           boundaries: [`${NERV}/general`],
         },
         {
@@ -190,6 +204,8 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
           enrolledAt: '2026-01-01T00:00:00.000Z',
           active: true,
           isService: false,
+          custody: 'pds',
+          repoHost: 'https://pds.faye.example',
           boundaries: [`${NERV}/general`],
         },
       ],
@@ -459,6 +475,51 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
       },
     )
 
+    it('filters by custody and defaults absent custody to stratos', async () => {
+      const { app } = createCtx({
+        enrollmentStore: {
+          listEnrollments: vi.fn(async () => [
+            storedEnrollment('did:plc:usagi'),
+            storedEnrollment('did:plc:rei', {
+              custody: 'pds',
+              repoHost: 'https://pds.rei.example',
+            }),
+          ]),
+          enrollmentCount: vi.fn(async () => 2),
+        } as unknown as Partial<EnrollmentStore>,
+      })
+
+      const stratos = await invokeGetRoute(app, ROUTE, { custody: 'stratos' })
+      const pds = await invokeGetRoute(app, ROUTE, { custody: 'pds' })
+
+      expect(
+        (stratos.body as { enrollments: Array<{ did: string }> }).enrollments,
+      ).toEqual([
+        expect.objectContaining({ did: 'did:plc:usagi', custody: 'stratos' }),
+      ])
+      expect(
+        (pds.body as { enrollments: Array<{ did: string }> }).enrollments,
+      ).toEqual([
+        expect.objectContaining({
+          did: 'did:plc:rei',
+          custody: 'pds',
+          repoHost: 'https://pds.rei.example',
+        }),
+      ])
+    })
+
+    it.each([['unknown'], [['pds']]])(
+      'rejects a malformed custody value (%o)',
+      async (custody) => {
+        const { app, enrollmentStore } = createCtx({})
+
+        const res = await invokeGetRoute(app, ROUTE, { custody })
+
+        expect(res.statusCode).toBe(400)
+        expect(enrollmentStore.listEnrollments).not.toHaveBeenCalled()
+      },
+    )
+
     it('bounds the scan when nothing matches, and stays resumable', async () => {
       // 5000 members, none matching: without a budget this would scan the
       // whole table and issue a boundary read per row.
@@ -506,5 +567,198 @@ describe('GET /xrpc/zone.stratos.admin.listEnrollments', () => {
       expect(res.statusCode).toBe(400)
       expect(enrollmentStore.listEnrollments).not.toHaveBeenCalled()
     })
+  })
+})
+
+const HOST_ROUTE = '/xrpc/zone.stratos.admin.getRepoHost'
+
+describe('GET /xrpc/zone.stratos.admin.getRepoHost', () => {
+  it('returns one authority override for every member space', async () => {
+    const { app } = createCtx({
+      enrollmentStore: {
+        getEnrollment: vi.fn(async () =>
+          storedEnrollment('did:plc:usagi', {
+            custody: 'pds',
+            repoHost: 'https://override.example',
+          }),
+        ),
+        getBoundaries: vi.fn(async () => [
+          `${NERV}/general`,
+          `${NERV}/swordsmith`,
+        ]),
+      } as unknown as Partial<EnrollmentStore>,
+    })
+
+    const res = await invokeGetRoute(app, HOST_ROUTE, { did: 'did:plc:usagi' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toEqual({
+      did: 'did:plc:usagi',
+      custody: 'pds',
+      isService: false,
+      resolutions: [
+        {
+          boundary: `${NERV}/general`,
+          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/general`,
+          host: 'https://override.example',
+          source: 'authority-override',
+        },
+        {
+          boundary: `${NERV}/swordsmith`,
+          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/swordsmith`,
+          host: 'https://override.example',
+          source: 'authority-override',
+        },
+      ],
+    })
+  })
+
+  it('falls back to the DID document and keeps unresolved spaces', async () => {
+    const { app } = createCtx({
+      enrollmentStore: {
+        getEnrollment: vi.fn(async () =>
+          storedEnrollment('did:plc:rei', { custody: 'pds' }),
+        ),
+        getBoundaries: vi.fn(async () => [
+          `${NERV}/general`,
+          `${NERV}/swordsmith`,
+        ]),
+      } as unknown as Partial<EnrollmentStore>,
+      idResolver: {
+        did: {
+          resolve: vi.fn(async () => ({
+            service: [
+              {
+                id: '#atproto_pds',
+                serviceEndpoint: 'https://pds.rei.example',
+              },
+            ],
+          })),
+        },
+      } as unknown as AppContext['idResolver'],
+    })
+
+    const resolved = await invokeGetRoute(app, HOST_ROUTE, {
+      did: 'did:plc:rei',
+    })
+    expect(resolved.body).toEqual({
+      did: 'did:plc:rei',
+      custody: 'pds',
+      isService: false,
+      resolutions: [
+        {
+          boundary: `${NERV}/general`,
+          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/general`,
+          host: 'https://pds.rei.example',
+          source: 'did-document',
+        },
+        {
+          boundary: `${NERV}/swordsmith`,
+          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/swordsmith`,
+          host: 'https://pds.rei.example',
+          source: 'did-document',
+        },
+      ],
+    })
+
+    const { app: unresolvedApp } = createCtx({
+      enrollmentStore: {
+        getEnrollment: vi.fn(async () =>
+          storedEnrollment('did:plc:rei', { custody: 'pds' }),
+        ),
+        getBoundaries: vi.fn(async () => [`${NERV}/general`]),
+      } as unknown as Partial<EnrollmentStore>,
+    })
+    const unresolved = await invokeGetRoute(unresolvedApp, HOST_ROUTE, {
+      did: 'did:plc:rei',
+    })
+    expect(unresolved.body).toEqual({
+      did: 'did:plc:rei',
+      custody: 'pds',
+      isService: false,
+      resolutions: [
+        {
+          boundary: `${NERV}/general`,
+          spaceUri: `at://${NERV}/space/zone.stratos.space.feed/general`,
+        },
+      ],
+    })
+  })
+
+  it('warns when a member boundary cannot convert to a space URI', async () => {
+    const boundary = 'unresolved-space'
+    const { app, logger } = createCtx({
+      enrollmentStore: {
+        getEnrollment: vi.fn(async () =>
+          storedEnrollment('did:plc:rei', { custody: 'pds' }),
+        ),
+        getBoundaries: vi.fn(async () => [boundary]),
+      } as unknown as Partial<EnrollmentStore>,
+    })
+
+    const res = await invokeGetRoute(app, HOST_ROUTE, { did: 'did:plc:rei' })
+
+    expect(res.body).toEqual({
+      did: 'did:plc:rei',
+      custody: 'pds',
+      isService: false,
+      resolutions: [],
+    })
+    expect(logger.warn).toHaveBeenCalledWith(
+      { did: 'did:plc:rei', boundary },
+      'admin.getRepoHost could not convert boundary to a space URI',
+    )
+  })
+
+  it('returns no host resolution for stratos or service enrollment', async () => {
+    for (const enrollment of [
+      storedEnrollment('did:plc:motoko'),
+      storedEnrollment('did:plc:batou', {
+        custody: 'pds',
+        isService: true,
+        repoHost: 'https://service.example',
+      }),
+    ]) {
+      const { app } = createCtx({
+        enrollmentStore: {
+          getEnrollment: vi.fn(async () => enrollment),
+        } as unknown as Partial<EnrollmentStore>,
+      })
+      const res = await invokeGetRoute(app, HOST_ROUTE, { did: enrollment.did })
+      expect(res.body).toEqual({
+        did: enrollment.did,
+        custody: enrollment.custody ?? 'stratos',
+        isService: enrollment.isService ?? false,
+        resolutions: [],
+      })
+    }
+  })
+
+  it('rejects unauthenticated callers', async () => {
+    const { app, enrollmentStore } = createCtx({ adminAuthFails: true })
+
+    expect(
+      (await invokeGetRoute(app, HOST_ROUTE, { did: 'did:plc:rei' }))
+        .statusCode,
+    ).toBe(401)
+    expect(enrollmentStore.getEnrollment).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid DID input and returns 404 for an unknown enrollment', async () => {
+    const { app, enrollmentStore } = createCtx({})
+
+    expect((await invokeGetRoute(app, HOST_ROUTE)).statusCode).toBe(400)
+    expect(
+      (await invokeGetRoute(app, HOST_ROUTE, { did: ['did:plc:rei'] }))
+        .statusCode,
+    ).toBe(400)
+    expect(
+      (await invokeGetRoute(app, HOST_ROUTE, { did: 'not-a-did' })).statusCode,
+    ).toBe(400)
+    expect(enrollmentStore.getEnrollment).not.toHaveBeenCalled()
+    expect(
+      (await invokeGetRoute(app, HOST_ROUTE, { did: 'did:plc:rei' }))
+        .statusCode,
+    ).toBe(404)
   })
 })

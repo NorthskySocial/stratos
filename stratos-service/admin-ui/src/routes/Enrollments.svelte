@@ -4,6 +4,7 @@
   import {
     addBoundary,
     getEnrollmentStatus,
+    getRepoHost,
     listDomains,
     listEnrollments,
     removeBoundary,
@@ -11,8 +12,10 @@
     setActive,
     setBoundaries,
     type BoundariesResponse,
+    type Custody,
     type EnrollmentStatusResponse,
     type EnrollmentSummary,
+    type RepoHostResolution,
   } from '../lib/api/client'
   import Button from '../lib/components/ui/Button.svelte'
   import Card from '../lib/components/ui/Card.svelte'
@@ -28,6 +31,10 @@
   let enrolled = $state(false)
   let boundaries = $state<string[]>([])
   let status = $state<EnrollmentStatusResponse | null>(null)
+  let detailCustody = $state<Custody | null>(null)
+  let detailIsService = $state(false)
+  let hostResolutions = $state<RepoHostResolution[]>([])
+  let hostError = $state<string | null>(null)
   let domains = $state<string[]>([])
   let selectedDomain = $state('')
   let setInput = $state('')
@@ -46,6 +53,7 @@
   let boundaryFilter = $state('')
   /** '' shows everyone, otherwise only active or only deactivated members. */
   let activeFilter = $state<'' | 'active' | 'inactive'>('')
+  let custodyFilter = $state<'' | 'stratos' | 'pds'>('')
 
   $effect(() => {
     listDomains()
@@ -71,6 +79,7 @@
         cursor,
         boundary: boundaryFilter || undefined,
         active: activeFilter === '' ? undefined : activeFilter === 'active',
+        custody: custodyFilter || undefined,
       })
       members = cursor ? [...members, ...res.enrollments] : res.enrollments
       membersCursor = res.cursor
@@ -106,7 +115,14 @@
   }
 
   function applyActiveFilter(value: string) {
-    activeFilter = value as '' | 'active' | 'inactive'
+    if (value !== '' && value !== 'active' && value !== 'inactive') return
+    activeFilter = value
+    reloadMembers()
+  }
+
+  function applyCustodyFilter(value: string) {
+    if (value !== '' && value !== 'stratos' && value !== 'pds') return
+    custodyFilter = value
     reloadMembers()
   }
 
@@ -121,13 +137,32 @@
     loadedDid = null
     boundaries = []
     status = null
+    const member = members.find((entry) => entry.did === did)
+    detailCustody = member?.custody ?? null
+    detailIsService = member?.isService ?? false
+    hostResolutions = []
+    hostError = null
     setInput = ''
     try {
       const res = await resolveEnrollments(did)
       loadedDid = res.did
       enrolled = res.enrolled
       boundaries = res.boundaries
-      status = await getEnrollmentStatus(did).catch(() => null)
+      const [statusResult, hostResult] = await Promise.allSettled([
+        getEnrollmentStatus(did),
+        getRepoHost(did),
+      ])
+      status = statusResult.status === 'fulfilled' ? statusResult.value : null
+      if (hostResult.status === 'fulfilled') {
+        detailCustody = hostResult.value.custody
+        detailIsService = hostResult.value.isService
+        hostResolutions = hostResult.value.resolutions
+      } else {
+        hostError =
+          hostResult.reason instanceof Error
+            ? hostResult.reason.message
+            : String(hostResult.reason)
+      }
       setInput = res.boundaries.join(', ')
     } catch (err) {
       loadedDid = null
@@ -235,6 +270,22 @@
       busy = false
     }
   }
+
+  function collapseHostResolutions(
+    resolutions: RepoHostResolution[],
+  ): RepoHostResolution | undefined {
+    if (resolutions.length === 0) return undefined
+    const [first] = resolutions
+    if (!first.host || !first.source) return undefined
+    return resolutions.every(
+      (resolution) =>
+        resolution.host === first.host && resolution.source === first.source,
+    )
+      ? first
+      : undefined
+  }
+
+  const collapsedHost = $derived(collapseHostResolutions(hostResolutions))
 </script>
 
 <div class="space-y-6" data-testid="enrollments-screen">
@@ -266,7 +317,7 @@
       <h2 class="font-display text-lg italic">Members</h2>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-2">
-          <span class="text-sm text-muted">Domain</span>
+          <span class="text-sm text-muted">Space</span>
           <select
             class="pill cursor-pointer px-4 py-1.5 text-sm outline-none"
             data-testid="members-filter"
@@ -276,11 +327,11 @@
               )}
             value={boundaryFilter}
           >
-            <option value="">All domains</option>
+            <option value="">All spaces</option>
             {#if boundaryFilter && !domains.includes(boundaryFilter)}
               <!--
                 A filter from the URL may name a domain no longer in the
-                allowed list. Show it so the control cannot read "All domains"
+                allowed list. Show it so the control cannot read "All spaces"
                 while a filter is applied.
               -->
               <option value={boundaryFilter}>
@@ -304,6 +355,20 @@
             <option value="">All</option>
             <option value="active">Active</option>
             <option value="inactive">Deactivated</option>
+          </select>
+        </label>
+        <label class="flex items-center gap-2">
+          <span class="text-sm text-muted">Custody</span>
+          <select
+            class="pill cursor-pointer px-4 py-1.5 text-sm outline-none"
+            data-testid="members-custody-filter"
+            onchange={(event) =>
+              applyCustodyFilter((event.currentTarget as HTMLSelectElement).value)}
+            value={custodyFilter}
+          >
+            <option value="">All</option>
+            <option value="stratos">Stratos</option>
+            <option value="pds">PDS</option>
           </select>
         </label>
         <span class="text-sm text-muted" data-testid="members-total">
@@ -351,7 +416,9 @@
                 <Identity did={member.did} />
                 <div class="flex items-center gap-3">
                   {#if member.isService}
-                    <span class="text-xs text-muted">service</span>
+                    <Chip label="service" />
+                  {:else}
+                    <Chip label={member.custody} />
                   {/if}
                   <StatusDot
                     label={member.active ? 'active' : 'deactivated'}
@@ -442,10 +509,10 @@
         </div>
 
         <div>
-          <h3 class="mb-2 text-sm font-medium text-muted">Boundaries</h3>
+          <h3 class="mb-2 text-sm font-medium text-muted">Spaces</h3>
           {#if boundaries.length === 0}
             <p class="text-sm text-muted" data-testid="no-boundaries">
-              No boundaries assigned.
+              No spaces assigned.
             </p>
           {:else}
             <div class="flex flex-wrap gap-2">
@@ -461,18 +528,57 @@
           {/if}
         </div>
 
+        {#if hostError}
+          <p class="text-sm text-error" data-testid="repo-host-error">
+            Failed to resolve repository host: {hostError}
+          </p>
+        {/if}
+
+        {#if !detailIsService}
+          {#if detailCustody === 'stratos'}
+            <p class="text-sm text-muted" data-testid="repo-host-detail">
+              Hosted by this service.
+            </p>
+          {:else if detailCustody === 'pds'}
+            <div data-testid="repo-host-detail">
+              <h3 class="mb-2 text-sm font-medium text-muted">Repository host</h3>
+              {#if collapsedHost}
+                <p class="text-sm text-muted">
+                  {collapsedHost.host} ({collapsedHost.source})
+                </p>
+              {:else if hostResolutions.length === 0}
+                <p class="text-sm text-muted">
+                  {boundaries.length === 0
+                    ? 'No spaces assigned.'
+                    : 'Repository host unresolved for assigned spaces.'}
+                </p>
+              {:else}
+                <ul class="space-y-1 text-sm text-muted">
+                  {#each hostResolutions as resolution (resolution.spaceUri)}
+                    <li>
+                      {boundaryName(resolution.boundary)}: {resolution.host
+                        ? `${resolution.host} (${resolution.source})`
+                        : 'Unresolved'}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          {/if}
+        {/if}
+
         {#if enrolled}
           <div class="flex items-end gap-3">
             <label class="block grow">
               <span class="mb-1 block text-sm font-medium text-muted">
-                Add boundary
+                Add space
               </span>
               <select
                 bind:value={selectedDomain}
                 class="pill w-full cursor-pointer px-4 py-2 text-sm outline-none"
                 data-testid="add-boundary-select"
               >
-                <option value="">Select a domain…</option>
+                <option value="">Select a space…</option>
                 {#each availableDomains as domain (domain)}
                   <option value={domain}>{boundaryName(domain)}</option>
                 {/each}
@@ -483,7 +589,7 @@
               onclick={handleAdd}
               testid="add-boundary"
             >
-              Add
+              Add space
             </Button>
           </div>
 
@@ -492,13 +598,13 @@
               class="cursor-pointer text-sm font-medium text-muted select-none"
               data-testid="set-boundaries-toggle"
             >
-              Set boundaries
+              Set spaces
             </summary>
             <div class="mt-3 flex items-end gap-3">
               <div class="grow">
                 <TextField
                   bind:value={setInput}
-                  ariaLabel="Boundaries, comma-separated"
+                  ariaLabel="Spaces, comma-separated"
                   onenter={handleSet}
                   placeholder="engineering, leadership"
                   testid="set-boundaries-input"
@@ -514,8 +620,8 @@
               </Button>
             </div>
             <p class="mt-2 text-xs text-muted">
-              Replaces every boundary at once. Values are full domains, not
-              short names.
+              Replaces every space at once. Values are full domains, not short
+              names.
             </p>
           </details>
         {/if}

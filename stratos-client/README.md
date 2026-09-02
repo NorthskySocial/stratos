@@ -644,6 +644,11 @@ The bundle contains only the `zone.stratos.*` lexicons — the standard `com.atp
 any overlap. The bundle is generated from the canonical lexicon JSON at build time (`pnpm lexgen`)
 and exported from the `./lexicons` subpath to keep the package root lightweight for atcute consumers.
 
+The bundle also includes the admin-only `zone.stratos.admin.listEnrollments` and
+`zone.stratos.admin.getRepoHost` queries. These endpoints require an operator session. The former
+filters by boundary, active state, or repo custody. The latter reports one repository-host resolution
+per member space; a PDS-custody member's stored host overrides every one of their spaces.
+
 ---
 
 ## 10. CORS and Header Requirements

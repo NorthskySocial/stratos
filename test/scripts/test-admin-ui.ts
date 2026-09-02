@@ -171,6 +171,14 @@ async function run(): Promise<void> {
       'Member list loads enrolled members without searching',
       `${memberRows} rows`,
     )
+    const memberRowText = await page
+      .locator('[data-testid="member-row"]')
+      .allTextContents()
+    assert(
+      memberRowText.every((text) => /\b(?:pds|service|stratos)\b/i.test(text)),
+      'Every member row shows a custody or service badge',
+      memberRowText.join(' | '),
+    )
 
     const targetRow = page
       .locator('[data-testid="member-row"]')
@@ -179,6 +187,31 @@ async function run(): Promise<void> {
       (await targetRow.count()) > 0,
       'Target user appears in the member list',
       `${target.handle} (${target.did})`,
+    )
+    const rowText = await targetRow.first().textContent()
+    assert(
+      rowText?.includes('stratos') === true,
+      'Member row shows the Stratos custody badge',
+    )
+    await page.selectOption('[data-testid="members-custody-filter"]', {
+      value: 'pds',
+    })
+    await page.waitForSelector('[data-testid="members-empty"]', {
+      timeout: 15_000,
+    })
+    assert(
+      (await page.locator('[data-testid="member-row"]').count()) === 0,
+      'PDS custody filter excludes the Stratos-only fixture members',
+    )
+    await page.selectOption('[data-testid="members-custody-filter"]', {
+      value: 'stratos',
+    })
+    await page.waitForSelector('[data-testid="members-list"]', {
+      timeout: 15_000,
+    })
+    assert(
+      (await page.locator('[data-testid="member-row"]').count()) > 0,
+      'Custody filter keeps Stratos-custody members visible',
     )
     await screenshot(page, 'admin-ui-02-member-list')
 
@@ -192,6 +225,11 @@ async function run(): Promise<void> {
     assert(
       rowDetail?.includes(target.did) === true,
       'Selecting a member row opens that member detail',
+    )
+    assert(
+      rowDetail?.includes('Spaces') === true &&
+        rowDetail?.includes('Hosted by this service.') === true,
+      'Enrollment detail uses space labels and shows the Stratos repository host',
     )
 
     // Search by DID still jumps straight to a member.
