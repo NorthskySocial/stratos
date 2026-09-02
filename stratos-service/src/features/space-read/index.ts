@@ -4,3 +4,4 @@ export {
   LIST_SPACE_REPOS_METHOD,
   registerSpaceReadHandlers,
 } from './handler.js'
+export { createRepoHostResolverDeps } from './host-resolution.js'

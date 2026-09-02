@@ -127,6 +127,20 @@ async function run(): Promise<void> {
     `status=${unauthList.status}`,
   )
 
+  const pdsMembers = await adminList(
+    'zone.stratos.admin.listEnrollments?custody=pds',
+    sessionCookie,
+  )
+  const pdsMembersBody = pdsMembers.body as {
+    enrollments?: Array<{ custody?: string }>
+  }
+  assert(
+    pdsMembers.status === 200 &&
+      (pdsMembersBody.enrollments?.length ?? 0) === 0,
+    'listEnrollments returns an empty PDS-custody partition before the PDS fixture',
+    `status=${pdsMembers.status}, returned=${pdsMembersBody.enrollments?.length ?? 0}`,
+  )
+
   // 2. addBoundary via the admin API.
   const add = await adminFetch(
     'zone.stratos.admin.addBoundary',

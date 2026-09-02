@@ -112,6 +112,78 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.admin.getRepoHost",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Resolve repository hosts for an enrolled member's spaces. Requires admin authorization.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The enrolled member DID."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "custody", "isService", "resolutions"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did"
+            },
+            "custody": {
+              "type": "string",
+              "enum": ["stratos", "pds"],
+              "description": "Who hosts the member repository."
+            },
+            "isService": {
+              "type": "boolean",
+              "description": "Whether this is a service enrollment."
+            },
+            "resolutions": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#resolution"
+              }
+            }
+          }
+        }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "required": ["boundary", "spaceUri"],
+      "properties": {
+        "boundary": {
+          "type": "ref",
+          "ref": "zone.stratos.boundary.defs#Domain"
+        },
+        "spaceUri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "host": {
+          "type": "string",
+          "format": "uri"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["authority-override", "did-document"]
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.admin.listAdmins",
   "defs": {
     "main": {
@@ -184,6 +256,15 @@ export const stratosLexicons: LexiconDoc[] = [
           "boundary": {
             "type": "string",
             "description": "Only return members holding this boundary."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Only return active or inactive enrollments."
+          },
+          "custody": {
+            "type": "string",
+            "knownValues": ["stratos", "pds"],
+            "description": "Only return enrollments with this repo custody."
           }
         }
       },
@@ -206,7 +287,7 @@ export const stratosLexicons: LexiconDoc[] = [
             },
             "total": {
               "type": "integer",
-              "description": "Total number of enrollments in the service. Absent when a boundary filter is applied."
+              "description": "Total number of enrollments in the service. Absent when any filter is applied."
             }
           }
         }
@@ -214,7 +295,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "enrollment": {
       "type": "object",
-      "required": ["did", "enrolledAt", "active", "boundaries"],
+      "required": ["did", "enrolledAt", "active", "custody", "boundaries"],
       "properties": {
         "did": {
           "type": "string",
@@ -233,6 +314,16 @@ export const stratosLexicons: LexiconDoc[] = [
         "isService": {
           "type": "boolean",
           "description": "Whether this is a service enrollment rather than a user."
+        },
+        "custody": {
+          "type": "string",
+          "knownValues": ["stratos", "pds"],
+          "description": "Who hosts the member repository."
+        },
+        "repoHost": {
+          "type": "string",
+          "format": "uri",
+          "description": "The repository host recorded for a PDS-custody member."
         },
         "boundaries": {
           "type": "array",
