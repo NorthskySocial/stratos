@@ -91,7 +91,11 @@ export interface GuardedBoundaryDeleteResult {
   spaceCursors: number
 }
 
-export interface FeedgenStore {
+/**
+ * Ephemeral materialized feed state. Sync cursors belong here because a
+ * cursor is only valid while the records it checkpoints are available.
+ */
+export interface FeedgenRecordStore {
   // posts
   upsertPost: (input: PostUpsert) => Promise<void>
   deletePost: (uri: string) => Promise<void>
@@ -158,7 +162,13 @@ export interface FeedgenStore {
     updatedAt: string,
   ) => Promise<void>
   getSpaceCursor: (spaceUri: string, did: string) => Promise<string | null>
+}
 
+/**
+ * Durable enrollment and membership snapshots. Runtime consumers keep their
+ * own hot maps; this store supplies restart and reconciliation baselines.
+ */
+export interface FeedgenMembershipStore {
   // completed space membership snapshots
   listSpaceMembers: (boundary: string) => Promise<SpaceMemberSnapshot[]>
   replaceSpaceMembers: (
@@ -171,7 +181,11 @@ export interface FeedgenStore {
   getEnrolledActor: (did: string) => Promise<EnrolledActor | null>
   listEnrolledActors: () => Promise<EnrolledActor[]>
   deleteEnrolledActor: (did: string) => Promise<void>
+}
 
+/** The production store combines record and membership storage lifecycles. */
+export interface FeedgenStore
+  extends FeedgenRecordStore, FeedgenMembershipStore {
   close: () => Promise<void>
 }
 

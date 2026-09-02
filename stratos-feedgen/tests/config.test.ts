@@ -1,3 +1,12 @@
+import {
+  linkSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
@@ -23,6 +32,113 @@ const baseEnv = {
   STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
   FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
 }
+
+describe('loadFeedgenConfig SQLite storage split', () => {
+  it('derives a distinct sibling database for durable membership snapshots', () => {
+    const cfg = loadFeedgenConfig({ ...baseEnv })
+
+    expect(cfg.sqlitePath).toBe('/tmp/feedgen-bebop.sqlite')
+    expect(cfg.membershipSqlitePath).toBe(
+      '/tmp/feedgen-bebop.sqlite.membership',
+    )
+  })
+
+  it('keeps an explicitly configured membership database path', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/var/lib/feedgen/membership.sqlite',
+    })
+
+    expect(cfg.membershipSqlitePath).toBe('/var/lib/feedgen/membership.sqlite')
+  })
+
+  it('requires an explicit disk membership path for an in-memory record index', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+      }),
+    ).toThrow(/FEEDGEN_MEMBERSHIP_SQLITE_PATH/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: ':memory:',
+      }),
+    ).toThrow(/must be a file path/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: ':memory:?cache=shared',
+      }),
+    ).toThrow(/must be a file path/)
+
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: ':memory:',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/var/lib/feedgen/membership.sqlite',
+      }).membershipSqlitePath,
+    ).toBe('/var/lib/feedgen/membership.sqlite')
+  })
+
+  it('rejects a membership database that aliases the record database', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: baseEnv.FEEDGEN_SQLITE_PATH,
+      }),
+    ).toThrow(/must differ/)
+
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
+      }),
+    ).toThrow(/must differ/)
+  })
+
+  it('rejects a membership database symlink', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'feedgen-config-'))
+    const recordPath = join(directory, 'record.sqlite')
+    const membershipPath = join(directory, 'membership.sqlite')
+    try {
+      symlinkSync(recordPath, membershipPath)
+      expect(() =>
+        loadFeedgenConfig({
+          ...baseEnv,
+          FEEDGEN_SQLITE_PATH: recordPath,
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+        }),
+      ).toThrow(/symbolic link/)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects membership and record hard links to the same file', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'feedgen-config-'))
+    const recordPath = join(directory, 'record.sqlite')
+    const membershipPath = join(directory, 'membership.sqlite')
+    try {
+      writeFileSync(recordPath, '')
+      linkSync(recordPath, membershipPath)
+      expect(() =>
+        loadFeedgenConfig({
+          ...baseEnv,
+          FEEDGEN_SQLITE_PATH: recordPath,
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+        }),
+      ).toThrow(/must differ/)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('loadFeedgenConfig space-sync defaults', () => {
   it('leaves request-timeout headroom above worst-case default host resolution', () => {
