@@ -5,7 +5,7 @@ import {
   Server,
   ServerResponse,
 } from 'node:http'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import { StratosError } from '@northskysocial/stratos-core'
 
@@ -166,6 +166,33 @@ describe('UpstreamStratosClient', () => {
         body: 'upstream down',
         lxm: 'zone.stratos.identity.resolveEnrollments',
       })
+    })
+
+    it('bounds the authority request with the configured timeout', async () => {
+      const fetchImpl = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          expect(init?.signal).toBeInstanceOf(AbortSignal)
+          return new Response(
+            JSON.stringify({
+              did: 'did:plc:user',
+              enrolled: true,
+              boundaries: ['engineering'],
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          )
+        },
+      )
+      const timedClient = new UpstreamStratosClient({
+        serviceUrl: mock.baseUrl,
+        serviceDid: STRATOS_DID,
+        feedgenDid: FEEDGEN_DID,
+        keypair,
+        fetch: fetchImpl as typeof fetch,
+        requestTimeoutMs: 1_000,
+      })
+
+      await timedClient.resolveEnrollments('did:plc:user')
+      expect(fetchImpl).toHaveBeenCalledOnce()
     })
   })
 

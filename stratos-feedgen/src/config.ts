@@ -1,4 +1,6 @@
 import { isIP } from 'node:net'
+import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { parseCommaList } from '@northskysocial/stratos-core'
 
 /**
@@ -31,6 +33,11 @@ export interface FeedgenConfig {
   storageBackend: StorageBackend
   /** Path to SQLite database file (used when `storageBackend === 'sqlite'`). */
   sqlitePath?: string
+  /**
+   * Path to the SQLite database holding durable enrollment and space-membership
+   * snapshots. This must differ from `sqlitePath`.
+   */
+  membershipSqlitePath?: string
   /** Postgres connection URL (used when `storageBackend === 'postgres'`). */
   postgresUrl?: string
   /** Optional Postgres schema name. Defaults to `public` when omitted. */
@@ -107,25 +114,19 @@ export interface FeedgenEnv {
   [key: string]: string | undefined
 }
 
+type StorageConfig = Pick<
+  FeedgenConfig,
+  | 'storageBackend'
+  | 'sqlitePath'
+  | 'membershipSqlitePath'
+  | 'postgresUrl'
+  | 'postgresSchema'
+>
+
 export function loadFeedgenConfig(
   env: FeedgenEnv = process.env,
 ): FeedgenConfig {
-  const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
-  const sqlitePath = env['FEEDGEN_SQLITE_PATH']
-  const postgresUrl = env['FEEDGEN_POSTGRES_URL']
-  const postgresSchema = env['FEEDGEN_POSTGRES_SCHEMA']
-
-  if (storageBackend === 'sqlite' && !sqlitePath) {
-    throw new Error(
-      'Missing required env var FEEDGEN_SQLITE_PATH for sqlite backend',
-    )
-  }
-  if (storageBackend === 'postgres' && !postgresUrl) {
-    throw new Error(
-      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
-    )
-  }
-
+  const storage = loadStorageConfig(env)
   const feedgenServiceDid = requireEnv(env, 'FEEDGEN_SERVICE_DID')
 
   return {
@@ -144,10 +145,7 @@ export function loadFeedgenConfig(
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
     feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
     feedgenAllowedLxms: DEFAULT_ALLOWED_LXMS,
-    storageBackend,
-    sqlitePath,
-    postgresUrl,
-    postgresSchema,
+    ...storage,
     boundaryCacheTtlMs: parsePositiveInt(
       env['FEEDGEN_BOUNDARY_CACHE_TTL_MS'],
       'FEEDGEN_BOUNDARY_CACHE_TTL_MS',
@@ -218,6 +216,113 @@ export function loadFeedgenConfig(
     spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
     ),
+  }
+}
+
+function loadStorageConfig(env: FeedgenEnv): StorageConfig {
+  const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
+  const sqlitePath = env['FEEDGEN_SQLITE_PATH']
+  const postgresUrl = env['FEEDGEN_POSTGRES_URL']
+  if (storageBackend === 'sqlite' && !sqlitePath) {
+    throw new Error(
+      'Missing required env var FEEDGEN_SQLITE_PATH for sqlite backend',
+    )
+  }
+  if (storageBackend === 'postgres' && !postgresUrl) {
+    throw new Error(
+      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+    )
+  }
+  return {
+    storageBackend,
+    sqlitePath,
+    membershipSqlitePath:
+      storageBackend === 'sqlite'
+        ? resolveMembershipSqlitePath(
+            sqlitePath,
+            nonEmpty(env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']),
+          )
+        : undefined,
+    postgresUrl,
+    postgresSchema: env['FEEDGEN_POSTGRES_SCHEMA'],
+  }
+}
+
+function resolveMembershipSqlitePath(
+  sqlitePath: string | undefined,
+  configuredPath: string | undefined,
+): string {
+  if (!sqlitePath) {
+    throw new Error('sqlitePath is required for sqlite backend')
+  }
+  if (sqlitePath === ':memory:' && !configuredPath) {
+    throw new Error(
+      'Missing required env var FEEDGEN_MEMBERSHIP_SQLITE_PATH when FEEDGEN_SQLITE_PATH is :memory:',
+    )
+  }
+  const membershipPath = configuredPath ?? `${sqlitePath}.membership`
+  if (membershipPath.startsWith(':memory:')) {
+    throw new Error('FEEDGEN_MEMBERSHIP_SQLITE_PATH must be a file path')
+  }
+  if (sqlitePath !== ':memory:') {
+    assertDistinctSqlitePaths(sqlitePath, membershipPath)
+  }
+  return membershipPath
+}
+
+/**
+ * Reject two spellings that resolve to the same SQLite file. Keeping cursor
+ * state out of durable control storage depends on these files being distinct.
+ */
+export function assertDistinctSqlitePaths(
+  recordPath: string,
+  membershipPath: string,
+): void {
+  if (
+    canonicalSqlitePath(recordPath) === canonicalSqlitePath(membershipPath) ||
+    sameExistingFile(recordPath, membershipPath)
+  ) {
+    throw new Error(
+      'FEEDGEN_MEMBERSHIP_SQLITE_PATH must differ from FEEDGEN_SQLITE_PATH',
+    )
+  }
+}
+
+function sameExistingFile(left: string, right: string): boolean {
+  try {
+    const leftStat = statSync(left)
+    const rightStat = statSync(right)
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
+  } catch (err) {
+    if ((err as { code?: string }).code === 'ENOENT') return false
+    throw err
+  }
+}
+
+function canonicalSqlitePath(location: string): string {
+  const absolute = resolve(location)
+  const missingSegments: string[] = []
+  let existingPath = absolute
+  for (;;) {
+    try {
+      // A leaf symlink can become an alias after startup. Reject it rather
+      // than accepting a path whose durable/ephemeral identity can change.
+      if (
+        missingSegments.length === 0 &&
+        lstatSync(existingPath).isSymbolicLink()
+      ) {
+        throw new Error(
+          `SQLite storage path must not be a symbolic link: ${location}`,
+        )
+      }
+      return join(realpathSync.native(existingPath), ...missingSegments)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      const parent = dirname(existingPath)
+      if (parent === existingPath) return absolute
+      missingSegments.unshift(basename(existingPath))
+      existingPath = parent
+    }
   }
 }
 

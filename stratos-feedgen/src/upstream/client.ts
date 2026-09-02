@@ -149,6 +149,7 @@ export class UpstreamStratosClient {
     const lxm = LXM.resolveEnrollments
     const res = await this.fetchImpl(url, {
       method: 'GET',
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
         authorization: `Bearer ${await this.mintFor(lxm)}`,
         accept: 'application/json',
