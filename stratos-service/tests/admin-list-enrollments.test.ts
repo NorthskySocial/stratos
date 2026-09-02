@@ -81,6 +81,7 @@ function createCtx(opts: {
 }): {
   app: express.Application
   enrollmentStore: AppContext['enrollmentStore']
+  logger: { warn: ReturnType<typeof vi.fn> }
 } {
   const enrollmentStore = {
     isEnrolled: vi.fn(async () => true),
@@ -100,6 +101,12 @@ function createCtx(opts: {
   const app = express()
   const enrollmentEvents: EnrollmentEventEmitter = new EventEmitter()
 
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }
   const ctx = {
     app,
     enrollmentStore,
@@ -129,16 +136,11 @@ function createCtx(opts: {
       service: { publicUrl: 'https://stratos.example.com' },
       stratos: { serviceDid: NERV, allowedDomains: [`${NERV}/general`] },
     },
-    logger: {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn(),
-    },
+    logger,
   } as unknown as AppContext
 
   registerEnrollmentHandlers({ method: vi.fn() } as never, ctx)
-  return { app, enrollmentStore }
+  return { app, enrollmentStore, logger }
 }
 
 const ROUTE = '/xrpc/zone.stratos.admin.listEnrollments'
@@ -681,6 +683,31 @@ describe('GET /xrpc/zone.stratos.admin.getRepoHost', () => {
         },
       ],
     })
+  })
+
+  it('warns when a member boundary cannot convert to a space URI', async () => {
+    const boundary = 'unresolved-space'
+    const { app, logger } = createCtx({
+      enrollmentStore: {
+        getEnrollment: vi.fn(async () =>
+          storedEnrollment('did:plc:rei', { custody: 'pds' }),
+        ),
+        getBoundaries: vi.fn(async () => [boundary]),
+      } as unknown as Partial<EnrollmentStore>,
+    })
+
+    const res = await invokeGetRoute(app, HOST_ROUTE, { did: 'did:plc:rei' })
+
+    expect(res.body).toEqual({
+      did: 'did:plc:rei',
+      custody: 'pds',
+      isService: false,
+      resolutions: [],
+    })
+    expect(logger.warn).toHaveBeenCalledWith(
+      { did: 'did:plc:rei', boundary },
+      'admin.getRepoHost could not convert boundary to a space URI',
+    )
   })
 
   it('returns no host resolution for stratos or service enrollment', async () => {

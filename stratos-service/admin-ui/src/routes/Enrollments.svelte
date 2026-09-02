@@ -547,7 +547,11 @@
                   {collapsedHost.host} ({collapsedHost.source})
                 </p>
               {:else if hostResolutions.length === 0}
-                <p class="text-sm text-muted">No spaces assigned.</p>
+                <p class="text-sm text-muted">
+                  {boundaries.length === 0
+                    ? 'No spaces assigned.'
+                    : 'Repository host unresolved for assigned spaces.'}
+                </p>
               {:else}
                 <ul class="space-y-1 text-sm text-muted">
                   {#each hostResolutions as resolution (resolution.spaceUri)}
