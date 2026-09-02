@@ -2,6 +2,7 @@ import { Readable } from 'node:stream'
 import type { Keypair } from '@atproto/crypto'
 import type { Custody } from '@northskysocial/stratos-core'
 
+import { normalizeMembershipBoundaries } from '../boundary-normalization.js'
 import { StratosClientError, StratosInvalidResponseError } from './errors.js'
 import { mintServiceJwt } from './jwt.js'
 
@@ -156,7 +157,14 @@ export class UpstreamStratosClient {
       },
     })
     await throwIfNotOk(res, url.toString(), lxm)
-    return (await res.json()) as ResolveEnrollmentsResult
+    const result = (await res.json()) as ResolveEnrollmentsResult
+    return {
+      ...result,
+      boundaries: normalizeMembershipBoundaries(
+        this.serviceDid,
+        result.boundaries,
+      ),
+    }
   }
 
   async hydrateRecords(uris: string[]): Promise<HydrateRecordsResult> {
