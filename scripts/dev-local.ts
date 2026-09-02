@@ -215,11 +215,17 @@ async function start(): Promise<void> {
       FEEDGEN_SIGNING_KEY: feedgenKey.signingKey,
       FEEDGEN_STORAGE_BACKEND: 'sqlite',
       FEEDGEN_SQLITE_PATH: path.join(rootDir, 'data', 'feedgen.sqlite'),
-      FEEDGEN_FEEDS_FILE: path.join(
-        rootDir,
-        'stratos-feedgen',
-        'feeds.local.yaml',
-      ),
+      FEEDGEN_FEEDS_FILE: '',
+      FEEDGEN_FEEDS_JSON: JSON.stringify({
+        feeds: [
+          {
+            id: 'swordsmith',
+            boundary: `${serviceDid}/swordsmith`,
+            displayName: 'Swordsmith',
+            description: 'Local feedgen test feed',
+          },
+        ],
+      }),
       FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true',
       STRATOS_SERVICE_URL: serviceLocalUrl,
       STRATOS_SERVICE_ENROLLMENTS: JSON.stringify([
