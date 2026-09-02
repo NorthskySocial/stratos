@@ -32,6 +32,7 @@ import {
   FEEDGEN_SIGNING_KEY,
   FeedgenHarness,
   type FeedgenStartOptions,
+  SPACE_COMMIT_TAMPER_MODULE,
 } from './lib/feedgen.ts'
 import { assert, fail, finish, pass, section } from './lib/log.ts'
 import {
@@ -116,11 +117,13 @@ interface FeedPostsResult {
   response: GetFeedResponse
 }
 
-function feedgenStartOptions(): FeedgenStartOptions {
+function feedgenStartOptions(
+  additionalEnv: Record<string, string> = {},
+): FeedgenStartOptions {
   return {
     port: FEEDGEN_PORT,
     feeds: MIXED_MODE_FEEDS,
-    env: SPACE_SYNC_ENV,
+    env: { ...SPACE_SYNC_ENV, ...additionalEnv },
   }
 }
 
@@ -417,6 +420,12 @@ async function run(): Promise<void> {
       fixture.hostile.did.startsWith('did:plc:'),
     'the invite-backed spaces PDS account APIs created did:plc fixtures',
   )
+
+  const isMemberSpaceSync = (event: {
+    fields: Readonly<Record<string, unknown>>
+  }): boolean =>
+    event.fields['msg'] === 'space member sync completed' &&
+    event.fields['did'] === fixture.member.did
 
   const space = spaceUriFor('swordsmith')
   const dnsRemediation = `republish ${DNS_DECLARATION_NAME} TXT as did=${SPACE_DECLARATION_AUTHORITY_DID}`
@@ -761,6 +770,111 @@ async function run(): Promise<void> {
       deniedSwordsmithFeed.status === 400 &&
         deniedSwordsmithFeed.body.error === 'BoundaryMismatch',
       'a viewer without swordsmith cannot access either custody record',
+    )
+
+    await feedgen.stop()
+    await feedgen.start(
+      feedgenStartOptions({
+        NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
+        FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
+        FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
+      }),
+    )
+    await assertFeedgenWarmup(feedgen, 'quarantine mixed-mode')
+    assert(
+      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
+      'the feedgen under a tampered PDS response is healthy',
+    )
+    const verificationFailure = await feedgen.waitForLog(
+      (event) => event.fields['msg'] === 'space commit verification failed',
+      30_000,
+    )
+    const failedTarget = verificationFailure.fields['target'] as
+      | Record<string, unknown>
+      | undefined
+    assert(
+      verificationFailure.fields['reason'] === 'mac-mismatch' &&
+        failedTarget?.['spaceUri'] === space &&
+        failedTarget['boundary'] === DOMAINS.swordsmith &&
+        failedTarget['did'] === fixture.member.did &&
+        failedTarget['host'] === PDS_SPACES_URL,
+      'the live feedgen quarantines the tampered PDS commit',
+    )
+    const haltedPass = await feedgen.waitForLog(
+      (event) => isSpaceSyncPass(event) && event.fields['halted'] === 1,
+      30_000,
+    )
+    assert(
+      haltedPass.fields['targets'] === 1 &&
+        haltedPass.fields['succeeded'] === 0 &&
+        haltedPass.fields['failed'] === 0,
+      'the live feedgen skips the quarantined PDS target on its next pass',
+    )
+    const quarantinedFeedState = await waitForFeedPost(
+      viewerToken,
+      'swordsmith',
+      memberPost.uri,
+      (found) => !found,
+    )
+    assert(
+      quarantinedFeedState.matches,
+      'commit quarantine removes the PDS-custody post from the boundary feed',
+      `${describeFeedState(quarantinedFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
+    )
+
+    await feedgen.stop()
+    await feedgen.start(feedgenStartOptions())
+    await assertFeedgenWarmup(feedgen, 'cold-restart mixed-mode')
+    assert(
+      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
+      'cold-restarted mixed-mode feedgen is healthy',
+    )
+    const restartMembershipPass = await feedgen.waitForLog(
+      isSwordsmithMembershipPass,
+      30_000,
+      1,
+    )
+    assert(
+      restartMembershipPass.fields['memberCount'] === 1 &&
+        restartMembershipPass.fields['skippedNoHost'] === 0 &&
+        restartMembershipPass.fields['removed'] === 0,
+      'the cold restart rebuilds the swordsmith PDS poll target',
+    )
+    const restartPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
+    assert(
+      restartPass.fields['targets'] === 1 &&
+        restartPass.fields['succeeded'] === 1 &&
+        restartPass.fields['failed'] === 0 &&
+        restartPass.fields['abandoned'] === 0 &&
+        restartPass.fields['halted'] === 0,
+      'the cold restart syncs the rebuilt PDS poll target',
+    )
+    const restartMemberSync = await feedgen.waitForLog(
+      isMemberSpaceSync,
+      30_000,
+      1,
+    )
+    assert(
+      typeof restartMemberSync.fields['recordsIndexed'] === 'number' &&
+        restartMemberSync.fields['recordsIndexed'] > 0,
+      'the cold restart reindexes the PDS member records',
+      JSON.stringify(restartMemberSync.fields),
+    )
+    const restartViewerToken = await getServiceAuth(
+      viewerSession.accessJwt,
+      FEEDGEN_DID,
+      GET_FEED_LXM,
+    )
+    const restartFeedState = await waitForFeedPost(
+      restartViewerToken,
+      'swordsmith',
+      memberPost.uri,
+      (found) => found,
+    )
+    assert(
+      restartFeedState.matches,
+      'the cold restart retains the PDS-custody post in its boundary feed',
+      `${describeFeedState(restartFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
     )
 
     const removal = await adminSetBoundaries(

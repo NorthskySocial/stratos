@@ -41,13 +41,17 @@ services:
       STRATOS_SERVICE_URL: http://stratos:3100
       STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID}
       FEEDGEN_STORAGE_BACKEND: sqlite
-      FEEDGEN_SQLITE_PATH: /app/data/feedgen.sqlite
+      # The materialized record projection and its replay cursors stay in
+      # memory. Persist only the membership/control recovery snapshot.
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: /app/data/feedgen-membership.sqlite
       FEEDGEN_FEEDS_FILE: /app/config/feeds.yaml
       FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true'
       FEEDGEN_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+    ulimits:
+      core: 0
     volumes:
-      - feedgen-data:/app/data
       - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
+      - feedgen-control:/app/data
     depends_on:
       stratos:
         condition: service_healthy
@@ -67,4 +71,8 @@ services:
       start_period: 5s
 
 volumes:
-  feedgen-data:
+  # To upgrade an existing feedgen-data volume, start once with the old volume
+  # mounted at /app/legacy and FEEDGEN_SQLITE_PATH=/app/legacy/feedgen.sqlite.
+  # The service imports membership snapshots into feedgen-control. Stop it after
+  # the import. Before normal starts, remove FEEDGEN_SQLITE_PATH.
+  feedgen-control:

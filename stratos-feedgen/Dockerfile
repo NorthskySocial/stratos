@@ -8,11 +8,23 @@
 #             -e FEEDGEN_SIGNING_KEY=<hex> \
 #             -e STRATOS_SERVICE_URL=https://stratos.example.com \
 #             -e STRATOS_SERVICE_DID=did:web:stratos.example.com \
-#             -e FEEDGEN_SQLITE_PATH=/app/data/feedgen.sqlite \
+#             -e FEEDGEN_MEMBERSHIP_SQLITE_PATH=/app/data/feedgen-membership.sqlite \
 #             -e FEEDGEN_FEEDS_FILE=/app/config/feeds.yaml \
+#             -v feedgen-control:/app/data \
 #             -v /path/to/feeds.yaml:/app/config/feeds.yaml:ro \
-#             -v feedgen-data:/app/data \
 #             stratos-feedgen
+#
+# The record projection and its replay cursors stay in memory by default. The
+# mounted control database persists only the membership/recovery snapshot.
+#
+# Persisting the private record projection is separately opt-in:
+#             -e FEEDGEN_SQLITE_PATH=/app/data/feedgen.sqlite
+#
+# To upgrade an existing feedgen-data volume, start once with:
+#             -e FEEDGEN_SQLITE_PATH=/app/legacy/feedgen.sqlite \
+#             -v <existing-feedgen-data-volume>:/app/legacy:ro
+# This imports membership snapshots into feedgen-control. Stop the container
+# after the import. Before normal starts, remove FEEDGEN_SQLITE_PATH.
 
 # --- Build stage: install workspace deps and run esbuild bundle ---
 FROM node:24-alpine AS builder
@@ -58,7 +70,7 @@ RUN apk add --no-cache wget \
 # Bundled application (single ESM file + sourcemap).
 COPY --from=builder /app/stratos-feedgen/dist-bundle/ ./
 
-RUN mkdir -p /app/data /app/config && chown -R node:node /app/data /app/config
+RUN mkdir -p /app/config /app/data && chown -R node:node /app/config /app/data
 
 USER node
 
