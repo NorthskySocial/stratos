@@ -71,4 +71,8 @@ services:
       start_period: 5s
 
 volumes:
+  # To upgrade an existing feedgen-data volume, start once with the old volume
+  # mounted at /app/legacy and FEEDGEN_SQLITE_PATH=/app/legacy/feedgen.sqlite.
+  # The service imports membership snapshots into feedgen-control. Stop it after
+  # the import. Before normal starts, remove FEEDGEN_SQLITE_PATH.
   feedgen-control:

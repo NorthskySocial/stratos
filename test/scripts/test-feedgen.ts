@@ -37,6 +37,11 @@ interface ReplayCheck {
   viewer: { did: string; handle: string; password: string }
 }
 
+interface FeedPostPoll {
+  post: PostView | null
+  status: number | null
+}
+
 async function mintViewerJwt(
   handle: string,
   password: string,
@@ -66,17 +71,19 @@ async function waitForPost(
   feed: string,
   uri: string,
   timeoutMs = 30_000,
-): Promise<PostView | null> {
+): Promise<FeedPostPoll> {
   const deadline = Date.now() + timeoutMs
+  let status: number | null = null
   while (Date.now() < deadline) {
-    const { status, body } = await getFeed(token, feed)
-    const post = (body as unknown as GetFeedBody).feed?.find(
+    const response = await getFeed(token, feed)
+    status = response.status
+    const post = (response.body as unknown as GetFeedBody).feed?.find(
       (item) => item.post?.uri === uri,
     )?.post
-    if (status === 200 && post) return post
+    if (status === 200 && post) return { status, post }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
-  return null
+  return { status, post: null }
 }
 
 async function waitForFeedReadiness(
@@ -206,7 +213,7 @@ async function exerciseFeedgen(
     users.sakura.handle,
     users.sakura.password,
   )
-  const post = await waitForPost(sakuraJwt, 'swordsmith', created.uri)
+  const { post } = await waitForPost(sakuraJwt, 'swordsmith', created.uri)
   assert(
     post !== null,
     'shared-boundary viewer sees the fresh post',
@@ -275,7 +282,7 @@ async function verifyReplay(
     replay.viewer.handle,
     replay.viewer.password,
   )
-  const post = await waitForPost(token, 'swordsmith', replay.uri)
+  const { post } = await waitForPost(token, 'swordsmith', replay.uri)
   assert(post?.uri === replay.uri, 'same viewer sees the same URI after replay')
   assert(post?.cid === replay.cid, 'same viewer sees the same CID after replay')
   assert(
@@ -340,9 +347,9 @@ async function verifyReplayAuthorization(
       15_000,
     )
     assert(
-      resurrected === null,
+      resurrected.status === 200 && resurrected.post === null,
       'a historical swordsmith post is denied after the author loses swordsmith',
-      resurrected?.uri,
+      `status=${resurrected.status} uri=${resurrected.post?.uri}`,
     )
   } finally {
     if (boundariesChanged) {

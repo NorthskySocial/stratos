@@ -21,7 +21,7 @@ globalThis.fetch = async (input, init) => {
     return response
   }
 
-  const body = await response.json()
+  const body = await response.clone().json()
   if (!isRecord(body) || !isRecord(body.commit) || !isRecord(body.commit.mac)) {
     return response
   }
