@@ -28,6 +28,7 @@ export class FeedReadinessGate implements FeedReadiness {
 
   markUnavailable(): void {
     this.ready = false
+    this.hasAuthoritativeSession = false
     this.generation++
   }
 
@@ -36,8 +37,8 @@ export class FeedReadinessGate implements FeedReadiness {
    * allowed to release reads, so invalidate any prior result first.
    */
   markSessionEstablished(): void {
-    this.hasAuthoritativeSession = true
     this.markUnavailable()
+    this.hasAuthoritativeSession = true
   }
 
   /** Mark reads unavailable and return the generation this run must satisfy. */

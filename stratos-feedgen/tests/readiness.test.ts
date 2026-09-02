@@ -57,4 +57,17 @@ describe('FeedReadinessGate', () => {
     ).toBe(false)
     expect(gate.isReady()).toBe(false)
   })
+
+  it('requires a new session after becoming unavailable', () => {
+    const gate = new FeedReadinessGate()
+    gate.markSessionEstablished()
+    gate.markUnavailable()
+
+    const generation = gate.beginReconciliation()
+
+    expect(
+      gate.completeReconciliation(generation, { errors: 0, truncated: false }),
+    ).toBe(false)
+    expect(gate.isReady()).toBe(false)
+  })
 })
