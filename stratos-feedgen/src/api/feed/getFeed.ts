@@ -53,12 +53,7 @@ export function registerGetFeedHandler(
   server.method(NSID.getFeed, {
     auth: toXrpcAuthVerifier(deps.verifier),
     handler: async ({ params, auth }) => {
-      if (deps.readiness !== undefined && !deps.readiness.isReady()) {
-        throw new NotEnoughResourcesError(
-          'Feed is unavailable while authorization state is reconciling',
-          'FeedNotReady',
-        )
-      }
+      assertReadiness(deps.readiness)
 
       const { viewerDid } = auth.credentials
       const feedId = params['feed'] as string
@@ -70,6 +65,7 @@ export function registerGetFeedHandler(
 
       const viewerBoundaries =
         await deps.enrollmentManager.getBoundaries(viewerDid)
+      assertReadiness(deps.readiness)
       if (!viewerBoundaries.includes(feed.boundary)) {
         throw new BoundaryMismatchError(feed.boundary)
       }
@@ -79,6 +75,7 @@ export function registerGetFeedHandler(
         limit,
         cursor: normalizeCursor(cursor),
       })
+      assertReadiness(deps.readiness)
 
       return {
         encoding: 'application/json',
@@ -89,6 +86,14 @@ export function registerGetFeedHandler(
       }
     },
   })
+}
+
+function assertReadiness(readiness: FeedReadiness | undefined): void {
+  if (readiness === undefined || readiness.isReady()) return
+  throw new NotEnoughResourcesError(
+    'Feed is unavailable while authorization state is reconciling',
+    'FeedNotReady',
+  )
 }
 
 function clampLimit(raw: unknown): number {

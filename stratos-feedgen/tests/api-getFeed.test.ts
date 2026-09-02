@@ -167,6 +167,25 @@ describe('zone.stratos.feedgen.getFeed', () => {
     expect(ctx.listPosts).not.toHaveBeenCalled()
   })
 
+  it('fails closed if readiness changes during a feed read', async () => {
+    const readiness = {
+      isReady: vi
+        .fn<() => boolean>()
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false),
+    }
+    ctx = await startServer({ readiness })
+
+    const res = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed`,
+      { headers: { authorization: 'Bearer test-token' } },
+    )
+
+    expect(res.status).toBe(503)
+    expect(ctx.listPosts).toHaveBeenCalledOnce()
+  })
+
   it('returns hydrated feedViewPosts with cursor', async () => {
     const posts = [
       makePost(
