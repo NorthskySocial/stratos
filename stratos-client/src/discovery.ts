@@ -181,18 +181,12 @@ export const discoverEnrollments = async (
 }
 
 /**
- * discovers a single Stratos enrollment from the user's PDS.
+ * Discovers one Stratos enrollment from the user's PDS.
  *
- * a user can enroll with more than one service. this function sorts the
- * enrollments by createdAt, then by rkey, and returns the first one. the
- * sort makes the result stable: two callers always get the same enrollment,
- * and a new enrollment does not change the result for an existing user.
- *
- * to see every enrollment, call discoverEnrollments instead.
- *
- * @param did the DID to check for enrollment
- * @param pdsUrlOrHandler the user's PDS service URL or a FetchHandler
- * @returns the oldest enrollment if any exist, null otherwise
+ * @deprecated Use discoverEnrollments to select the required service explicitly.
+ * @param did - The DID to check for enrollment.
+ * @param pdsUrlOrHandler - The user's PDS service URL or a FetchHandler.
+ * @returns The oldest enrollment, or null when none exist.
  */
 export const discoverEnrollment = async (
   did: string,
