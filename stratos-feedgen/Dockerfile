@@ -19,6 +19,12 @@
 #
 # Persisting the private record projection is separately opt-in:
 #             -e FEEDGEN_SQLITE_PATH=/app/data/feedgen.sqlite
+#
+# To upgrade an existing feedgen-data volume, start once with:
+#             -e FEEDGEN_SQLITE_PATH=/app/legacy/feedgen.sqlite \
+#             -v <existing-feedgen-data-volume>:/app/legacy:ro
+# This imports membership snapshots into feedgen-control. Stop the container
+# after the import. Before normal starts, remove FEEDGEN_SQLITE_PATH.
 
 # --- Build stage: install workspace deps and run esbuild bundle ---
 FROM node:24-alpine AS builder

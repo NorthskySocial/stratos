@@ -822,11 +822,6 @@ async function run(): Promise<void> {
       `${describeFeedState(quarantinedFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
     )
 
-    const passesBeforeRestart = feedgen.countLogs(isSpaceSyncPass)
-    const membershipsBeforeRestart = feedgen.countLogs(
-      isSwordsmithMembershipPass,
-    )
-    const memberSyncsBeforeRestart = feedgen.countLogs(isMemberSpaceSync)
     await feedgen.stop()
     await feedgen.start(feedgenStartOptions())
     await assertFeedgenWarmup(feedgen, 'cold-restart mixed-mode')
@@ -837,7 +832,7 @@ async function run(): Promise<void> {
     const restartMembershipPass = await feedgen.waitForLog(
       isSwordsmithMembershipPass,
       30_000,
-      membershipsBeforeRestart + 1,
+      1,
     )
     assert(
       restartMembershipPass.fields['memberCount'] === 1 &&
@@ -845,11 +840,7 @@ async function run(): Promise<void> {
         restartMembershipPass.fields['removed'] === 0,
       'the cold restart rebuilds the swordsmith PDS poll target',
     )
-    const restartPass = await feedgen.waitForLog(
-      isSpaceSyncPass,
-      30_000,
-      passesBeforeRestart + 1,
-    )
+    const restartPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
     assert(
       restartPass.fields['targets'] === 1 &&
         restartPass.fields['succeeded'] === 1 &&
@@ -861,7 +852,7 @@ async function run(): Promise<void> {
     const restartMemberSync = await feedgen.waitForLog(
       isMemberSpaceSync,
       30_000,
-      memberSyncsBeforeRestart + 1,
+      1,
     )
     assert(
       typeof restartMemberSync.fields['recordsIndexed'] === 'number' &&
