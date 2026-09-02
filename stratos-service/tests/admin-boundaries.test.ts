@@ -13,6 +13,10 @@ import {
   type PdsSyncQueueStore,
 } from '../src/features'
 
+const { putRecord } = vi.hoisted(() => ({
+  putRecord: vi.fn(async () => ({})),
+}))
+
 // The boundary handlers write the user's PDS enrollment record through an
 // `Agent` constructed inside `syncEnrollmentRecordToPds`. Stub it so the PDS
 // write is deterministic: by default it succeeds (pdsSync: 'ok'); a failure is
@@ -24,7 +28,7 @@ vi.mock('@atproto/api', () => ({
     com = {
       atproto: {
         repo: {
-          putRecord: async () => ({}),
+          putRecord,
         },
       },
     }
@@ -530,6 +534,41 @@ describe('admin boundary endpoints', () => {
   })
 
   describe('POST /xrpc/zone.stratos.admin.setBoundaries', () => {
+    it('preserves PDS custody metadata in the profile record', async () => {
+      putRecord.mockClear()
+      const { app } = createCtx({
+        enrollmentStore: {
+          getEnrollment: vi.fn(async () => ({
+            did: 'did:plc:usagi',
+            enrolledAt: '2026-01-01T00:00:00.000Z',
+            pdsEndpoint: 'https://pds.example.com',
+            signingKeyDid: 'did:key:zSailorMoon',
+            active: true,
+            enrollmentRkey: 'rkey123',
+            custody: 'pds' as const,
+            repoHost: 'https://pds.example.com',
+          })),
+        },
+      })
+
+      const res = await invokePostRoute(
+        app,
+        '/xrpc/zone.stratos.admin.setBoundaries',
+        { did: 'did:plc:usagi', boundaries: ['did:web:nerv.tokyo.jp/bees'] },
+      )
+
+      expect(res.statusCode).toBe(200)
+      expect(putRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          record: expect.objectContaining({
+            custody: 'pds',
+            repoHost: 'https://pds.example.com',
+          }),
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
+    })
+
     it('sets boundaries for an enrolled user', async () => {
       const { app, enrollmentStore } = createCtx({})
       const res = await invokePostRoute(

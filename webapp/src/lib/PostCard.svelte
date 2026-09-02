@@ -1,6 +1,6 @@
 <script lang="ts">
   import {Agent} from '@atproto/api'
-  import type {FeedPost} from './feed'
+  import {authorFromUri, type FeedPost} from './feed'
   import {displayBoundary} from './boundary-display'
   import RecordInspector from './RecordInspector.svelte'
   import {getCid, type StratosImage} from './utils/cid'
@@ -17,6 +17,31 @@
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
 
+  const HTTP_PROTOCOLS = ['https:', 'http:'] as const
+  const HTTP_OR_BLOB_PROTOCOLS = [...HTTP_PROTOCOLS, 'blob:'] as const
+
+  function safeHttpUrl(value: string | undefined): string {
+    return safeUrlForProtocols(value, HTTP_PROTOCOLS)
+  }
+
+  function safeHttpOrBlobUrl(value: string | undefined): string {
+    return safeUrlForProtocols(value, HTTP_OR_BLOB_PROTOCOLS)
+  }
+
+  function safeUrlForProtocols(
+    value: string | undefined,
+    allowedProtocols: readonly string[],
+  ): string {
+    if (!value) return ''
+    try {
+      const url = new URL(value)
+      if (allowedProtocols.includes(url.protocol)) return value
+    } catch {
+      return ''
+    }
+    return ''
+  }
+
   /**
    * Get the URL for an image.
    * @param img - The image object.
@@ -25,17 +50,16 @@
   function getImageUrl(img: StratosImage): string {
     const cid = getCid(img.image)
     if (cid && imageUrls[cid]) {
-      return imageUrls[cid]
+      return safeHttpOrBlobUrl(imageUrls[cid])
     }
-    // If hydrated fields are available, use them
     if (img.thumb) {
-      return img.thumb
+      return safeHttpUrl(img.thumb)
     }
     if (img.fullsize) {
-      return img.fullsize
+      return safeHttpUrl(img.fullsize)
     }
     if (typeof img.image === 'object' && img.image.url) {
-      return img.image.url
+      return safeHttpUrl(img.image.url)
     }
     return ''
   }
@@ -203,15 +227,6 @@
   }
 
   /**
-   * Extract the parent author from a URI.
-   * @param uriStr - The URI to extract the parent author from.
-   * @returns The parent author.
-   */
-  function parentAuthor(uriStr: string): string {
-    return (uriStr || '').replace('at://', '').split('/')[0]
-  }
-
-  /**
    * Get the author handle for a post.
    * @returns The author handle for the post.
    */
@@ -225,7 +240,7 @@
 <article class="post-card" class:private={post.isPrivate}>
     {#if post.reply}
         <div class="reply-context">
-            ↩ replying to {shortDid(parentAuthor(post.reply.parent.uri))}
+            ↩ replying to {shortDid(authorFromUri(post.reply.parent.uri))}
         </div>
     {/if}
 
@@ -263,7 +278,7 @@
                 <img src={getImageUrl(embed)} alt={embed.alt} class="post-image"/>
             </div>
         {:else if embed.$type === 'app.bsky.embed.external' && embed.external}
-            <a href={embed.external.uri} target="_blank" rel="noopener noreferrer"
+            <a href={safeHttpUrl(embed.external.uri) || undefined} target="_blank" rel="noopener noreferrer"
                class="external-embed">
                 {#if embed.external.thumb}
                     {@const cid = getCid(embed.external.thumb)}

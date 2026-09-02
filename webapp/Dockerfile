@@ -52,8 +52,9 @@ RUN pnpm build
 # Generate client-metadata.json for OAuth discovery.
 # The scope MUST match the authorization request in webapp/src/lib/auth.ts
 # (OAUTH_SCOPE) or the authorization server rejects sign-in with invalid_scope.
-RUN printf '{"client_id":"%s/client-metadata.json","client_name":"Stratos","client_uri":"%s","redirect_uris":["%s/"],"scope":"atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete rpc:zone.stratos.feedgen.getFeed?aud=* repo:app.bsky.feed.post?action=create","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":"web","dpop_bound_access_tokens":true}\n' \
-  "$VITE_WEBAPP_URL" "$VITE_WEBAPP_URL" "$VITE_WEBAPP_URL" > dist/client-metadata.json
+RUN SERVICE_DID_AUTHORITY="$(node -p 'encodeURIComponent(process.env.VITE_STRATOS_SERVICE_DID ?? "")')" && \
+  printf '{"client_id":"%s/client-metadata.json","client_name":"Stratos","client_uri":"%s","redirect_uris":["%s/"],"scope":"atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post?action=create&action=delete rpc:zone.stratos.feedgen.getFeed?aud=* repo:app.bsky.feed.post?action=create space:zone.stratos.space.feed?authority=%s&collection=zone.stratos.feed.post&action=read&action=create","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":"web","dpop_bound_access_tokens":true}\n' \
+  "$VITE_WEBAPP_URL" "$VITE_WEBAPP_URL" "$VITE_WEBAPP_URL" "$SERVICE_DID_AUTHORITY" > dist/client-metadata.json
 
 # Production stage
 FROM nginx:alpine

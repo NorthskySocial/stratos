@@ -22,7 +22,8 @@
     "@atproto/lexicon": "^0.7.11",
     "@atproto/oauth-client-browser": "^0.5.3",
     "@atproto/oauth-types": "^0.7.5",
-    "@atproto/syntax": "^0.7.4"
+    "@atproto/syntax": "^0.7.4",
+    "@northskysocial/stratos-core": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

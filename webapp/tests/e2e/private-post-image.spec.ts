@@ -1,12 +1,28 @@
 import { expect, test } from '@playwright/test'
+import { encode as cborEncode } from '@atcute/cbor'
+import { Secp256k1Keypair } from '@atproto/crypto'
 
 import { TEST_PNG } from './fixtures/test-image'
 
 const STRATOS_URL = 'https://stratos.example.com'
 const APPVIEW_URL = 'https://appview.example.com'
+const USER_DID = 'did:plc:mock'
+const USER_SIGNING_KEY = 'did:key:zMockUserSigningKey'
+
+const toBase64 = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...Array.from(bytes)))
 
 test.describe('Private Post with Image', () => {
   test.beforeEach(async ({ page }) => {
+    const serviceKeypair = await Secp256k1Keypair.create({ exportable: true })
+    const attestationSignature = await serviceKeypair.sign(
+      cborEncode({
+        boundaries: ['example.com'],
+        did: USER_DID,
+        signingKey: USER_SIGNING_KEY,
+      }),
+    )
+
     // Inject mock session
     await page.addInitScript(() => {
       interface CustomWindow extends Window {
@@ -65,10 +81,10 @@ test.describe('Private Post with Image', () => {
                   $type: 'zone.stratos.actor.enrollment',
                   service: 'https://stratos.example.com',
                   boundaries: [{ value: 'example.com' }],
-                  signingKey: 'did:key:zMockUserSigningKey',
+                  signingKey: USER_SIGNING_KEY,
                   attestation: {
-                    sig: { $bytes: 'AAAA' },
-                    signingKey: 'did:key:zMockServiceSigningKey',
+                    sig: { $bytes: toBase64(attestationSignature) },
+                    signingKey: serviceKeypair.did(),
                   },
                   createdAt: new Date().toISOString(),
                 },

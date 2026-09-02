@@ -9,6 +9,16 @@ let client: BrowserOAuthClient | null = null
 let currentSession: OAuthSession | null = null
 let sessionDeletedCallback: (() => void) | null = null
 
+export function buildSpaceWriteScope(
+  serviceDid = import.meta.env.VITE_STRATOS_SERVICE_DID,
+): string {
+  return `space:zone.stratos.space.feed?authority=${encodeURIComponent(serviceDid ?? '')}&collection=zone.stratos.feed.post&action=read&action=create`
+}
+
+export const SPACE_WRITE_SCOPE = buildSpaceWriteScope()
+
+export type SpaceWriteScopeStatus = 'granted' | 'missing' | 'unavailable'
+
 const HANDLE_RESOLVER =
   import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER ?? 'https://bsky.social'
 
@@ -21,7 +31,26 @@ const HANDLE_RESOLVER =
 const OAUTH_SCOPE = [
   ...buildStratosScopes(),
   'repo:app.bsky.feed.post?action=create',
+  // Keep this scope as one string during OAuth scope reserialization.
+  SPACE_WRITE_SCOPE,
 ].join(' ')
+
+export async function hasSpaceWriteScope(
+  session: OAuthSession,
+): Promise<boolean> {
+  const tokenInfo = await session.getTokenInfo(false)
+  return tokenInfo.scope.split(' ').includes(SPACE_WRITE_SCOPE)
+}
+
+export async function getSpaceWriteScopeStatus(
+  session: OAuthSession,
+): Promise<SpaceWriteScopeStatus> {
+  try {
+    return (await hasSpaceWriteScope(session)) ? 'granted' : 'missing'
+  } catch {
+    return 'unavailable'
+  }
+}
 
 function isLoopback(): boolean {
   const h = window.location.hostname

@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Import AFTER mocking
 import {
   getSession,
+  getSpaceWriteScopeStatus,
   init,
+  SPACE_WRITE_SCOPE,
   onSessionDeleted,
   signIn,
   signOut,
@@ -103,5 +105,52 @@ describe('auth', () => {
 
     expect(callback).toHaveBeenCalled()
     expect(getSession()).toBeNull()
+  })
+
+  it('distinguishes a missing space scope from a scope lookup failure', async () => {
+    const missing = await getSpaceWriteScopeStatus({
+      getTokenInfo: vi
+        .fn()
+        .mockResolvedValue({ scope: 'atproto transition:generic' }),
+    } as never)
+    const unavailable = await getSpaceWriteScopeStatus({
+      getTokenInfo: vi
+        .fn()
+        .mockRejectedValue(new Error('Nadia cannot reach the token endpoint')),
+    } as never)
+    const granted = await getSpaceWriteScopeStatus({
+      getTokenInfo: vi.fn().mockResolvedValue({ scope: SPACE_WRITE_SCOPE }),
+    } as never)
+
+    expect(missing).toBe('missing')
+    expect(unavailable).toBe('unavailable')
+    expect(granted).toBe('granted')
+  })
+
+  it('uses a canonical, encoded scope for a port-bearing service DID', async () => {
+    vi.stubEnv('VITE_STRATOS_SERVICE_DID', 'did:web:motoko.test%3A3100')
+    vi.resetModules()
+    const { getSpaceWriteScopeStatus, SPACE_WRITE_SCOPE } =
+      await import('../src/lib/auth')
+    const getTokenInfo = vi.fn().mockResolvedValue({ scope: SPACE_WRITE_SCOPE })
+
+    expect(SPACE_WRITE_SCOPE).toBe(
+      'space:zone.stratos.space.feed?authority=did%3Aweb%3Amotoko.test%253A3100&collection=zone.stratos.feed.post&action=read&action=create',
+    )
+    await expect(
+      getSpaceWriteScopeStatus({ getTokenInfo } as never),
+    ).resolves.toBe('granted')
+    expect(getTokenInfo).toHaveBeenCalledWith(false)
+    await expect(
+      getSpaceWriteScopeStatus({
+        getTokenInfo: vi.fn().mockResolvedValue({
+          scope: SPACE_WRITE_SCOPE.replace(
+            'action=read&action=create',
+            'action=create&action=read',
+          ),
+        }),
+      } as never),
+    ).resolves.toBe('missing')
+    vi.unstubAllEnvs()
   })
 })

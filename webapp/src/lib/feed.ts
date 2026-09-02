@@ -8,6 +8,7 @@ interface FeedViewPost {
     record?: Record<string, unknown>
     indexedAt?: string
     author?: { did: string; handle: string }
+    boundaries?: unknown
   }
   reason?: unknown
 }
@@ -130,8 +131,10 @@ export interface ThreadNode {
  * @param uri - The At Protocol URI.
  * @returns The author DID.
  */
-function authorFromUri(uri: string): string {
-  return uri.replace('at://', '').split('/')[0]
+export function authorFromUri(uri: string): string {
+  const parts = uri.replace('at://', '').split('/')
+  if (parts[1] === 'space' && parts.length >= 7) return parts[4]
+  return parts[0]
 }
 
 /**
@@ -191,6 +194,12 @@ function mapFeedViewPosts(
     const val = item.post.record ?? {}
     const did = item.post.author?.did ?? authorFromUri(item.post.uri)
     const handle = item.post.author?.handle ?? ''
+    const responseBoundaries = item.post.boundaries
+    const boundaries = Array.isArray(responseBoundaries)
+      ? responseBoundaries.filter(
+          (boundary): boundary is string => typeof boundary === 'string',
+        )
+      : boundariesFromRecord(val)
 
     return [
       {
@@ -203,7 +212,7 @@ function mapFeedViewPosts(
         embed: val.embed as FeedPost['embed'],
         author: did,
         authorHandle: handle !== did ? handle : '',
-        boundaries: boundariesFromRecord(val),
+        boundaries,
       },
     ]
   })

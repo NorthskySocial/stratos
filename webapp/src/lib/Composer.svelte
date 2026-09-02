@@ -5,17 +5,20 @@
   import type {FeedPost, ReplyRef} from './feed'
   import {displayBoundary} from './boundary-display'
   import {configureAgent} from './stratos-agent'
+  import {boundaryToSpaceUri} from '@northskysocial/stratos-core'
+  import {getSpaceWriteScopeStatus, type SpaceWriteScopeStatus} from './auth'
 
   interface Props {
     session: OAuthSession
     enrollment: StratosEnrollment | null
+    attestationVerified: boolean | null
     stratosAgent: Agent | null
     replyingTo: FeedPost | null
     onpost: () => void
     oncancelreply: () => void
   }
 
-  let {session, enrollment, stratosAgent, replyingTo, onpost, oncancelreply}: Props = $props()
+  let {session, enrollment, attestationVerified, stratosAgent, replyingTo, onpost, oncancelreply}: Props = $props()
 
   let text = $state('')
   const CHAR_LIMIT = 300
@@ -27,8 +30,15 @@
   let selectedFile: File | null = $state(null)
   let imagePreview: string | null = $state(null)
   let altText = $state('')
+  let spaceWriteScope = $state<SpaceWriteScopeStatus | 'checking'>('checking')
 
   let error = $state('')
+
+  let privatePostingDisabled = $derived(!enrollment || attestationVerified !== true)
+  let privateModeUnavailable = $derived(privatePostingDisabled)
+  let pdsPrivatePost = $derived(
+    isPrivate && enrollment?.custody === 'pds',
+  )
 
   let domains = $derived(
     enrollment?.boundaries.map((b) => b.value).filter(Boolean) ?? [],
@@ -41,7 +51,30 @@
   })
 
   $effect(() => {
-    if (replyingTo?.isPrivate) {
+    if (enrollment !== null) {
+      spaceWriteScope = 'checking'
+      return
+    }
+    let cancelled = false
+    spaceWriteScope = 'checking'
+    getSpaceWriteScopeStatus(session).then((status) => {
+      if (!cancelled) {
+        spaceWriteScope = status
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  })
+
+  $effect(() => {
+    if (privateModeUnavailable) {
+      isPrivate = false
+    }
+  })
+
+  $effect(() => {
+    if (replyingTo?.isPrivate && !privateModeUnavailable) {
       isPrivate = true
     }
   })
@@ -71,6 +104,14 @@
     return {root: rootRef, parent: parentRef}
   }
 
+  function spaceUriFromBoundary(boundary: string): string {
+    const result = boundaryToSpaceUri(boundary, 'zone.stratos.space.feed')
+    if (!result.ok) {
+      throw new Error(`The selected private space is invalid: ${result.error.message}`)
+    }
+    return result.value
+  }
+
   function shortDid(did: string): string {
     if (did.length <= 24) {
       return did
@@ -82,6 +123,18 @@
     if (!text.trim() && !selectedFile) {
       return
     }
+    if (isPrivate && privatePostingDisabled) {
+      error = 'Private posting is disabled because the enrollment attestation is not valid.'
+      return
+    }
+    if (isPrivate && !selectedDomain) {
+      error = 'Select an enrolled private space before posting.'
+      return
+    }
+    if (isPrivate && enrollment?.custody === 'stratos' && !stratosAgent) {
+      error = 'Private posting is unavailable because the Stratos service is not connected.'
+      return
+    }
     posting = true
     error = ''
 
@@ -91,6 +144,9 @@
       let embed: FeedPost['embed'] | undefined
 
       if (selectedFile) {
+        if (pdsPrivatePost) {
+          throw new Error('Images are not available for PDS-hosted private posts yet.')
+        }
         uploading = true
         try {
           if (isPrivate && stratosAgent) {
@@ -138,7 +194,31 @@
         }
       }
 
-      if (isPrivate && stratosAgent && selectedDomain) {
+      if (isPrivate && enrollment?.custody === 'pds') {
+        const response = await session.fetchHandler(
+          '/xrpc/com.atproto.space.createRecord',
+          {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({
+              space: spaceUriFromBoundary(selectedDomain),
+              repo: session.sub,
+              collection: 'zone.stratos.feed.post',
+              validate: false,
+              record: {
+                $type: 'zone.stratos.feed.post',
+                text: text.trim(),
+                ...(replyRef ? {reply: replyRef} : {}),
+                createdAt: now,
+              },
+            }),
+          },
+        )
+        if (!response.ok) {
+          const responseText = await response.text().catch(() => '')
+          throw new Error(responseText || `PDS write failed (${response.status})`)
+        }
+      } else if (isPrivate && enrollment?.custody === 'stratos' && stratosAgent) {
         await stratosAgent.com.atproto.repo.createRecord({
           repo: session.sub,
           collection: 'zone.stratos.feed.post',
@@ -154,7 +234,7 @@
             createdAt: now,
           },
         })
-      } else {
+      } else if (!isPrivate) {
         console.log('Creating public post with Atproto')
         const agent = configureAgent(new Agent(session))
         await agent.com.atproto.repo.createRecord({
@@ -177,7 +257,9 @@
     } catch (err) {
       console.error('Post failed:', err)
       const message = err instanceof Error ? err.message : 'Failed to create post'
-      if (!isPrivate && message.includes('Missing required scope')) {
+      if (pdsPrivatePost && message.toLowerCase().includes('scope')) {
+        error = 'Private posting requires a new space permission. Sign out and authorize the app again.'
+      } else if (!isPrivate && message.includes('Missing required scope')) {
         error = 'Public posting is not available — this demo is for private data only.'
       } else {
         error = message
@@ -221,26 +303,31 @@
 
     <div class="composer-actions">
         <div class="left-actions">
-            <label class="image-upload" class:disabled={posting}>
+            <label class="image-upload" class:disabled={posting || pdsPrivatePost}>
                 <input
                         type="file"
                         accept="image/*"
                         onchange={handleFileChange}
-                        disabled={posting}
+                        disabled={posting || pdsPrivatePost}
                         style="display: none;"
                 />
                 <span class="icon">🖼️</span>
             </label>
+            {#if pdsPrivatePost}
+                <span class="posting-note">Images are not available for PDS-hosted private posts yet.</span>
+            {/if}
 
-            <label class="private-toggle" class:disabled={!enrollment}>
+            <label class="private-toggle" class:disabled={privateModeUnavailable}>
                 <input
                         type="checkbox"
                         bind:checked={isPrivate}
-                        disabled={!enrollment || posting}
+                        disabled={privateModeUnavailable || posting}
                 />
                 <span>Private</span>
                 {#if !enrollment}
                     <span class="tooltip">Enroll in Stratos to post privately</span>
+                {:else if privatePostingDisabled}
+                    <span class="tooltip">Private posting requires a valid enrollment attestation</span>
                 {/if}
             </label>
 
@@ -250,7 +337,7 @@
                         bind:value={selectedDomain}
                         disabled={posting}
                 >
-                    {#each domains as domain}
+                    {#each domains as domain (domain)}
                         <option value={domain}>{displayBoundary(domain)}</option>
                     {/each}
                 </select>
@@ -269,6 +356,15 @@
 
     {#if error}
         <p class="error">{error}</p>
+    {/if}
+    {#if !enrollment && spaceWriteScope !== 'checking'}
+        <p class="posting-note">
+            {spaceWriteScope === 'granted'
+              ? 'Your PDS will hold your private posts after enrollment.'
+              : spaceWriteScope === 'missing'
+                ? 'Stratos will hold your private posts after enrollment.'
+                : 'Private posting permission could not be verified.'}
+        </p>
     {/if}
 </div>
 
