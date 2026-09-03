@@ -24,6 +24,12 @@
   let text = $state('')
   const CHAR_LIMIT = 300
   let charsRemaining = $derived(CHAR_LIMIT - text.length)
+  let isTextInvalid = $derived(charsRemaining < 0)
+  let characterCount = $derived(
+    charsRemaining < 0
+      ? `${Math.abs(charsRemaining)} character${charsRemaining === -1 ? '' : 's'} over the ${CHAR_LIMIT}-character limit.`
+      : `${charsRemaining} characters remaining of ${CHAR_LIMIT}.`,
+  )
   let isPrivate = $state(true)
   let selectedDomain = $state('')
   let posting = $state(false)
@@ -267,6 +273,7 @@
       status = 'Post created.'
     } catch (err) {
       console.error('Post failed:', err)
+      status = ''
       const message = err instanceof Error ? err.message : 'Failed to create post'
       if (pdsPrivatePost && message.toLowerCase().includes('scope')) {
         error = 'Private posting requires a new space permission. Sign out and authorize the app again.'
@@ -297,10 +304,11 @@
             placeholder={isPrivate ? `Post to ${selectedDomain ? displayBoundary(selectedDomain) : 'private'}…` : 'Write a post…'}
             disabled={posting}
             rows="3"
-            aria-invalid={Boolean(error)}
-            aria-describedby="post-guidance"
+            aria-invalid={isTextInvalid}
+            aria-describedby="post-guidance post-character-count"
     ></textarea>
     <p id="post-guidance" class="sr-only">Maximum {CHAR_LIMIT} characters.</p>
+    <p id="post-character-count" class="sr-only" role="status">{characterCount}</p>
 
     {#if imagePreview}
         <div class="image-preview-container">

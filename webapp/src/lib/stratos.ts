@@ -154,12 +154,19 @@ export async function discoverAllStratosEnrollments(
 ): Promise<StratosEnrollment[]> {
   const agent = configureAgent(new Agent(session))
   try {
-    const res = await agent.com.atproto.repo.listRecords({
-      repo: session.sub,
-      collection: 'zone.stratos.actor.enrollment',
-      limit: 50,
-    })
-    return (res.data.records || [])
+    const records = []
+    let cursor: string | undefined
+    do {
+      const res = await agent.com.atproto.repo.listRecords({
+        repo: session.sub,
+        collection: 'zone.stratos.actor.enrollment',
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+      })
+      records.push(...(res.data.records || []))
+      cursor = res.data.cursor
+    } while (cursor)
+    return records
       .map((r) =>
         parseEnrollmentRecord(
           r.value as Record<string, unknown>,

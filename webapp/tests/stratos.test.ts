@@ -182,6 +182,48 @@ describe('stratos logic', () => {
       setStratosServiceDid(undefined)
     })
 
+    it('finds the configured enrollment on a later page', async () => {
+      setStratosServiceDid('did:web:test.stratos.actor')
+      mockAgent.com.atproto.repo.listRecords
+        .mockResolvedValueOnce({
+          data: {
+            cursor: 'page-two',
+            records: [
+              {
+                uri: 'at://did:plc:user1/zone.stratos.actor.enrollment/other',
+                value: { service: 'https://other.example.com' },
+              },
+            ],
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            records: [
+              {
+                uri: 'at://did:plc:user1/zone.stratos.actor.enrollment/did:web:test.stratos.actor',
+                value: { service: 'https://stratos.example.com' },
+              },
+            ],
+          },
+        })
+
+      await expect(
+        discoverStratosEnrollment(mockSession),
+      ).resolves.toMatchObject({
+        rkey: 'did:web:test.stratos.actor',
+      })
+      expect(mockAgent.com.atproto.repo.listRecords).toHaveBeenNthCalledWith(
+        2,
+        {
+          repo: 'did:plc:user1',
+          collection: 'zone.stratos.actor.enrollment',
+          limit: 50,
+          cursor: 'page-two',
+        },
+      )
+      setStratosServiceDid(undefined)
+    })
+
     it('returns null if no records found', async () => {
       mockAgent.com.atproto.repo.listRecords.mockResolvedValue({
         data: { records: [] },

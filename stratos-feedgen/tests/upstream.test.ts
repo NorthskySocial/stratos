@@ -154,6 +154,47 @@ describe('UpstreamStratosClient', () => {
       })
     })
 
+    it('uses empty boundaries for unenrolled responses', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ did: 'did:plc:user', enrolled: false }))
+      }
+
+      await expect(client.resolveEnrollments('did:plc:user')).resolves.toEqual({
+        did: 'did:plc:user',
+        enrolled: false,
+        boundaries: [],
+      })
+    })
+
+    it('rejects enrolled responses with invalid boundaries', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ did: 'did:plc:user', enrolled: true }))
+      }
+
+      await expect(client.resolveEnrollments('did:plc:user')).rejects.toThrow(
+        'resolveEnrollments returned invalid boundaries',
+      )
+    })
+
+    it('rejects enrolled responses with non-string boundaries', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            did: 'did:plc:user',
+            enrolled: true,
+            boundaries: ['engineering', 17],
+          }),
+        )
+      }
+
+      await expect(
+        client.resolveEnrollments('did:plc:user'),
+      ).rejects.toBeInstanceOf(StratosInvalidResponseError)
+    })
+
     it('signs requests with a valid service JWT', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')
