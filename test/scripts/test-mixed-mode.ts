@@ -133,13 +133,10 @@ function isSpaceSyncPass(event: {
   return event.fields['msg'] === 'space sync pass completed'
 }
 
-function isSwordsmithMembershipPass(event: {
+function isMembershipPass(event: {
   fields: Readonly<Record<string, unknown>>
 }): boolean {
-  return (
-    event.fields['msg'] === 'space membership pass completed' &&
-    event.fields['boundary'] === DOMAINS.swordsmith
-  )
+  return event.fields['msg'] === 'space membership pass completed'
 }
 
 async function assertFeedgenWarmup(
@@ -677,15 +674,18 @@ async function run(): Promise<void> {
       'mixed-mode feedgen is healthy',
     )
     const firstMembershipPass = await feedgen.waitForLog(
-      isSwordsmithMembershipPass,
+      isMembershipPass,
       30_000,
       1,
     )
     assert(
-      firstMembershipPass.fields['memberCount'] === 1 &&
+      firstMembershipPass.fields['successfulBoundaries'] ===
+        MIXED_MODE_FEEDS.length &&
+        firstMembershipPass.fields['failedBoundaries'] === 0 &&
+        firstMembershipPass.fields['pollTargets'] === 1 &&
         firstMembershipPass.fields['skippedNoHost'] === 0 &&
         firstMembershipPass.fields['removed'] === 0,
-      'the swordsmith membership pass produces one poll target without removals',
+      'the membership pass processes both boundaries and produces one poll target',
     )
     const firstPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
     assert(
@@ -830,15 +830,18 @@ async function run(): Promise<void> {
       'cold-restarted mixed-mode feedgen is healthy',
     )
     const restartMembershipPass = await feedgen.waitForLog(
-      isSwordsmithMembershipPass,
+      isMembershipPass,
       30_000,
       1,
     )
     assert(
-      restartMembershipPass.fields['memberCount'] === 1 &&
+      restartMembershipPass.fields['successfulBoundaries'] ===
+        MIXED_MODE_FEEDS.length &&
+        restartMembershipPass.fields['failedBoundaries'] === 0 &&
+        restartMembershipPass.fields['pollTargets'] === 1 &&
         restartMembershipPass.fields['skippedNoHost'] === 0 &&
         restartMembershipPass.fields['removed'] === 0,
-      'the cold restart rebuilds the swordsmith PDS poll target',
+      'the cold restart rebuilds the PDS poll target for both boundaries',
     )
     const restartPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
     assert(
