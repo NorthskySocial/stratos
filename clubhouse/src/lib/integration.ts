@@ -62,7 +62,8 @@ async function requestRoomStatus(
   roomIds: readonly string[],
 ): Promise<RoomStatus> {
   const response = await session.fetchHandler(endpoint, { method: 'GET' })
-  if (!response.ok) throw new Error(`Room status returned HTTP ${response.status}.`)
+  if (!response.ok)
+    throw new Error(`Room status returned HTTP ${response.status}.`)
   const payload = (await response.json()) as AccessResponse
   return {
     states: parseRoomStates(payload, roomIds),
@@ -127,12 +128,16 @@ export function createClubhouseIntegration(
     if (!session || roomIds.length === 0) return {}
     const endpoint = roomStatusEndpoint(config)
     if (!endpoint) {
-      return Object.fromEntries(roomIds.map((roomId) => [roomId, 'status-error']))
+      return Object.fromEntries(
+        roomIds.map((roomId) => [roomId, 'status-error']),
+      )
     }
     try {
       return (await requestRoomStatus(session, endpoint, roomIds)).states
     } catch {
-      return Object.fromEntries(roomIds.map((roomId) => [roomId, 'status-error']))
+      return Object.fromEntries(
+        roomIds.map((roomId) => [roomId, 'status-error']),
+      )
     }
   }
 

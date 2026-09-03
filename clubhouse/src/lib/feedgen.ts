@@ -9,7 +9,10 @@ export type FeedFailureCode =
   | 'InvalidResponse'
 
 export class FeedgenError extends Error {
-  constructor(readonly code: FeedFailureCode, message: string) {
+  constructor(
+    readonly code: FeedFailureCode,
+    message: string,
+  ) {
     super(message)
     this.name = 'FeedgenError'
   }
@@ -47,19 +50,30 @@ function messageFor(code: FeedFailureCode): string {
 }
 
 function failureFromResponse(status: number, body: unknown): FeedgenError {
-  const error = typeof body === 'object' && body !== null
-    ? (body as { error?: unknown }).error
-    : undefined
-  if (error === 'UnknownFeed' || error === 'BoundaryMismatch' || error === 'FeedNotReady') {
+  const error =
+    typeof body === 'object' && body !== null
+      ? (body as { error?: unknown }).error
+      : undefined
+  if (
+    error === 'UnknownFeed' ||
+    error === 'BoundaryMismatch' ||
+    error === 'FeedNotReady'
+  ) {
     return new FeedgenError(error, messageFor(error))
   }
   if (status === 401 || status === 403) {
-    return new FeedgenError('AuthenticationRequired', messageFor('AuthenticationRequired'))
+    return new FeedgenError(
+      'AuthenticationRequired',
+      messageFor('AuthenticationRequired'),
+    )
   }
   return new FeedgenError('NetworkError', `The feed returned HTTP ${status}.`)
 }
 
-function stringField(record: Record<string, unknown>, field: string): string | null {
+function stringField(
+  record: Record<string, unknown>,
+  field: string,
+): string | null {
   const value = record[field]
   return typeof value === 'string' ? value : null
 }
@@ -80,23 +94,42 @@ function parseFeedPage(payload: unknown): FeedPage {
     throw new FeedgenError('InvalidResponse', messageFor('InvalidResponse'))
   }
   const posts = response.feed.flatMap((entry): ClubhouseFeedPost[] => {
-    const post = typeof entry === 'object' && entry !== null
-      ? (entry as { post?: unknown }).post
-      : undefined
+    const post =
+      typeof entry === 'object' && entry !== null
+        ? (entry as { post?: unknown }).post
+        : undefined
     if (typeof post !== 'object' || post === null) return []
     const value = post as Record<string, unknown>
     const uri = stringField(value, 'uri')
     const cid = stringField(value, 'cid')
     const indexedAt = stringField(value, 'indexedAt')
     const authorValue = value.author
-    if (!uri || !cid || !indexedAt || typeof authorValue !== 'object' || authorValue === null) return []
+    if (
+      !uri ||
+      !cid ||
+      !indexedAt ||
+      typeof authorValue !== 'object' ||
+      authorValue === null
+    )
+      return []
     const author = authorValue as Record<string, unknown>
     const did = stringField(author, 'did')
     if (!did) return []
     const handle = stringField(author, 'handle') ?? undefined
-    return [{ uri, cid, indexedAt, author: { did, handle }, text: safePostText(value.record) }]
+    return [
+      {
+        uri,
+        cid,
+        indexedAt,
+        author: { did, handle },
+        text: safePostText(value.record),
+      },
+    ]
   })
-  return { posts, cursor: typeof response.cursor === 'string' ? response.cursor : undefined }
+  return {
+    posts,
+    cursor: typeof response.cursor === 'string' ? response.cursor : undefined,
+  }
 }
 
 /** Call the one supported Feedgen query through the authenticated PDS proxy. */
@@ -106,7 +139,10 @@ export async function getFeed(
   input: { feed: string; limit: number; cursor?: string },
 ): Promise<FeedPage> {
   if (!config.feedgenDid) {
-    throw new FeedgenError('NetworkError', 'Feedgen is not configured for this deployment.')
+    throw new FeedgenError(
+      'NetworkError',
+      'Feedgen is not configured for this deployment.',
+    )
   }
   const parameters = new URLSearchParams({
     feed: input.feed,
@@ -115,10 +151,13 @@ export async function getFeed(
   if (input.cursor) parameters.set('cursor', input.cursor)
   let response: Response
   try {
-    response = await session.fetchHandler(`/xrpc/zone.stratos.feedgen.getFeed?${parameters.toString()}`, {
-      method: 'GET',
-      headers: { 'atproto-proxy': `${config.feedgenDid}#stratos_feedgen` },
-    })
+    response = await session.fetchHandler(
+      `/xrpc/zone.stratos.feedgen.getFeed?${parameters.toString()}`,
+      {
+        method: 'GET',
+        headers: { 'atproto-proxy': `${config.feedgenDid}#stratos_feedgen` },
+      },
+    )
   } catch (error) {
     throw new FeedgenError(
       'NetworkError',

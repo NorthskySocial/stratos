@@ -22,18 +22,24 @@ describe('room enrollment URL', () => {
     expect(url.href).toContain('https://stratos.example/oauth/authorize?')
     expect(url.searchParams.get('room')).toBe('nerv-hq')
     expect(url.searchParams.get('handle')).toBe('misato.example')
-    expect(url.searchParams.get('redirect_uri')).toBe('https://clubhouse.example/')
-    expect(url.searchParams.get('client_id')).toBe('https://clubhouse.example/client-metadata.json')
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://clubhouse.example/',
+    )
+    expect(url.searchParams.get('client_id')).toBe(
+      'https://clubhouse.example/client-metadata.json',
+    )
     expect(url.href).not.toContain('boundary')
   })
 
   it('rejects a return target outside a room route', () => {
-    expect(() => roomJoinUrl(
-      { serviceUrl: 'https://stratos.example', pdsSpaceUriByRoom: {} },
-      'nerv-hq',
-      'misato.example',
-      'https://elsewhere.example',
-    )).toThrow('return path')
+    expect(() =>
+      roomJoinUrl(
+        { serviceUrl: 'https://stratos.example', pdsSpaceUriByRoom: {} },
+        'nerv-hq',
+        'misato.example',
+        'https://elsewhere.example',
+      ),
+    ).toThrow('return path')
   })
 
   it('preserves only a public room route across the callback', () => {

@@ -11,7 +11,9 @@ interface RoomAccessDescription {
 type SafeCustody = 'stratos' | 'pds'
 
 function custodyForActiveEnrollment(
-  enrollment: Awaited<ReturnType<OAuthRoutesConfig['enrollmentStore']['getEnrollment']>>,
+  enrollment: Awaited<
+    ReturnType<OAuthRoutesConfig['enrollmentStore']['getEnrollment']>
+  >,
 ): SafeCustody | undefined {
   if (enrollment?.active !== true) return undefined
   // Normalize at the service boundary. Browser-owned records must never

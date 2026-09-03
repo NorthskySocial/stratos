@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  configureAgent,
-  createServiceFetch,
-} from '../src/stratos-agent'
+import { configureAgent, createServiceFetch } from '../src/stratos-agent'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { stratosLexicons } from '@northskysocial/stratos-client/lexicons'
 
@@ -70,10 +67,7 @@ describe('configureAgent', () => {
   it('keeps bundled Stratos lexicons when an app adds its own lexicon', () => {
     const add = vi.fn()
     const extra = { lexicon: 1, id: 'example.clubhouse.defs' }
-    configureAgent(
-      { api: { lex: { add } } } as never,
-      [extra] as never,
-    )
+    configureAgent({ api: { lex: { add } } } as never, [extra] as never)
 
     expect(add.mock.calls.map(([doc]) => doc)).toEqual([
       ...stratosLexicons,

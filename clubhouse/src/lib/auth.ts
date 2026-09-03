@@ -12,7 +12,9 @@ import {
 
 function isLoopback(): boolean {
   const hostname = window.location.hostname
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  return (
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  )
 }
 
 /** Create the shared OAuth client; protocol handling stays in stratos-browser. */
@@ -22,7 +24,9 @@ export function createClubhouseAuth(config: ClubhouseConfig): BrowserAuth {
     'repo:zone.stratos.actor.enrollment',
     'repo:zone.stratos.feed.post?action=create',
     ...(config.feedgenDid
-      ? [`rpc:zone.stratos.feedgen.getFeed?aud=${encodeURIComponent(config.feedgenDid)}`]
+      ? [
+          `rpc:zone.stratos.feedgen.getFeed?aud=${encodeURIComponent(config.feedgenDid)}`,
+        ]
       : []),
   ]
   return createBrowserAuth({
@@ -31,13 +35,15 @@ export function createClubhouseAuth(config: ClubhouseConfig): BrowserAuth {
     spaceWriteScope: config.serviceDid
       ? { serviceDid: config.serviceDid }
       : undefined,
-    handleResolver: import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social',
+    handleResolver:
+      import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social',
     oauthProxyUrl: import.meta.env.VITE_ATPROTO_OAUTH_PROXY_URL,
     getBaseUrl: () => clubhouseBaseUrl(config),
     getClientId: () => clubhouseClientId(config),
     getRedirectUri: () => clubhouseRedirectUri(config),
     isLoopback,
-    onSessionRestoreError: (error: unknown) => console.warn('Clubhouse session restore failed', error),
+    onSessionRestoreError: (error: unknown) =>
+      console.warn('Clubhouse session restore failed', error),
   })
 }
 
