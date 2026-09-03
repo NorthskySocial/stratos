@@ -61,6 +61,50 @@ describe('createServiceFetch', () => {
     ).rejects.toThrow('does not accept a Request')
     expect(fetchHandler).not.toHaveBeenCalled()
   })
+
+  it('rejects remote HTTP services before calling the authenticated fetch handler', async () => {
+    const fetchHandler = vi.fn()
+    const fetch = createServiceFetch(
+      { fetchHandler } as unknown as OAuthSession,
+      'http://stratos.example',
+    )
+
+    await expect(fetch('/xrpc/zone.stratos.feed.get')).rejects.toThrow(
+      'requires HTTPS or a loopback HTTP service',
+    )
+    expect(fetchHandler).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsafe non-HTTP service protocols before calling the authenticated fetch handler', async () => {
+    const fetchHandler = vi.fn()
+    const fetch = createServiceFetch(
+      { fetchHandler } as unknown as OAuthSession,
+      'ftp://stratos.example',
+    )
+
+    await expect(fetch('/xrpc/zone.stratos.feed.get')).rejects.toThrow(
+      'requires HTTPS or a loopback HTTP service',
+    )
+    expect(fetchHandler).not.toHaveBeenCalled()
+  })
+
+  it.each(['localhost', '127.0.0.1', '[::1]'])(
+    'allows HTTP loopback services at %s for local development',
+    async (host) => {
+      const fetchHandler = vi.fn().mockResolvedValue(new Response())
+      const fetch = createServiceFetch(
+        { fetchHandler } as unknown as OAuthSession,
+        `http://${host}:3000`,
+      )
+
+      await fetch('/xrpc/zone.stratos.feed.get')
+
+      expect(fetchHandler).toHaveBeenCalledWith(
+        `http://${host}:3000/xrpc/zone.stratos.feed.get`,
+        undefined,
+      )
+    },
+  )
 })
 
 describe('configureAgent', () => {

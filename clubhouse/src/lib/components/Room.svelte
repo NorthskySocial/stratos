@@ -18,6 +18,20 @@
     pending: 'Request pending',
     'status-error': 'Access status unavailable',
   }
+
+  function openRoom(event: MouseEvent) {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return
+    }
+    event.preventDefault()
+    onOpen(room.id)
+  }
 </script>
 
 <article class="room-card" class:room-unjoined={state === 'unjoined'} class:room-unavailable={state === 'unavailable' || state === 'status-error'}>
@@ -47,6 +61,6 @@
         {state === 'pending' ? 'Request pending…' : state === 'unavailable' || state === 'status-error' ? 'Joining unavailable' : 'Join room'}
       </button>
     {/if}
-    <a class="room-link" href={roomPath(room.id)} onclick={(event) => { event.preventDefault(); onOpen(room.id) }}>About this room</a>
+    <a class="room-link" href={roomPath(room.id)} onclick={openRoom}>About this room</a>
   </div>
 </article>

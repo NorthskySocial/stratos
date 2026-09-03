@@ -13,13 +13,22 @@
 
   let { feedState, posts, hasMore, message, onLoadMore, onPost }: Props = $props()
   let text = $state('')
+  let draftRevision = $state(0)
   let posting = $state(false)
 
+  function updateText() {
+    draftRevision += 1
+  }
+
   async function submitPost() {
+    const submittedText = text
+    const submittedDraftRevision = draftRevision
     posting = true
     try {
-      await onPost(text)
-      text = ''
+      await onPost(submittedText)
+      if (draftRevision === submittedDraftRevision) {
+        text = ''
+      }
     } catch {
       // The parent renders a recoverable error; keep the draft for retry.
     } finally {
@@ -31,7 +40,7 @@
 <div class="feed-panel">
   <form class="post-composer" onsubmit={(event) => { event.preventDefault(); void submitPost() }}>
     <label for="room-post">Write a flat room post</label>
-    <textarea id="room-post" bind:value={text} maxlength="300" rows="3" placeholder="Share something with this room." aria-describedby={message ? 'room-post-message' : undefined}></textarea>
+    <textarea id="room-post" bind:value={text} oninput={updateText} maxlength="300" rows="3" placeholder="Share something with this room." aria-describedby={message ? 'room-post-message' : undefined}></textarea>
     <div class="composer-actions">
       <p>Text only. Clubhouse does not create replies or threads.</p>
       <button class="button button-primary" type="submit" disabled={posting || !text.trim()}>

@@ -20,7 +20,7 @@ export function roomJoinUrl(
   if (!handle.trim()) throw new Error('A signed-in handle is required')
   if (!returnPath.startsWith('/rooms/'))
     throw new Error('Room return path is invalid')
-  const url = new URL('/oauth/authorize', config.serviceUrl)
+  const url = new URL('oauth/authorize', `${config.serviceUrl}/`)
   url.searchParams.set('handle', handle)
   url.searchParams.set('room', roomId)
   url.searchParams.set('redirect_uri', clubhouseRedirectUri(config))

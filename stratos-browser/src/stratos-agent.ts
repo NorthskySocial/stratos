@@ -48,6 +48,24 @@ function getServiceUrl(
   }
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  )
+}
+
+function assertServiceTargetIsSafe(targetUrl: string): void {
+  const target = new URL(targetUrl)
+  if (
+    target.protocol !== 'https:' &&
+    (target.protocol !== 'http:' || !isLoopbackHost(target.hostname))
+  ) {
+    throw new TypeError(
+      'createServiceFetch requires HTTPS or a loopback HTTP service',
+    )
+  }
+}
+
 function hasNonceErrorBody(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) {
     return false
@@ -90,6 +108,7 @@ export function createServiceFetch(
       )
     }
     const targetUrl = getServiceUrl(input, serviceUrl)
+    assertServiceTargetIsSafe(targetUrl)
     const response = await session.fetchHandler(targetUrl, init)
     if (await requiresDpopNonceRetry(response)) {
       return session.fetchHandler(targetUrl, init)
