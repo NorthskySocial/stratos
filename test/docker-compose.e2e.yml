@@ -8,7 +8,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: stratos-e2e-postgres
     restart: 'no'
     environment:
@@ -18,7 +18,7 @@ services:
     ports:
       - '5432:5432'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - ./appview/init-appview-db.sql:/docker-entrypoint-initdb.d/01-appview.sql:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U stratos']

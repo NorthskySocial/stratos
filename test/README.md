@@ -128,7 +128,7 @@ deno run -A scripts/run-all.ts --postgres
 
 This mode:
 
-1. Starts a `postgres:16-alpine` container alongside Stratos via `docker-compose.postgres.yml`
+1. Starts a `postgres:18-alpine` container alongside Stratos via `docker-compose.postgres.yml`
    overlay
 2. Configures the Stratos container with `STORAGE_BACKEND=postgres` and `STRATOS_POSTGRES_URL`
 

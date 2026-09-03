@@ -80,6 +80,29 @@ describe('PostgreSQL Backend Integration', () => {
     await cleanupClient`DELETE FROM enrollment`
   })
 
+  describe('Service Schema Migration', () => {
+    it('removes the redundant did index and keeps required indexes', async () => {
+      await cleanupClient`
+        CREATE INDEX IF NOT EXISTS enrollment_boundary_did_idx
+        ON enrollment_boundary(did)
+      `
+
+      await migrateServicePgDb(serviceDb)
+
+      const indexes = await cleanupClient<Array<{ indexName: string }>>`
+        SELECT indexname AS "indexName"
+        FROM pg_indexes
+        WHERE schemaname = current_schema()
+          AND tablename = 'enrollment_boundary'
+      `
+      const indexNames = indexes.map((index) => index.indexName)
+
+      expect(indexNames).not.toContain('enrollment_boundary_did_idx')
+      expect(indexNames).toContain('enrollment_boundary_pkey')
+      expect(indexNames).toContain('enrollment_boundary_boundary_idx')
+    })
+  })
+
   describe('Actor Lifecycle', () => {
     it('should create and check actor existence', async () => {
       expect(await actorStore.exists(testDid)).toBe(false)
