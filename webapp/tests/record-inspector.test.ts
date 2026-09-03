@@ -33,6 +33,8 @@ describe('RecordInspector.svelte', () => {
     await fireEvent.click(dialog)
 
     expect(onclose).toHaveBeenCalledTimes(1)
+    expect(dialog).not.toHaveAttribute('open')
+    expect(getComputedStyle(dialog).display).not.toBe('flex')
   })
 
   it('does not close when dialog content is clicked', async () => {

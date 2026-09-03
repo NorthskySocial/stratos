@@ -136,9 +136,12 @@
     width: 100%;
     max-width: 1200px;
     max-height: 90vh;
+    overflow: hidden;
+  }
+
+  .modal[open] {
     display: flex;
     flex-direction: column;
-    overflow: hidden;
   }
 
   .modal::backdrop {
