@@ -15,6 +15,16 @@
 # it — no reverse proxy needed.
 
 services:
+  # The public room catalogue is read by both Feedgen and Stratos. Keep the
+  # host-side file identical so the browser catalogue and the indexed feeds
+  # cannot drift apart.
+  stratos:
+    environment:
+      STRATOS_ROOM_CATALOG_FILE: /app/config/feeds.yaml
+    volumes:
+      - stratos-data:/app/data
+      - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
+
   # Ephemeral HTTPS tunnel to the feedgen service, mirroring the load-test setup.
   # trycloudflare prints its URL to the logs; feedgen-start.sh greps it out.
   # Swap for ngrok manually if you prefer — point it at localhost:3000.
