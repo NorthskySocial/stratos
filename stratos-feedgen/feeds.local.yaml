@@ -1,12 +1,12 @@
 # Stratos feed generator — local testing feed config.
 #
 # Maps short feed ids (requested via `?feed=<id>`) to a boundary domain.
-# The boundary value here must be one of STRATOS_ALLOWED_DOMAINS (or a
-# `<domain>/<path>` under it) that your test users enroll into.
+# The boundary value must exactly match a service-qualified
+# STRATOS_ALLOWED_DOMAINS entry that local test users can enroll into.
 #
 # Used by the `feedgen` service in docker-compose.yml via FEEDGEN_FEEDS_FILE.
 feeds:
   - id: swordsmith
-    boundary: swordsmith
+    boundary: did:web:stratos.example.com/swordsmith
     displayName: Swordsmith
     description: Local feedgen test feed

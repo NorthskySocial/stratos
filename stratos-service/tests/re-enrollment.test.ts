@@ -49,6 +49,7 @@ describe('Re-enrollment', () => {
       getBoundaries: vi.fn(),
       updateEnrollment: vi.fn(),
       setBoundaries: vi.fn(),
+      addBoundary: vi.fn(),
     }
     mockOauthClient = {
       callback: vi.fn().mockResolvedValue({ session: { sub: userDid } }),
@@ -117,6 +118,9 @@ describe('Re-enrollment', () => {
         sig: new Uint8Array([1, 2, 3]),
         signingKey: 'did:key:service-key',
       }),
+      repoWriteLocks: {
+        acquire: vi.fn().mockResolvedValue(() => undefined),
+      },
     }
 
     const router = createOAuthRoutes(config)
@@ -187,6 +191,9 @@ describe('Re-enrollment', () => {
         sig: new Uint8Array([1, 2, 3]),
         signingKey: 'did:key:service-key',
       }),
+      repoWriteLocks: {
+        acquire: vi.fn().mockResolvedValue(() => undefined),
+      },
     }
 
     const router = createOAuthRoutes(config)

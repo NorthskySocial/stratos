@@ -1,0 +1,38 @@
+{
+  "name": "@northskysocial/stratos-browser",
+  "version": "0.1.0",
+  "description": "Browser OAuth and DPoP helpers for Stratos applications",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prelint": "pnpm --filter @northskysocial/stratos-client run build",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@atproto/api": "^0.20.41",
+    "@atproto/lexicon": "^0.7.11",
+    "@atproto/oauth-client-browser": "^0.5.3",
+    "@atproto/oauth-types": "^0.7.5",
+    "@northskysocial/stratos-client": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "npm:@typescript/typescript6@~6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}
