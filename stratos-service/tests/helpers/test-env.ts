@@ -26,7 +26,7 @@ export const HAS_POSTGRES = !!POSTGRES_URL
 let pgContainer: StartedPostgreSqlContainer | null = null
 
 export async function startPostgresContainer(): Promise<string> {
-  pgContainer = await new PostgreSqlContainer('postgres:16-alpine')
+  pgContainer = await new PostgreSqlContainer('postgres:18-alpine')
     .withDatabase('stratos_test')
     .withUsername('stratos')
     .withPassword('stratos')

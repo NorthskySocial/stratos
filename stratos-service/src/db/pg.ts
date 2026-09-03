@@ -284,7 +284,7 @@ export async function migrateServicePgDb(db: ServicePgDb): Promise<void> {
     db,
     'enrollment_boundary_did_idx',
     sql`
-      CREATE INDEX IF NOT EXISTS "enrollment_boundary_did_idx" ON "enrollment_boundary"("did")
+      DROP INDEX IF EXISTS "enrollment_boundary_did_idx"
     `,
   )
 
