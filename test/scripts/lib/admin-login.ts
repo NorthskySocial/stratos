@@ -3,7 +3,6 @@
 
 import type { Browser, Page } from 'npm:playwright@1.58.2'
 import { STRATOS_URL } from './config.ts'
-import { loadState } from './state.ts'
 import { dim, fail, info } from './log.ts'
 import { ADMIN_SESSION_COOKIE } from './admin.ts'
 
@@ -23,19 +22,6 @@ async function screenshot(page: Page, name: string): Promise<void> {
   }
 }
 
-async function handleNgrokInterstitial(page: Page): Promise<void> {
-  const ngrokButton = await page.$(
-    'button:has-text("Visit Site"), button:has-text("Visit the site")',
-  )
-  if (!ngrokButton && !page.url().includes('ngrok-free.app')) return
-  if (ngrokButton) {
-    await ngrokButton.click()
-    await page
-      .waitForNavigation({ waitUntil: 'networkidle', timeout: 30_000 })
-      .catch(() => {})
-  }
-}
-
 /**
  * Drive the admin OAuth flow for the operator and return the opaque admin
  * session cookie value. Mirrors the enrollment OAuth flow but targets the admin
@@ -47,19 +33,17 @@ export async function adminLogin(
   handle: string,
   password: string,
 ): Promise<string | null> {
-  const state = await loadState()
-  const baseUrl = state.ngrokUrl || STRATOS_URL
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
-  await context.setExtraHTTPHeaders({ 'ngrok-skip-browser-warning': 'true' })
   const page = await context.newPage()
 
   try {
-    const authorizeUrl = `${baseUrl}/admin/oauth/authorize?handle=${encodeURIComponent(
+    const authorizeUrl = `${STRATOS_URL}/admin/oauth/authorize?handle=${encodeURIComponent(
       handle,
     )}`
-    info(`Operator: starting admin OAuth at ${baseUrl}/admin/oauth/authorize`)
+    info(
+      `Operator: starting admin OAuth at ${STRATOS_URL}/admin/oauth/authorize`,
+    )
     await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
-    await handleNgrokInterstitial(page)
 
     await page.waitForSelector(
       'input[type="password"], input[name="password"]',
@@ -104,7 +88,7 @@ export async function adminLogin(
         await page.keyboard.press('Enter')
       }
       await page
-        .waitForURL((url: URL) => url.toString().includes(baseUrl), {
+        .waitForURL((url: URL) => url.toString().includes(STRATOS_URL), {
           timeout: 15_000,
         })
         .catch(() => {

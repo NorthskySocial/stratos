@@ -3,11 +3,11 @@
 
 import { load } from 'jsr:@std/dotenv'
 
-import { loadState } from './state.ts'
+import { loadState, type TestState } from './state.ts'
 
 export { loadState }
 
-const envPath = new URL('../../../.env', import.meta.url).pathname
+const envPath = new URL('../../.env', import.meta.url).pathname
 await load({ envPath, export: true })
 
 // Defined before the loadState() call below: state.ts imports STATE_FILE from
@@ -18,20 +18,33 @@ export const STATE_FILE = new URL('../../test-state.json', import.meta.url)
   .pathname
 
 const state = await loadState()
+export const USE_CLOUDFLARE_TUNNEL =
+  Deno.env.get('USE_CLOUDFLARE_TUNNEL') === 'true'
 
-// Use the ngrok URL from state if available, otherwise fall back to environment or default.
+export function activeCloudflareTunnelUrl(
+  state: Pick<TestState, 'tunnelUrl'>,
+): string | undefined {
+  if (!USE_CLOUDFLARE_TUNNEL) return undefined
+  return state.tunnelUrl
+}
+
+export const CLOUDFLARE_TUNNEL_URL = activeCloudflareTunnelUrl(state)
+
+// Use the tunnel URL from state if available, otherwise use the environment or default.
 // This is critical because some scripts (like run-all.ts) might be imported by others
-// before the Ngrok phase has completed. However, since each phase runs in its own
+// before the tunnel phase has completed. However, since each phase runs in its own
 // process, this `loadState()` will re-run and pick up the correct URL.
 export const STRATOS_URL =
-  state.ngrokUrl || Deno.env.get('STRATOS_URL') || 'http://localhost:3100'
+  CLOUDFLARE_TUNNEL_URL ||
+  Deno.env.get('STRATOS_URL') ||
+  'http://127.0.0.1:3100'
 
-function deriveServiceDid(ngrokUrl?: string): string {
-  if (ngrokUrl) return `did:web:${ngrokUrl.replace(/^https?:\/\//, '')}`
+function deriveServiceDid(tunnelUrl?: string): string {
+  if (tunnelUrl) return `did:web:${tunnelUrl.replace(/^https?:\/\//, '')}`
   return 'did:web:127.0.0.1%3A3100'
 }
 
-export const SERVICE_DID = state.serviceDid ?? deriveServiceDid(state.ngrokUrl)
+export const SERVICE_DID = deriveServiceDid(CLOUDFLARE_TUNNEL_URL)
 
 function requireEnv(key: string): string {
   const value = Deno.env.get(key)

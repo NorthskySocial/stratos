@@ -5,7 +5,7 @@
   import type {FeedPost, ReplyRef} from './feed'
   import {displayBoundary} from './boundary-display'
   import {configureAgent} from './stratos-agent'
-  import {boundaryToSpaceUri} from '@northskysocial/stratos-core'
+  import {boundaryToSpaceUri} from '@northskysocial/stratos-core/spaces'
   import {getSpaceWriteScopeStatus, type SpaceWriteScopeStatus} from './auth'
 
   interface Props {

@@ -2,11 +2,7 @@
 import { type Browser, chromium, type Page } from 'npm:playwright@1.58.2'
 import { STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import {
-  fillSignInForm,
-  handleNgrokInterstitial,
-  screenshot,
-} from './lib/oauth-flow.ts'
+import { fillSignInForm, screenshot } from './lib/oauth-flow.ts'
 import {
   assert as assertTrue,
   dim,
@@ -18,9 +14,7 @@ import {
 } from './lib/log.ts'
 
 async function getAuthorizeUrl(handle: string) {
-  const state = await loadState()
-  const baseUrl = state.ngrokUrl || STRATOS_URL
-  return `${baseUrl}/oauth/authorize?handle=${encodeURIComponent(handle)}`
+  return `${STRATOS_URL}/oauth/authorize?handle=${encodeURIComponent(handle)}`
 }
 
 async function verifyLoginRejected(page: Page) {
@@ -63,9 +57,7 @@ async function verifyLoginRejected(page: Page) {
 async function testStratosRejectsInvalidTokens() {
   section('Stratos XRPC: Invalid Token Rejection')
 
-  const state = await loadState()
-  const baseUrl = state.ngrokUrl || STRATOS_URL
-  const url = `${baseUrl}/xrpc/com.atproto.repo.createRecord`
+  const url = `${STRATOS_URL}/xrpc/com.atproto.repo.createRecord`
   const body = JSON.stringify({
     repo: 'did:plc:auth-failure-probe',
     collection: 'zone.stratos.feed.post',
@@ -124,15 +116,10 @@ async function testInvalidPassword() {
     info(`Attempting login for ${rei.handle} with INVALID password...`)
     const authorizeUrl = await getAuthorizeUrl(rei.handle)
 
-    await context.setExtraHTTPHeaders({
-      'ngrok-skip-browser-warning': 'true',
-    })
-
     await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
     dim(`Current URL: ${page.url()}`)
     await screenshot(page, 'auth-fail-01-after-redirect')
 
-    await handleNgrokInterstitial(page, 'auth-fail')
     await fillSignInForm(
       page,
       rei.handle,
