@@ -47,7 +47,7 @@ async function waitForOk(url: string, timeoutMs = 20000): Promise<boolean> {
   while (Date.now() - start < timeoutMs) {
     try {
       const response = await fetch(url)
-      if (response.status !== 0) return true
+      if (response.ok) return true
     } catch {
       // Retry until the timeout expires.
     }
