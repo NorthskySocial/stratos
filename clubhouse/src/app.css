@@ -84,19 +84,14 @@ input:focus-visible, textarea:focus-visible {
 .sign-in input { width: 11rem; min-height: 2.75rem; padding: .6rem .75rem; font-size: .85rem; }
 .sign-in .button-secondary { margin-top: 0; }
 
-.brand-orbit, .room-orbit, .room-view-orbit, .loading-orbit, .empty-ring {
+.room-orbit, .room-view-orbit, .loading-orbit, .empty-ring {
   position: relative;
   display: inline-block;
   border: 1px solid #12a563;
   border-radius: 50%;
 }
 
-.brand-orbit { width: 2.1rem; height: 2.1rem; transform: rotate(-26deg); }
-.brand-orbit::before, .brand-orbit::after { content: ''; position: absolute; inset: .2rem .58rem; border: 1px solid #7350a7; border-radius: 50%; }
-.brand-orbit::after { transform: rotate(90deg); border-color: #12a563; }
-.brand-orbit span, .brand-orbit i { position: absolute; width: .32rem; height: .32rem; border-radius: 50%; background: #b7e63a; }
-.brand-orbit span { top: -.13rem; left: .72rem; }
-.brand-orbit i { right: -.12rem; bottom: .42rem; background: #7350a7; }
+.brand-mark { width: 2.1rem; height: 2.1rem; flex: 0 0 auto; }
 
 main { width: min(1120px, calc(100% - 3rem)); margin: 0 auto; padding: 5.5rem 0 7rem; }
 .entrance-copy { max-width: 720px; }

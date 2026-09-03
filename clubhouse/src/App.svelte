@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { fetchRoomCatalog } from './lib/catalog'
   import { loadClubhouseConfig, roomCatalogEndpoint } from './lib/config'
+  import houseWithGarden from './lib/icons/house-with-garden.svg'
   import Entrance from './lib/components/Entrance.svelte'
   import ErrorState from './lib/components/ErrorState.svelte'
   import RoomPlaceholder from './lib/components/RoomPlaceholder.svelte'
@@ -287,7 +288,7 @@
 <div class="app-shell">
   <header class="site-header">
     <a class="brand" href="/" aria-label="Clubhouse home" onclick={(event) => { event.preventDefault(); goHome() }}>
-      <span class="brand-orbit" aria-hidden="true"><span></span><i></i></span>
+      <img class="brand-mark" src={houseWithGarden} alt="" aria-hidden="true" />
       <span>clubhouse</span>
     </a>
     {#if identity}
