@@ -21,6 +21,7 @@ describe('handleCallback PDS Record', () => {
       getEnrollment: vi.fn(),
       getBoundaries: vi.fn(),
       setBoundaries: vi.fn(),
+      addBoundary: vi.fn(),
       updateEnrollment: vi.fn(),
     }
     const mockEnrollmentValidator = {
@@ -73,6 +74,9 @@ describe('handleCallback PDS Record', () => {
         sig: new Uint8Array(),
         signingKey: 'did:key:zQ3sh...',
       }),
+      repoWriteLocks: {
+        acquire: vi.fn().mockResolvedValue(() => undefined),
+      },
     }
   })
 
