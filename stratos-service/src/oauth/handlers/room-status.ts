@@ -73,6 +73,7 @@ export const handleRoomStatus = (
         }))
 
       const custody = custodyForActiveEnrollment(enrollment)
+      res.set('Cache-Control', 'no-store')
       res.json({
         rooms,
         ...(custody ? { custody } : {}),

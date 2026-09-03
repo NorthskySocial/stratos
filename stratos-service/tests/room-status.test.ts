@@ -6,8 +6,10 @@ import type { OAuthRoutesConfig } from '../src/oauth/routes.js'
 function createResponse() {
   const response = {
     status: vi.fn(),
+    set: vi.fn(),
     json: vi.fn(),
   }
+  response.set.mockReturnValue(response)
   response.status.mockReturnValue(response)
   return response
 }
@@ -65,6 +67,7 @@ describe('room membership status', () => {
       ],
       custody: 'pds',
     })
+    expect(response.set).toHaveBeenCalledWith('Cache-Control', 'no-store')
     expect(JSON.stringify(response.json.mock.calls[0][0])).not.toContain(
       'boundary',
     )

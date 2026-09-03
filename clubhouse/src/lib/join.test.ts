@@ -31,6 +31,23 @@ describe('room enrollment URL', () => {
     expect(url.href).not.toContain('boundary')
   })
 
+  it('preserves a configured service path when resolving authorization', () => {
+    const url = roomJoinUrl(
+      {
+        serviceUrl: 'https://stratos.example/service',
+        publicOrigin: 'https://clubhouse.example',
+        pdsSpaceUriByRoom: {},
+      },
+      'nerv-hq',
+      'misato.example',
+      '/rooms/nerv-hq',
+    )
+
+    expect(url.href).toContain(
+      'https://stratos.example/service/oauth/authorize?',
+    )
+  })
+
   it('rejects a return target outside a room route', () => {
     expect(() =>
       roomJoinUrl(
