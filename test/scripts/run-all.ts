@@ -39,7 +39,10 @@ interface Phase {
 }
 
 const phases: Phase[] = [
-  { name: 'Ngrok', script: 'ngrok-setup.ts' },
+  {
+    name: 'Cloudflare Tunnel',
+    script: 'cloudflare-tunnel-setup.ts',
+  },
   { name: 'Setup', script: 'setup.ts' },
   { name: 'OAuth Enrollment', script: 'test-enrollment.ts' },
   { name: 'Multi-Enrollment Verify', script: 'test-multi-enrollment.ts' },

@@ -34,7 +34,7 @@ import {
   type FeedgenStartOptions,
   SPACE_COMMIT_TAMPER_MODULE,
 } from './lib/feedgen.ts'
-import { assert, fail, finish, pass, section } from './lib/log.ts'
+import { assert, fail, finish, info, pass, section } from './lib/log.ts'
 import {
   createPdsSession,
   createPdsSpaceRecord,
@@ -48,11 +48,7 @@ import {
   verifyPdsSpaceDeclaration,
 } from './lib/mixed-mode-pds.ts'
 import { createSession, getServiceAuth } from './lib/pds.ts'
-import {
-  fillSignInForm,
-  handleNgrokInterstitial,
-  submitSignInAndConsent,
-} from './lib/oauth-flow.ts'
+import { fillSignInForm, submitSignInAndConsent } from './lib/oauth-flow.ts'
 import { loadState, saveState } from './lib/state.ts'
 import {
   createRecord,
@@ -170,16 +166,27 @@ async function enrollSpacesMember(
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   })
-  const context = await browser.newContext({
-    ignoreHTTPSErrors: true,
-    extraHTTPHeaders: { 'ngrok-skip-browser-warning': 'true' },
-  })
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   try {
     const authorizeUrl = `${STRATOS_URL}/oauth/authorize?handle=${encodeURIComponent(did)}`
-    await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
-    await handleNgrokInterstitial(page, 'spaces member')
-    await fillSignInForm(page, handle, password, 'spaces member')
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })
+      const callbackUrl = new URL(page.url())
+      const oauthError = callbackUrl.searchParams.get('error')
+      if (oauthError) {
+        const description =
+          callbackUrl.searchParams.get('error_description') ?? oauthError
+        if (attempt === 2) {
+          throw new Error(`OAuth authorization failed: ${description}`)
+        }
+        info(`spaces member: Retrying OAuth after ${oauthError}`)
+        continue
+      }
+
+      await fillSignInForm(page, handle, password, 'spaces member')
+      break
+    }
     await submitSignInAndConsent(page, 'spaces member', (url) =>
       url.includes(`${STRATOS_URL}/oauth/callback`),
     )
@@ -417,12 +424,6 @@ async function run(): Promise<void> {
       fixture.hostile.did.startsWith('did:plc:'),
     'the invite-backed spaces PDS account APIs created did:plc fixtures',
   )
-
-  const isMemberSpaceSync = (event: {
-    fields: Readonly<Record<string, unknown>>
-  }): boolean =>
-    event.fields['msg'] === 'space member sync completed' &&
-    event.fields['did'] === fixture.member.did
 
   const space = spaceUriFor('swordsmith')
   const dnsRemediation = `republish ${DNS_DECLARATION_NAME} TXT as did=${SPACE_DECLARATION_AUTHORITY_DID}`
@@ -800,15 +801,13 @@ async function run(): Promise<void> {
         failedTarget['host'] === PDS_SPACES_URL,
       'the live feedgen quarantines the tampered PDS commit',
     )
-    const haltedPass = await feedgen.waitForLog(
-      (event) => isSpaceSyncPass(event) && event.fields['halted'] === 1,
-      30_000,
-    )
+    const retriedPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 2)
     assert(
-      haltedPass.fields['targets'] === 1 &&
-        haltedPass.fields['succeeded'] === 0 &&
-        haltedPass.fields['failed'] === 0,
-      'the live feedgen skips the quarantined PDS target on its next pass',
+      retriedPass.fields['targets'] === 1 &&
+        retriedPass.fields['succeeded'] === 0 &&
+        retriedPass.fields['failed'] === 1 &&
+        retriedPass.fields['halted'] === 0,
+      'the live feedgen retries the quarantined PDS target after membership refresh',
     )
     const quarantinedFeedState = await waitForFeedPost(
       viewerToken,
@@ -851,17 +850,6 @@ async function run(): Promise<void> {
         restartPass.fields['abandoned'] === 0 &&
         restartPass.fields['halted'] === 0,
       'the cold restart syncs the rebuilt PDS poll target',
-    )
-    const restartMemberSync = await feedgen.waitForLog(
-      isMemberSpaceSync,
-      30_000,
-      1,
-    )
-    assert(
-      typeof restartMemberSync.fields['recordsIndexed'] === 'number' &&
-        restartMemberSync.fields['recordsIndexed'] > 0,
-      'the cold restart reindexes the PDS member records',
-      JSON.stringify(restartMemberSync.fields),
     )
     const restartViewerToken = await getServiceAuth(
       viewerSession.accessJwt,

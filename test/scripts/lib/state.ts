@@ -24,8 +24,7 @@ export interface MixedModeState {
 export interface TestState {
   users: Record<string, UserState>
   stratosRunning: boolean
-  ngrokUrl?: string
-  serviceDid?: string
+  tunnelUrl?: string
   /** Admin session cookie captured by configure-boundaries.ts for later phases. */
   adminSessionCookie?: string
   mixedMode?: MixedModeState

@@ -5,7 +5,7 @@ import { TEST_DATA_DIR, TEST_ROOT } from './lib/config.ts'
 import { fail, finish, info, pass, section } from './lib/log.ts'
 import { loadState } from './lib/state.ts'
 import { deleteAccount } from './lib/pds.ts'
-import { stopNgrok } from './lib/ngrok.ts'
+import { stopCloudflareTunnel } from './lib/cloudflare-tunnel.ts'
 import { isAppview, isPostgres } from './lib/backend.ts'
 
 async function deleteTestAccounts() {
@@ -76,7 +76,7 @@ async function cleanUpTestData() {
 
 async function run() {
   section('Teardown')
-  await stopNgrok()
+  await stopCloudflareTunnel()
   await deleteTestAccounts()
   await stopDockerCompose()
   await cleanUpTestData()

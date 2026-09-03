@@ -31,14 +31,11 @@ services:
       STORAGE_BACKEND: postgres
       STRATOS_POSTGRES_URL: postgres://stratos:stratos@postgres:5432/stratos
       STRATOS_DEV_MODE: 'true'
-      STRATOS_PUBLIC_URL: https://stratos.test
-      STRATOS_SERVICE_DID: did:web:stratos.test
-      STRATOS_OAUTH_CLIENT_ID: https://stratos.test/client-metadata.json
-      # AppView and e2e feedgen enrolled as services. The signingKey lets
+      # AppView and both feedgens enroll as services. The signingKey lets
       # Stratos verify each service's inter-service JWTs without resolving
       # its (non-resolvable) did:web over the network. This overlay replaces
-      # the base-file value per-key, so the feedgen entry repeats here.
-      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:appview.test","signingKey":"did:key:zQ3shqu5PGsBcRm7NU1uXcmLsfuNV4LvTTuChtYJbiXnjQaE5","boundaries":["swordsmith","aekea"]},{"did":"did:web:feedgen.test","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]}]'
+      # the base-file value per-key, so both feedgen entries repeat here.
+      STRATOS_SERVICE_ENROLLMENTS: '[{"did":"did:web:appview.test","signingKey":"did:key:zQ3shqu5PGsBcRm7NU1uXcmLsfuNV4LvTTuChtYJbiXnjQaE5","boundaries":["swordsmith","aekea"]},{"did":"did:web:feedgen.test","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]},{"did":"did:web:localhost%3A3302","signingKey":"did:key:zQ3shkb9BGsQPkg2fEWwwBbLiDuzryE1Rc1Sqka9dopGAuA5Z","boundaries":["swordsmith","aekea"]}]'
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,7 +55,7 @@ services:
       STRATOS_URL: http://stratos:3100
       APPVIEW_PG_URL: postgres://stratos:stratos@postgres:5432/appview
       APPVIEW_SERVICE_DID: did:web:appview.test
-      STRATOS_SERVICE_DID: did:web:stratos.test
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:-did:web:127.0.0.1%3A3100}
       APPVIEW_SIGNING_KEY: '0956d99570075b192e76269ca8781ae31679df438d3bab32c6dbb1abcb7e9cdc'
     depends_on:
       stratos:

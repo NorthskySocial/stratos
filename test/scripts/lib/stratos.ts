@@ -1,11 +1,10 @@
 // Stratos XRPC API helpers
 
-import { loadState, STRATOS_URL } from './config.ts'
+import { STRATOS_URL } from './config.ts'
 
 async function getBaseUrl(forceLocal = false) {
   if (forceLocal) return 'http://localhost:3100'
-  const state = await loadState()
-  return state.ngrokUrl || STRATOS_URL
+  return STRATOS_URL
 }
 
 /** Check Stratos health endpoint */

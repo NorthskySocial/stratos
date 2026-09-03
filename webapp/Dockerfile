@@ -9,6 +9,7 @@ WORKDIR /build
 # This layer is cached unless package.json files change
 COPY stratos-core/package.json ./stratos-core/
 COPY stratos-client/package.json ./stratos-client/
+COPY stratos-browser/package.json ./stratos-browser/
 COPY webapp/package.json ./webapp/
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 
@@ -18,14 +19,19 @@ RUN pnpm install --ignore-scripts
 
 # Copy lexicons (required by stratos-core lexicon imports)
 COPY lexicons/ ./lexicons/
+COPY lexicons-spaces/ ./lexicons-spaces/
 
 # Copy source code (after install, so cache invalidates only on source changes)
 COPY stratos-core/ ./stratos-core/
 COPY stratos-client/ ./stratos-client/
+COPY stratos-browser/ ./stratos-browser/
 COPY webapp/ ./webapp/
 
 # Build the Stratos client (generates dist/ consumed by the webapp lexicon import)
 WORKDIR /build/stratos-client
+RUN pnpm build
+
+WORKDIR /build/stratos-browser
 RUN pnpm build
 
 # Build the webapp package
