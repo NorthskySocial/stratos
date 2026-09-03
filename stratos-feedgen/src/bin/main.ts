@@ -138,7 +138,24 @@ async function main(): Promise<void> {
   shutdownDeps.httpServer = httpServer
   logger.info({ port }, 'stratos-feedgen listening')
 
-  const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
+  const configuredBoundaries = new Set(
+    normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      feeds.list().map((feed) => feed.boundary),
+    ),
+  )
+  for (const actor of await store.listEnrolledActors()) {
+    const boundaries = normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      actor.boundaries,
+    )
+    if (
+      boundaries.length !== actor.boundaries.length ||
+      boundaries.some((boundary, index) => boundary !== actor.boundaries[index])
+    ) {
+      await store.upsertEnrolledActor({ ...actor, boundaries })
+    }
+  }
   const replayAuthorizer = new CurrentMembershipReplayAuthorizer({
     client: upstream,
     configuredBoundaries,

@@ -157,7 +157,23 @@ export class UpstreamStratosClient {
       },
     })
     await throwIfNotOk(res, url.toString(), lxm)
-    const result = (await res.json()) as ResolveEnrollmentsResult
+    const result = (await res.json()) as Omit<
+      ResolveEnrollmentsResult,
+      'boundaries'
+    > & { boundaries?: unknown }
+    if (result.enrolled === false) {
+      return { ...result, boundaries: [] }
+    }
+    if (
+      !Array.isArray(result.boundaries) ||
+      !result.boundaries.every((boundary) => typeof boundary === 'string')
+    ) {
+      throw new StratosInvalidResponseError(
+        url.toString(),
+        lxm,
+        'resolveEnrollments returned invalid boundaries',
+      )
+    }
     return {
       ...result,
       boundaries: normalizeMembershipBoundaries(

@@ -21,6 +21,7 @@ if (fs.existsSync(envPath)) {
 interface CloudflareTunnel {
   process: ChildProcess
   url: string
+  exit: Promise<never>
 }
 
 interface FeedgenKey {
@@ -67,20 +68,28 @@ function startCloudflareTunnel(
       { stdio: ['ignore', 'pipe', 'pipe'] },
     )
     let opened = false
+    let rejectTunnelExit!: (error: Error) => void
+    const exit = new Promise<never>((_resolve, rejectExit) => {
+      rejectTunnelExit = rejectExit
+    })
+    void exit.catch(() => {})
     const timeout = setTimeout(() => {
       tunnel.kill()
       reject(new Error(`${name} tunnel did not report a URL in 30 seconds`))
     }, 30000)
 
+    let tunnelOutput = ''
     const captureUrl = (chunk: Buffer) => {
-      const match = chunk
-        .toString()
-        .match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
-      if (!match || opened) return
+      if (opened) return
+      tunnelOutput = `${tunnelOutput}${chunk.toString()}`.slice(-256)
+      const match = tunnelOutput.match(
+        /https:\/\/[a-z0-9-]+\.trycloudflare\.com/,
+      )
+      if (!match) return
 
       opened = true
       clearTimeout(timeout)
-      resolve({ process: tunnel, url: match[0] })
+      resolve({ process: tunnel, url: match[0], exit })
     }
 
     tunnel.stdout.on('data', captureUrl)
@@ -92,7 +101,9 @@ function startCloudflareTunnel(
     tunnel.once('exit', (code) => {
       clearTimeout(timeout)
       if (opened) {
-        console.error(`${name} tunnel exited with code ${code}`)
+        const error = new Error(`${name} tunnel exited with code ${code}`)
+        console.error(error.message)
+        rejectTunnelExit(error)
       } else {
         reject(new Error(`${name} tunnel exited before reporting a URL`))
       }
@@ -278,10 +289,21 @@ async function start(): Promise<void> {
       },
     )
 
-    const stackResult = result.then(
-      () => 0,
+    const tunnelResult = Promise.race([
+      serviceTunnel.exit,
+      feedgenTunnel.exit,
+      webappTunnel.exit,
+    ]).then(
+      () => 1,
       () => 1,
     )
+    const stackResult = Promise.race([
+      result.then(
+        () => 0,
+        () => 1,
+      ),
+      tunnelResult,
+    ])
     let checkInterval: ReturnType<typeof setInterval> | undefined
     const cleanup = (exitCode: number) => {
       if (checkInterval) clearInterval(checkInterval)

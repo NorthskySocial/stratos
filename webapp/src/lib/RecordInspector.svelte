@@ -57,13 +57,19 @@
     dialog?.close()
   }
 
+  function handleBackdropClick(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      dialog?.close()
+    }
+  }
+
   function stubValueOnly(data: Record<string, unknown> | null): unknown {
     if (!data) return null
     return data.value ?? data
   }
 </script>
 
-<dialog bind:this={dialog} class="modal" aria-labelledby="inspector-title" aria-busy={loading} oncancel={handleCancel} onclose={onclose}>
+<dialog bind:this={dialog} class="modal" aria-labelledby="inspector-title" aria-busy={loading} oncancel={handleCancel} onclose={onclose} onclick={handleBackdropClick}>
     <div class="modal-header">
       <div>
         <h2 id="inspector-title" class="modal-title">Record Inspector</h2>
