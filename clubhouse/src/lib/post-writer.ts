@@ -29,7 +29,9 @@ export async function createRoomPost(input: RoomPostInput): Promise<void> {
   const text = input.text.trim()
   if (!text) throw new Error('Write something before posting.')
   if (!input.custody) {
-    throw new RoomPostConfigurationError('Posting needs an active room enrollment.')
+    throw new RoomPostConfigurationError(
+      'Posting needs an active room enrollment.',
+    )
   }
 
   if (input.custody === 'stratos') {
@@ -40,21 +42,24 @@ export async function createRoomPost(input: RoomPostInput): Promise<void> {
 
   const space = input.config.pdsSpaceUriByRoom[input.roomId]
   if (!space) throw new RoomPostConfigurationError()
-  const response = await input.session.fetchHandler('/xrpc/com.atproto.space.createRecord', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      space,
-      repo: input.session.sub,
-      collection: 'zone.stratos.feed.post',
-      validate: false,
-      record: {
-        $type: 'zone.stratos.feed.post',
-        text,
-        createdAt: new Date().toISOString(),
-      },
-    }),
-  })
+  const response = await input.session.fetchHandler(
+    '/xrpc/com.atproto.space.createRecord',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        space,
+        repo: input.session.sub,
+        collection: 'zone.stratos.feed.post',
+        validate: false,
+        record: {
+          $type: 'zone.stratos.feed.post',
+          text,
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    },
+  )
   if (!response.ok) {
     throw new Error(`PDS could not create the post (HTTP ${response.status}).`)
   }

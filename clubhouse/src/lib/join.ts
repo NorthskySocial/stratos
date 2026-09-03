@@ -14,10 +14,12 @@ export function roomJoinUrl(
   handle: string,
   returnPath: string,
 ): URL {
-  if (!config.serviceUrl) throw new Error('Room enrollment needs a Stratos service URL')
+  if (!config.serviceUrl)
+    throw new Error('Room enrollment needs a Stratos service URL')
   if (!roomId.trim()) throw new Error('A room ID is required')
   if (!handle.trim()) throw new Error('A signed-in handle is required')
-  if (!returnPath.startsWith('/rooms/')) throw new Error('Room return path is invalid')
+  if (!returnPath.startsWith('/rooms/'))
+    throw new Error('Room return path is invalid')
   const url = new URL('/oauth/authorize', config.serviceUrl)
   url.searchParams.set('handle', handle)
   url.searchParams.set('room', roomId)
@@ -28,7 +30,8 @@ export function roomJoinUrl(
 
 /** Keep a public room route across the server-owned enrollment redirect. */
 export function rememberRoomReturn(returnPath: string): void {
-  if (!returnPath.startsWith('/rooms/')) throw new Error('Room return path is invalid')
+  if (!returnPath.startsWith('/rooms/'))
+    throw new Error('Room return path is invalid')
   window.sessionStorage.setItem(RETURN_ROOM_STORAGE_KEY, returnPath)
 }
 
