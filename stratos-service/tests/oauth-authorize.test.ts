@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Request } from 'express'
 import { handleAuthorize } from '../src/oauth/handlers/authorize.js'
 import { buildOAuthScope } from '../src/oauth'
+import { buildRoomCatalog } from '../src/oauth/room-catalog.js'
 
 const SERVICE_DID = 'did:web:stratos.example.com'
 const OAUTH_SCOPE = buildOAuthScope(SERVICE_DID)
@@ -10,6 +12,10 @@ const PROOF_REQUIRED =
 
 const FETCH_FAILED =
   'could not verify redirect_uri against the client_id metadata document'
+
+function selectedRoomRequest(query: Record<string, string>): Request {
+  return { query } as unknown as Request
+}
 
 describe('handleAuthorize', () => {
   let mockOauthClient: any
@@ -81,6 +87,143 @@ describe('handleAuthorize', () => {
       state: undefined,
     })
     expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
+  })
+
+  describe('selected-room enrollment', () => {
+    beforeEach(() => {
+      config.roomCatalog = buildRoomCatalog([
+        {
+          id: 'bebop',
+          boundary: 'did:web:stratos.example/bebop',
+          displayName: 'Bebop',
+          description: 'See you, space cowboy.',
+          available: true,
+        },
+        {
+          id: 'maintenance',
+          boundary: 'did:web:stratos.example/maintenance',
+          displayName: 'Maintenance',
+          description: 'Temporarily unavailable.',
+          available: false,
+        },
+      ])
+      config.allowedRedirectOrigins = ['https://clubhouse.example']
+    })
+
+    it('keeps generic clients on the default path and rejects invalid rooms', async () => {
+      const handler = handleAuthorize(config)
+      const authUrl = new URL(
+        'https://pds.example.com/oauth/authorize?state=abc',
+      )
+      mockOauthClient.authorize.mockResolvedValue(authUrl)
+      const res = makeRes()
+      await handler(
+        selectedRoomRequest({
+          handle: 'faye.test',
+          redirect_uri: 'https://clubhouse.example/',
+        }),
+        res,
+      )
+      expect(res.status).not.toHaveBeenCalled()
+      expect(mockOauthClient.authorize).toHaveBeenCalledWith('faye.test', {
+        scope: OAUTH_SCOPE,
+        state: 'https://clubhouse.example/',
+      })
+      expect(res.redirect).toHaveBeenCalledWith(authUrl.toString())
+
+      mockOauthClient.authorize.mockClear()
+      const unknown = makeRes()
+      await handler(
+        selectedRoomRequest({
+          handle: 'faye.test',
+          room: 'sybil',
+          redirect_uri: 'https://clubhouse.example/',
+        }),
+        unknown,
+      )
+      expect(unknown.status).toHaveBeenCalledWith(400)
+      expect(mockOauthClient.authorize).not.toHaveBeenCalled()
+
+      const unavailable = makeRes()
+      await handler(
+        selectedRoomRequest({
+          handle: 'faye.test',
+          room: 'maintenance',
+          redirect_uri: 'https://clubhouse.example/',
+        }),
+        unavailable,
+      )
+      expect(unavailable.status).toHaveBeenCalledWith(400)
+      expect(mockOauthClient.authorize).not.toHaveBeenCalled()
+    })
+
+    it('rejects a selected room without redirect_uri before authorizing', async () => {
+      const handler = handleAuthorize(config)
+      const res = makeRes()
+
+      await handler(
+        selectedRoomRequest({
+          handle: 'faye.test',
+          room: 'bebop',
+        }),
+        res,
+      )
+
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'InvalidRequest',
+        message: 'redirect_uri parameter required for room enrollment',
+      })
+      expect(mockOauthClient.authorize).not.toHaveBeenCalled()
+    })
+
+    it('stores only the canonical selected room with the verified redirect', async () => {
+      const authUrl = new URL(
+        'https://pds.example.com/oauth/authorize?state=abc',
+      )
+      mockOauthClient.authorize.mockResolvedValue(authUrl)
+
+      await handleAuthorize(config)(
+        selectedRoomRequest({
+          handle: 'faye.test',
+          room: 'bebop',
+          redirect_uri: 'https://clubhouse.example/after-oauth',
+        }),
+        makeRes(),
+      )
+
+      const state = mockOauthClient.authorize.mock.calls[0][1].state
+      expect(JSON.parse(state)).toEqual({
+        kind: 'stratos-room-enrollment-v1',
+        roomId: 'bebop',
+        boundary: 'did:web:stratos.example/bebop',
+        redirectTo: 'https://clubhouse.example/after-oauth',
+      })
+    })
+
+    it('accepts a redirect origin declared by client metadata', async () => {
+      mockFetchRedirectUris.mockResolvedValue([
+        'https://metadata-only.example/',
+      ])
+      mockOauthClient.authorize.mockResolvedValue(
+        new URL('https://pds.example.com/oauth/authorize?state=abc'),
+      )
+      const res = makeRes()
+      await handleAuthorize(config)(
+        selectedRoomRequest({
+          handle: 'faye.test',
+          room: 'bebop',
+          redirect_uri: 'https://metadata-only.example/after-oauth',
+          client_id: 'https://metadata-only.example/client.json',
+        }),
+        res,
+      )
+      expect(res.status).not.toHaveBeenCalled()
+      expect(mockFetchRedirectUris).toHaveBeenCalledWith(
+        'https://metadata-only.example/client.json',
+      )
+      expect(mockOauthClient.authorize).toHaveBeenCalled()
+    })
   })
 
   it('carries an allow-listed target in the OAuth state, not a cookie', async () => {

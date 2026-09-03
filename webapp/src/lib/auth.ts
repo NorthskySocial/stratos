@@ -1,107 +1,36 @@
 import { buildStratosScopes } from '@northskysocial/stratos-client'
 import {
-  BrowserOAuthClient,
-  type OAuthSession,
-} from '@atproto/oauth-client-browser'
-import {
-  buildAtprotoLoopbackClientMetadata,
-  type OAuthClientMetadataInput,
-} from '@atproto/oauth-types'
+  buildSpaceWriteScope as buildSharedSpaceWriteScope,
+  createBrowserAuth,
+  type BrowserAuthScopeStatus,
+} from '@northskysocial/stratos-browser'
+import type { OAuthSession } from '@atproto/oauth-client-browser'
 
-let client: BrowserOAuthClient | null = null
-let currentSession: OAuthSession | null = null
-let sessionDeletedCallback: (() => void) | null = null
-
+/** Build the webapp's canonical Stratos feed-space write scope. */
 export function buildSpaceWriteScope(
   serviceDid = import.meta.env.VITE_STRATOS_SERVICE_DID,
 ): string {
-  return `space:zone.stratos.space.feed?authority=${encodeURIComponent(serviceDid ?? '')}&collection=zone.stratos.feed.post&action=read&action=create`
+  return buildSharedSpaceWriteScope({ serviceDid })
 }
 
 export const SPACE_WRITE_SCOPE = buildSpaceWriteScope()
 
-export type SpaceWriteScopeStatus = 'granted' | 'missing' | 'unavailable'
+export type SpaceWriteScopeStatus = BrowserAuthScopeStatus
 
 const HANDLE_RESOLVER =
   import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social'
 const OAUTH_PROXY_URL = import.meta.env.VITE_ATPROTO_OAUTH_PROXY_URL
-const OAUTH_PROXY_ORIGIN = OAUTH_PROXY_URL
-  ? new URL(HANDLE_RESOLVER).origin
-  : undefined
-
-// The single OAuth scope string for this app. Both the authorization request
-// (signIn) and the declared client metadata must use the exact same value, and
-// it must match the served /client-metadata.json (webapp/Dockerfile and
-// webapp/public/client-metadata.json.template) or the AS rejects with
-// invalid_scope. The app.bsky.feed.post write scope is required because the
-// composer creates public posts on the user's PDS (see Composer.svelte).
-const OAUTH_SCOPE = [
-  ...buildStratosScopes(),
-  'repo:app.bsky.feed.post?action=create',
-  // Keep this scope as one string during OAuth scope reserialization.
-  SPACE_WRITE_SCOPE,
-].join(' ')
-
-export async function hasSpaceWriteScope(
-  session: OAuthSession,
-): Promise<boolean> {
-  const tokenInfo = await session.getTokenInfo(false)
-  return tokenInfo.scope.split(' ').includes(SPACE_WRITE_SCOPE)
-}
-
-export async function getSpaceWriteScopeStatus(
-  session: OAuthSession,
-): Promise<SpaceWriteScopeStatus> {
-  try {
-    return (await hasSpaceWriteScope(session)) ? 'granted' : 'missing'
-  } catch {
-    return 'unavailable'
-  }
-}
 
 function isLoopback(): boolean {
-  const h = window.location.hostname
-  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
-}
-
-async function fetchOAuth(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
-  const request = new Request(input, init)
-  const requestUrl = new URL(request.url)
-  if (!OAUTH_PROXY_URL || requestUrl.origin !== OAUTH_PROXY_ORIGIN) {
-    return fetch(request)
-  }
-
-  const proxyBase = `${OAUTH_PROXY_URL.replace(/\/+$/, '')}/`
-  const proxyUrl = new URL(
-    `${requestUrl.pathname.slice(1)}${requestUrl.search}`,
-    proxyBase,
+  const hostname = window.location.hostname
+  return (
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
   )
-  const body =
-    request.method === 'GET' || request.method === 'HEAD'
-      ? undefined
-      : await request.arrayBuffer()
-  return fetch(proxyUrl, {
-    method: request.method,
-    headers: request.headers,
-    body,
-    redirect: request.redirect,
-    credentials: request.credentials,
-    signal: request.signal,
-  })
 }
 
 /**
- * The base URL this app publishes itself under.
- *
- * A loopback development server has no public URL, so it falls back to the
- * browser origin. A trailing slash on `VITE_WEBAPP_URL` is removed: the value
- * is joined to a path to build the `client_id`, and Stratos rejects a document
- * whose own `client_id` does not equal the URL it was fetched from.
- *
- * @returns The app base URL, without a trailing slash.
+ * The base URL this app publishes itself under. A loopback development server
+ * has no public URL, so it falls back to the browser origin.
  */
 export function appBaseUrl(): string {
   const configured =
@@ -111,133 +40,61 @@ export function appBaseUrl(): string {
   return configured.replace(/\/+$/, '')
 }
 
-/**
- * The URL of this app's client metadata document.
- *
- * Stratos reads this document to confirm that the app owns the enrollment
- * redirect target it asks for.
- *
- * @returns The client metadata document URL.
- */
+/** The URL of this app's OAuth client metadata document. */
 export function getClientId(): string {
   return `${appBaseUrl()}/client-metadata.json`
 }
 
-/**
- * Build client metadata for local development.
- *
- * @returns OAuth client metadata.
- */
-function buildClientMetadata(): OAuthClientMetadataInput {
-  return {
-    client_id: getClientId(),
-    client_name: 'Stratos',
-    client_uri: appBaseUrl(),
-    redirect_uris: [`${appBaseUrl()}/`],
-    scope: OAUTH_SCOPE,
-    response_types: ['code'],
-    token_endpoint_auth_method: 'none',
-    application_type: 'web',
-    dpop_bound_access_tokens: true,
-  }
+const auth = createBrowserAuth({
+  appName: 'Stratos',
+  scopes: [...buildStratosScopes(), 'repo:app.bsky.feed.post?action=create'],
+  spaceWriteScope: { serviceDid: import.meta.env.VITE_STRATOS_SERVICE_DID },
+  handleResolver: HANDLE_RESOLVER,
+  oauthProxyUrl: OAUTH_PROXY_URL,
+  getBaseUrl: appBaseUrl,
+  getClientId,
+  getRedirectUri: () => `${appBaseUrl()}/`,
+  isLoopback,
+  onSessionRestoreError: (error) => {
+    console.warn('Session restore failed, clearing stale session:', error)
+  },
+})
+
+/** Check whether a session has the space scope used for PDS-hosted posts. */
+export async function hasSpaceWriteScope(
+  session: OAuthSession,
+): Promise<boolean> {
+  return auth.hasScope(session, SPACE_WRITE_SCOPE)
 }
 
-function loopbackRedirectUri(): string {
-  const redirectUrl = new URL('/', window.location.origin)
-  if (redirectUrl.hostname === 'localhost') {
-    redirectUrl.hostname = '127.0.0.1'
-  }
-  return redirectUrl.href
+/** Distinguish a missing space scope from a token-information lookup failure. */
+export async function getSpaceWriteScopeStatus(
+  session: OAuthSession,
+): Promise<SpaceWriteScopeStatus> {
+  return auth.getScopeStatus(session, SPACE_WRITE_SCOPE)
 }
 
-function getClientMetadata(): OAuthClientMetadataInput {
-  if (isLoopback()) {
-    return buildAtprotoLoopbackClientMetadata({
-      scope: OAUTH_SCOPE,
-      redirect_uris: [loopbackRedirectUri()],
-    })
-  }
-  return buildClientMetadata()
-}
-
-/**
- * Get the OAuth client instance.
- *
- * @returns the OAuth client instance
- */
-function getClient(): BrowserOAuthClient {
-  client ??= new BrowserOAuthClient({
-    fetch: fetchOAuth,
-    handleResolver: HANDLE_RESOLVER,
-    responseMode: 'query',
-    allowHttp: isLoopback(),
-    clientMetadata: getClientMetadata(),
-    onSessionDeleted: (_sub, _cause) => {
-      currentSession = null
-      sessionDeletedCallback?.()
-    },
-  })
-  return client
-}
-
-/**
- * Set the callback to be called when the session is deleted.
- * @param callback - the callback function to be called
- */
+/** Set the callback invoked when the current OAuth session is deleted. */
 export function onSessionDeleted(callback: () => void): void {
-  sessionDeletedCallback = callback
+  auth.onSessionDeleted(callback)
 }
 
-/**
- * Initialize the OAuth session.
- *
- * @returns the initialized OAuth session or null if initialization fails
- */
+/** Initialize browser OAuth and restore an existing session when present. */
 export async function init(): Promise<OAuthSession | null> {
-  const oauthClient = getClient()
-  try {
-    const result = await oauthClient.init()
-    if (result?.session) {
-      currentSession = result.session
-    }
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      // ignore
-    } else {
-      console.warn('Session restore failed, clearing stale session:', err)
-      currentSession = null
-    }
-  }
-  return currentSession
+  return auth.init()
 }
 
-/**
- * Sign in with the given handle.
- * @param handle - the handle to sign in with
- */
+/** Start browser OAuth sign-in for a handle. */
 export async function signIn(handle: string): Promise<void> {
-  const oauthClient = getClient()
-  await oauthClient.signIn(handle, {
-    scope: OAUTH_SCOPE,
-    signal: new AbortController().signal,
-  })
+  return auth.signIn(handle)
 }
 
-/**
- * Get the current OAuth session.
- * @returns the current OAuth session or null if not signed in
- */
+/** Get the current OAuth session. */
 export function getSession(): OAuthSession | null {
-  return currentSession
+  return auth.getSession()
 }
 
-/**
- * Sign out the current user.
- */
+/** Revoke and clear the current OAuth session. */
 export async function signOut(): Promise<void> {
-  if (currentSession) {
-    const oauthClient = getClient()
-    await oauthClient.revoke(currentSession.sub)
-    currentSession = null
-  }
+  return auth.signOut()
 }

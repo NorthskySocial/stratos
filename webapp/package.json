@@ -23,6 +23,7 @@
     "@atproto/oauth-client-browser": "^0.5.3",
     "@atproto/oauth-types": "^0.7.5",
     "@atproto/syntax": "^0.7.4",
+    "@northskysocial/stratos-browser": "workspace:*",
     "@northskysocial/stratos-core": "workspace:*"
   },
   "devDependencies": {
