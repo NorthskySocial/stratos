@@ -57,16 +57,34 @@ default catalogue, room-status, and Stratos-custody post URLs are derived from
   writes. Stratos-custody posts go only to `POST /oauth/boundaries/post`, which
   resolves the canonical boundary and verifies membership server-side.
 
+## Production container
+
+The production image builds the browser bundle and serves it with Nginx. Its
+public `VITE_*` configuration is intentionally supplied as Compose build args:
+Vite embeds those values in the browser bundle, so changing them requires an
+image rebuild.
+
+From this directory, place the required settings in `.env` and start it:
+
+```sh
+VITE_STRATOS_URL=https://stratos.example.com
+VITE_STRATOS_SERVICE_DID=did:web:stratos.example.com
+VITE_FEEDGEN_URL=https://feedgen.example.com
+VITE_FEEDGEN_DID=did:web:feedgen.example.com
+VITE_CLUBHOUSE_URL=https://clubhouse.example.com
+CLUBHOUSE_PORT=8080
+
+docker compose up --build -d
+```
+
+The image emits `/client-metadata.json` using those same values for OAuth
+discovery. `VITE_CLUBHOUSE_URL` must therefore be the final public HTTPS origin,
+not an internal Docker hostname. Optional settings are
+`VITE_CLUBHOUSE_ROOM_STATUS_URL`, `VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON`,
+`VITE_ATPROTO_HANDLE_RESOLVER`, and `VITE_ATPROTO_OAUTH_PROXY_URL`.
+
 ## Icon attribution
 
 The three local interface icons in `src/lib/icons/` are copied from the
 [IconaMoon 1.1](https://github.com/dariushhpg1/IconaMoon) Light set by
-Dariush. Source files:
-
-- `Information Circle.svg`
-- `Check.svg`
-- `Close.svg`
-
-The source set is free to use according to the IconaMoon README. The original
-files were copied from `/home/evelyn/git/IconaMoon/SVG/Light/Interface/` and
-kept with their original 24px SVG paths.
+Dariush.
