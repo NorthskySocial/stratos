@@ -25,6 +25,7 @@ import {
   type StratosServiceConfig,
 } from './config.js'
 import { registerHandlers } from './api'
+import { createRecord } from './api/records/index.js'
 import { registerSubscribeRecords } from './subscription'
 import { createAdminAuthRoutes, createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
@@ -395,11 +396,14 @@ export class StratosServer {
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
       autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
+      roomCatalog: cfg.roomCatalog,
+      reservedBoundary: cfg.stratos.reservedDomain,
       allowedRedirectOrigins: cfg.allowedRedirectOrigins,
       logger: ctx.logger,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
       profileRecordWriter: ctx.profileRecordWriter,
+      repoWriteLocks: ctx.repoWriteLocks,
       initRepo: async (did: string) => {
         await ctx.actorStore.create(did)
         await ctx.actorStore.transact(did, async (store) => {
@@ -422,6 +426,26 @@ export class StratosServer {
         return ctx.actorSigner.getPublicKey(did)
       },
       createAttestation: ctx.createAttestation,
+      createApprovedRoomPost: async ({ did, boundary, text }) => {
+        const result = await createRecord(
+          ctx,
+          {
+            repo: did,
+            collection: 'zone.stratos.feed.post',
+            record: {
+              $type: 'zone.stratos.feed.post',
+              text,
+              boundary: {
+                $type: 'zone.stratos.boundary.defs#Domains',
+                values: [{ value: boundary }],
+              },
+              createdAt: new Date().toISOString(),
+            },
+          },
+          did,
+        )
+        return { uri: result.uri, cid: result.cid }
+      },
     })
     app.use('/oauth', oauthRoutes)
   }

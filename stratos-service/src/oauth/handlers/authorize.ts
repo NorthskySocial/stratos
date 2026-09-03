@@ -1,7 +1,13 @@
 import express from 'express'
 import { buildOAuthScope } from '../client.js'
-import { verifyRedirectTarget } from '../redirect-target.js'
+import {
+  type RedirectTargetGates,
+  type RedirectTargetVerdict,
+  verifyRedirectTarget,
+} from '../redirect-target.js'
 import type { OAuthRoutesConfig } from '../routes.js'
+import type { RoomCatalog, RoomDescription } from '../room-catalog.js'
+import { encodeRoomOAuthState } from '../room-oauth-state.js'
 
 /**
  * Tells a client developer how to make its own redirect target acceptable.
@@ -12,8 +18,73 @@ import type { OAuthRoutesConfig } from '../routes.js'
 const HOW_TO_PROVE_REDIRECT =
   'Publish a client metadata document that declares this redirect_uri, then pass its URL as client_id.'
 
+interface RoomSelection {
+  room?: RoomDescription
+  error?: string
+}
+
+function selectRoom(
+  catalog: RoomCatalog | undefined,
+  roomId: string | undefined,
+  redirectUri: string | undefined,
+): RoomSelection {
+  // Room selection is an opt-in extension. Existing generic OAuth clients do
+  // not send `room`, even when the deployment exposes a room catalogue, and
+  // must retain the normal default-boundary enrollment path.
+  if (!catalog || roomId === undefined) return {}
+
+  const room = catalog.get(roomId)
+  if (!room || !room.available) {
+    return { error: 'Unknown or unavailable room' }
+  }
+  if (!redirectUri) {
+    return { error: 'redirect_uri parameter required for room enrollment' }
+  }
+
+  return { room }
+}
+
+async function verifyAuthorizeRedirect(deps: {
+  redirectUri: string | undefined
+  clientId: string | undefined
+  redirectGates: RedirectTargetGates
+  fetchClientRedirectUris: OAuthRoutesConfig['fetchClientRedirectUris']
+}): Promise<RedirectTargetVerdict | undefined> {
+  if (!deps.redirectUri) return undefined
+
+  return verifyRedirectTarget(
+    deps.redirectUri,
+    deps.clientId,
+    deps.redirectGates,
+    deps.fetchClientRedirectUris,
+  )
+}
+
+function createAuthorizationState(
+  selectedRoom: RoomDescription | undefined,
+  redirectUri: string | undefined,
+): string | undefined {
+  if (!selectedRoom) return redirectUri
+  if (!redirectUri) {
+    throw new Error('Selected room enrollment requires a verified redirect')
+  }
+
+  return encodeRoomOAuthState({
+    roomId: selectedRoom.id,
+    boundary: selectedRoom.boundary,
+    redirectTo: redirectUri,
+  })
+}
+
+function isResolutionError(errorMessage: string): boolean {
+  const normalizedMessage = errorMessage.toLowerCase()
+  return ['resolve', 'handle', 'did', 'discovery'].some((term) =>
+    normalizedMessage.includes(term),
+  )
+}
+
 /**
- * Handles the OAuth authorization flow
+ * Handles the OAuth authorization flow.
  *
  * @param config - OAuth routes configuration
  * @returns Express handler function
@@ -21,62 +92,62 @@ const HOW_TO_PROVE_REDIRECT =
 export const handleAuthorize = (config: OAuthRoutesConfig) => {
   const { oauthClient, serviceDid, logger } = config
   const scope = buildOAuthScope(serviceDid)
-
-  const isSecure = config.baseUrl.startsWith('https://')
-  const redirectGates = {
-    allowedSchemes: isSecure ? ['https:'] : ['http:', 'https:'],
+  const redirectGates: RedirectTargetGates = {
+    allowedSchemes: config.baseUrl.startsWith('https://')
+      ? ['https:']
+      : ['http:', 'https:'],
     allowedRedirectOrigins: config.allowedRedirectOrigins,
     devMode: config.devMode ?? false,
   }
 
   return async (req: express.Request, res: express.Response) => {
-    try {
-      const handle = req.query.handle as string
-      const redirectUri = req.query.redirect_uri as string | undefined
-      const clientId = req.query.client_id as string | undefined
+    const handle = req.query.handle as string
+    const redirectUri = req.query.redirect_uri as string | undefined
+    const clientId = req.query.client_id as string | undefined
+    const roomId = req.query.room as string | undefined
 
-      if (!handle) {
+    if (!handle) {
+      return res.status(400).json({
+        error: 'InvalidRequest',
+        message: 'Handle parameter required',
+      })
+    }
+
+    const selection = selectRoom(config.roomCatalog, roomId, redirectUri)
+    if (selection.error) {
+      return res.status(400).json({
+        error: 'InvalidRequest',
+        message: selection.error,
+      })
+    }
+
+    try {
+      const redirectVerdict = await verifyAuthorizeRedirect({
+        redirectUri,
+        clientId,
+        redirectGates,
+        fetchClientRedirectUris: config.fetchClientRedirectUris,
+      })
+      if (redirectVerdict && !redirectVerdict.allowed) {
+        logger?.warn(
+          {
+            clientId,
+            message: redirectVerdict.message,
+            detail: redirectVerdict.logDetail,
+          },
+          'rejected enrollment redirect_uri',
+        )
         return res.status(400).json({
           error: 'InvalidRequest',
-          message: 'Handle parameter required',
+          message: redirectVerdict.message,
+          hint: HOW_TO_PROVE_REDIRECT,
         })
       }
 
-      let verifiedRedirect: string | undefined
-      if (redirectUri) {
-        const verdict = await verifyRedirectTarget(
-          redirectUri,
-          clientId,
-          redirectGates,
-          config.fetchClientRedirectUris,
-        )
-        if (!verdict.allowed) {
-          logger?.warn(
-            { clientId, message: verdict.message, detail: verdict.logDetail },
-            'rejected enrollment redirect_uri',
-          )
-          return res.status(400).json({
-            error: 'InvalidRequest',
-            message: verdict.message,
-            hint: HOW_TO_PROVE_REDIRECT,
-          })
-        }
-
-        verifiedRedirect = redirectUri
-      }
-
-      // Start the authorization flow
       logger?.debug({ handle, scope }, 'Starting OAuth authorization')
-      // The verified target rides in the OAuth state, which the client stores
-      // server-side and returns only to this callback. A cookie cannot do this
-      // job: cookies are not bound to an origin, so a different host on the
-      // same registrable domain can write one.
-      const authUrl = await oauthClient.authorize(handle, {
-        scope,
-        state: verifiedRedirect,
-      })
+      const state = createAuthorizationState(selection.room, redirectUri)
+      const authUrl = await oauthClient.authorize(handle, { scope, state })
 
-      // Redirect user to their PDS for authorization
       res.redirect(authUrl.toString())
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
@@ -87,15 +158,7 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       )
       console.error('OAuth authorize failed:', errorMsg, errorStack)
 
-      // Check for common error types from @atproto/oauth-client-node
-      // Handle resolution or PDS discovery failures should be 400
-      const isResolutionError =
-        errorMsg.toLowerCase().includes('resolve') ||
-        errorMsg.toLowerCase().includes('handle') ||
-        errorMsg.toLowerCase().includes('did') ||
-        errorMsg.toLowerCase().includes('discovery')
-
-      res.status(isResolutionError ? 400 : 500).json({
+      res.status(isResolutionError(errorMsg) ? 400 : 500).json({
         error: 'AuthorizationError',
         message: config.devMode
           ? `Failed to start authorization flow: ${errorMsg}`
