@@ -1,0 +1,183 @@
+import type { OAuthSession } from '@atproto/oauth-client-browser'
+import { createClubhouseAuth } from './auth'
+import {
+  roomPostEndpoint,
+  roomStatusEndpoint,
+  type ClubhouseConfig,
+} from './config'
+import { resolveAuthenticatedHandle } from './enrollment'
+import { getFeed, type FeedPage } from './feedgen'
+import { rememberRoomReturn, roomJoinUrl } from './join'
+import {
+  createRoomPost,
+  RoomPostConfigurationError,
+  type StratosPostWriter,
+} from './post-writer'
+import type { ClubhouseIdentity, RoomAccessState, RoomCustody } from './types'
+
+interface AccessResponse {
+  rooms?: unknown
+  custody?: unknown
+}
+
+interface RoomStatus {
+  states: Readonly<Record<string, RoomAccessState>>
+  custody: RoomCustody | null
+}
+
+function isAccessState(value: unknown): value is RoomAccessState {
+  return (
+    value === 'joined' ||
+    value === 'unjoined' ||
+    value === 'pending' ||
+    value === 'unavailable' ||
+    value === 'status-error'
+  )
+}
+
+function parseRoomStates(
+  payload: AccessResponse,
+  knownRoomIds: readonly string[],
+): Readonly<Record<string, RoomAccessState>> {
+  if (!Array.isArray(payload.rooms)) return {}
+  const known = new Set(knownRoomIds)
+  const states: Record<string, RoomAccessState> = {}
+  for (const item of payload.rooms) {
+    if (typeof item !== 'object' || item === null) continue
+    const { id, state } = item as { id?: unknown; state?: unknown }
+    if (typeof id === 'string' && known.has(id) && isAccessState(state)) {
+      states[id] = state
+    }
+  }
+  return states
+}
+
+function parseCustody(value: unknown): RoomCustody | null {
+  return value === 'pds' || value === 'stratos' ? value : null
+}
+
+async function requestRoomStatus(
+  session: OAuthSession,
+  endpoint: string,
+  roomIds: readonly string[],
+): Promise<RoomStatus> {
+  const response = await session.fetchHandler(endpoint, { method: 'GET' })
+  if (!response.ok) throw new Error(`Room status returned HTTP ${response.status}.`)
+  const payload = (await response.json()) as AccessResponse
+  return {
+    states: parseRoomStates(payload, roomIds),
+    custody: parseCustody(payload.custody),
+  }
+}
+
+function createServiceRoomPostWriter(
+  session: OAuthSession,
+  config: ClubhouseConfig,
+): StratosPostWriter | undefined {
+  const endpoint = roomPostEndpoint(config)
+  if (!endpoint) return undefined
+  return {
+    async createPost({ roomId, text }): Promise<void> {
+      const response = await session.fetchHandler(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ roomId, text }),
+      })
+      if (response.ok) return
+
+      const payload: unknown = await response.json().catch(() => undefined)
+      const message =
+        typeof payload === 'object' &&
+        payload !== null &&
+        typeof (payload as { message?: unknown }).message === 'string'
+          ? (payload as { message: string }).message
+          : `Stratos could not create the post (HTTP ${response.status}).`
+      throw new Error(message)
+    },
+  }
+}
+
+/**
+ * App integration contains session and transport seams. It has no boundary map:
+ * room access is a response from an optional service endpoint, never browser policy.
+ */
+export function createClubhouseIntegration(
+  config: ClubhouseConfig,
+  dependencies: {
+    navigate?: (url: string) => void
+    stratosWriter?: StratosPostWriter
+  } = {},
+) {
+  const auth = createClubhouseAuth(config)
+  let session: OAuthSession | null = null
+
+  async function refresh(): Promise<ClubhouseIdentity | null> {
+    session = await auth.init()
+    return session ? { did: session.sub } : null
+  }
+
+  async function getRoomState(roomId: string): Promise<RoomAccessState> {
+    const states = await getRoomStates([roomId])
+    return states[roomId] ?? (session ? 'status-error' : 'unjoined')
+  }
+
+  async function getRoomStates(
+    roomIds: readonly string[],
+  ): Promise<Readonly<Record<string, RoomAccessState>>> {
+    if (!session || roomIds.length === 0) return {}
+    const endpoint = roomStatusEndpoint(config)
+    if (!endpoint) {
+      return Object.fromEntries(roomIds.map((roomId) => [roomId, 'status-error']))
+    }
+    try {
+      return (await requestRoomStatus(session, endpoint, roomIds)).states
+    } catch {
+      return Object.fromEntries(roomIds.map((roomId) => [roomId, 'status-error']))
+    }
+  }
+
+  return {
+    initialize: refresh,
+    signIn: auth.signIn,
+    getRoomState,
+    getRoomStates,
+    async requestJoin(roomId: string): Promise<RoomAccessState> {
+      if (!session) throw new Error('Sign in before joining a room.')
+      const handle = await resolveAuthenticatedHandle(session)
+      const destination = `/rooms/${encodeURIComponent(roomId)}`
+      const url = roomJoinUrl(config, roomId, handle, destination)
+      rememberRoomReturn(destination)
+      ;(dependencies.navigate ?? ((next) => window.location.assign(next)))(
+        url.href,
+      )
+      return 'pending'
+    },
+    async getFeed(
+      roomId: string,
+      limit: number,
+      cursor?: string,
+    ): Promise<FeedPage> {
+      if (!session) throw new Error('Sign in to read this room.')
+      return getFeed(session, config, { feed: roomId, limit, cursor })
+    },
+    async createPost(roomId: string, text: string): Promise<void> {
+      if (!session) throw new Error('Sign in before posting.')
+      const endpoint = roomStatusEndpoint(config)
+      if (!endpoint) throw new RoomPostConfigurationError()
+      const { custody } = await requestRoomStatus(session, endpoint, [roomId])
+      await createRoomPost({
+        session,
+        custody,
+        roomId,
+        text,
+        config,
+        stratosWriter:
+          dependencies.stratosWriter ??
+          createServiceRoomPostWriter(session, config),
+      })
+    },
+    get identity(): ClubhouseIdentity | null {
+      return session ? { did: session.sub } : null
+    },
+  }
+}
