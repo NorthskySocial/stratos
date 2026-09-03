@@ -1,4 +1,5 @@
 import { Client, createClient } from '@libsql/client'
+import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
@@ -32,18 +33,25 @@ import {
 
 export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
   _client: Client
+  _memoryAnchor?: Client
   _initialized: Promise<void>
 }
 
 const LEGACY_MEMBERSHIP_IMPORT_KEY = 'legacy-record-store-imported'
 
 export function createSqliteDb(location: string): SqliteDb {
+  const url = sqliteClientUrl(location)
   const client = createClient({
-    url: sqliteClientUrl(location),
+    url,
   })
   const baseDb = drizzle({ client, schema: sqliteSchema })
   const db = baseDb as unknown as SqliteDb
   db._client = client
+  if (location === ':memory:') {
+    // Drizzle releases libSQL connections after transactions. Keep this
+    // connection open so the shared in-memory database survives that release.
+    db._memoryAnchor = createClient({ url })
+  }
   db._initialized = (async () => {
     try {
       await db.run(sql.raw('PRAGMA journal_mode = WAL'))
@@ -57,9 +65,9 @@ export function createSqliteDb(location: string): SqliteDb {
 }
 
 function sqliteClientUrl(location: string): string {
-  return location === ':memory:'
-    ? ':memory:'
-    : pathToFileURL(resolve(location)).href
+  if (location !== ':memory:') return pathToFileURL(resolve(location)).href
+  const uri = `file:feedgen-${randomUUID()}?mode=memory&cache=shared`
+  return `file:${encodeURIComponent(uri)}`
 }
 
 /** Migrate the materialized record index and its checkpointed sync state. */
@@ -934,8 +942,10 @@ export class SqliteFeedgenStore implements FeedgenStore {
 
   async close(): Promise<void> {
     this.recordDb._client.close()
+    this.recordDb._memoryAnchor?.close()
     if (this.membershipDb !== this.recordDb) {
       this.membershipDb._client.close()
+      this.membershipDb._memoryAnchor?.close()
     }
   }
 }

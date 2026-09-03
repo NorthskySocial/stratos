@@ -19,6 +19,7 @@ import {
   type RawSpaceAppAccess,
   type SpaceAppAccessConfig,
 } from './features/space-credential/app-access.js'
+import { loadRoomCatalog, type RoomCatalog } from './oauth/room-catalog.js'
 
 /**
  * A boolean environment variable.
@@ -63,6 +64,11 @@ const envSchema = z
     // Stratos namespace config
     STRATOS_ALLOWED_DOMAINS: commaListSchema,
     STRATOS_AUTO_ENROLL_DOMAINS: commaListSchema,
+    /** Deployment-owned YAML or JSON catalogue for public-alpha rooms. */
+    STRATOS_ROOM_CATALOG_FILE: z
+      .string()
+      .optional()
+      .transform((v) => v || undefined),
     /**
      * Reserved all-members domain (bare name). Force-included in every
      * enrollment's boundary set and implicitly part of the allowed domains
@@ -341,6 +347,8 @@ export interface StratosServiceConfig {
     valkeyUrl?: string
     serviceEnrollments: ServiceEnrollment[]
   }
+  /** Present only when public-alpha selected-room enrollment is enabled. */
+  roomCatalog?: RoomCatalog
   /** Durable PDS enrollment-record sync queue scheduling knobs. */
   pdsSync: {
     tickMs: number
@@ -657,18 +665,28 @@ function pdsSyncConfig(env: Env): StratosServiceConfig['pdsSync'] {
   }
 }
 
+function loadConfiguredRoomCatalog(
+  env: Env,
+  allowedBoundaries: string[],
+): RoomCatalog | undefined {
+  if (!env.STRATOS_ROOM_CATALOG_FILE) return undefined
+
+  return loadRoomCatalog(env.STRATOS_ROOM_CATALOG_FILE, allowedBoundaries)
+}
+
 export function envToConfig(env: Env): StratosServiceConfig {
   const publicUrl = derivePublicUrl(env)
   const serviceDid = deriveServiceDid(env, publicUrl)
-  const allowedDomains = qualifyBoundaries(
+  const allowedBoundaries = qualifyBoundaries(
     serviceDid,
     env.STRATOS_ALLOWED_DOMAINS,
   )
   const reservedDomain = resolveReservedDomain(
     serviceDid,
     env.STRATOS_RESERVED_DOMAIN,
-    allowedDomains,
+    allowedBoundaries,
   )
+  const roomCatalog = loadConfiguredRoomCatalog(env, allowedBoundaries)
 
   return {
     service: {
@@ -689,7 +707,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
     blobstore: buildBlobstoreConfig(env),
     stratos: {
       serviceDid,
-      allowedDomains,
+      allowedDomains: allowedBoundaries,
       reservedDomain,
       retentionDays: env.STRATOS_RETENTION_DAYS,
       devMode: env.STRATOS_DEV_MODE,
@@ -718,9 +736,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
       serviceEnrollments: loadServiceEnrollments(
         env,
         serviceDid,
-        allowedDomains,
+        allowedBoundaries,
       ),
     },
+    roomCatalog,
     pdsSync: pdsSyncConfig(env),
     identity: {
       plcUrl: env.STRATOS_PLC_URL,

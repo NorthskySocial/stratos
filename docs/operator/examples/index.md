@@ -65,6 +65,45 @@ overlay on top of the base stack. The overlay adds a `feedgen` service (SQLite-b
 an ephemeral Cloudflare tunnel so the feedgen's `did:web` document is reachable over
 HTTPS.
 
+Feedgen keeps its materialized record projection in memory by default: posts, post
+boundaries, actor subscription cursors, and PDS-custody cursors all rebuild after a
+restart. The overlay still mounts a small `feedgen-control` volume and sets
+`FEEDGEN_MEMBERSHIP_SQLITE_PATH=/app/data/feedgen-membership.sqlite`. That database holds
+only enrolled-actor and space-member snapshots, from which runtime components source their
+hot maps for fast lookup and recovery/reconciliation.
+
+Those durable snapshots are not an authorization grant. Before actor-subscription replayed
+records are admitted, Feedgen checks current membership with the authority; an unavailable
+or invalid answer fails closed and leaves the replay to retry. The overlay also sets the
+core-dump limit to zero because the process can hold private content.
+
+Feed reads are separately admission-gated. From process start, and again through every
+enrollment-stream reconnect and reconciliation, `zone.stratos.feedgen.getFeed` returns HTTP
+`503` `FeedNotReady`. It becomes available only after a complete current-authority
+reconciliation. A pass bounded by `FEEDGEN_RECONCILE_MAX_ACTORS` is partial and does not
+release that gate. Keep `FEEDGEN_SUBSCRIBE_ENROLLMENTS` enabled: setting it to `false` leaves
+feed reads unavailable, so it is not a static-feed or manual-soak serving mode.
+
+Persisting the private record projection is separately opt-in. Add a deployment-specific
+Compose override:
+
+```yaml
+services:
+  feedgen:
+    environment:
+      FEEDGEN_SQLITE_PATH: /app/data/feedgen.sqlite
+```
+
+Layer that file after `docker-compose.feedgen.yml`. The overlay's `feedgen-control` volume
+remains required; the opt-in record file additionally retains private posts, boundaries,
+and both replay cursors. Protect that volume as private content. It is also where the
+membership snapshots live, but those snapshots remain a recovery baseline rather than the
+authority for replay authorization.
+
+Using `FEEDGEN_STORAGE_BACKEND=postgres` with `FEEDGEN_POSTGRES_URL` persists both the
+record projection and membership snapshots in PostgreSQL. Protect that database as private
+content.
+
 A bare `docker compose -f docker-compose.yml -f docker-compose.feedgen.yml up -d` is not
 enough on its own: the feedgen's identity is derived from `FEEDGEN_HOST`
 (`FEEDGEN_SERVICE_DID=did:web:${FEEDGEN_HOST}`), and that host is the tunnel's ephemeral

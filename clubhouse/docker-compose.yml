@@ -1,0 +1,19 @@
+services:
+  clubhouse:
+    build:
+      # Clubhouse has workspace dependencies, so its build context is Stratos.
+      context: ..
+      dockerfile: clubhouse/Dockerfile
+      args:
+        VITE_STRATOS_URL: ${VITE_STRATOS_URL:-}
+        VITE_STRATOS_SERVICE_DID: ${VITE_STRATOS_SERVICE_DID:-}
+        VITE_FEEDGEN_URL: ${VITE_FEEDGEN_URL:-}
+        VITE_FEEDGEN_DID: ${VITE_FEEDGEN_DID:-}
+        VITE_CLUBHOUSE_URL: ${VITE_CLUBHOUSE_URL:-}
+        VITE_CLUBHOUSE_ROOM_STATUS_URL: ${VITE_CLUBHOUSE_ROOM_STATUS_URL:-}
+        VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: ${VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON:-}
+        VITE_ATPROTO_HANDLE_RESOLVER: ${VITE_ATPROTO_HANDLE_RESOLVER:-}
+        VITE_ATPROTO_OAUTH_PROXY_URL: ${VITE_ATPROTO_OAUTH_PROXY_URL:-}
+    ports:
+      - '${CLUBHOUSE_PORT:-8080}:80'
+    restart: unless-stopped

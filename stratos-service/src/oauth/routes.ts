@@ -16,6 +16,7 @@ import {
   type SpacesCapability,
 } from '@northskysocial/stratos-core'
 import type { RequestHeaders } from '../infra/auth/index.js'
+import type { RepoWriteLocks } from '../shared/repo-write-lock.js'
 
 /** Verification method id fragment for a user's own atproto repo-signing key. */
 const ATPROTO_KID = '#atproto'
@@ -24,6 +25,10 @@ import { handleAuthorize } from './handlers/authorize.js'
 import { handleCallback } from './handlers/callback.js'
 import { handleStatus } from './handlers/status.js'
 import { handleRevoke } from './handlers/revoke.js'
+import { handleRooms } from './handlers/rooms.js'
+import { handleRoomStatus } from './handlers/room-status.js'
+import { handleRoomPost } from './handlers/room-post.js'
+import type { RoomCatalog } from './room-catalog.js'
 
 /**
  * Converts a service DID to a valid AT Protocol record key.
@@ -86,6 +91,10 @@ export interface OAuthRoutesConfig {
   serviceDid: string
   defaultBoundaries?: string[]
   autoEnrollDomains?: string[]
+  /** Enables public-alpha selected-room enrollment when present. */
+  roomCatalog?: RoomCatalog
+  /** Force-included by the enrollment-store decorator and profile publication. */
+  reservedBoundary?: string
   allowedRedirectOrigins: string[]
   fetchClientRedirectUris?: (clientId: string) => Promise<string[]>
   logger?: Logger
@@ -93,6 +102,8 @@ export interface OAuthRoutesConfig {
   devMode?: boolean
   dpopVerifier: import('../infra/auth/dpop-verifier.js').DpopVerifier
   profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter
+  /** Serializes per-actor enrollment publication with record writes. */
+  repoWriteLocks: RepoWriteLocks
   initRepo: (did: string) => Promise<void>
   createSigningKey: (did: string) => Promise<string>
   createAttestation: (
@@ -100,6 +111,12 @@ export interface OAuthRoutesConfig {
     boundaries: string[],
     userDidKey: string,
   ) => Promise<{ sig: Uint8Array; signingKey: string }>
+  /** Create a server-approved Stratos-custody room post. */
+  createApprovedRoomPost: (input: {
+    did: string
+    boundary: string
+    text: string
+  }) => Promise<{ uri: string; cid: string }>
 }
 
 /**
@@ -349,7 +366,9 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
       const result = await dpopVerifier.verify(
         {
           method: req.method || 'GET',
-          url: req.url || '/',
+          // This router is mounted at /oauth. Express strips that mount path
+          // from req.url, while a DPoP htu covers the browser-visible path.
+          url: req.originalUrl || req.url || '/',
           headers: req.headers as RequestHeaders,
         },
         {
@@ -370,6 +389,15 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
   }
 
   router.get('/authorize', handleAuthorize(config))
+
+  router.get('/boundaries', handleRooms(config))
+
+  router.get(
+    '/boundaries/status',
+    handleRoomStatus(config, authenticateRequest),
+  )
+
+  router.post('/boundaries/post', handleRoomPost(config, authenticateRequest))
 
   router.get('/callback', handleCallback(config))
 

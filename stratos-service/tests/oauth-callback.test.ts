@@ -3,6 +3,9 @@ import { Secp256k1Keypair } from '@atproto/crypto'
 import type { Keypair } from '@atproto/crypto'
 import { handleCallback } from '../src/oauth/handlers/callback.js'
 import { buildSpaceScope } from '../src/oauth/index.js'
+import { buildRoomCatalog } from '../src/oauth/room-catalog.js'
+import { encodeRoomOAuthState } from '../src/oauth/room-oauth-state.js'
+import { RepoWriteLocks } from '../src/shared/repo-write-lock.js'
 
 /** Minimal Express request the callback handler reads. */
 interface MockRequest {
@@ -100,6 +103,9 @@ describe('handleCallback', () => {
       isEnrolled: vi.fn(),
       enroll: vi.fn(),
       getEnrollment: vi.fn(),
+      getBoundaries: vi.fn(),
+      setBoundaries: vi.fn(),
+      addBoundary: vi.fn(),
       updateEnrollment: vi.fn(),
     }
     mockIdResolver = {
@@ -142,6 +148,9 @@ describe('handleCallback', () => {
         sig: new Uint8Array(),
         signingKey: 'did:key:zQ3sh...',
       }),
+      repoWriteLocks: {
+        acquire: vi.fn().mockResolvedValue(() => undefined),
+      },
     }
   })
 
@@ -167,6 +176,389 @@ describe('handleCallback', () => {
         did: 'did:plc:alice',
       }),
     )
+  })
+
+  describe('selected-room enrollment', () => {
+    const roomA = 'did:web:localhost%3A3100/nebula'
+    const roomB = 'did:web:localhost%3A3100/after-school'
+    const reserved = 'did:web:localhost%3A3100/general'
+
+    beforeEach(() => {
+      config.roomCatalog = buildRoomCatalog([
+        {
+          id: 'nebula',
+          boundary: roomA,
+          displayName: 'Nebula',
+          description: 'Cowboy Bebop night shift.',
+          available: true,
+        },
+        {
+          id: 'after-school',
+          boundary: roomB,
+          displayName: 'After School',
+          description: 'Revolutionary Girl Utena club.',
+          available: true,
+        },
+      ])
+      config.reservedBoundary = reserved
+    })
+
+    function stateFor(roomId: 'nebula' | 'after-school') {
+      const boundary = roomId === 'nebula' ? roomA : roomB
+      return encodeRoomOAuthState({
+        roomId,
+        boundary,
+        redirectTo: 'https://clubhouse.example/after-oauth',
+      })
+    }
+
+    it('enrolls exactly the selected room and reserved boundary', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:spike'),
+        state: stateFor('nebula'),
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+      const response = makeRes()
+      await callHandler(
+        handleCallback(config),
+        makeReq(
+          'http://localhost:3100/oauth/callback?code=foo&state=bar&room=after-school',
+        ),
+        response,
+      )
+
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ boundaries: [roomA, reserved] }),
+      )
+      expect(config.createAttestation).toHaveBeenCalledWith(
+        'did:plc:spike',
+        [roomA, reserved],
+        'did:key:zQ3sh...',
+      )
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:spike',
+        expect.any(String),
+        expect.objectContaining({
+          boundaries: [{ value: roomA }, { value: reserved }],
+        }),
+      )
+      expect(response.redirect).toHaveBeenCalledWith(
+        'https://clubhouse.example/after-oauth?stratos_enrolled=true&stratos_enrollment=pending',
+      )
+    })
+
+    it('uses server state, unions a second room, and preserves stored custody', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:faye'),
+        state: stateFor('after-school'),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+      mockEnrollmentStore.getEnrollment.mockResolvedValue({
+        did: 'did:plc:faye',
+        active: true,
+        enrollmentRkey: 'did:web:localhost:3100',
+        signingKeyDid: 'did:key:faye',
+        pdsEndpoint: 'https://pds.example.com',
+        custody: 'pds',
+        repoHost: 'https://pds.example.com',
+      })
+      mockEnrollmentStore.getBoundaries = vi
+        .fn()
+        .mockResolvedValueOnce([roomA, reserved])
+        .mockResolvedValue([roomA, reserved, roomB])
+
+      await callHandler(
+        handleCallback(config),
+        makeReq(
+          'http://localhost:3100/oauth/callback?code=foo&state=bar&room=nebula',
+        ),
+        makeRes(),
+      )
+
+      const expectedBoundaries = [roomA, reserved, roomB]
+      expect(mockEnrollmentStore.addBoundary).toHaveBeenCalledWith(
+        'did:plc:faye',
+        roomB,
+      )
+      expect(config.createAttestation).toHaveBeenCalledWith(
+        'did:plc:faye',
+        expectedBoundaries,
+        'did:key:faye',
+      )
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
+        'did:plc:faye',
+        'did:web:localhost:3100',
+        expect.objectContaining({
+          boundaries: expectedBoundaries.map((value) => ({ value })),
+          custody: 'pds',
+          repoHost: 'https://pds.example.com',
+        }),
+      )
+    })
+
+    it('does not add a boundary during a generic reauthorization', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:jet'),
+        state: null,
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+      mockEnrollmentStore.getEnrollment.mockResolvedValue({
+        did: 'did:plc:jet',
+        active: true,
+        enrollmentRkey: 'did:web:localhost:3100',
+        signingKeyDid: 'did:key:jet',
+        custody: 'stratos',
+      })
+      mockEnrollmentStore.getBoundaries.mockResolvedValue([roomA, reserved])
+
+      const response = makeRes()
+      await callHandler(handleCallback(config), makeReq(), response)
+
+      expect(mockEnrollmentStore.addBoundary).not.toHaveBeenCalled()
+      expect(response.status).not.toHaveBeenCalled()
+    })
+
+    it('does not add an already-held selected room boundary', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:jet'),
+        state: stateFor('nebula'),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+      mockEnrollmentStore.getEnrollment.mockResolvedValue({
+        did: 'did:plc:jet',
+        active: true,
+        enrollmentRkey: 'did:web:localhost:3100',
+        signingKeyDid: 'did:key:jet',
+        custody: 'stratos',
+      })
+      mockEnrollmentStore.getBoundaries.mockResolvedValue([roomA, reserved])
+
+      const response = makeRes()
+      await callHandler(handleCallback(config), makeReq(), response)
+
+      expect(mockEnrollmentStore.addBoundary).not.toHaveBeenCalled()
+      expect(response.status).not.toHaveBeenCalled()
+    })
+
+    it('serializes concurrent room joins and publishes their union', async () => {
+      const locks = new RepoWriteLocks()
+      config.repoWriteLocks = locks
+      const did = 'did:plc:ed'
+      const membership = new Set([reserved])
+      mockOauthClient.callback
+        .mockResolvedValueOnce({
+          session: sessionFor(did),
+          state: stateFor('nebula'),
+        })
+        .mockResolvedValueOnce({
+          session: sessionFor(did),
+          state: stateFor('after-school'),
+        })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+      mockEnrollmentStore.getEnrollment.mockResolvedValue({
+        did,
+        active: true,
+        enrollmentRkey: 'did:web:localhost:3100',
+        signingKeyDid: 'did:key:ed',
+        pdsEndpoint: 'https://pds.example.com',
+        custody: 'stratos',
+      })
+      mockEnrollmentStore.getBoundaries.mockImplementation(async () => [
+        ...membership,
+      ])
+      mockEnrollmentStore.addBoundary.mockImplementation(
+        async (_did: string, boundary: string) => {
+          membership.add(boundary)
+        },
+      )
+
+      try {
+        const callback = handleCallback(config)
+        await Promise.all([
+          callHandler(callback, makeReq(), makeRes()),
+          callHandler(callback, makeReq(), makeRes()),
+        ])
+
+        expect([...membership]).toEqual(
+          expect.arrayContaining([reserved, roomA, roomB]),
+        )
+        expect(
+          mockProfileRecordWriter.putEnrollmentRecord,
+        ).toHaveBeenLastCalledWith(
+          did,
+          'did:web:localhost:3100',
+          expect.objectContaining({
+            boundaries: expect.arrayContaining([
+              { value: reserved },
+              { value: roomA },
+              { value: roomB },
+            ]),
+          }),
+        )
+      } finally {
+        locks.destroy()
+      }
+    })
+
+    it('serializes concurrent first enrollments and preserves both rooms plus reserved', async () => {
+      const locks = new RepoWriteLocks()
+      config.repoWriteLocks = locks
+      const did = 'did:plc:first-enrollment-race'
+      const membership = new Set<string>()
+      let enrolled = false
+
+      mockOauthClient.callback
+        .mockResolvedValueOnce({
+          session: sessionFor(did),
+          state: stateFor('nebula'),
+        })
+        .mockResolvedValueOnce({
+          session: sessionFor(did),
+          state: stateFor('after-school'),
+        })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      mockEnrollmentStore.isEnrolled.mockImplementation(async () => enrolled)
+      mockEnrollmentStore.getEnrollment.mockImplementation(async () =>
+        enrolled
+          ? {
+              did,
+              active: true,
+              enrollmentRkey: 'did:web:localhost:3100',
+              signingKeyDid: 'did:key:first-enrollment-race',
+              pdsEndpoint: 'https://pds.example.com',
+              custody: 'stratos',
+            }
+          : undefined,
+      )
+      mockEnrollmentStore.getBoundaries.mockImplementation(async () => [
+        ...membership,
+      ])
+      mockEnrollmentStore.addBoundary.mockImplementation(
+        async (_did: string, boundary: string) => {
+          membership.add(boundary)
+        },
+      )
+      mockEnrollmentStore.enroll.mockImplementation(
+        async (input: { boundaries: string[] }) => {
+          enrolled = true
+          for (const boundary of input.boundaries) membership.add(boundary)
+        },
+      )
+
+      try {
+        const callback = handleCallback(config)
+        await Promise.all([
+          callHandler(callback, makeReq(), makeRes()),
+          callHandler(callback, makeReq(), makeRes()),
+        ])
+
+        expect(mockEnrollmentStore.enroll).toHaveBeenCalledTimes(1)
+        expect(mockEnrollmentStore.setBoundaries).not.toHaveBeenCalled()
+        expect(mockEnrollmentStore.addBoundary).toHaveBeenCalledWith(did, roomB)
+        expect([...membership]).toEqual(
+          expect.arrayContaining([roomA, roomB, reserved]),
+        )
+        expect(
+          mockProfileRecordWriter.putEnrollmentRecord,
+        ).toHaveBeenLastCalledWith(
+          did,
+          'did:web:localhost:3100',
+          expect.objectContaining({
+            boundaries: expect.arrayContaining([
+              { value: roomA },
+              { value: roomB },
+              { value: reserved },
+            ]),
+          }),
+        )
+      } finally {
+        locks.destroy()
+      }
+    })
+
+    it('fails closed if a consumed state no longer resolves to a configured room', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:jet'),
+        state: encodeRoomOAuthState({
+          roomId: 'removed',
+          boundary: 'did:web:localhost%3A3100/removed',
+          redirectTo: 'https://clubhouse.example/',
+        }),
+      })
+      const res = makeRes()
+
+      await callHandler(handleCallback(config), makeReq(), res)
+
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
+    })
+
+    it('keeps generic redirect state and default boundaries with a room catalogue', async () => {
+      config.defaultBoundaries = [reserved]
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:generic'),
+        state: 'https://clubhouse.example/generic-return',
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+      const response = makeRes()
+      await callHandler(handleCallback(config), makeReq(), response)
+
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ boundaries: [reserved] }),
+      )
+      expect(response.redirect).toHaveBeenCalledWith(
+        'https://clubhouse.example/generic-return?stratos_enrolled=true',
+      )
+    })
+
+    it('keeps null state on the normal enrollment path with a room catalogue', async () => {
+      config.defaultBoundaries = [reserved]
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:default'),
+        state: null,
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+
+      await callHandler(handleCallback(config), makeReq(), makeRes())
+
+      expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+        expect.objectContaining({ boundaries: [reserved] }),
+      )
+    })
+
+    it('fails closed for a malformed room state payload', async () => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:malformed'),
+        state: '{"kind":"stratos-room-enrollment-v1","roomId":"nebula",',
+      })
+      const response = makeRes()
+
+      await callHandler(handleCallback(config), makeReq(), response)
+
+      expect(response.status).toHaveBeenCalledWith(400)
+      expect(mockEnrollmentStore.enroll).not.toHaveBeenCalled()
+    })
   })
 
   it('records the spaces capability verdict for a new enrollment', async () => {
@@ -446,9 +838,26 @@ describe('handleCallback', () => {
     )
   })
 
-  it('emits a boundary change after reauthorization updates enrollment boundaries', async () => {
+  it('emits a boundary change after a selected-room reauthorization', async () => {
+    const boundary = 'did:web:localhost%3A3100/swordsmith'
+    config.roomCatalog = buildRoomCatalog([
+      {
+        id: 'swordsmith',
+        boundary,
+        displayName: 'Swordsmith',
+        description: 'Berserk night shift.',
+        available: true,
+      },
+    ])
     const session = sessionFor('did:plc:alice')
-    mockOauthClient.callback.mockResolvedValue({ session })
+    mockOauthClient.callback.mockResolvedValue({
+      session,
+      state: encodeRoomOAuthState({
+        roomId: 'swordsmith',
+        boundary,
+        redirectTo: 'https://clubhouse.example/after-oauth',
+      }),
+    })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
     mockEnrollmentStore.getEnrollment.mockResolvedValue({
       did: 'did:plc:alice',
@@ -457,20 +866,20 @@ describe('handleCallback', () => {
       signingKeyDid: 'did:key:zQ3sh...',
       pdsEndpoint: 'https://pds.example.com',
     })
-    mockEnrollmentStore.getBoundaries = vi.fn().mockResolvedValue([])
-    mockEnrollmentStore.setBoundaries = vi.fn()
+    mockEnrollmentStore.getBoundaries = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([boundary])
     mockEnrollmentValidator.validate.mockResolvedValue({
       allowed: true,
       pdsEndpoint: 'https://pds.example.com',
     })
-    config.autoEnrollDomains = ['swordsmith']
-
     await callHandler(handleCallback(config), makeReq(), makeRes())
 
     expect(config.enrollmentEvents.emit).toHaveBeenCalledWith('enrollment', {
       did: 'did:plc:alice',
       action: 'boundaries',
-      boundaries: ['swordsmith'],
+      boundaries: [boundary],
       priorBoundaries: [],
       time: expect.any(String),
     })

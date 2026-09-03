@@ -17,6 +17,12 @@ import {
   serviceDIDToRkey,
 } from '../routes.js'
 import { detectSpacesCapability } from '../spaces-capability.js'
+import {
+  decodeRoomOAuthState,
+  InvalidRoomOAuthStateError,
+  isRoomOAuthStateCandidate,
+  type RoomOAuthState,
+} from '../room-oauth-state.js'
 
 export const handleCallback = (config: OAuthRoutesConfig) => {
   const {
@@ -35,7 +41,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
     idResolver,
   } = config
 
-  const enrollBoundaries = selectEnrollBoundaries(
+  const configuredEnrollBoundaries = selectEnrollBoundaries(
     autoEnrollDomains,
     defaultBoundaries,
   )
@@ -51,6 +57,13 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       // `handleAuthorize` verified before it started this flow.
       const { session, state } = await oauthClient.callback(params)
       const did = session.sub
+      const roomState =
+        config.roomCatalog && isRoomOAuthStateCandidate(state)
+          ? decodeRoomOAuthState(state, config.roomCatalog)
+          : undefined
+      const enrollBoundaries = roomState
+        ? withReservedBoundary(roomState.boundary, config.reservedBoundary)
+        : configuredEnrollBoundaries
 
       // Validate enrollment eligibility
       const enrollmentResult: EnrollmentValidationResult =
@@ -71,42 +84,49 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       )
       logger?.info({ did, spacesCapability }, 'detected PDS spaces capability')
 
-      // Check if already enrolled
-      const alreadyEnrolled = await enrollmentStore.isEnrolled(did)
+      // Serialize the enrollment read/branch/write path. In particular, two
+      // first selected-room callbacks must not both observe an unenrolled DID
+      // and overwrite one another's initial boundary set.
+      const release = await config.repoWriteLocks.acquire(did)
+      let alreadyEnrolled = false
+      try {
+        alreadyEnrolled = await enrollmentStore.isEnrolled(did)
 
-      if (alreadyEnrolled) {
-        await handleExistingEnrollment({
-          did,
-          enrollmentStore,
-          oauthClient,
-          serviceEndpoint,
-          serviceDid,
-          profileRecordWriter,
-          createAttestation,
-          autoEnrollDomains,
-          defaultBoundaries,
-          spacesCapability,
-          pdsEndpoint: enrollmentResult.pdsEndpoint,
-          idResolver,
-          logger,
-          enrollmentEvents: config.enrollmentEvents,
-        })
-      } else {
-        await handleNewEnrollment({
-          did,
-          enrollmentStore,
-          serviceEndpoint,
-          serviceDid,
-          profileRecordWriter,
-          initRepo,
-          createSigningKey,
-          createAttestation,
-          idResolver,
-          enrollBoundaries,
-          pdsEndpoint: enrollmentResult.pdsEndpoint!,
-          spacesCapability,
-          logger,
-        })
+        if (alreadyEnrolled) {
+          await handleExistingEnrollment({
+            did,
+            enrollmentStore,
+            oauthClient,
+            serviceEndpoint,
+            serviceDid,
+            profileRecordWriter,
+            createAttestation,
+            selectedRoomBoundary: roomState?.boundary,
+            spacesCapability,
+            pdsEndpoint: enrollmentResult.pdsEndpoint,
+            idResolver,
+            logger,
+            enrollmentEvents: config.enrollmentEvents,
+          })
+        } else {
+          await handleNewEnrollment({
+            did,
+            enrollmentStore,
+            serviceEndpoint,
+            serviceDid,
+            profileRecordWriter,
+            initRepo,
+            createSigningKey,
+            createAttestation,
+            idResolver,
+            enrollBoundaries,
+            pdsEndpoint: enrollmentResult.pdsEndpoint!,
+            spacesCapability,
+            logger,
+          })
+        }
+      } finally {
+        release()
       }
 
       // Redirect back to the app if a redirect was stored, otherwise return JSON
@@ -114,9 +134,10 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
         res,
         did,
         alreadyEnrolled,
-        redirectTo: state,
+        redirectTo: roomState?.redirectTo ?? state,
         allowedSchemes,
         enrollBoundaries,
+        roomState,
         logger,
       })
     } catch (err) {
@@ -147,7 +168,55 @@ async function denyEnrollment(
   })
 }
 
-async function handleExistingEnrollment(deps: {
+type EnrollmentAttestation = Awaited<
+  ReturnType<OAuthRoutesConfig['createAttestation']>
+>
+
+async function updateExistingEnrollmentMembership(deps: {
+  did: string
+  enrollmentStore: EnrollmentStore
+  selectedRoomBoundary: string | undefined
+  signingKeyDid: string
+  createAttestation: OAuthRoutesConfig['createAttestation']
+  logger: Logger | undefined
+  enrollmentEvents: OAuthRoutesConfig['enrollmentEvents']
+}): Promise<{ boundaries: string[]; attestation: EnrollmentAttestation }> {
+  const currentBoundaries = await deps.enrollmentStore.getBoundaries(deps.did)
+  let boundaries = currentBoundaries
+  if (
+    deps.selectedRoomBoundary &&
+    !currentBoundaries.includes(deps.selectedRoomBoundary)
+  ) {
+    // `addBoundary` is an idempotent INSERT conflict no-op in both backends.
+    // Unlike a read-modify-replace `setBoundaries`, concurrent room joins
+    // cannot delete one another's membership rows.
+    await deps.enrollmentStore.addBoundary(deps.did, deps.selectedRoomBoundary)
+    deps.logger?.info(
+      { did: deps.did, newBoundary: deps.selectedRoomBoundary },
+      'updated enrollment boundaries',
+    )
+    boundaries = await deps.enrollmentStore.getBoundaries(deps.did)
+    deps.enrollmentEvents.emit('enrollment', {
+      did: deps.did,
+      action: 'boundaries',
+      boundaries,
+      priorBoundaries: currentBoundaries,
+      time: new Date().toISOString(),
+    })
+  }
+
+  // A plain reauthorization preserves every existing membership. After a
+  // selected-room insertion, read the authoritative set back for attestation
+  // and publication instead of reconstructing it from browser-controlled data.
+  const attestation = await deps.createAttestation(
+    deps.did,
+    boundaries,
+    deps.signingKeyDid,
+  )
+  return { boundaries, attestation }
+}
+
+interface ExistingEnrollmentDeps {
   did: string
   enrollmentStore: EnrollmentStore
   oauthClient: NodeOAuthClient
@@ -155,8 +224,7 @@ async function handleExistingEnrollment(deps: {
   serviceDid: string
   profileRecordWriter: OAuthRoutesConfig['profileRecordWriter']
   createAttestation: OAuthRoutesConfig['createAttestation']
-  autoEnrollDomains: string[] | undefined
-  defaultBoundaries: string[]
+  selectedRoomBoundary: string | undefined
   spacesCapability: SpacesCapability | undefined
   /**
    * Resolved this request, not the stored value. Absent in open mode, where
@@ -166,7 +234,9 @@ async function handleExistingEnrollment(deps: {
   idResolver: IdResolver
   logger: Logger | undefined
   enrollmentEvents: OAuthRoutesConfig['enrollmentEvents']
-}) {
+}
+
+async function handleExistingEnrollment(deps: ExistingEnrollmentDeps) {
   const {
     did,
     enrollmentStore,
@@ -208,34 +278,16 @@ async function handleExistingEnrollment(deps: {
       deps.pdsEndpoint ??
       (await resolveAtprotoIdentity(did, idResolver)).pdsEndpoint
 
-    const currentBoundaries = await enrollmentStore.getBoundaries(did)
-    const newBoundaries = selectEnrollBoundaries(
-      deps.autoEnrollDomains,
-      deps.defaultBoundaries,
-    )
-
-    const boundariesChanged =
-      JSON.stringify(currentBoundaries.sort()) !==
-      JSON.stringify(newBoundaries.sort())
-
-    if (boundariesChanged) {
-      await enrollmentStore.setBoundaries(did, newBoundaries)
-      enrollmentEvents.emit('enrollment', {
+    const { boundaries, attestation } =
+      await updateExistingEnrollmentMembership({
         did,
-        action: 'boundaries',
-        boundaries: newBoundaries,
-        priorBoundaries: currentBoundaries,
-        time: new Date().toISOString(),
+        enrollmentStore,
+        selectedRoomBoundary: deps.selectedRoomBoundary,
+        signingKeyDid: enrollment.signingKeyDid,
+        createAttestation,
+        logger,
+        enrollmentEvents,
       })
-      logger?.info({ did, newBoundaries }, 'updated enrollment boundaries')
-    }
-
-    const boundaries = boundariesChanged ? newBoundaries : currentBoundaries
-    const attestation = await createAttestation(
-      did,
-      boundaries,
-      enrollment.signingKeyDid,
-    )
 
     // Rows persisted before MM-03 carry no custody; treat them as 'stratos'
     // custody so re-auth starts from the same invariant a fresh enrollment would.
@@ -430,8 +482,9 @@ async function handleNewEnrollment(deps: {
  * chain is the integrity boundary, so this function re-checks only the scheme
  * and does not repeat the client metadata fetch.
  *
- * The redirect carries `stratos_enrolled` and nothing else. No token, no
- * authorization code, and no DID ever rides this URL.
+ * The redirect carries enrollment status only: `stratos_enrolled`, plus
+ * `stratos_enrollment=pending` for a selected room. No token, authorization
+ * code, DID, or canonical boundary ever rides this URL.
  */
 function sendOAuthResponse(deps: {
   res: express.Response
@@ -440,6 +493,7 @@ function sendOAuthResponse(deps: {
   redirectTo: string | null
   allowedSchemes: string[]
   enrollBoundaries: string[]
+  roomState: RoomOAuthState | undefined
   logger: Logger | undefined
 }) {
   const {
@@ -449,6 +503,7 @@ function sendOAuthResponse(deps: {
     redirectTo,
     allowedSchemes,
     enrollBoundaries,
+    roomState,
     logger,
   } = deps
 
@@ -457,6 +512,9 @@ function sendOAuthResponse(deps: {
       const url = new URL(redirectTo)
       if (allowedSchemes.includes(url.protocol)) {
         url.searchParams.set('stratos_enrolled', 'true')
+        if (roomState) {
+          url.searchParams.set('stratos_enrollment', 'pending')
+        }
         return res.redirect(url.toString())
       }
       logger?.warn(
@@ -478,6 +536,9 @@ function sendOAuthResponse(deps: {
     message: alreadyEnrolled
       ? 'Already enrolled in Stratos'
       : 'Successfully enrolled in Stratos',
+    ...(roomState
+      ? { room: roomState.roomId, reconciliation: 'pending' as const }
+      : {}),
   })
 
   if (!alreadyEnrolled) {
@@ -499,8 +560,23 @@ function handleCallbackError(
   logger?.error({ err: errMsg, stack: errStack }, 'OAuth callback failed')
   console.error('OAuth callback failed:', errMsg)
   if (errStack) console.error(errStack)
+  if (err instanceof InvalidRoomOAuthStateError) {
+    res
+      .status(400)
+      .json({ error: 'InvalidState', message: 'Invalid room enrollment state' })
+    return
+  }
   res.status(500).json({
     error: 'CallbackError',
     message: devMode ? errMsg : 'Failed to complete authorization',
   })
+}
+
+function withReservedBoundary(
+  boundary: string,
+  reservedBoundary: string | undefined,
+): string[] {
+  return reservedBoundary && reservedBoundary !== boundary
+    ? [boundary, reservedBoundary]
+    : [boundary]
 }
