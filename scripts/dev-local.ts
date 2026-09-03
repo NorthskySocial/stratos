@@ -260,7 +260,7 @@ async function start(): Promise<void> {
       ? 'tsx watch --inspect=0.0.0.0:9229 src/index.ts'
       : 'pnpm --filter @northskysocial/stratos-service run dev'
 
-    const { result } = concurrently(
+    const { commands, result } = concurrently(
       [
         {
           command: serviceCommand,
@@ -308,6 +308,7 @@ async function start(): Promise<void> {
     const cleanup = (exitCode: number) => {
       if (checkInterval) clearInterval(checkInterval)
       stopTunnels(tunnels)
+      commands.forEach((command) => command.kill())
       process.exit(exitCode)
     }
 
