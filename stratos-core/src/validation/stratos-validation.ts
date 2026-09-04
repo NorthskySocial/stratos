@@ -2,6 +2,7 @@ import { AtUri } from '@atproto/syntax'
 import { Lexicons } from '@atproto/lexicon'
 import { parseCid } from '../atproto'
 import { stratosLexicons } from '../lexicons'
+import { parseRecordUri } from '../spaces/domain.js'
 import { StratosConfig, StratosValidationError } from '../types.js'
 import { PostValidator } from './post-validator.js'
 import { EnrollmentRecordValidator } from './enrollment-record-validator.js'
@@ -64,6 +65,10 @@ export class StratosValidator {
    * @returns true if the URI references a stratos collection, false otherwise
    */
   static isStratosUri(uri: string): boolean {
+    const spaceRecord = parseRecordUri(uri)
+    if (spaceRecord.ok) {
+      return spaceRecord.value.collection.startsWith('zone.stratos.')
+    }
     try {
       const parsed = new AtUri(uri)
       return parsed.collection.startsWith('zone.stratos.')

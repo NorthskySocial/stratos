@@ -90,6 +90,42 @@ describe('server-approved room posts', () => {
     )
   })
 
+  it('passes valid thread references to the approved writer', async () => {
+    const config = createConfig()
+    vi.mocked(config.enrollmentStore.getEnrollment).mockResolvedValue({
+      did: 'did:plc:misato',
+      enrolledAt: '2026-09-03T00:00:00.000Z',
+      active: true,
+      signingKeyDid: 'did:key:misato',
+    })
+    vi.mocked(config.enrollmentStore.getBoundaries).mockResolvedValue([
+      'did:web:stratos.example/nerv-hq',
+    ])
+    const response = createResponse()
+    const reply = {
+      root: {
+        uri: 'at://did:plc:rei/zone.stratos.feed.post/root',
+        cid: 'bafy-root',
+      },
+      parent: {
+        uri: 'at://did:plc:faye/zone.stratos.feed.post/parent',
+        cid: 'bafy-parent',
+      },
+    }
+
+    await handleRoomPost(config, vi.fn().mockResolvedValue('did:plc:misato'))(
+      { body: { roomId: 'nerv-hq', text: 'Replying.', reply } } as never,
+      response as never,
+    )
+
+    expect(config.createApprovedRoomPost).toHaveBeenCalledWith({
+      did: 'did:plc:misato',
+      boundary: 'did:web:stratos.example/nerv-hq',
+      text: 'Replying.',
+      reply,
+    })
+  })
+
   it('does not call the writer for an unjoined room', async () => {
     const config = createConfig()
     vi.mocked(config.enrollmentStore.getEnrollment).mockResolvedValue({

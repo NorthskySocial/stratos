@@ -15,7 +15,10 @@ import {
   type Logger,
   type SpacesCapability,
 } from '@northskysocial/stratos-core'
-import type { RequestHeaders } from '../infra/auth/index.js'
+import {
+  DpopVerificationError,
+  type RequestHeaders,
+} from '../infra/auth/index.js'
 import type { RepoWriteLocks } from '../shared/repo-write-lock.js'
 
 /** Verification method id fragment for a user's own atproto repo-signing key. */
@@ -116,6 +119,10 @@ export interface OAuthRoutesConfig {
     did: string
     boundary: string
     text: string
+    reply?: {
+      root: { uri: string; cid: string }
+      parent: { uri: string; cid: string }
+    }
   }) => Promise<{ uri: string; cid: string }>
 }
 
@@ -380,6 +387,12 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'DPoP verification failed'
+      if (err instanceof DpopVerificationError) {
+        if (err.wwwAuthenticate) {
+          res.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+        if (err.nonce) res.setHeader('DPoP-Nonce', err.nonce)
+      }
       res.status(401).json({
         error: 'Unauthorized',
         message,
