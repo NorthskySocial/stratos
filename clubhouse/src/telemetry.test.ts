@@ -11,12 +11,30 @@ describe('Clubhouse telemetry', () => {
       scrubEvent({
         request: { headers: { authorization: 'Bearer secret' } },
         contexts: { room: { id: 'nerv' } },
-        extra: { postBody: 'private words' },
+        extra: {
+          postBody: 'private words',
+          response: {
+            status_code: 403,
+            body: {
+              error: 'ScopeMissingError',
+              message: 'Missing required scope',
+            },
+          },
+        },
       }),
     ).toEqual({
       request: { headers: { authorization: '[Filtered]' } },
       contexts: { room: { id: 'nerv' } },
-      extra: { postBody: '[Filtered]' },
+      extra: {
+        postBody: '[Filtered]',
+        response: {
+          status_code: 403,
+          body: {
+            error: 'ScopeMissingError',
+            message: 'Missing required scope',
+          },
+        },
+      },
     })
   })
 })

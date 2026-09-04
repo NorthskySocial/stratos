@@ -18,7 +18,19 @@ describe('Feedgen room client', () => {
                 cid: 'bafy-kaworu',
                 indexedAt: '2026-09-03T10:00:00.000Z',
                 author: { did: 'did:plc:kaworu', handle: 'kaworu.example' },
-                record: { text: '<img src=x onerror=alert(1)>' },
+                record: {
+                  text: '<img src=x onerror=alert(1)>',
+                  reply: {
+                    root: {
+                      uri: 'at://did:plc:rei/zone.stratos.feed.post/root',
+                      cid: 'bafy-root',
+                    },
+                    parent: {
+                      uri: 'at://did:plc:rei/zone.stratos.feed.post/parent',
+                      cid: 'bafy-parent',
+                    },
+                  },
+                },
               },
             },
           ],
@@ -36,6 +48,7 @@ describe('Feedgen room client', () => {
       },
     )
     expect(page.posts[0]?.text).toBe('<img src=x onerror=alert(1)>')
+    expect(page.posts[0]?.reply?.parent.cid).toBe('bafy-parent')
     expect(current.fetchHandler).toHaveBeenCalledWith(
       '/xrpc/zone.stratos.feedgen.getFeed?feed=terminal-dogma&limit=100&cursor=asuka-cursor',
       {

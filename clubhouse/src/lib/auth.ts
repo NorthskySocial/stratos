@@ -24,9 +24,7 @@ export function createClubhouseAuth(config: ClubhouseConfig): BrowserAuth {
     'repo:zone.stratos.actor.enrollment',
     'repo:zone.stratos.feed.post?action=create',
     ...(config.feedgenDid
-      ? [
-          `rpc:zone.stratos.feedgen.getFeed?aud=${encodeURIComponent(config.feedgenDid)}`,
-        ]
+      ? ['rpc:zone.stratos.feedgen.getFeed?aud=*']
       : []),
   ]
   return createBrowserAuth({

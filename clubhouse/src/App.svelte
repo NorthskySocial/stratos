@@ -2,13 +2,13 @@
   import { onMount } from 'svelte'
   import { fetchRoomCatalog } from './lib/catalog'
   import { loadClubhouseConfig, roomCatalogEndpoint } from './lib/config'
-  import houseWithGarden from './lib/icons/house-with-garden.svg'
+  import IconaMoon from './lib/components/IconaMoon.svelte'
   import Entrance from './lib/components/Entrance.svelte'
   import ErrorState from './lib/components/ErrorState.svelte'
   import RoomPlaceholder from './lib/components/RoomPlaceholder.svelte'
   import { FeedCursorStore, FeedgenError, type ClubhouseFeedPost } from './lib/feedgen'
   import { consumeRoomJoin, consumeRoomReturn, rememberRoomJoin } from './lib/join'
-  import { roomIdFromPath, roomPath } from './lib/route'
+  import { roomIdFromPath, roomPath, topicPath, topicUriFromPath } from './lib/route'
   import { stateForRoom } from './lib/state'
   import { withClubhouseSpan } from './telemetry'
   import type { ClubhouseIntegration, ClubhouseIdentity, RoomAccessState, RoomCatalogEntry, RoomFeedState } from './lib/types'
@@ -37,6 +37,7 @@
   let identity = $state<ClubhouseIdentity | null>(null)
   let handle = $state('')
   let signingIn = $state(false)
+  let signingOut = $state(false)
   let feedState = $state<RoomFeedState>('idle')
   let feedMessage = $state('')
   let posts = $state<ClubhouseFeedPost[]>([])
@@ -47,14 +48,15 @@
   const deploymentConfig = loadClubhouseConfig()
 
   const currentRoomId = $derived(roomIdFromPath(pathname))
+  const currentTopicUri = $derived(topicUriFromPath(pathname))
   const currentRoom = $derived(
     currentRoomId ? rooms.find((room) => room.id === currentRoomId) : undefined,
   )
 
   onMount(() => {
-    pathname = window.location.pathname
+    pathname = window.location.pathname + window.location.search
     const onPopState = () => {
-      const destination = window.location.pathname
+      const destination = window.location.pathname + window.location.search
       invalidateFeed(currentRoomId)
       const destinationRoomId = roomIdFromPath(destination)
       if (destinationRoomId) feedCursors.reset(destinationRoomId)
@@ -206,6 +208,20 @@
     pathname = '/'
   }
 
+  function openTopic(topicUri: string) {
+    if (!currentRoomId) return
+    const destination = topicPath(currentRoomId, topicUri)
+    window.history.pushState({}, '', destination)
+    pathname = destination
+  }
+
+  function closeTopic() {
+    if (!currentRoomId) return
+    const destination = roomPath(currentRoomId)
+    window.history.pushState({}, '', destination)
+    pathname = destination
+  }
+
   async function signIn() {
     if (!handle.trim() || !activeIntegration.signIn) return
     signingIn = true
@@ -216,6 +232,24 @@
       liveMessage = cause instanceof Error ? cause.message : 'Sign-in could not be started'
     } finally {
       signingIn = false
+    }
+  }
+
+  async function signOut() {
+    if (!activeIntegration.signOut) return
+    signingOut = true
+    liveMessage = 'Signing out'
+    try {
+      await activeIntegration.signOut()
+      identity = null
+      states = {}
+      pendingRoomId = null
+      invalidateFeed(currentRoomId)
+      liveMessage = 'Signed out'
+    } catch (cause) {
+      liveMessage = cause instanceof Error ? cause.message : 'Sign-out failed'
+    } finally {
+      signingOut = false
     }
   }
 
@@ -247,6 +281,7 @@
       liveMessage = posts.length ? `${posts.length} room posts loaded` : 'No room posts yet'
     } catch (cause) {
       if (requestEpoch !== feedRequestEpoch || currentRoomId !== room.id) return
+      captureClubhouseException(cause)
       const code = cause instanceof FeedgenError ? cause.code : 'NetworkError'
       feedState = code === 'InvalidResponse' ? 'NetworkError' : code
       feedMessage = cause instanceof Error ? cause.message : 'The room could not be loaded'
@@ -274,14 +309,14 @@
     await loadSelectedRoom()
   }
 
-  async function postToRoom(text: string) {
+  async function postToRoom(text: string, reply?: import('./lib/post-writer').ReplyRef) {
     if (!currentRoom || !activeIntegration.createPost) {
       feedMessage = 'Posting needs service configuration for this room.'
       return
     }
     try {
       await withClubhouseSpan('clubhouse.post.create', () =>
-        activeIntegration.createPost!(currentRoom.id, text),
+        activeIntegration.createPost!(currentRoom.id, text, reply),
       )
       liveMessage = 'Post sent to the room'
       await loadSelectedRoom()
@@ -300,11 +335,14 @@
 <div class="app-shell">
   <header class="site-header">
     <a class="brand" href="/" aria-label="Clubhouse home" onclick={(event) => { event.preventDefault(); goHome() }}>
-      <img class="brand-mark" src={houseWithGarden} alt="" aria-hidden="true" />
+      <span class="brand-mark" aria-hidden="true"><IconaMoon name="home" /></span>
       <span>clubhouse</span>
     </a>
     {#if identity}
-      <p class="header-note">Signed in as {identity.did}</p>
+      <div class="signed-in-account">
+        <p class="header-note" title={identity.did}>Signed in as {identity.handle ?? identity.did}</p>
+        <button class="button button-secondary" type="button" disabled={signingOut} onclick={() => void signOut()}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
+      </div>
     {:else}
       <form class="sign-in" onsubmit={(event) => { event.preventDefault(); void signIn() }}>
         <label for="handle">ATProto handle</label>
@@ -325,7 +363,7 @@
     {:else if error}
       <ErrorState message={error} onRetry={loadCatalog} />
     {:else if currentRoomId && currentRoom}
-      <RoomPlaceholder room={currentRoom} state={stateForRoom(currentRoom, states)} onBack={goHome} onJoin={joinRoom} onRecheckPending={() => void recheckPendingRoom()} {feedState} {posts} {hasMore} feedMessage={feedMessage} onLoadMore={() => void loadSelectedRoom(true)} onPost={postToRoom} />
+      <RoomPlaceholder room={currentRoom} state={stateForRoom(currentRoom, states)} onBack={goHome} onJoin={joinRoom} onRecheckPending={() => void recheckPendingRoom()} {feedState} {posts} {hasMore} feedMessage={feedMessage} topicUri={currentTopicUri} onOpenTopic={openTopic} onCloseTopic={closeTopic} onLoadMore={() => void loadSelectedRoom(true)} onPost={postToRoom} />
     {:else if currentRoomId}
       <ErrorState message="That room does not appear in the current catalogue." onRetry={goHome} />
     {:else}

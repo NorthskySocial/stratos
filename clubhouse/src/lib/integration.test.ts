@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: {
     init: vi.fn(),
     signIn: vi.fn(),
+    signOut: vi.fn(),
   },
 }))
 
@@ -16,6 +17,7 @@ vi.mock('./enrollment', () => ({
 }))
 
 import { createClubhouseIntegration } from './integration'
+import { resolveAuthenticatedHandle } from './enrollment'
 
 const session = (fetchHandler: ReturnType<typeof vi.fn>) => ({
   sub: 'did:plc:misato',
@@ -26,6 +28,70 @@ describe('Clubhouse integration', () => {
   beforeEach(() => {
     mocks.auth.init.mockReset()
     mocks.auth.signIn.mockReset()
+    mocks.auth.signOut.mockReset()
+    vi.mocked(resolveAuthenticatedHandle).mockReset()
+  })
+
+  it('starts room enrollment with the restored identity without another handle lookup', async () => {
+    const fetchHandler = vi.fn()
+    const navigate = vi.fn()
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    vi.mocked(resolveAuthenticatedHandle).mockResolvedValue('misato.example')
+    const integration = createClubhouseIntegration(
+      {
+        serviceUrl: 'https://stratos.example',
+        publicOrigin: 'https://clubhouse.example',
+        pdsSpaceUriByRoom: {},
+      },
+      { navigate },
+    )
+    await integration.initialize?.()
+
+    await integration.requestJoin?.('nerv-hq')
+
+    expect(resolveAuthenticatedHandle).toHaveBeenCalledOnce()
+    expect(navigate).toHaveBeenCalledOnce()
+    const destination = new URL(navigate.mock.calls[0]![0])
+    expect(destination.searchParams.get('handle')).toBe('misato.example')
+    expect(destination.searchParams.get('room')).toBe('nerv-hq')
+  })
+
+  it('uses the signed-in DID when handle resolution is temporarily unavailable', async () => {
+    const navigate = vi.fn()
+    mocks.auth.init.mockResolvedValue(session(vi.fn()))
+    vi.mocked(resolveAuthenticatedHandle).mockRejectedValue(
+      new Error('PDS unavailable'),
+    )
+    const integration = createClubhouseIntegration(
+      {
+        serviceUrl: 'https://stratos.example',
+        publicOrigin: 'https://clubhouse.example',
+        pdsSpaceUriByRoom: {},
+      },
+      { navigate },
+    )
+    await integration.initialize?.()
+
+    await integration.requestJoin?.('nerv-hq')
+
+    const destination = new URL(navigate.mock.calls[0]![0])
+    expect(destination.searchParams.get('handle')).toBe('did:plc:misato')
+  })
+
+  it('resolves the signed-in handle and signs out through browser auth', async () => {
+    const fetchHandler = vi.fn()
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    vi.mocked(resolveAuthenticatedHandle).mockResolvedValue('misato.example')
+    const integration = createClubhouseIntegration({ pdsSpaceUriByRoom: {} })
+
+    await expect(integration.initialize?.()).resolves.toEqual({
+      did: 'did:plc:misato',
+      handle: 'misato.example',
+    })
+    await integration.signOut?.()
+
+    expect(mocks.auth.signOut).toHaveBeenCalledOnce()
+    expect(integration.identity).toBeNull()
   })
 
   it('loads all room states from Stratos in one boundary-free request', async () => {
@@ -132,7 +198,15 @@ describe('Clubhouse integration', () => {
           { status: 200 },
         ),
       )
-      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            uri: 'at://did:plc:misato/zone.stratos.feed.post/2',
+            cid: 'bafy-misato-2',
+          }),
+          { status: 200 },
+        ),
+      )
     mocks.auth.init.mockResolvedValue(session(fetchHandler))
     const integration = createClubhouseIntegration({
       serviceUrl: 'https://stratos.example',

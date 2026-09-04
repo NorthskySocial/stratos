@@ -5,7 +5,15 @@ describe('custody-aware room posting', () => {
   it('uses the configured authority space for PDS custody and omits record boundaries', async () => {
     const fetchHandler = vi
       .fn()
-      .mockResolvedValue(new Response('{}', { status: 200 }))
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            uri: 'at://did:plc:asuka/zone.stratos.feed.post/1',
+            cid: 'bafy-asuka',
+          }),
+          { status: 200 },
+        ),
+      )
     await createRoomPost({
       session: { sub: 'did:plc:asuka', fetchHandler } as never,
       custody: 'pds',
@@ -15,6 +23,16 @@ describe('custody-aware room posting', () => {
         pdsSpaceUriByRoom: {
           'tokyo-3':
             'at://did:web:stratos.example/space/zone.stratos.space.feed/tokyo-3',
+        },
+      },
+      reply: {
+        root: {
+          uri: 'at://did:plc:rei/zone.stratos.feed.post/root',
+          cid: 'bafy-root',
+        },
+        parent: {
+          uri: 'at://did:plc:rei/zone.stratos.feed.post/parent',
+          cid: 'bafy-parent',
         },
       },
     })
@@ -35,6 +53,10 @@ describe('custody-aware room posting', () => {
     expect(body.record).toMatchObject({
       $type: 'zone.stratos.feed.post',
       text: 'I am here.',
+      reply: {
+        root: { cid: 'bafy-root' },
+        parent: { cid: 'bafy-parent' },
+      },
     })
     expect(body.record).not.toHaveProperty('boundary')
   })

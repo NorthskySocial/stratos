@@ -16,7 +16,7 @@
     unjoined: 'Open to join',
     unavailable: 'Not accepting joins',
     pending: 'Request pending',
-    'status-error': 'Access status unavailable',
+    'status-error': 'Access status unavailable · you can still join',
   }
 
   function openRoom(event: MouseEvent) {
@@ -34,10 +34,10 @@
   }
 </script>
 
-<article class="room-card" class:room-unjoined={state === 'unjoined'} class:room-unavailable={state === 'unavailable' || state === 'status-error'}>
+<article class="room-card" class:room-unjoined={state === 'unjoined' || state === 'status-error'} class:room-unavailable={state === 'unavailable'}>
   <div class="room-card-topline">
-    <span class="room-orbit" aria-hidden="true"><span></span></span>
-    <span class:status-joined={state === 'joined'} class:status-pending={state === 'pending'} class:status-unavailable={state === 'unavailable' || state === 'status-error'} class="status">
+    <span class="room-icon" aria-hidden="true"><IconaMoon name="category" /></span>
+    <span class:status-joined={state === 'joined'} class:status-pending={state === 'pending'} class:status-unavailable={state === 'unavailable'} class="status">
       {#if state === 'joined'}<IconaMoon name="check" />{/if}
       {stateLabel[state]}
     </span>
@@ -55,10 +55,10 @@
       <button
         class="button button-primary"
         type="button"
-        disabled={state === 'unavailable' || state === 'pending' || state === 'status-error'}
+        disabled={state === 'unavailable' || state === 'pending'}
         onclick={() => onJoin(room.id)}
       >
-        {state === 'pending' ? 'Request pending…' : state === 'unavailable' || state === 'status-error' ? 'Joining unavailable' : 'Join room'}
+        {state === 'pending' ? 'Request pending…' : state === 'unavailable' ? 'Joining unavailable' : 'Join room'}
       </button>
     {/if}
     <a class="room-link" href={roomPath(room.id)} onclick={openRoom}>About this room</a>

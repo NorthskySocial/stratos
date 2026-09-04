@@ -1,4 +1,5 @@
 import type { OAuthSession } from '@atproto/oauth-client-browser'
+import { feedgenServiceId } from './config'
 
 export type FeedFailureCode =
   | 'UnknownFeed'
@@ -12,6 +13,9 @@ export class FeedgenError extends Error {
   constructor(
     readonly code: FeedFailureCode,
     message: string,
+    readonly httpStatus?: number,
+    readonly responseError?: string,
+    readonly responseMessage?: string,
   ) {
     super(message)
     this.name = 'FeedgenError'
@@ -24,6 +28,12 @@ export interface ClubhouseFeedPost {
   author: { did: string; handle?: string }
   text: string
   indexedAt: string
+  reply?: { root: StrongRef; parent: StrongRef }
+}
+
+export interface StrongRef {
+  uri: string
+  cid: string
 }
 
 export interface FeedPage {
@@ -50,24 +60,36 @@ function messageFor(code: FeedFailureCode): string {
 }
 
 function failureFromResponse(status: number, body: unknown): FeedgenError {
-  const error =
+  const response =
     typeof body === 'object' && body !== null
-      ? (body as { error?: unknown }).error
-      : undefined
+      ? (body as { error?: unknown; message?: unknown })
+      : {}
+  const error = typeof response.error === 'string' ? response.error : undefined
+  const message =
+    typeof response.message === 'string' ? response.message : undefined
   if (
     error === 'UnknownFeed' ||
     error === 'BoundaryMismatch' ||
     error === 'FeedNotReady'
   ) {
-    return new FeedgenError(error, messageFor(error))
+    return new FeedgenError(error, messageFor(error), status, error, message)
   }
   if (status === 401 || status === 403) {
     return new FeedgenError(
       'AuthenticationRequired',
       messageFor('AuthenticationRequired'),
+      status,
+      error,
+      message,
     )
   }
-  return new FeedgenError('NetworkError', `The feed returned HTTP ${status}.`)
+  return new FeedgenError(
+    'NetworkError',
+    `The feed returned HTTP ${status}.`,
+    status,
+    error,
+    message,
+  )
 }
 
 function stringField(
@@ -76,6 +98,14 @@ function stringField(
 ): string | null {
   const value = record[field]
   return typeof value === 'string' ? value : null
+}
+
+function strongRef(value: unknown): StrongRef | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  const uri = stringField(record, 'uri')
+  const cid = stringField(record, 'cid')
+  return uri && cid ? { uri, cid } : undefined
 }
 
 /** Extract plain text only; Svelte renders this as text, never supplied HTML. */
@@ -116,6 +146,16 @@ function parseFeedPage(payload: unknown): FeedPage {
     const did = stringField(author, 'did')
     if (!did) return []
     const handle = stringField(author, 'handle') ?? undefined
+    const record =
+      typeof value.record === 'object' && value.record !== null
+        ? (value.record as Record<string, unknown>)
+        : {}
+    const replyValue =
+      typeof record.reply === 'object' && record.reply !== null
+        ? (record.reply as Record<string, unknown>)
+        : undefined
+    const root = strongRef(replyValue?.root)
+    const parent = strongRef(replyValue?.parent)
     return [
       {
         uri,
@@ -123,6 +163,7 @@ function parseFeedPage(payload: unknown): FeedPage {
         indexedAt,
         author: { did, handle },
         text: safePostText(value.record),
+        ...(root && parent ? { reply: { root, parent } } : {}),
       },
     ]
   })
@@ -155,7 +196,7 @@ export async function getFeed(
       `/xrpc/zone.stratos.feedgen.getFeed?${parameters.toString()}`,
       {
         method: 'GET',
-        headers: { 'atproto-proxy': `${config.feedgenDid}#stratos_feedgen` },
+        headers: { 'atproto-proxy': feedgenServiceId(config.feedgenDid) },
       },
     )
   } catch (error) {

@@ -11,7 +11,20 @@ export class RoomPostConfigurationError extends Error {
 
 export interface StratosPostWriter {
   /** A service-owned writer that resolves the canonical room boundary itself. */
-  createPost(input: { roomId: string; text: string }): Promise<void>
+  createPost(input: {
+    roomId: string
+    text: string
+    reply?: ReplyRef
+  }): Promise<PostRef>
+}
+
+export interface PostRef {
+  uri: string
+  cid: string
+}
+export interface ReplyRef {
+  root: PostRef
+  parent: PostRef
 }
 
 export interface RoomPostInput {
@@ -22,10 +35,11 @@ export interface RoomPostInput {
   text: string
   config: Pick<ClubhouseConfig, 'pdsSpaceUriByRoom'>
   stratosWriter?: StratosPostWriter
+  reply?: ReplyRef
 }
 
-/** Create a flat, text-only post without accepting a caller-controlled boundary. */
-export async function createRoomPost(input: RoomPostInput): Promise<void> {
+/** Create a topic or reply without accepting a caller-controlled boundary. */
+export async function createRoomPost(input: RoomPostInput): Promise<PostRef> {
   const text = input.text.trim()
   if (!text) throw new Error('Write something before posting.')
   if (!input.custody) {
@@ -36,8 +50,11 @@ export async function createRoomPost(input: RoomPostInput): Promise<void> {
 
   if (input.custody === 'stratos') {
     if (!input.stratosWriter) throw new RoomPostConfigurationError()
-    await input.stratosWriter.createPost({ roomId: input.roomId, text })
-    return
+    return input.stratosWriter.createPost({
+      roomId: input.roomId,
+      text,
+      ...(input.reply ? { reply: input.reply } : {}),
+    })
   }
 
   const space = input.config.pdsSpaceUriByRoom[input.roomId]
@@ -55,6 +72,7 @@ export async function createRoomPost(input: RoomPostInput): Promise<void> {
         record: {
           $type: 'zone.stratos.feed.post',
           text,
+          ...(input.reply ? { reply: input.reply } : {}),
           createdAt: new Date().toISOString(),
         },
       }),
@@ -63,4 +81,9 @@ export async function createRoomPost(input: RoomPostInput): Promise<void> {
   if (!response.ok) {
     throw new Error(`PDS could not create the post (HTTP ${response.status}).`)
   }
+  const result = (await response.json()) as Partial<PostRef>
+  if (typeof result.uri !== 'string' || typeof result.cid !== 'string') {
+    throw new Error('PDS returned an invalid post reference.')
+  }
+  return { uri: result.uri, cid: result.cid }
 }
