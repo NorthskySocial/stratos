@@ -663,32 +663,37 @@ describe('createShutdownHandler', () => {
 })
 
 describe('createPanicHandler', () => {
-  it('logs the fatal error and exits 1', () => {
+  it('flushes telemetry before it exits 1', async () => {
     const lines: CapturedLine[] = []
     const exit = vi.fn()
-    const handler = createPanicHandler(captureLogger(lines), exit)
+    const telemetry = deferred()
+    const shutdown = vi.fn(() => telemetry.promise)
+    const handler = createPanicHandler(captureLogger(lines), exit, shutdown)
 
     handler(new Error('angel attack'))
 
     expect(lines).toHaveLength(1)
     expect(lines[0]?.msg).toBe('unrecoverable error; exiting')
     expect((lines[0]?.obj['err'] as Error).message).toBe('angel attack')
-    expect(exit).toHaveBeenCalledWith(1)
+    expect(shutdown).toHaveBeenCalledOnce()
+    expect(exit).not.toHaveBeenCalled()
+    telemetry.resolve()
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
   })
 
-  it('defaults to process.exit', () => {
+  it('defaults to process.exit', async () => {
     const exitSpy = vi
       .spyOn(process, 'exit')
       .mockImplementation(() => undefined as never)
     try {
       createPanicHandler(nullLogger)(new Error('eva unit berserk'))
-      expect(exitSpy).toHaveBeenCalledWith(1)
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
     } finally {
       exitSpy.mockRestore()
     }
   })
 
-  it('installPanicHandlers registers unhandledRejection and uncaughtException', () => {
+  it('installPanicHandlers registers unhandledRejection and uncaughtException', async () => {
     const lines: CapturedLine[] = []
     const registered = new Map<string, (...args: unknown[]) => unknown>()
     const onSpy = vi
@@ -710,7 +715,7 @@ describe('createPanicHandler', () => {
       ])
       registered.get('uncaughtException')?.(new Error('terminal dogma breach'))
       expect(lines[0]?.msg).toBe('unrecoverable error; exiting')
-      expect(exitSpy).toHaveBeenCalledWith(1)
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
     } finally {
       onSpy.mockRestore()
       exitSpy.mockRestore()

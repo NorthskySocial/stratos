@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws'
 import type { AppContext, EnrollmentEvent } from '../context.js'
 import type { EnrollmentStoreReader } from '@northskysocial/stratos-core'
 import { SEQUENCE_DB_PAGE_SIZE } from './sequence-paging.js'
+import { serviceMetrics } from '../observability/metrics.js'
 
 const WS_PING_INTERVAL_MS = 30_000
 
@@ -150,7 +151,12 @@ function createActorSubscriptionHandler(ctx: AppContext) {
         for (const event of catchUp) {
           if (signal.aborted) return
           const message = emitEvent(ctx, event, callerBoundaries, domain)
-          if (message) yield message
+          if (message) {
+            serviceMetrics.recordSyncEvent('applied')
+            yield message
+          } else {
+            serviceMetrics.recordSyncEvent('dropped')
+          }
           lastSeq = event.seq
         }
         if (catchUp.length < SEQUENCE_DB_PAGE_SIZE) break
@@ -220,7 +226,10 @@ async function* streamNewEvents(
         if (signal.aborted) return
         const message = emitEvent(ctx, event, callerBoundaries, domain)
         if (message) {
+          serviceMetrics.recordSyncEvent('applied')
           yield message
+        } else {
+          serviceMetrics.recordSyncEvent('dropped')
         }
         lastSeq = event.seq
       }
@@ -725,7 +734,13 @@ export function registerSubscribeRecords(ctx: AppContext): void {
         }
       }
 
-      yield* handler(typedParams, typedAuth, signal)
+      const kind = typedParams.did ? 'actor' : 'service'
+      serviceMetrics.recordSyncConnection(kind, true)
+      try {
+        yield* handler(typedParams, typedAuth, signal)
+      } finally {
+        serviceMetrics.recordSyncConnection(kind, false)
+      }
     },
   })
 

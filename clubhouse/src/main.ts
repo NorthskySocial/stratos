@@ -1,8 +1,18 @@
-import { mount } from 'svelte'
-import App from './App.svelte'
 import './app.css'
+import { initializeClubhouseTelemetry } from './telemetry'
 
-const target = document.getElementById('app')
-if (!target) throw new Error('Clubhouse app target is missing')
+initializeClubhouseTelemetry()
 
-mount(App, { target })
+void bootstrap()
+
+async function bootstrap(): Promise<void> {
+  const [{ mount }, { default: App }] = await Promise.all([
+    import('svelte'),
+    import('./App.svelte'),
+  ])
+
+  const target = document.getElementById('app')
+  if (!target) throw new Error('Clubhouse app target is missing')
+
+  mount(App, { target })
+}

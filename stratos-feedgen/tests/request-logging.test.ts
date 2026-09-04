@@ -188,12 +188,16 @@ describe('request completion logging', () => {
     expect(serialized.toLowerCase()).not.toContain('bearer')
   })
 
-  it('does not log /health or /metrics requests', async () => {
+  it('does not log /health, while unknown requests retain a bounded log label', async () => {
     ctx = await startServer()
 
     await fetch(`${ctx.baseUrl}/health`)
     await fetch(`${ctx.baseUrl}/metrics`)
-    expect(completionLines(ctx)).toHaveLength(0)
+    expect(completionLines(ctx)).toHaveLength(1)
+    expect(completionLines(ctx)[0]).toMatchObject({
+      endpoint: 'unknown',
+      status: 404,
+    })
   })
 
   it('reports degraded /health and no /metrics route without observability wiring', async () => {

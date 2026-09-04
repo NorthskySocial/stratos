@@ -24,8 +24,8 @@ export interface IndexCommitArgs {
  * records in any other collection.
  */
 export interface SubscriptionIndexerHooks {
-  /** Observability hook fired per upserted post; keeps metrics out of this module. */
-  onPostIndexed?: () => void
+  /** Observability hook fired after a local projection write. */
+  onPostIndexed?: (operation: 'upsert' | 'delete') => void
 }
 
 export interface SubscriptionIndexerOptions extends SubscriptionIndexerHooks {
@@ -63,6 +63,7 @@ export class SubscriptionIndexer {
       if (!isPostPath(path)) continue
       if (op.action === 'delete') {
         await this.store.deletePost(`at://${did}/${path}`)
+        this.hooks.onPostIndexed?.('delete')
         continue
       }
       if (!op.cid || !op.record) continue
@@ -78,6 +79,7 @@ export class SubscriptionIndexer {
       // advance without reintroducing the forbidden record.
       if (this.replayAuthorizer && boundaries.length === 0) {
         await this.store.deletePost(uri)
+        this.hooks.onPostIndexed?.('delete')
         continue
       }
       const blobRefs = extractBlobRefs(op.record)
@@ -91,7 +93,7 @@ export class SubscriptionIndexer {
         blobRefs,
         boundaries,
       })
-      this.hooks.onPostIndexed?.()
+      this.hooks.onPostIndexed?.('upsert')
     }
     await this.store.upsertCursor(did, seq, time)
   }
