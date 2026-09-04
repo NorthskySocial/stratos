@@ -27,6 +27,8 @@ const KNOWN_XRPC_NSIDS = new Set([
 /** Collapse input paths to a small stable route vocabulary. */
 export function normalizeServiceRoute(path: string): string {
   if (KNOWN_HTTP_ROUTES.has(path)) return path
+  const mountedOAuthRoute = `/oauth${path}`
+  if (KNOWN_HTTP_ROUTES.has(mountedOAuthRoute)) return mountedOAuthRoute
   if (path.startsWith('/xrpc/')) {
     const nsid = path.slice('/xrpc/'.length)
     return KNOWN_XRPC_NSIDS.has(nsid) ? `/xrpc/${nsid}` : '/xrpc/:nsid'

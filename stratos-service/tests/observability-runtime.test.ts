@@ -98,10 +98,18 @@ describe('service telemetry runtime', () => {
       scrubEvent({
         contexts: { actor: { did: 'did:plc:faye' } },
         request: { headers: { authorization: 'Bearer secret' }, body: 'post' },
+        response: {
+          status_code: 403,
+          body: { error: 'ScopeMissingError', message: 'Missing scope' },
+        },
       }),
     ).toEqual({
       contexts: { actor: { did: 'did:plc:faye' } },
       request: { headers: { authorization: '[Filtered]' }, body: '[Filtered]' },
+      response: {
+        status_code: 403,
+        body: { error: 'ScopeMissingError', message: 'Missing scope' },
+      },
     })
   })
 
