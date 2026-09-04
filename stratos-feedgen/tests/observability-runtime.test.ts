@@ -110,4 +110,20 @@ describe('feedgen telemetry runtime', () => {
       breadcrumbs: [{ token: '[Filtered]' }],
     })
   })
+
+  it('redacts sensitive URL query values before export', () => {
+    expect(
+      scrubEvent({
+        request: {
+          url: 'https://feedgen.example/oauth/callback?code=asuka&state=unit-02&scope=feed',
+          query_string: 'code=asuka&state=unit-02',
+        },
+      }),
+    ).toEqual({
+      request: {
+        url: 'https://feedgen.example/oauth/callback?code=%5BFiltered%5D&state=%5BFiltered%5D&scope=feed',
+        query_string: '[Filtered]',
+      },
+    })
+  })
 })

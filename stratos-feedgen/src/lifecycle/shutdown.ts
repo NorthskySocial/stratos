@@ -1,6 +1,9 @@
 import type { Server as HttpServer } from 'node:http'
 import type { Logger } from '@northskysocial/stratos-core'
-import { captureUnexpectedError } from '../observability/runtime.js'
+import {
+  captureUnexpectedError,
+  shutdownTelemetry,
+} from '../observability/runtime.js'
 
 export interface ShutdownDeps {
   httpServer?: HttpServer | null
@@ -88,11 +91,12 @@ export function installShutdownHandlers(deps: ShutdownDeps): void {
 export function createPanicHandler(
   logger: Logger,
   exit: (code: number) => void = (code): void => process.exit(code),
+  shutdown: () => Promise<void> = shutdownTelemetry,
 ): (err: unknown) => void {
   return (err: unknown): void => {
     captureUnexpectedError(err)
     logger.error({ err }, 'unrecoverable error; exiting')
-    exit(1)
+    void shutdown().finally(() => exit(1))
   }
 }
 
