@@ -24,15 +24,15 @@ npx playwright install chromium
 | kaoruko | `kaoruko-{id}.{PDS_HOST}` | `aekea`      |
 
 Handles include a random 5-digit suffix (`{id}`) to avoid collisions with previous test runs.
-`{PDS_HOST}` comes from `scripts/.env`.
+`{PDS_HOST}` comes from `test/.env`.
 
 Rei and Sakura share the **swordsmith** boundary. kaoruko is in **aekea** only.
 
 ## Configuration
 
-### Test scripts environment (`scripts/.env`)
+### Test scripts environment (`test/.env`)
 
-The Deno test scripts load their own `.env` from `scripts/.env`. Copy from `.env.example` in the
+The Deno test scripts load `.env` from the `test/` directory. Copy from `.env.example` in the
 same directory and fill in the values:
 
 | Variable             | Example                 | Purpose                                                                      |
@@ -117,6 +117,30 @@ deno run -A scripts/run-all.ts
 
 Runs all five stages in order. On any stage failure the remaining stages (except teardown) are
 skipped.
+
+### Public-alpha Clubhouse release check
+
+The Clubhouse check drives a deployed browser session against a real
+spaces-capable PDS account. It is intentionally excluded from the local suite:
+the account file is operator-owned and should never be committed. With a
+pre-enrolled account it verifies sign-in, resolved handle, room status, room
+feed, and sign-out without writing. Set the explicit mutation opt-in only when
+the account may be enrolled in the selected room and receive disposable posts.
+
+```bash
+CLUBHOUSE_PUBLIC_E2E_USERS_FILE=/secure/alpha-users.json \
+CLUBHOUSE_PUBLIC_E2E_BROWSER_PATH=/path/to/chromium \
+deno run -A scripts/test-clubhouse-public-alpha.ts
+
+CLUBHOUSE_PUBLIC_E2E_USERS_FILE=/secure/alpha-users.json \
+CLUBHOUSE_PUBLIC_E2E_BROWSER_PATH=/path/to/chromium \
+CLUBHOUSE_PUBLIC_E2E_MUTATE=true \
+deno run -A scripts/test-clubhouse-public-alpha.ts
+```
+
+The mutation run also starts selected-room enrollment when necessary, waits for
+Feedgen reconciliation, creates a PDS-custody topic and reply, checks their
+strong references and shareable topic URL, then signs out.
 
 ### PostgreSQL mode
 
