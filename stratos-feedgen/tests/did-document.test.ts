@@ -154,15 +154,4 @@ describe('loadFeedgenConfig public URL derivation', () => {
       loadFeedgenConfig({ ...baseEnv, FEEDGEN_LOG_LEVEL: '' }).logLevel,
     ).toBe('info')
   })
-
-  it('parses FEEDGEN_METRICS_TOKEN and treats empty as unset', () => {
-    expect(loadFeedgenConfig({ ...baseEnv }).metricsToken).toBeUndefined()
-    expect(
-      loadFeedgenConfig({ ...baseEnv, FEEDGEN_METRICS_TOKEN: '' }).metricsToken,
-    ).toBeUndefined()
-    expect(
-      loadFeedgenConfig({ ...baseEnv, FEEDGEN_METRICS_TOKEN: 'himeya-soft' })
-        .metricsToken,
-    ).toBe('himeya-soft')
-  })
 })

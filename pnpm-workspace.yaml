@@ -11,6 +11,7 @@ packages:
 # different pnpm store. The next host run must purge without a TTY prompt.
 confirmModulesPurge: false
 allowBuilds:
+  '@sentry/cli': true
   core-js: true
   cpu-features: true
   esbuild: true

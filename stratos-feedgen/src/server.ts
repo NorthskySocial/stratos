@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto'
 import type { Server as HttpServer } from 'node:http'
 import express, { type Express, type RequestHandler } from 'express'
 import { createServer as createXrpcServer } from '@atproto/xrpc-server'
@@ -33,13 +32,8 @@ export interface FeedgenServerDeps {
   version?: string
   /** Request-completion logger. Omitted: no request logging. */
   logger?: Logger
-  /** Metric set; also enables the `/metrics` endpoint. Omitted: no metrics. */
+  /** Optional OpenTelemetry metric set. The Collector owns Prometheus export. */
   metrics?: FeedgenMetrics
-  /**
-   * Bearer token required on `/metrics`. Omitted: the endpoint is open and
-   * the operator must restrict access at the network layer.
-   */
-  metricsToken?: string
   /** Late-bound subscription state reported by `/health`. */
   subscriptionStatus?: SubscriptionStatus
   /** Optional fail-closed gate for projections pending authorization replay. */
@@ -68,6 +62,7 @@ export function createFeedgenServer(
     enrollmentManager: deps.enrollmentManager,
     verifier: deps.verifier,
     readiness: deps.feedReadiness,
+    metrics: deps.metrics,
   })
 
   registerDescribeFeedHandler(xrpc, {
@@ -91,24 +86,6 @@ export function createFeedgenServer(
       actorPoolSize: status?.actorPool?.getStats().active ?? 0,
     })
   })
-
-  const metrics = deps.metrics
-  if (metrics) {
-    const metricsToken = deps.metricsToken
-    app.get('/metrics', (req, res, next) => {
-      if (
-        metricsToken !== undefined &&
-        !isBearerTokenValid(req.headers.authorization, metricsToken)
-      ) {
-        res.status(401).json({ error: 'Unauthorized' })
-        return
-      }
-      metrics.registry.metrics().then((body) => {
-        res.set('Content-Type', metrics.registry.contentType)
-        res.send(body)
-      }, next)
-    })
-  }
 
   app.get('/.well-known/did.json', (_req, res) => {
     res.json({
@@ -150,28 +127,14 @@ export function createFeedgenServer(
   }
 }
 
-/** Constant-time bearer comparison; the length guard leaks only the length. */
-function isBearerTokenValid(
-  header: string | undefined,
-  expectedToken: string,
-): boolean {
-  const scheme = 'Bearer '
-  if (!header?.startsWith(scheme)) return false
-  const presented = Buffer.from(header.slice(scheme.length))
-  const expected = Buffer.from(expectedToken)
-  if (presented.length !== expected.length) return false
-  return timingSafeEqual(presented, expected)
-}
-
 const KNOWN_ENDPOINTS = new Set([
   '/health',
-  '/metrics',
   '/.well-known/did.json',
   ...FEEDGEN_LEXICONS.map((doc) => `/xrpc/${doc.id}`),
 ])
 
 /** Endpoints that scrapes/probes hit constantly; counted but not logged. */
-const UNLOGGED_ENDPOINTS = new Set(['/health', '/metrics'])
+const UNLOGGED_ENDPOINTS = new Set(['/health'])
 
 /**
  * Completion hook per request: one structured log line and the request
@@ -184,12 +147,17 @@ function requestInstrumentation(
 ): RequestHandler {
   return (req, res, next) => {
     const startedAt = process.hrtime.bigint()
+    const completeMetrics = deps.metrics?.beginHttpRequest()
     res.on('finish', () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
       const endpoint = KNOWN_ENDPOINTS.has(req.path) ? req.path : 'unknown'
       const status = res.statusCode
-      deps.metrics?.requestsTotal.inc({ endpoint, status: String(status) })
-      deps.metrics?.requestDuration.observe({ endpoint }, durationMs / 1_000)
+      completeMetrics?.({
+        method: req.method,
+        route: endpoint,
+        status,
+        durationSeconds: durationMs / 1_000,
+      })
       if (deps.logger && !UNLOGGED_ENDPOINTS.has(endpoint)) {
         const ctx = getRequestContext()
         deps.logger.info(

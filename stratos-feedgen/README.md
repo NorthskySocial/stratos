@@ -193,7 +193,6 @@ tests/
 | `FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER`   | no          | Indexed-record cap per member and pass (default `1000`)                         |
 | `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS`         | no          | Loopback `http://` only: `localhost`, `127/8`, `[::1]`; HTTPS always allowed    |
 | `FEEDGEN_LOG_LEVEL`                           | no          | Pino level (default `info`)                                                     |
-| `FEEDGEN_METRICS_TOKEN`                       | no          | Bearer token for `/metrics`; unset leaves the endpoint open                     |
 
 ### Storage durability
 
@@ -247,33 +246,14 @@ Structured JSON logs via pino. Every request logs one completion line with
 `requestId`, `viewerDid` (when authenticated), `endpoint`, `status`, and
 `durationMs`. An inbound `X-Request-Id` header (sanitized, max 64 chars) is
 honored and echoed on the response; otherwise a UUID is generated. `/health`
-and `/metrics` requests are counted in metrics but not logged.
+requests are counted in metrics but not logged.
 
-### `/metrics`
+### Telemetry
 
-Prometheus text format, served on the same listener as the public API. When
-`FEEDGEN_METRICS_TOKEN` is set, scrapes must send
-`Authorization: Bearer <token>` (constant-time comparison); other requests
-get 401. The token travels as a plaintext header, so serve `/metrics` over
-HTTPS (TLS-terminating reverse proxy) — on plain HTTP the token is exposed
-to any on-path observer. When unset, the endpoint is **open** — the operator
-must restrict access at the network layer (firewall or reverse proxy).
-Feedgen-specific metrics:
-
-| Metric                                  | Type      | Labels            |
-| --------------------------------------- | --------- | ----------------- |
-| `feedgen_requests_total`                | counter   | `endpoint,status` |
-| `feedgen_request_duration_seconds`      | histogram | `endpoint`        |
-| `feedgen_subscriptions_open`            | gauge     | `kind`            |
-| `feedgen_subscription_reconnects_total` | counter   | `kind`            |
-| `feedgen_index_posts_total`             | counter   |                   |
-| `feedgen_boundary_cache_hits_total`     | counter   |                   |
-| `feedgen_boundary_cache_misses_total`   | counter   |                   |
-
-`kind` is `service` (enrollment stream) or `actor` (per-actor syncers).
-Process defaults (`process_resident_memory_bytes`, `process_open_fds`,
-event-loop lag, …) are included. Blob-cache metrics land with the blob cache
-itself (WP9); no blob cache exists yet.
+Feedgen emits bounded OpenTelemetry metrics by OTLP/HTTP only when
+`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is configured. The local listener does
+not expose `/metrics`; scrape the Collector's private Prometheus endpoint
+instead. Sentry reporting is independently enabled by `SENTRY_DSN`.
 
 ### `/health`
 
@@ -304,9 +284,8 @@ Wait for the complete current-authority reconciliation to release feed reads, th
 ~50 req/s for 5 minutes against `getFeed` with a static service JWT, e.g.
 `autocannon -R 50 -d 300 -H "authorization=Bearer $JWT" "$BASE/xrpc/zone.stratos.feedgen.getFeed?feed=<id>"`.
 Record before/after RSS (`ps -o rss= -p <pid>`) and FD count
-(`ls /proc/<pid>/fd | wc -l`), and cross-check
-`process_resident_memory_bytes` / `process_open_fds` from `/metrics`.
-Pass: RSS growth < 50 MB and no FD growth.
+(`ls /proc/<pid>/fd | wc -l`) and Collector process metrics. Pass: RSS growth
+< 50 MB and no FD growth.
 
 ## Build & test
 

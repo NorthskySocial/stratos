@@ -10,6 +10,7 @@
   import { consumeRoomJoin, consumeRoomReturn, rememberRoomJoin } from './lib/join'
   import { roomIdFromPath, roomPath } from './lib/route'
   import { stateForRoom } from './lib/state'
+  import { withClubhouseSpan } from './telemetry'
   import type { ClubhouseIntegration, ClubhouseIdentity, RoomAccessState, RoomCatalogEntry, RoomFeedState } from './lib/types'
 
   interface Props {
@@ -62,7 +63,7 @@
     }
     window.addEventListener('popstate', onPopState)
 
-    void initializeApp()
+    void withClubhouseSpan('clubhouse.bootstrap', initializeApp)
 
     return () => window.removeEventListener('popstate', onPopState)
   })
@@ -111,9 +112,11 @@
     error = null
     liveMessage = 'Loading rooms'
     try {
-      rooms = await catalogFetcher(
-        globalThis.fetch,
-        catalogEndpoint ?? roomCatalogEndpoint(deploymentConfig) ?? '/oauth/boundaries',
+      rooms = await withClubhouseSpan('clubhouse.catalogue.load', () =>
+        catalogFetcher(
+          globalThis.fetch,
+          catalogEndpoint ?? roomCatalogEndpoint(deploymentConfig) ?? '/oauth/boundaries',
+        ),
       )
       await loadStates(rooms)
       await loadSelectedRoom()
@@ -132,7 +135,9 @@
   ) {
     if (activeIntegration.getRoomStates) {
       try {
-        const resolved = await activeIntegration.getRoomStates(entries.map((room) => room.id))
+        const resolved = await withClubhouseSpan('clubhouse.room_status.load', () =>
+          activeIntegration.getRoomStates!(entries.map((room) => room.id)),
+        )
         const nextStates: Record<string, RoomAccessState> = {}
         for (const room of entries) {
           const resolvedState = resolved[room.id]
@@ -174,7 +179,9 @@
     if (!activeIntegration.requestJoin) return
 
     try {
-      const result = await activeIntegration.requestJoin(roomId)
+      const result = await withClubhouseSpan('clubhouse.room.join', () =>
+        activeIntegration.requestJoin!(roomId),
+      )
       if (result) states[roomId] = result
       liveMessage = result === 'joined' ? 'You joined the room' : 'Join request pending'
     } catch {
@@ -228,7 +235,10 @@
     feedState = 'loading'
     feedMessage = ''
     try {
-      const page = await activeIntegration.getFeed(room.id, 50, loadMore ? feedCursors.get(room.id) : undefined)
+      const page = await withClubhouseSpan(
+        loadMore ? 'clubhouse.feed.paginate' : 'clubhouse.feed.load',
+        () => activeIntegration.getFeed!(room.id, 50, loadMore ? feedCursors.get(room.id) : undefined),
+      )
       if (requestEpoch !== feedRequestEpoch || currentRoomId !== room.id) return
       posts = loadMore ? [...posts, ...page.posts] : page.posts
       feedCursors.set(room.id, page.cursor)
@@ -270,7 +280,9 @@
       return
     }
     try {
-      await activeIntegration.createPost(currentRoom.id, text)
+      await withClubhouseSpan('clubhouse.post.create', () =>
+        activeIntegration.createPost!(currentRoom.id, text),
+      )
       liveMessage = 'Post sent to the room'
       await loadSelectedRoom()
     } catch (cause) {

@@ -15,6 +15,8 @@ import {
 } from '../records'
 import { createXrpcHandler } from '../util.js'
 import { HANDLER_METHOD } from '../handlers'
+import { serviceMetrics } from '../../observability/metrics.js'
+import { withTelemetrySpan } from '../../observability/runtime.js'
 
 /**
  * Handler for creating a record in a repository.
@@ -27,18 +29,20 @@ export const createRecordHandler = (ctx: AppContext) =>
       const start = Date.now()
       const body = input
 
-      const result = await createRecord(
-        ctx,
-        {
-          repo: body.repo,
-          collection: body.collection,
-          rkey: body.rkey,
-          record: body.record,
-          validate: body.validate,
-          swapCommit: body.swapCommit,
-          requestId,
-        },
-        did!,
+      const result = await observeRecordOperation(ctx, 'create', () =>
+        createRecord(
+          ctx,
+          {
+            repo: body.repo,
+            collection: body.collection,
+            rkey: body.rkey,
+            record: body.record,
+            validate: body.validate,
+            swapCommit: body.swapCommit,
+            requestId,
+          },
+          did!,
+        ),
       )
 
       const { phases, ...body_result } = result
@@ -70,17 +74,19 @@ export const deleteRecordHandler = (ctx: AppContext) =>
     handler: async ({ input, did, requestId }) => {
       const body = input
 
-      const result = await deleteRecord(
-        ctx,
-        {
-          repo: body.repo,
-          collection: body.collection,
-          rkey: body.rkey,
-          swapRecord: body.swapRecord,
-          swapCommit: body.swapCommit,
-          requestId,
-        },
-        did!,
+      const result = await observeRecordOperation(ctx, 'delete', () =>
+        deleteRecord(
+          ctx,
+          {
+            repo: body.repo,
+            collection: body.collection,
+            rkey: body.rkey,
+            swapRecord: body.swapRecord,
+            swapCommit: body.swapCommit,
+            requestId,
+          },
+          did!,
+        ),
       )
 
       const { phases, ...delete_result } = result
@@ -315,13 +321,42 @@ interface ApplyWritesInput {
 export const applyWritesHandler = (ctx: AppContext) =>
   createXrpcHandler<ApplyWritesInput>(ctx, HANDLER_METHOD.APPLY_WRITES, {
     handler: async ({ input, did, requestId }) => {
-      const batchResult = await applyWritesBatch(
-        ctx,
-        did!,
-        input.writes,
-        requestId,
+      const batchResult = await observeRecordOperation(ctx, 'batch', () =>
+        applyWritesBatch(ctx, did!, input.writes, requestId),
       )
 
       return { results: batchResult.results, commit: batchResult.commit }
     },
   })
+
+async function observeRecordOperation<T>(
+  ctx: AppContext,
+  operation: 'create' | 'delete' | 'batch',
+  work: () => Promise<T>,
+): Promise<T> {
+  const startedAt = performance.now()
+  try {
+    const result = await withTelemetrySpan(
+      `record.${operation}`,
+      'stratos.record',
+      work,
+    )
+    serviceMetrics.recordRecordOperation(operation, 'ok')
+    serviceMetrics.recordStorageOperation(
+      ctx.cfg.storage.backend,
+      'write',
+      'ok',
+      (performance.now() - startedAt) / 1_000,
+    )
+    return result
+  } catch (error) {
+    serviceMetrics.recordRecordOperation(operation, 'error')
+    serviceMetrics.recordStorageOperation(
+      ctx.cfg.storage.backend,
+      'write',
+      'error',
+      (performance.now() - startedAt) / 1_000,
+    )
+    throw error
+  }
+}

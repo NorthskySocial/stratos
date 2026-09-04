@@ -36,6 +36,8 @@ export type PdsSyncJobStatus = 'pending' | 'failed' | 'completed' | 'cancelled'
  * Persistence for the PDS enrollment-record sync queue.
  */
 export interface PdsSyncQueueStore {
+  /** Bounded aggregate queue state for metrics; it never reads queue pages. */
+  getStats?(): Promise<PdsSyncQueueStats>
   /**
    * Record durable sync intent for an actor. Resets an existing row (including
    * a terminal `'failed'` one) to `'pending'` with `nextAttemptAt = now` and a
@@ -80,6 +82,12 @@ export interface PdsSyncQueueStore {
   list(limit: number, after?: PdsSyncPageKey): Promise<PdsSyncJob[]>
 }
 
+export interface PdsSyncQueueStats {
+  pending: number
+  failed: number
+  oldestPendingAgeSeconds: number
+}
+
 /** Keyset cursor: the sort key of the last row of the previous page. */
 export interface PdsSyncPageKey {
   firstQueuedAt: string
@@ -119,6 +127,19 @@ function toJob(row: PdsSyncRow): PdsSyncJob {
  */
 export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
   constructor(private db: ServiceDb) {}
+
+  async getStats(): Promise<PdsSyncQueueStats> {
+    const [row] = await this.db
+      .select({
+        pending: sql<number>`count(case when ${enrollmentPdsSync.status} = 'pending' then 1 end)`,
+        failed: sql<number>`count(case when ${enrollmentPdsSync.status} = 'failed' then 1 end)`,
+        oldestPendingAt: sql<
+          string | null
+        >`min(case when ${enrollmentPdsSync.status} = 'pending' then ${enrollmentPdsSync.firstQueuedAt} end)`,
+      })
+      .from(enrollmentPdsSync)
+    return queueStats(row)
+  }
 
   async upsertPending(did: string): Promise<number> {
     const now = nowIso()
@@ -314,6 +335,19 @@ export class SqlitePdsSyncQueueStore implements PdsSyncQueueStore {
 export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
   constructor(private db: ServicePgDb) {}
 
+  async getStats(): Promise<PdsSyncQueueStats> {
+    const [row] = await this.db
+      .select({
+        pending: sql<number>`count(case when ${pgEnrollmentPdsSync.status} = 'pending' then 1 end)`,
+        failed: sql<number>`count(case when ${pgEnrollmentPdsSync.status} = 'failed' then 1 end)`,
+        oldestPendingAt: sql<
+          string | null
+        >`min(case when ${pgEnrollmentPdsSync.status} = 'pending' then ${pgEnrollmentPdsSync.firstQueuedAt} end)`,
+      })
+      .from(pgEnrollmentPdsSync)
+    return queueStats(row)
+  }
+
   async upsertPending(did: string): Promise<number> {
     const now = nowIso()
     const rows = await this.db
@@ -502,5 +536,20 @@ export class PgPdsSyncQueueStore implements PdsSyncQueueStore {
       )
       .limit(limit)
     return rows.map(toJob)
+  }
+}
+
+function queueStats(row: {
+  pending: number
+  failed: number
+  oldestPendingAt: string | null
+}): PdsSyncQueueStats {
+  const oldest = row.oldestPendingAt ? Date.parse(row.oldestPendingAt) : NaN
+  return {
+    pending: Number(row.pending),
+    failed: Number(row.failed),
+    oldestPendingAgeSeconds: Number.isNaN(oldest)
+      ? 0
+      : Math.max(0, (Date.now() - oldest) / 1_000),
   }
 }

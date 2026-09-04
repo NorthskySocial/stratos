@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'node:http'
 import type { Logger } from '@northskysocial/stratos-core'
+import { captureUnexpectedError } from '../observability/runtime.js'
 
 export interface ShutdownDeps {
   httpServer?: HttpServer | null
@@ -15,6 +16,7 @@ export interface ShutdownDeps {
   } | null
   actorPool?: { stop: () => Promise<void> } | null
   store?: { close: () => Promise<void> } | null
+  telemetry?: { shutdown: () => Promise<void> } | null
   logger: Logger
   /** In-flight HTTP drain deadline before open sockets are destroyed. */
   drainTimeoutMs?: number
@@ -65,6 +67,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
         deps.logger,
       )
       await deps.actorPool?.stop()
+      await deps.telemetry?.shutdown()
       await deps.store?.close()
       deps.logger.info({ signal }, 'shutdown complete')
       exit(0)
@@ -87,6 +90,7 @@ export function createPanicHandler(
   exit: (code: number) => void = (code): void => process.exit(code),
 ): (err: unknown) => void {
   return (err: unknown): void => {
+    captureUnexpectedError(err)
     logger.error({ err }, 'unrecoverable error; exiting')
     exit(1)
   }
