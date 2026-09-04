@@ -55,7 +55,13 @@ default catalogue, room-status, and Stratos-custody post URLs are derived from
 - optionally `VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON` (a deployment-owned map from
   room IDs to authority-space URIs). The PDS is still the authority for these
   writes. Stratos-custody posts go only to `POST /oauth/boundaries/post`, which
-  resolves the canonical boundary and verifies membership server-side.
+  resolves the canonical boundary and verifies membership server-side. Owned
+  posts are deleted through `com.atproto.repo.deleteRecord` for PDS custody or
+  `DELETE /oauth/boundaries/post` for Stratos custody.
+
+Clubhouse requests full `zone.stratos.feed.post` record access, including all
+space record actions. Existing browser sessions created with the earlier
+create-only scope must sign out and sign in again before deleting a post.
 
 ## Production container
 
@@ -92,6 +98,14 @@ author DIDs to Typeahead's `app.bsky.actor.getProfiles` endpoint in batches of
 softly: visitors can still enter a handle directly, and feed posts retain their
 Feedgen-provided DID and handle when profile hydration is unavailable. Browser
 requests identify Clubhouse with the deployment host in the `X-Client` header.
+
+## Visual language
+
+Clubhouse uses the Martha Bloom zine language documented in
+[`DESIGN.md`](./DESIGN.md): warm paper, dense green-black ink, hard print
+shadows, asymmetrical editorial grids, and colorful room identities. All
+interface artwork comes from the local IconaMoon set, including loading and
+empty states; circular spinner artwork is intentionally excluded.
 
 ## Icon attribution
 

@@ -1,5 +1,6 @@
 import express from 'express'
 import { XRPCError } from '@atproto/xrpc-server'
+import { AtUri } from '@atproto/syntax'
 import { StratosError } from '@northskysocial/stratos-core'
 import type { OAuthRoutesConfig } from '../routes.js'
 
@@ -8,6 +9,12 @@ interface RoomPostRequest {
   text: string
   reply?: ReplyRef
 }
+
+interface RoomPostDeleteRequest {
+  uri: AtUri
+}
+
+const POST_COLLECTION = 'zone.stratos.feed.post'
 
 interface StrongRef {
   uri: string
@@ -50,6 +57,20 @@ function parseRoomPostRequest(body: unknown): RoomPostRequest | null {
   const reply = parseReply(value.reply)
   if (!roomId || !text || reply === null) return null
   return { roomId, text, ...(reply ? { reply } : {}) }
+}
+
+function parseRoomPostDeleteRequest(
+  body: unknown,
+): RoomPostDeleteRequest | null {
+  if (typeof body !== 'object' || body === null) return null
+  const value = body as Record<string, unknown>
+  if (typeof value.uri !== 'string') return null
+  try {
+    const uri = new AtUri(value.uri)
+    return uri.collection === POST_COLLECTION && uri.rkey ? { uri } : null
+  } catch {
+    return null
+  }
 }
 
 const SAFE_ERROR_MESSAGES: Record<string, string> = {
@@ -174,6 +195,51 @@ export const handleRoomPost = (
       res.status(500).json({
         error: 'RoomPostError',
         message: 'Failed to create room post',
+      })
+    }
+  }
+}
+
+/** Delete a Stratos-custodied room post owned by the authenticated actor. */
+export const handleRoomPostDelete = (
+  config: OAuthRoutesConfig,
+  authenticateRequest: (
+    req: express.Request,
+    res: express.Response,
+  ) => Promise<string | null>,
+) => {
+  return async (req: express.Request, res: express.Response) => {
+    try {
+      const did = await authenticateRequest(req, res)
+      if (!did) return
+
+      const request = parseRoomPostDeleteRequest(req.body)
+      if (!request) {
+        res.status(400).json({
+          error: 'InvalidRoomPostDelete',
+          message: 'A valid room post URI is required',
+        })
+        return
+      }
+      if (request.uri.hostname !== did) {
+        res.status(403).json({
+          error: 'PostOwnershipRequired',
+          message: 'You can only delete your own room posts',
+        })
+        return
+      }
+
+      await config.deleteApprovedRoomPost({ did, rkey: request.uri.rkey })
+      res.status(200).json({})
+    } catch (err) {
+      if (sendRoomPostWriteError(res, err)) return
+      config.logger?.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'room post deletion failed',
+      )
+      res.status(500).json({
+        error: 'RoomPostDeleteError',
+        message: 'Failed to delete room post',
       })
     }
   }

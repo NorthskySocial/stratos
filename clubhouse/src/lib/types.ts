@@ -62,4 +62,9 @@ export interface ClubhouseIntegration {
     text: string,
     reply?: import('./post-writer').ReplyRef,
   ) => Promise<import('./post-writer').PostRef>
+  /** Delete one owned post through the same custody-aware writer seam. */
+  deletePost?: (
+    roomId: string,
+    post: import('./feedgen').ClubhouseFeedPost,
+  ) => Promise<void>
 }

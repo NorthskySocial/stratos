@@ -3,7 +3,12 @@ import { roomVisualsFor } from './room-visuals'
 import type { RoomCatalogEntry } from './types'
 
 function room(id: string, displayName: string): RoomCatalogEntry {
-  return { id, displayName, description: `${displayName} room`, available: true }
+  return {
+    id,
+    displayName,
+    description: `${displayName} room`,
+    available: true,
+  }
 }
 
 describe('roomVisualsFor', () => {
@@ -45,6 +50,21 @@ describe('roomVisualsFor', () => {
       room('after-school', 'Study room'),
     ]
 
-    expect([...roomVisualsFor(rooms)]).toEqual([...roomVisualsFor([...rooms].reverse())])
+    expect([...roomVisualsFor(rooms)]).toEqual([
+      ...roomVisualsFor([...rooms].reverse()),
+    ])
+  })
+
+  it('uses the music treatment for listening rooms', () => {
+    const visuals = roomVisualsFor([
+      room('film-club', 'The late screening'),
+      room('yoko-record-club', 'After-hours listening'),
+    ])
+
+    expect(visuals.get('film-club')).toEqual({ icon: 'camera', tone: 'sky' })
+    expect(visuals.get('yoko-record-club')).toEqual({
+      icon: 'music',
+      tone: 'magenta',
+    })
   })
 })
