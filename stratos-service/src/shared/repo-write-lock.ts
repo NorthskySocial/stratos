@@ -1,3 +1,5 @@
+import { serviceMetrics } from '../observability/metrics.js'
+
 const SWEEP_INTERVAL_MS = 5 * 60_000
 
 /**
@@ -13,6 +15,7 @@ const SWEEP_INTERVAL_MS = 5 * 60_000
 export class RepoWriteLocks {
   private locks = new Map<string, Promise<void>>()
   private sweepTimer: ReturnType<typeof setInterval> | undefined
+  private waiting = 0
 
   constructor() {
     this.sweepTimer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS)
@@ -27,7 +30,13 @@ export class RepoWriteLocks {
    */
   async acquire(did: string): Promise<() => void> {
     // Chain behind whatever is currently pending for this DID
-    const prev = this.locks.get(did) ?? Promise.resolve()
+    const previous = this.locks.get(did)
+    const prev = previous ?? Promise.resolve()
+    const startedAt = process.hrtime.bigint()
+    if (previous) {
+      this.waiting += 1
+      serviceMetrics.setLockWaiters(this.waiting)
+    }
 
     let unlock!: () => void
     const gate = new Promise<void>((resolve) => {
@@ -38,7 +47,18 @@ export class RepoWriteLocks {
     this.locks.set(did, gate)
 
     // Wait for the previous holder to finish
-    await prev
+    try {
+      await prev
+    } finally {
+      if (previous) {
+        this.waiting -= 1
+        serviceMetrics.setLockWaiters(this.waiting)
+      }
+      serviceMetrics.recordLockWait(
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+        previous !== undefined,
+      )
+    }
 
     return unlock
   }
@@ -52,6 +72,8 @@ export class RepoWriteLocks {
       this.sweepTimer = undefined
     }
     this.locks.clear()
+    this.waiting = 0
+    serviceMetrics.setLockWaiters(0)
   }
 
   /**

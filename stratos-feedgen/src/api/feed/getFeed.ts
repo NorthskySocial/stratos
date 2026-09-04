@@ -15,6 +15,7 @@ import {
   type XrpcAuthCredentials,
 } from '../util.js'
 import type { FeedRequestVerifier } from '../../auth/index.js'
+import type { FeedgenMetrics } from '../../metrics.js'
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
@@ -24,6 +25,7 @@ export interface GetFeedDeps {
   store: Pick<FeedgenStore, 'listPostsByBoundary'>
   enrollmentManager: Pick<EnrollmentManager, 'getBoundaries'>
   verifier: FeedRequestVerifier
+  metrics?: FeedgenMetrics
   /** Omitted means the caller has no replay-readiness requirement. */
   readiness?: FeedReadiness
 }
@@ -53,39 +55,59 @@ export function registerGetFeedHandler(
   server.method(NSID.getFeed, {
     auth: toXrpcAuthVerifier(deps.verifier),
     handler: async ({ params, auth }) => {
-      assertReadiness(deps.readiness)
+      try {
+        assertReadiness(deps.readiness)
 
-      const { viewerDid } = auth.credentials
-      const feedId = params['feed'] as string
-      const limit = clampLimit(params['limit'])
-      const cursor = params['cursor'] as string | undefined
+        const { viewerDid } = auth.credentials
+        const feedId = params['feed'] as string
+        const limit = clampLimit(params['limit'])
+        const cursor = params['cursor'] as string | undefined
 
-      const feed = deps.feeds.get(feedId)
-      if (!feed) throw new UnknownFeedError(feedId)
+        const feed = deps.feeds.get(feedId)
+        if (!feed) throw new UnknownFeedError(feedId)
 
-      const viewerBoundaries =
-        await deps.enrollmentManager.getBoundaries(viewerDid)
-      assertReadiness(deps.readiness)
-      if (!viewerBoundaries.includes(feed.boundary)) {
-        throw new BoundaryMismatchError(feed.boundary)
-      }
+        const viewerBoundaries =
+          await deps.enrollmentManager.getBoundaries(viewerDid)
+        assertReadiness(deps.readiness)
+        if (!viewerBoundaries.includes(feed.boundary)) {
+          throw new BoundaryMismatchError(feed.boundary)
+        }
 
-      const result = await deps.store.listPostsByBoundary({
-        boundary: feed.boundary,
-        limit,
-        cursor: normalizeCursor(cursor),
-      })
-      assertReadiness(deps.readiness)
+        const result = await deps.store.listPostsByBoundary({
+          boundary: feed.boundary,
+          limit,
+          cursor: normalizeCursor(cursor),
+        })
+        assertReadiness(deps.readiness)
 
-      return {
-        encoding: 'application/json',
-        body: {
-          cursor: result.cursor,
-          feed: result.posts.map(toFeedViewPost),
-        } satisfies GetFeedOutput,
+        const output = {
+          encoding: 'application/json',
+          body: {
+            cursor: result.cursor,
+            feed: result.posts.map(toFeedViewPost),
+          } satisfies GetFeedOutput,
+        }
+        deps.metrics?.observeFeedRequest({
+          outcome: 'ok',
+          postsReturned: output.body.feed.length,
+        })
+        return output
+      } catch (error) {
+        deps.metrics?.observeFeedRequest({
+          outcome: isExpectedFeedError(error) ? 'expected_error' : 'error',
+        })
+        throw error
       }
     },
   })
+}
+
+function isExpectedFeedError(error: unknown): boolean {
+  return (
+    error instanceof BoundaryMismatchError ||
+    error instanceof UnknownFeedError ||
+    error instanceof NotEnoughResourcesError
+  )
 }
 
 function assertReadiness(readiness: FeedReadiness | undefined): void {

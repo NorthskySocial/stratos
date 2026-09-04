@@ -4,6 +4,10 @@ import type { Custody } from '@northskysocial/stratos-core'
 
 import { StratosClientError, StratosInvalidResponseError } from './errors.js'
 import { mintServiceJwt } from './jwt.js'
+import {
+  upstreamTraceHeaders,
+  withUpstreamSpan,
+} from '../observability/tracing.js'
 
 const LXM = {
   resolveEnrollments: 'zone.stratos.identity.resolveEnrollments',
@@ -147,7 +151,7 @@ export class UpstreamStratosClient {
     const url = new URL(`${this.serviceUrl}/xrpc/${LXM.resolveEnrollments}`)
     url.searchParams.set('did', did)
     const lxm = LXM.resolveEnrollments
-    const res = await this.fetchImpl(url, {
+    const res = await this.request(lxm, url, {
       method: 'GET',
       signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
@@ -162,7 +166,7 @@ export class UpstreamStratosClient {
   async hydrateRecords(uris: string[]): Promise<HydrateRecordsResult> {
     const url = `${this.serviceUrl}/xrpc/${LXM.hydrateRecords}`
     const lxm = LXM.hydrateRecords
-    const res = await this.fetchImpl(url, {
+    const res = await this.request(lxm, url, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${await this.mintFor(lxm)}`,
@@ -180,7 +184,7 @@ export class UpstreamStratosClient {
     url.searchParams.set('did', did)
     url.searchParams.set('cid', cid)
     const lxm = LXM.getBlob
-    const res = await this.fetchImpl(url, {
+    const res = await this.request(lxm, url, {
       method: 'GET',
       headers: {
         authorization: `Bearer ${await this.mintFor(lxm)}`,
@@ -229,7 +233,7 @@ export class UpstreamStratosClient {
     // (`STRATOS_PUBLIC_URL`), which can differ from `serviceUrl` — the
     // address this client actually sends the request to.
     const htu = `${this.publicUrl}${path}`
-    const res = await this.fetchImpl(url, {
+    const res = await this.request(lxm, url, {
       method: 'POST',
       signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
@@ -276,7 +280,7 @@ export class UpstreamStratosClient {
       htu,
     )
     signal?.throwIfAborted()
-    const res = await this.fetchImpl(url, {
+    const res = await this.request(lxm, url, {
       method: 'GET',
       signal: requestSignal(this.requestTimeoutMs, signal),
       headers: {
@@ -308,6 +312,19 @@ export class UpstreamStratosClient {
       aud: this.serviceDid,
       keypair: this.keypair,
     })
+  }
+
+  private request(
+    lxm: string,
+    url: string | URL,
+    init: RequestInit & { headers: Record<string, string> },
+  ): Promise<Response> {
+    return withUpstreamSpan(`upstream ${lxm}`, () =>
+      this.fetchImpl(url, {
+        ...init,
+        headers: { ...upstreamTraceHeaders(), ...init.headers },
+      }),
+    )
   }
 }
 

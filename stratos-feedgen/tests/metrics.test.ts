@@ -1,6 +1,11 @@
 import type { AddressInfo } from 'node:net'
 import type { Server as HttpServer } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  AggregationTemporality,
+  InMemoryMetricExporter,
+  PeriodicExportingMetricReader,
+} from '@opentelemetry/sdk-metrics'
 
 import {
   ActorSyncer,
@@ -17,19 +22,15 @@ import {
   type UpstreamStratosClient,
 } from '../src/index.js'
 import type { FeedgenStore } from '../src/db/index.js'
+import {
+  createMeterProvider,
+  BACKGROUND_BUCKETS_SECONDS,
+  HTTP_BUCKETS_SECONDS,
+  parseTelemetryConfig,
+} from '../src/observability/runtime.js'
 
 const FEEDGEN_DID = 'did:web:feedgen.tokyo3.test'
 const VIEWER_DID = 'did:plc:shinjiikari'
-
-const ISSUE_METRIC_NAMES = [
-  'feedgen_requests_total',
-  'feedgen_request_duration_seconds',
-  'feedgen_subscriptions_open',
-  'feedgen_subscription_reconnects_total',
-  'feedgen_index_posts_total',
-  'feedgen_boundary_cache_hits_total',
-  'feedgen_boundary_cache_misses_total',
-]
 
 interface TestServerCtx {
   httpServer: HttpServer
@@ -38,9 +39,7 @@ interface TestServerCtx {
   status: SubscriptionStatus
 }
 
-async function startServer(opts?: {
-  metricsToken?: string
-}): Promise<TestServerCtx> {
+async function startServer(): Promise<TestServerCtx> {
   const status: SubscriptionStatus = { serviceStream: null, actorPool: null }
   const metrics = createFeedgenMetrics(status)
 
@@ -69,7 +68,6 @@ async function startServer(opts?: {
     >[0]['enrollmentManager'],
     verifier,
     metrics,
-    metricsToken: opts?.metricsToken,
     subscriptionStatus: status,
   })
 
@@ -87,19 +85,7 @@ async function stopServer(ctx: TestServerCtx): Promise<void> {
   await new Promise<void>((resolve) => ctx.httpServer.close(() => resolve()))
 }
 
-async function scrape(ctx: TestServerCtx): Promise<Response> {
-  return fetch(`${ctx.baseUrl}/metrics`)
-}
-
-const SAMPLE_LINE =
-  /^[a-zA-Z_:][a-zA-Z0-9_:]*(\{[^}]*\})? (?:[0-9.eE+-]+|NaN)( [0-9]+)?$/
-
-function sampleName(line: string): string {
-  const match = /^([a-zA-Z_:][a-zA-Z0-9_:]*)/.exec(line)
-  return match?.[1] ?? ''
-}
-
-describe('/metrics endpoint', () => {
+describe('OTLP metrics', () => {
   let ctx: TestServerCtx | undefined
 
   afterEach(async () => {
@@ -107,120 +93,110 @@ describe('/metrics endpoint', () => {
     ctx = undefined
   })
 
-  it('serves valid Prometheus text format with every issue metric', async () => {
+  it('does not expose a public Prometheus scrape endpoint', async () => {
     ctx = await startServer()
-    await fetch(
-      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=nerv-feed`,
-      { headers: { authorization: 'Bearer test-token' } },
-    )
-    await fetch(`${ctx.baseUrl}/xrpc/zone.stratos.feedgen.describeFeed`)
-    await fetch(`${ctx.baseUrl}/no-such-route`)
-
-    const res = await scrape(ctx)
-    expect(res.status).toBe(200)
-    // Express may reorder the parameters; assert the tokens, not the order.
-    const contentType = res.headers.get('content-type') ?? ''
-    expect(contentType).toContain('text/plain')
-    expect(contentType).toContain('version=0.0.4')
-
-    const body = await res.text()
-    const lines = body.split('\n').filter((l) => l.length > 0)
-    const typedNames = new Set<string>()
-    for (const line of lines) {
-      if (line.startsWith('# TYPE ')) {
-        typedNames.add(line.split(' ')[2] ?? '')
-        continue
-      }
-      if (line.startsWith('#')) continue
-      expect(line).toMatch(SAMPLE_LINE)
-      const name = sampleName(line)
-      const base = name.replace(/_(bucket|sum|count)$/, '')
-      // A `# TYPE` line must precede the samples it describes.
-      expect(typedNames.has(name) || typedNames.has(base)).toBe(true)
-    }
-    for (const name of ISSUE_METRIC_NAMES) {
-      expect(typedNames.has(name)).toBe(true)
-    }
+    expect((await fetch(`${ctx.baseUrl}/metrics`)).status).toBe(404)
   })
 
-  it('counts requests per endpoint/status and observes durations', async () => {
-    ctx = await startServer()
-    await fetch(
-      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=nerv-feed`,
-      { headers: { authorization: 'Bearer test-token' } },
+  it('exports bounded metric names and attributes through its supplied meter', async () => {
+    const exporter = new InMemoryMetricExporter(
+      AggregationTemporality.CUMULATIVE,
     )
-    await fetch(`${ctx.baseUrl}/no-such-route`)
+    const provider = createMeterProvider(
+      parseTelemetryConfig(
+        {
+          HOSTNAME: 'feedgen-observability-test',
+          OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:
+            'http://collector:4318/v1/metrics',
+        },
+        'stratos-feedgen',
+      ),
+      new PeriodicExportingMetricReader({
+        exporter,
+        exportIntervalMillis: 60_000,
+      }),
+    )
+    const status: SubscriptionStatus = { serviceStream: null, actorPool: null }
+    const metrics = createFeedgenMetrics(
+      status,
+      provider.getMeter('feedgen-test'),
+    )
 
-    const body = await (await scrape(ctx)).text()
-    expect(body).toContain(
-      'feedgen_requests_total{endpoint="/xrpc/zone.stratos.feedgen.getFeed",status="200"} 1',
+    const finish = metrics.beginHttpRequest()
+    finish({
+      method: 'GET',
+      route: '/xrpc/zone.stratos.feedgen.getFeed',
+      status: 200,
+      durationSeconds: 0.125,
+    })
+    metrics.observeFeedRequest({ outcome: 'ok', postsReturned: 2 })
+    metrics.recordReconnect('service')
+    metrics.recordIndexOperation('upsert', 'ok')
+    metrics.recordBoundaryCache('hit')
+    metrics.recordReconciliation({ outcome: 'ok', durationSeconds: 0.25 })
+    metrics.recordSpaceSync({
+      outcome: 'partial',
+      durationSeconds: 0.5,
+      succeeded: 1,
+      failed: 1,
+      abandoned: 0,
+      skippedMalformed: 0,
+      skippedOversized: 0,
+    })
+    await provider.forceFlush()
+
+    const exported = exporter.getMetrics()
+    const metricNames = exported
+      .flatMap((resource) => resource.scopeMetrics)
+      .flatMap((scope) => scope.metrics)
+      .map((metric) => metric.descriptor.name)
+    expect(metricNames).toEqual(
+      expect.arrayContaining([
+        'http.server.request.duration',
+        'http.server.active_requests',
+        'stratos.feedgen.feed.requests',
+        'stratos.feedgen.subscription.reconnects',
+        'stratos.feedgen.index.operations',
+        'stratos.feedgen.cache.requests',
+        'stratos.feedgen.reconciliation.duration',
+        'stratos.feedgen.space_sync.duration',
+      ]),
     )
-    // Unknown paths collapse to one label value (bounded cardinality).
-    expect(body).toContain(
-      'feedgen_requests_total{endpoint="unknown",status="404"} 1',
-    )
-    const countLine = body
-      .split('\n')
-      .find((l) =>
-        l.startsWith(
-          'feedgen_request_duration_seconds_count{endpoint="/xrpc/zone.stratos.feedgen.getFeed"}',
-        ),
+    const http = exported
+      .flatMap((resource) => resource.scopeMetrics)
+      .flatMap((scope) => scope.metrics)
+      .find(
+        (metric) => metric.descriptor.name === 'http.server.request.duration',
       )
-    expect(countLine).toBeDefined()
-    expect(Number(countLine?.split(' ')[1])).toBeGreaterThanOrEqual(1)
-    // Durations are observed in seconds, not milliseconds.
-    const sumLine = body
-      .split('\n')
-      .find((l) =>
-        l.startsWith(
-          'feedgen_request_duration_seconds_sum{endpoint="/xrpc/zone.stratos.feedgen.getFeed"}',
-        ),
+    expect(http?.descriptor.unit).toBe('s')
+    expect(
+      (http?.dataPoints[0]?.value as { buckets: { boundaries: number[] } })
+        .buckets.boundaries,
+    ).toEqual(HTTP_BUCKETS_SECONDS)
+    expect(http?.dataPoints[0]?.attributes).toEqual({
+      'http.request.method': 'GET',
+      'http.route': '/xrpc/zone.stratos.feedgen.getFeed',
+      'http.response.status_code': 200,
+    })
+    expect(exported[0]?.resource.attributes).toMatchObject({
+      'service.name': 'stratos-feedgen',
+      'service.instance.id': 'feedgen-observability-test',
+    })
+    const reconciliation = exported
+      .flatMap((resource) => resource.scopeMetrics)
+      .flatMap((scope) => scope.metrics)
+      .find(
+        (metric) =>
+          metric.descriptor.name === 'stratos.feedgen.reconciliation.duration',
       )
-    expect(Number(sumLine?.split(' ')[1])).toBeGreaterThanOrEqual(0)
-    expect(Number(sumLine?.split(' ')[1])).toBeLessThan(60)
-  })
-
-  it('serves labeled reconnect counter samples', async () => {
-    ctx = await startServer()
-    ctx.metrics.reconnectsTotal.inc({ kind: 'service' })
-
-    const body = await (await scrape(ctx)).text()
-    expect(body).toContain(
-      'feedgen_subscription_reconnects_total{kind="service"} 1',
-    )
-  })
-
-  it('rejects scrapes without the configured bearer token', async () => {
-    ctx = await startServer({ metricsToken: 'magi-melchior-token' })
-
-    const missing = await fetch(`${ctx.baseUrl}/metrics`)
-    expect(missing.status).toBe(401)
-    expect(await missing.json()).toEqual({ error: 'Unauthorized' })
-
-    const wrongLength = await fetch(`${ctx.baseUrl}/metrics`, {
-      headers: { authorization: 'Bearer wrong' },
-    })
-    expect(wrongLength.status).toBe(401)
-
-    const sameLength = await fetch(`${ctx.baseUrl}/metrics`, {
-      headers: { authorization: 'Bearer magi-melchior-tokeX' },
-    })
-    expect(sameLength.status).toBe(401)
-
-    const wrongScheme = await fetch(`${ctx.baseUrl}/metrics`, {
-      headers: { authorization: 'Basic magi-melchior-token' },
-    })
-    expect(wrongScheme.status).toBe(401)
-  })
-
-  it('serves scrapes carrying the configured bearer token', async () => {
-    ctx = await startServer({ metricsToken: 'magi-melchior-token' })
-
-    const res = await fetch(`${ctx.baseUrl}/metrics`, {
-      headers: { authorization: 'Bearer magi-melchior-token' },
-    })
-    expect(res.status).toBe(200)
-    expect(await res.text()).toContain('feedgen_requests_total')
+    expect(
+      (
+        reconciliation?.dataPoints[0]?.value as {
+          buckets: { boundaries: number[] }
+        }
+      ).buckets.boundaries,
+    ).toEqual(BACKGROUND_BUCKETS_SECONDS)
+    await provider.shutdown()
   })
 
   it('reports subscription state on /health from the late-bound status', async () => {
@@ -242,22 +218,6 @@ describe('/metrics endpoint', () => {
       serviceStreamConnected: true,
       actorPoolSize: 3,
     })
-  })
-
-  it('reports subscription gauges from the late-bound status', async () => {
-    ctx = await startServer()
-
-    let body = await (await scrape(ctx)).text()
-    expect(body).toContain('feedgen_subscriptions_open{kind="service"} 0')
-    expect(body).toContain('feedgen_subscriptions_open{kind="actor"} 0')
-
-    ctx.status.serviceStream = { isConnected: () => true }
-    ctx.status.actorPool = {
-      getStats: () => ({ active: 3, waiting: 1, max: 500 }),
-    }
-    body = await (await scrape(ctx)).text()
-    expect(body).toContain('feedgen_subscriptions_open{kind="service"} 1')
-    expect(body).toContain('feedgen_subscriptions_open{kind="actor"} 3')
   })
 })
 
@@ -354,7 +314,7 @@ describe('metric hooks', () => {
     expect(events).toEqual(['miss'])
   })
 
-  it('SubscriptionIndexer fires onPostIndexed once per upserted post', async () => {
+  it('SubscriptionIndexer reports every projected post mutation', async () => {
     const onPostIndexed = vi.fn()
     const store = {
       upsertPost: vi.fn(async () => {}),
@@ -384,7 +344,9 @@ describe('metric hooks', () => {
       ],
     })
 
-    expect(onPostIndexed).toHaveBeenCalledTimes(2)
+    expect(onPostIndexed).toHaveBeenNthCalledWith(1, 'upsert')
+    expect(onPostIndexed).toHaveBeenNthCalledWith(2, 'upsert')
+    expect(onPostIndexed).toHaveBeenNthCalledWith(3, 'delete')
   })
 
   it('SubscriptionIndexer indexes with a hooks object that has no onPostIndexed', async () => {

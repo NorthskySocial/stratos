@@ -13,6 +13,10 @@ import {
 } from '../lifecycle/shutdown.js'
 import { createLogger } from '../logger.js'
 import {
+  captureUnexpectedError,
+  shutdownTelemetry,
+} from '../observability/runtime.js'
+import {
   createFeedgenMetrics,
   type FeedgenMetrics,
   type SubscriptionStatus,
@@ -60,7 +64,10 @@ async function main(): Promise<void> {
   // the deps at signal time, and startup fills them as resources come up, so
   // a mid-startup signal drains exactly what already exists (open store,
   // listening server) instead of exiting around it.
-  const shutdownDeps: ShutdownDeps = { logger }
+  const shutdownDeps: ShutdownDeps = {
+    logger,
+    telemetry: { shutdown: shutdownTelemetry },
+  }
   const shutdown = createShutdownHandler(shutdownDeps)
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
   process.on('SIGINT', () => void shutdown('SIGINT'))
@@ -93,8 +100,7 @@ async function main(): Promise<void> {
     ttlMs: cfg.boundaryCacheTtlMs,
     max: cfg.boundaryCacheMax,
     onCacheEvent: (event) => {
-      if (event === 'hit') metrics.boundaryCacheHits.inc()
-      else metrics.boundaryCacheMisses.inc()
+      metrics.recordBoundaryCache(event)
     },
   })
 
@@ -128,7 +134,6 @@ async function main(): Promise<void> {
     verifier,
     logger,
     metrics,
-    metricsToken: cfg.metricsToken,
     subscriptionStatus,
     feedReadiness,
   })
@@ -143,7 +148,7 @@ async function main(): Promise<void> {
     configuredBoundaries,
   })
   const indexer = new SubscriptionIndexer(store, {
-    onPostIndexed: () => metrics.indexPostsTotal.inc(),
+    onPostIndexed: (operation) => metrics.recordIndexOperation(operation, 'ok'),
     replayAuthorizer,
   })
 
@@ -283,6 +288,18 @@ async function main(): Promise<void> {
       memberBudgetMs: cfg.spaceSyncMemberBudgetMs,
       memberConcurrency: cfg.spaceSyncMemberConcurrency,
       log: (event) => {
+        metrics.recordSpaceSync({
+          outcome:
+            event.failed > 0 || event.abandoned > 0 || event.halted > 0
+              ? 'partial'
+              : 'ok',
+          durationSeconds: event.durationSeconds,
+          succeeded: event.succeeded,
+          failed: event.failed,
+          abandoned: event.abandoned,
+          skippedMalformed: event.skippedMalformed,
+          skippedOversized: event.skippedOversized,
+        })
         const context = { ...event }
         if (
           event.skippedOversized > 0 ||
@@ -295,11 +312,24 @@ async function main(): Promise<void> {
           logger.info(context, 'space sync pass completed')
         }
       },
-      onTickSkipped: () =>
-        logger.warn({}, 'space sync tick skipped because a pass is active'),
+      onTickSkipped: () => {
+        metrics.recordSpaceSyncTickSkipped()
+        logger.warn({}, 'space sync tick skipped because a pass is active')
+      },
       onMemberBudgetExceeded: (target) =>
         logger.warn({ target }, 'space member exceeded the sync budget'),
-      onError: (err) => logger.error({ err }, 'space sync pass failed'),
+      onError: (err) => {
+        metrics.recordSpaceSync({
+          outcome: 'failed',
+          durationSeconds: 0,
+          succeeded: 0,
+          failed: 1,
+          abandoned: 0,
+          skippedMalformed: 0,
+          skippedOversized: 0,
+        })
+        logger.error({ err }, 'space sync pass failed')
+      },
     })
     shutdownDeps.spaceSyncScheduler = scheduler
     scheduler.start()
@@ -349,8 +379,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       idleEvictionMs: parseIntEnv(
         process.env['FEEDGEN_ACTOR_SYNC_IDLE_EVICTION_MS'],
       ),
-      onReconnectScheduled: () =>
-        metrics.reconnectsTotal.inc({ kind: 'actor' }),
+      onReconnectScheduled: () => metrics.recordReconnect('actor'),
     },
     {
       store,
@@ -378,31 +407,52 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // via batching so upstream resolves don't fan out unbounded on large
   // tenants.
   const runReconcile = async (): Promise<void> => {
+    const startedAt = performance.now()
     const generation = feedReadiness.beginReconciliation()
-    const summary = await reconcileEnrollments(
-      {
-        store,
-        purger,
-        mutationFence: spaceMutationFence,
-        actorPool: pool,
-        client: upstream,
-        log: (summary) =>
-          logger.info({ ...summary }, 'enrollment reconciliation completed'),
-        onError: (did, err) =>
-          logger.error({ did, err }, 'reconcile resolve failed'),
-      },
-      configuredBoundaries,
-      {
-        batchSize: parseIntEnv(process.env['FEEDGEN_RECONCILE_BATCH_SIZE']),
-        maxActors: parseIntEnv(process.env['FEEDGEN_RECONCILE_MAX_ACTORS']),
-      },
-    )
-    const released = feedReadiness.completeReconciliation(generation, summary)
-    if (!released && (summary.errors > 0 || summary.truncated)) {
-      logger.warn(
-        { ...summary },
-        'feed remains unavailable until enrollment reconciliation is complete',
+    metrics.setReady(false)
+    try {
+      const summary = await reconcileEnrollments(
+        {
+          store,
+          purger,
+          mutationFence: spaceMutationFence,
+          actorPool: pool,
+          client: upstream,
+          log: (summary) =>
+            logger.info({ ...summary }, 'enrollment reconciliation completed'),
+          onError: (did, err) =>
+            logger.error({ did, err }, 'reconcile resolve failed'),
+        },
+        configuredBoundaries,
+        {
+          batchSize: parseIntEnv(process.env['FEEDGEN_RECONCILE_BATCH_SIZE']),
+          maxActors: parseIntEnv(process.env['FEEDGEN_RECONCILE_MAX_ACTORS']),
+        },
       )
+      const released = feedReadiness.completeReconciliation(generation, summary)
+      const outcome =
+        summary.errors > 0 || summary.truncated
+          ? 'partial'
+          : released
+            ? 'ok'
+            : 'failed'
+      metrics.recordReconciliation({
+        outcome,
+        durationSeconds: (performance.now() - startedAt) / 1_000,
+      })
+      metrics.setReady(released)
+      if (!released && (summary.errors > 0 || summary.truncated)) {
+        logger.warn(
+          { ...summary },
+          'feed remains unavailable until enrollment reconciliation is complete',
+        )
+      }
+    } catch (error) {
+      metrics.recordReconciliation({
+        outcome: 'failed',
+        durationSeconds: (performance.now() - startedAt) / 1_000,
+      })
+      throw error
     }
   }
   await runReconcile()
@@ -470,7 +520,8 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       mintToken: () => upstream.mintServiceAuthToken(),
       onReconnectScheduled: () => {
         feedReadiness.markUnavailable()
-        metrics.reconnectsTotal.inc({ kind: 'service' })
+        metrics.setReady(false)
+        metrics.recordReconnect('service')
       },
     },
     {
@@ -532,6 +583,7 @@ function parseIntEnv(value: string | undefined): number | undefined {
 }
 
 main().catch((err: unknown) => {
+  captureUnexpectedError(err)
   // Config/startup can fail before the configured logger exists.
   createLogger('info').error({ err }, 'fatal startup error')
   process.exit(1)

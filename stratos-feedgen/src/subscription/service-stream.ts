@@ -3,6 +3,7 @@
 import { decodeFirst } from '@atcute/cbor'
 import { StratosError } from '@northskysocial/stratos-core'
 import { WebSocket as NodeWebSocket } from 'ws'
+import { upstreamTraceHeaders } from '../observability/tracing.js'
 
 export interface ServiceStreamCallbacks {
   onEnroll: (did: string, boundaries: string[]) => void | Promise<void>
@@ -176,7 +177,10 @@ export class ServiceStream {
     let ws: WebSocketLike
     try {
       ws = new this.wsCtor(wsUrl, {
-        headers: { authorization: `Bearer ${token}` },
+        headers: {
+          ...upstreamTraceHeaders(),
+          authorization: `Bearer ${token}`,
+        },
       })
     } catch (err) {
       this.onError?.(err as Error)
