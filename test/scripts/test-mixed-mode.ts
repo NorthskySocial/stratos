@@ -779,6 +779,44 @@ async function run(): Promise<void> {
         NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
         FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
         FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
+        FEEDGEN_E2E_COMMIT_RESPONSE_MODE: 'omit',
+      }),
+    )
+    await assertFeedgenWarmup(feedgen, 'commit-fallback mixed-mode')
+    assert(
+      await feedgen.waitForHealth(FEEDGEN_PORT, 30_000),
+      'the feedgen with a commit-less terminal page is healthy',
+    )
+    const fallbackPass = await feedgen.waitForLog(isSpaceSyncPass, 30_000, 1)
+    assert(
+      fallbackPass.fields['targets'] === 1 &&
+        fallbackPass.fields['succeeded'] === 1 &&
+        fallbackPass.fields['failed'] === 0,
+      'the live feedgen fetches the latest commit when terminal ops omit it',
+    )
+    const fallbackViewerToken = await getServiceAuth(
+      viewerSession.accessJwt,
+      FEEDGEN_DID,
+      GET_FEED_LXM,
+    )
+    const fallbackFeedState = await waitForFeedPost(
+      fallbackViewerToken,
+      'swordsmith',
+      memberPost.uri,
+      (found) => found,
+    )
+    assert(
+      fallbackFeedState.matches,
+      'the separately verified latest commit promotes the PDS post',
+      `${describeFeedState(fallbackFeedState.response)}\n${describeFeedgenLogs(feedgen)}`,
+    )
+
+    await feedgen.stop()
+    await feedgen.start(
+      feedgenStartOptions({
+        NODE_OPTIONS: `--import=${SPACE_COMMIT_TAMPER_MODULE}`,
+        FEEDGEN_E2E_TAMPER_COMMIT_REPO: fixture.member.did,
+        FEEDGEN_E2E_TAMPER_COMMIT_SPACE: space,
       }),
     )
     await assertFeedgenWarmup(feedgen, 'quarantine mixed-mode')
