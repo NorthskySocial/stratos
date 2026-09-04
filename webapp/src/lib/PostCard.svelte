@@ -9,13 +9,18 @@
     post: FeedPost
     stratosAgent: Agent | null
     publicAgent?: Agent | null
+    currentDid: string
     onreply: (post: FeedPost) => void
+    ondelete: (post: FeedPost) => Promise<void>
   }
 
-  let {post, stratosAgent, publicAgent, onreply}: Props = $props()
+  let {post, stratosAgent, publicAgent, currentDid, onreply, ondelete}: Props = $props()
 
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
+  let deleting = $state(false)
+  let deleteError = $state('')
+  let canDelete = $derived(post.author === currentDid)
 
   const HTTP_PROTOCOLS = ['https:', 'http:'] as const
   const HTTP_OR_BLOB_PROTOCOLS = [...HTTP_PROTOCOLS, 'blob:'] as const
@@ -234,6 +239,19 @@
     return post.authorHandle || shortDid(post.author)
   }
 
+  async function handleDelete() {
+    deleting = true
+    deleteError = ''
+    try {
+      await ondelete(post)
+    } catch (error) {
+      console.error('Post deletion failed:', error)
+      deleteError = 'Could not delete the post. Try again.'
+    } finally {
+      deleting = false
+    }
+  }
+
   getPostAuthorHandle()
 </script>
 
@@ -299,6 +317,15 @@
 
     <div class="post-actions">
         <button class="reply-btn" onclick={() => onreply(post)}>Reply</button>
+        {#if canDelete}
+            <button
+                    class="delete-btn"
+                    onclick={() => void handleDelete()}
+                    disabled={deleting}
+                    aria-label="Delete post"
+            >{deleting ? 'Deleting…' : 'Delete'}
+            </button>
+        {/if}
         {#if post.isPrivate}
             <button
                     class="inspect-btn"
@@ -314,6 +341,10 @@
 
     {#if inspectorOpen}
         <RecordInspector uri={post.uri} onclose={() => inspectorOpen = false}/>
+    {/if}
+
+    {#if deleteError}
+        <p class="delete-error" role="alert">{deleteError}</p>
     {/if}
 </article>
 
@@ -471,6 +502,32 @@
     .reply-btn:hover {
         background: #f3f4f6;
         color: #333;
+    }
+
+    .delete-btn {
+        background: none;
+        border: none;
+        color: #b91c1c;
+        font-size: 0.8rem;
+        cursor: pointer;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+    }
+
+    .delete-btn:hover:not(:disabled) {
+        background: #fef2f2;
+        color: #991b1b;
+    }
+
+    .delete-btn:disabled {
+        cursor: wait;
+        opacity: 0.65;
+    }
+
+    .delete-error {
+        color: #b91c1c;
+        font-size: 0.8rem;
+        margin: 0.5rem 0 0;
     }
 
     .inspect-btn {
