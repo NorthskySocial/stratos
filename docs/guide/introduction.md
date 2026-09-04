@@ -1,57 +1,42 @@
-# Introduction
-
-Stratos is a private permissioned data layer for ATprotocol. It keeps private records out of public
-purview, publishes enrollment metadata back to the PDS for discovery, and lets downstream apps serve
-boundary-filtered content without inventing a separate identity model.
-
-## What Problem Does It Solve?
-
-ATprotocol is designed for open, public social data. Every record on a PDS is visible to anyone who
-knows the AT-URI. Stratos adds a permissioned layer on top: users can create posts that are only
-visible to members of specific communities, without leaving the AT Protocol identity and tooling
-ecosystem.
-
-## How It Works
-
 <script setup>
+import StratosFlowDiagram from '../.vitepress/theme/components/StratosFlowDiagram.vue'
 </script>
 
-<DataFlowAnimation />
+# Introduction
 
-1. _A user enrolls_ with a Stratos service via OAuth. The service writes a
-   `zone.stratos.actor.enrollment` record to the user's PDS.
-2. _The user creates private records_ by calling the Stratos XRPC API. Records are stored in the
-   user's per-actor repo on Stratos, not on the PDS. Nothing is written to the PDS on the record
-   write path; hydrated records carry a `source` field pointing back to Stratos.
-3. _A standalone indexer_ subscribes to the PDS firehose (to discover enrollments) and to each
-   user's `subscribeRecords` stream (to index records with their boundary metadata).
-4. _An AppView_ queries the indexed PostgreSQL tables. When a viewer requests a feed, the AppView
-   filters posts to only those whose boundaries overlap with the viewer's enrolled boundaries.
+Stratos is a private, permissioned data layer for AT Protocol. It keeps private record content out of public PDS repositories while retaining the user DID, OAuth identity, and AT Protocol repository model.
 
-## Repository Packages
+## The public-data constraint
 
-| Package           | Description                                                                |
-| ----------------- | -------------------------------------------------------------------------- |
-| `stratos-core`    | Domain logic, storage interfaces, schema, validation, MST commit builder   |
-| `stratos-service` | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters      |
-| `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers                  |
-| `stratos-indexer` | Standalone indexer consuming PDS + Stratos streams into AppView PostgreSQL |
-| `webapp`          | [Svelte demo client](/guide/webapp) for enrollment and private posting     |
-| `lexicons`        | JSON-based lexicon definitions                                             |
+A record in a standard PDS repository is addressable by its AT URI and available to public consumers. Stratos adds a separate service-managed repository for record collections that require authorization. It does not replace the PDS. The PDS remains the user's identity anchor and the place where Stratos publishes public enrollment metadata.
 
-## Architecture
+## The system
 
-For a deeper dive into the technical details of Stratos, see the following documentation:
+<StratosFlowDiagram />
 
-- [**Hydration Architecture**](/architecture/hydration) — How Stratos uses the source field pattern to keep data private.
-- [**Indexer Architecture**](/indexer-architecture) — How the standalone indexer consumes PDS and Stratos sync streams.
-- [**Enrollment Signing**](/architecture/enrollment-signing) — How user keys and boundary attestations are managed.
-- [**Multi-Domain Enrollment**](/architecture/multi-domain-enrollment) — How users can enroll in multiple boundaries across different services.
+1. A user enrolls with a Stratos service through AT Protocol OAuth.
+2. Stratos creates a per-actor repository and writes an enrollment record to the user PDS.
+3. The client routes private record operations to Stratos with DPoP-bound requests.
+4. A feed generator or an AppView consumes authorized Stratos data and serves boundary-filtered views.
 
-## Next Steps
+The full private record never becomes a PDS stub. The PDS enrollment record contains discovery and verification metadata, not post content.
 
-- Read the [Glossary](/guide/glossary) for key terms and concepts.
-- Follow the [First Post Tutorial](/guide/first-post) to get started as a user.
-- Follow the [Client Integration Guide](/client/getting-started) to add Stratos to your app.
-- See the [Operator Guide](/operator/overview) to deploy a Stratos service.
-- Explore the [Architecture](/architecture/hydration) for deep technical detail.
+## Repository packages
+
+| Package           | Responsibility                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `stratos-core`    | Domain rules, storage ports, schema, validation, and the MST commit builder.                     |
+| `stratos-service` | OAuth enrollment, repository operations, hydration, sync, and access enforcement.                |
+| `stratos-client`  | Enrollment discovery, service routing, verification, and scope helpers.                          |
+| `stratos-feedgen` | Boundary-scoped feed delivery from a local projection.                                           |
+| `webapp`          | A Svelte 5 example implementation for OAuth enrollment, private posting, and client integration. |
+| `lexicons`        | Stratos record and XRPC lexicon definitions.                                                     |
+
+The WebApp is an example client, not a required deployment component. Use it to examine an end-to-end client integration while you design your own client.
+
+## Continue
+
+- Read [Shared Private Data](/guide/what-is-stratos) for the record model and access path.
+- Read [Core Concepts](/guide/concepts) for boundaries, enrollment, synchronization, and proofs.
+- Read [Client Integration](/client/getting-started) to route OAuth requests correctly.
+- Read the [Operator Guide](/operator/overview) to deploy a service and feed generator.

@@ -1,67 +1,19 @@
 # Operations
 
-## Monitoring
+## Health and readiness
 
-Key metrics to track:
+The feed generator exposes `/health`. It reports the running version, service-stream connection state, and active actor sync count.
 
-| Metric                             | Description                    |
-| ---------------------------------- | ------------------------------ |
-| `stratos_enrolled_users`           | Total enrolled users           |
-| `stratos_records_total`            | Total records stored           |
-| `stratos_subscription_connections` | Active WebSocket subscriptions |
-| `stratos_request_duration_seconds` | XRPC request latency           |
+Treat a healthy HTTP process and a ready feed projection as separate states. A feed generator must complete its enrollment reconciliation before it serves a projection that depends on current authorization.
 
-For create → index latency investigations also track:
+## Projection lifecycle
 
-- `record created` log `durationMs` and `phases.prepareCommitBuild`
-- `record created` log `buildShare` (commit-build contribution to total)
-- `high create-to-index lag observed` warnings in `stratos-indexer`
-- Actor sync reconnect pressure (`max reconnect attempts`, WebSocket close/error events)
+The feed generator keeps a service subscription for enrollment events and actor subscriptions for matching members. It stores cursor state with its projection. On startup and reconnect, it reconciles enrollments before it seeds active actor subscriptions.
 
-## Backup
+When a user unenrolls or loses a configured boundary, remove the actor from the subscription pool, purge derived records for that boundary, and invalidate cached viewer membership.
 
-```bash
-# Backup service database
-sqlite3 /var/lib/stratos/data/service.sqlite \
-  ".backup /backup/service-$(date +%Y%m%d).sqlite"
+## Backups and recovery
 
-# Backup all actor databases
-tar -czf /backup/actors-$(date +%Y%m%d).tar.gz \
-  /var/lib/stratos/data/actors/
-```
+Back up the authoritative Stratos storage on its own schedule. The feed generator projection is derived state, but back up its storage when replay time or operational recovery matters.
 
-## Scaling
-
-For high-traffic deployments:
-
-1. **Horizontal scaling** — Run multiple Stratos instances behind a load balancer.
-2. **Shared storage** — Use network-attached storage for actor databases, or switch to the
-   `postgres` backend.
-3. **Connection pooling** — WebSocket subscriptions should be load-balanced by user DID so one
-   instance handles all subscriptions for a given user.
-4. **S3 blobs** — Use the `s3` blob storage backend to decouple blob storage from the instance.
-
-## Health Check
-
-```bash
-curl localhost:3100/health
-# {"status":"ok","version":"0.1.0"}
-```
-
-## Debug Logging
-
-```bash
-STRATOS_LOG_LEVEL=debug pnpm start
-```
-
-## Manual Enrollment Check
-
-```bash
-curl "localhost:3100/xrpc/zone.stratos.enrollment.status?did=did:plc:abc"
-```
-
-## Test WebSocket Connectivity
-
-```bash
-wscat -c "ws://localhost:3100/xrpc/zone.stratos.sync.subscribeRecords?did=did:plc:abc"
-```
+Do not use a feed generator backup as the source of truth for private records. Recover authoritative records from Stratos repositories and CAR export procedures.

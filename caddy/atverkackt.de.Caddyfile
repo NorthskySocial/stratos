@@ -1,0 +1,73 @@
+# Import this file from the main Caddyfile:
+#   import /path/to/stratos/caddy/atverkackt.de.Caddyfile
+#
+# The public-alpha compose stack publishes these services on the host at:
+#   Stratos   127.0.0.1:3100
+#   Feedgen   127.0.0.1:3000
+#   Clubhouse 127.0.0.1:8080
+#
+# Each site uses its pre-issued certificate and key. DNS and certificate
+# provisioning are managed outside this imported fragment.
+
+stratos.atverkackt.de {
+	tls /var/opt/ssl/certificates/stratos.atverkackt.de.crt /var/opt/ssl/certificates/stratos.atverkackt.de.key
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/stratos.log
+		format json
+	}
+
+	route {
+		reverse_proxy 127.0.0.1:3100
+	}
+}
+
+feedgen.atverkackt.de {
+	tls /var/opt/ssl/certificates/feedgen.atverkackt.de.crt /var/opt/ssl/certificates/feedgen.atverkackt.de.key
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/feedgen.log
+		format json
+	}
+
+	route {
+		reverse_proxy 127.0.0.1:3000
+	}
+}
+
+clubhouse.atverkackt.de {
+	tls /var/opt/ssl/certificates/clubhouse.atverkackt.de.crt /var/opt/ssl/certificates/clubhouse.atverkackt.de.key
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/clubhouse.log
+		format json
+	}
+
+	route {
+		reverse_proxy 127.0.0.1:8080
+	}
+}

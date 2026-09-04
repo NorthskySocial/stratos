@@ -1,41 +1,23 @@
-# Overview
+# Operator Guide
 
-Stratos is a **private namespace service** for ATprotocol that enables users to store content
-visible only within specific community domains. Unlike public `app.bsky` records that are globally
-visible, Stratos records have **domain boundaries** that restrict visibility.
+Run Stratos when your application needs private records that keep AT Protocol identity and repository semantics.
 
-## Key Concepts
+## Services
 
-| Concept              | Description                                                                                                                                  |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Domain Boundary**  | A service-qualified boundary identifier in `{serviceDid}/{name}` format. Records are visible only to enrolled users who share that boundary. |
-| **Enrollment**       | The process of a user registering with a Stratos service via OAuth.                                                                          |
-| **Service DID**      | The decentralized identifier for the Stratos service itself.                                                                                 |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content.                                                                           |
+| Service         | Responsibility                                                               | State         |
+| --------------- | ---------------------------------------------------------------------------- | ------------- |
+| Stratos service | Enrollment, private repositories, boundary checks, repository and sync XRPC. | Authoritative |
+| Feed generator  | Local projection, fully hydrated feed views, feed blob delivery.             | Derived       |
+| User PDS        | User OAuth authorization and the public enrollment record.                   | External      |
 
-## Use Cases
+The feed generator is the supported projection path for private feeds. It is not a generic AppView. It serves only configured boundaries and must be treated as a privileged Stratos service identity.
 
-- **Community-private feeds** — Fandom and community social feeds.
-- **Gated communities** — Content visible only to verified domain members.
-- **Multi-community platforms** — Apps with per-community data isolation.
+## Before deployment
 
-## Service Components
+1. Provide a stable service URL and DID for Stratos.
+2. Configure storage, OAuth, signing, and allowed boundaries.
+3. Register feed generator identity, signing key, storage, and feed configuration.
+4. Limit service-auth permissions to the required boundaries and lexicons.
+5. Configure health, telemetry, backups, and alerts before serving users.
 
-| Component         | Description                                                          |
-| ----------------- | -------------------------------------------------------------------- |
-| `stratos-service` | XRPC/HTTP service — enrollment, record CRUD, sync export             |
-| `stratos-indexer` | Standalone indexer — PDS firehose + actor sync streams → PostgreSQL  |
-| AppView           | Feed query endpoints — `zone.stratos.feed.*` with boundary filtering |
-
-## Request Flow
-
-<script setup>
-</script>
-
-<DataFlowAnimation />
-
-## Next Steps
-
-- [Architecture](/operator/architecture) — system components, MST repos, storage layout
-- [Deployment](/operator/deployment) — step-by-step production setup
-- [Configuration](/operator/configuration) — all environment variables explained
+Read [Architecture](/operator/architecture) before choosing topology. Read [Telemetry](/operator/telemetry) before configuring production monitoring.

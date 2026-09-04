@@ -1,154 +1,80 @@
 <script setup>
-import BoundaryAccess from '../.vitepress/theme/components/BoundaryAccess.vue'
-import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
+import BoundaryAccessDiagram from '../.vitepress/theme/components/BoundaryAccessDiagram.vue'
+import StratosFlowDiagram from '../.vitepress/theme/components/StratosFlowDiagram.vue'
+import TrustFlowDiagram from '../.vitepress/theme/components/TrustFlowDiagram.vue'
 </script>
 
-# Shared Private Data — Explained Simply
+# What Is Stratos?
 
-Imagine a house party where everyone is in the same room socialising, they're able to gather into
-groups to have independent discussions but anyone is able to join them. This is how ATproto data
-exposure functions.
+Stratos is a private, permissioned data layer for AT Protocol. It stores private records outside the public PDS network while preserving AT Protocol identity, repository semantics, and record verification.
 
-Stratos flips the house party on its head where now we have multiple parties going on in _different_
-rooms, each with their own theme (music, fandom, etc.) and the person running the party decides who
-gets to join. A person could be able to go into any of the rooms or just a subset.
+## The problem: public records have no audience boundary
 
----
+Think of the public PDS network as a house party with one public room. A client that knows a record AT URI can read the record. This model works for public conversation, but it cannot limit a record to a team, community, or other authorized group.
 
-## The Problem: Everything Is Public
+Private groups need more than a hidden user-interface element. The record content, blobs, and its existence must remain outside the public repository. The access decision must also remain with a service that knows the viewer's current membership.
 
-Social networks built on ATprotocol (like Bluesky) are fully public by default. Every post you write
-is visible to anyone, anywhere. That's great for public conversations, but it means there's no way
-to share something with just your group, your community, or your close friends — without leaving the
-network entirely.
+## The Stratos answer
 
----
+Stratos adds private rooms to that house party. Each room is a boundary. The service assigns users to boundaries, stores private records in a service-managed actor repository, and returns a record only when the viewer and record share a current boundary.
 
-## The Stratos Answer
+The PDS still provides the user identity and public enrollment record. Stratos does not replace the PDS or create a second account. It adds a private record path that clients can discover through the existing DID and OAuth identity.
 
-Stratos introduces boundaries — named access scopes that act like club memberships.
+## Shared private data
 
-When you write a post, you label it with a boundary, like `cooking` or `hiking`. Only people who are
-enrolled in that same boundary can read it. Everyone else sees nothing — not even a hint that the
-post exists.
+Stratos separates public discovery data from private record data.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">1</span>
-    <span>Who can see what — boundary access control</span>
-  </div>
-  <BoundaryAccess />
-</div>
+| Surface                  | Contains                                                       | Visibility                                         |
+| ------------------------ | -------------------------------------------------------------- | -------------------------------------------------- |
+| User PDS                 | The public `zone.stratos.actor.enrollment` record.             | Public discovery and verification metadata.        |
+| Stratos actor repository | Private records, signed commits, blobs, and boundary metadata. | Callers that pass the current boundary check only. |
 
----
+The PDS enrollment record identifies the Stratos service, assigned boundaries, user signing key, and service attestation. It does not contain a private-record copy, stub, preview, or blob reference.
 
-## Enrollment
+## Boundary access control
 
-Before you can post or read inside a boundary, you _enroll_ with a Stratos service using your
-existing ATprotocol account. This is a one-time OAuth flow.
+A boundary is a service-DID-qualified access scope, such as `did:web:stratos.example.com/engineering`. A private record can carry one or more boundary values. A viewer can read the record only when current membership shares at least one value.
 
-When you enroll:
+<BoundaryAccessDiagram />
 
-1. Stratos checks whether you're on the allowlist (if the operator uses one).
-2. Your assigned boundaries are recorded.
-3. A small _enrollment record_ is written to your own PDS (your personal data store on the network),
-   so anyone can discover which Stratos service you're a member of.
+The service performs the check. A client can show boundary state, but its user interface cannot authorize a read. An unauthorized read returns not found so the response does not confirm that a record exists.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">2</span>
-    <span>Joining a Stratos service — the enrollment flow</span>
-  </div>
-  <EnrollmentFlow />
-</div>
+## Enrollment publishes discovery data
 
----
+The user begins enrollment with Stratos through AT Protocol OAuth. The service initializes an empty signed actor repository, creates or obtains the user record-signing key, signs an enrollment attestation, and writes `zone.stratos.actor.enrollment` to the user PDS.
 
-## Private Data: A tale of two records
+<TrustFlowDiagram />
 
-When you post something via Stratos, it is stored within the service and never written to your
-public PDS:
+The enrollment record lets a client discover the service. The attestation lets a verifier confirm the service endorsement of the user DID, boundary set, and signing key. Neither is an access grant. Private content still requires a live membership check.
 
-- The full post (with your actual text, attachments, and boundary label) is stored securely inside
-  Stratos.
-- Nothing about the post lands on your public PDS. Your enrollment record — published once when you
-  join — advertises your Stratos endpoint so apps know where to look.
-- When an app hydrates a post, Stratos returns it with a `source` field: a pointer that says _"the
-  real version of this lives over here, and you'll need permission to read it"_.
+## Private records keep AT Protocol properties
 
-This means apps can discover and route your posts through your enrollment, but the actual content
-never leaks onto the public network.
+The client writes a private post as a `zone.stratos.feed.post` record in the Stratos actor repository. The write produces an AT URI, CID, signed commit, and Merkle Search Tree path. The repository can return inclusion proofs and export a CAR file without publishing record content through the PDS.
 
-<div class="animation-card">
-  <div class="animation-label">
-    <span class="step-number">3</span>
-    <span>How apps read private posts — AppView hydration</span>
-  </div>
-  <AppviewHydration />
-</div>
+<StratosFlowDiagram />
 
----
+Hydration returns a record with a `source` field that identifies the authoritative Stratos subject:
 
-## Putting It Together
-
-| Step                    | What happens                                                              |
-| ----------------------- | ------------------------------------------------------------------------- |
-| You enroll              | Your boundaries are recorded; an enrollment record lands on your PDS      |
-| You write a post        | Full content stored in Stratos; nothing is written to your PDS            |
-| Someone opens your feed | The app hydrates via Stratos, sees the source pointer, gets the full post |
-| Stratos checks          | Does the requester share your boundary? Yes → full post. No → nothing     |
-| You see your feed       | Only posts from boundaries you're in appear                               |
-
----
-
-## Why This Matters
-
-- Your posts live in your namespace (`at://your-did/zone.stratos.feed.post/...`), not in a closed
-  silo.
-- You keep your identity - Stratos is an add-on layer, not a separate account.
-- Access control is enforced - When your app fetches a post, Stratos validates the requester's
-  actual boundary membership before returning any content — no trust is delegated to the client.
-- Attestations are for _discovery_, not enforcement - The service attestation in your enrollment
-  record is a public signal: it lets any app confirm that you are enrolled with a specific Stratos
-  service and what boundaries you were assigned at signing time. This enables offline verification
-  without hitting the live service on every request.
-
-::: info Operators choose the rules
-A community can run its own Stratos service with its own membership criteria — fully independent of
-any central authority.
-:::
-
-<style scoped>
-.animation-card {
-  margin: 2rem 0;
-  border-radius: 14px;
-  overflow: hidden;
-  border: 1.5px solid var(--vp-c-divider);
-  background: var(--vp-c-bg-soft);
+```json
+{
+  "$type": "zone.stratos.feed.post",
+  "source": {
+    "vary": "authenticated",
+    "subject": {
+      "uri": "at://did:plc:example/zone.stratos.feed.post/3kq...",
+      "cid": "bafyre..."
+    },
+    "service": "did:web:stratos.example.com#atproto_pns"
+  }
 }
+```
 
-.animation-label {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1.1rem;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--vp-c-text-2);
-  border-bottom: 1px solid var(--vp-c-divider);
-}
+The source identifies where the record is held. It does not authorize the caller. A consumer calls the service with an authenticated identity and accepts the result of the current boundary check.
 
-.step-number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 50%;
-  font-size: 0.78rem;
-  font-weight: 700;
-  background: var(--vp-c-brand-1);
-  color: #fff;
-  flex-shrink: 0;
-}
-</style>
+## Shared views and verification
+
+A feed generator maintains a local projection from the Stratos subscription stream and serves hydrated, boundary-scoped feed results. An AppView can use the same hydration interfaces in its deployment. These consumers apply Stratos authorization semantics. The service remains the authority for private-record access.
+
+To verify a returned record, recompute the CID from the record data. To verify authorship, combine the signed commit, MST inclusion proof, and the user signing key from the service attestation. This verifies an enrollment statement and a record history. It does not replace a current access decision.
+
+The included `webapp` package demonstrates enrollment, private-post creation, and a unified public/private view. It is a reference implementation, not the protocol contract.

@@ -1,136 +1,83 @@
-# Hydration Architecture
+# Hydration
 
-Stratos uses the _source field pattern_ to separate data storage from presentation. Full records
-with boundary content are stored in Stratos; when a record is hydrated, Stratos returns it wrapped
-with a `source` field that points back to the full record.
+Hydration is an authorized read of a private record, not a client-side
+expansion step. A reference tells an application _which_ record it wants; the
+service decides whether the authenticated viewer may receive the content.
 
-## Source Field Pattern
+There are two useful delivery shapes:
 
-When a user creates a record in Stratos, a single write happens:
+- **Direct hydration** reads named records from Stratos when an application has
+  their `at://` URI.
+- **Feed delivery** lets Feedgen return complete posts from its verified local
+  projection for one configured boundary.
 
-1. Full record - stored in the user's per-actor repo on Stratos (with text content, boundary, etc.).
-   Nothing is written to the user's mainstream PDS on the record write path.
+The two shapes share the same rule: identity comes from the credential, never
+from a DID supplied in the request body.
 
-On hydration, Stratos returns the record with an added `source` field:
+## Direct hydration
 
-```typescript
-interface RecordSource {
-  vary: 'authenticated' | 'unauthenticated'
-  subject: {
-    uri: string // at:// URI of the full record in Stratos
-    cid: string // CID of the full record for integrity verification
-  }
-  service: string // DID + fragment: "did:web:stratos.example.com#atproto_pns"
-}
-```
+`zone.stratos.repo.hydrateRecord` reads one URI. The service derives the viewer
+from the authenticated OAuth credential, or derives a single permitted boundary
+from a space credential. It then loads the record and checks access:
 
-### Example
+1. The record owner may read their own record.
+2. An authenticated non-owner must share at least one current boundary with the
+   record.
+3. An unauthenticated caller cannot read a private record.
+4. A record with no boundary fails closed for non-owners.
 
-**Full record (in Stratos):**
+The optional CID is a strong-reference guard: if it does not match the current
+record, the request does not return a different revision by accident.
 
-```json
-{
-  "$type": "zone.stratos.feed.post",
-  "text": "Private message for my community",
-  "boundary": {
-    "values": [{ "value": "did:web:stratos.example.com/fanart" }]
-  },
-  "createdAt": "2024-01-15T12:00:00.000Z"
-}
-```
+`zone.stratos.repo.hydrateRecords` accepts up to 100 URIs and reports each
+outcome without forcing a client to repeat individual calls:
 
-**Hydrated record (returned by Stratos, carrying the `source` field):**
+| Result     | Meaning                                                                  | Record content returned? |
+| ---------- | ------------------------------------------------------------------------ | ------------------------ |
+| `records`  | The caller passed the boundary check.                                    | Yes                      |
+| `blocked`  | The record exists but its boundary or takedown policy blocks the caller. | No                       |
+| `notFound` | The URI or requested CID could not be resolved.                          | No                       |
 
-```json
-{
-  "$type": "zone.stratos.feed.post",
-  "source": {
-    "vary": "authenticated",
-    "subject": {
-      "uri": "at://did:plc:abc/zone.stratos.feed.post/tid123",
-      "cid": "bafyreibeef..."
-    },
-    "service": "did:web:stratos.example.com#atproto_pns"
-  },
-  "createdAt": "2024-01-15T12:00:00.000Z"
-}
-```
+Applications should treat `blocked` and `notFound` as different rendering
+states, but must not attempt to recover private content from a blocked result.
 
-## Hydration Flow
+## Feed generator delivery
 
-<script setup>
-</script>
+Feedgen does not pass a list of private record references back to the browser
+for a second, unauthenticated hydration step. It maintains a boundary-scoped
+projection for its configured feeds and returns complete post views after it
+has identified the viewer and checked their membership.
 
-<AppviewHydration />
+The request path is:
 
-## Endpoint Discovery
+1. The viewer asks their PDS to proxy a feed request.
+2. The PDS forwards a short-lived service-authenticated request to Feedgen.
+3. Feedgen verifies the request and resolves the viewer's enrolled boundaries.
+4. If the viewer belongs to the feed's boundary, Feedgen reads that boundary's
+   projection rows and returns the hydrated feed.
 
-AppViews and clients discover the Stratos service URL through the user's
-`zone.stratos.actor.enrollment` record on their PDS:
+Feedgen checks its readiness before the request, after membership resolution,
+and after the projection query. If its authoritative subscription or
+reconciliation state changes during the request, it returns an unavailable
+response instead of mixing old authorization state with new content.
 
-> 1. Fetch enrollment record from users PDS repo
-> 2. Each record has: { service: "<https://stratos.example.com>", ... }
-> 3. Resolve service DID from: <https://stratos.example.com/.well-known/did.json>
-> 4. Use service DID to hydrate records (validates source.service field matches)
+The projection may contain posts from two ingestion arms. Stratos-custody
+records arrive over `zone.stratos.sync.subscribeRecords`; records from a
+spaces-capable member PDS arrive through the credentialed pull-sync path. The
+mixed-mode architecture assigns the same authoritative boundary to both before
+they become feed rows. See [Architecture Overview](/architecture/diagrams) for
+the full flow.
 
-The `source.service` field is a DID+fragment string, not a URL — the AppView resolves the full URL
-by looking up the DID document.
+## References, integrity, and authenticity
 
-## Hydration Model
+Some record views carry a `source` field. `source.subject` contains the
+authoritative record URI and CID, and `source.service` identifies the Stratos
+service entry responsible for that subject. Recomputing the CID verifies that
+returned content matches that reference.
 
-Stratos `com.atproto.repo.getRecord` applies boundary access control:
-
-| Scenario                               | Result               |
-| -------------------------------------- | -------------------- |
-| Caller enrolled + shares boundary      | Full record returned |
-| Caller enrolled but different boundary | 404 (not visible)    |
-| Caller not enrolled                    | 404                  |
-| Unauthenticated                        | 404                  |
-
-### Batch Hydration (`hydrateRecords`)
-
-AppViews typically use `zone.stratos.repo.hydrateRecords` to hydrate multiple records for a feed.
-
-- Returns a list of successfully hydrated records.
-- Records the viewer cannot access are listed in `blocked`.
-- Missing records are listed in `notFound`.
-
-The 404 response for denied access is deliberate — it avoids leaking the existence of records to
-unauthorized viewers.
-
-### Viewer Identity
-
-The viewer used for boundary scoping is derived **strictly from the authenticated credential**
-(`auth.credentials.did`). The hydration endpoints accept no client-supplied viewer DID, so a caller
-cannot spoof another identity to widen the boundary set. The viewer's boundaries are resolved from
-that DID, and only records sharing at least one of those boundaries are returned. This applies
-uniformly to user and service callers — a service identity reads only within its own enrolled
-boundaries.
-
-## Trust Model
-
-The `source.cid` returned on hydration allows AppViews to verify the hydrated record hasn't changed:
-
-```typescript
-// AppView verification after hydrating: recompute the CID from the returned
-// record content and compare it against the source reference.
-const computedCid = await cidForCbor(hydratedRecord.value)
-if (computedCid.toString() !== hydratedRecord.source.subject.cid) {
-  throw new Error('Record CID mismatch — content may have been tampered with')
-}
-```
-
-Note the limits of this check: both the record value and `source.subject.cid` come from the same
-service response, so recomputing the CID proves the response is **internally consistent** (the
-content matches the reference the service claims for it) — it does not by itself prove
-**authenticity**. For that, fetch the record proof (`com.atproto.sync.getRecord`, which returns
-the signed commit and MST inclusion proof) and verify the commit signature against the user's
-enrolled signing key from the attestation chain below.
-
-Combined with the enrollment attestation
-system ([Enrollment Signing](/architecture/enrollment-signing)), this gives AppViews a complete
-verification chain:
-
-1. `source.cid` returned on hydration matches the hydrated record's CID
-2. Service attestation verifies user's boundary memberships were endorsed by the service
-3. Record commits are signed with the user's P-256 key (enrolled key is in the attestation)
+CID equality is an integrity check, not complete proof of authorship. To verify
+authenticity, obtain the signed commit and Merkle Search Tree inclusion proof,
+then verify the commit signature against the user's enrolled signing key from
+the [enrollment attestation](/architecture/enrollment-signing). For a
+PDS-custody space record, Feedgen also verifies the space commit before it
+promotes the staged record into its feed projection.

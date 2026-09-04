@@ -1,49 +1,61 @@
 :root {
-  /* Brand palette */
   --sp-mint: #2affba;
   --sp-teal: #40dac4;
   --sp-sky: #59b2cf;
   --sp-indigo: #7780dc;
   --sp-violet: #9145ec;
-  --sp-deep: #1f0b35;
-
-  /* VitePress colour overrides — light mode */
-  --vp-c-brand-1: #7780dc;
-  --vp-c-brand-2: #9145ec;
-  --vp-c-brand-3: #59b2cf;
-  --vp-c-brand-soft: rgba(119, 128, 220, 0.14);
-
-  --vp-button-brand-bg: var(--sp-indigo);
-  --vp-button-brand-hover-bg: var(--sp-violet);
-  --vp-button-brand-active-bg: var(--sp-violet);
+  --ns-ink: #172235;
+  --ns-blue: #1f5eff;
+  --ns-sand: #f5f7fb;
+  --vp-c-brand-1: var(--ns-blue);
+  --vp-c-brand-2: #174ad0;
+  --vp-c-brand-3: #15399e;
+  --vp-c-brand-soft: rgb(31 94 255 / 12%);
+  --vp-button-brand-bg: var(--ns-blue);
+  --vp-button-brand-hover-bg: #174ad0;
   --vp-button-brand-border: transparent;
-  --vp-button-brand-hover-border: transparent;
-  --vp-button-brand-text: #ffffff;
-  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-text: #fff;
+  --vp-c-text-1: var(--ns-ink);
 }
 
 .dark {
-  /* VitePress colour overrides — dark mode */
-  --vp-c-brand-1: var(--sp-mint);
-  --vp-c-brand-2: var(--sp-teal);
-  --vp-c-brand-3: var(--sp-sky);
-  --vp-c-brand-soft: rgba(42, 255, 186, 0.12);
-
-  --vp-button-brand-bg: var(--sp-indigo);
-  --vp-button-brand-hover-bg: var(--sp-violet);
-  --vp-button-brand-active-bg: var(--sp-violet);
-  --vp-button-brand-text: #ffffff;
-  --vp-button-brand-hover-text: #ffffff;
-
-  --vp-c-bg: #150826;
-  --vp-c-bg-alt: #1f0b35;
-  --vp-c-bg-elv: #2a1245;
-
-  --vp-c-divider: rgba(119, 128, 220, 0.2);
-  --vp-c-gutter: #1f0b35;
+  --ns-ink: #eef4ff;
+  --ns-sand: #101827;
+  --vp-c-bg: #0c1320;
+  --vp-c-bg-alt: #101827;
+  --vp-c-bg-elv: #172235;
+  --vp-c-brand-1: #8eaeff;
+  --vp-c-brand-2: #b3c8ff;
+  --vp-c-brand-3: #dbe6ff;
+  --vp-c-divider: #2e405b;
 }
 
-/* ── Hero gradient ── */
+.VPContent .content-container {
+  max-width: 72ch;
+}
+.VPDoc h1,
+.VPDoc h2 {
+  letter-spacing: -0.025em;
+}
+.VPDoc h2 {
+  margin-top: 3rem;
+}
+.VPDoc p,
+.VPDoc li {
+  line-height: 1.7;
+}
+.VPNavBarMenuLink:hover,
+.VPNavBarMenuLink.active {
+  color: var(--vp-c-brand-1);
+}
+.VPLink:focus-visible,
+button:focus-visible {
+  outline: 3px solid var(--vp-c-brand-1);
+  outline-offset: 3px;
+}
+.VPHero .text {
+  max-width: 18ch;
+}
 .VPHero .name {
   background: linear-gradient(
     135deg,
@@ -57,67 +69,48 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-
-/* ── Nav active link ── */
-.VPNavBarMenuLink.active,
-.VPNavBarMenuLink:hover {
-  color: var(--sp-mint) !important;
-}
-
-/* ── Sidebar active item ── */
-.VPSidebarItem.is-active > .item > .VPLink,
-.VPSidebarItem.is-active > .item .link {
-  color: var(--sp-mint) !important;
-  border-left-color: var(--sp-mint) !important;
-}
-
-/* ── Code blocks ── */
-.dark .vp-code-group .tabs label.active {
-  border-bottom-color: var(--sp-mint);
-  color: var(--sp-mint);
-}
-
-/* ── Tip / Info callout ── */
-.custom-block.tip {
-  border-color: var(--sp-teal);
-}
-
-.custom-block.tip .custom-block-title {
-  color: var(--sp-teal);
-}
-
-/* ── Home feature cards ── */
-.VPFeature:hover {
-  border-color: var(--sp-indigo) !important;
-  box-shadow: 0 0 0 1px var(--sp-indigo);
-}
-
-.dark .VPFeature {
-  background: rgba(31, 11, 53, 0.6);
-}
-
-/* ── Badge ── */
-.VPBadge.tip {
-  background: var(--sp-mint);
-  color: var(--sp-deep);
-}
-
-.VPBadge.info {
-  background: var(--sp-indigo);
-  color: #ffffff;
-}
-
-/* ── Home page tagline ── */
 .VPHero .tagline {
-  opacity: 0.85;
+  max-width: 55ch;
 }
-
-/* ── Table ── */
-.dark table thead tr {
-  background: rgba(119, 128, 220, 0.15);
+.VPFeature {
+  border-radius: 12px;
+  transition:
+    transform 180ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 180ms;
 }
-
-/* ── Always show social links ── */
-.VPNavBarSocialLinks {
-  display: flex !important;
+.VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+.VPFeature :deep(.VPImage) {
+  width: 42px;
+  height: 42px;
+}
+.stratos-diagram {
+  margin: 2rem 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--ns-sand);
+}
+.stratos-diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.stratos-diagram text {
+  font-family: var(--vp-font-family-base);
+}
+@media (max-width: 640px) {
+  .VPHero .text {
+    max-width: none;
+  }
+  .VPFeature:hover {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }

@@ -1,0 +1,173 @@
+# Local/public-alpha stack for Clubhouse, Stratos, Feedgen, and telemetry.
+#
+# Required environment values are documented in .env.example. Feedgen's
+# FEEDGEN_HOST must be the hostname used in its did:web identity (without a
+# scheme). The Clubhouse VITE_* values are build-time values, so rebuild after
+# changing them.
+
+services:
+  clubhouse:
+    build:
+      context: .
+      dockerfile: clubhouse/Dockerfile
+      args:
+        VITE_STRATOS_URL: ${VITE_STRATOS_URL:-http://localhost:3100}
+        VITE_STRATOS_SERVICE_DID: ${VITE_STRATOS_SERVICE_DID:?set VITE_STRATOS_SERVICE_DID}
+        VITE_FEEDGEN_URL: ${VITE_FEEDGEN_URL:-http://localhost:3000}
+        VITE_FEEDGEN_DID: ${VITE_FEEDGEN_DID:?set VITE_FEEDGEN_DID}
+        VITE_CLUBHOUSE_URL: ${VITE_CLUBHOUSE_URL:-http://localhost:8080}
+        VITE_CLUBHOUSE_ROOM_STATUS_URL: ${VITE_CLUBHOUSE_ROOM_STATUS_URL:-}
+        VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON: ${VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON:-}
+        VITE_ATPROTO_HANDLE_RESOLVER: ${VITE_ATPROTO_HANDLE_RESOLVER:-}
+        VITE_ATPROTO_OAUTH_PROXY_URL: ${VITE_ATPROTO_OAUTH_PROXY_URL:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-development}
+        VITE_SENTRY_RELEASE: ${VITE_SENTRY_RELEASE:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0.1}
+    ports:
+      - '${CLUBHOUSE_PORT:-8080}:80'
+    restart: unless-stopped
+    depends_on:
+      stratos:
+        condition: service_healthy
+      feedgen:
+        condition: service_healthy
+
+  stratos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: stratos
+    container_name: stratos
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    ports:
+      - '${STRATOS_PORT:-3100}:3100'
+    environment:
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:?set STRATOS_SERVICE_DID}
+      STRATOS_PUBLIC_URL: ${STRATOS_PUBLIC_URL:?set STRATOS_PUBLIC_URL}
+      STRATOS_PORT: 3100
+      STRATOS_VALKEY_URL: redis://valkey:6379
+      STRATOS_SERVICE_FRAGMENT: ${STRATOS_SERVICE_FRAGMENT:-atproto_pns}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-sqlite}
+      STRATOS_DATA_DIR: /app/data
+      STRATOS_BLOB_STORAGE: ${STRATOS_BLOB_STORAGE:-local}
+      STRATOS_ALLOWED_DOMAINS: ${STRATOS_ALLOWED_DOMAINS:?set STRATOS_ALLOWED_DOMAINS}
+      STRATOS_RESERVED_DOMAIN: ${STRATOS_RESERVED_DOMAIN:-general}
+      STRATOS_RETENTION_DAYS: ${STRATOS_RETENTION_DAYS:-30}
+      STRATOS_ENROLLMENT_MODE: ${STRATOS_ENROLLMENT_MODE:-allowlist}
+      STRATOS_ALLOWED_DIDS: ${STRATOS_ALLOWED_DIDS:-}
+      STRATOS_ALLOWED_PDS_ENDPOINTS: ${STRATOS_ALLOWED_PDS_ENDPOINTS:-}
+      STRATOS_AUTO_ENROLL_DOMAINS: ${STRATOS_AUTO_ENROLL_DOMAINS:-general}
+      STRATOS_ROOM_CATALOG_FILE: /app/config/feeds.yaml
+      STRATOS_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+      STRATOS_SIGNING_KEY_HEX: ${STRATOS_SIGNING_KEY_HEX:-}
+      STRATOS_SYNC_TOKEN: ${STRATOS_SYNC_TOKEN:?set STRATOS_SYNC_TOKEN}
+      STRATOS_ALLOWED_REDIRECT_ORIGINS: ${STRATOS_ALLOWED_REDIRECT_ORIGINS:-}
+      STRATOS_REPO_URL: ${STRATOS_REPO_URL:-https://github.com/NorthskySocial/stratos}
+      STRATOS_OPERATOR_CONTACT: ${STRATOS_OPERATOR_CONTACT:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      STRATOS_DEV_MODE: ${STRATOS_DEV_MODE:-false}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-1}
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://collector:4318/v1/metrics
+      OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-15000}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=development}
+    volumes:
+      - stratos-data:/app/data
+      - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3100/health',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  feedgen:
+    build:
+      context: .
+      dockerfile: stratos-feedgen/Dockerfile
+      target: feedgen
+    container_name: stratos-feedgen
+    restart: unless-stopped
+    depends_on:
+      stratos:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    ports:
+      - '${FEEDGEN_PORT:-3000}:3000'
+    environment:
+      FEEDGEN_PORT: 3000
+      FEEDGEN_SERVICE_DID: did:web:${FEEDGEN_HOST:?set FEEDGEN_HOST}
+      FEEDGEN_SIGNING_KEY: ${FEEDGEN_SIGNING_KEY:?set FEEDGEN_SIGNING_KEY}
+      STRATOS_SERVICE_URL: http://stratos:3100
+      STRATOS_SERVICE_DID: ${STRATOS_SERVICE_DID:?set STRATOS_SERVICE_DID}
+      FEEDGEN_STORAGE_BACKEND: sqlite
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: /app/data/feedgen-membership.sqlite
+      FEEDGEN_FEEDS_FILE: /app/config/feeds.yaml
+      FEEDGEN_SUBSCRIBE_ENROLLMENTS: 'true'
+      FEEDGEN_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+      SENTRY_DSN: ${FEEDGEN_SENTRY_DSN:-${SENTRY_DSN:-}}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-1}
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://collector:4318/v1/metrics
+      OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-15000}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=development}
+    volumes:
+      - ./stratos-feedgen/feeds.local.yaml:/app/config/feeds.yaml:ro
+      - feedgen-control:/app/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/health',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: stratos-valkey
+    restart: unless-stopped
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.153.0
+    container_name: northsky-telemetry-collector
+    restart: unless-stopped
+    command: ['--config=/etc/otelcol-contrib/config.yaml']
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+
+volumes:
+  stratos-data:
+  feedgen-control:
+  valkey-data:

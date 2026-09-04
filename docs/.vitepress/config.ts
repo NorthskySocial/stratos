@@ -1,53 +1,50 @@
 import { defineConfig } from 'vitepress'
 
-const base = '/'
-
 export default defineConfig({
   title: 'Stratos',
-  description: 'Private permissioned data layer for ATprotocol',
-  base,
-
-  srcExclude: ['multi-domain-enrollment.md', 'architecture-diagram.md'],
-
+  description: 'Private, boundary-scoped data for AT Protocol',
+  srcExclude: [
+    'architecture-diagram.md',
+    'design/**',
+    'guide/webapp.md',
+    'indexer-architecture.md',
+    'multi-domain-enrollment.md',
+    'operator/appview-integration.md',
+    'operator/clubhouse-public-alpha.md',
+    'operator/examples/**',
+  ],
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' }]],
-
   themeConfig: {
     logo: { src: '/icon.svg', alt: 'Stratos' },
     siteTitle: 'Stratos',
-
     nav: [
       { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
       {
-        text: 'Client Integration',
+        text: 'Client',
         link: '/client/getting-started',
         activeMatch: '/client/',
       },
       {
-        text: 'Operator Guide',
+        text: 'Operator',
         link: '/operator/overview',
         activeMatch: '/operator/',
       },
       {
         text: 'Architecture',
-        link: '/architecture/hydration',
+        link: '/architecture/diagrams',
         activeMatch: '/architecture/',
       },
       { text: 'Lexicons', link: '/lexicons/', activeMatch: '/lexicons/' },
     ],
-
     sidebar: {
       '/guide/': [
         {
-          text: 'Getting Started',
+          text: 'Guide',
           items: [
             { text: 'Introduction', link: '/guide/introduction' },
-            {
-              text: 'What Is Shared Private Data?',
-              link: '/guide/what-is-stratos',
-            },
+            { text: 'What Stratos Does', link: '/guide/what-is-stratos' },
             { text: 'Core Concepts', link: '/guide/concepts' },
-            { text: 'Stratos WebApp', link: '/guide/webapp' },
-            { text: 'Your First Post', link: '/guide/first-post' },
+            { text: 'Create a Private Post', link: '/guide/first-post' },
             { text: 'Glossary', link: '/guide/glossary' },
             { text: 'Error Codes', link: '/guide/errors' },
           ],
@@ -55,39 +52,29 @@ export default defineConfig({
       ],
       '/client/': [
         {
-          text: 'Client Integration',
+          text: 'Client integration',
           items: [
             { text: 'Getting Started', link: '/client/getting-started' },
-            { text: 'User Enrollment', link: '/client/enrollment' },
-            { text: 'Creating Records', link: '/client/creating-records' },
-            { text: 'Reading Records', link: '/client/reading-records' },
-            { text: 'Domain Boundaries', link: '/client/boundaries' },
-            {
-              text: 'Repo Export & Import',
-              link: '/client/repo-export-import',
-            },
-            { text: 'UI Patterns', link: '/client/ui-patterns' },
+            { text: 'Enrollment', link: '/client/enrollment' },
+            { text: 'Create Records', link: '/client/creating-records' },
+            { text: 'Read Records', link: '/client/reading-records' },
+            { text: 'Boundaries and Spaces', link: '/client/boundaries' },
             { text: 'Attestation Verification', link: '/client/attestation' },
             { text: 'API Reference', link: '/client/api-reference' },
-            { text: 'Best Practices', link: '/client/best-practices' },
             { text: 'Troubleshooting', link: '/client/troubleshooting' },
           ],
         },
       ],
       '/operator/': [
         {
-          text: 'Operator Guide',
+          text: 'Operator guide',
           items: [
             { text: 'Overview', link: '/operator/overview' },
             { text: 'Architecture', link: '/operator/architecture' },
             { text: 'Deployment', link: '/operator/deployment' },
-            { text: 'Deployment Examples', link: '/operator/examples/' },
             { text: 'Configuration', link: '/operator/configuration' },
-            {
-              text: 'AppView Integration',
-              link: '/operator/appview-integration',
-            },
             { text: 'Operations', link: '/operator/operations' },
+            { text: 'Telemetry', link: '/operator/telemetry' },
             { text: 'Security', link: '/operator/security' },
             { text: 'Troubleshooting', link: '/operator/troubleshooting' },
           ],
@@ -97,51 +84,29 @@ export default defineConfig({
         {
           text: 'Architecture',
           items: [
-            { text: 'Hydration Architecture', link: '/architecture/hydration' },
-            { text: 'Indexer Architecture', link: '/indexer-architecture' },
+            { text: 'Architecture Overview', link: '/architecture/diagrams' },
+            { text: 'Hydration', link: '/architecture/hydration' },
             {
               text: 'Enrollment Signing',
               link: '/architecture/enrollment-signing',
             },
             {
-              text: 'Multi-Domain Enrollment',
-              link: '/architecture/multi-domain-enrollment',
-            },
-            {
-              text: 'Repo-Host Discovery',
+              text: 'Repo-host Discovery',
               link: '/architecture/repo-host-discovery',
             },
-            { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },
       ],
       '/lexicons/': [
         {
-          text: 'Lexicon Reference',
+          text: 'Lexicon reference',
           items: [{ text: 'All Lexicons', link: '/lexicons/' }],
         },
       ],
     },
-
     socialLinks: [
       { icon: 'github', link: 'https://github.com/NorthskySocial/stratos' },
     ],
-
-    footer: {
-      message:
-        'Built on ATprotocol, designed by <a href="https://northskysocial.com" target="_blank">Northsky Social</a>',
-      copyright: `<center><img src="${base}northsky.png" alt="Northsky Social" width="48" height="48" /></center>`,
-    },
-
-    search: {
-      provider: 'local',
-    },
-  },
-
-  markdown: {
-    theme: {
-      light: 'github-light',
-      dark: 'one-dark-pro',
-    },
+    search: { provider: 'local' },
   },
 })

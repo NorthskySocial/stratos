@@ -3,27 +3,33 @@ layout: home
 
 hero:
   name: Stratos
-  text: Private permissioned data for ATprotocol
-  tagline: Store boundary-scoped records off the firehose, serve them through the protocol.
+  text: Private data with AT Protocol identity
+  tagline: Store access-controlled records in an AT Protocol-compatible repository. Use spaces and boundaries to limit access without creating a second identity system.
   actions:
     - theme: brand
-      text: Get Started
+      text: Read the guide
       link: /guide/introduction
     - theme: alt
-      text: Client Integration
+      text: Integrate a client
       link: /client/getting-started
     - theme: alt
-      text: Operator Guide
+      text: Run a service
       link: /operator/overview
 
 features:
-  - icon: 🔐
-    title: Boundary Access Control
-    details: Records carry domain boundaries. A viewer can only access content when they share at least one boundary with the record.
-  - icon: 🪪
-    title: OAuth Enrollment
-    details: Users enroll via standard ATprotocol OAuth. An enrollment record is published to their PDS for endpoint discovery.
-  - icon: 🔗
-    title: Source Field Hydration
-    details: Hydrated records carry a source field pointing back to Stratos. Appviews resolve full content from Stratos with boundary checks.
+  - icon:
+      src: /icons/lock.svg
+      alt: Boundary-scoped access
+    title: Boundary-scoped access
+    details: A record is available only when the requester has current membership in a shared boundary.
+  - icon:
+      src: /icons/link.svg
+      alt: AT Protocol repository
+    title: AT Protocol repositories
+    details: Each enrolled actor has a signed repository. Records, CAR export, and inclusion proofs remain protocol-native.
+  - icon:
+      src: /icons/cloud.svg
+      alt: Feed generator
+    title: Feed generator delivery
+    details: A feed generator maintains a local projection and returns fully hydrated, boundary-scoped feed views.
 ---

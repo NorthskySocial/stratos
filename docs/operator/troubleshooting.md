@@ -1,57 +1,21 @@
 # Troubleshooting
 
-## "NotEnrolled" Error When Creating Records
+## Feed requests fail after startup
 
-- User hasn't completed OAuth enrollment.
-- Enrollment was rejected — check your allowlist configuration (`STRATOS_ALLOWED_DIDS`,
-  `STRATOS_ALLOWED_PDS_ENDPOINTS`).
+Check the feed generator health response. Confirm that the service stream is connected and that startup reconciliation completed. Then confirm that the request uses a PDS-issued service-auth token for the feed generator DID and lexicon.
 
-Verify directly:
+## A member cannot read a post
 
-```bash
-curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=<did>"
-```
+Check current enrollment and the record boundaries. A valid old attestation does not grant access after a boundary change. Confirm that the feed generator projection processed the membership change and purged removed access.
 
-## Empty Subscription Stream
+## The feed is empty
 
-- Verify service auth is configured correctly and the AppView DID is in `STRATOS_ALLOWED_APPVIEWS`.
-- Check cursor isn't ahead of the latest sequence number.
-- Confirm the user has records in their Stratos repo.
+Confirm that the requested feed boundary is configured. Check that the actor belongs to that boundary, the actor subscription is active, and the projection cursor advances after a record write.
 
-## OAuth Callback Fails
+## Metrics endpoint returns 401
 
-- Verify `redirect_uris` in `client-metadata.json` exactly matches `STRATOS_OAUTH_REDIRECT_URI`.
-- Check the user's PDS is reachable from the Stratos server for the token exchange.
-- Check nginx/proxy isn't stripping required headers.
+Set the `Authorization` header to `Bearer <FEEDGEN_METRICS_TOKEN>`. If no token is configured, protect the endpoint with network policy instead.
 
-## DPoP Nonce Errors
+## Trace data is missing
 
-Extract the nonce from the `DPoP-Nonce` response header and include it in the next request's DPoP
-proof. Ensure your reverse proxy exposes `DPoP-Nonce` in `Access-Control-Expose-Headers` —
-see [Security](/operator/security#cors-configuration).
-
-## High Latency Under Load
-
-See the Performance Investigation Playbook. Key checkpoints:
-
-1. **DB connection pool exhaustion** — increase `STRATOS_PG_ACTOR_POOL_SIZE`.
-2. **RDS IOPS saturation** — check `WriteIOPS` vs baseline (gp2: `allocatedStorageGiB × 3` IOPS).
-3. **CPU pinned at 100%** — Node.js is single-threaded; if 1 vCPU is maxed, scale up the task.
-
-## Indexer Reconnection Pressure
-
-Common during RDS restarts or resizes: `ECONNREFUSED` and `database system is shutting down`. The
-indexer retries with exponential backoff. These errors self-resolve once the database is back.
-
-Check indexer logs:
-
-```bash
-# CloudWatch Log Insights
-filter @message like /error|Error|ECONNREFUSED|timeout|worker pool/
-```
-
-## Debug Logging
-
-```bash
-STRATOS_LOG_LEVEL=debug pnpm start
-```
+Confirm that the deployed workload has the OpenTelemetry auto-instrumentation mount and an OTLP endpoint. Check `OTEL_RESOURCE_ATTRIBUTES` and the trace exporter configuration. The feed generator Prometheus endpoint does not replace distributed traces.

@@ -1,93 +1,22 @@
-# Architecture
-
 <script setup>
-import SystemOverviewAnimation from '../.vitepress/theme/components/SystemOverviewAnimation.vue'
-import EnrollmentFlow from '../.vitepress/theme/components/EnrollmentFlow.vue'
-import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreationAnimation.vue'
+import StratosFlowDiagram from '../.vitepress/theme/components/StratosFlowDiagram.vue'
 </script>
 
-## System Components
+# Operator Architecture
 
-<SystemOverviewAnimation />
+<StratosFlowDiagram />
 
-## Data Flow
+## Trust boundaries
 
-### User Enrollment
+The Stratos service is authoritative for enrollment, record custody, and live access checks. Its storage contains private records and signing material. Protect it as a data service.
 
-<EnrollmentFlow />
+The feed generator is a derived, privileged consumer. It holds a local projection for configured feeds and uses service-auth credentials to subscribe and hydrate records. It must not receive a broader boundary grant than its feeds require.
 
-### Record Creation
+The user PDS remains responsible for user authorization. A proxied feed request carries a short-lived service-auth JWT from the PDS to the feed generator. The feed generator verifies that identity before it reads its projection.
 
-<RecordCreationAnimation />
+## Failure handling
 
-### AppView Indexing
-
-<IndexerSyncAnimation />
-
-## Repository & MST Architecture
-
-Stratos maintains a per-user **Merkle Search Tree (MST)** and **signed commit chain** compatible
-with the ATProto repo format. Every record write produces a signed commit that updates the MST root,
-enabling cryptographic verification of repository contents.
-
-| Layer                  | Contents                                                                         |
-| ---------------------- | -------------------------------------------------------------------------------- |
-| **Signed Commit (v3)** | `did`, `version: 3`, `data` (MST root CID), `rev` (TID), `sig` (P-256 signature) |
-| **MST**                | Sorted key-value tree mapping `collection/rkey → record CID`                     |
-
-| Endpoint                       | Description                                                 |
-| ------------------------------ | ----------------------------------------------------------- |
-| `com.atproto.sync.getRecord`   | CAR with signed commit + MST inclusion proof + record block |
-| `zone.stratos.sync.getRepo`    | Full repo as a CAR file                                     |
-| `zone.stratos.repo.importRepo` | Import repo from CAR with CID integrity verification        |
-
-## Storage Architecture
-
-Each enrolled user gets either an isolated SQLite database (default) or an isolated PostgreSQL
-schema.
-
-**SQLite layout:**
-
-```text
-/data/stratos/
-├── service.sqlite              # Enrollment, OAuth sessions
-├── blobs/                      # Blob storage (local provider)
-│   ├── {did}/{cid}
-│   ├── temp/{did}/{key}
-│   └── quarantine/{did}/{cid}
-└── actors/
-    ├── ab/
-    │   └── did:plc:abc123/
-    │       └── stratos.sqlite  # Records, repo blocks
-    └── cd/
-        └── did:plc:cdef456/
-            └── stratos.sqlite
-```
-
-## Database Schema
-
-**stratos_record** — record metadata
-
-```sql
-CREATE TABLE stratos_record (
-    uri         TEXT PRIMARY KEY,
-    cid         TEXT NOT NULL,
-    collection  TEXT NOT NULL,
-    rkey        TEXT NOT NULL,
-    repoRev     TEXT,
-    indexedAt   TEXT NOT NULL,
-    takedownRef TEXT
-);
-```
-
-**stratos_seq** — event sequencing for subscriptions
-
-```sql
-CREATE TABLE stratos_seq (
-    seq   INTEGER PRIMARY KEY AUTOINCREMENT,
-    did   TEXT NOT NULL,
-    time  TEXT NOT NULL,
-    rev   TEXT NOT NULL,
-    event TEXT NOT NULL  -- JSON-encoded operation
-);
-```
+- A Stratos outage prevents authoritative reads and writes.
+- A feed generator outage does not change Stratos records. It makes its derived feeds unavailable or stale until subscription recovery completes.
+- A subscription reconnect requires reconciliation before the feed generator reports readiness for a protected projection.
+- A boundary removal must purge derived state and invalidate cached membership before a feed is served.

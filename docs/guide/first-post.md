@@ -1,93 +1,66 @@
-# Tutorial: Your First Private Post
+# Create a Private Post
 
-This tutorial walks you through the process of setting up the Stratos client, discovering an enrollment, and creating your first private post with a domain boundary.
+This guide assumes that the user has completed OAuth enrollment and the client has access to the user PDS OAuth session.
 
-## Prerequisites
+## Discover the service
 
-- An AT Protocol account (e.g., on `bsky.social`).
-- A Stratos service you want to use (e.g., `https://stratos.actor`).
-- Basic knowledge of TypeScript/JavaScript.
+Read the user `zone.stratos.actor.enrollment` record from the PDS. The service DID is the enrollment record key. `stratos-client` provides a direct lookup and a routing helper:
 
-## 1. Install the Client
-
-First, install the Stratos client library along with the standard AT Protocol API:
-
-```bash
-pnpm add @northskysocial/stratos-client @atproto/api
-```
-
-## 2. Discover an Enrollment
-
-Before you can post to Stratos, you need to find the user's enrollment record on their PDS. This record tells the client which Stratos service the user is registered with.
-
-```typescript
+```ts
 import {
+  createServiceFetchHandler,
   getEnrollmentByServiceDid,
   resolveServiceUrl,
 } from '@northskysocial/stratos-client'
+import { Client } from '@atcute/client'
 
-const userDid = 'did:plc:your-user-did'
-const pdsUrl = 'https://bsky.social' // Or your custom PDS
-const serviceDid = 'did:web:stratos.example.com'
-
-// Discover the enrollment record
 const enrollment = await getEnrollmentByServiceDid(userDid, pdsUrl, serviceDid)
+if (!enrollment) throw new Error('The user is not enrolled with this service.')
 
-if (!enrollment) {
-  throw new Error('User is not enrolled with any Stratos service.')
-}
-
-// Resolve the service URL
 const serviceUrl = resolveServiceUrl(enrollment, pdsUrl)
-console.log(`Stratos service found at: ${serviceUrl}`)
+const handler = createServiceFetchHandler(session.fetchHandler, serviceUrl)
+const rpc = new Client({ handler })
 ```
 
-## 3. Create a Private Post
+The helper passes an absolute Stratos URL to the OAuth fetch handler. This causes the DPoP proof to bind to the Stratos origin instead of the PDS origin.
 
-Now that you have the service URL, you can create a private post. You'll need an authenticated session from your OAuth flow or a temporary session for testing.
+## Select a boundary
 
-```typescript
-import { Agent } from '@atproto/api'
-import { createServiceFetchHandler } from '@northskysocial/stratos-client'
+Use a fully qualified boundary that appears in the current enrollment. Do not send the unqualified local name.
 
-// Assume 'session' is your existing AT Protocol session
-const stratosAgent = new Agent((url, init) => {
-  const fullUrl = new URL(url, serviceUrl)
-  return session.fetchHandler(fullUrl.href, init)
-})
+```ts
+const boundary = 'did:web:stratos.example.com/engineering'
+```
 
-// Create a post restricted to the 'engineering' boundary
-await stratosAgent.com.atproto.repo.createRecord({
-  repo: userDid,
-  collection: 'zone.stratos.feed.post',
-  record: {
-    $type: 'zone.stratos.feed.post',
-    text: 'Hello from the private engineering channel!',
-    boundary: {
-      $type: 'zone.stratos.boundary.defs#Domains',
-      values: [
-        {
-          $type: 'zone.stratos.boundary.defs#Domain',
-          value: 'did:web:stratos.actor/engineering',
-        },
-      ],
+## Create the record
+
+```ts
+await rpc.call('com.atproto.repo.createRecord', {
+  data: {
+    repo: userDid,
+    collection: 'zone.stratos.feed.post',
+    record: {
+      $type: 'zone.stratos.feed.post',
+      text: 'Private engineering update.',
+      boundary: {
+        $type: 'zone.stratos.boundary.defs#Domains',
+        values: [
+          {
+            $type: 'zone.stratos.boundary.defs#Domain',
+            value: boundary,
+          },
+        ],
+      },
+      createdAt: new Date().toISOString(),
     },
-    createdAt: new Date().toISOString(),
   },
 })
-
-console.log('Private post created successfully!')
 ```
 
-## Summary
+Stratos validates the collection, actor, boundary, and OAuth identity before it writes. It encodes the record, computes the CID, updates the actor MST, signs a new commit, and emits a subscription event.
 
-You've successfully:
+## Observe the result
 
-1. Located a Stratos enrollment via the PDS.
-2. Routed an XRPC request to the correct Stratos instance.
-3. Created a record with a domain-scoped boundary.
+The record exists at an AT URI under the user DID, but the record content remains in the Stratos repository. A feed generator can ingest the commit into its local projection. A reader receives the record only when the reader passes the current shared-boundary check.
 
-## Next Steps
-
-- Explore [Boundary Visibility](../client/boundaries.md) to learn how access is restricted.
-- Learn about [Hydration](../architecture/hydration.md) to understand how these posts appear in feeds.
+For client patterns beyond this single write, read [Creating Records](/client/creating-records) and [Reading Records](/client/reading-records).
