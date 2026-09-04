@@ -366,6 +366,81 @@ describe('SQLite-specific behavior', () => {
     }
   })
 
+  it('serializes concurrent space-member staging and reset transactions', async () => {
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db)
+    const authorityDid = 'did:web:stratos.bebop.test'
+    const spaceUri = `at://${authorityDid}/space/zone.stratos.space.feed/bounty-hunters`
+    const members = [
+      'did:plc:spikespiegel',
+      'did:plc:fayevalentine',
+      'did:plc:jetblack',
+      'did:plc:edwardwong',
+      'did:plc:vicious',
+    ]
+    const indexedAt = '2024-01-01T00:00:00.000Z'
+
+    try {
+      await Promise.all(
+        members.map((did, index) =>
+          store.stageSpaceSyncPage({
+            spaceUri,
+            did,
+            boundary: 'bounty-hunters',
+            mutations: [
+              {
+                kind: 'upsert',
+                post: {
+                  uri: `${spaceUri}/${did}/zone.stratos.feed.post/${index}`,
+                  did,
+                  cid: `bafyspace${index}`,
+                  sortAt: indexedAt,
+                  indexedAt,
+                  record: { text: `Space sync ${index}` },
+                  blobRefs: [],
+                  boundaries: [],
+                },
+              },
+            ],
+            updatedAt: indexedAt,
+          }),
+        ),
+      )
+
+      await Promise.all(
+        members.map((did) => store.promoteSpaceSyncStage(spaceUri, did)),
+      )
+
+      const posts = await store.listPostsByBoundary({
+        boundary: 'bounty-hunters',
+        limit: members.length,
+      })
+      expect(posts.posts.map((post) => post.did).sort()).toEqual(
+        members.slice().sort(),
+      )
+
+      await Promise.all(
+        members.map((did) =>
+          store.stageSpaceSyncPage({
+            spaceUri,
+            did,
+            boundary: 'bounty-hunters',
+            mutations: [],
+            updatedAt: indexedAt,
+          }),
+        ),
+      )
+      expect(
+        await Promise.all(
+          members.map((did) => store.resetPendingSpaceSyncState(spaceUri, did)),
+        ),
+      ).toEqual(members.map(() => true))
+    } finally {
+      await store.close()
+    }
+  })
+
   it('imports legacy membership snapshots once without moving cursors', async () => {
     const legacyPath = await makeTempDbPath()
     const membershipPath = await makeTempDbPath()
