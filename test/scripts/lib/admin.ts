@@ -5,7 +5,6 @@
 
 import { PDS_URL, STRATOS_URL } from './config.ts'
 import { listPdsRecords } from './stratos.ts'
-import { loadState } from './state.ts'
 
 // Mirrors `ADMIN_SESSION_COOKIE` in stratos-service/src/oauth/admin-routes.ts;
 // kept in sync manually since the Deno suite does not import the service package.
@@ -19,8 +18,7 @@ export interface AdminResponse {
 }
 
 async function adminBaseUrl(): Promise<string> {
-  const state = await loadState()
-  return state.ngrokUrl || STRATOS_URL
+  return STRATOS_URL
 }
 
 /** POST an admin XRPC procedure with the session cookie. */
@@ -32,7 +30,6 @@ export async function adminFetch(
   const baseUrl = await adminBaseUrl()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'ngrok-skip-browser-warning': 'true',
   }
   if (sessionCookie) {
     headers['Cookie'] = `${ADMIN_SESSION_COOKIE}=${sessionCookie}`
@@ -58,9 +55,7 @@ export async function adminList(
   query: Record<string, string> = {},
 ): Promise<AdminResponse> {
   const baseUrl = await adminBaseUrl()
-  const headers: Record<string, string> = {
-    'ngrok-skip-browser-warning': 'true',
-  }
+  const headers: Record<string, string> = {}
   if (sessionCookie) {
     headers['Cookie'] = `${ADMIN_SESSION_COOKIE}=${sessionCookie}`
   }

@@ -30,6 +30,10 @@
       "types": "./src/enrollment/index.ts",
       "import": "./src/enrollment/index.ts"
     },
+    "./spaces": {
+      "types": "./src/spaces/index.ts",
+      "import": "./src/spaces/index.ts"
+    },
     "./tests": {
       "types": "./tests/utils/index.ts",
       "import": "./tests/utils/index.ts"
@@ -112,6 +116,10 @@
       "./enrollment": {
         "types": "./dist/enrollment/index.d.ts",
         "import": "./dist/enrollment/index.js"
+      },
+      "./spaces": {
+        "types": "./dist/spaces/index.d.ts",
+        "import": "./dist/spaces/index.js"
       }
     }
   }

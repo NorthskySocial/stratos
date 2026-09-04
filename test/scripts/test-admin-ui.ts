@@ -23,8 +23,7 @@ const SCREENSHOT_DIR = new URL('../test-data/screenshots', import.meta.url)
   .pathname
 
 async function getBaseUrl(): Promise<string> {
-  const state = await loadState()
-  return state.ngrokUrl || STRATOS_URL
+  return STRATOS_URL
 }
 
 async function screenshot(page: Page, name: string): Promise<void> {
@@ -40,22 +39,8 @@ async function screenshot(page: Page, name: string): Promise<void> {
   }
 }
 
-async function handleNgrokInterstitial(page: Page): Promise<void> {
-  const ngrokButton = await page.$(
-    'button:has-text("Visit Site"), button:has-text("Visit the site")',
-  )
-  if (!ngrokButton && !page.url().includes('ngrok-free.app')) return
-  if (ngrokButton) {
-    await ngrokButton.click()
-    await page
-      .waitForNavigation({ waitUntil: 'networkidle', timeout: 30_000 })
-      .catch(() => {})
-  }
-}
-
 /** Complete the PDS login + consent screens after the UI started the flow. */
 async function completePdsLogin(page: Page, password: string): Promise<void> {
-  await handleNgrokInterstitial(page)
   await page.waitForSelector('input[type="password"], input[name="password"]', {
     timeout: 15_000,
   })
@@ -105,9 +90,7 @@ async function run(): Promise<void> {
   const baseUrl = await getBaseUrl()
 
   // 1a. The built SPA is served at /admin.
-  const spaRes = await fetch(`${baseUrl}/admin/`, {
-    headers: { 'ngrok-skip-browser-warning': 'true' },
-  })
+  const spaRes = await fetch(`${baseUrl}/admin/`)
   const spaHtml = await spaRes.text()
   assert(
     spaRes.status === 200 && spaHtml.includes('Northsky Admin'),
@@ -116,9 +99,7 @@ async function run(): Promise<void> {
   )
 
   // 1b. whoami without a session is 401 (and never SPA HTML).
-  const whoamiRes = await fetch(`${baseUrl}/admin/whoami`, {
-    headers: { 'ngrok-skip-browser-warning': 'true' },
-  })
+  const whoamiRes = await fetch(`${baseUrl}/admin/whoami`)
   assert(
     whoamiRes.status === 401,
     '/admin/whoami rejects unauthenticated request (401, not SPA HTML)',
@@ -131,7 +112,6 @@ async function run(): Promise<void> {
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   })
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
-  await context.setExtraHTTPHeaders({ 'ngrok-skip-browser-warning': 'true' })
   const page = await context.newPage()
 
   try {

@@ -7,7 +7,15 @@ import {
   type Page,
 } from 'npm:playwright@1.58.2'
 import { adminSetBoundaries } from './lib/admin.ts'
-import { DOMAINS, PDS_URL, SPACES, TEST_ROOT } from './lib/config.ts'
+import {
+  CLOUDFLARE_TUNNEL_URL,
+  DOMAINS,
+  PDS_URL,
+  SERVICE_DID,
+  SPACES,
+  STRATOS_URL,
+  TEST_ROOT,
+} from './lib/config.ts'
 import { assert, fail, finish, info, section } from './lib/log.ts'
 import {
   createPdsSession,
@@ -17,11 +25,10 @@ import {
 } from './lib/mixed-mode-pds.ts'
 import {
   fillSignInForm,
-  handleNgrokInterstitial,
   screenshot,
   submitSignInAndConsent,
 } from './lib/oauth-flow.ts'
-import { loadState, type TestState, type UserState } from './lib/state.ts'
+import { loadState, type UserState } from './lib/state.ts'
 import {
   isRecordNotFound,
   listPdsRecords,
@@ -104,7 +111,6 @@ async function login(
     await identifierInput.waitFor({ state: 'visible', timeout: 15_000 })
     await identifierInput.fill(identifier)
     await page.getByRole('button', { name: 'Sign In' }).click()
-    await handleNgrokInterstitial(page, label)
     try {
       await fillSignInForm(page, user.handle, user.password, label)
       break
@@ -399,17 +405,15 @@ async function waitUntil(
   return false
 }
 
-function composeEnvironment(state: TestState): Record<string, string> {
+function composeEnvironment(): Record<string, string> {
   return {
     ...Deno.env.toObject(),
-    STRATOS_PUBLIC_URL:
-      state.ngrokUrl ?? Deno.env.get('STRATOS_URL') ?? 'http://127.0.0.1:3100',
-    STRATOS_SERVICE_DID: state.serviceDid ?? 'did:web:127.0.0.1%3A3100',
+    STRATOS_PUBLIC_URL: STRATOS_URL,
+    STRATOS_SERVICE_DID: SERVICE_DID,
   }
 }
 
 async function runBrowserCompose(
-  state: TestState,
   command: string[],
   failureMessage: string,
 ): Promise<void> {
@@ -422,7 +426,7 @@ async function runBrowserCompose(
       ...command,
     ],
     cwd: TEST_ROOT,
-    env: composeEnvironment(state),
+    env: composeEnvironment(),
     stdout: 'inherit',
     stderr: 'piped',
   }).output()
@@ -433,14 +437,12 @@ async function runBrowserCompose(
   }
 }
 
-async function startBrowserServices(state: TestState): Promise<void> {
+async function startBrowserServices(): Promise<void> {
   await runBrowserCompose(
-    state,
     ['rm', '-sf', 'feedgen-webapp'],
     'Browser feedgen reset failed',
   )
   await runBrowserCompose(
-    state,
     [
       'up',
       '-d',
@@ -454,19 +456,15 @@ async function startBrowserServices(state: TestState): Promise<void> {
   )
 }
 
-async function stopBrowserServices(state: TestState): Promise<void> {
+async function stopBrowserServices(): Promise<void> {
   await runBrowserCompose(
-    state,
     ['stop', 'feedgen-webapp', 'webapp', 'webapp-pds'],
     'Browser services stop failed',
   )
 }
 
 async function newContext(browser: Browser): Promise<BrowserContext> {
-  return await browser.newContext({
-    ignoreHTTPSErrors: true,
-    extraHTTPHeaders: { 'ngrok-skip-browser-warning': 'true' },
-  })
+  return await browser.newContext({ ignoreHTTPSErrors: true })
 }
 
 async function run(): Promise<void> {
@@ -478,14 +476,17 @@ async function run(): Promise<void> {
     state.adminSessionCookie,
     'admin session cookie',
   )
-  const stratosUrl = requireValue(state.ngrokUrl, 'ngrok URL')
+  const stratosUrl = requireValue(
+    CLOUDFLARE_TUNNEL_URL,
+    'active Cloudflare Tunnel URL',
+  )
   let browser: Browser | undefined
   let pdsContext: BrowserContext | undefined
   let stratosContext: BrowserContext | undefined
 
   try {
     info('Building and starting the browser E2E webapp and feedgen images')
-    await startBrowserServices(state)
+    await startBrowserServices()
     assert(await waitForHealth(WEBAPP_URL), 'The production webapp is healthy')
     assert(
       await waitForHealth(PDS_WEBAPP_URL),
@@ -588,7 +589,7 @@ async function run(): Promise<void> {
     ])
     await browser?.close()
     try {
-      await stopBrowserServices(state)
+      await stopBrowserServices()
     } catch (error) {
       fail(
         'Browser services stopped',

@@ -65,7 +65,6 @@ export default defineConfig(({ command, mode }) => {
     build: {
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
-        external: ['postgres'],
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
