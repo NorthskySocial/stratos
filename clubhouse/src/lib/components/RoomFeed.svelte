@@ -2,6 +2,8 @@
   import type { ClubhouseFeedPost } from '../feedgen'
   import type { ReplyRef } from '../post-writer'
   import type { RoomFeedState } from '../types'
+  import IconaMoon from './IconaMoon.svelte'
+  import PostAuthor from './PostAuthor.svelte'
 
   interface Props {
     feedState: RoomFeedState
@@ -75,9 +77,9 @@
     <div class="feed-status feed-status-error"><h2>Topic unavailable</h2><p>This topic is not in the loaded room history.</p>{#if hasMore}<button class="button button-secondary" type="button" onclick={onLoadMore}>Load more history</button>{/if}</div>
   {:else if openTopic}
     <section class="thread-view" aria-label="Topic thread">
-      <button class="thread-back" type="button" onclick={() => { replyingToUri = null; onCloseTopic() }}>← All topics</button>
+      <button class="thread-back" type="button" onclick={() => { replyingToUri = null; onCloseTopic() }}><IconaMoon name="arrow-left" /> All topics</button>
       <article class="post topic-root">
-        <p class="post-author">{openTopic.author.handle ?? openTopic.author.did}</p>
+        <PostAuthor author={openTopic.author} />
         <p class="post-text">{openTopic.text}</p>
         <div class="post-meta"><time datetime={openTopic.indexedAt}>{new Date(openTopic.indexedAt).toLocaleString()}</time><button class="button button-primary" type="button" onclick={() => replyingToUri = openTopic.uri}>Reply to topic</button></div>
       </article>
@@ -85,7 +87,7 @@
       <ol class="post-list thread-list">
         {#each threadPosts.filter((post) => post.uri !== openTopic.uri) as post (post.uri)}
           <li class="post thread-reply">
-            <p class="post-author">{post.author.handle ?? post.author.did}</p>
+            <PostAuthor author={post.author} />
             <p class="post-text">{post.text}</p>
             <div class="post-meta"><time datetime={post.indexedAt}>{new Date(post.indexedAt).toLocaleString()}</time><button type="button" onclick={() => replyingToUri = post.uri}>Reply</button></div>
           </li>
@@ -99,7 +101,7 @@
     <ol class="post-list" aria-label="Room topics">
       {#each topics as post (post.uri)}
         <li class="post topic-card">
-          <p class="post-author">{post.author.handle ?? post.author.did}</p>
+          <PostAuthor author={post.author} />
           <p class="post-text">{post.text}</p>
           <div class="post-meta"><time datetime={post.indexedAt}>{new Date(post.indexedAt).toLocaleString()}</time><div><button type="button" onclick={() => onOpenTopic(post.uri)}>Open topic</button><button type="button" onclick={() => { onOpenTopic(post.uri); replyingToUri = post.uri }}>Reply</button></div></div>
         </li>
@@ -112,7 +114,7 @@
 {#if replyingTo}
   <dialog class="reply-dialog" open aria-labelledby="reply-dialog-title">
     <form method="dialog" class="reply-dialog-card" onsubmit={(event) => { event.preventDefault(); void submitPost() }}>
-      <div class="reply-dialog-heading"><h2 id="reply-dialog-title">Reply to {replyingTo.author.handle ?? replyingTo.author.did}</h2><button type="button" aria-label="Close reply dialog" onclick={() => replyingToUri = null}>×</button></div>
+      <div class="reply-dialog-heading"><h2 id="reply-dialog-title">Reply to {replyingTo.author.handle ?? replyingTo.author.did}</h2><button type="button" aria-label="Close reply dialog" onclick={() => replyingToUri = null}><IconaMoon name="close" /></button></div>
       <p class="reply-context">{replyingTo.text}</p>
       <label for="topic-reply">Your response</label>
       <textarea id="topic-reply" bind:value={text} oninput={() => draftRevision += 1} maxlength="300" rows="5" placeholder="Contribute to this topic."></textarea>

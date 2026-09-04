@@ -16,6 +16,10 @@ vi.mock('./enrollment', () => ({
   resolveAuthenticatedHandle: vi.fn(),
 }))
 
+vi.mock('../telemetry', () => ({
+  captureClubhouseException: vi.fn(),
+}))
+
 import { createClubhouseIntegration } from './integration'
 import { resolveAuthenticatedHandle } from './enrollment'
 
@@ -121,6 +125,58 @@ describe('Clubhouse integration', () => {
       'https://stratos.example/oauth/boundaries/status',
       { method: 'GET' },
     )
+  })
+
+  it('hydrates feed authors with Typeahead profile avatars', async () => {
+    const fetchHandler = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          feed: [
+            {
+              post: {
+                uri: 'at://did:plc:faye/zone.stratos.feed.post/1',
+                cid: 'bafy-faye',
+                indexedAt: '2026-09-04T18:00:00.000Z',
+                author: { did: 'did:plc:faye', handle: 'faye.example' },
+                record: { text: 'See you, space cowboy.' },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+    const typeaheadFetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          profiles: [
+            {
+              did: 'did:plc:faye',
+              handle: 'faye.example',
+              displayName: 'Faye Valentine',
+              avatar: 'https://cdn.example/faye.jpg',
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    const integration = createClubhouseIntegration(
+      { feedgenDid: 'did:web:feed.example', pdsSpaceUriByRoom: {} },
+      { typeaheadFetcher },
+    )
+    await integration.initialize?.()
+
+    const page = await integration.getFeed?.('bebop-sessions', 50)
+
+    expect(page?.posts[0]?.author).toEqual({
+      did: 'did:plc:faye',
+      handle: 'faye.example',
+      displayName: 'Faye Valentine',
+      avatar: 'https://cdn.example/faye.jpg',
+    })
+    expect(typeaheadFetcher).toHaveBeenCalledOnce()
   })
 
   it('uses the authenticated server custody rather than a forged PDS enrollment record', async () => {

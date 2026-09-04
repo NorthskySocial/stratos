@@ -8,6 +8,7 @@ import {
 import { resolveAuthenticatedHandle } from './enrollment'
 import { getFeed, type FeedPage } from './feedgen'
 import { rememberRoomReturn, roomJoinUrl } from './join'
+import { getActorProfiles, type TypeaheadActor } from './typeahead'
 import { captureClubhouseException } from '../telemetry'
 import {
   createRoomPost,
@@ -110,11 +111,47 @@ export function createClubhouseIntegration(
   dependencies: {
     navigate?: (url: string) => void
     stratosWriter?: StratosPostWriter
+    typeaheadFetcher?: typeof fetch
   } = {},
 ) {
   const auth = createClubhouseAuth(config)
   let session: OAuthSession | null = null
   let identity: ClubhouseIdentity | null = null
+  const authorProfiles = new Map<string, TypeaheadActor | null>()
+
+  async function enrichAuthors(page: FeedPage): Promise<FeedPage> {
+    const missing = [
+      ...new Set(
+        page.posts
+          .filter((post) => !post.author.avatar)
+          .map((post) => post.author.did)
+          .filter((did) => !authorProfiles.has(did)),
+      ),
+    ]
+    if (missing.length > 0) {
+      try {
+        const resolved = await getActorProfiles(
+          missing,
+          dependencies.typeaheadFetcher ?? globalThis.fetch,
+        )
+        for (const did of missing) {
+          authorProfiles.set(did, resolved.get(did) ?? null)
+        }
+      } catch (error) {
+        captureClubhouseException(error)
+      }
+    }
+
+    return {
+      ...page,
+      posts: page.posts.map((post) => {
+        const profile = authorProfiles.get(post.author.did)
+        return profile
+          ? { ...post, author: { ...post.author, ...profile } }
+          : post
+      }),
+    }
+  }
 
   async function refresh(): Promise<ClubhouseIdentity | null> {
     session = await auth.init()
@@ -188,7 +225,8 @@ export function createClubhouseIntegration(
       cursor?: string,
     ): Promise<FeedPage> {
       if (!session) throw new Error('Sign in to read this room.')
-      return getFeed(session, config, { feed: roomId, limit, cursor })
+      const page = await getFeed(session, config, { feed: roomId, limit, cursor })
+      return enrichAuthors(page)
     },
     async createPost(roomId: string, text: string, reply?: ReplyRef) {
       if (!session) throw new Error('Sign in before posting.')

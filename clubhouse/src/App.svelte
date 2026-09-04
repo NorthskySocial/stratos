@@ -5,12 +5,14 @@
   import IconaMoon from './lib/components/IconaMoon.svelte'
   import Entrance from './lib/components/Entrance.svelte'
   import ErrorState from './lib/components/ErrorState.svelte'
+  import HandleTypeahead from './lib/components/HandleTypeahead.svelte'
   import RoomPlaceholder from './lib/components/RoomPlaceholder.svelte'
   import { FeedCursorStore, FeedgenError, type ClubhouseFeedPost } from './lib/feedgen'
   import { consumeRoomJoin, consumeRoomReturn, rememberRoomJoin } from './lib/join'
   import { roomIdFromPath, roomPath, topicPath, topicUriFromPath } from './lib/route'
+  import { DEFAULT_ROOM_VISUAL, roomVisualsFor } from './lib/room-visuals'
   import { stateForRoom } from './lib/state'
-  import { withClubhouseSpan } from './telemetry'
+  import { captureClubhouseException, withClubhouseSpan } from './telemetry'
   import type { ClubhouseIntegration, ClubhouseIdentity, RoomAccessState, RoomCatalogEntry, RoomFeedState } from './lib/types'
 
   interface Props {
@@ -51,6 +53,11 @@
   const currentTopicUri = $derived(topicUriFromPath(pathname))
   const currentRoom = $derived(
     currentRoomId ? rooms.find((room) => room.id === currentRoomId) : undefined,
+  )
+  const currentRoomVisual = $derived(
+    currentRoom
+      ? roomVisualsFor(rooms).get(currentRoom.id) ?? DEFAULT_ROOM_VISUAL
+      : DEFAULT_ROOM_VISUAL,
   )
 
   onMount(() => {
@@ -346,7 +353,7 @@
     {:else}
       <form class="sign-in" onsubmit={(event) => { event.preventDefault(); void signIn() }}>
         <label for="handle">ATProto handle</label>
-        <input id="handle" bind:value={handle} autocomplete="username" placeholder="rei.example" />
+        <HandleTypeahead bind:value={handle} disabled={signingIn} />
         <button class="button button-secondary" type="submit" disabled={signingIn || !handle.trim()}>{signingIn ? 'Opening…' : 'Sign in'}</button>
       </form>
     {/if}
@@ -356,14 +363,14 @@
     <div class="live-region" aria-live="polite" aria-atomic="true">{liveMessage}</div>
     {#if loading}
       <section class="loading-state" aria-busy="true" aria-labelledby="loading-title">
-        <span class="loading-orbit" aria-hidden="true"></span>
+        <span class="loading-icon" aria-hidden="true"><IconaMoon name="clock" /></span>
         <h1 id="loading-title">Mapping the rooms…</h1>
-        <p>One moment while the constellation comes into view.</p>
+        <p>One moment while the clubhouse gets ready.</p>
       </section>
     {:else if error}
       <ErrorState message={error} onRetry={loadCatalog} />
     {:else if currentRoomId && currentRoom}
-      <RoomPlaceholder room={currentRoom} state={stateForRoom(currentRoom, states)} onBack={goHome} onJoin={joinRoom} onRecheckPending={() => void recheckPendingRoom()} {feedState} {posts} {hasMore} feedMessage={feedMessage} topicUri={currentTopicUri} onOpenTopic={openTopic} onCloseTopic={closeTopic} onLoadMore={() => void loadSelectedRoom(true)} onPost={postToRoom} />
+      <RoomPlaceholder room={currentRoom} state={stateForRoom(currentRoom, states)} visual={currentRoomVisual} onBack={goHome} onJoin={joinRoom} onRecheckPending={() => void recheckPendingRoom()} {feedState} {posts} {hasMore} feedMessage={feedMessage} topicUri={currentTopicUri} onOpenTopic={openTopic} onCloseTopic={closeTopic} onLoadMore={() => void loadSelectedRoom(true)} onPost={postToRoom} />
     {:else if currentRoomId}
       <ErrorState message="That room does not appear in the current catalogue." onRetry={goHome} />
     {:else}
@@ -372,7 +379,7 @@
   </main>
 
   <footer class="site-footer">
-    <p>Clubhouse alpha · rooms are open membership areas.</p>
-    <p>Room access is decided by the service, not this interface.</p>
+    <p>Stratos alpha alpha · Clubhouse is a demonstration of it.</p>
+    <p>Supports both Spaces and non-spaces users.</p>
   </footer>
 </div>
