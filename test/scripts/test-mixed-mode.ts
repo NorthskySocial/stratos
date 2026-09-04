@@ -88,7 +88,7 @@ interface ListReposBody {
 interface PostView {
   uri?: string
   cid?: string
-  author?: { did?: string }
+  author?: { did?: string; handle?: string }
   record?: Record<string, unknown>
   boundaries?: string[]
 }
@@ -744,8 +744,9 @@ async function run(): Promise<void> {
     )
     assert(
       memberFeedPost?.author?.did === fixture.member.did &&
+        memberFeedPost?.author?.handle === fixture.member.handle &&
         stratosFeedPost?.author?.did === stratosAuthor.did,
-      'the feed returns the PDS and Stratos authors for their custody records',
+      'the feed returns the PDS author handle and both custody authors',
     )
     assert(
       claimedFeedPost?.boundaries?.length === 1 &&
