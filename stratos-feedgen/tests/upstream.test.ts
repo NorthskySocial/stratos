@@ -107,7 +107,7 @@ describe('UpstreamStratosClient', () => {
   })
 
   describe('resolveEnrollments', () => {
-    it('GETs the endpoint and returns the parsed body', async () => {
+    it('GETs the endpoint and qualifies returned boundaries', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(
@@ -122,7 +122,7 @@ describe('UpstreamStratosClient', () => {
       expect(result).toEqual({
         did: 'did:plc:user',
         enrolled: true,
-        boundaries: ['engineering'],
+        boundaries: [`${STRATOS_DID}/engineering`],
       })
       expect(mock.requests).toHaveLength(1)
       const req = mock.requests[0]
@@ -130,6 +130,69 @@ describe('UpstreamStratosClient', () => {
       expect(req.url).toBe(
         '/xrpc/zone.stratos.identity.resolveEnrollments?did=did%3Aplc%3Auser',
       )
+    })
+
+    it('ignores boundaries that belong to another service', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            did: 'did:plc:user',
+            enrolled: true,
+            boundaries: [
+              'engineering',
+              'did:web:previous-service.test/engineering',
+            ],
+          }),
+        )
+      }
+
+      await expect(client.resolveEnrollments('did:plc:user')).resolves.toEqual({
+        did: 'did:plc:user',
+        enrolled: true,
+        boundaries: [`${STRATOS_DID}/engineering`],
+      })
+    })
+
+    it('uses empty boundaries for unenrolled responses', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ did: 'did:plc:user', enrolled: false }))
+      }
+
+      await expect(client.resolveEnrollments('did:plc:user')).resolves.toEqual({
+        did: 'did:plc:user',
+        enrolled: false,
+        boundaries: [],
+      })
+    })
+
+    it('rejects enrolled responses with invalid boundaries', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ did: 'did:plc:user', enrolled: true }))
+      }
+
+      await expect(client.resolveEnrollments('did:plc:user')).rejects.toThrow(
+        'resolveEnrollments returned invalid boundaries',
+      )
+    })
+
+    it('rejects enrolled responses with non-string boundaries', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            did: 'did:plc:user',
+            enrolled: true,
+            boundaries: ['engineering', 17],
+          }),
+        )
+      }
+
+      await expect(
+        client.resolveEnrollments('did:plc:user'),
+      ).rejects.toBeInstanceOf(StratosInvalidResponseError)
     })
 
     it('signs requests with a valid service JWT', async () => {

@@ -400,6 +400,7 @@ export class StratosServer {
       reservedBoundary: cfg.stratos.reservedDomain,
       allowedRedirectOrigins: cfg.allowedRedirectOrigins,
       logger: ctx.logger,
+      enrollmentEvents: ctx.enrollmentEvents,
       devMode: cfg.stratos.devMode === true,
       dpopVerifier: ctx.dpopVerifier,
       profileRecordWriter: ctx.profileRecordWriter,

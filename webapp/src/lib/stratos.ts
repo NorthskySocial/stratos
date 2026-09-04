@@ -135,58 +135,13 @@ export function serviceDIDToRkey(serviceDid: string): string {
 export async function discoverStratosEnrollment(
   session: OAuthSession,
 ): Promise<StratosEnrollment | null> {
-  const agent = configureAgent(new Agent(session))
+  const enrollments = await discoverAllStratosEnrollments(session)
   if (STRATOS_SERVICE_DID) {
     const rkey = serviceDIDToRkey(STRATOS_SERVICE_DID)
-    try {
-      const res = await agent.com.atproto.repo.getRecord({
-        repo: session.sub,
-        collection: 'zone.stratos.actor.enrollment',
-        rkey,
-      })
-      if (res.data.value) {
-        return parseEnrollmentRecord(
-          res.data.value as Record<string, unknown>,
-          rkey,
-        )
-      }
-    } catch (err) {
-      console.warn(`Failed to get enrollment record by rkey ${rkey}:`, err)
-    }
+    return enrollments.find((enrollment) => enrollment.rkey === rkey) ?? null
   }
 
-  // Fallback to listing records
-  try {
-    const res = await agent.com.atproto.repo.listRecords({
-      repo: session.sub,
-      collection: 'zone.stratos.actor.enrollment',
-      limit: 10,
-    })
-    if (res.data.records && res.data.records.length > 0) {
-      // If we have a preferred DID, try to find it in the list first
-      if (STRATOS_SERVICE_DID) {
-        const preferred = res.data.records.find((r) =>
-          r.uri.endsWith(`/${serviceDIDToRkey(STRATOS_SERVICE_DID!)}`),
-        )
-        if (preferred) {
-          return parseEnrollmentRecord(
-            preferred.value as Record<string, unknown>,
-            preferred.uri.split('/').pop()!,
-          )
-        }
-      }
-      // Otherwise return the first one
-      const first = res.data.records[0]
-      return parseEnrollmentRecord(
-        first.value as Record<string, unknown>,
-        first.uri.split('/').pop()!,
-      )
-    }
-  } catch (err) {
-    console.warn('Failed to list enrollment records:', err)
-  }
-
-  return null
+  return enrollments[0] ?? null
 }
 
 /**
@@ -199,12 +154,19 @@ export async function discoverAllStratosEnrollments(
 ): Promise<StratosEnrollment[]> {
   const agent = configureAgent(new Agent(session))
   try {
-    const res = await agent.com.atproto.repo.listRecords({
-      repo: session.sub,
-      collection: 'zone.stratos.actor.enrollment',
-      limit: 50,
-    })
-    return (res.data.records || [])
+    const records = []
+    let cursor: string | undefined
+    do {
+      const res = await agent.com.atproto.repo.listRecords({
+        repo: session.sub,
+        collection: 'zone.stratos.actor.enrollment',
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+      })
+      records.push(...(res.data.records || []))
+      cursor = res.data.cursor
+    } while (cursor)
+    return records
       .map((r) =>
         parseEnrollmentRecord(
           r.value as Record<string, unknown>,

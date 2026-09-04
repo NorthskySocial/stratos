@@ -98,6 +98,7 @@ export interface OAuthRoutesConfig {
   allowedRedirectOrigins: string[]
   fetchClientRedirectUris?: (clientId: string) => Promise<string[]>
   logger?: Logger
+  enrollmentEvents: import('../context-types.js').EnrollmentEventEmitter
   devMode?: boolean
   dpopVerifier: import('../infra/auth/dpop-verifier.js').DpopVerifier
   profileRecordWriter: import('@northskysocial/stratos-core').ProfileRecordWriter

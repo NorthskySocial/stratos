@@ -100,6 +100,7 @@ describe('Re-enrollment', () => {
       enrollmentConfig: { mode: 'open' },
       enrollmentStore: mockEnrollmentStore,
       enrollmentValidator: mockEnrollmentValidator,
+      enrollmentEvents: { emit: vi.fn() },
       idResolver: mockIdResolver,
       baseUrl: 'https://stratos.example.com',
       allowedRedirectOrigins: [],

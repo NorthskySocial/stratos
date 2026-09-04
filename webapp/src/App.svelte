@@ -333,7 +333,7 @@
 </script>
 
 {#if loading && allPosts.length === 0}
-    <div class="loading-screen">
+    <div class="loading-screen" role="status">
         Loading…
         <p class="loading-hint">{loadingStatus}</p>
     </div>
@@ -370,11 +370,12 @@
             <Composer {session} {enrollment} {attestationVerified} {stratosAgent} {replyingTo} onpost={refreshFeed}
                       oncancelreply={cancelReply}/>
 
-            <div class="feed-tabs">
+            <div class="feed-tabs" role="group" aria-label="Feed filter">
                 <button
                         class="tab"
                         class:active={activeFeed === null}
                         onclick={() => handleSelectFeed(null)}
+                        aria-pressed={activeFeed === null}
                 >
                     All
                 </button>
@@ -383,6 +384,7 @@
                             class="tab"
                             class:active={activeFeed === domain}
                             onclick={() => handleSelectFeed(domain)}
+                            aria-pressed={activeFeed === domain}
                     >
                         {displayBoundary(domain)}
                     </button>
@@ -402,13 +404,13 @@
         align-items: center;
         justify-content: center;
         min-height: 100vh;
-        color: #888;
+        color: #666;
     }
 
     .loading-hint {
         font-size: 0.85rem;
         margin-top: 0.5rem;
-        color: #aaa;
+        color: #666;
     }
 
     .app-layout {

@@ -106,6 +106,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
             pdsEndpoint: enrollmentResult.pdsEndpoint,
             idResolver,
             logger,
+            enrollmentEvents: config.enrollmentEvents,
           })
         } else {
           await handleNewEnrollment({
@@ -178,8 +179,10 @@ async function updateExistingEnrollmentMembership(deps: {
   signingKeyDid: string
   createAttestation: OAuthRoutesConfig['createAttestation']
   logger: Logger | undefined
+  enrollmentEvents: OAuthRoutesConfig['enrollmentEvents']
 }): Promise<{ boundaries: string[]; attestation: EnrollmentAttestation }> {
   const currentBoundaries = await deps.enrollmentStore.getBoundaries(deps.did)
+  let boundaries = currentBoundaries
   if (
     deps.selectedRoomBoundary &&
     !currentBoundaries.includes(deps.selectedRoomBoundary)
@@ -192,14 +195,19 @@ async function updateExistingEnrollmentMembership(deps: {
       { did: deps.did, newBoundary: deps.selectedRoomBoundary },
       'updated enrollment boundaries',
     )
+    boundaries = await deps.enrollmentStore.getBoundaries(deps.did)
+    deps.enrollmentEvents.emit('enrollment', {
+      did: deps.did,
+      action: 'boundaries',
+      boundaries,
+      priorBoundaries: currentBoundaries,
+      time: new Date().toISOString(),
+    })
   }
 
   // A plain reauthorization preserves every existing membership. After a
   // selected-room insertion, read the authoritative set back for attestation
   // and publication instead of reconstructing it from browser-controlled data.
-  const boundaries = deps.selectedRoomBoundary
-    ? await deps.enrollmentStore.getBoundaries(deps.did)
-    : currentBoundaries
   const attestation = await deps.createAttestation(
     deps.did,
     boundaries,
@@ -225,6 +233,7 @@ interface ExistingEnrollmentDeps {
   pdsEndpoint: string | undefined
   idResolver: IdResolver
   logger: Logger | undefined
+  enrollmentEvents: OAuthRoutesConfig['enrollmentEvents']
 }
 
 async function handleExistingEnrollment(deps: ExistingEnrollmentDeps) {
@@ -239,6 +248,7 @@ async function handleExistingEnrollment(deps: ExistingEnrollmentDeps) {
     spacesCapability,
     idResolver,
     logger,
+    enrollmentEvents,
   } = deps
 
   // A re-auth can change the verdict, because the user may grant or withhold
@@ -276,6 +286,7 @@ async function handleExistingEnrollment(deps: ExistingEnrollmentDeps) {
         signingKeyDid: enrollment.signingKeyDid,
         createAttestation,
         logger,
+        enrollmentEvents,
       })
 
     // Rows persisted before MM-03 carry no custody; treat them as 'stratos'
@@ -297,26 +308,28 @@ async function handleExistingEnrollment(deps: ExistingEnrollmentDeps) {
     const repoHost = custody === 'pds' ? pdsEndpoint : undefined
     const pdsEndpointChanged = pdsEndpoint !== enrollment.pdsEndpoint
 
-    await profileRecordWriter.putEnrollmentRecord(
-      did,
-      enrollment.enrollmentRkey!,
-      {
-        service: serviceEndpoint,
-        boundaries: boundaries.map((value: string) => ({ value })),
-        signingKey: enrollment.signingKeyDid,
-        attestation: {
-          sig: attestation.sig,
-          signingKey: attestation.signingKey,
-        },
-        createdAt: new Date().toISOString(),
-        custody,
-        repoHost,
+    const currentEnrollmentRkey = serviceDIDToRkey(serviceDid)
+    await profileRecordWriter.putEnrollmentRecord(did, currentEnrollmentRkey, {
+      service: serviceEndpoint,
+      boundaries: boundaries.map((value: string) => ({ value })),
+      signingKey: enrollment.signingKeyDid,
+      attestation: {
+        sig: attestation.sig,
+        signingKey: attestation.signingKey,
       },
-    )
+      createdAt: new Date().toISOString(),
+      custody,
+      repoHost,
+    })
 
+    const enrollmentRkeyChanged =
+      enrollment.enrollmentRkey !== currentEnrollmentRkey
     const verdictChanged = spacesCapability !== enrollment.capabilityVerdict
-    if (verdictChanged || pdsEndpointChanged) {
+    if (enrollmentRkeyChanged || verdictChanged || pdsEndpointChanged) {
       await enrollmentStore.updateEnrollment(did, {
+        ...(enrollmentRkeyChanged
+          ? { enrollmentRkey: currentEnrollmentRkey }
+          : {}),
         ...(verdictChanged ? { capabilityVerdict: spacesCapability } : {}),
         // `repoHost` is the routing target, so it moves with the endpoint.
         // Publishing the new host while the store keeps the old one would

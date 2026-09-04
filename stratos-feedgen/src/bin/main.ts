@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Secp256k1Keypair } from '@atproto/crypto'
 import type { Logger } from '@northskysocial/stratos-core'
+import { normalizeMembershipBoundaries } from '../boundary-normalization.js'
 import { createFeedRequestVerifier, createIdResolver } from '../auth/index.js'
 import { type FeedgenConfig, loadFeedgenConfig } from '../config.js'
 import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
@@ -137,7 +138,24 @@ async function main(): Promise<void> {
   shutdownDeps.httpServer = httpServer
   logger.info({ port }, 'stratos-feedgen listening')
 
-  const configuredBoundaries = new Set(feeds.list().map((f) => f.boundary))
+  const configuredBoundaries = new Set(
+    normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      feeds.list().map((feed) => feed.boundary),
+    ),
+  )
+  for (const actor of await store.listEnrolledActors()) {
+    const boundaries = normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      actor.boundaries,
+    )
+    if (
+      boundaries.length !== actor.boundaries.length ||
+      boundaries.some((boundary, index) => boundary !== actor.boundaries[index])
+    ) {
+      await store.upsertEnrolledActor({ ...actor, boundaries })
+    }
+  }
   const replayAuthorizer = new CurrentMembershipReplayAuthorizer({
     client: upstream,
     configuredBoundaries,
@@ -427,13 +445,17 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
     did: string,
     boundaries: string[],
   ): Promise<void> => {
+    const qualifiedBoundaries = normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      boundaries,
+    )
     spaceMutationFence.beginDidMutation(did)
     try {
       await spaceMutationFence.withDidScope(did, async (scope) => {
         const now = new Date().toISOString()
         const existing = await store.getEnrolledActor(did)
         if (existing) {
-          const nextSet = new Set(boundaries)
+          const nextSet = new Set(qualifiedBoundaries)
           const lost = existing.boundaries.filter(
             (b) => configuredBoundaries.has(b) && !nextSet.has(b),
           )
@@ -446,14 +468,14 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
         }
         await store.upsertEnrolledActor({
           did,
-          boundaries,
+          boundaries: qualifiedBoundaries,
           enrolledAt: existing?.enrolledAt ?? now,
           lastSeenAt: now,
         })
         // The boundary cache may hold a stale set for this viewer. The purge
         // already invalidates on shrink; invalidate here too for a pure grow.
         enrollmentManager.invalidate(did)
-        if (intersectsBoundaries(boundaries, configuredBoundaries)) {
+        if (intersectsBoundaries(qualifiedBoundaries, configuredBoundaries)) {
           pool.addActor(did)
         } else {
           pool.removeActor(did)

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Client } from '@atcute/client'
 import {
   ENROLLMENT_COLLECTION,
+  discoverEnrollment,
   discoverEnrollments,
   getEnrollmentByServiceDid,
   parseEnrollmentRecord,
@@ -354,6 +355,50 @@ describe('Enrollment Discovery', () => {
         'did:web:nerv.tokyo.jp',
         'did:web:seele.berlin.de',
       ])
+    })
+  })
+
+  describe('discoverEnrollment', () => {
+    it('returns the oldest enrollment for compatibility', async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          records: [
+            {
+              uri: `at://did:plc:shinji/${ENROLLMENT_COLLECTION}/did:web:nerv.tokyo.jp`,
+              value: {
+                service: 'did:web:nerv.tokyo.jp',
+                createdAt: '1995-10-05T18:30:00Z',
+                signingKey: 'did:key:zReiKey',
+                attestation: {
+                  signingKey: 'did:key:zMisatoKey',
+                  sig: new Uint8Array([1, 2, 3]),
+                },
+              },
+            },
+            {
+              uri: `at://did:plc:shinji/${ENROLLMENT_COLLECTION}/did:web:seele.berlin.de`,
+              value: {
+                service: 'did:web:seele.berlin.de',
+                createdAt: '1995-10-04T18:30:00Z',
+                signingKey: 'did:key:zReiKey',
+                attestation: {
+                  signingKey: 'did:key:zMisatoKey',
+                  sig: new Uint8Array([1, 2, 3]),
+                },
+              },
+            },
+          ],
+        },
+      })
+      await mockClient(mockGet)
+
+      const result = await discoverEnrollment(
+        'did:plc:shinji',
+        'https://pds.nerv',
+      )
+
+      expect(result?.service).toBe('did:web:seele.berlin.de')
     })
   })
 
