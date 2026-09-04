@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { InvalidRequestError } from '@atproto/xrpc-server'
-import { handleRoomPost } from '../src/oauth/handlers/room-post.js'
+import {
+  handleRoomPost,
+  handleRoomPostDelete,
+} from '../src/oauth/handlers/room-post.js'
 import { buildRoomCatalog } from '../src/oauth/room-catalog.js'
 import type { OAuthRoutesConfig } from '../src/oauth/routes.js'
 
@@ -32,6 +35,7 @@ function createConfig(): OAuthRoutesConfig {
       uri: 'at://did:plc:misato/zone.stratos.feed.post/1',
       cid: 'bafy-misato',
     }),
+    deleteApprovedRoomPost: vi.fn().mockResolvedValue(undefined),
   } as unknown as OAuthRoutesConfig
 }
 
@@ -235,5 +239,70 @@ describe('server-approved room posts', () => {
     expect(JSON.stringify(response.json.mock.calls[0][0])).not.toContain(
       'internal boundary detail',
     )
+  })
+
+  it('deletes a room post owned by the authenticated actor', async () => {
+    const config = createConfig()
+    const response = createResponse()
+
+    await handleRoomPostDelete(
+      config,
+      vi.fn().mockResolvedValue('did:plc:misato'),
+    )(
+      {
+        body: {
+          uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+        },
+      } as never,
+      response as never,
+    )
+
+    expect(config.deleteApprovedRoomPost).toHaveBeenCalledWith({
+      did: 'did:plc:misato',
+      rkey: '3k5',
+    })
+    expect(response.status).toHaveBeenCalledWith(200)
+  })
+
+  it('rejects deleting another actor room post', async () => {
+    const config = createConfig()
+    const response = createResponse()
+
+    await handleRoomPostDelete(
+      config,
+      vi.fn().mockResolvedValue('did:plc:rei'),
+    )(
+      {
+        body: {
+          uri: 'at://did:plc:asuka/zone.stratos.feed.post/3k6',
+        },
+      } as never,
+      response as never,
+    )
+
+    expect(config.deleteApprovedRoomPost).not.toHaveBeenCalled()
+    expect(response.status).toHaveBeenCalledWith(403)
+    expect(response.json).toHaveBeenCalledWith({
+      error: 'PostOwnershipRequired',
+      message: 'You can only delete your own room posts',
+    })
+  })
+
+  it.each([
+    null,
+    {},
+    { uri: 'not-an-at-uri' },
+    { uri: 'at://did:plc:rei/app.bsky.feed.post/3k7' },
+  ])('rejects malformed room post deletion input %#', async (body) => {
+    const config = createConfig()
+    const response = createResponse()
+
+    await handleRoomPostDelete(
+      config,
+      vi.fn().mockResolvedValue('did:plc:rei'),
+    )({ body } as never, response as never)
+
+    expect(config.deleteApprovedRoomPost).not.toHaveBeenCalled()
+    expect(response.status).toHaveBeenCalledWith(400)
   })
 })

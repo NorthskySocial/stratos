@@ -1,19 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createRoomPost, RoomPostConfigurationError } from './post-writer'
+import {
+  createRoomPost,
+  deleteRoomPost,
+  RoomPostConfigurationError,
+} from './post-writer'
 
 describe('custody-aware room posting', () => {
   it('uses the configured authority space for PDS custody and omits record boundaries', async () => {
-    const fetchHandler = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            uri: 'at://did:plc:asuka/zone.stratos.feed.post/1',
-            cid: 'bafy-asuka',
-          }),
-          { status: 200 },
-        ),
-      )
+    const fetchHandler = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          uri: 'at://did:plc:asuka/zone.stratos.feed.post/1',
+          cid: 'bafy-asuka',
+        }),
+        { status: 200 },
+      ),
+    )
     await createRoomPost({
       session: { sub: 'did:plc:asuka', fetchHandler } as never,
       custody: 'pds',
@@ -63,13 +65,14 @@ describe('custody-aware room posting', () => {
 
   it('delegates Stratos custody to a server-approved writer and never supplies a boundary', async () => {
     const createPost = vi.fn().mockResolvedValue(undefined)
+    const deletePost = vi.fn().mockResolvedValue(undefined)
     await createRoomPost({
       session: { sub: 'did:plc:rei' } as never,
       custody: 'stratos',
       roomId: 'nerv-hq',
       text: 'Report in.',
       config: { pdsSpaceUriByRoom: {} },
-      stratosWriter: { createPost },
+      stratosWriter: { createPost, deletePost },
     })
     expect(createPost).toHaveBeenCalledWith({
       roomId: 'nerv-hq',
@@ -87,5 +90,62 @@ describe('custody-aware room posting', () => {
         config: { pdsSpaceUriByRoom: {} },
       }),
     ).rejects.toBeInstanceOf(RoomPostConfigurationError)
+  })
+
+  it('deletes an owned PDS-custodied post with record compare-and-swap', async () => {
+    const fetchHandler = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }))
+
+    await deleteRoomPost({
+      session: { sub: 'did:plc:asuka', fetchHandler } as never,
+      custody: 'pds',
+      uri: 'at://did:plc:asuka/zone.stratos.feed.post/3k2',
+      cid: 'bafy-asuka',
+    })
+
+    expect(fetchHandler).toHaveBeenCalledWith(
+      '/xrpc/com.atproto.repo.deleteRecord',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          repo: 'did:plc:asuka',
+          collection: 'zone.stratos.feed.post',
+          rkey: '3k2',
+          swapRecord: 'bafy-asuka',
+        }),
+      },
+    )
+  })
+
+  it('delegates an owned Stratos-custodied post deletion', async () => {
+    const deletePost = vi.fn().mockResolvedValue(undefined)
+
+    await deleteRoomPost({
+      session: { sub: 'did:plc:rei' } as never,
+      custody: 'stratos',
+      uri: 'at://did:plc:rei/zone.stratos.feed.post/3k3',
+      cid: 'bafy-rei',
+      stratosWriter: { createPost: vi.fn(), deletePost },
+    })
+
+    expect(deletePost).toHaveBeenCalledWith({
+      uri: 'at://did:plc:rei/zone.stratos.feed.post/3k3',
+    })
+  })
+
+  it('rejects deletion of another actor post before making a request', async () => {
+    const fetchHandler = vi.fn()
+
+    await expect(
+      deleteRoomPost({
+        session: { sub: 'did:plc:rei', fetchHandler } as never,
+        custody: 'pds',
+        uri: 'at://did:plc:asuka/zone.stratos.feed.post/3k4',
+        cid: 'bafy-asuka',
+      }),
+    ).rejects.toThrow('only delete your own posts')
+    expect(fetchHandler).not.toHaveBeenCalled()
   })
 })

@@ -19,12 +19,14 @@
     feedMessage: string
     onLoadMore: () => void
     topicUri: string | null
+    viewerDid: string | null
     onOpenTopic: (uri: string) => void
     onCloseTopic: () => void
     onPost: (text: string, reply?: import('../post-writer').ReplyRef) => Promise<void>
+    onDelete: (post: ClubhouseFeedPost) => Promise<void>
   }
 
-  let { room, state, visual, onBack, onJoin, onRecheckPending, feedState, posts, hasMore, feedMessage, topicUri, onOpenTopic, onCloseTopic, onLoadMore, onPost }: Props = $props()
+  let { room, state, visual, onBack, onJoin, onRecheckPending, feedState, posts, hasMore, feedMessage, topicUri, viewerDid, onOpenTopic, onCloseTopic, onLoadMore, onPost, onDelete }: Props = $props()
 </script>
 
 <section class="room-view" aria-labelledby="room-title">
@@ -38,7 +40,7 @@
   </div>
 
   {#if state === 'joined'}
-    <RoomFeed {feedState} {posts} {hasMore} message={feedMessage} {topicUri} {onOpenTopic} {onCloseTopic} {onLoadMore} {onPost} />
+    <RoomFeed {feedState} {posts} {hasMore} message={feedMessage} {topicUri} {viewerDid} {onOpenTopic} {onCloseTopic} {onLoadMore} {onPost} {onDelete} />
   {:else if state === 'pending'}
     <div class="placeholder-panel">
       <div class="panel-icon"><IconaMoon name="information" /></div>

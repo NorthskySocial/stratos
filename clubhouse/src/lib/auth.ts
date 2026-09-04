@@ -10,6 +10,14 @@ import {
   type ClubhouseConfig,
 } from './config'
 
+export const CLUBHOUSE_POST_SCOPE = 'repo:zone.stratos.feed.post'
+export const CLUBHOUSE_SPACE_ACTIONS = [
+  'read',
+  'create',
+  'update',
+  'delete',
+] as const
+
 function isLoopback(): boolean {
   const hostname = window.location.hostname
   return (
@@ -22,16 +30,14 @@ export function createClubhouseAuth(config: ClubhouseConfig): BrowserAuth {
   const scopes = [
     'atproto',
     'repo:zone.stratos.actor.enrollment',
-    'repo:zone.stratos.feed.post?action=create',
-    ...(config.feedgenDid
-      ? ['rpc:zone.stratos.feedgen.getFeed?aud=*']
-      : []),
+    CLUBHOUSE_POST_SCOPE,
+    ...(config.feedgenDid ? ['rpc:zone.stratos.feedgen.getFeed?aud=*'] : []),
   ]
   return createBrowserAuth({
     appName: 'Clubhouse',
     scopes,
     spaceWriteScope: config.serviceDid
-      ? { serviceDid: config.serviceDid }
+      ? { serviceDid: config.serviceDid, actions: CLUBHOUSE_SPACE_ACTIONS }
       : undefined,
     handleResolver:
       import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social',
