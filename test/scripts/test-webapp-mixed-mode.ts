@@ -680,6 +680,26 @@ async function run(): Promise<void> {
       await waitForRenderedPost(stratosPage, pdsReplyText),
       'The browser renders a PDS-custody reply to a Stratos topic',
     )
+
+    const nestedPdsReplyText = `Motoko nests a reply across custody ${runId}`
+    const nestedPdsReply = await createPrivateReply(
+      pdsPage,
+      stratosReplyText,
+      SPACE_CREATE_PATH,
+      nestedPdsReplyText,
+    )
+    const nestedPdsReplyWrite = findWrite(
+      pdsWrites,
+      SPACE_CREATE_PATH,
+      nestedPdsReplyText,
+    )
+    assertPdsWrite(nestedPdsReplyWrite, member)
+    assertReplyWrite(nestedPdsReplyWrite, pdsRef, stratosReply)
+    await assertPdsResidency(member, nestedPdsReply, nestedPdsReplyText)
+    assert(
+      await waitForRenderedPost(stratosPage, nestedPdsReplyText),
+      'The browser renders a nested PDS-custody reply with its original topic root',
+    )
     await screenshot(pdsPage, 'webapp-mixed-mode-rendered-feed')
   } catch (error) {
     fail(
