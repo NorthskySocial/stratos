@@ -38,7 +38,7 @@ describe('Clubhouse integration', () => {
 
   it('starts room enrollment with the restored identity without another handle lookup', async () => {
     const fetchHandler = vi.fn()
-    const navigate = vi.fn()
+    const navigate = vi.fn<(url: string) => void>()
     mocks.auth.init.mockResolvedValue(session(fetchHandler))
     vi.mocked(resolveAuthenticatedHandle).mockResolvedValue('misato.example')
     const integration = createClubhouseIntegration(
@@ -61,7 +61,7 @@ describe('Clubhouse integration', () => {
   })
 
   it('uses the signed-in DID when handle resolution is temporarily unavailable', async () => {
-    const navigate = vi.fn()
+    const navigate = vi.fn<(url: string) => void>()
     mocks.auth.init.mockResolvedValue(session(vi.fn()))
     vi.mocked(resolveAuthenticatedHandle).mockRejectedValue(
       new Error('PDS unavailable'),
@@ -282,6 +282,80 @@ describe('Clubhouse integration', () => {
     expect(fetchHandler).not.toHaveBeenCalledWith(
       'https://stratos.example/oauth/boundaries/post',
       expect.anything(),
+    )
+  })
+
+  it('deletes a Stratos-custodied post through the authenticated service', async () => {
+    const fetchHandler = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            rooms: [{ id: 'nerv-hq', state: 'joined' }],
+            custody: 'stratos',
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    const integration = createClubhouseIntegration({
+      serviceUrl: 'https://stratos.example',
+      pdsSpaceUriByRoom: {},
+    })
+    await integration.initialize?.()
+
+    await integration.deletePost?.('nerv-hq', {
+      uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+      cid: 'bafy-misato-3k5',
+      author: { did: 'did:plc:misato' },
+      text: 'Delete this report.',
+      indexedAt: '2026-09-04T18:00:00.000Z',
+    })
+
+    expect(fetchHandler).toHaveBeenLastCalledWith(
+      'https://stratos.example/oauth/boundaries/post',
+      {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+        }),
+      },
+    )
+  })
+
+  it('deletes a PDS-custodied post through the actor repository', async () => {
+    const fetchHandler = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            rooms: [{ id: 'nerv-hq', state: 'joined' }],
+            custody: 'pds',
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    const integration = createClubhouseIntegration({
+      serviceUrl: 'https://stratos.example',
+      pdsSpaceUriByRoom: {},
+    })
+    await integration.initialize?.()
+
+    await integration.deletePost?.('nerv-hq', {
+      uri: 'at://did:plc:misato/zone.stratos.feed.post/3k6',
+      cid: 'bafy-misato-3k6',
+      author: { did: 'did:plc:misato' },
+      text: 'Delete this PDS report.',
+      indexedAt: '2026-09-04T18:00:00.000Z',
+    })
+
+    expect(fetchHandler).toHaveBeenLastCalledWith(
+      '/xrpc/com.atproto.repo.deleteRecord',
+      expect.objectContaining({ method: 'POST' }),
     )
   })
 })

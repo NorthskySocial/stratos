@@ -12,6 +12,7 @@ import { getActorProfiles, type TypeaheadActor } from './typeahead'
 import { captureClubhouseException } from '../telemetry'
 import {
   createRoomPost,
+  deleteRoomPost,
   RoomPostConfigurationError,
   type ReplyRef,
   type StratosPostWriter,
@@ -97,6 +98,23 @@ function createServiceRoomPostWriter(
         typeof (payload as { message?: unknown }).message === 'string'
           ? (payload as { message: string }).message
           : `Stratos could not create the post (HTTP ${response.status}).`
+      throw new Error(message)
+    },
+    async deletePost({ uri }) {
+      const response = await session.fetchHandler(endpoint, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ uri }),
+      })
+      if (response.ok) return
+
+      const payload: unknown = await response.json().catch(() => undefined)
+      const message =
+        typeof payload === 'object' &&
+        payload !== null &&
+        typeof (payload as { message?: unknown }).message === 'string'
+          ? (payload as { message: string }).message
+          : `Stratos could not delete the post (HTTP ${response.status}).`
       throw new Error(message)
     },
   }
@@ -225,7 +243,11 @@ export function createClubhouseIntegration(
       cursor?: string,
     ): Promise<FeedPage> {
       if (!session) throw new Error('Sign in to read this room.')
-      const page = await getFeed(session, config, { feed: roomId, limit, cursor })
+      const page = await getFeed(session, config, {
+        feed: roomId,
+        limit,
+        cursor,
+      })
       return enrichAuthors(page)
     },
     async createPost(roomId: string, text: string, reply?: ReplyRef) {
@@ -240,6 +262,28 @@ export function createClubhouseIntegration(
         text,
         config,
         reply,
+        stratosWriter:
+          dependencies.stratosWriter ??
+          createServiceRoomPostWriter(session, config),
+      })
+    },
+    async deletePost(
+      roomId: string,
+      post: import('./feedgen').ClubhouseFeedPost,
+    ) {
+      if (!session) throw new Error('Sign in before deleting a post.')
+      const endpoint = roomStatusEndpoint(config)
+      if (!endpoint) {
+        throw new RoomPostConfigurationError(
+          'Deleting needs service configuration for this room.',
+        )
+      }
+      const { custody } = await requestRoomStatus(session, endpoint, [roomId])
+      await deleteRoomPost({
+        session,
+        custody,
+        uri: post.uri,
+        cid: post.cid,
         stratosWriter:
           dependencies.stratosWriter ??
           createServiceRoomPostWriter(session, config),

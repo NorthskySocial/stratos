@@ -2,6 +2,8 @@ import type { OAuthSession } from '@atproto/oauth-client-browser'
 import type { ClubhouseConfig } from './config'
 import type { RoomCustody } from './types'
 
+const POST_COLLECTION = 'zone.stratos.feed.post'
+
 export class RoomPostConfigurationError extends Error {
   constructor(message = 'Posting needs service configuration for this room.') {
     super(message)
@@ -11,11 +13,13 @@ export class RoomPostConfigurationError extends Error {
 
 export interface StratosPostWriter {
   /** A service-owned writer that resolves the canonical room boundary itself. */
-  createPost(input: {
+  createPost: (input: {
     roomId: string
     text: string
     reply?: ReplyRef
-  }): Promise<PostRef>
+  }) => Promise<PostRef>
+  /** Delete an authenticated actor's own Stratos-custodied room post. */
+  deletePost: (input: { uri: string }) => Promise<void>
 }
 
 export interface PostRef {
@@ -36,6 +40,27 @@ export interface RoomPostInput {
   config: Pick<ClubhouseConfig, 'pdsSpaceUriByRoom'>
   stratosWriter?: StratosPostWriter
   reply?: ReplyRef
+}
+
+export interface RoomPostDeleteInput {
+  session: OAuthSession
+  /** Custody supplied by the authenticated Stratos room-status response. */
+  custody: RoomCustody | null
+  uri: string
+  cid: string
+  stratosWriter?: StratosPostWriter
+}
+
+function ownPostRkey(uri: string, did: string): string {
+  const prefix = `at://${did}/${POST_COLLECTION}/`
+  if (!uri.startsWith(prefix)) {
+    throw new Error('You can only delete your own posts.')
+  }
+  const rkey = uri.slice(prefix.length)
+  if (!rkey || /[/?#]/.test(rkey)) {
+    throw new Error('The post reference is invalid.')
+  }
+  return rkey
 }
 
 /** Create a topic or reply without accepting a caller-controlled boundary. */
@@ -67,7 +92,7 @@ export async function createRoomPost(input: RoomPostInput): Promise<PostRef> {
       body: JSON.stringify({
         space,
         repo: input.session.sub,
-        collection: 'zone.stratos.feed.post',
+        collection: POST_COLLECTION,
         validate: false,
         record: {
           $type: 'zone.stratos.feed.post',
@@ -86,4 +111,43 @@ export async function createRoomPost(input: RoomPostInput): Promise<PostRef> {
     throw new Error('PDS returned an invalid post reference.')
   }
   return { uri: result.uri, cid: result.cid }
+}
+
+/** Delete an owned room post through its authoritative custody path. */
+export async function deleteRoomPost(
+  input: RoomPostDeleteInput,
+): Promise<void> {
+  const rkey = ownPostRkey(input.uri, input.session.sub)
+  if (!input.custody) {
+    throw new RoomPostConfigurationError(
+      'Deleting needs an active room enrollment.',
+    )
+  }
+
+  if (input.custody === 'stratos') {
+    if (!input.stratosWriter) {
+      throw new RoomPostConfigurationError(
+        'Deleting needs service configuration for this room.',
+      )
+    }
+    await input.stratosWriter.deletePost({ uri: input.uri })
+    return
+  }
+
+  const response = await input.session.fetchHandler(
+    '/xrpc/com.atproto.repo.deleteRecord',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: input.session.sub,
+        collection: POST_COLLECTION,
+        rkey,
+        swapRecord: input.cid,
+      }),
+    },
+  )
+  if (!response.ok) {
+    throw new Error(`PDS could not delete the post (HTTP ${response.status}).`)
+  }
 }
