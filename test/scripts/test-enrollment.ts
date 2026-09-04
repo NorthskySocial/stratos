@@ -1,18 +1,12 @@
 #!/usr/bin/env -S deno run -A
 // Enrollment test — drives the PDS OAuth flow via Playwright to enroll each user.
 
-import {
-  type Browser,
-  type BrowserContext,
-  chromium,
-  type Page,
-} from 'npm:playwright@1.58.2'
+import { type Browser, chromium, type Page } from 'npm:playwright@1.58.2'
 import { PDS_URL, STRATOS_URL, TEST_USERS } from './lib/config.ts'
 import { enrollmentStatus, listPdsRecords } from './lib/stratos.ts'
 import { loadState, saveState } from './lib/state.ts'
 import {
   fillSignInForm,
-  handleNgrokInterstitial,
   screenshot,
   submitSignInAndConsent,
 } from './lib/oauth-flow.ts'
@@ -45,19 +39,16 @@ async function enrollUser(
   password: string,
   label: string,
 ): Promise<{ success: boolean; did?: string; error?: string }> {
-  const state = await loadState()
-  const baseUrl = state.ngrokUrl || STRATOS_URL
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
   })
   const page = await context.newPage()
 
   try {
-    await navigateToOAuth(page, context, handle, label, baseUrl)
-    await handleNgrokInterstitial(page, label)
+    await navigateToOAuth(page, handle, label, STRATOS_URL)
     await fillSignInForm(page, handle, password, label)
     await submitSignInAndConsent(page, label, (url) =>
-      url.includes(`${baseUrl}/oauth/callback`),
+      url.includes(`${STRATOS_URL}/oauth/callback`),
     )
     return await verifyEnrollmentResponse(page, label)
   } catch (err) {
@@ -73,7 +64,6 @@ async function enrollUser(
 
 async function navigateToOAuth(
   page: Page,
-  context: BrowserContext,
   handle: string,
   label: string,
   baseUrl: string,
@@ -82,11 +72,6 @@ async function navigateToOAuth(
   const authorizeUrl = `${baseUrl}/oauth/authorize?handle=${encodeURIComponent(
     handle,
   )}`
-
-  // Set a custom header to skip ngrok browser warning
-  await context.setExtraHTTPHeaders({
-    'ngrok-skip-browser-warning': 'true',
-  })
 
   // Stratos will redirect to the PDS OAuth page — may take a moment
   await page.goto(authorizeUrl, { waitUntil: 'load', timeout: 30_000 })

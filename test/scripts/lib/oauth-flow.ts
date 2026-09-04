@@ -21,54 +21,6 @@ export async function screenshot(page: Page, name: string) {
   }
 }
 
-export async function handleNgrokInterstitial(page: Page, label: string) {
-  const ngrokButton = await page.$(
-    'button:has-text("Visit Site"), button:has-text("Visit the site")',
-  )
-  const isNgrokFreeDomain = ['ngrok-free.app', 'ngrok-free.dev'].some(
-    (domain) => page.url().includes(domain),
-  )
-  if (!ngrokButton && !isNgrokFreeDomain) {
-    return
-  }
-
-  const body = await page.textContent('body')
-  const isNgrokPage =
-    body?.includes('ngrok') &&
-    (body?.includes('browser') ||
-      body?.includes('Visit') ||
-      body?.includes('visit'))
-
-  if (!isNgrokPage) {
-    return
-  }
-
-  dim(`${label}: Ngrok interstitial detected, searching for Visit button...`)
-  if (ngrokButton) {
-    await ngrokButton.click()
-  } else {
-    const buttons = await page.$$('button')
-    if (buttons.length > 0) {
-      await buttons[0].click()
-    } else {
-      await page.click('text=/Visit Site/i').catch(() => {})
-    }
-  }
-
-  try {
-    await page.waitForNavigation({
-      waitUntil: 'networkidle',
-      timeout: 30_000,
-    })
-  } catch {
-    dim(
-      `${label}: Navigation after ngrok click timed out or didn't happen, continuing...`,
-    )
-  }
-  dim(`${label}: After ngrok interstitial URL: ${page.url()}`)
-  await screenshot(page, `${label}-01b-after-ngrok`)
-}
-
 export async function fillSignInForm(
   page: Page,
   handle: string,

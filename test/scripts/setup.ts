@@ -1,8 +1,14 @@
 #!/usr/bin/env -S deno run -A
 // Setup script — creates PDS accounts, starts Stratos via Docker Compose, waits for health.
 
-import { TEST_DATA_DIR, TEST_ROOT, TEST_USERS } from './lib/config.ts'
-import { ADMIN_OPERATOR_KEY } from './lib/config.ts'
+import {
+  ADMIN_OPERATOR_KEY,
+  CLOUDFLARE_TUNNEL_URL,
+  TEST_DATA_DIR,
+  TEST_ROOT,
+  TEST_USERS,
+  USE_CLOUDFLARE_TUNNEL,
+} from './lib/config.ts'
 import { accountExists, createAccount, createInviteCode } from './lib/pds.ts'
 import { waitForHealthy } from './lib/stratos.ts'
 import { loadState, saveState, type TestState } from './lib/state.ts'
@@ -119,17 +125,20 @@ async function createMixedModeAccounts(state: TestState) {
 
 function getEnvVars(state: TestState): Record<string, string> {
   const envVars: Record<string, string> = {}
-  if (state.ngrokUrl) {
-    info(`Using ngrok URL: ${state.ngrokUrl}`)
-    envVars['STRATOS_PUBLIC_URL'] = state.ngrokUrl
+  if (CLOUDFLARE_TUNNEL_URL) {
+    info(`Using tunnel URL: ${CLOUDFLARE_TUNNEL_URL}`)
+    envVars['STRATOS_PUBLIC_URL'] = CLOUDFLARE_TUNNEL_URL
     envVars['STRATOS_SERVICE_DID'] =
-      `did:web:${state.ngrokUrl.replace(/^https?:\/\//, '')}`
+      `did:web:${CLOUDFLARE_TUNNEL_URL.replace(/^https?:\/\//, '')}`
     envVars['STRATOS_OAUTH_CLIENT_ID'] =
-      `${state.ngrokUrl}/client-metadata.json`
-    envVars['STRATOS_OAUTH_CLIENT_URI'] = state.ngrokUrl
-    envVars['STRATOS_OAUTH_REDIRECT_URI'] = `${state.ngrokUrl}/oauth/callback`
-  } else if (Deno.env.get('USE_NGROK') === 'true') {
-    throw new Error('No ngrok URL found in state, but USE_NGROK=true')
+      `${CLOUDFLARE_TUNNEL_URL}/client-metadata.json`
+    envVars['STRATOS_OAUTH_CLIENT_URI'] = CLOUDFLARE_TUNNEL_URL
+    envVars['STRATOS_OAUTH_REDIRECT_URI'] =
+      `${CLOUDFLARE_TUNNEL_URL}/oauth/callback`
+  } else if (USE_CLOUDFLARE_TUNNEL) {
+    throw new Error(
+      'No Cloudflare Tunnel URL found in state, but USE_CLOUDFLARE_TUNNEL=true',
+    )
   } else {
     envVars['STRATOS_PUBLIC_URL'] = 'http://127.0.0.1:3100'
     envVars['STRATOS_SERVICE_DID'] = 'did:web:127.0.0.1%3A3100'
@@ -148,13 +157,6 @@ function getEnvVars(state: TestState): Record<string, string> {
     warn(
       `Admin operator "${ADMIN_OPERATOR_KEY}" has no DID in state — admin-API phase will be unable to authorize`,
     )
-  }
-
-  if (isAppview()) {
-    // The e2e compose overlay hardcodes these values inside the container.
-    // Record the same values so state and test scripts match the service.
-    envVars['STRATOS_PUBLIC_URL'] = 'https://stratos.test'
-    envVars['STRATOS_SERVICE_DID'] = 'did:web:stratos.test'
   }
 
   return envVars
@@ -245,7 +247,6 @@ async function run() {
 
   await createMixedModeAccounts(state)
 
-  state.serviceDid = envVars['STRATOS_SERVICE_DID']
   state.stratosRunning = true
   await saveState(state)
   pass('Setup complete')

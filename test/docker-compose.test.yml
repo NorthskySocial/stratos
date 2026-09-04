@@ -243,18 +243,15 @@ services:
       timeout: 5s
       retries: 30
 
-  ngrok:
+  cloudflared:
     networks:
       - default
-    image: ngrok/ngrok:latest
-    container_name: stratos-ngrok
+    image: cloudflare/cloudflared:latest
+    container_name: stratos-cloudflared
     restart: 'no'
-    ports:
-      - '4040:4040'
-    environment:
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
     command:
-      - http
+      - tunnel
+      - --url
       - http://stratos:3100
 
 networks:

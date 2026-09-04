@@ -16,15 +16,14 @@ import {
   type OAuthSession,
   requestLocalLock,
 } from 'npm:@atproto/oauth-client-node@0.5.3'
-import { DOMAINS, PDS_URL } from './lib/config.ts'
+import { DOMAINS, PDS_URL, STRATOS_URL } from './lib/config.ts'
 import { loadState } from './lib/state.ts'
-import { isAppview } from './lib/backend.ts'
 import {
   fillSignInForm,
   screenshot,
   submitSignInAndConsent,
 } from './lib/oauth-flow.ts'
-import { assert, fail, finish, info, pass, section, skip } from './lib/log.ts'
+import { assert, fail, finish, info, pass, section } from './lib/log.ts'
 
 const CALLBACK_PORT = 8917
 const CALLBACK_PATH = '/oauth/callback'
@@ -162,16 +161,12 @@ async function dpopFetch(
   url: string,
   init: RequestInit,
 ): Promise<Response> {
-  const headers = {
-    'ngrok-skip-browser-warning': 'true',
-    ...(init.headers as Record<string, string> | undefined),
-  }
-  const first = await session.fetchHandler(url, { ...init, headers })
+  const first = await session.fetchHandler(url, init)
   if (first.status !== 401 || !first.headers.get('dpop-nonce')) {
     return first
   }
   await first.body?.cancel()
-  return session.fetchHandler(url, { ...init, headers })
+  return session.fetchHandler(url, init)
 }
 
 async function testCrud(session: OAuthSession, base: string, did: string) {
@@ -266,7 +261,6 @@ async function testRejections(base: string, did: string, accessToken: string) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
       Authorization: `DPoP ${accessToken}`,
     },
     body,
@@ -282,7 +276,6 @@ async function testRejections(base: string, did: string, accessToken: string) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
       Authorization: `DPoP ${accessToken}`,
       DPoP: 'ff.tampered.proof',
     },
@@ -299,14 +292,6 @@ async function testRejections(base: string, did: string, accessToken: string) {
 async function run() {
   section('Phase 4b: DPoP CRUD (production auth)')
 
-  if (isAppview()) {
-    skip(
-      'DPoP CRUD',
-      'appview mode pins STRATOS_PUBLIC_URL to https://stratos.test — the DPoP htu check cannot match a reachable URL',
-    )
-    finish()
-  }
-
   const state = await loadState()
   const rei = state.users.rei
   if (!rei?.enrolled) {
@@ -315,9 +300,9 @@ async function run() {
   }
 
   // The verifier compares the proof htu against STRATOS_PUBLIC_URL, so the
-  // request origin must match what setup.ts gave the service — the ngrok
+  // request origin must match what setup.ts gave the service — the tunnel
   // URL, or the 127.0.0.1 (not localhost) fallback.
-  const base = state.ngrokUrl ?? 'http://127.0.0.1:3100'
+  const base = STRATOS_URL
   info(`Stratos base URL for DPoP requests: ${base}`)
 
   info(`Acquiring a DPoP-bound token for ${rei.handle} via OAuth...`)
