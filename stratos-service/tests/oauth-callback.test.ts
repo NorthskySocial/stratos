@@ -137,6 +137,7 @@ describe('handleCallback', () => {
       enrollmentValidator: mockEnrollmentValidator,
       profileRecordWriter: mockProfileRecordWriter,
       logger: mockLogger,
+      enrollmentEvents: { emit: vi.fn() },
       baseUrl: 'http://localhost:3100',
       allowedRedirectOrigins: [],
       serviceEndpoint: 'http://localhost:3100',
@@ -835,6 +836,53 @@ describe('handleCallback', () => {
         message: 'Already enrolled in Stratos',
       }),
     )
+  })
+
+  it('emits a boundary change after a selected-room reauthorization', async () => {
+    const boundary = 'did:web:localhost%3A3100/swordsmith'
+    config.roomCatalog = buildRoomCatalog([
+      {
+        id: 'swordsmith',
+        boundary,
+        displayName: 'Swordsmith',
+        description: 'Berserk night shift.',
+        available: true,
+      },
+    ])
+    const session = sessionFor('did:plc:alice')
+    mockOauthClient.callback.mockResolvedValue({
+      session,
+      state: encodeRoomOAuthState({
+        roomId: 'swordsmith',
+        boundary,
+        redirectTo: 'https://clubhouse.example/after-oauth',
+      }),
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(true)
+    mockEnrollmentStore.getEnrollment.mockResolvedValue({
+      did: 'did:plc:alice',
+      active: true,
+      enrollmentRkey: 'did:web:previous-service.test',
+      signingKeyDid: 'did:key:zQ3sh...',
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    mockEnrollmentStore.getBoundaries = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([boundary])
+    mockEnrollmentValidator.validate.mockResolvedValue({
+      allowed: true,
+      pdsEndpoint: 'https://pds.example.com',
+    })
+    await callHandler(handleCallback(config), makeReq(), makeRes())
+
+    expect(config.enrollmentEvents.emit).toHaveBeenCalledWith('enrollment', {
+      did: 'did:plc:alice',
+      action: 'boundaries',
+      boundaries: [boundary],
+      priorBoundaries: [],
+      time: expect.any(String),
+    })
   })
 
   it('denies enrollment if not allowed', async () => {

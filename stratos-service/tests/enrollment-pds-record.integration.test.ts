@@ -60,6 +60,7 @@ describe('handleCallback PDS Record', () => {
       oauthClient: mockOauthClient,
       enrollmentStore: mockEnrollmentStore,
       enrollmentValidator: mockEnrollmentValidator,
+      enrollmentEvents: { emit: vi.fn() },
       idResolver: mockIdResolver,
       enrollmentConfig: mockEnrollmentConfig,
       profileRecordWriter: mockProfileRecordWriter,
@@ -139,9 +140,15 @@ describe('handleCallback PDS Record', () => {
 
     expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
       'did:plc:usagi',
-      'localhost-3100',
+      'did:web:localhost:3100',
       expect.objectContaining({
         service: 'http://localhost:3100',
+      }),
+    )
+    expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
+      'did:plc:usagi',
+      expect.objectContaining({
+        enrollmentRkey: 'did:web:localhost:3100',
       }),
     )
   })

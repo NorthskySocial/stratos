@@ -229,6 +229,53 @@ describe('Composer.svelte', () => {
       ).toBeInTheDocument(),
     )
     expect(pdsSession.fetchHandler).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-invalid', 'false')
+  })
+
+  it('clears the posting status after a post fails', async () => {
+    const createRecord = vi
+      .fn()
+      .mockRejectedValue(new Error('Rin lost the uplink'))
+    render(Composer, {
+      props: props({
+        stratosAgent: {
+          com: { atproto: { repo: { uploadBlob: vi.fn(), createRecord } } },
+        },
+      }),
+    })
+
+    await fireEvent.input(screen.getByRole('textbox'), {
+      target: { value: 'Rin checks the uplink.' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: /Post$/ }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Could not create the post/i),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Creating post.')).not.toBeInTheDocument()
+  })
+
+  it('reports the character limit without marking service errors as text errors', async () => {
+    const { unmount } = render(Composer, { props: props() })
+    const textBox = screen.getByRole('textbox')
+    await fireEvent.input(textBox, { target: { value: 'a'.repeat(280) } })
+    expect(
+      screen.getByText('20 characters remaining of 300.'),
+    ).toBeInTheDocument()
+    expect(textBox).toHaveAttribute('aria-invalid', 'false')
+    unmount()
+
+    render(Composer, { props: props() })
+    const overLimitTextBox = screen.getByRole('textbox')
+    await fireEvent.input(overLimitTextBox, {
+      target: { value: 'a'.repeat(301) },
+    })
+    expect(
+      screen.getByText('1 character over the 300-character limit.'),
+    ).toBeInTheDocument()
+    expect(overLimitTextBox).toHaveAttribute('aria-invalid', 'true')
   })
 
   it('previews custody from the granted space scope before enrollment', async () => {

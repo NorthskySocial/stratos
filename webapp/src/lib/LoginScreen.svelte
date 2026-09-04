@@ -25,21 +25,28 @@
     <h1>Stratos</h1>
     <p class="subtitle">Private data for ATProto</p>
 
-    <form onsubmit={handleSubmit}>
+    <form onsubmit={handleSubmit} aria-busy={loading}>
+      <label for="handle">Bluesky handle</label>
       <input
+        id="handle"
         type="text"
         bind:value={handle}
         placeholder="Enter your handle (e.g. alice.bsky.social)"
         disabled={loading}
         autocomplete="username"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? 'sign-in-error' : 'handle-help'}
       />
+      <p id="handle-help" class="help">Use the handle for the account you want to sign in with.</p>
       <button type="submit" disabled={loading || !handle.trim()}>
         {loading ? 'Signing in…' : 'Sign In'}
       </button>
     </form>
 
+    <p class="sr-only" role="status">{loading ? 'Signing in' : ''}</p>
+
     {#if error}
-      <p class="error">{error}</p>
+      <p id="sign-in-error" class="error" role="alert">{error}</p>
     {/if}
   </div>
 </div>
@@ -86,6 +93,30 @@
     outline: none;
     border-color: #0066ff;
     box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.15);
+  }
+
+  input:focus-visible,
+  button:focus-visible {
+    outline: 3px solid #1d4ed8;
+    outline-offset: 2px;
+  }
+
+  .help {
+    margin: -0.4rem 0 0;
+    color: #666;
+    font-size: 0.8rem;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   button {
