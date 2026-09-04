@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import PostCard from '../src/lib/PostCard.svelte'
 import '@testing-library/jest-dom'
 
@@ -17,9 +17,31 @@ describe('PostCard.svelte', () => {
   }
 
   it('renders post text correctly', () => {
-    render(PostCard, { post: mockPost, stratosAgent: null, onreply: () => {} })
+    render(PostCard, {
+      post: mockPost,
+      stratosAgent: null,
+      currentDid: 'did:plc:other',
+      onreply: () => {},
+      ondelete: async () => {},
+    })
     expect(screen.getByText('Hello world')).toBeInTheDocument()
     expect(screen.getByText('@alice.bsky.social')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete post' })).not.toBeInTheDocument()
+  })
+
+  it('lets an author delete their own post', async () => {
+    const ondelete = vi.fn().mockResolvedValue(undefined)
+    render(PostCard, {
+      post: mockPost,
+      stratosAgent: null,
+      currentDid: mockPost.author,
+      onreply: () => {},
+      ondelete,
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete post' }))
+
+    await waitFor(() => expect(ondelete).toHaveBeenCalledWith(mockPost))
   })
 
   it('attributes a space reply parent to its record author', () => {

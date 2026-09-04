@@ -10,10 +10,12 @@
     publicAgent?: Agent | null
     serviceUrl?: string
     loading: boolean
+    currentDid: string
     onreply: (post: FeedPost) => void
+    ondelete: (post: FeedPost) => Promise<void>
   }
 
-  let {posts, stratosAgent, publicAgent, serviceUrl, loading, onreply}: Props = $props()
+  let {posts, stratosAgent, publicAgent, serviceUrl, loading, currentDid, onreply, ondelete}: Props = $props()
 
   let threads = $derived(groupIntoThreads(posts))
 </script>
@@ -29,7 +31,7 @@
         {#if node.depth > 0}
             <div class="thread-line"></div>
         {/if}
-        <PostCard post={node.post} {stratosAgent} {publicAgent} {serviceUrl} {onreply}/>
+        <PostCard post={node.post} {stratosAgent} {publicAgent} {serviceUrl} {currentDid} {onreply} {ondelete}/>
     </div>
     {#each node.replies as child (child.post.uri)}
         {@render threadNode(child)}
