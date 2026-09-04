@@ -35,6 +35,15 @@ interface ClubhouseEnvironment {
   VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON?: string
 }
 
+const FEEDGEN_SERVICE_FRAGMENT = '#stratos_feedgen'
+
+/** Return the DID URL identifying the Feedgen service in its DID document. */
+export function feedgenServiceId(feedgenDid: string): string {
+  return feedgenDid.includes('#')
+    ? feedgenDid
+    : `${feedgenDid}${FEEDGEN_SERVICE_FRAGMENT}`
+}
+
 function optionalUrl(value: string | undefined): string | undefined {
   if (!value?.trim()) return undefined
   return value.replace(/\/+$/, '')

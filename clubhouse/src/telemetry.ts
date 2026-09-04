@@ -9,7 +9,7 @@ interface ClubhouseTelemetryEnvironment {
 }
 
 const SECRET =
-  /authorization|cookie|dpop|token|secret|password|body|post|oauth|code|state/i
+  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
 
 /** Initialize browser telemetry before any application module is imported. */
 export function initializeClubhouseTelemetry(
@@ -46,7 +46,7 @@ export function captureClubhouseException(error: unknown): void {
 }
 
 export function scrubEvent<T extends object>(event: T): T {
-  return scrub(event) as T
+  return scrub(event, []) as T
 }
 
 function directStratosOrigin(value_: string | undefined): string[] {
@@ -70,13 +70,15 @@ function value(input: string | undefined): string | undefined {
   return result || undefined
 }
 
-function scrub(value_: unknown): unknown {
-  if (Array.isArray(value_)) return value_.map(scrub)
+function scrub(value_: unknown, path: readonly string[]): unknown {
+  if (Array.isArray(value_)) return value_.map((item) => scrub(item, path))
   if (!value_ || typeof value_ !== 'object') return value_
   return Object.fromEntries(
     Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
       key,
-      SECRET.test(key) ? '[Filtered]' : scrub(item),
+      SECRET.test(key) || (key === 'body' && path.includes('request'))
+        ? '[Filtered]'
+        : scrub(item, [...path, key]),
     ]),
   )
 }

@@ -85,6 +85,5 @@ not an internal Docker hostname. Optional settings are
 
 ## Icon attribution
 
-The three local interface icons in `src/lib/icons/` are copied from the
-[IconaMoon 1.1](https://github.com/dariushhpg1/IconaMoon) Light set by
-Dariush.
+The local interface icons in `src/lib/icons/` use the
+[IconaMoon 1.1](https://github.com/dariushhpg1/IconaMoon) Light set by Dariush.

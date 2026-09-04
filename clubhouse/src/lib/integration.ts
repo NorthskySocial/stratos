@@ -8,9 +8,11 @@ import {
 import { resolveAuthenticatedHandle } from './enrollment'
 import { getFeed, type FeedPage } from './feedgen'
 import { rememberRoomReturn, roomJoinUrl } from './join'
+import { captureClubhouseException } from '../telemetry'
 import {
   createRoomPost,
   RoomPostConfigurationError,
+  type ReplyRef,
   type StratosPostWriter,
 } from './post-writer'
 import type { ClubhouseIdentity, RoomAccessState, RoomCustody } from './types'
@@ -78,13 +80,14 @@ function createServiceRoomPostWriter(
   const endpoint = roomPostEndpoint(config)
   if (!endpoint) return undefined
   return {
-    async createPost({ roomId, text }): Promise<void> {
+    async createPost({ roomId, text, reply }) {
       const response = await session.fetchHandler(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roomId, text }),
+        body: JSON.stringify({ roomId, text, ...(reply ? { reply } : {}) }),
       })
-      if (response.ok) return
+      if (response.ok)
+        return (await response.json()) as { uri: string; cid: string }
 
       const payload: unknown = await response.json().catch(() => undefined)
       const message =
@@ -111,10 +114,23 @@ export function createClubhouseIntegration(
 ) {
   const auth = createClubhouseAuth(config)
   let session: OAuthSession | null = null
+  let identity: ClubhouseIdentity | null = null
 
   async function refresh(): Promise<ClubhouseIdentity | null> {
     session = await auth.init()
-    return session ? { did: session.sub } : null
+    if (!session) {
+      identity = null
+      return null
+    }
+    try {
+      identity = {
+        did: session.sub,
+        handle: await resolveAuthenticatedHandle(session),
+      }
+    } catch {
+      identity = { did: session.sub }
+    }
+    return identity
   }
 
   async function getRoomState(roomId: string): Promise<RoomAccessState> {
@@ -134,7 +150,8 @@ export function createClubhouseIntegration(
     }
     try {
       return (await requestRoomStatus(session, endpoint, roomIds)).states
-    } catch {
+    } catch (error) {
+      captureClubhouseException(error)
       return Object.fromEntries(
         roomIds.map((roomId) => [roomId, 'status-error']),
       )
@@ -144,11 +161,19 @@ export function createClubhouseIntegration(
   return {
     initialize: refresh,
     signIn: auth.signIn,
+    async signOut(): Promise<void> {
+      await auth.signOut()
+      session = null
+      identity = null
+    },
     getRoomState,
     getRoomStates,
     async requestJoin(roomId: string): Promise<RoomAccessState> {
       if (!session) throw new Error('Sign in before joining a room.')
-      const handle = await resolveAuthenticatedHandle(session)
+      // Reuse the identity resolved during session restoration. A DID is also
+      // a valid ATProto login hint, so enrollment must not depend on a second
+      // PDS handle lookup succeeding.
+      const handle = identity?.handle ?? session.sub
       const destination = `/rooms/${encodeURIComponent(roomId)}`
       const url = roomJoinUrl(config, roomId, handle, destination)
       rememberRoomReturn(destination)
@@ -165,24 +190,25 @@ export function createClubhouseIntegration(
       if (!session) throw new Error('Sign in to read this room.')
       return getFeed(session, config, { feed: roomId, limit, cursor })
     },
-    async createPost(roomId: string, text: string): Promise<void> {
+    async createPost(roomId: string, text: string, reply?: ReplyRef) {
       if (!session) throw new Error('Sign in before posting.')
       const endpoint = roomStatusEndpoint(config)
       if (!endpoint) throw new RoomPostConfigurationError()
       const { custody } = await requestRoomStatus(session, endpoint, [roomId])
-      await createRoomPost({
+      return createRoomPost({
         session,
         custody,
         roomId,
         text,
         config,
+        reply,
         stratosWriter:
           dependencies.stratosWriter ??
           createServiceRoomPostWriter(session, config),
       })
     },
     get identity(): ClubhouseIdentity | null {
-      return session ? { did: session.sub } : null
+      return identity
     },
   }
 }
