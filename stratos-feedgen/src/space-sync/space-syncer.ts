@@ -43,7 +43,7 @@ export interface SpaceSyncerDeps {
   /** Injectable host-client factory (test seam). Defaults to `new SpaceHostClient(opts)`. */
   createHostClient?: (
     opts: SpaceHostClientOptions,
-  ) => Pick<SpaceHostClient, 'listRepoOps' | 'getRecord'>
+  ) => Pick<SpaceHostClient, 'listRepoOps' | 'getRecord' | 'getLatestCommit'>
   /** Byte cap on a decoded record's JSON size, whether it arrived inline or via `getRecord`. */
   maxRecordBytes?: number
   maxPages?: number
@@ -113,7 +113,7 @@ export class SpaceSyncer {
   private readonly mutationFence: SpaceSyncerDeps['mutationFence']
   private readonly createHostClient: (
     opts: SpaceHostClientOptions,
-  ) => Pick<SpaceHostClient, 'listRepoOps' | 'getRecord'>
+  ) => Pick<SpaceHostClient, 'listRepoOps' | 'getRecord' | 'getLatestCommit'>
   private readonly maxRecordBytes: number
   private readonly maxPages: number
   private readonly maxRecordsPerMember: number
@@ -253,11 +253,20 @@ export class SpaceSyncer {
       skippedOversized += applied.skippedOversized
       skippedMalformed += applied.skippedMalformed
 
+      const terminalCommit =
+        page.cursor === undefined && page.commit === undefined
+          ? await client.getLatestCommit({
+              space: target.spaceUri,
+              repo: target.did,
+              signal,
+            })
+          : page.commit
+      assertNotAborted(signal)
       finalCommit = await this.persistPageProgress(
         target,
         applied.mutations,
         page.cursor,
-        page.commit,
+        terminalCommit,
         signal,
       )
       assertNotAborted(signal)

@@ -129,6 +129,7 @@ function buildRunner(
         return pages[pageIndex++] ?? { ops: [] }
       }),
       getRecord: vi.fn(),
+      getLatestCommit: vi.fn(async () => ({ sig: 'terminal' })),
     }),
     now: () => NOW,
   })

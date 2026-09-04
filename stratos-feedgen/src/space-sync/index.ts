@@ -4,6 +4,7 @@ export {
   SpaceHostClient,
 } from './host-client.js'
 export type {
+  GetLatestCommitOptions,
   GetRecordOptions,
   GetRecordResult,
   ListRepoOpsOptions,

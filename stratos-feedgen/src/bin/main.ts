@@ -1,8 +1,13 @@
 #!/usr/bin/env node
+import '../observability/instrumentation.js'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import type { Logger } from '@northskysocial/stratos-core'
 import { normalizeMembershipBoundaries } from '../boundary-normalization.js'
-import { createFeedRequestVerifier, createIdResolver } from '../auth/index.js'
+import {
+  CachedHandleResolver,
+  createFeedRequestVerifier,
+  createIdResolver,
+} from '../auth/index.js'
 import { type FeedgenConfig, loadFeedgenConfig } from '../config.js'
 import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
@@ -79,6 +84,7 @@ async function main(): Promise<void> {
   const keypair = await Secp256k1Keypair.import(cfg.feedgenSigningKey)
   const publicKeyMultibase = keypair.did().slice('did:key:'.length)
   const idResolver = createIdResolver(cfg)
+  const handleResolver = new CachedHandleResolver(idResolver)
   const commitKeyResolver = createCommitKeyResolver(idResolver.did)
 
   const upstream = new UpstreamStratosClient({
@@ -137,6 +143,7 @@ async function main(): Promise<void> {
     metrics,
     subscriptionStatus,
     feedReadiness,
+    resolveHandle: (did) => handleResolver.resolve(did),
   })
 
   const httpServer = await server.listen(port)
