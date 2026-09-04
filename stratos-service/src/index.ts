@@ -473,7 +473,7 @@ export class StratosServer {
         return ctx.actorSigner.getPublicKey(did)
       },
       createAttestation: ctx.createAttestation,
-      createApprovedRoomPost: async ({ did, boundary, text }) => {
+      createApprovedRoomPost: async ({ did, boundary, text, reply }) => {
         const result = await createRecord(
           ctx,
           {
@@ -482,6 +482,7 @@ export class StratosServer {
             record: {
               $type: 'zone.stratos.feed.post',
               text,
+              ...(reply ? { reply } : {}),
               boundary: {
                 $type: 'zone.stratos.boundary.defs#Domains',
                 values: [{ value: boundary }],

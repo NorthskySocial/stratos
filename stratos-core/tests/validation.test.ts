@@ -153,6 +153,26 @@ describe('stratos-validation', () => {
       }).not.toThrow()
     })
 
+    it('should pass for a stratos post replying to a PDS-hosted space record', () => {
+      const spacePostUri =
+        'at://did:web:stratos.atverkackt.de/space/zone.stratos.space.feed/general/did:plc:or5elrbod5l4vq66ol4gy2eb/zone.stratos.feed.post/3mup74hqt3w25'
+      const record = {
+        text: "I'm on a non-space PDS and yet this is all private?!",
+        boundary: {
+          values: [{ value: 'did:web:nerv.tokyo.jp/example-com' }],
+        },
+        reply: {
+          parent: { uri: spacePostUri, cid: 'bafyreicnquudovolfjexydvy' },
+          root: { uri: spacePostUri, cid: 'bafyreicnquudovolfjexydvy' },
+        },
+        createdAt: new Date().toISOString(),
+      }
+
+      expect(() => {
+        validator.assertValid(record, 'zone.stratos.feed.post')
+      }).not.toThrow()
+    })
+
     it('should pass when reply boundaries are a subset of parent boundaries', () => {
       const record = {
         text: 'test',

@@ -6,6 +6,37 @@ import type { OAuthRoutesConfig } from '../routes.js'
 interface RoomPostRequest {
   roomId: string
   text: string
+  reply?: ReplyRef
+}
+
+interface StrongRef {
+  uri: string
+  cid: string
+}
+interface ReplyRef {
+  root: StrongRef
+  parent: StrongRef
+}
+
+function parseStrongRef(value: unknown): StrongRef | null {
+  if (typeof value !== 'object' || value === null) return null
+  const ref = value as Record<string, unknown>
+  return typeof ref.uri === 'string' &&
+    ref.uri.startsWith('at://') &&
+    ref.uri.includes('/zone.stratos.feed.post/') &&
+    typeof ref.cid === 'string' &&
+    ref.cid.length > 0
+    ? { uri: ref.uri, cid: ref.cid }
+    : null
+}
+
+function parseReply(value: unknown): ReplyRef | null | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null) return null
+  const reply = value as Record<string, unknown>
+  const root = parseStrongRef(reply.root)
+  const parent = parseStrongRef(reply.parent)
+  return root && parent ? { root, parent } : null
 }
 
 function parseRoomPostRequest(body: unknown): RoomPostRequest | null {
@@ -16,8 +47,9 @@ function parseRoomPostRequest(body: unknown): RoomPostRequest | null {
   }
   const roomId = value.roomId.trim()
   const text = value.text.trim()
-  if (!roomId || !text) return null
-  return { roomId, text }
+  const reply = parseReply(value.reply)
+  if (!roomId || !text || reply === null) return null
+  return { roomId, text, ...(reply ? { reply } : {}) }
 }
 
 const SAFE_ERROR_MESSAGES: Record<string, string> = {
@@ -130,6 +162,7 @@ export const handleRoomPost = (
         did,
         boundary: room.boundary,
         text: request.text,
+        ...(request.reply ? { reply: request.reply } : {}),
       })
       res.status(201).json(result)
     } catch (err) {
