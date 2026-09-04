@@ -12,6 +12,9 @@ import {
 
 const SECRET =
   /authorization|cookie|dpop|token|secret|password|body|post|oauth|code|state/i
+const MAX_SCRUB_DEPTH = 32
+const CIRCULAR_VALUE = '[Circular]'
+const TRUNCATED_VALUE = '[Truncated]'
 export const HTTP_BUCKETS_SECONDS = [
   0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
 ]
@@ -209,25 +212,40 @@ export function withTelemetrySpan<T>(
 }
 
 export function scrubEvent<T extends object>(event: T): T {
-  return scrub(event) as T
+  return scrub(event, new WeakSet(), 0) as T
 }
 
-function scrub(value_: unknown): unknown {
-  if (Array.isArray(value_)) return value_.map(scrub)
+function scrub(
+  value_: unknown,
+  ancestors: WeakSet<object>,
+  depth: number,
+): unknown {
   if (!value_ || typeof value_ !== 'object') return value_
+  if (depth >= MAX_SCRUB_DEPTH) return TRUNCATED_VALUE
+  if (ancestors.has(value_)) return CIRCULAR_VALUE
 
-  return Object.fromEntries(
-    Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
-      key,
-      SECRET.test(key)
-        ? '[Filtered]'
-        : key === 'query_string'
-          ? '[Filtered]'
-          : key === 'url' && typeof item === 'string'
-            ? scrubUrl(item)
-            : scrub(item),
-    ]),
-  )
+  ancestors.add(value_)
+  try {
+    if (Array.isArray(value_))
+      return value_.map((item) => scrub(item, ancestors, depth + 1))
+
+    return Object.fromEntries(
+      Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
+        key,
+        key === 'sdkProcessingMetadata'
+          ? item
+          : SECRET.test(key)
+            ? '[Filtered]'
+            : key === 'query_string'
+              ? '[Filtered]'
+              : key === 'url' && typeof item === 'string'
+                ? scrubUrl(item)
+                : scrub(item, ancestors, depth + 1),
+      ]),
+    )
+  } finally {
+    ancestors.delete(value_)
+  }
 }
 
 function scrubUrl(value: string): string {
