@@ -141,7 +141,7 @@ services:
   # Also set STORAGE_BACKEND=postgres and configure STRATOS_POSTGRES_URL
   # or STRATOS_PG_* vars above.
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: postgres
     environment:
       POSTGRES_USER: stratos
@@ -150,7 +150,7 @@ services:
     ports:
       - '5432:5432'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U stratos -d bsky']
       interval: 5s
