@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import '../observability/instrumentation.js'
 import { main } from '../index.js'
 
 main().catch((err) => {

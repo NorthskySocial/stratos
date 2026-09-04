@@ -11,7 +11,8 @@ import {
 } from '@opentelemetry/sdk-metrics'
 
 const SECRET =
-  /authorization|cookie|dpop|token|secret|password|body|post|oauth|code|state/i
+  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
+const SECRET_QUERY_PARAMETER = /^(?:code|state)$/i
 export const HTTP_BUCKETS_SECONDS = [
   0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
 ]
@@ -196,21 +197,21 @@ export function withTelemetrySpan<T>(
   return Sentry.startSpan({ name, op }, work)
 }
 export function scrubEvent<T extends object>(event: T): T {
-  return scrub(event) as T
+  return scrub(event, []) as T
 }
-function scrub(value_: unknown): unknown {
-  if (Array.isArray(value_)) return value_.map(scrub)
+function scrub(value_: unknown, path: readonly string[]): unknown {
+  if (Array.isArray(value_)) return value_.map((item) => scrub(item, path))
   if (!value_ || typeof value_ !== 'object') return value_
   return Object.fromEntries(
     Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
       key,
-      SECRET.test(key)
+      SECRET.test(key) || (key === 'body' && path.includes('request'))
         ? '[Filtered]'
         : key === 'query_string'
           ? '[Filtered]'
           : key === 'url' && typeof item === 'string'
             ? scrubUrl(item)
-            : scrub(item),
+            : scrub(item, [...path, key]),
     ]),
   )
 }
@@ -221,7 +222,8 @@ function scrubUrl(value: string): string {
   if (!query) return value
   const params = new URLSearchParams(query)
   for (const key of params.keys()) {
-    if (SECRET.test(key)) params.set(key, '[Filtered]')
+    if (SECRET.test(key) || SECRET_QUERY_PARAMETER.test(key))
+      params.set(key, '[Filtered]')
   }
   return `${path}?${params.toString()}${fragment ? `#${fragment}` : ''}`
 }

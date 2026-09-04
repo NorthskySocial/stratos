@@ -24,6 +24,9 @@ describe('service observability metrics', () => {
       '/xrpc/:nsid',
     )
     expect(normalizeServiceRoute('/records/did:plc:shinji')).toBe('unknown')
+    expect(normalizeServiceRoute('/boundaries/status')).toBe(
+      '/oauth/boundaries/status',
+    )
   })
 
   it('exports service operational metrics through its supplied meter', async () => {
