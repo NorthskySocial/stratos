@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RoomAccessState, RoomCatalogEntry } from '../types'
+  import type { RoomVisual } from '../room-visuals'
   import type { ClubhouseFeedPost } from '../feedgen'
   import type { RoomFeedState } from '../types'
   import IconaMoon from './IconaMoon.svelte'
@@ -8,6 +9,7 @@
   interface Props {
     room: RoomCatalogEntry
     state: RoomAccessState
+    visual: RoomVisual
     onBack: () => void
     onJoin: (roomId: string) => void
     onRecheckPending: () => void
@@ -22,13 +24,13 @@
     onPost: (text: string, reply?: import('../post-writer').ReplyRef) => Promise<void>
   }
 
-  let { room, state, onBack, onJoin, onRecheckPending, feedState, posts, hasMore, feedMessage, topicUri, onOpenTopic, onCloseTopic, onLoadMore, onPost }: Props = $props()
+  let { room, state, visual, onBack, onJoin, onRecheckPending, feedState, posts, hasMore, feedMessage, topicUri, onOpenTopic, onCloseTopic, onLoadMore, onPost }: Props = $props()
 </script>
 
 <section class="room-view" aria-labelledby="room-title">
   <button class="back-link" type="button" onclick={onBack}>Back to rooms</button>
   <div class="room-view-heading">
-    <span class="room-icon room-view-icon" aria-hidden="true"><IconaMoon name="category" /></span>
+    <span class={`room-icon room-view-icon room-icon-${visual.tone}`} aria-hidden="true"><IconaMoon name={visual.icon} /></span>
     <div>
       <h1 id="room-title">{room.displayName}</h1>
       <p>{room.description}</p>

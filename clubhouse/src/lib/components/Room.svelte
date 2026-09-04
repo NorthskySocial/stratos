@@ -1,16 +1,18 @@
 <script lang="ts">
   import { roomPath } from '../route'
+  import type { RoomVisual } from '../room-visuals'
   import type { RoomAccessState, RoomCatalogEntry } from '../types'
   import IconaMoon from './IconaMoon.svelte'
 
   interface Props {
     room: RoomCatalogEntry
     state: RoomAccessState
+    visual: RoomVisual
     onJoin: (roomId: string) => void
     onOpen: (roomId: string) => void
   }
 
-  let { room, state, onJoin, onOpen }: Props = $props()
+  let { room, state, visual, onJoin, onOpen }: Props = $props()
   const stateLabel: Record<RoomAccessState, string> = {
     joined: 'Joined',
     unjoined: 'Open to join',
@@ -36,7 +38,7 @@
 
 <article class="room-card" class:room-unjoined={state === 'unjoined' || state === 'status-error'} class:room-unavailable={state === 'unavailable'}>
   <div class="room-card-topline">
-    <span class="room-icon" aria-hidden="true"><IconaMoon name="category" /></span>
+    <span class={`room-icon room-icon-${visual.tone}`} aria-hidden="true"><IconaMoon name={visual.icon} /></span>
     <span class:status-joined={state === 'joined'} class:status-pending={state === 'pending'} class:status-unavailable={state === 'unavailable'} class="status">
       {#if state === 'joined'}<IconaMoon name="check" />{/if}
       {stateLabel[state]}

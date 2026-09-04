@@ -83,6 +83,16 @@ not an internal Docker hostname. Optional settings are
 `VITE_CLUBHOUSE_ROOM_STATUS_URL`, `VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON`,
 `VITE_ATPROTO_HANDLE_RESOLVER`, and `VITE_ATPROTO_OAUTH_PROXY_URL`.
 
+## Actor search and avatars
+
+The signed-out handle field queries the community-run Typeahead service at
+`typeahead.waow.tech` after two characters. Feed pages also send their public
+author DIDs to Typeahead's `app.bsky.actor.getProfiles` endpoint in batches of
+25 so Clubhouse can render display names and avatars. Both integrations fail
+softly: visitors can still enter a handle directly, and feed posts retain their
+Feedgen-provided DID and handle when profile hydration is unavailable. Browser
+requests identify Clubhouse with the deployment host in the `X-Client` header.
+
 ## Icon attribution
 
 The local interface icons in `src/lib/icons/` use the

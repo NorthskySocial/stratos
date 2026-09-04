@@ -25,7 +25,7 @@ export class FeedgenError extends Error {
 export interface ClubhouseFeedPost {
   uri: string
   cid: string
-  author: { did: string; handle?: string }
+  author: { did: string; handle?: string; displayName?: string; avatar?: string }
   text: string
   indexedAt: string
   reply?: { root: StrongRef; parent: StrongRef }
@@ -146,6 +146,8 @@ function parseFeedPage(payload: unknown): FeedPage {
     const did = stringField(author, 'did')
     if (!did) return []
     const handle = stringField(author, 'handle') ?? undefined
+    const displayName = stringField(author, 'displayName') ?? undefined
+    const avatar = stringField(author, 'avatar') ?? undefined
     const record =
       typeof value.record === 'object' && value.record !== null
         ? (value.record as Record<string, unknown>)
@@ -161,7 +163,7 @@ function parseFeedPage(payload: unknown): FeedPage {
         uri,
         cid,
         indexedAt,
-        author: { did, handle },
+        author: { did, handle, displayName, avatar },
         text: safePostText(value.record),
         ...(root && parent ? { reply: { root, parent } } : {}),
       },
