@@ -142,17 +142,24 @@ const UNLOGGED_ENDPOINTS = new Set(['/health'])
  * raw URL — and unknown paths collapse to one label so an attacker cannot
  * inflate label cardinality.
  */
-function requestInstrumentation(
+export function requestInstrumentation(
   deps: Pick<FeedgenServerDeps, 'logger' | 'metrics'>,
 ): RequestHandler {
   return (req, res, next) => {
     const startedAt = process.hrtime.bigint()
-    const completeMetrics = deps.metrics?.beginHttpRequest()
-    res.on('finish', () => {
+    const requestMetrics = deps.metrics?.beginHttpRequest()
+    let completed = false
+    const complete = (finished: boolean): void => {
+      if (completed) return
+      completed = true
+      if (!finished) {
+        requestMetrics?.abort()
+        return
+      }
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
       const endpoint = KNOWN_ENDPOINTS.has(req.path) ? req.path : 'unknown'
       const status = res.statusCode
-      completeMetrics?.({
+      requestMetrics?.complete({
         method: req.method,
         route: endpoint,
         status,
@@ -171,7 +178,9 @@ function requestInstrumentation(
           'request completed',
         )
       }
-    })
+    }
+    res.once('finish', () => complete(true))
+    res.once('close', () => complete(false))
     next()
   }
 }

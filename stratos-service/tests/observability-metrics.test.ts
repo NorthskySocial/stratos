@@ -46,8 +46,8 @@ describe('service observability metrics', () => {
     )
     const metrics = createServiceMetrics(provider.getMeter('service-test'))
 
-    const finish = metrics.beginHttpRequest()
-    finish({
+    const request = metrics.beginHttpRequest()
+    request.complete({
       method: 'POST',
       route: '/xrpc/com.atproto.repo.createRecord',
       status: 200,

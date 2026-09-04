@@ -33,12 +33,7 @@ export interface SpaceSyncMetrics {
  * attribute.
  */
 export interface FeedgenMetrics {
-  beginHttpRequest(): (input: {
-    method: string
-    route: string
-    status: number
-    durationSeconds: number
-  }) => void
+  beginHttpRequest(): HttpRequestMetrics
   observeFeedRequest(input: {
     outcome: 'ok' | 'expected_error' | 'error'
     postsReturned?: number
@@ -53,6 +48,16 @@ export interface FeedgenMetrics {
   recordSpaceSync(metrics: SpaceSyncMetrics): void
   recordSpaceSyncTickSkipped(): void
   setReady(ready: boolean): void
+}
+
+export interface HttpRequestMetrics {
+  complete(input: {
+    method: string
+    route: string
+    status: number
+    durationSeconds: number
+  }): void
+  abort(): void
 }
 
 /**
@@ -168,14 +173,19 @@ export function createFeedgenMetrics(
   return {
     beginHttpRequest() {
       activeRequests.add(1)
-      return ({ method, route, status: responseStatus, durationSeconds }) => {
-        const attributes = {
-          'http.request.method': method,
-          'http.route': route,
-          'http.response.status_code': responseStatus,
-        }
-        activeRequests.add(-1)
-        httpRequestDuration.record(durationSeconds, attributes)
+      return {
+        complete({ method, route, status: responseStatus, durationSeconds }) {
+          const attributes = {
+            'http.request.method': method,
+            'http.route': route,
+            'http.response.status_code': responseStatus,
+          }
+          activeRequests.add(-1)
+          httpRequestDuration.record(durationSeconds, attributes)
+        },
+        abort() {
+          activeRequests.add(-1)
+        },
       }
     },
     observeFeedRequest({ outcome, postsReturned: count }) {

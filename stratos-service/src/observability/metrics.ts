@@ -52,12 +52,7 @@ const KNOWN_HTTP_ROUTES = new Set([
  * series label.
  */
 export interface ServiceMetrics {
-  beginHttpRequest(): (input: {
-    method: string
-    route: string
-    status: number
-    durationSeconds: number
-  }) => void
+  beginHttpRequest(): HttpRequestMetrics
   setReady(ready: boolean): void
   recordAuth(outcome: 'ok' | 'rejected' | 'error'): void
   recordRecordOperation(
@@ -76,6 +71,16 @@ export interface ServiceMetrics {
     outcome: 'ok' | 'error',
     durationSeconds: number,
   ): void
+}
+
+export interface HttpRequestMetrics {
+  complete(input: {
+    method: string
+    route: string
+    status: number
+    durationSeconds: number
+  }): void
+  abort(): void
 }
 
 export function createServiceMetrics(
@@ -184,13 +189,18 @@ export function createServiceMetrics(
   return {
     beginHttpRequest() {
       activeRequests.add(1)
-      return ({ method, route, status, durationSeconds }) => {
-        activeRequests.add(-1)
-        httpRequestDuration.record(durationSeconds, {
-          'http.request.method': method,
-          'http.route': route,
-          'http.response.status_code': status,
-        })
+      return {
+        complete({ method, route, status, durationSeconds }) {
+          activeRequests.add(-1)
+          httpRequestDuration.record(durationSeconds, {
+            'http.request.method': method,
+            'http.route': route,
+            'http.response.status_code': status,
+          })
+        },
+        abort() {
+          activeRequests.add(-1)
+        },
       }
     },
     setReady(value) {

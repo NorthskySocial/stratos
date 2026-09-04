@@ -204,9 +204,26 @@ function scrub(value_: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
       key,
-      SECRET.test(key) ? '[Filtered]' : scrub(item),
+      SECRET.test(key)
+        ? '[Filtered]'
+        : key === 'query_string'
+          ? '[Filtered]'
+          : key === 'url' && typeof item === 'string'
+            ? scrubUrl(item)
+            : scrub(item),
     ]),
   )
+}
+
+function scrubUrl(value: string): string {
+  const [beforeFragment, fragment = ''] = value.split('#', 2)
+  const [path, query] = beforeFragment.split('?', 2)
+  if (!query) return value
+  const params = new URLSearchParams(query)
+  for (const key of params.keys()) {
+    if (SECRET.test(key)) params.set(key, '[Filtered]')
+  }
+  return `${path}?${params.toString()}${fragment ? `#${fragment}` : ''}`
 }
 function value(input: string | undefined): string | undefined {
   const result = input?.trim()

@@ -3,7 +3,7 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type http from 'node:http'
-import express from 'express'
+import express, { type RequestHandler } from 'express'
 import './types.js'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
@@ -48,6 +48,56 @@ dotenvConfig({ override: false })
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
 export * from './shared/user-agent.js'
+
+export function requestInstrumentation(logger?: Logger): RequestHandler {
+  return (req, res, next) => {
+    const startedAt = process.hrtime.bigint()
+    const requestMetrics = serviceMetrics.beginHttpRequest()
+    let completed = false
+    const complete = (finished: boolean): void => {
+      if (completed) return
+      completed = true
+      if (!finished) {
+        requestMetrics.abort()
+        return
+      }
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
+      const route = normalizeServiceRoute(req.path)
+      requestMetrics.complete({
+        method: req.method,
+        route,
+        status: res.statusCode,
+        durationSeconds: durationMs / 1_000,
+      })
+      if (route.startsWith('/xrpc/')) {
+        serviceMetrics.recordAuth(
+          res.statusCode === 401 || res.statusCode === 403
+            ? 'rejected'
+            : res.statusCode >= 500
+              ? 'error'
+              : 'ok',
+        )
+      }
+      const activeSpan = Sentry.getActiveSpan()
+      const span = activeSpan ? Sentry.spanToJSON(activeSpan) : undefined
+      logger?.info(
+        {
+          method: req.method,
+          path: route,
+          status: res.statusCode,
+          durationMs,
+          traceId: req.traceId,
+          sentryTraceId: span?.trace_id,
+          sentrySpanId: span?.span_id,
+        },
+        'http request completed',
+      )
+    }
+    res.once('finish', () => complete(true))
+    res.once('close', () => complete(false))
+    next()
+  }
+}
 
 /**
  * Stratos service server
@@ -151,46 +201,7 @@ export class StratosServer {
     )
     app.use(cookieParser())
 
-    // Logging middleware with traceId
-    app.use((req, res, next) => {
-      const startedAt = process.hrtime.bigint()
-      const completeMetrics = serviceMetrics.beginHttpRequest()
-      res.on('finish', () => {
-        const durationMs =
-          Number(process.hrtime.bigint() - startedAt) / 1_000_000
-        const route = normalizeServiceRoute(req.path)
-        completeMetrics({
-          method: req.method,
-          route,
-          status: res.statusCode,
-          durationSeconds: durationMs / 1_000,
-        })
-        if (route.startsWith('/xrpc/')) {
-          serviceMetrics.recordAuth(
-            res.statusCode === 401 || res.statusCode === 403
-              ? 'rejected'
-              : res.statusCode >= 500
-                ? 'error'
-                : 'ok',
-          )
-        }
-        const activeSpan = Sentry.getActiveSpan()
-        const span = activeSpan ? Sentry.spanToJSON(activeSpan) : undefined
-        ctx.logger?.info(
-          {
-            method: req.method,
-            path: route,
-            status: res.statusCode,
-            durationMs,
-            traceId: req.traceId,
-            sentryTraceId: span?.trace_id,
-            sentrySpanId: span?.span_id,
-          },
-          'http request completed',
-        )
-      })
-      next()
-    })
+    app.use(requestInstrumentation(ctx.logger))
 
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {

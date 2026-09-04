@@ -122,8 +122,8 @@ describe('OTLP metrics', () => {
       provider.getMeter('feedgen-test'),
     )
 
-    const finish = metrics.beginHttpRequest()
-    finish({
+    const request = metrics.beginHttpRequest()
+    request.complete({
       method: 'GET',
       route: '/xrpc/zone.stratos.feedgen.getFeed',
       status: 200,

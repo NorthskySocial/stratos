@@ -586,5 +586,5 @@ main().catch((err: unknown) => {
   captureUnexpectedError(err)
   // Config/startup can fail before the configured logger exists.
   createLogger('info').error({ err }, 'fatal startup error')
-  process.exit(1)
+  void shutdownTelemetry().finally(() => process.exit(1))
 })

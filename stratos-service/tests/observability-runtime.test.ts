@@ -110,4 +110,20 @@ describe('service telemetry runtime', () => {
       breadcrumbs: [{ token: '[Filtered]' }],
     })
   })
+
+  it('redacts sensitive URL query values before export', () => {
+    expect(
+      scrubEvent({
+        request: {
+          url: 'https://stratos.example/oauth/callback?code=rei&state=nerv&scope=atproto',
+          query_string: 'code=rei&state=nerv',
+        },
+      }),
+    ).toEqual({
+      request: {
+        url: 'https://stratos.example/oauth/callback?code=%5BFiltered%5D&state=%5BFiltered%5D&scope=atproto',
+        query_string: '[Filtered]',
+      },
+    })
+  })
 })
