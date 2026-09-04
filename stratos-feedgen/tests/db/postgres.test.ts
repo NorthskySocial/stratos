@@ -24,7 +24,7 @@ maybeDescribe('postgres backend (testcontainers)', () => {
   let cleanupDb: PgDb
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:16-alpine')
+    container = await new PostgreSqlContainer('postgres:18-alpine')
       .withDatabase('feedgen_test')
       .withUsername('feedgen')
       .withPassword('feedgen')
