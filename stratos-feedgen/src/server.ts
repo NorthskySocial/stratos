@@ -38,6 +38,7 @@ export interface FeedgenServerDeps {
   subscriptionStatus?: SubscriptionStatus
   /** Optional fail-closed gate for projections pending authorization replay. */
   feedReadiness?: FeedReadiness
+  resolveHandle?: (did: string) => Promise<string | undefined>
 }
 
 export interface FeedgenHttpServer {
@@ -63,6 +64,7 @@ export function createFeedgenServer(
     verifier: deps.verifier,
     readiness: deps.feedReadiness,
     metrics: deps.metrics,
+    resolveHandle: deps.resolveHandle,
   })
 
   registerDescribeFeedHandler(xrpc, {

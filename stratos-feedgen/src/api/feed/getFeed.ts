@@ -28,6 +28,8 @@ export interface GetFeedDeps {
   metrics?: FeedgenMetrics
   /** Omitted means the caller has no replay-readiness requirement. */
   readiness?: FeedReadiness
+  /** Resolve a DID to its current handle; the identity resolver owns caching. */
+  resolveHandle?: (did: string) => Promise<string | undefined>
 }
 
 export interface PostView {
@@ -84,7 +86,7 @@ export function registerGetFeedHandler(
           encoding: 'application/json',
           body: {
             cursor: result.cursor,
-            feed: result.posts.map(toFeedViewPost),
+            feed: await toFeedViewPosts(result.posts, deps.resolveHandle),
           } satisfies GetFeedOutput,
         }
         deps.metrics?.observeFeedRequest({
@@ -133,12 +135,31 @@ function normalizeCursor(cursor: string | undefined): string | undefined {
   return cursor
 }
 
-function toFeedViewPost(post: IndexedPost): FeedViewPost {
+async function toFeedViewPosts(
+  posts: IndexedPost[],
+  resolveHandle?: (did: string) => Promise<string | undefined>,
+): Promise<FeedViewPost[]> {
+  const handles = new Map<string, string | undefined>()
+  if (resolveHandle) {
+    await Promise.all(
+      [...new Set(posts.map((post) => post.did))].map(async (did) => {
+        try {
+          handles.set(did, await resolveHandle(did))
+        } catch {
+          handles.set(did, undefined)
+        }
+      }),
+    )
+  }
+  return posts.map((post) => toFeedViewPost(post, handles.get(post.did)))
+}
+
+function toFeedViewPost(post: IndexedPost, handle?: string): FeedViewPost {
   return {
     post: {
       uri: post.uri,
       cid: post.cid,
-      author: { did: post.did },
+      author: { did: post.did, ...(handle ? { handle } : {}) },
       record: post.record,
       indexedAt: post.indexedAt,
       boundaries: post.boundaries,
