@@ -18,6 +18,7 @@ import type { SpaceSyncRunner, SpaceSyncRunResult } from './sync-runner.js'
 const JITTER_FRACTION = 0.1
 
 export interface SpaceSyncPassLogEvent {
+  durationSeconds: number
   targets: number
   succeeded: number
   failed: number
@@ -177,10 +178,16 @@ export class SpaceSyncScheduler {
   }
 
   private async runPass(): Promise<void> {
+    const startedAt = performance.now()
     const controller = new AbortController()
     this.activePassController = controller
     try {
-      await this.runPassWithSignal(controller.signal)
+      const event = await this.runPassWithSignal(controller.signal)
+      if (event)
+        this.log({
+          ...event,
+          durationSeconds: (performance.now() - startedAt) / 1_000,
+        })
     } finally {
       if (this.activePassController === controller) {
         this.activePassController = null
@@ -188,7 +195,9 @@ export class SpaceSyncScheduler {
     }
   }
 
-  private async runPassWithSignal(signal: AbortSignal): Promise<void> {
+  private async runPassWithSignal(
+    signal: AbortSignal,
+  ): Promise<Omit<SpaceSyncPassLogEvent, 'durationSeconds'> | undefined> {
     let outcomes: BoundaryPassOutcome[]
     try {
       outcomes = await this.membership.runPass(this.boundaries, signal)
@@ -256,20 +265,16 @@ export class SpaceSyncScheduler {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (signal.aborted) return
 
-    try {
-      this.log({
-        targets: targets.length,
-        succeeded,
-        failed,
-        abandoned,
-        halted,
-        skippedOversized,
-        skippedMalformed,
-        maxPageStops,
-        capped,
-      })
-    } catch (err) {
-      this.reportError(err)
+    return {
+      targets: targets.length,
+      succeeded,
+      failed,
+      abandoned,
+      halted,
+      skippedOversized,
+      skippedMalformed,
+      maxPageStops,
+      capped,
     }
   }
 

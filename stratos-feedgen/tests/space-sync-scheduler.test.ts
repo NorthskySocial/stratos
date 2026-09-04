@@ -167,6 +167,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
+      durationSeconds: expect.any(Number),
     })
 
     await scheduler.stop()
@@ -254,6 +255,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 3,
       maxPageStops: 1,
       capped: 1,
+      durationSeconds: expect.any(Number),
     })
     await scheduler.stop()
   })
@@ -517,6 +519,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
+      durationSeconds: expect.any(Number),
     })
 
     // Jet's own call finishing late, after abandonment, must not surface as
@@ -734,6 +737,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
+      durationSeconds: expect.any(Number),
     })
 
     await scheduler.stop()
@@ -908,6 +912,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
+      durationSeconds: expect.any(Number),
     })
 
     await scheduler.stop()
@@ -978,6 +983,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
+      durationSeconds: expect.any(Number),
     })
 
     let stopSettled = false
@@ -1108,6 +1114,7 @@ describe('SpaceSyncScheduler', () => {
       skippedMalformed: 0,
       maxPageStops: 0,
       capped: 0,
+      durationSeconds: expect.any(Number),
     })
 
     await scheduler.stop()

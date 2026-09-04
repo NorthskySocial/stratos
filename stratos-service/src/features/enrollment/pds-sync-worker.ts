@@ -7,6 +7,11 @@ import type {
   PdsSyncJob,
   PdsSyncQueueStore,
 } from './internal/pds-sync-store.js'
+import { serviceMetrics } from '../../observability/metrics.js'
+import {
+  captureUnexpectedError,
+  withTelemetrySpan,
+} from '../../observability/runtime.js'
 
 /**
  * Scheduling knobs for the PDS enrollment sync worker.
@@ -83,6 +88,7 @@ export class PdsEnrollmentSyncWorker {
       void this.tick()
     }, this.config.tickMs)
     this.timer.unref()
+    void this.refreshMetrics()
     void this.tick()
   }
 
@@ -181,6 +187,8 @@ export class PdsEnrollmentSyncWorker {
       }
     } catch (err) {
       this.deps.logger?.warn({ err }, 'pds sync: tick failed')
+    } finally {
+      await this.refreshMetrics()
     }
   }
 
@@ -202,7 +210,11 @@ export class PdsEnrollmentSyncWorker {
     const { did } = job
     try {
       const signal = AbortSignal.timeout(this.config.attemptTimeoutMs)
-      const result = await this.deps.sync(did, signal)
+      const result = await withTelemetrySpan(
+        'pds_sync.enrollment',
+        'stratos.pds_sync',
+        () => this.deps.sync(did, signal),
+      )
       const completed = await this.deps.queue.markCompleted(did, job.generation)
       if (!completed) {
         // A mutation landed while this attempt was writing. Its job survives
@@ -217,6 +229,7 @@ export class PdsEnrollmentSyncWorker {
           'pds sync: enrollment record written',
         )
       }
+      serviceMetrics.recordPdsSyncAttempt('ok')
       return 'ok'
     } catch (err) {
       await this.recordFailure(job, err)
@@ -235,6 +248,8 @@ export class PdsEnrollmentSyncWorker {
 
     if (terminal) {
       await this.deps.queue.markFailed(did, generation, lastError)
+      serviceMetrics.recordPdsSyncAttempt('failed')
+      captureUnexpectedError(err)
       // Operator signal: the PDS record stays stale until the user
       // re-authorizes OAuth and the job is revived.
       this.deps.logger?.error(
@@ -254,6 +269,7 @@ export class PdsEnrollmentSyncWorker {
       nextAttemptAt,
       lastError,
     )
+    serviceMetrics.recordPdsSyncAttempt('retry')
     this.deps.logger?.warn(
       { did, attemptCount, nextAttemptAt, lastError },
       'pds sync: attempt failed, retry scheduled',
@@ -264,5 +280,15 @@ export class PdsEnrollmentSyncWorker {
     const exponential = this.config.backoffBaseMs * 2 ** (attemptCount - 1)
     const capped = Math.min(exponential, this.config.backoffCapMs)
     return capped + Math.floor(Math.random() * BACKOFF_JITTER_MS)
+  }
+
+  private async refreshMetrics(): Promise<void> {
+    const getStats = this.deps.queue.getStats
+    if (!getStats) return
+    try {
+      serviceMetrics.setPdsSyncQueue(await getStats.call(this.deps.queue))
+    } catch (error) {
+      this.deps.logger?.warn({ error }, 'pds sync: metrics query failed')
+    }
   }
 }

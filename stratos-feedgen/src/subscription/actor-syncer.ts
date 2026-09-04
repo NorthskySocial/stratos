@@ -3,6 +3,7 @@
 import { decodeFirst } from '@atcute/cbor'
 import { StratosError } from '@northskysocial/stratos-core'
 import { WebSocket as NodeWebSocket } from 'ws'
+import { upstreamTraceHeaders } from '../observability/tracing.js'
 import type { FeedgenStore } from '../db/index.js'
 import type { CommitOp, SubscriptionIndexer } from './indexer.js'
 
@@ -215,7 +216,10 @@ export class ActorSyncer {
     let ws: WebSocketLike
     try {
       ws = new this.wsCtor(wsUrl, {
-        headers: { authorization: `Bearer ${token}` },
+        headers: {
+          ...upstreamTraceHeaders(),
+          authorization: `Bearer ${token}`,
+        },
       })
     } catch (err) {
       this.deps.onError?.(err as Error)

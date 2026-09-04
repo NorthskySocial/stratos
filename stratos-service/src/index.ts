@@ -3,13 +3,14 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type http from 'node:http'
-import express from 'express'
+import express, { type RequestHandler } from 'express'
 import './types.js'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { decode as cborDecode } from '@atproto/lex-cbor'
 import { isTypedLexMap } from '@atproto/lex-data'
 import { randomBytes } from 'node:crypto'
+import * as Sentry from '@sentry/node'
 import type { BlobStoreCreator, Logger } from '@northskysocial/stratos-core'
 import { buildCommit, StratosError } from '@northskysocial/stratos-core'
 import {
@@ -32,6 +33,14 @@ import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
 import { SPACE_CREDENTIAL_KID } from './infra/auth/space-credential-verifier.js'
 import { signAndPersistCommit, StratosBlockStoreReader } from './features'
 import { reconcileServiceEnrollments } from './features/enrollment'
+import {
+  captureUnexpectedError,
+  shutdownTelemetry,
+} from './observability/runtime.js'
+import {
+  normalizeServiceRoute,
+  serviceMetrics,
+} from './observability/metrics.js'
 
 dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
 dotenvConfig({ override: false })
@@ -39,6 +48,56 @@ dotenvConfig({ override: false })
 export { type StratosServiceConfig, type AppContext }
 export { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore/index.js'
 export * from './shared/user-agent.js'
+
+export function requestInstrumentation(logger?: Logger): RequestHandler {
+  return (req, res, next) => {
+    const startedAt = process.hrtime.bigint()
+    const requestMetrics = serviceMetrics.beginHttpRequest()
+    let completed = false
+    const complete = (finished: boolean): void => {
+      if (completed) return
+      completed = true
+      if (!finished) {
+        requestMetrics.abort()
+        return
+      }
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
+      const route = normalizeServiceRoute(req.path)
+      requestMetrics.complete({
+        method: req.method,
+        route,
+        status: res.statusCode,
+        durationSeconds: durationMs / 1_000,
+      })
+      if (route.startsWith('/xrpc/')) {
+        serviceMetrics.recordAuth(
+          res.statusCode === 401 || res.statusCode === 403
+            ? 'rejected'
+            : res.statusCode >= 500
+              ? 'error'
+              : 'ok',
+        )
+      }
+      const activeSpan = Sentry.getActiveSpan()
+      const span = activeSpan ? Sentry.spanToJSON(activeSpan) : undefined
+      logger?.info(
+        {
+          method: req.method,
+          path: route,
+          status: res.statusCode,
+          durationMs,
+          traceId: req.traceId,
+          sentryTraceId: span?.trace_id,
+          sentrySpanId: span?.span_id,
+        },
+        'http request completed',
+      )
+    }
+    res.once('finish', () => complete(true))
+    res.once('close', () => complete(false))
+    next()
+  }
+}
 
 /**
  * Stratos service server
@@ -111,6 +170,9 @@ export class StratosServer {
           publicUrl: ctx.cfg.service.publicUrl,
           devMode: ctx.cfg.stratos.devMode === true,
         })
+        const allowTracingHeaders =
+          origin !== undefined &&
+          ctx.cfg.allowedRedirectOrigins.includes(origin)
         callback(null, {
           // Reflect the request origin for the non-credentialed DPoP/XRPC
           // surface; only allowlisted origins additionally receive
@@ -127,6 +189,7 @@ export class StratosServer {
             'atproto-accept-labelers',
             'atproto-proxy-type',
             'ngrok-skip-browser-warning',
+            ...(allowTracingHeaders ? ['sentry-trace', 'baggage'] : []),
           ],
           exposedHeaders: ['DPoP-Nonce', 'WWW-Authenticate', 'x-trace-id'],
           credentials: credentialed,
@@ -138,24 +201,7 @@ export class StratosServer {
     )
     app.use(cookieParser())
 
-    // Logging middleware with traceId
-    app.use((req, res, next) => {
-      const start = Date.now()
-      res.on('finish', () => {
-        const durationMs = Date.now() - start
-        ctx.logger?.info(
-          {
-            method: req.method,
-            path: req.path,
-            status: res.statusCode,
-            durationMs,
-            traceId: req.traceId,
-          },
-          'http request completed',
-        )
-      })
-      next()
-    })
+    app.use(requestInstrumentation(ctx.logger))
 
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {
@@ -543,6 +589,7 @@ export class StratosServer {
         }
         console.error('Express error:', err.message)
         console.error(err.stack)
+        captureUnexpectedError(err)
         ctx.logger?.error(
           {
             err: err.message,
@@ -568,6 +615,7 @@ export class StratosServer {
 
     return new Promise((resolve) => {
       this.server = this.app.listen(port, () => {
+        serviceMetrics.setReady(true)
         const upgradeListeners = this.server?.listenerCount('upgrade') ?? 0
         this.ctx.logger?.info(
           { port, upgradeListeners },
@@ -583,6 +631,7 @@ export class StratosServer {
    */
   async stop(): Promise<void> {
     this.ctx.logger?.info('stopping stratos server...')
+    serviceMetrics.setReady(false)
     if (this.server) {
       // 1. Stop accepting new connections
       await new Promise<void>((resolve, reject) => {
@@ -671,6 +720,7 @@ export async function main(): Promise<void> {
   process.on('SIGTERM', async () => {
     server.ctx.logger?.info('SIGTERM received, shutting down...')
     await server.stop()
+    await shutdownTelemetry()
     process.exit(0)
   })
 
@@ -678,6 +728,7 @@ export async function main(): Promise<void> {
   process.on('SIGINT', async () => {
     server.ctx.logger?.info('SIGINT received, shutting down...')
     await server.stop()
+    await shutdownTelemetry()
     process.exit(0)
   })
 }
@@ -685,6 +736,7 @@ export async function main(): Promise<void> {
 // Run if executed directly
 if (process.argv[1] === import.meta.url.slice(7)) {
   main().catch((err) => {
+    captureUnexpectedError(err)
     console.error('Fatal error:', err)
     process.exit(1)
   })

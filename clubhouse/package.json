@@ -14,6 +14,7 @@
     "@atproto/oauth-client-browser": "^0.5.3",
     "@northskysocial/stratos-browser": "workspace:*",
     "@northskysocial/stratos-client": "workspace:*",
+    "@sentry/svelte": "^10.73.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/vite": "^4.1.0",
     "svelte": "^5.20.0",
@@ -21,6 +22,7 @@
     "vite": "^6.1.0"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "^4.9.1",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^25.2.1",
     "jsdom": "^29.0.2",

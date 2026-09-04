@@ -29,6 +29,9 @@ describe('repo-write-handlers', () => {
     }
     mockCtx = {
       actorStore: mockActorStore,
+      cfg: {
+        storage: { backend: 'sqlite' },
+      },
       logger: {
         debug: vi.fn(),
         info: vi.fn(),

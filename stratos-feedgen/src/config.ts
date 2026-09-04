@@ -48,9 +48,6 @@ export interface FeedgenConfig {
   boundaryCacheMax: number
   /** Pino log level. */
   logLevel: string
-  /** Bearer token required on `/metrics`. Unset: the endpoint is open. */
-  metricsToken?: string
-
   /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
   spaceSyncEnabled: boolean
   /** Target interval (ms) between space-sync passes, before jitter. */
@@ -158,8 +155,6 @@ export function loadFeedgenConfig(
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
     logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
-    metricsToken: nonEmpty(env['FEEDGEN_METRICS_TOKEN']),
-
     spaceSyncEnabled: parseBoolean(
       env['FEEDGEN_SPACE_SYNC_ENABLED'],
       'FEEDGEN_SPACE_SYNC_ENABLED',
