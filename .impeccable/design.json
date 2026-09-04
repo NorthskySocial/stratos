@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-04T20:36:41+02:00",
+  "title": "Design System: Clubhouse",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Green-black Ink",
+        "canonical": "#20301f",
+        "tonalRamp": [
+          "#0d140d",
+          "#20301f",
+          "#354a33",
+          "#526951",
+          "#748875",
+          "#9eada0",
+          "#cbd3ca",
+          "#f1f4f0"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Warm Newsprint",
+        "canonical": "#f4ead1",
+        "tonalRamp": [
+          "#2b281f",
+          "#514b3c",
+          "#776f59",
+          "#9e9479",
+          "#c2b89b",
+          "#ddd3b7",
+          "#f4ead1",
+          "#fffaf0"
+        ]
+      },
+      "leaf": {
+        "role": "primary",
+        "displayName": "Leaf Green",
+        "canonical": "#128f4a",
+        "tonalRamp": [
+          "#052514",
+          "#084529",
+          "#0b6538",
+          "#128f4a",
+          "#36aa66",
+          "#69c98c",
+          "#a7e3ba",
+          "#e1f7e8"
+        ]
+      },
+      "marigold": {
+        "role": "secondary",
+        "displayName": "Marigold Plate",
+        "canonical": "#ffb500",
+        "tonalRamp": [
+          "#2a1d00",
+          "#5b3d00",
+          "#8d6000",
+          "#c58b00",
+          "#ffb500",
+          "#ffc94f",
+          "#ffdfa0",
+          "#fff5dc"
+        ]
+      },
+      "editorial-pink": {
+        "role": "secondary",
+        "displayName": "Editorial Pink",
+        "canonical": "#f0328c",
+        "tonalRamp": [
+          "#2e071a",
+          "#620d39",
+          "#95175a",
+          "#c82476",
+          "#f0328c",
+          "#f56aa8",
+          "#f9a9cc",
+          "#fde4f0"
+        ]
+      },
+      "sky": {
+        "role": "secondary",
+        "displayName": "Sky Blue",
+        "canonical": "#2f93d6",
+        "tonalRamp": [
+          "#061e2e",
+          "#0c3e5d",
+          "#155f8b",
+          "#2181b9",
+          "#2f93d6",
+          "#68b4e6",
+          "#a6d5f1",
+          "#e3f3fb"
+        ]
+      },
+      "tangerine": {
+        "role": "tertiary",
+        "displayName": "Tangerine Plate",
+        "canonical": "#ff7526",
+        "tonalRamp": [
+          "#301006",
+          "#63240c",
+          "#963814",
+          "#cc501c",
+          "#ff7526",
+          "#ff9b62",
+          "#ffc5a1",
+          "#ffecdf"
+        ]
+      },
+      "destructive": {
+        "role": "tertiary",
+        "displayName": "Destructive Red",
+        "canonical": "#d9374f",
+        "tonalRamp": [
+          "#2b080e",
+          "#59101d",
+          "#861a2b",
+          "#b5263d",
+          "#d9374f",
+          "#e87383",
+          "#f2acb5",
+          "#fbe4e8"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Poster Display",
+        "purpose": "Entrance invitation only."
+      },
+      "headline": {
+        "displayName": "Room Headline",
+        "purpose": "Room identity and major states."
+      },
+      "title": {
+        "displayName": "Cover Line",
+        "purpose": "Room cards and panel titles."
+      },
+      "body": {
+        "displayName": "Reading Copy",
+        "purpose": "Descriptions and conversation."
+      },
+      "label": {
+        "displayName": "Sticker Label",
+        "purpose": "Controls, status, and metadata."
+      }
+    },
+    "shadows": [
+      {
+        "name": "print-panel",
+        "value": "5px 6px 0 rgb(32 48 31 / 0.9)",
+        "purpose": "Primary cards and panels."
+      },
+      {
+        "name": "print-control",
+        "value": "3px 3px 0 rgb(32 48 31 / 0.9)",
+        "purpose": "Buttons, icon tiles, and compact status surfaces."
+      }
+    ],
+    "motion": [
+      {
+        "name": "print-settle",
+        "value": "480ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "A short card entrance that settles onto its offset shadow."
+      },
+      {
+        "name": "loading-nudge",
+        "value": "750ms ease-in-out alternate",
+        "purpose": "A small IconaMoon tile nudge used instead of a spinner."
+      }
+    ],
+    "breakpoints": [
+      { "name": "editorial-medium", "value": "900px" },
+      { "name": "single-column", "value": "680px" },
+      { "name": "phone", "value": "430px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Marigold action control with a hard print shadow.",
+      "html": "<button class=\"ds-button-primary\">OPEN ROOM</button>",
+      "css": ".ds-button-primary{min-height:44px;padding:.65rem 1rem;border:2px solid #20301f;border-radius:.65rem;background:#ffb500;color:#20301f;box-shadow:3px 3px 0 rgba(32,48,31,.9);font:900 .85rem/1 'Trebuchet MS',sans-serif;cursor:pointer;transition:transform 140ms ease-out,box-shadow 140ms ease-out}.ds-button-primary:hover{box-shadow:1px 1px 0 #20301f;transform:translate(2px,2px)}.ds-button-primary:focus-visible{outline:3px solid #2f93d6;outline-offset:4px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Paper action control for sign-out and quiet actions.",
+      "html": "<button class=\"ds-button-secondary\">SIGN OUT</button>",
+      "css": ".ds-button-secondary{min-height:44px;padding:.65rem 1rem;border:2px solid #20301f;border-radius:.65rem;background:#fffaf0;color:#20301f;box-shadow:2px 2px 0 #20301f;font:900 .85rem/1 'Trebuchet MS',sans-serif;cursor:pointer;transition:transform 140ms ease-out,box-shadow 140ms ease-out}.ds-button-secondary:hover{box-shadow:1px 1px 0 #20301f;transform:translate(2px,2px)}.ds-button-secondary:focus-visible{outline:3px solid #2f93d6;outline-offset:4px}"
+    },
+    {
+      "name": "Handle Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Compact paper field used for ATProto handle entry.",
+      "html": "<input class=\"ds-handle-field\" aria-label=\"Handle\" placeholder=\"you.example.com\">",
+      "css": ".ds-handle-field{min-height:44px;width:240px;padding:.58rem .75rem;border:2px solid #20301f;border-radius:.6rem;background:#fffaf0;color:#20301f;box-shadow:2px 2px 0 rgba(32,48,31,.18) inset;font:.84rem/1.4 'Trebuchet MS',sans-serif}.ds-handle-field:hover{background:#fdf4dd}.ds-handle-field:focus-visible{outline:3px solid #2f93d6;outline-offset:4px}"
+    },
+    {
+      "name": "Joined Status",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "Outlined membership sticker with redundant text state.",
+      "html": "<span class=\"ds-status-chip\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 7L10 17L5 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>JOINED</span>",
+      "css": ".ds-status-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:26px;padding:.33rem .58rem;border:2px solid #20301f;border-radius:999px;background:#b7e63a;color:#20301f;font:900 .7rem/1 'Trebuchet MS',sans-serif;letter-spacing:.015em}.ds-status-chip svg{width:.85rem;height:.85rem}.ds-status-chip:hover{transform:rotate(-1deg)}.ds-status-chip:focus-visible{outline:3px solid #2f93d6;outline-offset:4px}"
+    },
+    {
+      "name": "Room Poster Card",
+      "kind": "card",
+      "refersTo": "room-card",
+      "description": "Signature room identity: colorful plate, IconaMoon pictogram, and paper reading surface.",
+      "html": "<article class=\"ds-room-card\"><div class=\"ds-room-poster\"><span class=\"ds-room-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 11L10.6 3.4C11.4 2.6 12.6 2.6 13.4 3.4L21 11M5 9V18C5 19.7 6.3 21 8 21H16C17.7 21 19 19.7 19 18V9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></span></div><div class=\"ds-room-copy\"><span class=\"ds-status\">JOINED</span><h3>NEIGHBOURHOOD PROJECTS</h3><p>Plans, mutual help, and small ideas made real.</p></div></article>",
+      "css": ".ds-room-card{width:340px;overflow:hidden;border:3px solid #20301f;border-radius:.9rem;background:#fffaf0;color:#20301f;box-shadow:5px 6px 0 rgba(32,48,31,.9);font-family:'Trebuchet MS',sans-serif;transition:transform 180ms ease-out,box-shadow 180ms ease-out}.ds-room-card:hover{box-shadow:7px 8px 0 rgba(32,48,31,.92);transform:translate(-2px,-2px)}.ds-room-card:focus-visible{outline:3px solid #2f93d6;outline-offset:4px}.ds-room-poster{display:grid;min-height:140px;place-items:center;border-bottom:3px solid #20301f;background:#ff7526}.ds-room-icon{display:grid;width:76px;height:76px;place-items:center;border:3px solid #20301f;border-radius:1rem 1rem 1rem .25rem;background:#fffaf0;box-shadow:3px 3px 0 rgba(32,48,31,.9);transform:rotate(-3deg)}.ds-room-icon svg{width:42px;height:42px}.ds-room-copy{padding:1.25rem 1.35rem 1.35rem}.ds-status{display:inline-block;padding:.33rem .58rem;border:2px solid #20301f;border-radius:999px;background:#b7e63a;font-size:.7rem;font-weight:900}.ds-room-copy h3{margin:1rem 0 .5rem;font-size:1.8rem;line-height:.98;letter-spacing:-.025em}.ds-room-copy p{margin:0;color:#4a5a47;line-height:1.5}"
+    },
+    {
+      "name": "Topic Card",
+      "kind": "card",
+      "description": "Paper conversation card with compact author identity and editorial actions.",
+      "html": "<article class=\"ds-topic-card\"><strong>MISATO KATSURAGI</strong><small>@misato.example</small><p>Bring one strange idea and one practical question.</p><a href=\"#\">REPLY</a></article>",
+      "css": ".ds-topic-card{width:420px;padding:1.25rem 1.4rem;border:2px solid #20301f;border-radius:.75rem;background:#fffaf0;color:#20301f;box-shadow:3px 3px 0 rgba(32,48,31,.9);font-family:'Trebuchet MS',sans-serif}.ds-topic-card strong{display:block;color:#0b6b38;font-size:.83rem}.ds-topic-card small{color:#4a5a47;font-weight:700}.ds-topic-card p{margin:1rem 0;line-height:1.5}.ds-topic-card a{color:#f0328c;font-size:.8rem;font-weight:900;text-underline-offset:.2em}.ds-topic-card:hover{transform:rotate(.15deg)}.ds-topic-card:focus-visible{outline:3px solid #2f93d6;outline-offset:4px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Living Room Zine",
+    "overview": "Clubhouse borrows its visual world from Martha's Bloom zine language: warm paper, dense green-black ink, imperfect-looking stickers, and saturated print plates. It should feel assembled by a community with opinions, not generated from a generic software dashboard kit. The system is expressive but operational: strong hierarchy keeps room state, membership actions, authorship, and destructive actions immediately legible.",
+    "keyCharacteristics": [
+      "Warm, lightly speckled paper rather than a clean digital canvas.",
+      "Heavy editorial type with compact labels and plain, readable body copy.",
+      "Thick green-black rules, hard offset print shadows, tape, stamps, and flat shapes.",
+      "A distinct colorful IconaMoon pictogram for every room and every interface icon.",
+      "Asymmetrical editorial grids on wide screens and an intentional single column on phones."
+    ],
+    "rules": [
+      {
+        "name": "The Paper-and-Ink Rule",
+        "body": "Every surface must still read clearly with only the paper family and green-black ink; accent colors add identity, never basic legibility.",
+        "section": "colors"
+      },
+      {
+        "name": "The Spot-Color Rule",
+        "body": "Use flat saturated plates. Do not soften room identities into pastel gradients or distribute every accent equally across a screen.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Loud Voice Rule",
+        "body": "Only the primary page or room title uses display scale. Card titles are forceful, but never compete with the page's first reading stop.",
+        "section": "typography"
+      },
+      {
+        "name": "The Editorial Rhythm Rule",
+        "body": "Wide layouts must vary scale or span. Repeated equal cards are not the Clubhouse composition.",
+        "section": "layout"
+      },
+      {
+        "name": "The Hard Shadow Rule",
+        "body": "Use hard offset shadows only with an outlined paper or spot-color surface. Never substitute soft glassy elevation or blurred ambient glow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use local IconaMoon files for every interface icon, including loading and empty states.",
+      "Do give every room a stable, distinct icon and color treatment.",
+      "Do combine thick rules, flat print colors, and hard shadows as one coherent material system.",
+      "Do keep access, error, empty, pending, and destructive states as carefully styled as the happy path.",
+      "Do reduce motion when the visitor requests it."
+    ],
+    "donts": [
+      "Don't fall back to soft SaaS cards, glass panels, ambient shadows, or a uniform dashboard grid.",
+      "Don't use emoji, text glyphs, external icon families, or circular spinner artwork as icons.",
+      "Don't use color alone to communicate room or post state.",
+      "Don't let decorative tape, rotation, or print shapes obscure controls or reading order.",
+      "Don't expose Stratos boundary identifiers as visible decoration or UI state."
+    ]
+  }
+}

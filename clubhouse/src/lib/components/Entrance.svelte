@@ -18,8 +18,11 @@
 
 <section class="entrance" aria-labelledby="entrance-title">
   <div class="entrance-copy">
-    <h1 id="entrance-title">Find your room in the clubhouse.</h1>
-    <p class="entrance-lede">Join a room to hangout and chat</p>
+    <div class="entrance-title-lockup">
+      <h1 id="entrance-title">Find your room in the clubhouse.</h1>
+      <span class="edition-stamp" aria-hidden="true">Open rooms<br />live now</span>
+    </div>
+    <p class="entrance-lede">Join a room to hang out and chat.</p>
   </div>
 
   {#if rooms.length > 0}

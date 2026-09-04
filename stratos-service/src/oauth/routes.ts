@@ -30,7 +30,7 @@ import { handleStatus } from './handlers/status.js'
 import { handleRevoke } from './handlers/revoke.js'
 import { handleRooms } from './handlers/rooms.js'
 import { handleRoomStatus } from './handlers/room-status.js'
-import { handleRoomPost } from './handlers/room-post.js'
+import { handleRoomPost, handleRoomPostDelete } from './handlers/room-post.js'
 import type { RoomCatalog } from './room-catalog.js'
 
 /**
@@ -124,6 +124,11 @@ export interface OAuthRoutesConfig {
       parent: { uri: string; cid: string }
     }
   }) => Promise<{ uri: string; cid: string }>
+  /** Delete an authenticated actor's own Stratos-custodied room post. */
+  deleteApprovedRoomPost: (input: {
+    did: string
+    rkey: string
+  }) => Promise<void>
 }
 
 /**
@@ -411,6 +416,10 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
   )
 
   router.post('/boundaries/post', handleRoomPost(config, authenticateRequest))
+  router.delete(
+    '/boundaries/post',
+    handleRoomPostDelete(config, authenticateRequest),
+  )
 
   router.get('/callback', handleCallback(config))
 

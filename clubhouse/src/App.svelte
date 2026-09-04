@@ -333,6 +333,27 @@
       throw cause
     }
   }
+
+  async function deletePostFromRoom(post: ClubhouseFeedPost) {
+    const room = currentRoom
+    const deletingOpenTopic = currentTopicUri === post.uri
+    if (!room || !activeIntegration.deletePost) {
+      throw new Error('Deleting needs service configuration for this room.')
+    }
+    try {
+      await withClubhouseSpan('clubhouse.post.delete', () =>
+        activeIntegration.deletePost!(room.id, post),
+      )
+      liveMessage = 'Post deleted from the room'
+      if (currentRoomId !== room.id) return
+      if (deletingOpenTopic) closeTopic()
+      await loadSelectedRoom()
+    } catch (cause) {
+      feedMessage = cause instanceof Error ? cause.message : 'Post could not be deleted'
+      liveMessage = feedMessage
+      throw cause
+    }
+  }
 </script>
 
 <svelte:head>
@@ -343,7 +364,7 @@
   <header class="site-header">
     <a class="brand" href="/" aria-label="Clubhouse home" onclick={(event) => { event.preventDefault(); goHome() }}>
       <span class="brand-mark" aria-hidden="true"><IconaMoon name="home" /></span>
-      <span>clubhouse</span>
+      <span class="brand-copy"><strong>clubhouse</strong><small>private rooms on ATProto</small></span>
     </a>
     {#if identity}
       <div class="signed-in-account">
@@ -370,7 +391,7 @@
     {:else if error}
       <ErrorState message={error} onRetry={loadCatalog} />
     {:else if currentRoomId && currentRoom}
-      <RoomPlaceholder room={currentRoom} state={stateForRoom(currentRoom, states)} visual={currentRoomVisual} onBack={goHome} onJoin={joinRoom} onRecheckPending={() => void recheckPendingRoom()} {feedState} {posts} {hasMore} feedMessage={feedMessage} topicUri={currentTopicUri} onOpenTopic={openTopic} onCloseTopic={closeTopic} onLoadMore={() => void loadSelectedRoom(true)} onPost={postToRoom} />
+      <RoomPlaceholder room={currentRoom} state={stateForRoom(currentRoom, states)} visual={currentRoomVisual} onBack={goHome} onJoin={joinRoom} onRecheckPending={() => void recheckPendingRoom()} {feedState} {posts} {hasMore} feedMessage={feedMessage} topicUri={currentTopicUri} viewerDid={identity?.did ?? null} onOpenTopic={openTopic} onCloseTopic={closeTopic} onLoadMore={() => void loadSelectedRoom(true)} onPost={postToRoom} onDelete={deletePostFromRoom} />
     {:else if currentRoomId}
       <ErrorState message="That room does not appear in the current catalogue." onRetry={goHome} />
     {:else}
@@ -379,7 +400,7 @@
   </main>
 
   <footer class="site-footer">
-    <p>Stratos alpha alpha · Clubhouse is a demonstration of it.</p>
+    <p><strong>Clubhouse</strong> · A Stratos alpha demonstration.</p>
     <p>Supports both Spaces and non-spaces users.</p>
   </footer>
 </div>

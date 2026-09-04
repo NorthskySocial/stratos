@@ -3,6 +3,7 @@
   import type { ReplyRef } from '../post-writer'
   import type { RoomFeedState } from '../types'
   import IconaMoon from './IconaMoon.svelte'
+  import DeletePostButton from './DeletePostButton.svelte'
   import PostAuthor from './PostAuthor.svelte'
 
   interface Props {
@@ -11,13 +12,15 @@
     hasMore: boolean
     message: string
     topicUri: string | null
+    viewerDid: string | null
     onOpenTopic: (uri: string) => void
     onCloseTopic: () => void
     onLoadMore: () => void
     onPost: (text: string, reply?: ReplyRef) => Promise<void>
+    onDelete: (post: ClubhouseFeedPost) => Promise<void>
   }
 
-  let { feedState, posts, hasMore, message, topicUri, onOpenTopic, onCloseTopic, onLoadMore, onPost }: Props = $props()
+  let { feedState, posts, hasMore, message, topicUri, viewerDid, onOpenTopic, onCloseTopic, onLoadMore, onPost, onDelete }: Props = $props()
   let text = $state('')
   let draftRevision = $state(0)
   let posting = $state(false)
@@ -57,7 +60,7 @@
 <div class="feed-panel">
   {#if !topicUri}
     <form class="post-composer" onsubmit={(event) => { event.preventDefault(); void submitPost() }}>
-      <label for="room-post">Start a topic</label>
+      <div class="composer-heading"><span aria-hidden="true"><IconaMoon name="comment" /></span><label for="room-post">Start a topic</label></div>
       <textarea id="room-post" bind:value={text} oninput={() => draftRevision += 1} maxlength="300" rows="3" placeholder="What should the room discuss?" aria-describedby={message ? 'room-post-message' : undefined}></textarea>
       <div class="composer-actions"><p>A new top-level topic.</p><button class="button button-primary" type="submit" disabled={posting || !text.trim()}>{posting ? 'Posting…' : 'Post topic'}</button></div>
       {#if message}<p id="room-post-message" class="composer-message" role="alert">{message}</p>{/if}
@@ -81,7 +84,7 @@
       <article class="post topic-root">
         <PostAuthor author={openTopic.author} />
         <p class="post-text">{openTopic.text}</p>
-        <div class="post-meta"><time datetime={openTopic.indexedAt}>{new Date(openTopic.indexedAt).toLocaleString()}</time><button class="button button-primary" type="button" onclick={() => replyingToUri = openTopic.uri}>Reply to topic</button></div>
+        <div class="post-meta"><time datetime={openTopic.indexedAt}>{new Date(openTopic.indexedAt).toLocaleString()}</time><div><button class="button button-primary" type="button" onclick={() => replyingToUri = openTopic.uri}>Reply to topic</button>{#if viewerDid === openTopic.author.did}<DeletePostButton post={openTopic} noun="topic" {onDelete} />{/if}</div></div>
       </article>
       <h2 class="responses-title">Responses</h2>
       <ol class="post-list thread-list">
@@ -89,7 +92,7 @@
           <li class="post thread-reply">
             <PostAuthor author={post.author} />
             <p class="post-text">{post.text}</p>
-            <div class="post-meta"><time datetime={post.indexedAt}>{new Date(post.indexedAt).toLocaleString()}</time><button type="button" onclick={() => replyingToUri = post.uri}>Reply</button></div>
+            <div class="post-meta"><time datetime={post.indexedAt}>{new Date(post.indexedAt).toLocaleString()}</time><div><button type="button" onclick={() => replyingToUri = post.uri}>Reply</button>{#if viewerDid === post.author.did}<DeletePostButton {post} noun="reply" {onDelete} />{/if}</div></div>
           </li>
         {/each}
       </ol>
@@ -103,7 +106,7 @@
         <li class="post topic-card">
           <PostAuthor author={post.author} />
           <p class="post-text">{post.text}</p>
-          <div class="post-meta"><time datetime={post.indexedAt}>{new Date(post.indexedAt).toLocaleString()}</time><div><button type="button" onclick={() => onOpenTopic(post.uri)}>Open topic</button><button type="button" onclick={() => { onOpenTopic(post.uri); replyingToUri = post.uri }}>Reply</button></div></div>
+          <div class="post-meta"><time datetime={post.indexedAt}>{new Date(post.indexedAt).toLocaleString()}</time><div><button type="button" onclick={() => onOpenTopic(post.uri)}>Open topic</button><button type="button" onclick={() => { onOpenTopic(post.uri); replyingToUri = post.uri }}>Reply</button>{#if viewerDid === post.author.did}<DeletePostButton {post} noun="topic" {onDelete} />{/if}</div></div>
         </li>
       {/each}
     </ol>

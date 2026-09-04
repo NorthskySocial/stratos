@@ -59,6 +59,14 @@ describe('OAuth route DPoP verification', () => {
     expect(paths).not.toEqual(
       expect.arrayContaining(['/rooms', '/rooms/status', '/rooms/post']),
     )
+    const postRoutes = router.stack.filter(
+      (layer) => layer.route?.path === '/boundaries/post',
+    )
+    const routeMethods = postRoutes.flatMap(
+      (layer) => layer.route?.stack.map((handler) => handler.method) ?? [],
+    )
+    expect(routeMethods).toContain('post')
+    expect(routeMethods).toContain('delete')
   })
 
   it('uses the full original URL when the router is mounted at /oauth', async () => {
@@ -121,14 +129,16 @@ describe('OAuth route DPoP verification', () => {
 
   it('returns the DPoP nonce challenge headers needed for an automatic retry', async () => {
     const dpopVerifier = {
-      verify: vi.fn().mockRejectedValue(
-        new DpopVerificationError(
-          'DPoP nonce required',
-          'use_dpop_nonce',
-          'DPoP error="use_dpop_nonce"',
-          'next-nonce',
+      verify: vi
+        .fn()
+        .mockRejectedValue(
+          new DpopVerificationError(
+            'DPoP nonce required',
+            'use_dpop_nonce',
+            'DPoP error="use_dpop_nonce"',
+            'next-nonce',
+          ),
         ),
-      ),
     }
     const app = express()
     app.use('/oauth', createOAuthRoutes(createConfig(dpopVerifier)))

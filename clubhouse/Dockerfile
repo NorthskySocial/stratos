@@ -70,9 +70,9 @@ RUN node -e "\
   const scope = [ \
     'atproto', \
     'repo:zone.stratos.actor.enrollment', \
-    'repo:zone.stratos.feed.post?action=create', \
+    'repo:zone.stratos.feed.post', \
     'rpc:zone.stratos.feedgen.getFeed?aud=*', \
-    'space:zone.stratos.space.feed?authority=' + encodeURIComponent(process.env.VITE_STRATOS_SERVICE_DID) + '&collection=zone.stratos.feed.post&action=read&action=create', \
+    'space:zone.stratos.space.feed?authority=' + encodeURIComponent(process.env.VITE_STRATOS_SERVICE_DID) + '&collection=zone.stratos.feed.post&action=read&action=create&action=update&action=delete', \
   ].join(' '); \
   fs.writeFileSync('clubhouse/dist/client-metadata.json', JSON.stringify({ \
     client_id: baseUrl + '/client-metadata.json', \
