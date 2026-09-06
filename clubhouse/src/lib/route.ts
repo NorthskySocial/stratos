@@ -21,7 +21,8 @@ export function roomIdFromPath(pathname: string): string | null {
 
 /** Build a shareable topic URL while keeping the authoritative AT URI intact. */
 export function topicPath(roomId: string, topicUri: string): string {
-  if (!topicUri.startsWith('at://')) throw new Error('A topic AT URI is required')
+  if (!topicUri.startsWith('at://'))
+    throw new Error('A topic AT URI is required')
   return `${roomPath(roomId)}?topic=${encodeURIComponent(topicUri)}`
 }
 

@@ -189,7 +189,9 @@ async function createPrivateReply(
   endpoint: string,
   text: string,
 ): Promise<RecordResponse> {
-  const parent = page.locator('.post-card.private', { hasText: parentText }).first()
+  const parent = page
+    .locator('.post-card.private', { hasText: parentText })
+    .first()
   await parent.getByRole('button', { name: 'Reply' }).click()
   await page.locator('.reply-indicator').waitFor({
     state: 'visible',
@@ -426,15 +428,13 @@ async function waitForRenderedPosts(
   return false
 }
 
-async function waitForRenderedPost(
-  page: Page,
-  text: string,
-): Promise<boolean> {
+async function waitForRenderedPost(page: Page, text: string): Promise<boolean> {
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForSelector('.composer', { timeout: 30_000 })
-    if ((await page.locator('.post-card.private', { hasText: text }).count()) > 0) {
+    const matchingPosts = page.locator('.post-card.private', { hasText: text })
+    if ((await matchingPosts.count()) > 0) {
       return true
     }
     await page.waitForTimeout(2_000)

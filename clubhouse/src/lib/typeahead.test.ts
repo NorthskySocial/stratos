@@ -30,7 +30,9 @@ describe('Typeahead actor client', () => {
     ])
     expect(fetcher).toHaveBeenCalledWith(
       'https://typeahead.waow.tech/xrpc/tech.waow.typeahead.searchActors?q=misa&limit=6',
-      expect.objectContaining({ headers: expect.objectContaining({ 'X-Client': expect.any(String) }) }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Client': expect.any(String) }),
+      }),
     )
   })
 
@@ -48,7 +50,10 @@ describe('Typeahead actor client', () => {
         { status: 200 },
       )
     })
-    const actors = Array.from({ length: 26 }, (_, index) => `did:plc:pilot-${index}`)
+    const actors = Array.from(
+      { length: 26 },
+      (_, index) => `did:plc:pilot-${index}`,
+    )
 
     const profiles = await getActorProfiles(actors, fetcher)
 

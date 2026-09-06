@@ -43,7 +43,14 @@ function parseActors(value: unknown): TypeaheadActor[] {
     if (!did || !handle) return []
     const displayName = optionalString(actor, 'displayName')
     const avatar = safeImageUrl(optionalString(actor, 'avatar'))
-    return [{ did, handle, ...(displayName ? { displayName } : {}), ...(avatar ? { avatar } : {}) }]
+    return [
+      {
+        did,
+        handle,
+        ...(displayName ? { displayName } : {}),
+        ...(avatar ? { avatar } : {}),
+      },
+    ]
   })
 }
 
@@ -95,9 +102,16 @@ export async function getActorProfiles(
   const uniqueActors = [...new Set(actors.filter(Boolean))]
   const profiles = new Map<string, TypeaheadActor>()
 
-  for (let offset = 0; offset < uniqueActors.length; offset += PROFILE_BATCH_SIZE) {
+  for (
+    let offset = 0;
+    offset < uniqueActors.length;
+    offset += PROFILE_BATCH_SIZE
+  ) {
     const parameters = new URLSearchParams()
-    for (const actor of uniqueActors.slice(offset, offset + PROFILE_BATCH_SIZE)) {
+    for (const actor of uniqueActors.slice(
+      offset,
+      offset + PROFILE_BATCH_SIZE,
+    )) {
       parameters.append('actors', actor)
     }
     const payload = await request(
