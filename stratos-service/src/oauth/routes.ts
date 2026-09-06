@@ -128,6 +128,7 @@ export interface OAuthRoutesConfig {
   deleteApprovedRoomPost: (input: {
     did: string
     rkey: string
+    cid: string
   }) => Promise<void>
 }
 

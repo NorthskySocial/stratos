@@ -100,11 +100,11 @@ function createServiceRoomPostWriter(
           : `Stratos could not create the post (HTTP ${response.status}).`
       throw new Error(message)
     },
-    async deletePost({ uri }) {
+    async deletePost({ uri, cid }) {
       const response = await session.fetchHandler(endpoint, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ uri }),
+        body: JSON.stringify({ uri, cid }),
       })
       if (response.ok) return
 

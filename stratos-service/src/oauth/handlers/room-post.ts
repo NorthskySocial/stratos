@@ -12,6 +12,7 @@ interface RoomPostRequest {
 
 interface RoomPostDeleteRequest {
   uri: AtUri
+  cid: string
 }
 
 const POST_COLLECTION = 'zone.stratos.feed.post'
@@ -64,10 +65,18 @@ function parseRoomPostDeleteRequest(
 ): RoomPostDeleteRequest | null {
   if (typeof body !== 'object' || body === null) return null
   const value = body as Record<string, unknown>
-  if (typeof value.uri !== 'string') return null
+  if (
+    typeof value.uri !== 'string' ||
+    typeof value.cid !== 'string' ||
+    value.cid.length === 0
+  ) {
+    return null
+  }
   try {
     const uri = new AtUri(value.uri)
-    return uri.collection === POST_COLLECTION && uri.rkey ? { uri } : null
+    return uri.collection === POST_COLLECTION && uri.rkey
+      ? { uri, cid: value.cid }
+      : null
   } catch {
     return null
   }
@@ -229,7 +238,11 @@ export const handleRoomPostDelete = (
         return
       }
 
-      await config.deleteApprovedRoomPost({ did, rkey: request.uri.rkey })
+      await config.deleteApprovedRoomPost({
+        did,
+        rkey: request.uri.rkey,
+        cid: request.cid,
+      })
       res.status(200).json({})
     } catch (err) {
       if (sendRoomPostWriteError(res, err)) return
