@@ -11,7 +11,7 @@ import {
 } from '@opentelemetry/sdk-metrics'
 
 const SECRET =
-  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
+  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|client[_-]?secret|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
 const SECRET_QUERY_PARAMETER = /^(?:code|state)$/i
 export const HTTP_BUCKETS_SECONDS = [
   0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
@@ -205,7 +205,8 @@ function scrub(value_: unknown, path: readonly string[]): unknown {
   return Object.fromEntries(
     Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
       key,
-      SECRET.test(key) || (key === 'body' && path.includes('request'))
+      SECRET.test(key) ||
+      ((key === 'body' || key === 'data') && path.includes('request'))
         ? '[Filtered]'
         : key === 'query_string'
           ? '[Filtered]'
