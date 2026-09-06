@@ -21,6 +21,16 @@
     request?.abort()
   })
 
+  function dismissResults() {
+    searchVersion += 1
+    window.clearTimeout(debounceTimer)
+    request?.abort()
+    request = undefined
+    searching = false
+    open = false
+    activeIndex = -1
+  }
+
   function queueSearch() {
     const version = ++searchVersion
     window.clearTimeout(debounceTimer)
@@ -58,15 +68,13 @@
   }
 
   function choose(actor: TypeaheadActor) {
+    dismissResults()
     value = actor.handle
-    open = false
-    activeIndex = -1
   }
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
-      open = false
-      activeIndex = -1
+      dismissResults()
       return
     }
     if (event.key === 'Tab') {
@@ -90,7 +98,7 @@
   function handleBlur(event: FocusEvent) {
     const next = event.relatedTarget
     if (next instanceof Element && next.closest('#handle-suggestions')) return
-    open = false
+    dismissResults()
   }
 
 </script>
