@@ -199,6 +199,7 @@ describe('Clubhouse integration', () => {
         return new Response(
           JSON.stringify({
             uri: 'at://did:plc:misato/zone.stratos.feed.post/1',
+            cid: 'bafy-misato-1',
           }),
           { status: 201 },
         )
@@ -283,6 +284,38 @@ describe('Clubhouse integration', () => {
       'https://stratos.example/oauth/boundaries/post',
       expect.anything(),
     )
+  })
+
+  it('rejects a malformed post reference from the Stratos writer', async () => {
+    const fetchHandler = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            rooms: [{ id: 'nerv-hq', state: 'joined' }],
+            custody: 'stratos',
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            uri: 'at://did:plc:misato/zone.stratos.feed.post/1',
+          }),
+          { status: 201 },
+        ),
+      )
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    const integration = createClubhouseIntegration({
+      serviceUrl: 'https://stratos.example',
+      pdsSpaceUriByRoom: {},
+    })
+    await integration.initialize?.()
+
+    await expect(
+      integration.createPost?.('nerv-hq', 'Bridge report.'),
+    ).rejects.toThrow('Stratos returned an invalid post reference.')
   })
 
   it('deletes a Stratos-custodied post through the authenticated service', async () => {

@@ -88,8 +88,19 @@ function createServiceRoomPostWriter(
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roomId, text, ...(reply ? { reply } : {}) }),
       })
-      if (response.ok)
-        return (await response.json()) as { uri: string; cid: string }
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          uri?: unknown
+          cid?: unknown
+        }
+        if (
+          typeof payload.uri !== 'string' ||
+          typeof payload.cid !== 'string'
+        ) {
+          throw new Error('Stratos returned an invalid post reference.')
+        }
+        return { uri: payload.uri, cid: payload.cid }
+      }
 
       const payload: unknown = await response.json().catch(() => undefined)
       const message =
