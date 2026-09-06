@@ -9,7 +9,7 @@ interface ClubhouseTelemetryEnvironment {
 }
 
 const SECRET =
-  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
+  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|client[_-]?secret|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
 
 /** Initialize browser telemetry before any application module is imported. */
 export function initializeClubhouseTelemetry(
@@ -76,7 +76,8 @@ function scrub(value_: unknown, path: readonly string[]): unknown {
   return Object.fromEntries(
     Object.entries(value_ as Record<string, unknown>).map(([key, item]) => [
       key,
-      SECRET.test(key) || (key === 'body' && path.includes('request'))
+      SECRET.test(key) ||
+      ((key === 'body' || key === 'data') && path.includes('request'))
         ? '[Filtered]'
         : scrub(item, [...path, key]),
     ]),
