@@ -41,6 +41,7 @@ import {
   normalizeServiceRoute,
   serviceMetrics,
 } from './observability/metrics.js'
+import { browserTiming } from './observability/browser-timing.js'
 
 dotenvConfig({ path: path.join(process.cwd(), '../.env'), override: false })
 dotenvConfig({ override: false })
@@ -69,7 +70,7 @@ export function requestInstrumentation(logger?: Logger): RequestHandler {
         status: res.statusCode,
         durationSeconds: durationMs / 1_000,
       })
-      if (route.startsWith('/xrpc/')) {
+      if (req.method !== 'OPTIONS' && route.startsWith('/xrpc/')) {
         serviceMetrics.recordAuth(
           res.statusCode === 401 || res.statusCode === 403
             ? 'rejected'
@@ -163,6 +164,10 @@ export class StratosServer {
       next()
     })
 
+    // CORS completes preflights without reaching the remaining middleware.
+    app.use(requestInstrumentation(ctx.logger))
+    app.use(browserTiming(ctx.cfg.allowedRedirectOrigins))
+
     app.use(
       cors((req: express.Request, callback) => {
         const origin = req.headers.origin
@@ -200,8 +205,6 @@ export class StratosServer {
       }),
     )
     app.use(cookieParser())
-
-    app.use(requestInstrumentation(ctx.logger))
 
     // Exclude /xrpc/ routes from express.json() - xrpc-server handles its own body parsing
     app.use((req, res, next) => {

@@ -1,6 +1,8 @@
 import type { IdResolver } from '@atproto/identity'
 import { AuthRequiredError } from '@atproto/xrpc-server'
 import { verifyJwt } from '@atproto/xrpc-server'
+import * as Sentry from '@sentry/node'
+import { withTelemetrySpan } from '../observability/runtime.js'
 
 /** Headers carried on an inbound feed-generator request. */
 export interface RequestHeaders {
@@ -59,7 +61,14 @@ export function createFeedRequestVerifier(
     forceRefresh: boolean,
   ): Promise<string> => {
     try {
-      return await idResolver.did.resolveAtprotoKey(iss, forceRefresh)
+      return await Sentry.startSpan(
+        {
+          name: 'feedgen.auth.resolve_issuer',
+          op: 'function',
+          attributes: { 'did.force_refresh': forceRefresh },
+        },
+        () => idResolver.did.resolveAtprotoKey(iss, forceRefresh),
+      )
     } catch (err) {
       throw new AuthRequiredError(
         `could not resolve issuer did: ${iss}`,
@@ -69,35 +78,36 @@ export function createFeedRequestVerifier(
     }
   }
 
-  return async (req) => {
-    const token = extractBearerToken(req.headers)
+  return (req) =>
+    withTelemetrySpan('feedgen.auth.verify', 'function', async () => {
+      const token = extractBearerToken(req.headers)
 
-    let payload
-    try {
-      payload = await verifyJwt(token, feedgenDid, null, getSigningKey)
-    } catch (err) {
-      if (
-        err instanceof AuthRequiredError &&
-        (err as { customErrorName?: string }).customErrorName === 'JwtExpired'
-      ) {
-        throw new AuthRequiredError('jwt expired', 'ExpiredToken', {
-          cause: err,
-        })
+      let payload
+      try {
+        payload = await verifyJwt(token, feedgenDid, null, getSigningKey)
+      } catch (err) {
+        if (
+          err instanceof AuthRequiredError &&
+          (err as { customErrorName?: string }).customErrorName === 'JwtExpired'
+        ) {
+          throw new AuthRequiredError('jwt expired', 'ExpiredToken', {
+            cause: err,
+          })
+        }
+        throw err
       }
-      throw err
-    }
 
-    if (!payload.lxm || !allowedLxms.includes(payload.lxm)) {
-      throw new AuthRequiredError(
-        payload.lxm
-          ? `bad jwt lexicon method ("lxm"): ${payload.lxm}`
-          : 'missing jwt lexicon method ("lxm")',
-        'BadJwtLexiconMethod',
-      )
-    }
+      if (!payload.lxm || !allowedLxms.includes(payload.lxm)) {
+        throw new AuthRequiredError(
+          payload.lxm
+            ? `bad jwt lexicon method ("lxm"): ${payload.lxm}`
+            : 'missing jwt lexicon method ("lxm")',
+          'BadJwtLexiconMethod',
+        )
+      }
 
-    return { viewerDid: payload.iss, lxm: payload.lxm }
-  }
+      return { viewerDid: payload.iss, lxm: payload.lxm }
+    })
 }
 
 function extractBearerToken(headers: RequestHeaders): string {

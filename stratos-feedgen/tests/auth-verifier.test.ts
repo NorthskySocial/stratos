@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as Sentry from '@sentry/node'
 import { type Keypair, P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { createServiceJwt, AuthRequiredError } from '@atproto/xrpc-server'
 
@@ -6,6 +7,13 @@ import {
   createFeedRequestVerifier,
   type IncomingFeedRequest,
 } from '../src/auth/verifier.js'
+
+vi.mock('@sentry/node', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@sentry/node')>()),
+  startSpan: vi.fn((_options: unknown, work: () => unknown) => work()),
+}))
+
+beforeEach(() => vi.clearAllMocks())
 
 const FEEDGEN_DID = 'did:web:feedgen.test'
 const USER_DID = 'did:plc:user'
@@ -108,6 +116,16 @@ describe('createFeedRequestVerifier', () => {
 
     expect(result).toEqual({ viewerDid: USER_DID, lxm: ALLOWED_LXM })
     expect(resolver.calls[0]).toEqual({ iss: USER_DID, forceRefresh: false })
+    expect(
+      vi.mocked(Sentry.startSpan).mock.calls.map(([options]) => options),
+    ).toEqual([
+      { name: 'feedgen.auth.verify', op: 'function' },
+      {
+        name: 'feedgen.auth.resolve_issuer',
+        op: 'function',
+        attributes: { 'did.force_refresh': false },
+      },
+    ])
   })
 
   it('returns viewer DID on a valid JWT (P-256)', async () => {
@@ -127,6 +145,9 @@ describe('createFeedRequestVerifier', () => {
 
     await expectAuthError(verify({ headers: {} }), 'AuthMissing')
     expect(resolver.calls).toHaveLength(0)
+    expect(
+      vi.mocked(Sentry.startSpan).mock.calls.map(([options]) => options),
+    ).toEqual([{ name: 'feedgen.auth.verify', op: 'function' }])
   })
 
   it('rejects a non-Bearer scheme', async () => {
@@ -189,6 +210,21 @@ describe('createFeedRequestVerifier', () => {
     await expectAuthError(verify(withBearer(token)), 'BadJwtSignature')
     // verifyJwt retries once with forceRefresh=true on signature failure.
     expect(resolver.calls.map((c) => c.forceRefresh)).toEqual([false, true])
+    expect(
+      vi.mocked(Sentry.startSpan).mock.calls.map(([options]) => options),
+    ).toEqual([
+      { name: 'feedgen.auth.verify', op: 'function' },
+      {
+        name: 'feedgen.auth.resolve_issuer',
+        op: 'function',
+        attributes: { 'did.force_refresh': false },
+      },
+      {
+        name: 'feedgen.auth.resolve_issuer',
+        op: 'function',
+        attributes: { 'did.force_refresh': true },
+      },
+    ])
   })
 
   it.each(['at+jwt', 'dpop+jwt', 'refresh+jwt'])(

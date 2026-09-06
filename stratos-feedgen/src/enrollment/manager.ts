@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node'
 import {
   DEFAULT_BOUNDARY_CACHE_MAX,
   DEFAULT_BOUNDARY_CACHE_TTL_MS,
@@ -57,29 +58,39 @@ export class EnrollmentManager {
   }
 
   async getBoundaries(did: string): Promise<string[]> {
-    const cached = this.cache.get(did)
-    if (cached !== undefined) {
-      this.onCacheEvent?.('hit')
-      return cached
-    }
+    return Sentry.startSpan(
+      { name: 'feedgen.boundaries.lookup', op: 'function' },
+      async (span) => {
+        const cached = this.cache.get(did)
+        if (cached !== undefined) {
+          span.setAttribute('cache.result', 'hit')
+          this.onCacheEvent?.('hit')
+          return cached
+        }
 
-    const existing = this.inflight.get(did)
-    if (existing !== undefined) return existing.promise
+        const existing = this.inflight.get(did)
+        if (existing !== undefined) {
+          span.setAttribute('cache.result', 'inflight')
+          return existing.promise
+        }
 
-    this.onCacheEvent?.('miss')
-    const entry: InflightFetch = { promise: undefined as never }
-    entry.promise = this.fetchAndCache(did, entry)
-    this.inflight.set(did, entry)
-    try {
-      return await entry.promise
-    } finally {
-      // Identity-conditional cleanup: an invalidation may have detached this
-      // entry and a replacement fetch may already occupy the slot - deleting
-      // unconditionally would tear down the replacement's single-flighting.
-      if (this.inflight.get(did) === entry) {
-        this.inflight.delete(did)
-      }
-    }
+        span.setAttribute('cache.result', 'miss')
+        this.onCacheEvent?.('miss')
+        const entry: InflightFetch = { promise: undefined as never }
+        entry.promise = this.fetchAndCache(did, entry)
+        this.inflight.set(did, entry)
+        try {
+          return await entry.promise
+        } finally {
+          // Identity-conditional cleanup: an invalidation may have detached this
+          // entry and a replacement fetch may already occupy the slot - deleting
+          // unconditionally would tear down the replacement's single-flighting.
+          if (this.inflight.get(did) === entry) {
+            this.inflight.delete(did)
+          }
+        }
+      },
+    )
   }
 
   private async fetchAndCache(

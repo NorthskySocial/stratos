@@ -9,6 +9,7 @@
   "inPlace": true,
   "reporters": ["html", "clear-text", "progress"],
   "mutate": [
+    "src/observability/browser-timing.ts",
     "src/config.ts",
     "src/features/blob/adapter.ts",
     "src/features/enrollment/**/*.ts",
