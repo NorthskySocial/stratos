@@ -23,6 +23,8 @@ describe('room routes', () => {
     const path = topicPath('open-orbit', uri)
     expect(path).toBe(`/rooms/open-orbit?topic=${encodeURIComponent(uri)}`)
     expect(topicUriFromPath(path)).toBe(uri)
-    expect(topicUriFromPath('/rooms/open-orbit?topic=https%3A%2F%2Fbad')).toBeNull()
+    expect(
+      topicUriFromPath('/rooms/open-orbit?topic=https%3A%2F%2Fbad'),
+    ).toBeNull()
   })
 })

@@ -72,7 +72,9 @@ describe('deletePost', () => {
   })
 
   it('deletes a PDS-hosted private post through the space endpoint', async () => {
-    const fetchHandler = vi.fn().mockResolvedValue(new Response(null, {status: 200}))
+    const fetchHandler = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }))
     const publicDelete = vi.fn().mockResolvedValue({})
     const stratosDelete = vi.fn().mockResolvedValue({})
 
@@ -88,16 +90,15 @@ describe('deletePost', () => {
 
     const [path, request] = fetchHandler.mock.calls[0] as [
       string,
-      {method: string; headers: Record<string, string>; body: string},
+      { method: string; headers: Record<string, string>; body: string },
     ]
     expect(path).toBe('/xrpc/com.atproto.space.deleteRecord')
     expect(request).toMatchObject({
       method: 'POST',
-      headers: {'content-type': 'application/json'},
+      headers: { 'content-type': 'application/json' },
     })
     expect(JSON.parse(request.body)).toEqual({
-      space:
-        'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
+      space: 'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
       repo: DID,
       collection: 'zone.stratos.feed.post',
       rkey: 'three',
@@ -109,7 +110,7 @@ describe('deletePost', () => {
   it('rejects a post owned by another user', async () => {
     await expect(
       deletePost({
-        post: post({author: 'did:plc:asuka'}),
+        post: post({ author: 'did:plc:asuka' }),
         session: session(),
         publicAgent: agent(),
         stratosAgent: null,
@@ -141,7 +142,7 @@ describe('deletePost', () => {
           isPrivate: true,
         }),
         session: session(
-          vi.fn().mockResolvedValue(new Response(null, {status: 403})),
+          vi.fn().mockResolvedValue(new Response(null, { status: 403 })),
         ),
         publicAgent: agent(),
         stratosAgent: null,

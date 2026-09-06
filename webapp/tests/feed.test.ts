@@ -41,9 +41,7 @@ describe('feed logic', () => {
   describe('postDeleteTargetFromUri', () => {
     it('extracts the target for a custody record', () => {
       expect(
-        postDeleteTargetFromUri(
-          'at://did:plc:rei/app.bsky.feed.post/one',
-        ),
+        postDeleteTargetFromUri('at://did:plc:rei/app.bsky.feed.post/one'),
       ).toEqual({
         repo: 'did:plc:rei',
         collection: 'app.bsky.feed.post',

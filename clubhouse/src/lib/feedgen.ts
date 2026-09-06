@@ -25,7 +25,12 @@ export class FeedgenError extends Error {
 export interface ClubhouseFeedPost {
   uri: string
   cid: string
-  author: { did: string; handle?: string; displayName?: string; avatar?: string }
+  author: {
+    did: string
+    handle?: string
+    displayName?: string
+    avatar?: string
+  }
   text: string
   indexedAt: string
   reply?: { root: StrongRef; parent: StrongRef }

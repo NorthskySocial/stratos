@@ -33,7 +33,7 @@ export async function deletePost({
       '/xrpc/com.atproto.space.deleteRecord',
       {
         method: 'POST',
-        headers: {'content-type': 'application/json'},
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify(target),
       },
     )

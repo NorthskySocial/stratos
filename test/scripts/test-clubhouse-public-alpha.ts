@@ -53,7 +53,9 @@ function parseAccount(value: unknown): AlphaAccount {
     typeof account.password !== 'string' ||
     !account.password
   ) {
-    throw new Error('The selected account needs non-empty username and password')
+    throw new Error(
+      'The selected account needs non-empty username and password',
+    )
   }
   return { username: account.username, password: account.password }
 }
@@ -110,21 +112,20 @@ async function completeOAuth(
         .first()
       if (await visible(username)) await username.fill(account.username)
       await password.fill(account.password)
-      const submit = page
-        .locator('button[type="submit"], button:has-text("Sign in")')
+      const submit = page.locator(
+        'button[type="submit"], button:has-text("Sign in")',
+      )
       if (await clickFirstEnabled(submit)) {
         await page.waitForTimeout(300)
         continue
-      }
-      else await page.keyboard.press('Enter')
+      } else await page.keyboard.press('Enter')
       await page.waitForTimeout(300)
       continue
     }
 
-    const consent = page
-      .locator(
-        'button:has-text("Accept"), button:has-text("Authorize"), button:has-text("Allow")',
-      )
+    const consent = page.locator(
+      'button:has-text("Accept"), button:has-text("Authorize"), button:has-text("Allow")',
+    )
     if (await clickFirstEnabled(consent)) {
       await page.waitForTimeout(300)
       continue
@@ -161,7 +162,9 @@ async function signIn(
 
 function roomCard(page: Page, roomId: string): Locator {
   return page.locator('.room-card', {
-    has: page.locator(`a.room-link[href="/rooms/${encodeURIComponent(roomId)}"]`),
+    has: page.locator(
+      `a.room-link[href="/rooms/${encodeURIComponent(roomId)}"]`,
+    ),
   })
 }
 
@@ -174,7 +177,9 @@ async function waitForComposer(page: Page): Promise<void> {
     const recheck = page.getByRole('button', { name: 'Check room again' })
     if (await visible(recheck)) {
       await recheck.click()
-      await composer.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+      await composer
+        .waitFor({ state: 'visible', timeout: 5_000 })
+        .catch(() => {})
       if (await visible(composer)) return
     }
     await page.reload({ waitUntil: 'domcontentloaded' })
@@ -200,7 +205,10 @@ async function enterRoom(
   }
 
   const join = card.getByRole('button', { name: 'Join room' })
-  assert(await visible(join), `Room ${roomId} has neither an open nor join action`)
+  assert(
+    await visible(join),
+    `Room ${roomId} has neither an open nor join action`,
+  )
   assert(
     allowMutation,
     'The account is not yet a member. Re-run with CLUBHOUSE_PUBLIC_E2E_MUTATE=true to test enrollment and writes.',
@@ -318,13 +326,17 @@ async function signOut(page: Page): Promise<void> {
 }
 
 async function run(): Promise<void> {
-  const account = await loadAccount(requiredEnvironment('CLUBHOUSE_PUBLIC_E2E_USERS_FILE'))
+  const account = await loadAccount(
+    requiredEnvironment('CLUBHOUSE_PUBLIC_E2E_USERS_FILE'),
+  )
   const clubhouseUrl =
     Deno.env.get('CLUBHOUSE_PUBLIC_E2E_URL')?.trim() || DEFAULT_CLUBHOUSE_URL
   const roomId =
     Deno.env.get('CLUBHOUSE_PUBLIC_E2E_ROOM')?.trim() || DEFAULT_ROOM_ID
   const allowMutation = Deno.env.get('CLUBHOUSE_PUBLIC_E2E_MUTATE') === 'true'
-  const executablePath = Deno.env.get('CLUBHOUSE_PUBLIC_E2E_BROWSER_PATH')?.trim()
+  const executablePath = Deno.env
+    .get('CLUBHOUSE_PUBLIC_E2E_BROWSER_PATH')
+    ?.trim()
   const browser = await chromium.launch({
     headless: true,
     ...(executablePath ? { executablePath, args: ['--no-sandbox'] } : {}),
@@ -357,7 +369,9 @@ async function run(): Promise<void> {
     assertPdsRecord(recordFromWrite(writes, topicText), topicText)
     const topicCard = await waitForPost(page, topicText)
     await topicCard.getByRole('button', { name: 'Open topic' }).click()
-    await page.locator('.thread-view').waitFor({ state: 'visible', timeout: 30_000 })
+    await page
+      .locator('.thread-view')
+      .waitFor({ state: 'visible', timeout: 30_000 })
     assert(
       new URL(page.url()).searchParams.get('topic') === topic.uri,
       'Opening a topic did not create its shareable URI route',

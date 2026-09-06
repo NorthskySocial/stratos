@@ -140,9 +140,7 @@ export async function resolveParentBoundaries(
 
   const spaceRecord = parseRecordUri(reply.parent.uri)
   if (spaceRecord.ok) {
-    return [
-      qualifyBoundary(spaceRecord.value.spaceDid, spaceRecord.value.skey),
-    ]
+    return [qualifyBoundary(spaceRecord.value.spaceDid, spaceRecord.value.skey)]
   }
 
   let parentUri: AtUriSyntax

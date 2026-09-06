@@ -26,7 +26,9 @@ describe('PostCard.svelte', () => {
     })
     expect(screen.getByText('Hello world')).toBeInTheDocument()
     expect(screen.getByText('@alice.bsky.social')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Delete post' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Delete post' }),
+    ).not.toBeInTheDocument()
   })
 
   it('lets an author delete their own post', async () => {
