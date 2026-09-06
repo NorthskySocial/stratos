@@ -7,6 +7,8 @@ export interface RoomCatalogEntry {
 }
 
 export type RoomAccessState =
+  /** Browser is still restoring the session or resolving room access. */
+  | 'loading'
   | 'joined'
   | 'unjoined'
   | 'unavailable'
@@ -55,6 +57,10 @@ export interface ClubhouseIntegration {
     roomId: string,
     limit: number,
     cursor?: string,
+  ) => Promise<import('./feedgen').FeedPage>
+  /** Enrich optional author metadata after the feed has been displayed. */
+  enrichFeedAuthors?: (
+    page: import('./feedgen').FeedPage,
   ) => Promise<import('./feedgen').FeedPage>
   /** Create a topic or reply through the custody-aware writer seam. */
   createPost?: (
