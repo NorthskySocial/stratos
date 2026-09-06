@@ -336,7 +336,6 @@
 
   async function deletePostFromRoom(post: ClubhouseFeedPost) {
     const room = currentRoom
-    const deletingOpenTopic = currentTopicUri === post.uri
     if (!room || !activeIntegration.deletePost) {
       throw new Error('Deleting needs service configuration for this room.')
     }
@@ -346,7 +345,7 @@
       )
       liveMessage = 'Post deleted from the room'
       if (currentRoomId !== room.id) return
-      if (deletingOpenTopic) closeTopic()
+      if (currentTopicUri === post.uri) closeTopic()
       await loadSelectedRoom()
     } catch (cause) {
       feedMessage = cause instanceof Error ? cause.message : 'Post could not be deleted'
