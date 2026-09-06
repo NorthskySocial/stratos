@@ -320,6 +320,7 @@ describe('Clubhouse integration', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+          cid: 'bafy-misato-3k5',
         }),
       },
     )

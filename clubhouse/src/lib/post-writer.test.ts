@@ -132,6 +132,7 @@ describe('custody-aware room posting', () => {
 
     expect(deletePost).toHaveBeenCalledWith({
       uri: 'at://did:plc:rei/zone.stratos.feed.post/3k3',
+      cid: 'bafy-rei',
     })
   })
 

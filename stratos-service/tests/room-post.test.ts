@@ -252,6 +252,7 @@ describe('server-approved room posts', () => {
       {
         body: {
           uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+          cid: 'bafy-misato',
         },
       } as never,
       response as never,
@@ -260,6 +261,7 @@ describe('server-approved room posts', () => {
     expect(config.deleteApprovedRoomPost).toHaveBeenCalledWith({
       did: 'did:plc:misato',
       rkey: '3k5',
+      cid: 'bafy-misato',
     })
     expect(response.status).toHaveBeenCalledWith(200)
   })
@@ -275,6 +277,7 @@ describe('server-approved room posts', () => {
       {
         body: {
           uri: 'at://did:plc:asuka/zone.stratos.feed.post/3k6',
+          cid: 'bafy-asuka',
         },
       } as never,
       response as never,
@@ -289,10 +292,20 @@ describe('server-approved room posts', () => {
   })
 
   it.each([
+    undefined,
     null,
+    'invalid',
     {},
-    { uri: 'not-an-at-uri' },
-    { uri: 'at://did:plc:rei/app.bsky.feed.post/3k7' },
+    { uri: 1, cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/zone.stratos.feed.post/3k7', cid: 1 },
+    { uri: 'not-an-at-uri', cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/app.bsky.feed.post/3k7', cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/zone.stratos.feed.post', cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/zone.stratos.feed.post/3k7' },
+    {
+      uri: 'at://did:plc:rei/zone.stratos.feed.post/3k7',
+      cid: '',
+    },
   ])('rejects malformed room post deletion input %#', async (body) => {
     const config = createConfig()
     const response = createResponse()

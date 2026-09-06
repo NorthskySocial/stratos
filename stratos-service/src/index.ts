@@ -494,13 +494,14 @@ export class StratosServer {
         )
         return { uri: result.uri, cid: result.cid }
       },
-      deleteApprovedRoomPost: async ({ did, rkey }) => {
+      deleteApprovedRoomPost: async ({ did, rkey, cid }) => {
         await deleteRecord(
           ctx,
           {
             repo: did,
             collection: 'zone.stratos.feed.post',
             rkey,
+            swapRecord: cid,
           },
           did,
         )

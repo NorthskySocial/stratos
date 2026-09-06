@@ -19,7 +19,7 @@ export interface StratosPostWriter {
     reply?: ReplyRef
   }) => Promise<PostRef>
   /** Delete an authenticated actor's own Stratos-custodied room post. */
-  deletePost: (input: { uri: string }) => Promise<void>
+  deletePost: (input: { uri: string; cid: string }) => Promise<void>
 }
 
 export interface PostRef {
@@ -130,7 +130,7 @@ export async function deleteRoomPost(
         'Deleting needs service configuration for this room.',
       )
     }
-    await input.stratosWriter.deletePost({ uri: input.uri })
+    await input.stratosWriter.deletePost({ uri: input.uri, cid: input.cid })
     return
   }
 
