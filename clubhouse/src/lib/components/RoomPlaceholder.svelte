@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RoomAccessState, RoomCatalogEntry } from '../types'
+  import type { RoomVisual } from '../room-visuals'
   import type { ClubhouseFeedPost } from '../feedgen'
   import type { RoomFeedState } from '../types'
   import IconaMoon from './IconaMoon.svelte'
@@ -8,6 +9,7 @@
   interface Props {
     room: RoomCatalogEntry
     state: RoomAccessState
+    visual: RoomVisual
     onBack: () => void
     onJoin: (roomId: string) => void
     onRecheckPending: () => void
@@ -16,16 +18,21 @@
     hasMore: boolean
     feedMessage: string
     onLoadMore: () => void
-    onPost: (text: string) => Promise<void>
+    topicUri: string | null
+    viewerDid: string | null
+    onOpenTopic: (uri: string) => void
+    onCloseTopic: () => void
+    onPost: (text: string, reply?: import('../post-writer').ReplyRef) => Promise<void>
+    onDelete: (post: ClubhouseFeedPost) => Promise<void>
   }
 
-  let { room, state, onBack, onJoin, onRecheckPending, feedState, posts, hasMore, feedMessage, onLoadMore, onPost }: Props = $props()
+  let { room, state, visual, onBack, onJoin, onRecheckPending, feedState, posts, hasMore, feedMessage, topicUri, viewerDid, onOpenTopic, onCloseTopic, onLoadMore, onPost, onDelete }: Props = $props()
 </script>
 
 <section class="room-view" aria-labelledby="room-title">
   <button class="back-link" type="button" onclick={onBack}>Back to rooms</button>
   <div class="room-view-heading">
-    <span class="room-view-orbit" aria-hidden="true"><span></span></span>
+    <span class={`room-icon room-view-icon room-icon-${visual.tone}`} aria-hidden="true"><IconaMoon name={visual.icon} /></span>
     <div>
       <h1 id="room-title">{room.displayName}</h1>
       <p>{room.description}</p>
@@ -33,7 +40,7 @@
   </div>
 
   {#if state === 'joined'}
-    <RoomFeed {feedState} {posts} {hasMore} message={feedMessage} {onLoadMore} {onPost} />
+    <RoomFeed {feedState} {posts} {hasMore} message={feedMessage} {topicUri} {viewerDid} {onOpenTopic} {onCloseTopic} {onLoadMore} {onPost} {onDelete} />
   {:else if state === 'pending'}
     <div class="placeholder-panel">
       <div class="panel-icon"><IconaMoon name="information" /></div>
@@ -54,11 +61,12 @@
       </div>
     </div>
   {:else if state === 'status-error'}
-    <div class="placeholder-panel" role="alert">
+    <div class="placeholder-panel">
       <div class="panel-icon"><IconaMoon name="information" /></div>
       <div>
         <h2>Room access status is unavailable.</h2>
-        <p>We could not verify your access right now, so joining is paused. Return to the room list and try again shortly.</p>
+        <p>We could not verify whether you are already a member. You can still start the room’s secure enrollment flow.</p>
+        <button class="button button-primary" type="button" onclick={() => onJoin(room.id)}>Join room</button>
       </div>
     </div>
   {:else}

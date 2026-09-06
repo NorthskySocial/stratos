@@ -96,12 +96,42 @@ describe('service telemetry runtime', () => {
   it('removes sensitive fields while retaining operational context', () => {
     expect(
       scrubEvent({
-        contexts: { actor: { did: 'did:plc:faye' } },
-        request: { headers: { authorization: 'Bearer secret' }, body: 'post' },
+        contexts: {
+          actor: { did: 'did:plc:faye' },
+          credentials: {
+            client_secret: 'rei',
+            'client-secret': 'asuka',
+            clientsecret: 'misato',
+          },
+        },
+        request: {
+          headers: { authorization: 'Bearer secret' },
+          body: 'post',
+          data: { client_secret: 'rei' },
+        },
+        response: {
+          status_code: 403,
+          body: { error: 'ScopeMissingError', message: 'Missing scope' },
+        },
       }),
     ).toEqual({
-      contexts: { actor: { did: 'did:plc:faye' } },
-      request: { headers: { authorization: '[Filtered]' }, body: '[Filtered]' },
+      contexts: {
+        actor: { did: 'did:plc:faye' },
+        credentials: {
+          client_secret: '[Filtered]',
+          'client-secret': '[Filtered]',
+          clientsecret: '[Filtered]',
+        },
+      },
+      request: {
+        headers: { authorization: '[Filtered]' },
+        body: '[Filtered]',
+        data: '[Filtered]',
+      },
+      response: {
+        status_code: 403,
+        body: { error: 'ScopeMissingError', message: 'Missing scope' },
+      },
     })
   })
 
@@ -115,13 +145,13 @@ describe('service telemetry runtime', () => {
     expect(
       scrubEvent({
         request: {
-          url: 'https://stratos.example/oauth/callback?code=rei&state=nerv&scope=atproto',
+          url: 'https://stratos.example/oauth/callback?code=rei&state=nerv&client_secret=asuka&scope=atproto',
           query_string: 'code=rei&state=nerv',
         },
       }),
     ).toEqual({
       request: {
-        url: 'https://stratos.example/oauth/callback?code=%5BFiltered%5D&state=%5BFiltered%5D&scope=atproto',
+        url: 'https://stratos.example/oauth/callback?code=%5BFiltered%5D&state=%5BFiltered%5D&client_secret=%5BFiltered%5D&scope=atproto',
         query_string: '[Filtered]',
       },
     })

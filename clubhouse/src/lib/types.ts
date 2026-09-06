@@ -38,6 +38,8 @@ export interface ClubhouseIntegration {
   initialize?: () => Promise<ClubhouseIdentity | null>
   /** Begin normal browser OAuth for a user-supplied login handle. */
   signIn?: (handle: string) => Promise<void>
+  /** Revoke the current OAuth session and clear the signed-in identity. */
+  signOut?: () => Promise<void>
   /** Resolve the viewer's state without exposing an authorization value. */
   getRoomState?: (roomId: string) => RoomAccessState | Promise<RoomAccessState>
   /** Resolve all known room states in one boundary-free service request. */
@@ -54,6 +56,15 @@ export interface ClubhouseIntegration {
     limit: number,
     cursor?: string,
   ) => Promise<import('./feedgen').FeedPage>
-  /** Create one flat text post through the custody-aware writer seam. */
-  createPost?: (roomId: string, text: string) => Promise<void>
+  /** Create a topic or reply through the custody-aware writer seam. */
+  createPost?: (
+    roomId: string,
+    text: string,
+    reply?: import('./post-writer').ReplyRef,
+  ) => Promise<import('./post-writer').PostRef>
+  /** Delete one owned post through the same custody-aware writer seam. */
+  deletePost?: (
+    roomId: string,
+    post: import('./feedgen').ClubhouseFeedPost,
+  ) => Promise<void>
 }

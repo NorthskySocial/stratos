@@ -27,6 +27,7 @@ describe('Record Delete Handler', () => {
   const serviceDid = 'did:web:nerv.tokyo.jp'
   const collection = 'zone.stratos.feed.post'
   const rkey = 'post1'
+  let recordCid: string
 
   async function createTestCid(data: any) {
     const bytes = new TextEncoder().encode(JSON.stringify(data))
@@ -92,6 +93,7 @@ describe('Record Delete Handler', () => {
         },
       }
       const cid = await createTestCid(record)
+      recordCid = cid.toString()
       await store.record.putRecord({
         uri: `at://${testDid}/${collection}/${rkey}`,
         cid,
@@ -113,6 +115,7 @@ describe('Record Delete Handler', () => {
         repo: testDid,
         collection,
         rkey,
+        swapRecord: recordCid,
       },
       testDid,
     )
@@ -134,6 +137,63 @@ describe('Record Delete Handler', () => {
 
     // Verify event was emitted
     expect(ctx.sequenceEvents.emit).toHaveBeenCalledWith(testDid)
+  })
+
+  it('preserves the record when the compare-and-swap CID is stale', async () => {
+    await expect(
+      deleteRecord(
+        ctx,
+        {
+          repo: testDid,
+          collection,
+          rkey,
+          swapRecord: 'bafy-stale',
+        },
+        testDid,
+      ),
+    ).rejects.toThrow('Record does not match swap condition')
+
+    await expect(
+      getRecord(
+        ctx,
+        {
+          repo: testDid,
+          collection,
+          rkey,
+        },
+        testDid,
+      ),
+    ).resolves.toMatchObject({ cid: recordCid })
+    expect(ctx.sequenceEvents.emit).not.toHaveBeenCalled()
+  })
+
+  it('allows an unconditional delete without a compare-and-swap CID', async () => {
+    await expect(
+      deleteRecord(
+        ctx,
+        {
+          repo: testDid,
+          collection,
+          rkey,
+        },
+        testDid,
+      ),
+    ).resolves.toMatchObject({ commit: expect.anything() })
+  })
+
+  it('reports an InvalidSwap error when the target record is missing', async () => {
+    await expect(
+      deleteRecord(
+        ctx,
+        {
+          repo: testDid,
+          collection,
+          rkey: 'missing',
+          swapRecord: recordCid,
+        },
+        testDid,
+      ),
+    ).rejects.toMatchObject({ error: 'InvalidSwap' })
   })
 
   it('should throw AuthRequiredError when deleting another users record', async () => {

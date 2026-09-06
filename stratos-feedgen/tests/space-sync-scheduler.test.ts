@@ -627,6 +627,7 @@ describe('SpaceSyncScheduler', () => {
           },
         ),
         getRecord: vi.fn(),
+        getLatestCommit: vi.fn(),
       }
       const refuses = (label: string) =>
         vi.fn(() => {

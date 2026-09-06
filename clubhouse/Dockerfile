@@ -36,6 +36,10 @@ ARG VITE_CLUBHOUSE_ROOM_STATUS_URL
 ARG VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON
 ARG VITE_ATPROTO_HANDLE_RESOLVER
 ARG VITE_ATPROTO_OAUTH_PROXY_URL
+ARG VITE_SENTRY_DSN
+ARG VITE_SENTRY_ENVIRONMENT
+ARG VITE_SENTRY_RELEASE
+ARG VITE_SENTRY_TRACES_SAMPLE_RATE
 
 ENV VITE_STRATOS_URL=${VITE_STRATOS_URL}
 ENV VITE_STRATOS_SERVICE_DID=${VITE_STRATOS_SERVICE_DID}
@@ -46,6 +50,10 @@ ENV VITE_CLUBHOUSE_ROOM_STATUS_URL=${VITE_CLUBHOUSE_ROOM_STATUS_URL}
 ENV VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON=${VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON}
 ENV VITE_ATPROTO_HANDLE_RESOLVER=${VITE_ATPROTO_HANDLE_RESOLVER}
 ENV VITE_ATPROTO_OAUTH_PROXY_URL=${VITE_ATPROTO_OAUTH_PROXY_URL}
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+ENV VITE_SENTRY_ENVIRONMENT=${VITE_SENTRY_ENVIRONMENT}
+ENV VITE_SENTRY_RELEASE=${VITE_SENTRY_RELEASE}
+ENV VITE_SENTRY_TRACES_SAMPLE_RATE=${VITE_SENTRY_TRACES_SAMPLE_RATE}
 
 RUN pnpm --filter @northskysocial/stratos-client build \
     && pnpm --filter @northskysocial/stratos-browser build \
@@ -57,13 +65,14 @@ RUN node -e "\
   const fs = require('node:fs'); \
   const required = ['VITE_STRATOS_URL', 'VITE_STRATOS_SERVICE_DID', 'VITE_FEEDGEN_URL', 'VITE_FEEDGEN_DID', 'VITE_CLUBHOUSE_URL']; \
   for (const name of required) { if (!process.env[name]) throw new Error(name + ' is required for a production Clubhouse build'); } \
+  for (const name of ['VITE_STRATOS_SERVICE_DID', 'VITE_FEEDGEN_DID']) { if (!process.env[name].startsWith('did:')) throw new Error(name + ' must be a DID, not a URL'); } \
   const baseUrl = process.env.VITE_CLUBHOUSE_URL.replace(/\\/+$/, ''); \
   const scope = [ \
     'atproto', \
     'repo:zone.stratos.actor.enrollment', \
-    'repo:zone.stratos.feed.post?action=create', \
-    'rpc:zone.stratos.feedgen.getFeed?aud=' + encodeURIComponent(process.env.VITE_FEEDGEN_DID), \
-    'space:zone.stratos.space.feed?authority=' + encodeURIComponent(process.env.VITE_STRATOS_SERVICE_DID) + '&collection=zone.stratos.feed.post&action=read&action=create', \
+    'repo:zone.stratos.feed.post', \
+    'rpc:zone.stratos.feedgen.getFeed?aud=*', \
+    'space:zone.stratos.space.feed?authority=' + encodeURIComponent(process.env.VITE_STRATOS_SERVICE_DID) + '&collection=zone.stratos.feed.post&action=read&action=create&action=update&action=delete', \
   ].join(' '); \
   fs.writeFileSync('clubhouse/dist/client-metadata.json', JSON.stringify({ \
     client_id: baseUrl + '/client-metadata.json', \

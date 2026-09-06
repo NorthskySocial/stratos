@@ -26,7 +26,7 @@ import {
   type StratosServiceConfig,
 } from './config.js'
 import { registerHandlers } from './api'
-import { createRecord } from './api/records/index.js'
+import { createRecord, deleteRecord } from './api/records/index.js'
 import { registerSubscribeRecords } from './subscription'
 import { createAdminAuthRoutes, createOAuthRoutes } from './oauth'
 import { DiskBlobStore, S3BlobStoreAdapter } from './infra/blobstore'
@@ -473,7 +473,7 @@ export class StratosServer {
         return ctx.actorSigner.getPublicKey(did)
       },
       createAttestation: ctx.createAttestation,
-      createApprovedRoomPost: async ({ did, boundary, text }) => {
+      createApprovedRoomPost: async ({ did, boundary, text, reply }) => {
         const result = await createRecord(
           ctx,
           {
@@ -482,6 +482,7 @@ export class StratosServer {
             record: {
               $type: 'zone.stratos.feed.post',
               text,
+              ...(reply ? { reply } : {}),
               boundary: {
                 $type: 'zone.stratos.boundary.defs#Domains',
                 values: [{ value: boundary }],
@@ -492,6 +493,18 @@ export class StratosServer {
           did,
         )
         return { uri: result.uri, cid: result.cid }
+      },
+      deleteApprovedRoomPost: async ({ did, rkey, cid }) => {
+        await deleteRecord(
+          ctx,
+          {
+            repo: did,
+            collection: 'zone.stratos.feed.post',
+            rkey,
+            swapRecord: cid,
+          },
+          did,
+        )
       },
     })
     app.use('/oauth', oauthRoutes)

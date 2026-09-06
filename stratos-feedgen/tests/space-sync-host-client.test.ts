@@ -562,6 +562,38 @@ describe('SpaceHostClient', () => {
     })
   })
 
+  describe('getLatestCommit', () => {
+    it('fetches and returns the signed commit envelope', async () => {
+      mock.handler = (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ commit: { rev: '2', sig: 'signed' } }))
+      }
+      const client = await createClient()
+
+      await expect(
+        client.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).resolves.toEqual({ rev: '2', sig: 'signed' })
+
+      const requestUrl = new URL(mock.requests[0].url, mock.baseUrl)
+      expect(requestUrl.pathname).toBe(
+        '/xrpc/com.atproto.space.getLatestCommit',
+      )
+      expect(requestUrl.searchParams.get('space')).toBe(SPACE_URI)
+      expect(requestUrl.searchParams.get('repo')).toBe(REPO_DID)
+    })
+
+    it('rejects a response without a commit object', async () => {
+      mock.handler = (_req, res) => {
+        res.end(JSON.stringify({}))
+      }
+      const client = await createClient()
+
+      await expect(
+        client.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(SpaceHostInvalidResponseError)
+    })
+  })
+
   describe('getRecord', () => {
     it('GETs the record and decodes uri/cid/value', async () => {
       mock.handler = (_req, res) => {

@@ -154,6 +154,7 @@ function fakeHostClient() {
         throw new Error('getRecord not stubbed for this test')
       },
     ),
+    getLatestCommit: vi.fn(async () => ({ sig: 'latest' })),
   }
 }
 
@@ -887,14 +888,18 @@ describe('SpaceSyncer', () => {
       expect(result.finalCommit).toEqual({ sig: 'abc' })
     })
 
-    it('omits finalCommit when the terminal page carries none', async () => {
+    it('fetches the latest commit when the terminal page carries none', async () => {
       const { syncer, client } = buildSyncer()
       client.listRepoOps.mockResolvedValue(makePage({ ops: [] }))
 
       const result = expectSuccess(await syncer.syncTarget(makeTarget()))
 
-      expect(result.finalCommit).toBeUndefined()
-      expect('finalCommit' in result).toBe(false)
+      expect(result.finalCommit).toEqual({ sig: 'latest' })
+      expect(client.getLatestCommit).toHaveBeenCalledWith({
+        space: SPACE_URI,
+        repo: SPIKE_DID,
+        signal: undefined,
+      })
     })
 
     it('ignores a commit envelope on a non-terminal page', async () => {
@@ -907,7 +912,8 @@ describe('SpaceSyncer', () => {
 
       const result = expectSuccess(await syncer.syncTarget(makeTarget()))
 
-      expect(result.finalCommit).toBeUndefined()
+      expect(result.finalCommit).toEqual({ sig: 'latest' })
+      expect(client.getLatestCommit).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -1046,6 +1052,9 @@ describe('SpaceSyncer', () => {
       const listRepoOps = vi
         .spyOn(SpaceHostClient.prototype, 'listRepoOps')
         .mockResolvedValue(makePage({ ops: [] }))
+      const getLatestCommit = vi
+        .spyOn(SpaceHostClient.prototype, 'getLatestCommit')
+        .mockResolvedValue({ sig: 'latest' })
 
       const syncer = new SpaceSyncer({
         store: fakeStore(),
@@ -1057,8 +1066,10 @@ describe('SpaceSyncer', () => {
       const result = expectSuccess(await syncer.syncTarget(makeTarget()))
 
       expect(listRepoOps).toHaveBeenCalledTimes(1)
+      expect(getLatestCommit).toHaveBeenCalledTimes(1)
       expect(result.stopReason).toBe('complete')
       listRepoOps.mockRestore()
+      getLatestCommit.mockRestore()
     })
   })
 

@@ -15,7 +15,10 @@ import {
   type Logger,
   type SpacesCapability,
 } from '@northskysocial/stratos-core'
-import type { RequestHeaders } from '../infra/auth/index.js'
+import {
+  DpopVerificationError,
+  type RequestHeaders,
+} from '../infra/auth/index.js'
 import type { RepoWriteLocks } from '../shared/repo-write-lock.js'
 
 /** Verification method id fragment for a user's own atproto repo-signing key. */
@@ -27,7 +30,7 @@ import { handleStatus } from './handlers/status.js'
 import { handleRevoke } from './handlers/revoke.js'
 import { handleRooms } from './handlers/rooms.js'
 import { handleRoomStatus } from './handlers/room-status.js'
-import { handleRoomPost } from './handlers/room-post.js'
+import { handleRoomPost, handleRoomPostDelete } from './handlers/room-post.js'
 import type { RoomCatalog } from './room-catalog.js'
 
 /**
@@ -116,7 +119,17 @@ export interface OAuthRoutesConfig {
     did: string
     boundary: string
     text: string
+    reply?: {
+      root: { uri: string; cid: string }
+      parent: { uri: string; cid: string }
+    }
   }) => Promise<{ uri: string; cid: string }>
+  /** Delete an authenticated actor's own Stratos-custodied room post. */
+  deleteApprovedRoomPost: (input: {
+    did: string
+    rkey: string
+    cid: string
+  }) => Promise<void>
 }
 
 /**
@@ -380,6 +393,12 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'DPoP verification failed'
+      if (err instanceof DpopVerificationError) {
+        if (err.wwwAuthenticate) {
+          res.setHeader('WWW-Authenticate', err.wwwAuthenticate)
+        }
+        if (err.nonce) res.setHeader('DPoP-Nonce', err.nonce)
+      }
       res.status(401).json({
         error: 'Unauthorized',
         message,
@@ -398,6 +417,10 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): express.Router {
   )
 
   router.post('/boundaries/post', handleRoomPost(config, authenticateRequest))
+  router.delete(
+    '/boundaries/post',
+    handleRoomPostDelete(config, authenticateRequest),
+  )
 
   router.get('/callback', handleCallback(config))
 

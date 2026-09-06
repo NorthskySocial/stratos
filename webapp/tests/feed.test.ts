@@ -7,6 +7,7 @@ import {
   resolveHandles,
   groupIntoThreads,
   authorFromUri,
+  postDeleteTargetFromUri,
   type FeedPost,
 } from '../src/lib/feed'
 
@@ -34,6 +35,36 @@ describe('feed logic', () => {
       expect(authorFromUri('at://did:plc:spike/zone.stratos.feed.post/1')).toBe(
         'did:plc:spike',
       )
+    })
+  })
+
+  describe('postDeleteTargetFromUri', () => {
+    it('extracts the target for a custody record', () => {
+      expect(
+        postDeleteTargetFromUri('at://did:plc:rei/app.bsky.feed.post/one'),
+      ).toEqual({
+        repo: 'did:plc:rei',
+        collection: 'app.bsky.feed.post',
+        rkey: 'one',
+      })
+    })
+
+    it('extracts the space and target for a PDS-hosted record', () => {
+      expect(
+        postDeleteTargetFromUri(
+          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve/did:plc:asuka/zone.stratos.feed.post/two',
+        ),
+      ).toEqual({
+        space:
+          'at://did:web:stratos.example/space/zone.stratos.space.feed/nerve',
+        repo: 'did:plc:asuka',
+        collection: 'zone.stratos.feed.post',
+        rkey: 'two',
+      })
+    })
+
+    it('rejects malformed post URIs', () => {
+      expect(postDeleteTargetFromUri('at://did:plc:rei/not-a-post')).toBeNull()
     })
   })
 

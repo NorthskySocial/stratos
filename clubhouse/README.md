@@ -55,7 +55,13 @@ default catalogue, room-status, and Stratos-custody post URLs are derived from
 - optionally `VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON` (a deployment-owned map from
   room IDs to authority-space URIs). The PDS is still the authority for these
   writes. Stratos-custody posts go only to `POST /oauth/boundaries/post`, which
-  resolves the canonical boundary and verifies membership server-side.
+  resolves the canonical boundary and verifies membership server-side. Owned
+  posts are deleted through `com.atproto.repo.deleteRecord` for PDS custody or
+  `DELETE /oauth/boundaries/post` for Stratos custody.
+
+Clubhouse requests full `zone.stratos.feed.post` record access, including all
+space record actions. Existing browser sessions created with the earlier
+create-only scope must sign out and sign in again before deleting a post.
 
 ## Production container
 
@@ -83,8 +89,25 @@ not an internal Docker hostname. Optional settings are
 `VITE_CLUBHOUSE_ROOM_STATUS_URL`, `VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON`,
 `VITE_ATPROTO_HANDLE_RESOLVER`, and `VITE_ATPROTO_OAUTH_PROXY_URL`.
 
+## Actor search and avatars
+
+The signed-out handle field queries the community-run Typeahead service at
+`typeahead.waow.tech` after two characters. Feed pages also send their public
+author DIDs to Typeahead's `app.bsky.actor.getProfiles` endpoint in batches of
+25 so Clubhouse can render display names and avatars. Both integrations fail
+softly: visitors can still enter a handle directly, and feed posts retain their
+Feedgen-provided DID and handle when profile hydration is unavailable. Browser
+requests identify Clubhouse with the deployment host in the `X-Client` header.
+
+## Visual language
+
+Clubhouse uses the Martha Bloom zine language documented in
+[`DESIGN.md`](./DESIGN.md): warm paper, dense green-black ink, hard print
+shadows, asymmetrical editorial grids, and colorful room identities. All
+interface artwork comes from the local IconaMoon set, including loading and
+empty states; circular spinner artwork is intentionally excluded.
+
 ## Icon attribution
 
-The three local interface icons in `src/lib/icons/` are copied from the
-[IconaMoon 1.1](https://github.com/dariushhpg1/IconaMoon) Light set by
-Dariush.
+The local interface icons in `src/lib/icons/` use the
+[IconaMoon 1.1](https://github.com/dariushhpg1/IconaMoon) Light set by Dariush.

@@ -20,7 +20,7 @@ describe('room UI state', () => {
     expect(stateForRoom(available, {})).toBe('unjoined')
   })
 
-  it('preserves an unavailable status lookup as non-joinable', () => {
+  it('preserves an unavailable status lookup for an informative UI fallback', () => {
     expect(stateForRoom(available, { orbit: 'status-error' })).toBe(
       'status-error',
     )

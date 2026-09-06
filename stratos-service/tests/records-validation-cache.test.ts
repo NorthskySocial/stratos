@@ -45,6 +45,17 @@ describe('resolveParentBoundaries cache', () => {
     vi.useRealTimers()
   })
 
+  it('derives a space-record boundary without opening an authority actor store', async () => {
+    const parentUri =
+      'at://did:web:stratos.example/space/zone.stratos.space.feed/general/did:plc:asuka/zone.stratos.feed.post/topic-1'
+    const { ctx, readCount } = fakeCtx()
+
+    await expect(
+      resolveParentBoundaries(ctx, replyRecord(parentUri)),
+    ).resolves.toEqual(['did:web:stratos.example/general'])
+    expect(readCount()).toBe(0)
+  })
+
   it('serves a repeat lookup for the same parent from cache within the TTL', async () => {
     const parentUri = 'at://did:plc:asuka/zone.stratos.feed.post/reply-ttl-1'
     const { ctx, readCount } = fakeCtx()

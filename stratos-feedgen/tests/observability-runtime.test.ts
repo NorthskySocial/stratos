@@ -111,6 +111,50 @@ describe('feedgen telemetry runtime', () => {
     })
   })
 
+  it('preserves Sentry processing metadata without traversing its scopes', () => {
+    const sdkProcessingMetadata: Record<string, unknown> = {}
+    sdkProcessingMetadata.capturedSpanScope = sdkProcessingMetadata
+
+    const scrubbed = scrubEvent({
+      type: 'transaction',
+      sdkProcessingMetadata,
+    })
+
+    expect(scrubbed.sdkProcessingMetadata).toBe(sdkProcessingMetadata)
+  })
+
+  it('replaces circular application data without losing sibling values', () => {
+    const context: Record<string, unknown> = {
+      operation: 'space-sync',
+      token: 'red-tail',
+    }
+    context.parent = context
+
+    expect(scrubEvent({ context })).toEqual({
+      context: {
+        operation: 'space-sync',
+        token: '[Filtered]',
+        parent: '[Circular]',
+      },
+    })
+  })
+
+  it('bounds traversal of excessively deep application data', () => {
+    const root: Record<string, unknown> = {}
+    let current = root
+    for (let depth = 0; depth < 32; depth++) {
+      const child: Record<string, unknown> = {}
+      current.child = child
+      current = child
+    }
+
+    let scrubbed: unknown = scrubEvent({ root }).root
+    for (let depth = 1; depth < 32; depth++) {
+      scrubbed = (scrubbed as Record<string, unknown>).child
+    }
+    expect(scrubbed).toBe('[Truncated]')
+  })
+
   it('redacts sensitive URL query values before export', () => {
     expect(
       scrubEvent({

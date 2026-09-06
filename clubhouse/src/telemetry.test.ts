@@ -9,14 +9,50 @@ describe('Clubhouse telemetry', () => {
   it('scrubs credentials and post bodies while preserving diagnostic context', () => {
     expect(
       scrubEvent({
-        request: { headers: { authorization: 'Bearer secret' } },
-        contexts: { room: { id: 'nerv' } },
-        extra: { postBody: 'private words' },
+        request: {
+          headers: { authorization: 'Bearer secret' },
+          data: { client_secret: 'private client credential' },
+        },
+        contexts: {
+          room: { id: 'nerv' },
+          credentials: {
+            'client-secret': 'private client credential',
+            clientsecret: 'private client credential',
+          },
+        },
+        extra: {
+          postBody: 'private words',
+          response: {
+            status_code: 403,
+            body: {
+              error: 'ScopeMissingError',
+              message: 'Missing required scope',
+            },
+          },
+        },
       }),
     ).toEqual({
-      request: { headers: { authorization: '[Filtered]' } },
-      contexts: { room: { id: 'nerv' } },
-      extra: { postBody: '[Filtered]' },
+      request: {
+        headers: { authorization: '[Filtered]' },
+        data: '[Filtered]',
+      },
+      contexts: {
+        room: { id: 'nerv' },
+        credentials: {
+          'client-secret': '[Filtered]',
+          clientsecret: '[Filtered]',
+        },
+      },
+      extra: {
+        postBody: '[Filtered]',
+        response: {
+          status_code: 403,
+          body: {
+            error: 'ScopeMissingError',
+            message: 'Missing required scope',
+          },
+        },
+      },
     })
   })
 })

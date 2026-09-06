@@ -5,7 +5,9 @@ import {
   assertBoundaryMatchesService,
   BoundaryServiceMismatchError,
   isValidSkey,
+  parseRecordUri,
   parseQualifiedBoundary,
+  qualifyBoundary,
   StratosValidationError,
   StratosValidator,
 } from '@northskysocial/stratos-core'
@@ -134,6 +136,11 @@ export async function resolveParentBoundaries(
   const reply = record.reply as { parent?: { uri?: string } } | undefined
   if (!reply?.parent?.uri) {
     return undefined
+  }
+
+  const spaceRecord = parseRecordUri(reply.parent.uri)
+  if (spaceRecord.ok) {
+    return [qualifyBoundary(spaceRecord.value.spaceDid, spaceRecord.value.skey)]
   }
 
   let parentUri: AtUriSyntax

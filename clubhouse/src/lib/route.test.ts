@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { roomIdFromPath, roomPath } from './route'
+import { roomIdFromPath, roomPath, topicPath, topicUriFromPath } from './route'
 
 describe('room routes', () => {
   it('uses only the room/feed ID in a durable URL', () => {
@@ -13,8 +13,18 @@ describe('room routes', () => {
     expect(roomIdFromPath('/rooms/room%20with%20spaces/')).toBe(
       'room with spaces',
     )
-    expect(roomIdFromPath('/rooms/open-orbit?boundary=secret')).toBeNull()
+    expect(roomIdFromPath('/rooms/open-orbit?topic=ignored')).toBe('open-orbit')
     expect(roomIdFromPath('/rooms/open-orbit/extra')).toBeNull()
     expect(roomIdFromPath('/')).toBeNull()
+  })
+
+  it('round-trips a topic AT URI in a shareable room URL', () => {
+    const uri = 'at://did:plc:rei/zone.stratos.feed.post/3kabc'
+    const path = topicPath('open-orbit', uri)
+    expect(path).toBe(`/rooms/open-orbit?topic=${encodeURIComponent(uri)}`)
+    expect(topicUriFromPath(path)).toBe(uri)
+    expect(
+      topicUriFromPath('/rooms/open-orbit?topic=https%3A%2F%2Fbad'),
+    ).toBeNull()
   })
 })

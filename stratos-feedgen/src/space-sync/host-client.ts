@@ -100,6 +100,13 @@ export interface GetRecordOptions {
   signal?: AbortSignal
 }
 
+export interface GetLatestCommitOptions {
+  space: string
+  repo: string
+  /** Aborts the request early, combined with the per-request timeout. */
+  signal?: AbortSignal
+}
+
 export interface GetRecordResult {
   uri: string
   cid: string
@@ -168,6 +175,25 @@ export class SpaceHostClient {
       opts.signal,
     )
     return decodeGetRecordResult(text, url)
+  }
+
+  async getLatestCommit(
+    opts: GetLatestCommitOptions,
+  ): Promise<Record<string, unknown>> {
+    const { url, text } = await this.get(
+      '/xrpc/com.atproto.space.getLatestCommit',
+      { space: opts.space, repo: opts.repo },
+      JSON_ENVELOPE_BYTES,
+      opts.signal,
+    )
+    const raw = parseJsonRecord(text, url)
+    if (!isRecord(raw.commit)) {
+      throw new SpaceHostInvalidResponseError(
+        url,
+        'response was missing a "commit" object',
+      )
+    }
+    return raw.commit
   }
 
   private async get(

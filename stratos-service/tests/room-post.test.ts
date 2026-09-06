@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { InvalidRequestError } from '@atproto/xrpc-server'
-import { handleRoomPost } from '../src/oauth/handlers/room-post.js'
+import {
+  handleRoomPost,
+  handleRoomPostDelete,
+} from '../src/oauth/handlers/room-post.js'
 import { buildRoomCatalog } from '../src/oauth/room-catalog.js'
 import type { OAuthRoutesConfig } from '../src/oauth/routes.js'
 
@@ -32,6 +35,7 @@ function createConfig(): OAuthRoutesConfig {
       uri: 'at://did:plc:misato/zone.stratos.feed.post/1',
       cid: 'bafy-misato',
     }),
+    deleteApprovedRoomPost: vi.fn().mockResolvedValue(undefined),
   } as unknown as OAuthRoutesConfig
 }
 
@@ -88,6 +92,42 @@ describe('server-approved room posts', () => {
     expect(JSON.stringify(response.json.mock.calls[0][0])).not.toContain(
       'boundary',
     )
+  })
+
+  it('passes valid thread references to the approved writer', async () => {
+    const config = createConfig()
+    vi.mocked(config.enrollmentStore.getEnrollment).mockResolvedValue({
+      did: 'did:plc:misato',
+      enrolledAt: '2026-09-03T00:00:00.000Z',
+      active: true,
+      signingKeyDid: 'did:key:misato',
+    })
+    vi.mocked(config.enrollmentStore.getBoundaries).mockResolvedValue([
+      'did:web:stratos.example/nerv-hq',
+    ])
+    const response = createResponse()
+    const reply = {
+      root: {
+        uri: 'at://did:plc:rei/zone.stratos.feed.post/root',
+        cid: 'bafy-root',
+      },
+      parent: {
+        uri: 'at://did:plc:faye/zone.stratos.feed.post/parent',
+        cid: 'bafy-parent',
+      },
+    }
+
+    await handleRoomPost(config, vi.fn().mockResolvedValue('did:plc:misato'))(
+      { body: { roomId: 'nerv-hq', text: 'Replying.', reply } } as never,
+      response as never,
+    )
+
+    expect(config.createApprovedRoomPost).toHaveBeenCalledWith({
+      did: 'did:plc:misato',
+      boundary: 'did:web:stratos.example/nerv-hq',
+      text: 'Replying.',
+      reply,
+    })
   })
 
   it('does not call the writer for an unjoined room', async () => {
@@ -199,5 +239,83 @@ describe('server-approved room posts', () => {
     expect(JSON.stringify(response.json.mock.calls[0][0])).not.toContain(
       'internal boundary detail',
     )
+  })
+
+  it('deletes a room post owned by the authenticated actor', async () => {
+    const config = createConfig()
+    const response = createResponse()
+
+    await handleRoomPostDelete(
+      config,
+      vi.fn().mockResolvedValue('did:plc:misato'),
+    )(
+      {
+        body: {
+          uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+          cid: 'bafy-misato',
+        },
+      } as never,
+      response as never,
+    )
+
+    expect(config.deleteApprovedRoomPost).toHaveBeenCalledWith({
+      did: 'did:plc:misato',
+      rkey: '3k5',
+      cid: 'bafy-misato',
+    })
+    expect(response.status).toHaveBeenCalledWith(200)
+  })
+
+  it('rejects deleting another actor room post', async () => {
+    const config = createConfig()
+    const response = createResponse()
+
+    await handleRoomPostDelete(
+      config,
+      vi.fn().mockResolvedValue('did:plc:rei'),
+    )(
+      {
+        body: {
+          uri: 'at://did:plc:asuka/zone.stratos.feed.post/3k6',
+          cid: 'bafy-asuka',
+        },
+      } as never,
+      response as never,
+    )
+
+    expect(config.deleteApprovedRoomPost).not.toHaveBeenCalled()
+    expect(response.status).toHaveBeenCalledWith(403)
+    expect(response.json).toHaveBeenCalledWith({
+      error: 'PostOwnershipRequired',
+      message: 'You can only delete your own room posts',
+    })
+  })
+
+  it.each([
+    undefined,
+    null,
+    'invalid',
+    {},
+    { uri: 1, cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/zone.stratos.feed.post/3k7', cid: 1 },
+    { uri: 'not-an-at-uri', cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/app.bsky.feed.post/3k7', cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/zone.stratos.feed.post', cid: 'bafy-rei' },
+    { uri: 'at://did:plc:rei/zone.stratos.feed.post/3k7' },
+    {
+      uri: 'at://did:plc:rei/zone.stratos.feed.post/3k7',
+      cid: '',
+    },
+  ])('rejects malformed room post deletion input %#', async (body) => {
+    const config = createConfig()
+    const response = createResponse()
+
+    await handleRoomPostDelete(
+      config,
+      vi.fn().mockResolvedValue('did:plc:rei'),
+    )({ body } as never, response as never)
+
+    expect(config.deleteApprovedRoomPost).not.toHaveBeenCalled()
+    expect(response.status).toHaveBeenCalledWith(400)
   })
 })

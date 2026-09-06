@@ -1,5 +1,12 @@
 import type { Agent } from '@atproto/api'
 import type { OAuthSession } from '@atproto/oauth-client-browser'
+import {
+  formatSpaceUri,
+  isSyntacticDid,
+  isValidNsidStr,
+  isValidRkey,
+  parseRecordUri,
+} from '@northskysocial/stratos-core/spaces'
 
 interface FeedViewPost {
   post?: {
@@ -126,15 +133,60 @@ export interface ThreadNode {
   depth: number
 }
 
+export interface PostDeleteTarget {
+  repo: string
+  collection: string
+  rkey: string
+  space?: string
+}
+
 /**
  * Extracts the author DID from an At Protocol URI.
  * @param uri - The At Protocol URI.
  * @returns The author DID.
  */
 export function authorFromUri(uri: string): string {
-  const parts = uri.replace('at://', '').split('/')
-  if (parts[1] === 'space' && parts.length >= 7) return parts[4]
-  return parts[0]
+  const spaceRecord = parseRecordUri(uri)
+  if (spaceRecord.ok) return spaceRecord.value.authorDid
+  return uri.replace('at://', '').split('/')[0] ?? ''
+}
+
+/**
+ * Resolves the write target for a post URI.
+ *
+ * PDS-hosted private records include their space in the URI, while custody
+ * records use the standard repository URI shape.
+ */
+export function postDeleteTargetFromUri(uri: string): PostDeleteTarget | null {
+  const spaceRecord = parseRecordUri(uri)
+  if (spaceRecord.ok) {
+    const space = formatSpaceUri(spaceRecord.value)
+    if (!space.ok) return null
+    return {
+      repo: spaceRecord.value.authorDid,
+      collection: spaceRecord.value.collection,
+      rkey: spaceRecord.value.rkey,
+      space: space.value,
+    }
+  }
+
+  const parts = uri.startsWith('at://')
+    ? uri.slice('at://'.length).split('/')
+    : []
+  if (parts.length !== 3) return null
+
+  const [repo, collection, rkey] = parts
+  if (
+    !repo ||
+    !collection ||
+    !rkey ||
+    !isSyntacticDid(repo) ||
+    !isValidNsidStr(collection) ||
+    !isValidRkey(rkey)
+  ) {
+    return null
+  }
+  return { repo, collection, rkey }
 }
 
 /**

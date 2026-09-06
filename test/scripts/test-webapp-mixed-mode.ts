@@ -182,6 +182,40 @@ async function createPrivatePost(
   return { uri: body.uri, cid: body.cid }
 }
 
+/** Reply through the same production composer used for topics. */
+async function createPrivateReply(
+  page: Page,
+  parentText: string,
+  endpoint: string,
+  text: string,
+): Promise<RecordResponse> {
+  const parent = page
+    .locator('.post-card.private', { hasText: parentText })
+    .first()
+  await parent.getByRole('button', { name: 'Reply' }).click()
+  await page.locator('.reply-indicator').waitFor({
+    state: 'visible',
+    timeout: 15_000,
+  })
+  await waitForPrivateComposer(page)
+  await page.locator('.composer textarea').fill(text)
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      xrpcPath(response.url()) === endpoint &&
+      response.ok(),
+    { timeout: 45_000 },
+  )
+  await page.locator('.composer-actions > button').click()
+  const response = await responsePromise
+  const body = (await response.json()) as Partial<RecordResponse>
+  if (typeof body.uri !== 'string' || typeof body.cid !== 'string') {
+    throw new Error(`${endpoint} returned no reply reference`)
+  }
+  await page.locator('.reply-indicator').waitFor({ state: 'hidden' })
+  return { uri: body.uri, cid: body.cid }
+}
+
 function findWrite(
   writes: CapturedWrite[],
   endpoint: string,
@@ -237,6 +271,24 @@ function assertStratosWrite(
       boundary?.values?.some((entry) => entry.value === DOMAINS.swordsmith) ===
         true,
     'Composer sends the exact Stratos-custody record contract',
+  )
+}
+
+function assertReplyWrite(
+  write: CapturedWrite | undefined,
+  root: RecordResponse,
+  parent: RecordResponse,
+): void {
+  const record = write?.body['record'] as Record<string, unknown> | undefined
+  const reply = record?.['reply'] as
+    | { root?: RecordResponse; parent?: RecordResponse }
+    | undefined
+  assert(
+    reply?.root?.uri === root.uri &&
+      reply?.root?.cid === root.cid &&
+      reply?.parent?.uri === parent.uri &&
+      reply?.parent?.cid === parent.cid,
+    'Composer preserves exact strong references across custody modes',
   )
 }
 
@@ -369,6 +421,20 @@ async function waitForRenderedPosts(
           return false
         }
       }
+      return true
+    }
+    await page.waitForTimeout(2_000)
+  }
+  return false
+}
+
+async function waitForRenderedPost(page: Page, text: string): Promise<boolean> {
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.composer', { timeout: 30_000 })
+    const matchingPosts = page.locator('.post-card.private', { hasText: text })
+    if ((await matchingPosts.count()) > 0) {
       return true
     }
     await page.waitForTimeout(2_000)
@@ -575,6 +641,64 @@ async function run(): Promise<void> {
     assert(
       await waitForRenderedPosts(pdsPage, pdsText, stratosText),
       'The production webapp renders both browser-created custody classes together',
+    )
+
+    const stratosReplyText = `Rei replies across custody ${runId}`
+    const stratosReply = await createPrivateReply(
+      stratosPage,
+      pdsText,
+      REPO_CREATE_PATH,
+      stratosReplyText,
+    )
+    const stratosReplyWrite = findWrite(
+      stratosWrites,
+      REPO_CREATE_PATH,
+      stratosReplyText,
+    )
+    assertStratosWrite(stratosReplyWrite, stratosUser, stratosUrl)
+    assertReplyWrite(stratosReplyWrite, pdsRef, pdsRef)
+    await assertStratosResidency(stratosUser, stratosReply, stratosReplyText)
+
+    assert(
+      await waitForRenderedPost(pdsPage, stratosReplyText),
+      'The browser renders a Stratos-custody reply to a PDS space topic',
+    )
+
+    const pdsReplyText = `Motoko replies across custody ${runId}`
+    const pdsReply = await createPrivateReply(
+      pdsPage,
+      stratosText,
+      SPACE_CREATE_PATH,
+      pdsReplyText,
+    )
+    const pdsReplyWrite = findWrite(pdsWrites, SPACE_CREATE_PATH, pdsReplyText)
+    assertPdsWrite(pdsReplyWrite, member)
+    assertReplyWrite(pdsReplyWrite, stratosRef, stratosRef)
+    await assertPdsResidency(member, pdsReply, pdsReplyText)
+
+    assert(
+      await waitForRenderedPost(stratosPage, pdsReplyText),
+      'The browser renders a PDS-custody reply to a Stratos topic',
+    )
+
+    const nestedPdsReplyText = `Motoko nests a reply across custody ${runId}`
+    const nestedPdsReply = await createPrivateReply(
+      pdsPage,
+      stratosReplyText,
+      SPACE_CREATE_PATH,
+      nestedPdsReplyText,
+    )
+    const nestedPdsReplyWrite = findWrite(
+      pdsWrites,
+      SPACE_CREATE_PATH,
+      nestedPdsReplyText,
+    )
+    assertPdsWrite(nestedPdsReplyWrite, member)
+    assertReplyWrite(nestedPdsReplyWrite, pdsRef, stratosReply)
+    await assertPdsResidency(member, nestedPdsReply, nestedPdsReplyText)
+    assert(
+      await waitForRenderedPost(stratosPage, nestedPdsReplyText),
+      'The browser renders a nested PDS-custody reply with its original topic root',
     )
     await screenshot(pdsPage, 'webapp-mixed-mode-rendered-feed')
   } catch (error) {

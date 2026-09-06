@@ -34,6 +34,7 @@ async function startServer(opts?: {
   readiness?: { isReady(): boolean }
   /** Override verifier to simulate auth failure or alternative viewer DIDs. */
   verifier?: FeedRequestVerifier
+  resolveHandle?: (did: string) => Promise<string | undefined>
 }): Promise<TestServerCtx> {
   const viewerBoundaries = opts?.viewerBoundaries ?? ['engineering']
   const posts = opts?.posts ?? []
@@ -81,6 +82,7 @@ async function startServer(opts?: {
     >[0]['enrollmentManager'],
     verifier,
     feedReadiness: opts?.readiness,
+    resolveHandle: opts?.resolveHandle,
   })
 
   const httpServer = await server.listen(0, '127.0.0.1')
@@ -199,7 +201,10 @@ describe('zone.stratos.feedgen.getFeed', () => {
         '2025-01-01T00:01:00.000Z',
       ),
     ]
-    ctx = await startServer({ posts, nextCursor: 'next' })
+    const resolveHandle = vi.fn(async (did: string) =>
+      did === FAYE_DID ? 'faye.example' : 'spike.example',
+    )
+    ctx = await startServer({ posts, nextCursor: 'next', resolveHandle })
 
     const res = await fetch(
       `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed&limit=10`,
@@ -210,13 +215,20 @@ describe('zone.stratos.feedgen.getFeed', () => {
     const body = (await res.json()) as {
       cursor?: string
       feed: Array<{
-        post: { uri: string; author: { did: string }; boundaries: string[] }
+        post: {
+          uri: string
+          author: { did: string; handle?: string }
+          boundaries: string[]
+        }
       }>
     }
     expect(body.cursor).toBe('next')
     expect(body.feed).toHaveLength(2)
     expect(body.feed[0]?.post.uri).toBe(posts[0]?.uri)
     expect(body.feed[0]?.post.author.did).toBe(VIEWER_DID)
+    expect(body.feed[0]?.post.author.handle).toBe('spike.example')
+    expect(body.feed[1]?.post.author.handle).toBe('faye.example')
+    expect(resolveHandle).toHaveBeenCalledTimes(2)
     expect(body.feed[0]?.post.boundaries).toEqual(['engineering'])
     expect(body.feed[1]?.post.author.did).toBe(FAYE_DID)
     expect(ctx.listPosts).toHaveBeenCalledWith({

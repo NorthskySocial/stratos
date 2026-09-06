@@ -85,6 +85,15 @@ export async function deleteRecord(
         // no boundary and is dropped by the fail-closed scope gate for every
         // subscriber, so without this the deletion would never propagate.
         const existing = await store.record.getRecord(uri, null)
+        if (
+          input.swapRecord !== undefined &&
+          existing?.cid !== input.swapRecord
+        ) {
+          throw new InvalidRequestError(
+            'Record does not match swap condition',
+            'InvalidSwap',
+          )
+        }
         const deletedDomains = existing
           ? StratosValidator.extractBoundaryDomains(existing.value)
           : []

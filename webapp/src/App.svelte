@@ -28,6 +28,7 @@
     filterByDomain,
     resolveHandles,
   } from './lib/feed'
+  import {deletePost} from './lib/post-deletion'
   import LoginScreen from './lib/LoginScreen.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import Composer from './lib/Composer.svelte'
@@ -285,6 +286,20 @@
     replyingTo = post
   }
 
+  async function handleDelete(post: FeedPost): Promise<void> {
+    const activeSession = session
+    if (!activeSession) throw new Error('Your session has expired.')
+
+    await deletePost({
+      post,
+      session: activeSession,
+      publicAgent: configureAgent(new Agent(activeSession)),
+      stratosAgent,
+    })
+
+    allPosts = allPosts.filter((candidate) => candidate.uri !== post.uri)
+  }
+
   /**
    * Cancels replying to a post.
    */
@@ -392,7 +407,7 @@
             </div>
 
             <Feed posts={filteredPosts} {stratosAgent} {publicAgent} {serviceUrl} loading={loading}
-                  onreply={handleReply}/>
+                  currentDid={did} onreply={handleReply} ondelete={handleDelete}/>
         </main>
     </div>
 {/if}

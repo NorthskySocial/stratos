@@ -5,6 +5,7 @@ import {
   createOAuthRoutes,
   type OAuthRoutesConfig,
 } from '../src/oauth/index.js'
+import { DpopVerificationError } from '../src/infra/auth/index.js'
 
 function createConfig(dpopVerifier = { verify: vi.fn() }): OAuthRoutesConfig {
   return {
@@ -58,6 +59,14 @@ describe('OAuth route DPoP verification', () => {
     expect(paths).not.toEqual(
       expect.arrayContaining(['/rooms', '/rooms/status', '/rooms/post']),
     )
+    const postRoutes = router.stack.filter(
+      (layer) => layer.route?.path === '/boundaries/post',
+    )
+    const routeMethods = postRoutes.flatMap(
+      (layer) => layer.route?.stack.map((handler) => handler.method) ?? [],
+    )
+    expect(routeMethods).toContain('post')
+    expect(routeMethods).toContain('delete')
   })
 
   it('uses the full original URL when the router is mounted at /oauth', async () => {
@@ -116,6 +125,38 @@ describe('OAuth route DPoP verification', () => {
       expect.objectContaining({ url: '/status' }),
       expect.anything(),
     )
+  })
+
+  it('returns the DPoP nonce challenge headers needed for an automatic retry', async () => {
+    const dpopVerifier = {
+      verify: vi
+        .fn()
+        .mockRejectedValue(
+          new DpopVerificationError(
+            'DPoP nonce required',
+            'use_dpop_nonce',
+            'DPoP error="use_dpop_nonce"',
+            'next-nonce',
+          ),
+        ),
+    }
+    const app = express()
+    app.use('/oauth', createOAuthRoutes(createConfig(dpopVerifier)))
+    const server = app.listen(0, '127.0.0.1')
+    servers.push(server)
+
+    await new Promise<void>((resolve) => server.once('listening', resolve))
+    const { port } = server.address() as AddressInfo
+    const response = await fetch(
+      `http://127.0.0.1:${port}/oauth/boundaries/status`,
+      { headers: { authorization: 'DPoP token' } },
+    )
+
+    expect(response.status).toBe(401)
+    expect(response.headers.get('www-authenticate')).toBe(
+      'DPoP error="use_dpop_nonce"',
+    )
+    expect(response.headers.get('dpop-nonce')).toBe('next-nonce')
   })
 
   it.each([

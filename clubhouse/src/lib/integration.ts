@@ -8,9 +8,13 @@ import {
 import { resolveAuthenticatedHandle } from './enrollment'
 import { getFeed, type FeedPage } from './feedgen'
 import { rememberRoomReturn, roomJoinUrl } from './join'
+import { getActorProfiles, type TypeaheadActor } from './typeahead'
+import { captureClubhouseException } from '../telemetry'
 import {
   createRoomPost,
+  deleteRoomPost,
   RoomPostConfigurationError,
+  type ReplyRef,
   type StratosPostWriter,
 } from './post-writer'
 import type { ClubhouseIdentity, RoomAccessState, RoomCustody } from './types'
@@ -78,11 +82,40 @@ function createServiceRoomPostWriter(
   const endpoint = roomPostEndpoint(config)
   if (!endpoint) return undefined
   return {
-    async createPost({ roomId, text }): Promise<void> {
+    async createPost({ roomId, text, reply }) {
       const response = await session.fetchHandler(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roomId, text }),
+        body: JSON.stringify({ roomId, text, ...(reply ? { reply } : {}) }),
+      })
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          uri?: unknown
+          cid?: unknown
+        }
+        if (
+          typeof payload.uri !== 'string' ||
+          typeof payload.cid !== 'string'
+        ) {
+          throw new Error('Stratos returned an invalid post reference.')
+        }
+        return { uri: payload.uri, cid: payload.cid }
+      }
+
+      const payload: unknown = await response.json().catch(() => undefined)
+      const message =
+        typeof payload === 'object' &&
+        payload !== null &&
+        typeof (payload as { message?: unknown }).message === 'string'
+          ? (payload as { message: string }).message
+          : `Stratos could not create the post (HTTP ${response.status}).`
+      throw new Error(message)
+    },
+    async deletePost({ uri, cid }) {
+      const response = await session.fetchHandler(endpoint, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ uri, cid }),
       })
       if (response.ok) return
 
@@ -92,7 +125,7 @@ function createServiceRoomPostWriter(
         payload !== null &&
         typeof (payload as { message?: unknown }).message === 'string'
           ? (payload as { message: string }).message
-          : `Stratos could not create the post (HTTP ${response.status}).`
+          : `Stratos could not delete the post (HTTP ${response.status}).`
       throw new Error(message)
     },
   }
@@ -107,14 +140,63 @@ export function createClubhouseIntegration(
   dependencies: {
     navigate?: (url: string) => void
     stratosWriter?: StratosPostWriter
+    typeaheadFetcher?: typeof fetch
   } = {},
 ) {
   const auth = createClubhouseAuth(config)
   let session: OAuthSession | null = null
+  let identity: ClubhouseIdentity | null = null
+  const authorProfiles = new Map<string, TypeaheadActor | null>()
+
+  async function enrichAuthors(page: FeedPage): Promise<FeedPage> {
+    const missing = [
+      ...new Set(
+        page.posts
+          .filter((post) => !post.author.avatar)
+          .map((post) => post.author.did)
+          .filter((did) => !authorProfiles.has(did)),
+      ),
+    ]
+    if (missing.length > 0) {
+      try {
+        const resolved = await getActorProfiles(
+          missing,
+          dependencies.typeaheadFetcher ?? globalThis.fetch,
+        )
+        for (const did of missing) {
+          authorProfiles.set(did, resolved.get(did) ?? null)
+        }
+      } catch (error) {
+        captureClubhouseException(error)
+      }
+    }
+
+    return {
+      ...page,
+      posts: page.posts.map((post) => {
+        const profile = authorProfiles.get(post.author.did)
+        return profile
+          ? { ...post, author: { ...post.author, ...profile } }
+          : post
+      }),
+    }
+  }
 
   async function refresh(): Promise<ClubhouseIdentity | null> {
     session = await auth.init()
-    return session ? { did: session.sub } : null
+    if (!session) {
+      identity = null
+      return null
+    }
+    try {
+      identity = {
+        did: session.sub,
+        handle: await resolveAuthenticatedHandle(session),
+      }
+    } catch {
+      identity = { did: session.sub }
+    }
+    return identity
   }
 
   async function getRoomState(roomId: string): Promise<RoomAccessState> {
@@ -134,7 +216,8 @@ export function createClubhouseIntegration(
     }
     try {
       return (await requestRoomStatus(session, endpoint, roomIds)).states
-    } catch {
+    } catch (error) {
+      captureClubhouseException(error)
       return Object.fromEntries(
         roomIds.map((roomId) => [roomId, 'status-error']),
       )
@@ -144,11 +227,19 @@ export function createClubhouseIntegration(
   return {
     initialize: refresh,
     signIn: auth.signIn,
+    async signOut(): Promise<void> {
+      await auth.signOut()
+      session = null
+      identity = null
+    },
     getRoomState,
     getRoomStates,
     async requestJoin(roomId: string): Promise<RoomAccessState> {
       if (!session) throw new Error('Sign in before joining a room.')
-      const handle = await resolveAuthenticatedHandle(session)
+      // Reuse the identity resolved during session restoration. A DID is also
+      // a valid ATProto login hint, so enrollment must not depend on a second
+      // PDS handle lookup succeeding.
+      const handle = identity?.handle ?? session.sub
       const destination = `/rooms/${encodeURIComponent(roomId)}`
       const url = roomJoinUrl(config, roomId, handle, destination)
       rememberRoomReturn(destination)
@@ -163,26 +254,54 @@ export function createClubhouseIntegration(
       cursor?: string,
     ): Promise<FeedPage> {
       if (!session) throw new Error('Sign in to read this room.')
-      return getFeed(session, config, { feed: roomId, limit, cursor })
+      const page = await getFeed(session, config, {
+        feed: roomId,
+        limit,
+        cursor,
+      })
+      return enrichAuthors(page)
     },
-    async createPost(roomId: string, text: string): Promise<void> {
+    async createPost(roomId: string, text: string, reply?: ReplyRef) {
       if (!session) throw new Error('Sign in before posting.')
       const endpoint = roomStatusEndpoint(config)
       if (!endpoint) throw new RoomPostConfigurationError()
       const { custody } = await requestRoomStatus(session, endpoint, [roomId])
-      await createRoomPost({
+      return createRoomPost({
         session,
         custody,
         roomId,
         text,
         config,
+        reply,
+        stratosWriter:
+          dependencies.stratosWriter ??
+          createServiceRoomPostWriter(session, config),
+      })
+    },
+    async deletePost(
+      roomId: string,
+      post: import('./feedgen').ClubhouseFeedPost,
+    ) {
+      if (!session) throw new Error('Sign in before deleting a post.')
+      const endpoint = roomStatusEndpoint(config)
+      if (!endpoint) {
+        throw new RoomPostConfigurationError(
+          'Deleting needs service configuration for this room.',
+        )
+      }
+      const { custody } = await requestRoomStatus(session, endpoint, [roomId])
+      await deleteRoomPost({
+        session,
+        custody,
+        uri: post.uri,
+        cid: post.cid,
         stratosWriter:
           dependencies.stratosWriter ??
           createServiceRoomPostWriter(session, config),
       })
     },
     get identity(): ClubhouseIdentity | null {
-      return session ? { did: session.sub } : null
+      return identity
     },
   }
 }
