@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as Sentry from '@sentry/node'
 import {
   DEFAULT_BOUNDARY_CACHE_MAX,
   DEFAULT_BOUNDARY_CACHE_TTL_MS,
@@ -6,6 +7,20 @@ import {
 import { EnrollmentManager } from '../src/enrollment/manager.js'
 import { TtlLru } from '../src/enrollment/lru.js'
 import type { ResolveEnrollmentsResult } from '../src/upstream/index.js'
+
+const { setSpanAttribute } = vi.hoisted(() => ({ setSpanAttribute: vi.fn() }))
+
+vi.mock('@sentry/node', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@sentry/node')>()),
+  startSpan: vi.fn(
+    (
+      _options: unknown,
+      work: (span: { setAttribute: typeof setSpanAttribute }) => unknown,
+    ) => work({ setAttribute: setSpanAttribute }),
+  ),
+}))
+
+beforeEach(() => vi.clearAllMocks())
 
 // Mock clock used by both the LRU and tests so we can drive expiry without
 // relying on real timers.
@@ -55,6 +70,16 @@ describe('EnrollmentManager', () => {
       expect(await mgr.getBoundaries(SPIKE)).toEqual(['cowboybebop.tv/crew'])
 
       expect(client.resolveEnrollments).toHaveBeenCalledTimes(1)
+      expect(
+        vi.mocked(Sentry.startSpan).mock.calls.map(([options]) => options),
+      ).toEqual(
+        Array(3).fill({ name: 'feedgen.boundaries.lookup', op: 'function' }),
+      )
+      expect(setSpanAttribute.mock.calls).toEqual([
+        ['cache.result', 'miss'],
+        ['cache.result', 'hit'],
+        ['cache.result', 'hit'],
+      ])
     })
   })
 
@@ -126,6 +151,11 @@ describe('EnrollmentManager', () => {
       })
 
       const results = await Promise.all([p1, p2, p3])
+      expect(setSpanAttribute.mock.calls).toEqual([
+        ['cache.result', 'miss'],
+        ['cache.result', 'inflight'],
+        ['cache.result', 'inflight'],
+      ])
       expect(results).toEqual([
         ['cowboybebop.tv/bounty'],
         ['cowboybebop.tv/bounty'],

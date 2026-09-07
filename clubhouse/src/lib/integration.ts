@@ -9,7 +9,7 @@ import { resolveAuthenticatedHandle } from './enrollment'
 import { getFeed, type FeedPage } from './feedgen'
 import { rememberRoomReturn, roomJoinUrl } from './join'
 import { getActorProfiles, type TypeaheadActor } from './typeahead'
-import { captureClubhouseException } from '../telemetry'
+import { captureClubhouseException, withClubhouseSpan } from '../telemetry'
 import {
   createRoomPost,
   deleteRoomPost,
@@ -146,31 +146,15 @@ export function createClubhouseIntegration(
   const auth = createClubhouseAuth(config)
   let session: OAuthSession | null = null
   let identity: ClubhouseIdentity | null = null
-  const authorProfiles = new Map<string, TypeaheadActor | null>()
+  let authorProfiles = new Map<string, TypeaheadActor | null>()
+  let authorRequests = new Map<string, Promise<void>>()
 
-  async function enrichAuthors(page: FeedPage): Promise<FeedPage> {
-    const missing = [
-      ...new Set(
-        page.posts
-          .filter((post) => !post.author.avatar)
-          .map((post) => post.author.did)
-          .filter((did) => !authorProfiles.has(did)),
-      ),
-    ]
-    if (missing.length > 0) {
-      try {
-        const resolved = await getActorProfiles(
-          missing,
-          dependencies.typeaheadFetcher ?? globalThis.fetch,
-        )
-        for (const did of missing) {
-          authorProfiles.set(did, resolved.get(did) ?? null)
-        }
-      } catch (error) {
-        captureClubhouseException(error)
-      }
-    }
+  function clearAuthorProfiles(): void {
+    authorProfiles = new Map()
+    authorRequests = new Map()
+  }
 
+  function applyAuthorProfiles(page: FeedPage): FeedPage {
     return {
       ...page,
       posts: page.posts.map((post) => {
@@ -182,19 +166,61 @@ export function createClubhouseIntegration(
     }
   }
 
+  async function enrichAuthors(page: FeedPage): Promise<FeedPage> {
+    if (!session) return page
+    const profiles = authorProfiles
+    const requests = authorRequests
+    const needed = [
+      ...new Set(
+        page.posts
+          .filter((post) => !post.author.avatar)
+          .map((post) => post.author.did)
+          .filter((did) => !profiles.has(did)),
+      ),
+    ]
+    const missing = needed.filter((did) => !requests.has(did))
+    if (missing.length > 0) {
+      const request = getActorProfiles(
+        missing,
+        dependencies.typeaheadFetcher ?? globalThis.fetch,
+      )
+        .then((resolved) => {
+          for (const did of missing) {
+            profiles.set(did, resolved.get(did) ?? null)
+          }
+        })
+        .catch(captureClubhouseException)
+        .finally(() => {
+          for (const did of missing) requests.delete(did)
+        })
+      for (const did of missing) {
+        requests.set(did, request)
+      }
+    }
+
+    await Promise.all(needed.map((did) => requests.get(did)))
+    return profiles === authorProfiles ? applyAuthorProfiles(page) : page
+  }
+
   async function refresh(): Promise<ClubhouseIdentity | null> {
-    session = await auth.init()
+    session = await withClubhouseSpan('clubhouse.session.restore', () =>
+      auth.init(),
+    )
+    clearAuthorProfiles()
     if (!session) {
       identity = null
       return null
     }
+    const activeSession = session
     try {
       identity = {
-        did: session.sub,
-        handle: await resolveAuthenticatedHandle(session),
+        did: activeSession.sub,
+        handle: await withClubhouseSpan('clubhouse.identity.resolve', () =>
+          resolveAuthenticatedHandle(activeSession),
+        ),
       }
     } catch {
-      identity = { did: session.sub }
+      identity = { did: activeSession.sub }
     }
     return identity
   }
@@ -231,6 +257,7 @@ export function createClubhouseIntegration(
       await auth.signOut()
       session = null
       identity = null
+      clearAuthorProfiles()
     },
     getRoomState,
     getRoomStates,
@@ -254,12 +281,20 @@ export function createClubhouseIntegration(
       cursor?: string,
     ): Promise<FeedPage> {
       if (!session) throw new Error('Sign in to read this room.')
-      const page = await getFeed(session, config, {
-        feed: roomId,
-        limit,
-        cursor,
-      })
-      return enrichAuthors(page)
+      const activeSession = session
+      const page = await withClubhouseSpan('clubhouse.feed.transport', () =>
+        getFeed(activeSession, config, {
+          feed: roomId,
+          limit,
+          cursor,
+        }),
+      )
+      return applyAuthorProfiles(page)
+    },
+    enrichFeedAuthors(page: FeedPage): Promise<FeedPage> {
+      return withClubhouseSpan('clubhouse.feed.authors.enrich', () =>
+        enrichAuthors(page),
+      )
     },
     async createPost(roomId: string, text: string, reply?: ReplyRef) {
       if (!session) throw new Error('Sign in before posting.')

@@ -1,5 +1,5 @@
 import { ENROLLMENT_MODE } from '@northskysocial/stratos-core'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -10,6 +10,7 @@ import { decode } from '@atcute/cbor'
 
 import { StratosServer } from '../src'
 import { createMockBlobStore, createTestConfig } from './utils'
+import { serviceMetrics } from '../src/observability/metrics.js'
 
 describe('CORS and 404 Verification', () => {
   let dataDir: string
@@ -27,6 +28,7 @@ describe('CORS and 404 Verification', () => {
     // Use CLOSED mode to ensure unknown DIDs are not auto-enrolled
     cfg.enrollment.mode = ENROLLMENT_MODE.CLOSED
     cfg.stratos.allowedDomains = ['example.com']
+    cfg.allowedRedirectOrigins = ['http://localhost:5173']
 
     const server = await StratosServer.create(
       cfg,
@@ -76,21 +78,37 @@ describe('CORS and 404 Verification', () => {
   })
 
   it('should handle preflight OPTIONS request for com.atproto.repo.createRecord', async () => {
-    const res = await axios.options(
-      `${url}/xrpc/com.atproto.repo.createRecord`,
-      {
-        headers: {
-          Origin: 'http://localhost:5173',
-          'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Headers': 'Content-Type,Authorization',
+    const complete = vi.fn()
+    const begin = vi
+      .spyOn(serviceMetrics, 'beginHttpRequest')
+      .mockReturnValue({ complete, abort: vi.fn() })
+    try {
+      const res = await axios.options(
+        `${url}/xrpc/com.atproto.repo.createRecord`,
+        {
+          headers: {
+            Origin: 'http://localhost:5173',
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'Content-Type,Authorization',
+          },
         },
-      },
-    )
-    expect(res.status).toBe(204)
-    expect(res.headers['access-control-allow-origin']).toBe(
-      'http://localhost:5173',
-    )
-    expect(res.headers['access-control-allow-methods']).toContain('POST')
+      )
+      expect(res.status).toBe(204)
+      expect(res.headers['access-control-allow-origin']).toBe(
+        'http://localhost:5173',
+      )
+      expect(res.headers['access-control-allow-methods']).toContain('POST')
+      expect(res.headers['timing-allow-origin']).toBe('http://localhost:5173')
+      expect(complete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'OPTIONS',
+          route: '/xrpc/com.atproto.repo.createRecord',
+          status: 204,
+        }),
+      )
+    } finally {
+      begin.mockRestore()
+    }
   })
 
   it('should not return 404 for standard XRPC methods', async () => {

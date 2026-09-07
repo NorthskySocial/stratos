@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net'
 import type { Server as HttpServer } from 'node:http'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as Sentry from '@sentry/node'
 
 import {
   buildFeedRegistry,
@@ -10,6 +11,13 @@ import {
   type ListPostsOpts,
   type ListPostsResult,
 } from '../src/index.js'
+
+vi.mock('@sentry/node', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@sentry/node')>()),
+  startSpan: vi.fn((_options: unknown, work: () => unknown) => work()),
+}))
+
+beforeEach(() => vi.clearAllMocks())
 
 const FEEDGEN_DID = 'did:web:feedgen.spiegelcorp.test'
 const VIEWER_DID = 'did:plc:spikespiegel'
@@ -136,6 +144,9 @@ describe('zone.stratos.feedgen.getFeed', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { feed: unknown[]; cursor?: string }
     expect(body).toEqual({ feed: [] })
+    expect(
+      vi.mocked(Sentry.startSpan).mock.calls.map(([options]) => options),
+    ).toEqual([{ name: 'feedgen.feed.query', op: 'db.query' }])
     expect(ctx.verifier).toHaveBeenCalledOnce()
     expect(ctx.resolveBoundaries).toHaveBeenCalledWith(VIEWER_DID)
     expect(ctx.listPosts).toHaveBeenCalledWith({
@@ -229,6 +240,12 @@ describe('zone.stratos.feedgen.getFeed', () => {
     expect(body.feed[0]?.post.author.handle).toBe('spike.example')
     expect(body.feed[1]?.post.author.handle).toBe('faye.example')
     expect(resolveHandle).toHaveBeenCalledTimes(2)
+    expect(
+      vi.mocked(Sentry.startSpan).mock.calls.map(([options]) => options),
+    ).toEqual([
+      { name: 'feedgen.feed.query', op: 'db.query' },
+      { name: 'feedgen.feed.author_handles', op: 'function' },
+    ])
     expect(body.feed[0]?.post.boundaries).toEqual(['engineering'])
     expect(body.feed[1]?.post.author.did).toBe(FAYE_DID)
     expect(ctx.listPosts).toHaveBeenCalledWith({
@@ -285,6 +302,7 @@ describe('zone.stratos.feedgen.getFeed', () => {
     const body = (await res.json()) as { error: string }
     expect(body.error).toBe('BoundaryMismatch')
     expect(ctx.listPosts).not.toHaveBeenCalled()
+    expect(Sentry.startSpan).not.toHaveBeenCalled()
   })
 
   it('rejects requests without an Authorization header', async () => {

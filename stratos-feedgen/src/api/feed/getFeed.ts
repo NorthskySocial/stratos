@@ -2,6 +2,7 @@ import {
   NotEnoughResourcesError,
   type Server as XrpcServer,
 } from '@atproto/xrpc-server'
+import { withTelemetrySpan } from '../../observability/runtime.js'
 import type { FeedgenStore, IndexedPost } from '../../db/index.js'
 import { decodeCursor, encodeCursor } from '../../db/index.js'
 import type { EnrollmentManager } from '../../enrollment/index.js'
@@ -75,11 +76,16 @@ export function registerGetFeedHandler(
           throw new BoundaryMismatchError(feed.boundary)
         }
 
-        const result = await deps.store.listPostsByBoundary({
-          boundary: feed.boundary,
-          limit,
-          cursor: normalizeCursor(cursor),
-        })
+        const result = await withTelemetrySpan(
+          'feedgen.feed.query',
+          'db.query',
+          () =>
+            deps.store.listPostsByBoundary({
+              boundary: feed.boundary,
+              limit,
+              cursor: normalizeCursor(cursor),
+            }),
+        )
         assertReadiness(deps.readiness)
 
         const output = {
@@ -141,14 +147,16 @@ async function toFeedViewPosts(
 ): Promise<FeedViewPost[]> {
   const handles = new Map<string, string | undefined>()
   if (resolveHandle) {
-    await Promise.all(
-      [...new Set(posts.map((post) => post.did))].map(async (did) => {
-        try {
-          handles.set(did, await resolveHandle(did))
-        } catch {
-          handles.set(did, undefined)
-        }
-      }),
+    await withTelemetrySpan('feedgen.feed.author_handles', 'function', () =>
+      Promise.all(
+        [...new Set(posts.map((post) => post.did))].map(async (did) => {
+          try {
+            handles.set(did, await resolveHandle(did))
+          } catch {
+            handles.set(did, undefined)
+          }
+        }),
+      ),
     )
   }
   return posts.map((post) => toFeedViewPost(post, handles.get(post.did)))
