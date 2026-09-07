@@ -168,12 +168,16 @@ describe('Re-enrollment', () => {
   it('reactivates an inactive user', async () => {
     // 1. Setup: user is inactive
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false) // Inactive users return false for isEnrolled
+    const boundaries = [`${serviceDid}/engineering`]
+    mockEnrollmentStore.getBoundaries.mockResolvedValue(boundaries)
+    const enrollmentEvents = { emit: vi.fn() }
 
     const config: any = {
       oauthClient: mockOauthClient,
       enrollmentConfig: { mode: 'open' },
       enrollmentStore: mockEnrollmentStore,
       enrollmentValidator: mockEnrollmentValidator,
+      enrollmentEvents,
       idResolver: mockIdResolver,
       baseUrl: 'https://stratos.example.com',
       allowedRedirectOrigins: [],
@@ -221,6 +225,17 @@ describe('Re-enrollment', () => {
         did: userDid,
         active: true,
       }),
+    )
+
+    expect(enrollmentEvents.emit).toHaveBeenCalledExactlyOnceWith(
+      'enrollment',
+      {
+        did: userDid,
+        action: 'enroll',
+        service: serviceEndpoint,
+        boundaries,
+        time: expect.any(String),
+      },
     )
 
     // 3. Verify: putEnrollmentRecord was called
