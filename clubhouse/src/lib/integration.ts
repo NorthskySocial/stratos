@@ -1,4 +1,5 @@
 import type { OAuthSession } from '@atproto/oauth-client-browser'
+import { createServiceFetch } from '@northskysocial/stratos-browser'
 import { createClubhouseAuth } from './auth'
 import {
   roomPostEndpoint,
@@ -65,7 +66,8 @@ async function requestRoomStatus(
   endpoint: string,
   roomIds: readonly string[],
 ): Promise<RoomStatus> {
-  const response = await session.fetchHandler(endpoint, { method: 'GET' })
+  const serviceFetch = createServiceFetch(session, endpoint)
+  const response = await serviceFetch(endpoint, { method: 'GET' })
   if (!response.ok)
     throw new Error(`Room status returned HTTP ${response.status}.`)
   const payload = (await response.json()) as AccessResponse
@@ -81,9 +83,10 @@ function createServiceRoomPostWriter(
 ): StratosPostWriter | undefined {
   const endpoint = roomPostEndpoint(config)
   if (!endpoint) return undefined
+  const serviceFetch = createServiceFetch(session, endpoint)
   return {
     async createPost({ roomId, text, reply }) {
-      const response = await session.fetchHandler(endpoint, {
+      const response = await serviceFetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roomId, text, ...(reply ? { reply } : {}) }),
@@ -112,7 +115,7 @@ function createServiceRoomPostWriter(
       throw new Error(message)
     },
     async deletePost({ uri, cid }) {
-      const response = await session.fetchHandler(endpoint, {
+      const response = await serviceFetch(endpoint, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ uri, cid }),

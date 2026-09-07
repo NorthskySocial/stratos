@@ -142,6 +142,7 @@ function createCtx(opts: {
       },
     },
     createAttestation,
+    enrollmentEvents: new EventEmitter(),
     app,
     logger: {
       debug: () => {},
@@ -628,6 +629,65 @@ describe('resolveEnrollments cache invalidation', () => {
     enrolled: boolean
     boundaries: string[]
   }
+
+  it('invalidates OAuth membership changes without evicting another actor', async () => {
+    const { ctx, state } = createHarness()
+    await invokeResolveRoute(ctx, { did: REI })
+    await invokeResolveRoute(ctx, { did: MISATO })
+    await ctx.enrollmentStore.addBoundary(REI, 'geofront.nerv.jp')
+    ctx.enrollmentEvents.emit('enrollment', {
+      did: REI,
+      action: 'boundaries',
+      priorBoundaries: ['tokyo-3.nerv.jp'],
+      boundaries: [...state.boundaries],
+      time: new Date().toISOString(),
+    })
+
+    const after = await invokeResolveRoute(ctx, { did: REI })
+    expect((after.body as ResolveBody).boundaries).toEqual([
+      'tokyo-3.nerv.jp',
+      'geofront.nerv.jp',
+    ])
+    expect(state.boundaryReads).toBe(3)
+    await invokeResolveRoute(ctx, { did: MISATO })
+    expect(state.boundaryReads).toBe(3)
+  })
+
+  it('fences a resolve already in flight when an OAuth membership event arrives', async () => {
+    const { ctx, state } = createHarness()
+    let release!: (boundaries: string[]) => void
+    let started!: () => void
+    const reading = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const pending = new Promise<string[]>((resolve) => {
+      release = resolve
+    })
+    vi.spyOn(ctx.boundaryResolver, 'getBoundaries').mockImplementationOnce(
+      () => {
+        started()
+        return pending
+      },
+    )
+    const inFlight = invokeResolveRoute(ctx, { did: REI })
+    await reading
+    await ctx.enrollmentStore.addBoundary(REI, 'geofront.nerv.jp')
+    ctx.enrollmentEvents.emit('enrollment', {
+      did: REI,
+      action: 'boundaries',
+      priorBoundaries: ['tokyo-3.nerv.jp'],
+      boundaries: [...state.boundaries],
+      time: new Date().toISOString(),
+    })
+    release(['tokyo-3.nerv.jp'])
+    expect(((await inFlight).body as ResolveBody).boundaries).toEqual([
+      'tokyo-3.nerv.jp',
+    ])
+    expect(
+      ((await invokeResolveRoute(ctx, { did: REI })).body as ResolveBody)
+        .boundaries,
+    ).toEqual(['tokyo-3.nerv.jp', 'geofront.nerv.jp'])
+  })
 
   it('returns enrolled false after unenroll within the cache TTL', async () => {
     const { ctx, xrpc } = createHarness()

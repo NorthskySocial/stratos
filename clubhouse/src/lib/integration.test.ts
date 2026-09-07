@@ -98,6 +98,95 @@ describe('Clubhouse integration', () => {
     vi.mocked(withClubhouseSpan).mockClear()
   })
 
+  it.each(['GET', 'POST', 'DELETE'])(
+    'replays a %s nonce challenge once at the configured service endpoint',
+    async (method) => {
+      const status = {
+        rooms: [{ id: 'nerv-hq', state: 'joined' }],
+        custody: 'stratos',
+      }
+      const ref = {
+        uri: 'at://did:plc:misato/zone.stratos.feed.post/3k5',
+        cid: 'bafy-misato-3k5',
+      }
+      const reply = { root: ref, parent: ref }
+      let challenged = false
+      const fetchHandler = vi.fn(async (_url: string, init: RequestInit) => {
+        if (init.method === method && !challenged) {
+          challenged = true
+          return new Response(
+            JSON.stringify({
+              error: 'AuthenticationRequired',
+              message: 'DPoP nonce required',
+            }),
+            { status: 401 },
+          )
+        }
+        return Response.json(init.method === 'GET' ? status : ref)
+      })
+      mocks.auth.init.mockResolvedValue(session(fetchHandler))
+      const integration = createClubhouseIntegration({
+        serviceUrl: 'https://stratos.example',
+        roomStatusEndpoint: 'https://status.nerv.jp/custom/status',
+        pdsSpaceUriByRoom: {},
+      })
+      await integration.initialize()
+      if (method === 'GET') {
+        await expect(integration.getRoomStates(['nerv-hq'])).resolves.toEqual({
+          'nerv-hq': 'joined',
+        })
+      } else if (method === 'POST') {
+        await expect(
+          integration.createPost('nerv-hq', 'Bridge report.', reply),
+        ).resolves.toEqual(ref)
+      } else {
+        await integration.deletePost('nerv-hq', {
+          ...ref,
+          author: { did: 'did:plc:misato' },
+          text: 'Bridge report.',
+          indexedAt: '2026-09-07T12:00:00.000Z',
+        })
+      }
+      const calls = fetchHandler.mock.calls.filter(
+        ([, init]) => init.method === method,
+      )
+      expect(calls).toHaveLength(2)
+      expect(calls[0]).toEqual(calls[1])
+      expect(calls[0][0]).toBe(
+        method === 'GET'
+          ? 'https://status.nerv.jp/custom/status'
+          : 'https://stratos.example/oauth/boundaries/post',
+      )
+      if (method !== 'GET') {
+        expect(calls[0][1].headers).toEqual({
+          'content-type': 'application/json',
+        })
+        expect(JSON.parse(calls[0][1].body as string)).toEqual(
+          method === 'POST'
+            ? { roomId: 'nerv-hq', text: 'Bridge report.', reply }
+            : ref,
+        )
+      }
+    },
+  )
+
+  it.each([
+    [{ error: 'AuthenticationRequired', message: 'DPoP nonce required' }, 2],
+    [{ error: 'AuthenticationRequired', message: 'Not enrolled' }, 1],
+  ])('limits retries for a persistent 401 (%j)', async (body, count) => {
+    const fetchHandler = vi.fn(async () => Response.json(body, { status: 401 }))
+    mocks.auth.init.mockResolvedValue(session(fetchHandler))
+    const integration = createClubhouseIntegration({
+      serviceUrl: 'https://stratos.example',
+      pdsSpaceUriByRoom: {},
+    })
+    await integration.initialize()
+    await expect(integration.getRoomStates(['nerv-hq'])).resolves.toEqual({
+      'nerv-hq': 'status-error',
+    })
+    expect(fetchHandler).toHaveBeenCalledTimes(count)
+  })
+
   it('starts room enrollment with the restored identity without another handle lookup', async () => {
     const fetchHandler = vi.fn()
     const navigate = vi.fn<(url: string) => void>()

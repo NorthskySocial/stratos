@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
 import express from 'express'
 import { registerEnrollmentHandlers } from '../src/features/index.js'
 import type { AppContext } from '../src/index.js'
@@ -62,6 +63,7 @@ function createCtx(opts: {
       isEnrolled: async (did: string) =>
         (await opts.getEnrollment(did)) !== null,
     },
+    enrollmentEvents: new EventEmitter(),
     enrollmentStore: {
       getEnrollment: opts.getEnrollment,
     },

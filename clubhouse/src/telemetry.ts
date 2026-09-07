@@ -9,7 +9,9 @@ interface ClubhouseTelemetryEnvironment {
 }
 
 const SECRET =
-  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|client[_-]?secret|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code[_-]?verifier|state)$/i
+  /^(?:authorization|cookie|set-cookie|dpop|dpop-nonce|(?:access|refresh|id)[_-]?token|token|client[_-]?secret|secret|password|post(?:body)?|oauth(?:code)?|authorization[_-]?code|code|code[_-]?verifier|state|query_string)$/i
+
+const URL_FIELD = /^(?:url|from|to|url\.full|http\.url|http\.target)$/i
 
 /** Initialize browser telemetry before any application module is imported. */
 export function initializeClubhouseTelemetry(
@@ -79,7 +81,10 @@ function scrub(value_: unknown, path: readonly string[]): unknown {
       SECRET.test(key) ||
       ((key === 'body' || key === 'data') && path.includes('request'))
         ? '[Filtered]'
-        : scrub(item, [...path, key]),
+        : URL_FIELD.test(key) && typeof item === 'string'
+          ? // Callback credentials also appear in relative navigation URLs.
+            item.split(/[?#]/, 1)[0]
+          : scrub(item, [...path, key]),
     ]),
   )
 }
