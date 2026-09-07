@@ -22,9 +22,8 @@ const RESOLVE_CACHE_MAX_ENTRIES = 10_000
 /**
  * Positive `resolveEnrollments` response cache, keyed by DID.
  *
- * Every handler that mutates enrollment or boundary state must call
- * `invalidate`, or a downstream reconcile that resolves within the TTL reads
- * stale `enrolled: true` state and purges nothing.
+ * Enrollment events invalidate writes outside these handlers, including OAuth
+ * room joins. Local handlers also invalidate before publishing their events.
  *
  * An epoch fences the resolve handler's read-then-set window: every
  * invalidation bumps it and `set` writes only while the caller's epoch is
@@ -91,6 +90,9 @@ export function registerEnrollmentHandlers(
     RESOLVE_CACHE_TTL_MS,
     RESOLVE_CACHE_MAX_ENTRIES,
   )
+  ctx.enrollmentEvents.on('enrollment', ({ did }) => {
+    resolveCache.invalidate(did)
+  })
   registerEnrollmentStatus(server, ctx)
   registerEnrollmentUnenroll(server, ctx, resolveCache)
   registerResolveEnrollmentsHandler(ctx, resolveCache)

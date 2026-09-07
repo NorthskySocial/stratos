@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
 import * as fc from 'fast-check'
 import type { Server as XrpcServer } from '@atproto/xrpc-server'
 import type { AppContext } from '../src'
@@ -96,6 +97,7 @@ function createCtx(opts: {
       }),
     },
     createAttestation,
+    enrollmentEvents: new EventEmitter(),
     app: {
       get: vi.fn(),
       post: vi.fn(),
@@ -319,6 +321,7 @@ describe('Unenroll endpoint', () => {
     })
 
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
         getEnrollment: getEnrollmentSpy,
       },
@@ -381,6 +384,7 @@ describe('Unenroll endpoint', () => {
     }
 
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
         getEnrollment: vi.fn().mockResolvedValue(null),
       },
@@ -428,6 +432,7 @@ describe('Unenroll endpoint', () => {
     const server = createMockXrpcServer()
 
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
         getEnrollment: vi.fn().mockResolvedValue(null),
       },
@@ -478,6 +483,7 @@ describe('Unenroll endpoint', () => {
     })
 
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
         getEnrollment: getEnrollmentSpy,
       },
@@ -544,6 +550,7 @@ describe('Unenroll endpoint', () => {
     }
 
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
         getEnrollment: getEnrollmentSpy,
       },
@@ -602,6 +609,7 @@ describe('Unenroll endpoint', () => {
     const server = createMockXrpcServer()
 
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       enrollmentStore: {
         getEnrollment: vi.fn().mockRejectedValue(new Error('store down')),
       },
@@ -645,6 +653,7 @@ describe('Unenroll endpoint', () => {
   it('requires authentication', async () => {
     const server = createMockXrpcServer()
     const ctx = {
+      enrollmentEvents: new EventEmitter(),
       authVerifier: {
         standard: vi.fn(),
       },
