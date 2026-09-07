@@ -120,6 +120,7 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
             createAttestation,
             idResolver,
             enrollBoundaries,
+            enrollmentEvents: config.enrollmentEvents,
             pdsEndpoint: enrollmentResult.pdsEndpoint!,
             spacesCapability,
             logger,
@@ -404,6 +405,7 @@ async function handleNewEnrollment(deps: {
   createAttestation: OAuthRoutesConfig['createAttestation']
   idResolver: IdResolver
   enrollBoundaries: string[]
+  enrollmentEvents: OAuthRoutesConfig['enrollmentEvents']
   pdsEndpoint: string
   spacesCapability: SpacesCapability | undefined
   logger: Logger | undefined
@@ -464,6 +466,14 @@ async function handleNewEnrollment(deps: {
     custody,
     repoHost,
     capabilityVerdict: spacesCapability,
+  })
+
+  deps.enrollmentEvents.emit('enrollment', {
+    did,
+    action: 'enroll',
+    service: serviceEndpoint,
+    boundaries: await enrollmentStore.getBoundaries(did),
+    time: new Date().toISOString(),
   })
 
   logger?.info(

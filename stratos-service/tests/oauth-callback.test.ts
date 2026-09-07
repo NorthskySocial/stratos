@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import type { Keypair } from '@atproto/crypto'
 import { handleCallback } from '../src/oauth/handlers/callback.js'
@@ -94,6 +95,10 @@ describe('handleCallback', () => {
   let mockEnrollmentValidator: any
   let config: any
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     mockOauthClient = {
       callback: vi.fn(),
@@ -103,7 +108,7 @@ describe('handleCallback', () => {
       isEnrolled: vi.fn(),
       enroll: vi.fn(),
       getEnrollment: vi.fn(),
-      getBoundaries: vi.fn(),
+      getBoundaries: vi.fn().mockResolvedValue([]),
       setBoundaries: vi.fn(),
       addBoundary: vi.fn(),
       updateEnrollment: vi.fn(),
@@ -177,6 +182,90 @@ describe('handleCallback', () => {
       }),
     )
   })
+
+  it.each(['stratos', 'pds'])(
+    'publishes a new %s enrollment only after storage commits',
+    async (custody) => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      const now = '2026-09-07T12:00:00.000Z'
+      vi.setSystemTime(new Date(now))
+      const did = 'did:plc:rei'
+      const boundaries = [
+        'did:web:localhost%3A3100/nerv',
+        'did:web:localhost%3A3100/general',
+      ]
+      config.defaultBoundaries = [boundaries[0]]
+      const events: unknown[] = []
+      config.enrollmentEvents = new EventEmitter()
+      config.enrollmentEvents.on('enrollment', (event: unknown) =>
+        events.push(event),
+      )
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          did,
+          custody === 'pds'
+            ? `atproto ${buildSpaceScope(config.serviceDid)}`
+            : 'atproto',
+        ),
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+      mockIdResolver.did.resolve.mockResolvedValue(
+        atprotoDidDoc(did, await Secp256k1Keypair.create({ exportable: true })),
+      )
+      mockEnrollmentStore.getBoundaries.mockResolvedValue(boundaries)
+      let commit!: () => void
+      let started!: () => void
+      const writing = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      const committed = new Promise<void>((resolve) => {
+        commit = resolve
+      })
+      mockEnrollmentStore.enroll.mockImplementation(() => {
+        started()
+        return committed
+      })
+      const response = makeRes()
+      const callback = callHandler(handleCallback(config), makeReq(), response)
+      await writing
+      expect(events).toEqual([])
+      expect(mockEnrollmentStore.getBoundaries).not.toHaveBeenCalled()
+      commit()
+      await callback
+      expect(mockEnrollmentStore.getBoundaries).toHaveBeenCalledWith(did)
+      expect(events).toEqual([
+        {
+          did,
+          action: 'enroll',
+          service: config.serviceEndpoint,
+          boundaries,
+          time: now,
+        },
+      ])
+      expect(response.json).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true }),
+      )
+    },
+  )
+
+  it.each(['publication', 'storage'])(
+    'does not announce enrollment when %s fails',
+    async (failure) => {
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:rei'),
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+      const operation =
+        failure === 'publication'
+          ? mockProfileRecordWriter.putEnrollmentRecord
+          : mockEnrollmentStore.enroll
+      operation.mockRejectedValue(new Error('Unavailable'))
+      const response = makeRes()
+      await callHandler(handleCallback(config), makeReq(), response)
+      expect(response.status).toHaveBeenCalledWith(500)
+      expect(config.enrollmentEvents.emit).not.toHaveBeenCalled()
+    },
+  )
 
   describe('selected-room enrollment', () => {
     const roomA = 'did:web:localhost%3A3100/nebula'
