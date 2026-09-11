@@ -42,13 +42,9 @@ RUN pnpm run --filter stratos-service generate:version \
 RUN node -e " \
   const fs = require('fs'); \
   const pkg = JSON.parse(fs.readFileSync('stratos-core/package.json', 'utf8')); \
-  pkg.main = 'dist/index.js'; \
-  pkg.types = 'dist/index.d.ts'; \
-  pkg.exports = { \
-    '.': { types: './dist/index.d.ts', import: './dist/index.js' }, \
-    './validation': { types: './dist/validation/index.d.ts', import: './dist/validation/index.js' }, \
-    './db': { types: './dist/db/index.d.ts', import: './dist/db/index.js' } \
-  }; \
+  pkg.main = pkg.publishConfig.main; \
+  pkg.types = pkg.publishConfig.types; \
+  pkg.exports = pkg.publishConfig.exports; \
   fs.writeFileSync('stratos-core/package.json', JSON.stringify(pkg, null, 2) + '\n'); \
 "
 
