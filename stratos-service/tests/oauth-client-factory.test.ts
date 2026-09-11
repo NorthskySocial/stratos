@@ -46,6 +46,20 @@ function config(
 }
 
 describe('OAuth client factories', () => {
+  it('protects the enrollment and admin OAuth transports', async () => {
+    const transport = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}'))
+    await createEnrollmentAndAdminClients(config({}))
+    try {
+      for (const [options] of nodeOAuthClient.mock.calls) {
+        await expect(options.fetch('https://127.0.0.1/token')).rejects.toThrow()
+      }
+      expect(transport).not.toHaveBeenCalled()
+    } finally {
+      transport.mockRestore()
+    }
+  })
   beforeEach(() => nodeOAuthClient.mockClear())
 
   async function createEnrollmentAndAdminClients(

@@ -346,6 +346,7 @@ export class UpstreamStratosClient {
     return withUpstreamSpan(`upstream ${lxm}`, () =>
       this.fetchImpl(url, {
         ...init,
+        redirect: 'error',
         headers: { ...upstreamTraceHeaders(), ...init.headers },
       }),
     )

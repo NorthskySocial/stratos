@@ -71,6 +71,7 @@ describe('fetchClientRedirectUris', () => {
       headers: { accept: 'application/json' },
       redirect: 'error',
       signal: expect.any(AbortSignal),
+      dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
     })
   })
 

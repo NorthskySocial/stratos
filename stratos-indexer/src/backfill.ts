@@ -162,7 +162,7 @@ async function fetchRepoRecordsPage(
   url.searchParams.set('limit', '100')
   if (cursor) url.searchParams.set('cursor', cursor)
 
-  const res = await fetch(url.toString())
+  const res = await fetch(url.toString(), { redirect: 'error' })
   if (!res.ok) return null
 
   return (await res.json()) as ListRecordsResponse
@@ -238,7 +238,7 @@ async function* listRepoPages(
     url.searchParams.set('limit', '1000')
     if (cursor) url.searchParams.set('cursor', cursor)
 
-    const res = await fetch(url.toString())
+    const res = await fetch(url.toString(), { redirect: 'error' })
     if (!res.ok) break
 
     const body = (await res.json()) as {

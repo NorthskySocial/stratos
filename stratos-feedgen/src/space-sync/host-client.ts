@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises'
 import { isIP, type LookupFunction } from 'node:net'
 import { Agent, type Dispatcher } from 'undici'
+import { isPublicAddress } from '@northskysocial/stratos-core/network'
 import {
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
@@ -30,16 +31,6 @@ const DEFAULT_MAX_PAGE_BYTES = getRepoOpsResponseByteLimit(
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
 )
-const PRIVATE_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
-  [0x00000000, 0x00ffffff],
-  [0x0a000000, 0x0affffff],
-  [0x64400000, 0x647fffff],
-  [0x7f000000, 0x7fffffff],
-  [0xa9fe0000, 0xa9feffff],
-  [0xac100000, 0xac1fffff],
-  [0xc0a80000, 0xc0a8ffff],
-  [0xe0000000, 0xffffffff],
-]
 
 export interface SpaceHostClientOptions {
   /** Origin (scheme + host [+ port]) this client sends every request to. */
@@ -289,7 +280,7 @@ export class SpaceHostClient {
       })
     }
     for (const address of addresses) {
-      if (isPrivateAddress(address)) {
+      if (!isPublicAddress(address)) {
         throw new PrivateHostOriginError(origin, address)
       }
     }
@@ -597,49 +588,6 @@ function isLoopbackHttpHostname(hostname: string): boolean {
     normalized === 'localhost' ||
     normalized === '::1' ||
     (isIP(normalized) === 4 && normalized.startsWith('127.'))
-  )
-}
-
-function isPrivateAddress(address: string): boolean {
-  const normalized = address.toLowerCase()
-  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u)
-  if (mappedIpv4) return isPrivateIpv4(mappedIpv4[1])
-  const mappedIpv4Hex = normalized.match(
-    /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u,
-  )
-  if (mappedIpv4Hex) {
-    const high = Number.parseInt(mappedIpv4Hex[1], 16)
-    const low = Number.parseInt(mappedIpv4Hex[2], 16)
-    return isPrivateIpv4(
-      `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`,
-    )
-  }
-  if (isIP(normalized) === 4) return isPrivateIpv4(normalized)
-  if (isIP(normalized) !== 6) return true
-
-  const first = Number.parseInt(normalized.split(':', 1)[0] || '0', 16)
-  return (
-    normalized === '::' ||
-    normalized === '::1' ||
-    (first & 0xfe00) === 0xfc00 ||
-    (first & 0xffc0) === 0xfe80 ||
-    (first & 0xff00) === 0xff00
-  )
-}
-
-function isPrivateIpv4(address: string): boolean {
-  const parts = address.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((part) => part < 0 || part > 255)) {
-    return true
-  }
-  const value =
-    (parts[0] * 0x1000000 +
-      parts[1] * 0x10000 +
-      parts[2] * 0x100 +
-      parts[3]) >>>
-    0
-  return PRIVATE_IPV4_RANGES.some(
-    ([start, end]) => value >= start && value <= end,
   )
 }
 

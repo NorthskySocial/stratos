@@ -87,6 +87,20 @@ function decodeJwt(token: string): {
 }
 
 describe('UpstreamStratosClient', () => {
+  it('rejects a configured upstream redirect before requesting another path', async () => {
+    mock.handler = (_req, res) => {
+      res.writeHead(302, { location: '/internal.json' })
+      res.end()
+    }
+    const client = new UpstreamStratosClient({
+      serviceUrl: mock.baseUrl,
+      serviceDid: STRATOS_DID,
+      feedgenDid: FEEDGEN_DID,
+      keypair: await Secp256k1Keypair.create(),
+    })
+    await expect(client.resolveEnrollments('did:plc:shinji')).rejects.toThrow()
+    expect(mock.requests).toHaveLength(1)
+  })
   let mock: MockServer
   let client: UpstreamStratosClient
   let keypair: Secp256k1Keypair

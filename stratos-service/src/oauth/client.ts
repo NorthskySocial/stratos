@@ -5,6 +5,7 @@ import {
 } from '@atproto/oauth-client-node'
 import { JoseKey } from '@atproto/jwk-jose'
 import { IdResolver } from '@atproto/identity'
+import { createPublicFetch } from '@northskysocial/stratos-core/network'
 import { eq } from 'drizzle-orm'
 import { oauthSession, oauthState, type ServiceDb } from '../db'
 import { pgOauthSession, pgOauthState } from '../db/pg-schema.js'
@@ -466,7 +467,7 @@ export async function createOAuthClient(
       },
     },
 
-    fetch,
+    fetch: createPublicFetch(fetch),
     ...(config.allowHttp === true ? { allowHttp: true } : {}),
   })
 }

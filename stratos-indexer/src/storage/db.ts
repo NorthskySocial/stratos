@@ -1,6 +1,7 @@
 import { sql, Kysely } from 'kysely'
 import { BackgroundQueue, Database } from '@atproto/bsky'
 import { IdResolver, MemoryCache } from '@atproto/identity'
+import { protectIdentityResolver } from '@northskysocial/stratos-core/network'
 import { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
 import PQueue from 'p-queue'
 import type { DbConfig, IdentityConfig, IndexerConfig } from '../config.js'
@@ -160,10 +161,9 @@ export function createIdResolver(cfg: IdentityConfig): IdResolver {
     }
   }, DID_CACHE_SWEEP_INTERVAL)
 
-  return new IdResolver({
-    plcUrl: cfg.plcUrl,
-    didCache: cache,
-  })
+  return protectIdentityResolver(
+    new IdResolver({ plcUrl: cfg.plcUrl, didCache: cache }),
+  )
 }
 
 function capBackgroundQueue(

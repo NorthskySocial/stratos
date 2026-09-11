@@ -1,14 +1,15 @@
 import {
   DidWebResolver,
-  PoorlyFormattedDidError,
-  UnsupportedDidWebPathError,
   type DidCache,
   type DidResolver,
 } from '@atproto/identity'
 import { StratosError } from '@northskysocial/stratos-core'
+import {
+  createPublicFetch,
+  didWebDocumentUrl,
+} from '@northskysocial/stratos-core/network'
 
 const DEFAULT_DID_WEB_TIMEOUT_MS = 3_000
-const DID_WEB_DOCUMENT_PATH = '/.well-known/did.json'
 
 export interface CommitKeyResolver {
   resolveAtprotoKey: (did: string) => Promise<string>
@@ -43,7 +44,7 @@ export function createCommitKeyResolver(
   const didWebResolver = new StatusPreservingDidWebResolver(
     options.timeoutMs ?? DEFAULT_DID_WEB_TIMEOUT_MS,
     source.cache,
-    options.fetch ?? globalThis.fetch,
+    createPublicFetch(options.fetch),
   )
 
   return {
@@ -99,19 +100,4 @@ class StatusPreservingDidWebResolver extends DidWebResolver {
       abortController.abort()
     }
   }
-}
-
-function didWebDocumentUrl(did: string): URL {
-  const parsedId = did.split(':').slice(2).join(':')
-  const parts = parsedId.split(':').map(decodeURIComponent)
-  if (parts.length < 1 || parts[0] === '') {
-    throw new PoorlyFormattedDidError(did)
-  }
-  if (parts.length !== 1) {
-    throw new UnsupportedDidWebPathError(did)
-  }
-
-  const url = new URL(`https://${parts[0]}${DID_WEB_DOCUMENT_PATH}`)
-  if (url.hostname === 'localhost') url.protocol = 'http:'
-  return url
 }

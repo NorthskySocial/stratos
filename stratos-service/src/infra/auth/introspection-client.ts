@@ -9,6 +9,7 @@
  * Authentication assurance comes from DPoP proof binding (RFC 9449) instead.
  */
 import { IdResolver } from '@atproto/identity'
+import { createPublicFetch } from '@northskysocial/stratos-core/network'
 
 /**
  * Verified token claims
@@ -103,7 +104,7 @@ export class PdsTokenVerifier implements TokenVerifier {
     this.audience = config.audience
     this.verifyCacheMaxAge = config.verifyCacheMaxAge ?? 60 * 1000
     this.verifyCacheMaxSize = config.verifyCacheMaxSize ?? 1_000
-    this.fetch = config.fetch ?? globalThis.fetch.bind(globalThis)
+    this.fetch = createPublicFetch(config.fetch)
   }
 
   /**

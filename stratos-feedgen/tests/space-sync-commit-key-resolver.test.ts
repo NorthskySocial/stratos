@@ -49,6 +49,31 @@ function didDocument(did: string, didKey: string): Record<string, unknown> {
 }
 
 describe('createCommitKeyResolver', () => {
+  it('blocks private commit-key DID hosts', async () => {
+    const fetch = vi.fn()
+    await expect(
+      createCommitKeyResolver(sourceResolver(), { fetch }).resolveAtprotoKey(
+        'did:web:127.0.0.1',
+      ),
+    ).rejects.toThrow()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('protects the socket and rejects redirects for commit-key lookups', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }))
+    await expect(
+      createCommitKeyResolver(sourceResolver(), { fetch }).resolveAtprotoKey(
+        JULIA_DID,
+      ),
+    ).rejects.toThrow()
+    expect(fetch).toHaveBeenCalledWith(
+      new URL('https://julia.bebop.test/.well-known/did.json'),
+      expect.objectContaining({
+        redirect: 'error',
+        dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
+      }),
+    )
+  })
   it.each([408, 429, 500, 503])(
     'preserves retryable did:web HTTP %i responses',
     async (status) => {

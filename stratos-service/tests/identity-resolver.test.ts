@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createIdResolver } from '../src/identity-resolver.js'
 
-// Mock the @atproto/identity module
+// Keep fallback and configured-key tests independent of network resolution.
 const mockHandleResolve = vi.fn()
 const mockDidResolve = vi.fn()
-vi.mock('@atproto/identity', () => {
+vi.mock('@northskysocial/stratos-core/network', () => {
   return {
-    IdResolver: class {
-      handle = {
+    createPublicIdResolver: () => ({
+      handle: {
         resolve: mockHandleResolve,
-      }
-      did = {
+      },
+      did: {
         resolve: mockDidResolve,
-      }
-    },
+      },
+    }),
   }
 })
 
@@ -68,6 +68,7 @@ describe('identity-resolver', () => {
     expect(result).toBe(did)
     expect(mockFetch).toHaveBeenCalledWith(
       `https://plc.directory/did-by-handle/${encodeURIComponent(handle)}`,
+      { redirect: 'error' },
     )
     expect(mockLogger.debug).toHaveBeenCalledWith(
       expect.objectContaining({ handle, err: 'NXDOMAIN' }),

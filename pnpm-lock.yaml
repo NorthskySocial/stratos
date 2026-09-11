@@ -231,6 +231,9 @@ importers:
       '@atproto/common-web':
         specifier: ^0.5.9
         version: 0.5.9
+      '@atproto/identity':
+        specifier: ^0.5.9
+        version: 0.5.9
       '@atproto/lex-cbor':
         specifier: ^0.1.6
         version: 0.1.6
@@ -249,12 +252,18 @@ importers:
       drizzle-orm:
         specifier: 1.0.0-beta.18-7eb39f0
         version: 1.0.0-beta.18-7eb39f0(@libsql/client@0.17.0)(@opentelemetry/api@1.9.1)(@types/mssql@9.1.9(@azure/core-client@1.10.1(supports-color@8.1.1))(supports-color@8.1.1))(mssql@11.0.1(@azure/core-client@1.10.1(supports-color@8.1.1))(supports-color@8.1.1))(pg@8.20.0)(postgres@3.4.8)(valibot@1.4.2(@typescript/typescript6@6.0.2))(zod@4.3.6)
+      ipaddr.js:
+        specifier: ^2.3.0
+        version: 2.3.0
       multiformats:
         specifier: ^13.4.2
         version: 13.4.2
       postgres:
         specifier: ^3.4.8
         version: 3.4.8
+      undici:
+        specifier: ^7.27.0
+        version: 7.27.0
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -450,6 +459,12 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.2.1)(supports-color@8.1.1)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.2.1)(supports-color@8.1.1))(vitest@4.0.18(@opentelemetry/api@1.9.1)(@types/node@25.2.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       '@types/deno':
         specifier: ^2.5.0
         version: 2.5.0
