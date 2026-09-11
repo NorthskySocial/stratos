@@ -84,11 +84,13 @@ export async function fetchClientRedirectUris(
   })
 
   if (!response.ok) {
+    await response.body?.cancel()
     throw new Error(`client metadata document returned ${response.status}`)
   }
 
   const declaredLength = Number(response.headers.get('content-length'))
   if (declaredLength > MAX_CLIENT_METADATA_BYTES) {
+    await response.body?.cancel()
     throw new Error('client metadata document is too large')
   }
 

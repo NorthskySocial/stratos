@@ -48,10 +48,18 @@ describe('public identity resolution', () => {
       .mockImplementation(async () => new Response('{"id":"did:web:nerv.jp"}'))
     const resolver = createPublicIdResolver({ timeout: 4321 })
     await resolver.did.resolve('did:web:nerv.jp')
-    expect(fetch.mock.calls[0][1]?.signal).toBe(timeout.signal)
+    expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(false)
     await resolver.handle.resolveHttp('nerv.jp')
-    expect(fetch.mock.calls[1][1]?.signal).toBe(timeout.signal)
-    expect(timeoutFactory.mock.calls).toEqual([[4321], [4321]])
+    expect(fetch.mock.calls[1][1]?.signal?.aborted).toBe(false)
+    timeout.abort()
+    expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(fetch.mock.calls[1][1]?.signal?.aborted).toBe(true)
+    expect(timeoutFactory.mock.calls).toEqual([
+      [4321],
+      [10_000],
+      [4321],
+      [10_000],
+    ])
   })
   it.each([
     'did:web:nerv.jp%2Finternal',
@@ -124,6 +132,49 @@ describe('public identity resolution', () => {
     await expect(
       createPublicIdResolver().did.resolve('did:web:nerv.jp'),
     ).resolves.toBeNull()
+  })
+
+  it('rejects encoded authority delimiters through the installed DID resolver', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    await expect(
+      createPublicIdResolver().did.resolve('did:web:nerv.jp%3Finternal'),
+    ).rejects.toBeInstanceOf(PoorlyFormattedDidError)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('caps DID documents before JSON parsing', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: 'did:web:nerv.jp', extra: 'あ'.repeat(200_000) }),
+      ),
+    )
+    await expect(
+      createPublicIdResolver().did.resolve('did:web:nerv.jp'),
+    ).rejects.toThrow('Response too large')
+  })
+
+  it.each(['did', 'handle'])('cancels rejected %s responses', async (kind) => {
+    const cancel = vi.fn()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(new ReadableStream({ cancel }), { status: 404 }),
+    )
+    const resolver = createPublicIdResolver()
+    if (kind === 'did')
+      await expect(resolver.did.resolve('did:web:nerv.jp')).resolves.toBeNull()
+    else
+      await expect(
+        resolver.handle.resolveHttp('nerv.jp'),
+      ).resolves.toBeUndefined()
+    await expect.poll(() => cancel.mock.calls.length).toBe(1)
+  })
+
+  it('ignores a failed HTTP handle response without a body', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 500 }),
+    )
+    await expect(
+      createPublicIdResolver().handle.resolveHttp('nerv.jp'),
+    ).resolves.toBeUndefined()
   })
 
   it('keeps the operator-configured PLC endpoint and disallows redirects there', async () => {

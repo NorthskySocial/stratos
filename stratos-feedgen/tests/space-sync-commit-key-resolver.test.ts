@@ -49,6 +49,43 @@ function didDocument(did: string, didKey: string): Record<string, unknown> {
 }
 
 describe('createCommitKeyResolver', () => {
+  it.each([404, 503])(
+    'cancels HTTP %i bodies while preserving retry classification',
+    async (status) => {
+      const cancel = vi.fn()
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(new ReadableStream({ cancel }), { status }),
+        )
+      const result = createCommitKeyResolver(sourceResolver(), {
+        fetch,
+      }).resolveAtprotoKey(JULIA_DID)
+      if (status === 404)
+        await expect(result).rejects.toBeInstanceOf(DidNotFoundError)
+      else
+        await expect(result).rejects.toMatchObject({
+          status: 503,
+          code: 'DidWebHttpError',
+        })
+      await expect.poll(() => cancel.mock.calls.length).toBe(1)
+    },
+  )
+
+  it('bounds commit-key documents before parsing', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ id: JULIA_DID, extra: 'あ'.repeat(200_000) }),
+        ),
+      )
+    await expect(
+      createCommitKeyResolver(sourceResolver(), { fetch }).resolveAtprotoKey(
+        JULIA_DID,
+      ),
+    ).rejects.toThrow('Response too large')
+  })
   it('blocks private commit-key DID hosts', async () => {
     const fetch = vi.fn()
     await expect(

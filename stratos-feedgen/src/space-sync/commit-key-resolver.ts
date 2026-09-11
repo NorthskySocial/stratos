@@ -76,9 +76,9 @@ class StatusPreservingDidWebResolver extends DidWebResolver {
   constructor(
     timeoutMs: number,
     cache: DidCache | undefined,
-    private readonly fetch: typeof globalThis.fetch,
+    private readonly fetchDocument: typeof globalThis.fetch,
   ) {
-    super(timeoutMs, cache)
+    super(timeoutMs, cache, fetchDocument)
   }
 
   override async resolveNoCheck(did: string): Promise<unknown> {
@@ -87,13 +87,16 @@ class StatusPreservingDidWebResolver extends DidWebResolver {
     const timer = setTimeout(() => abortController.abort(), this.timeout)
 
     try {
-      const response = await this.fetch(url, {
+      const response = await this.fetchDocument(url, {
         signal: abortController.signal,
         redirect: 'error',
         headers: { accept: 'application/did+ld+json,application/json' },
       })
-      if (response.status === 404) return null
-      if (!response.ok) throw new DidWebHttpError(did, response.status)
+      if (!response.ok) {
+        await response.body?.cancel()
+        if (response.status === 404) return null
+        throw new DidWebHttpError(did, response.status)
+      }
       return await response.json()
     } finally {
       clearTimeout(timer)

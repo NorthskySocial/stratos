@@ -54,7 +54,7 @@ describe('public outbound transport', () => {
       headers: { authorization: 'Bearer test' },
       signal: controller.signal,
     })
-    await expect(publicFetch(request)).resolves.toBe(response)
+    expect(await (await publicFetch(request)).text()).toBe('{}')
     const [url, init] = transport.mock.calls.at(-1)!
     expect(url).toBe(request.url)
     expect(init).toMatchObject({
@@ -213,11 +213,11 @@ describe('public outbound transport', () => {
       },
     )
     const signal = new AbortController().signal
-    await expect(fetch(input, { signal, redirect: 'manual' })).resolves.toBe(
-      response,
-    )
+    expect(
+      await (await fetch(input, { signal, redirect: 'manual' })).text(),
+    ).toBe('{}')
     expect(transport).toHaveBeenCalledWith(input, {
-      signal,
+      signal: expect.any(AbortSignal),
       redirect: 'error',
       dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
     })
@@ -239,6 +239,7 @@ describe('public outbound transport', () => {
     await publicFetch(new URL('https://nerv.jp/'))
     expect(transport).toHaveBeenCalledWith(new URL('https://nerv.jp/'), {
       redirect: 'error',
+      signal: expect.any(AbortSignal),
       dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
     })
   })

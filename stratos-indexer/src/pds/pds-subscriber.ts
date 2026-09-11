@@ -4,7 +4,7 @@ import {
   PdsFirehose,
   processFirehoseWork,
 } from './pds-firehose.js'
-import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import type { IndexingService } from '../storage/db.js'
 import type { CursorManager } from '../storage/cursor-manager.js'
 import type { BackgroundQueue } from '@atproto/bsky'
 import { HandleDedup } from '../util/handle-dedup.js'

@@ -6,7 +6,7 @@ import {
 import type { CursorManager } from '../storage/cursor-manager.js'
 import type { EnrollmentCallback } from '../pds/pds-firehose.js'
 import { Kysely } from 'kysely'
-import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import type { IndexingService } from '../storage/db.js'
 import type { BackfillOptions } from '../backfill.js'
 import type { StratosIndexerSchema } from '../storage/schema.js'
 import { BackgroundQueue } from '@atproto/bsky'

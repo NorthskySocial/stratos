@@ -1,7 +1,7 @@
 import { WriteOpAction } from '@atproto/repo'
 import { AtUri } from '@atproto/syntax'
 import { CID } from 'multiformats/cid'
-import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import type { IndexingService } from './storage/db.js'
 import PQueue from 'p-queue'
 import type { EnrollmentCallback } from './pds/pds-firehose.js'
 import { extractBoundaries, jsonToLex } from '@northskysocial/stratos-core'

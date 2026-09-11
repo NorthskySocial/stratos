@@ -7,6 +7,33 @@ import { PdsTokenVerifier } from '../src/infra/auth/introspection-client.js'
 afterEach(() => vi.restoreAllMocks())
 
 describe('service outbound security', () => {
+  it('bounds JWKS documents before buffering and parsing them', async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jwks: { keys: [{ kty: 'EC', kid: 'Rei' }] },
+          extra: 'あ'.repeat(200_000),
+        }),
+      ),
+    )
+    await expect(
+      new JwksResolver({ fetch }).resolveJwks('https://nerv.jp/client.json'),
+    ).rejects.toThrow('Response too large')
+  })
+
+  it('cancels failed metadata responses', async () => {
+    const cancel = vi.fn()
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(new ReadableStream({ cancel }), { status: 404 }),
+      )
+    await expect(
+      new JwksResolver({ fetch }).resolveJwks('https://nerv.jp/client.json'),
+    ).rejects.toThrow('HTTP 404')
+    await expect.poll(() => cancel.mock.calls.length).toBe(1)
+  })
+
   it('keeps the configured PLC endpoint through the protected resolver factory', async () => {
     const did = 'did:plc:shinji'
     const fetch = vi
@@ -104,5 +131,30 @@ describe('service outbound security', () => {
         dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
       }),
     )
+  })
+
+  it('cancels rejected PDS metadata', async () => {
+    const did = 'did:plc:shinji'
+    const cancel = vi.fn()
+    const idResolver = {
+      did: {
+        resolve: vi.fn().mockResolvedValue({
+          id: did,
+          service: [{ id: '#atproto_pds', serviceEndpoint: 'https://nerv.jp' }],
+        }),
+      },
+    }
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(new ReadableStream({ cancel }), { status: 404 }),
+      )
+    const verifier = new PdsTokenVerifier({
+      idResolver: idResolver as never,
+      fetch,
+    })
+    const token = `${Buffer.from('{}').toString('base64url')}.${Buffer.from(JSON.stringify({ sub: did, iss: 'https://nerv.jp' })).toString('base64url')}.signature`
+    expect(await verifier.verify(token)).toMatchObject({ active: false })
+    await expect.poll(() => cancel.mock.calls.length).toBe(1)
   })
 })

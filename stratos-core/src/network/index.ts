@@ -4,8 +4,4 @@ export {
   isPublicAddress,
   publicFetch,
 } from './public-fetch.js'
-export {
-  createPublicIdResolver,
-  didWebDocumentUrl,
-  protectIdentityResolver,
-} from './identity.js'
+export { createPublicIdResolver, didWebDocumentUrl } from './identity.js'

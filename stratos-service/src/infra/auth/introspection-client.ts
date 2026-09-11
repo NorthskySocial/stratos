@@ -367,6 +367,7 @@ export class PdsTokenVerifier implements TokenVerifier {
       headers: { Accept: 'application/json' },
     })
     if (!response.ok) {
+      await response.body?.cancel()
       throw new Error(
         `PDS protected resource metadata request failed: ${response.status} from ${pdsOrigin}`,
       )

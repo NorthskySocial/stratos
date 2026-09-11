@@ -3,6 +3,7 @@ import { isIP, type LookupFunction } from 'node:net'
 import ipaddr from 'ipaddr.js'
 import { Agent, fetch as undiciFetch } from 'undici'
 import { StratosError } from '../shared/errors.js'
+import { createBoundedFetch } from './bounded-fetch.js'
 
 export function isPublicAddress(address: string): boolean {
   const family = isIP(address)
@@ -46,6 +47,7 @@ export function createPublicFetch(
   baseFetch: typeof fetch = fetchWithDispatcher,
 ): typeof fetch {
   const dispatcher = new Agent({ connect: { lookup: publicLookup } })
+  const boundedFetch = createBoundedFetch(baseFetch)
   return async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.protocol !== 'https:' || url.username || url.password) {
@@ -70,7 +72,7 @@ export function createPublicFetch(
       dispatcher,
     }
     // Node and the indexer's Deno types carry different Undici dispatcher declarations.
-    return baseFetch(input, requestInit as unknown as RequestInit)
+    return boundedFetch(input, requestInit as unknown as RequestInit)
   }
 }
 

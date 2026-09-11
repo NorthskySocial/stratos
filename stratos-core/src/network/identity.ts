@@ -6,6 +6,7 @@ import {
   type IdentityResolverOpts,
 } from '@atproto/identity'
 import { isValidHandle } from '@atproto/syntax'
+import { createBoundedFetch } from './bounded-fetch.js'
 import { publicFetch } from './public-fetch.js'
 
 export function didWebDocumentUrl(did: string): URL {
@@ -20,36 +21,26 @@ export function didWebDocumentUrl(did: string): URL {
 }
 
 class PublicDidWebResolver extends DidWebResolver {
-  override async resolveNoCheck(did: string): Promise<unknown> {
-    const response = await publicFetch(didWebDocumentUrl(did), {
-      signal: AbortSignal.timeout(this.timeout),
-      headers: { accept: 'application/did+ld+json,application/json' },
-    })
-    if (!response.ok) return null
-    return response.json()
+  constructor(timeout: number) {
+    super(timeout, undefined, publicFetch)
+  }
+
+  override resolveNoCheck(did: string): Promise<unknown> {
+    didWebDocumentUrl(did)
+    return super.resolveNoCheck(did)
   }
 }
 
 export function createPublicIdResolver(
-  opts: IdentityResolverOpts = {},
+  opts: Omit<IdentityResolverOpts, 'fetch'> = {},
 ): IdResolver {
-  return protectIdentityResolver(new IdResolver(opts))
-}
-
-interface NetworkIdentityResolver {
-  handle: Pick<IdResolver['handle'], 'timeout' | 'resolveHttp'>
-  did: { methods: Map<string, Pick<DidWebResolver, 'resolveNoCheck'>> }
-}
-
-/** Keep the caller's resolver and cache, including older indexer SDK instances. */
-export function protectIdentityResolver<T extends NetworkIdentityResolver>(
-  resolver: T,
-): T {
+  // PLC is operator-configured; DID web and HTTP handles use public-host checks below.
+  const resolver = new IdResolver({ ...opts, fetch: createBoundedFetch() })
   resolver.did.methods.set(
     'web',
     new PublicDidWebResolver(resolver.handle.timeout),
   )
-  // The upstream resolver uses global fetch and follows redirects for HTTP handles.
+  // Keep HTTP handles on the well-known path even when the server redirects.
   resolver.handle.resolveHttp = async (handle, signal) => {
     if (!isValidHandle(handle)) return undefined
     try {
@@ -58,9 +49,11 @@ export function protectIdentityResolver<T extends NetworkIdentityResolver>(
         new URL('/.well-known/atproto-did', `https://${handle}`),
         { signal: signal ? AbortSignal.any([signal, timeout]) : timeout },
       )
-      if (!response.ok) return undefined
-      const did = (await response.text()).split('\n')[0].trim()
-      return did.startsWith('did:') ? did : undefined
+      if (response.ok) {
+        const did = (await response.text()).split('\n')[0].trim()
+        return did.startsWith('did:') ? did : undefined
+      }
+      await response.body?.cancel()
     } catch {
       // Let the caller fall back to DNS when HTTPS resolution fails.
     }

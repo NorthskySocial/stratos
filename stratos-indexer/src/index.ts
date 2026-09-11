@@ -1,6 +1,7 @@
 export { Indexer } from './indexer.ts'
 export { loadConfig } from './config.ts'
 export type { IndexerConfig } from './config.ts'
+export type { IndexingService } from './storage/db.js'
 export { WorkerPool } from './util/worker-pool.ts'
 export { CursorManager } from './storage/cursor-manager.ts'
 export { PdsFirehose, processFirehoseWork } from './pds/pds-firehose.ts'

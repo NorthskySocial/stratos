@@ -26,7 +26,9 @@ try {
   )
   await assert.rejects(
     createPublicIdResolver().did.resolve(`did:web:localhost%3A${port}`),
-    isBlocked,
+    // The updated upstream resolver maps localhost to HTTP, which our URL policy rejects.
+    (error: unknown) =>
+      error instanceof StratosError && error.code === 'UnsafeOutboundUrl',
   )
   assert.equal(connections, 0, 'SSRF attempts must not open an internal socket')
   console.log(

@@ -268,6 +268,7 @@ export class JwksResolver {
       )
     }
     if (!res.ok) {
+      await res.body?.cancel()
       throw new MetadataFetchError(
         `Fetching ${what} from "${url.toString()}" returned HTTP ${res.status}`,
       )

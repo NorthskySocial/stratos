@@ -3,7 +3,7 @@ import { fromBytes } from '@atcute/cbor'
 import { ComAtprotoSyncSubscribeRepos } from '@atcute/atproto'
 import { AtUri } from '@atproto/syntax'
 import { CID } from 'multiformats/cid'
-import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import type { IndexingService } from '../storage/db.js'
 import type { HandleDedup } from '../util/handle-dedup.js'
 import type { BackgroundQueue } from '@atproto/bsky'
 import {

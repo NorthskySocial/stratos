@@ -92,7 +92,8 @@ async function main() {
   )
 
   try {
-    const idResolver = new IdResolver()
+    // This fixture deliberately serves its DID document on localhost.
+    const idResolver = new IdResolver({ fetch: globalThis.fetch })
     const dids: DidPdsReader = {
       async getPdsEndpoint(did) {
         // A member whose document will not resolve must yield "unknown host",

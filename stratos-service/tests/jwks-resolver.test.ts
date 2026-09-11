@@ -34,16 +34,12 @@ function mockFetch(
     const url = input.toString()
     const entry = routes[url]
     if (entry === undefined) {
-      return { ok: false, status: 404, json: async () => ({}) } as Response
+      return new Response(null, { status: 404 })
     }
     if (typeof entry === 'function') {
       ;(entry as () => never)()
     }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => entry,
-    } as Response
+    return new Response(JSON.stringify(entry))
   })
 }
 
@@ -165,11 +161,7 @@ describe('JwksResolver', () => {
     let fail = true
     const fetch = vi.fn(async () => {
       if (fail) throw new Error('network down')
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ jwks: { keys: [jwk] } }),
-      } as Response
+      return new Response(JSON.stringify({ jwks: { keys: [jwk] } }))
     })
     const resolver = new JwksResolver({ fetch: fetch as never })
 
@@ -192,10 +184,7 @@ describe('JwksResolver', () => {
   })
 
   it('fails closed on a non-2xx metadata response', async () => {
-    const fetch = vi.fn(
-      async () =>
-        ({ ok: false, status: 500, json: async () => ({}) }) as Response,
-    )
+    const fetch = vi.fn(async () => new Response(null, { status: 500 }))
     const resolver = new JwksResolver({ fetch: fetch as never })
     await expect(resolver.resolveJwks(CLIENT_ID)).rejects.toBeInstanceOf(
       MetadataFetchError,
