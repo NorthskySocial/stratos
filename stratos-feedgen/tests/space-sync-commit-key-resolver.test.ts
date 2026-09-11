@@ -206,6 +206,21 @@ describe('createCommitKeyResolver', () => {
   it.each([
     ['an empty identifier', 'did:web:', PoorlyFormattedDidError],
     [
+      'a malformed percent escape',
+      'did:web:julia.bebop.test%',
+      PoorlyFormattedDidError,
+    ],
+    [
+      'a public host with a custom port',
+      'did:web:julia.bebop.test%3A8443',
+      PoorlyFormattedDidError,
+    ],
+    [
+      'a public host with an explicit default port',
+      'did:web:julia.bebop.test%3A443',
+      PoorlyFormattedDidError,
+    ],
+    [
       'a path identifier',
       'did:web:julia.bebop.test:crew',
       UnsupportedDidWebPathError,

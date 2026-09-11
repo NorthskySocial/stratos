@@ -39,7 +39,9 @@ The indexer container runs Deno. Its native fetch ignores Node's `dispatcher` op
 
 The classifier rejects non-unicast IPv4 ranges and restricts IPv6 to global unicast outside reserved ranges. It also rejects IPv4-mapped and transition addresses, site-local IPv6, loopback, private, link-local, multicast, and benchmark destinations. Existing space sync DNS pinning uses this same classifier.
 
-Stratos permits public HTTPS literal addresses and custom ports where a caller's URL schema permits them. Upstream's default identity fetch also rejects literal addresses, custom ports, and certain domain names. Stratos enforces the public-address requirement at the socket and rejects all redirects; it does not adopt that domain-name denylist.
+The general HTTP transport permits public HTTPS literal addresses and custom ports where a caller's URL schema permits them. Upstream's default identity fetch also rejects literal addresses, custom ports, and certain domain names. Stratos enforces the public-address requirement at the socket and rejects all redirects; it does not adopt that domain-name denylist.
+
+DID web authorities permit ports only on the exact `localhost` hostname, following the [AT Protocol DID rules](https://atproto.com/specs/did#didweb-in-at-protocol). Check explicit default ports before URL normalization removes them. Localhost syntax support does not bypass the public-address transport. Malformed percent escapes, invalid URL authorities, and encoded whitespace raise `PoorlyFormattedDidError` before any fetch.
 
 The shared transport limits responses to 512 KiB of decoded bytes and applies a 10-second timeout. Caller cancellation and shorter timeouts remain effective. The upstream `fetchMaxSizeProcessor` counts streamed bytes after decompression, including when `Content-Length` is absent or false. Tests cover gzip, deflate, and Brotli. OAuth client metadata retains its stricter 64 KiB limit. DID, handle, JWKS, and metadata readers cancel rejected response bodies.
 
@@ -85,7 +87,7 @@ The updated SDK exposes its indexing service through `RepoSubscription`. Constru
 
 ## Verification
 
-The final workspace Vitest run passed 2,891 tests across 223 files, with 44 tests skipped. The separate browser package passed another 15 tests across two files. Formatting and whitespace checks passed.
+The final workspace Vitest run passed 2,917 tests across 223 files, with 44 tests skipped. The separate browser package passed another 15 tests across two files. Formatting and whitespace checks passed.
 
 Verification covers the shared transport, identity factories, service metadata, OAuth, feedgen commit keys, and the actual updated indexer SDK. The compressed-response tests use local HTTP servers. The HTTP 413 regression sends a compressed JSON request whose decoded body exceeds the existing 100 KiB limit.
 
@@ -93,7 +95,8 @@ Scoped mutation testing after the dependency update kept the existing 60% gate:
 
 | Scope                                        | Score  | Notes                                                                                                                                                              |
 | -------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Shared network implementation                | 99.16% | 118 killed; one equivalent survivor removes a null-body guard inside a catch that returns the same handle-resolution fallback. Both paths are tested.              |
+| Socket transport and response limits         | 100%   | All 77 mutants killed across `public-fetch.ts` and `bounded-fetch.ts`. These files are unchanged by the DID validation follow-up.                                  |
+| DID validation and resolver                  | 98.18% | 54 killed; one equivalent survivor removes a null-body guard inside a catch that returns the same handle-resolution fallback. No new validation mutants survive.   |
 | Service response cleanup and HTTP 413 branch | 100%   | All 15 mutants killed. The entry-point run targets only the new error-handling branch.                                                                             |
 | Feedgen commit-key resolver                  | 70.97% | 22 killed; nine survivors concern existing timeout, request options, cleanup, or diagnostic text. New HTTP-status and body-cancellation behavior has no survivors. |
 | Indexer resolver and SDK construction        | 100%   | All four mutants killed. Tests use the actual SDK and verify the protected resolver, bounded queue, and absence of an extra subscription.                          |

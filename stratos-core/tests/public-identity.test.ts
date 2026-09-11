@@ -67,25 +67,59 @@ describe('public identity resolution', () => {
     'did:web:nerv.jp%3Fquery',
     'did:web:nerv.jp%23fragment',
     'did:web:shinji%40nerv.jp',
+    'did:web:nerv.jp%',
+    'did:web:nerv.jp%2',
+    'did:web:nerv.jp%GG',
+    'did:web:nerv.jp%C0%AF',
+    'did:web:%5Bnerv.jp',
+    'did:web:nerv.jp%3A65536',
+    'did:web:%20nerv.jp',
+    'did:web:nerv.jp%09%3A443',
     'did:web:',
+    'did:web::shinji',
     'did:plc:shinji',
   ])('rejects a malformed DID authority %s', (did) => {
     expect(() => didWebDocumentUrl(did)).toThrow(PoorlyFormattedDidError)
   })
 
-  it('rejects DID paths and preserves an encoded port', () => {
+  it('rejects DID paths', () => {
     expect(() => didWebDocumentUrl('did:web:nerv.jp:shinji')).toThrow(
       UnsupportedDidWebPathError,
     )
-    expect(didWebDocumentUrl('did:web:nerv.jp%3A8443').href).toBe(
-      'https://nerv.jp:8443/.well-known/did.json',
+  })
+
+  it.each([
+    ['localhost%3A8443', 'https://localhost:8443/.well-known/did.json'],
+    ['localhost%3A443', 'https://localhost/.well-known/did.json'],
+    ['localhost%3A80', 'https://localhost:80/.well-known/did.json'],
+  ])('preserves URL generation for a localhost port: %s', (authority, url) => {
+    expect(didWebDocumentUrl(`did:web:${authority}`).href).toBe(url)
+  })
+
+  it.each([
+    'nerv.jp%3A8443',
+    'nerv.jp%3A443',
+    'nerv.jp%3a0443',
+    'localhost.nerv.jp%3A8443',
+    'localhost.%3A8443',
+    '%5B2606%3A4700%3A4700%3A%3A1111%5D%3A443',
+  ])('rejects a port on a non-localhost authority: %s', (authority) => {
+    expect(() => didWebDocumentUrl(`did:web:${authority}`)).toThrow(
+      PoorlyFormattedDidError,
     )
+  })
+
+  it('does not mistake IPv6 address segments for a port', () => {
+    expect(
+      didWebDocumentUrl('did:web:%5B2606%3A4700%3A4700%3A%3A1111%5D').href,
+    ).toBe('https://[2606:4700:4700::1111]/.well-known/did.json')
   })
 
   it.each([
     'did:web:127.0.0.1',
     'did:web:169.254.169.254',
     'did:web:%5B%3A%3A1%5D',
+    'did:web:localhost%3A8443',
   ])('refuses an internal DID %s without sending a request', async (did) => {
     const fetch = vi.spyOn(globalThis, 'fetch')
     await expect(createPublicIdResolver().did.resolve(did)).rejects.toThrow()
@@ -134,13 +168,21 @@ describe('public identity resolution', () => {
     ).resolves.toBeNull()
   })
 
-  it('rejects encoded authority delimiters through the installed DID resolver', async () => {
-    const fetch = vi.spyOn(globalThis, 'fetch')
-    await expect(
-      createPublicIdResolver().did.resolve('did:web:nerv.jp%3Finternal'),
-    ).rejects.toBeInstanceOf(PoorlyFormattedDidError)
-    expect(fetch).not.toHaveBeenCalled()
-  })
+  it.each([
+    'did:web:nerv.jp%3Finternal',
+    'did:web:nerv.jp%',
+    'did:web:nerv.jp%3A8443',
+    'did:web:nerv.jp%3A443',
+  ])(
+    'rejects invalid authority %s through the installed DID resolver',
+    async (did) => {
+      const fetch = vi.spyOn(globalThis, 'fetch')
+      await expect(
+        createPublicIdResolver().did.resolve(did),
+      ).rejects.toBeInstanceOf(PoorlyFormattedDidError)
+      expect(fetch).not.toHaveBeenCalled()
+    },
+  )
 
   it('caps DID documents before JSON parsing', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

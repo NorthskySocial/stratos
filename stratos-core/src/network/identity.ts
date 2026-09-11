@@ -14,10 +14,21 @@ export function didWebDocumentUrl(did: string): URL {
   const parts = did.slice('did:web:'.length).split(':')
   if (!parts[0]) throw new PoorlyFormattedDidError(did)
   if (parts.length !== 1) throw new UnsupportedDidWebPathError(did)
-  const authority = decodeURIComponent(parts[0])
+  let authority: string
+  let url: URL
+  try {
+    authority = decodeURIComponent(parts[0])
+    url = new URL('/.well-known/did.json', `https://${authority}`)
+  } catch {
+    throw new PoorlyFormattedDidError(did)
+  }
   // Encoded delimiters must not turn the authority into a path, query, or userinfo.
-  if (/[/\\?#@]/u.test(authority)) throw new PoorlyFormattedDidError(did)
-  return new URL('/.well-known/did.json', `https://${authority}`)
+  if (/[/\\?#@\s]/u.test(authority)) throw new PoorlyFormattedDidError(did)
+  // Inspect the authority because URL.port removes explicit default ports such as 443.
+  if (/:\d+$/u.test(authority) && url.hostname !== 'localhost') {
+    throw new PoorlyFormattedDidError(did)
+  }
+  return url
 }
 
 class PublicDidWebResolver extends DidWebResolver {
