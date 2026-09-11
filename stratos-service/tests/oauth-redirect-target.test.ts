@@ -71,6 +71,7 @@ describe('fetchClientRedirectUris', () => {
       headers: { accept: 'application/json' },
       redirect: 'error',
       signal: expect.any(AbortSignal),
+      dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
     })
   })
 
@@ -108,6 +109,37 @@ describe('fetchClientRedirectUris', () => {
       'returned 404',
     )
   })
+
+  it.each([404, 200])(
+    'cancels rejected HTTP %i metadata bodies',
+    async (status) => {
+      const cancel = vi.fn()
+      stubFetch(
+        new Response(new ReadableStream({ cancel }), {
+          status,
+          headers: { 'content-length': String(64 * 1024 + 1) },
+        }),
+      )
+      await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow()
+      await expect.poll(() => cancel.mock.calls.length).toBe(1)
+    },
+  )
+
+  it.each([
+    [404, 'client metadata document returned 404'],
+    [204, 'client metadata document is too large'],
+  ] as const)(
+    'preserves the rejection reason for bodyless HTTP %i',
+    async (status, message) => {
+      stubFetch(
+        new Response(null, {
+          status,
+          headers: { 'content-length': String(64 * 1024 + 1) },
+        }),
+      )
+      await expect(fetchClientRedirectUris(CLIENT_ID)).rejects.toThrow(message)
+    },
+  )
 
   it('rejects an oversized document by its declared length', async () => {
     stubFetch(textResponse('{}', { contentLength: 1024 * 1024 }))

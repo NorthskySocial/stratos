@@ -49,6 +49,68 @@ function didDocument(did: string, didKey: string): Record<string, unknown> {
 }
 
 describe('createCommitKeyResolver', () => {
+  it.each([404, 503])(
+    'cancels HTTP %i bodies while preserving retry classification',
+    async (status) => {
+      const cancel = vi.fn()
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(new ReadableStream({ cancel }), { status }),
+        )
+      const result = createCommitKeyResolver(sourceResolver(), {
+        fetch,
+      }).resolveAtprotoKey(JULIA_DID)
+      if (status === 404)
+        await expect(result).rejects.toBeInstanceOf(DidNotFoundError)
+      else
+        await expect(result).rejects.toMatchObject({
+          status: 503,
+          code: 'DidWebHttpError',
+        })
+      await expect.poll(() => cancel.mock.calls.length).toBe(1)
+    },
+  )
+
+  it('bounds commit-key documents before parsing', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ id: JULIA_DID, extra: 'あ'.repeat(200_000) }),
+        ),
+      )
+    await expect(
+      createCommitKeyResolver(sourceResolver(), { fetch }).resolveAtprotoKey(
+        JULIA_DID,
+      ),
+    ).rejects.toThrow('Response too large')
+  })
+  it('blocks private commit-key DID hosts', async () => {
+    const fetch = vi.fn()
+    await expect(
+      createCommitKeyResolver(sourceResolver(), { fetch }).resolveAtprotoKey(
+        'did:web:127.0.0.1',
+      ),
+    ).rejects.toThrow()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('protects the socket and rejects redirects for commit-key lookups', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }))
+    await expect(
+      createCommitKeyResolver(sourceResolver(), { fetch }).resolveAtprotoKey(
+        JULIA_DID,
+      ),
+    ).rejects.toThrow()
+    expect(fetch).toHaveBeenCalledWith(
+      new URL('https://julia.bebop.test/.well-known/did.json'),
+      expect.objectContaining({
+        redirect: 'error',
+        dispatcher: expect.objectContaining({ dispatch: expect.any(Function) }),
+      }),
+    )
+  })
   it.each([408, 429, 500, 503])(
     'preserves retryable did:web HTTP %i responses',
     async (status) => {
@@ -143,6 +205,21 @@ describe('createCommitKeyResolver', () => {
 
   it.each([
     ['an empty identifier', 'did:web:', PoorlyFormattedDidError],
+    [
+      'a malformed percent escape',
+      'did:web:julia.bebop.test%',
+      PoorlyFormattedDidError,
+    ],
+    [
+      'a public host with a custom port',
+      'did:web:julia.bebop.test%3A8443',
+      PoorlyFormattedDidError,
+    ],
+    [
+      'a public host with an explicit default port',
+      'did:web:julia.bebop.test%3A443',
+      PoorlyFormattedDidError,
+    ],
     [
       'a path identifier',
       'did:web:julia.bebop.test:crew',

@@ -43,10 +43,18 @@ function doc(did: string): DidDocument {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
 describe('createIdResolver', () => {
+  it('blocks caller-chosen private DID hosts before fetching', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    await expect(
+      createIdResolver(cfg).did.resolve('did:web:127.0.0.1'),
+    ).rejects.toThrow()
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('backs the resolver with a size-bounded in-memory DID cache', () => {
     const resolver = createIdResolver(cfg)
     expect(resolver.did.cache).toBeInstanceOf(BoundedDidCache)

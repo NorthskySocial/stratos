@@ -1,4 +1,5 @@
-import { IdResolver, MemoryCache } from '@atproto/identity'
+import { type IdResolver, MemoryCache } from '@atproto/identity'
+import { createPublicIdResolver } from '@northskysocial/stratos-core/network'
 import type { DidDocument } from '@atproto/identity'
 
 import type { FeedgenConfig } from '../config.js'
@@ -68,7 +69,7 @@ export function createIdResolver(cfg: FeedgenConfig): IdResolver {
   // The sweep is upkeep. It must never be the reason the process stays alive.
   sweep.unref()
 
-  return new IdResolver({
+  return createPublicIdResolver({
     plcUrl: cfg.feedgenPlcUrl,
     didCache: cache,
   })

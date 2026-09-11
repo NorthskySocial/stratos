@@ -106,11 +106,7 @@ export function resolverFor(
     if (!client || fail.has(url)) {
       throw new Error(`simulated fetch failure for ${url}`)
     }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ jwks: { keys: [client.publicJwk] } }),
-    } as Response
+    return new Response(JSON.stringify({ jwks: { keys: [client.publicJwk] } }))
   }
   return new JwksResolver({
     fetch: fetch as unknown as typeof globalThis.fetch,

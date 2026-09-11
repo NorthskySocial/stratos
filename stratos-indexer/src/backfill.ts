@@ -1,7 +1,7 @@
 import { WriteOpAction } from '@atproto/repo'
 import { AtUri } from '@atproto/syntax'
 import { CID } from 'multiformats/cid'
-import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import type { IndexingService } from './storage/db.js'
 import PQueue from 'p-queue'
 import type { EnrollmentCallback } from './pds/pds-firehose.js'
 import { extractBoundaries, jsonToLex } from '@northskysocial/stratos-core'
@@ -162,7 +162,7 @@ async function fetchRepoRecordsPage(
   url.searchParams.set('limit', '100')
   if (cursor) url.searchParams.set('cursor', cursor)
 
-  const res = await fetch(url.toString())
+  const res = await fetch(url.toString(), { redirect: 'error' })
   if (!res.ok) return null
 
   return (await res.json()) as ListRecordsResponse
@@ -238,7 +238,7 @@ async function* listRepoPages(
     url.searchParams.set('limit', '1000')
     if (cursor) url.searchParams.set('cursor', cursor)
 
-    const res = await fetch(url.toString())
+    const res = await fetch(url.toString(), { redirect: 'error' })
     if (!res.ok) break
 
     const body = (await res.json()) as {

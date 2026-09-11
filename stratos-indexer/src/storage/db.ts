@@ -1,9 +1,11 @@
 import { sql, Kysely } from 'kysely'
-import { BackgroundQueue, Database } from '@atproto/bsky'
-import { IdResolver, MemoryCache } from '@atproto/identity'
-import { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import { BackgroundQueue, Database, RepoSubscription } from '@atproto/bsky'
+import { type IdResolver, MemoryCache } from '@atproto/identity'
+import { createPublicIdResolver } from '@northskysocial/stratos-core/network'
 import PQueue from 'p-queue'
 import type { DbConfig, IdentityConfig, IndexerConfig } from '../config.js'
+
+export type IndexingService = RepoSubscription['indexingSvc']
 
 const DID_CACHE_STALE_TTL = 5 * 60 * 1000 // 5 minutes
 const DID_CACHE_MAX_TTL = 60 * 60 * 1000 // 1 hour
@@ -160,14 +162,11 @@ export function createIdResolver(cfg: IdentityConfig): IdResolver {
     }
   }, DID_CACHE_SWEEP_INTERVAL)
 
-  return new IdResolver({
-    plcUrl: cfg.plcUrl,
-    didCache: cache,
-  })
+  return createPublicIdResolver({ plcUrl: cfg.plcUrl, didCache: cache })
 }
 
 function capBackgroundQueue(
-  background: BackgroundQueue,
+  background: BackgroundQueue<Database>,
   concurrency: number,
   maxSize: number,
 ): void {
@@ -185,13 +184,20 @@ export function createIndexingService(
   db: Database,
   idResolver: IdResolver,
   config: IndexerConfig,
-): { indexingService: IndexingService; background: BackgroundQueue } {
-  const background = new BackgroundQueue(db)
+): {
+  indexingService: IndexingService
+  background: BackgroundQueue<Database>
+} {
+  // The SDK exposes its indexer through RepoSubscription. Constructing it does not start sync.
+  const { indexingSvc: indexingService, background } = new RepoSubscription({
+    db,
+    idResolver,
+    service: config.pds.repoProvider,
+  })
   capBackgroundQueue(
     background,
     config.worker.backgroundQueueConcurrency,
     config.worker.backgroundQueueMaxSize,
   )
-  const indexingService = new IndexingService(db, idResolver, background)
   return { indexingService, background }
 }

@@ -47,9 +47,7 @@ export interface PostTable {
 
 /**
  * The subset of the AppView database this indexer reads and writes. Declared
- * standalone rather than intersected with `@atproto/bsky`'s schema: bsky pins
- * kysely 0.22 while this package uses 0.28, so inferring its table map through
- * `Kysely<infer T>` silently yielded `never` and left every query untyped.
+ * standalone so query types do not depend on the AppView's Kysely version.
  */
 export interface StratosIndexerSchema {
   stratos_sync_cursor: StratosSyncCursorTable

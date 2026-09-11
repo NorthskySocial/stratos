@@ -7,6 +7,7 @@ import { randomBytes } from 'crypto'
 import http from 'http'
 import axios from 'axios'
 import { decode } from '@atcute/cbor'
+import { gzipSync } from 'node:zlib'
 
 import { StratosServer } from '../src'
 import { createMockBlobStore, createTestConfig } from './utils'
@@ -44,12 +45,46 @@ describe('CORS and 404 Verification', () => {
   })
 
   afterEach(async () => {
+    vi.restoreAllMocks()
     if (httpServer) {
       await new Promise<void>((resolve) => {
         httpServer.close(() => resolve())
       })
     }
     await rm(dataDir, { recursive: true, force: true })
+  })
+
+  it('rejects compressed JSON by its decoded size', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const compressed = gzipSync(JSON.stringify({ name: 'Rei'.repeat(40_000) }))
+    expect(compressed.byteLength).toBeLessThan(100 * 1024)
+    const response = await fetch(`${url}/missing`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-encoding': 'gzip',
+      },
+      body: compressed,
+    })
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: 'PayloadTooLarge',
+      message: 'Request body is too large',
+    })
+    expect(errorLog).not.toHaveBeenCalled()
+    errorLog.mockRestore()
+  })
+
+  it('does not report other parser failures as oversized bodies', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const response = await fetch(`${url}/missing`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{Rei',
+    })
+    expect(response.status).not.toBe(413)
+    expect((await response.json()).error).not.toBe('PayloadTooLarge')
+    errorLog.mockRestore()
   })
 
   it('should have CORS headers on zone.stratos.server.listDomains', async () => {

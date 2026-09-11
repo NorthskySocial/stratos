@@ -1,4 +1,6 @@
-import { type DidDocument, IdResolver } from '@atproto/identity'
+import type { DidDocument, IdResolver } from '@atproto/identity'
+import { createPublicIdResolver } from '@northskysocial/stratos-core/network'
+import { isValidHandle } from '@atproto/syntax'
 import type { Logger, ServiceEnrollment } from '@northskysocial/stratos-core'
 import type { StratosServiceConfig } from './config.js'
 
@@ -14,7 +16,7 @@ export function createIdResolver(
   fetchWithUserAgent: typeof fetch,
   logger?: Logger,
 ): IdResolver {
-  const idResolver = new IdResolver({
+  const idResolver = createPublicIdResolver({
     plcUrl: cfg.identity.plcUrl,
   })
 
@@ -26,6 +28,7 @@ export function createIdResolver(
 
   const originalResolve = idResolver.handle.resolve.bind(idResolver.handle)
   idResolver.handle.resolve = async (handle: string) => {
+    if (!isValidHandle(handle)) return undefined
     try {
       const result = await originalResolve(handle)
       if (result) return result
@@ -36,11 +39,11 @@ export function createIdResolver(
       )
     }
 
-    // Fallback: resolve via PLC directory (trusted endpoint, no SSRF risk)
+    // The operator chooses the PLC endpoint; it must not redirect elsewhere.
     try {
       const plcUrl = cfg.identity.plcUrl
       const resolveUrl = `${plcUrl}/did-by-handle/${encodeURIComponent(handle)}`
-      const resp = await fetchWithUserAgent(resolveUrl)
+      const resp = await fetchWithUserAgent(resolveUrl, { redirect: 'error' })
       if (resp.ok) {
         const did = await resp.text()
         if (did && did.startsWith('did:')) {

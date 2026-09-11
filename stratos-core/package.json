@@ -34,6 +34,10 @@
       "types": "./src/spaces/index.ts",
       "import": "./src/spaces/index.ts"
     },
+    "./network": {
+      "types": "./src/network/index.ts",
+      "import": "./src/network/index.ts"
+    },
     "./tests": {
       "types": "./tests/utils/index.ts",
       "import": "./tests/utils/index.ts"
@@ -56,15 +60,19 @@
     "@atcute/client": "^5.1.1",
     "@atcute/mst": "^1.0.3",
     "@atcute/uint8array": "^1.1.5",
+    "@atproto-labs/fetch": "^0.3.6",
     "@atproto/common-web": "^0.5.9",
+    "@atproto/identity": "^0.5.13",
     "@atproto/lex-cbor": "^0.1.6",
     "@atproto/lex-data": "^0.1.7",
     "@atproto/lexicon": "^0.7.11",
     "@atproto/syntax": "^0.7.4",
     "@libsql/client": "^0.17.0",
     "drizzle-orm": "1.0.0-beta.18-7eb39f0",
+    "ipaddr.js": "^2.5.0",
     "multiformats": "^13.4.2",
     "postgres": "^3.4.8",
+    "undici": "^7.29.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -120,6 +128,10 @@
       "./spaces": {
         "types": "./dist/spaces/index.d.ts",
         "import": "./dist/spaces/index.js"
+      },
+      "./network": {
+        "types": "./dist/network/index.d.ts",
+        "import": "./dist/network/index.js"
       }
     }
   }

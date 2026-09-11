@@ -107,10 +107,10 @@ describe('PdsTokenVerifier', () => {
       })
 
       // Default Metadata fetch
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ authorization_servers: [ISSUER] }),
-      })
+      mockFetch.mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ authorization_servers: [ISSUER] })),
+      )
     })
 
     it('verifies a valid token', async () => {
@@ -169,7 +169,7 @@ describe('PdsTokenVerifier', () => {
     })
 
     it('returns inactive if PDS metadata fetch fails', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 404 })
+      mockFetch.mockResolvedValue(new Response(null, { status: 404 }))
       const token = createToken(validPayload)
       const result = await verifier.verify(token)
       expect(result.active).toBe(false)
@@ -179,12 +179,13 @@ describe('PdsTokenVerifier', () => {
     })
 
     it('returns inactive if issuer mismatch', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          authorization_servers: ['https://other-issuer.com'],
-        }),
-      })
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            authorization_servers: ['https://other-issuer.com'],
+          }),
+        ),
+      )
       const token = createToken(validPayload)
       const result = await verifier.verify(token)
       expect(result.active).toBe(false)

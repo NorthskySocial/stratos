@@ -23,7 +23,7 @@
   "dependencies": {
     "@atcute/cbor": "^2.3.6",
     "@atproto/crypto": "^0.5.4",
-    "@atproto/identity": "^0.5.9",
+    "@atproto/identity": "^0.5.13",
     "@atproto/lexicon": "^0.7.11",
     "@atproto/xrpc-server": "^0.12.5",
     "@libsql/client": "^0.17.0",
@@ -40,7 +40,7 @@
     "express": "^4.21.2",
     "pino": "^10.3.0",
     "postgres": "^3.4.8",
-    "undici": "^7.27.0",
+    "undici": "^7.29.1",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

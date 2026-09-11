@@ -1,14 +1,15 @@
 import {
   DidWebResolver,
-  PoorlyFormattedDidError,
-  UnsupportedDidWebPathError,
   type DidCache,
   type DidResolver,
 } from '@atproto/identity'
 import { StratosError } from '@northskysocial/stratos-core'
+import {
+  createPublicFetch,
+  didWebDocumentUrl,
+} from '@northskysocial/stratos-core/network'
 
 const DEFAULT_DID_WEB_TIMEOUT_MS = 3_000
-const DID_WEB_DOCUMENT_PATH = '/.well-known/did.json'
 
 export interface CommitKeyResolver {
   resolveAtprotoKey: (did: string) => Promise<string>
@@ -43,7 +44,7 @@ export function createCommitKeyResolver(
   const didWebResolver = new StatusPreservingDidWebResolver(
     options.timeoutMs ?? DEFAULT_DID_WEB_TIMEOUT_MS,
     source.cache,
-    options.fetch ?? globalThis.fetch,
+    createPublicFetch(options.fetch),
   )
 
   return {
@@ -75,9 +76,9 @@ class StatusPreservingDidWebResolver extends DidWebResolver {
   constructor(
     timeoutMs: number,
     cache: DidCache | undefined,
-    private readonly fetch: typeof globalThis.fetch,
+    private readonly fetchDocument: typeof globalThis.fetch,
   ) {
-    super(timeoutMs, cache)
+    super(timeoutMs, cache, fetchDocument)
   }
 
   override async resolveNoCheck(did: string): Promise<unknown> {
@@ -86,32 +87,20 @@ class StatusPreservingDidWebResolver extends DidWebResolver {
     const timer = setTimeout(() => abortController.abort(), this.timeout)
 
     try {
-      const response = await this.fetch(url, {
+      const response = await this.fetchDocument(url, {
         signal: abortController.signal,
         redirect: 'error',
         headers: { accept: 'application/did+ld+json,application/json' },
       })
-      if (response.status === 404) return null
-      if (!response.ok) throw new DidWebHttpError(did, response.status)
+      if (!response.ok) {
+        await response.body?.cancel()
+        if (response.status === 404) return null
+        throw new DidWebHttpError(did, response.status)
+      }
       return await response.json()
     } finally {
       clearTimeout(timer)
       abortController.abort()
     }
   }
-}
-
-function didWebDocumentUrl(did: string): URL {
-  const parsedId = did.split(':').slice(2).join(':')
-  const parts = parsedId.split(':').map(decodeURIComponent)
-  if (parts.length < 1 || parts[0] === '') {
-    throw new PoorlyFormattedDidError(did)
-  }
-  if (parts.length !== 1) {
-    throw new UnsupportedDidWebPathError(did)
-  }
-
-  const url = new URL(`https://${parts[0]}${DID_WEB_DOCUMENT_PATH}`)
-  if (url.hostname === 'localhost') url.protocol = 'http:'
-  return url
 }

@@ -603,6 +603,13 @@ export class StratosServer {
           })
           return
         }
+        if ('type' in err && err.type === 'entity.too.large') {
+          res.status(413).json({
+            error: 'PayloadTooLarge',
+            message: 'Request body is too large',
+          })
+          return
+        }
         console.error('Express error:', err.message)
         console.error(err.stack)
         captureUnexpectedError(err)

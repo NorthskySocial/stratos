@@ -3,6 +3,7 @@ import {
   oauthClientMetadataSchema,
 } from '@atproto/oauth-types'
 import { isAllowedRedirectOrigin } from '../config.js'
+import { publicFetch } from '@northskysocial/stratos-core/network'
 
 /**
  * Largest client metadata document the service will read, in bytes.
@@ -75,7 +76,7 @@ export async function fetchClientRedirectUris(
     throw new Error('client_id is not a discoverable client metadata URL')
   }
 
-  const response = await fetch(parsed.data, {
+  const response = await publicFetch(parsed.data, {
     method: 'GET',
     headers: { accept: 'application/json' },
     redirect: 'error',
@@ -83,11 +84,13 @@ export async function fetchClientRedirectUris(
   })
 
   if (!response.ok) {
+    await response.body?.cancel()
     throw new Error(`client metadata document returned ${response.status}`)
   }
 
   const declaredLength = Number(response.headers.get('content-length'))
   if (declaredLength > MAX_CLIENT_METADATA_BYTES) {
+    await response.body?.cancel()
     throw new Error('client metadata document is too large')
   }
 

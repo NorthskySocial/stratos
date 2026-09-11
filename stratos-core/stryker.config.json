@@ -9,6 +9,7 @@
   "inPlace": true,
   "reporters": ["html", "clear-text", "progress"],
   "mutate": [
+    "src/network/**/*.ts",
     "src/enrollment/**/*.ts",
     "src/hydration/**/*.ts",
     "src/spaces/**/*.ts",

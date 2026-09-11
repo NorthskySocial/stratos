@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "mutation": "stryker run",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -13,12 +14,12 @@
     "@atcute/cbor": "^2.3.6",
     "@atcute/cid": "^2.4.2",
     "@atcute/firehose": "^1.1.0",
-    "@atproto/bsky": "^0.0.214",
-    "@atproto/identity": "^0.4.12",
+    "@atproto/bsky": "^0.0.280",
+    "@atproto/identity": "^0.5.13",
     "@atproto/lex-data": "^0.0.9",
     "@atproto/lexicon": "^0.6.1",
     "@atproto/repo": "^0.8.1",
-    "@atproto/syntax": "^0.4.0",
+    "@atproto/syntax": "^0.7.6",
     "@northskysocial/stratos-core": "workspace:*",
     "kysely": "^0.28.14",
     "multiformats": "^13.4.2",
@@ -26,6 +27,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/deno": "^2.5.0",
     "@types/node": "^25.2.1",
     "typescript": "npm:@typescript/typescript6@~6.0.2",

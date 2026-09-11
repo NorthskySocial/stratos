@@ -7,7 +7,7 @@ import {
   processFirehoseWork,
 } from '../src/pds/pds-firehose.js'
 import type { CursorManager, WorkerPool } from '../src/index.ts'
-import type { IndexingService } from '@atproto/bsky/dist/data-plane/server/indexing/index.js'
+import type { IndexingService } from '../src/storage/db.js'
 // Re-import mocked functions to use in tests
 import type { BackgroundQueue } from '@atproto/bsky'
 import {

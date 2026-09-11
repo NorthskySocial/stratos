@@ -33,9 +33,8 @@ export class DidDocumentPdsReader implements DidPdsReader {
   async getPdsEndpoint(memberDid: string): Promise<string | undefined> {
     // A did:web resolution fetches `https://{host}/.well-known/did.json`
     // server-side, and the host comes from the member's own DID. Refuse a
-    // host in private or local address space before any fetch (SSRF). This
-    // does not defend against DNS rebinding; a deployment must also isolate
-    // egress at the network level.
+    // host in private or local address space before any fetch (SSRF). The
+    // shared identity resolver also checks DNS answers at connection time.
     if (memberDid.startsWith(DID_WEB_PREFIX)) {
       const host = didWebHostname(memberDid)
       if (!host || isPrivateOrLocalHost(host)) return undefined

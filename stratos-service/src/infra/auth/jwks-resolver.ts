@@ -1,5 +1,6 @@
 import { importJWK, type JWK } from 'jose'
 import type { Logger } from '@northskysocial/stratos-core'
+import { createPublicFetch } from '@northskysocial/stratos-core/network'
 
 /** A key material usable with jose's `compactVerify` (the import result). */
 export type ClientVerifyKey = Awaited<ReturnType<typeof importJWK>>
@@ -104,7 +105,7 @@ export class JwksResolver {
   private readonly cache = new Map<string, CacheEntry>()
 
   constructor(opts: JwksResolverOptions = {}) {
-    this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis)
+    this.fetchImpl = createPublicFetch(opts.fetch)
     this.cacheTtlMs = opts.cacheTtlMs ?? DEFAULT_JWKS_CACHE_TTL_MS
     this.fetchTimeoutMs = opts.fetchTimeoutMs ?? DEFAULT_JWKS_FETCH_TIMEOUT_MS
     this.logger = opts.logger
@@ -254,9 +255,7 @@ export class JwksResolver {
         // Bounded: the URL is attacker-influencable; a hung endpoint must not
         // pin the auth request. Timeouts surface as MetadataFetchError below.
         signal: AbortSignal.timeout(this.fetchTimeoutMs),
-        // SSRF: refuse redirects outright — a public metadata URL must not be
-        // able to bounce the fetch to an internal destination. (Residual: DNS
-        // rebinding needs resolver-level pinning, out of scope here.)
+        // Keep metadata and JWKS requests on their declared paths.
         redirect: 'error',
       })
     } catch (err) {
@@ -269,6 +268,7 @@ export class JwksResolver {
       )
     }
     if (!res.ok) {
+      await res.body?.cancel()
       throw new MetadataFetchError(
         `Fetching ${what} from "${url.toString()}" returned HTTP ${res.status}`,
       )
@@ -295,8 +295,7 @@ function errMessage(err: unknown): string {
  * v4-mapped literal. These URLs come from attacker-supplied attestations and
  * must not let the service fetch its own internal network (SSRF).
  *
- * Residual: a public hostname that RESOLVES to an internal address (DNS
- * rebinding) is not caught here — that requires resolver-level pinning.
+ * The public fetch transport also checks DNS answers at connection time.
  */
 /** Non-public IPv6 literal prefixes/exact forms, tested in order. */
 const DENIED_IPV6: Array<[test: (h: string) => boolean, why: string]> = [
@@ -326,8 +325,7 @@ const DENIED_IPV4: Array<[a: number, b: (b: number) => boolean, why: string]> =
  * v4-mapped literal. These URLs come from attacker-supplied attestations and
  * must not let the service fetch its own internal network (SSRF).
  *
- * Residual: a public hostname that RESOLVES to an internal address (DNS
- * rebinding) is not caught here — that requires resolver-level pinning.
+ * The public fetch transport also checks DNS answers at connection time.
  */
 function assertPublicHost(url: URL): void {
   // Node's URL keeps the brackets on IPv6 literals in `hostname`.

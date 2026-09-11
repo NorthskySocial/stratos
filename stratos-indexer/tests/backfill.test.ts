@@ -233,5 +233,8 @@ describe('backfillRepos', () => {
       return urlString.includes('listRepos')
     })
     expect(listReposCalls.length).toBeGreaterThan(0)
+    for (const [, init] of fetchSpy.mock.calls) {
+      expect(init).toEqual({ redirect: 'error' })
+    }
   })
 })
