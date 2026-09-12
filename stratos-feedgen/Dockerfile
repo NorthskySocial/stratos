@@ -70,7 +70,8 @@ RUN apk add --no-cache wget \
 # Bundled application (single ESM file + sourcemap).
 COPY --from=builder /app/stratos-feedgen/dist-bundle/ ./
 
-RUN mkdir -p /app/config /app/data && chown -R node:node /app/config /app/data
+RUN mkdir -p /app/config /app/data /app/cache \
+    && chown -R node:node /app/config /app/data /app/cache
 
 USER node
 
@@ -81,5 +82,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 ENV NODE_ENV=production
 ENV FEEDGEN_PORT=3000
+ENV FEEDGEN_BLOB_CACHE_DIRECTORY=/app/cache/blobs
 
 CMD ["node", "main.mjs"]

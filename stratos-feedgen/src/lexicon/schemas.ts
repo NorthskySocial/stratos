@@ -1,12 +1,6 @@
 import type { LexiconDoc } from '@atproto/lexicon'
 
-/**
- * Inline copies of the `zone.stratos.feedgen.*` lexicons. Kept in source
- * (rather than imported from disk) so the package has no out-of-tree file
- * dependencies and TypeScript can typecheck them against `LexiconDoc`.
- *
- * Source of truth: `stratos/lexicons/zone/stratos/feedgen/*.json`.
- */
+// Inline copies keep the package independent of out-of-tree JSON files.
 
 export const getFeedLexicon: LexiconDoc = {
   lexicon: 1,
@@ -20,9 +14,19 @@ export const getFeedLexicon: LexiconDoc = {
         type: 'params',
         required: ['feed'],
         properties: {
-          feed: { type: 'string', description: 'Configured feed id.' },
-          limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
-          cursor: { type: 'string' },
+          feed: {
+            type: 'string',
+            description: 'Configured feed id.',
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            default: 50,
+          },
+          cursor: {
+            type: 'string',
+          },
         },
       },
       output: {
@@ -31,21 +35,36 @@ export const getFeedLexicon: LexiconDoc = {
           type: 'object',
           required: ['feed'],
           properties: {
-            cursor: { type: 'string' },
+            cursor: {
+              type: 'string',
+            },
             feed: {
               type: 'array',
-              items: { type: 'ref', ref: '#feedViewPost' },
+              items: {
+                type: 'ref',
+                ref: '#feedViewPost',
+              },
             },
           },
         },
       },
-      errors: [{ name: 'UnknownFeed' }, { name: 'BoundaryMismatch' }],
+      errors: [
+        {
+          name: 'UnknownFeed',
+        },
+        {
+          name: 'BoundaryMismatch',
+        },
+      ],
     },
     feedViewPost: {
       type: 'object',
       required: ['post'],
       properties: {
-        post: { type: 'ref', ref: '#postView' },
+        post: {
+          type: 'ref',
+          ref: '#postView',
+        },
       },
     },
     postView: {
@@ -56,14 +75,36 @@ export const getFeedLexicon: LexiconDoc = {
           type: 'string',
           description: 'AT URI or permissioned space record URI.',
         },
-        cid: { type: 'string', format: 'cid' },
-        author: { type: 'ref', ref: '#authorView' },
-        record: { type: 'unknown' },
-        indexedAt: { type: 'string', format: 'datetime' },
+        cid: {
+          type: 'string',
+          format: 'cid',
+        },
+        author: {
+          type: 'ref',
+          ref: '#authorView',
+        },
+        record: {
+          type: 'unknown',
+        },
+        indexedAt: {
+          type: 'string',
+          format: 'datetime',
+        },
         boundaries: {
           type: 'array',
-          items: { type: 'string' },
+          items: {
+            type: 'string',
+          },
           minLength: 1,
+        },
+        blobs: {
+          type: 'array',
+          items: {
+            type: 'ref',
+            ref: '#blobView',
+          },
+          description:
+            'Authenticated feedgen blob URLs. Record blob refs remain unchanged. Absent for custody whose blobs must be read from the host.',
         },
       },
     },
@@ -71,8 +112,30 @@ export const getFeedLexicon: LexiconDoc = {
       type: 'object',
       required: ['did'],
       properties: {
-        did: { type: 'string', format: 'did' },
-        handle: { type: 'string' },
+        did: {
+          type: 'string',
+          format: 'did',
+        },
+        handle: {
+          type: 'string',
+        },
+      },
+    },
+    blobView: {
+      type: 'object',
+      required: ['cid', 'url'],
+      properties: {
+        cid: {
+          type: 'string',
+          format: 'cid',
+        },
+        url: {
+          type: 'string',
+          format: 'uri',
+        },
+        mimeType: {
+          type: 'string',
+        },
       },
     },
   },
@@ -91,10 +154,16 @@ export const describeFeedLexicon: LexiconDoc = {
           type: 'object',
           required: ['did', 'feeds'],
           properties: {
-            did: { type: 'string', format: 'did' },
+            did: {
+              type: 'string',
+              format: 'did',
+            },
             feeds: {
               type: 'array',
-              items: { type: 'ref', ref: '#feedDescription' },
+              items: {
+                type: 'ref',
+                ref: '#feedDescription',
+              },
             },
           },
         },
@@ -104,11 +173,62 @@ export const describeFeedLexicon: LexiconDoc = {
       type: 'object',
       required: ['id', 'boundary'],
       properties: {
-        id: { type: 'string' },
-        boundary: { type: 'string' },
-        displayName: { type: 'string' },
-        description: { type: 'string' },
+        id: {
+          type: 'string',
+        },
+        boundary: {
+          type: 'string',
+        },
+        displayName: {
+          type: 'string',
+        },
+        description: {
+          type: 'string',
+        },
       },
+    },
+  },
+}
+
+export const getBlobLexicon: LexiconDoc = {
+  lexicon: 1,
+  id: 'zone.stratos.feedgen.getBlob',
+  defs: {
+    main: {
+      type: 'query',
+      description:
+        'Read a Stratos-hosted blob attached to an accessible indexed post. Requires service-auth scoped to this method. Responses are private and must not be shared or cached by HTTP intermediaries.',
+      parameters: {
+        type: 'params',
+        required: ['uri', 'cid'],
+        properties: {
+          uri: {
+            type: 'string',
+            description: 'Exact indexed post URI, including space record URIs.',
+          },
+          cid: {
+            type: 'string',
+            format: 'cid',
+          },
+        },
+      },
+      output: {
+        encoding: '*/*',
+      },
+      errors: [
+        {
+          name: 'BlobNotFound',
+        },
+        {
+          name: 'BlobTooLarge',
+        },
+        {
+          name: 'BlobBusy',
+        },
+        {
+          name: 'FeedNotReady',
+        },
+      ],
     },
   },
 }
@@ -116,9 +236,11 @@ export const describeFeedLexicon: LexiconDoc = {
 export const FEEDGEN_LEXICONS: LexiconDoc[] = [
   getFeedLexicon,
   describeFeedLexicon,
+  getBlobLexicon,
 ]
 
 export const NSID = {
   getFeed: 'zone.stratos.feedgen.getFeed',
   describeFeed: 'zone.stratos.feedgen.describeFeed',
+  getBlob: 'zone.stratos.feedgen.getBlob',
 } as const

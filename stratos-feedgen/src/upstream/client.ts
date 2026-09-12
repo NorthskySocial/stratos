@@ -213,6 +213,7 @@ export class UpstreamStratosClient {
     const lxm = LXM.getBlob
     const res = await this.request(lxm, url, {
       method: 'GET',
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
         authorization: `Bearer ${await this.mintFor(lxm)}`,
       },

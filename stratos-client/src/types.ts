@@ -90,4 +90,5 @@ export interface StratosScopes {
   enrollment: string
   post: string
   getFeed: string
+  getBlob: string
 }

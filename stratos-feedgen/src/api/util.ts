@@ -1,4 +1,4 @@
-import { InvalidRequestError } from '@atproto/xrpc-server'
+import { AuthRequiredError, InvalidRequestError } from '@atproto/xrpc-server'
 import type { MethodAuthVerifier } from '@atproto/xrpc-server'
 import type { FeedRequestVerifier, RequestHeaders } from '../auth/index.js'
 import { getRequestContext } from '../middleware/request-id.js'
@@ -14,9 +14,15 @@ export interface XrpcAuthCredentials {
  */
 export function toXrpcAuthVerifier(
   verifier: FeedRequestVerifier,
+  lxm: string,
 ): MethodAuthVerifier<{ credentials: XrpcAuthCredentials }> {
   return async ({ req }) => {
     const result = await verifier({ headers: req.headers })
+    if (result.lxm !== lxm)
+      throw new AuthRequiredError(
+        'JWT does not authorize this method',
+        'BadJwtLexiconMethod',
+      )
     // Surface the verified viewer to the request-completion log without
     // threading it through the xrpc-server response plumbing.
     const ctx = getRequestContext()

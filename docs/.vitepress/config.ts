@@ -61,6 +61,7 @@ export default defineConfig({
             { text: 'User Enrollment', link: '/client/enrollment' },
             { text: 'Creating Records', link: '/client/creating-records' },
             { text: 'Reading Records', link: '/client/reading-records' },
+            { text: 'Private Feed Attachments', link: '/client/feedgen-blobs' },
             { text: 'Domain Boundaries', link: '/client/boundaries' },
             {
               text: 'Repo Export & Import',

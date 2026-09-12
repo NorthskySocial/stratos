@@ -223,10 +223,13 @@ describe('sanitizeRequestId', () => {
 
 describe('toXrpcAuthVerifier', () => {
   it('verifies outside an ambient request context', async () => {
-    const verify = toXrpcAuthVerifier(async () => ({
-      viewerDid: VIEWER_DID,
-      lxm: 'zone.stratos.feedgen.getFeed',
-    }))
+    const verify = toXrpcAuthVerifier(
+      async () => ({
+        viewerDid: VIEWER_DID,
+        lxm: 'zone.stratos.feedgen.getFeed',
+      }),
+      'zone.stratos.feedgen.getFeed',
+    )
 
     const result = await verify({ req: { headers: {} } } as never)
     expect(result).toEqual({

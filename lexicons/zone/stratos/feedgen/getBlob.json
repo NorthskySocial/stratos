@@ -1,0 +1,41 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.feedgen.getBlob",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Read a Stratos-hosted blob attached to an accessible indexed post. Requires service-auth scoped to this method. Responses are private and must not be shared or cached by HTTP intermediaries.",
+      "parameters": {
+        "type": "params",
+        "required": ["uri", "cid"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "Exact indexed post URI, including space record URIs."
+          },
+          "cid": {
+            "type": "string",
+            "format": "cid"
+          }
+        }
+      },
+      "output": {
+        "encoding": "*/*"
+      },
+      "errors": [
+        {
+          "name": "BlobNotFound"
+        },
+        {
+          "name": "BlobTooLarge"
+        },
+        {
+          "name": "BlobBusy"
+        },
+        {
+          "name": "FeedNotReady"
+        }
+      ]
+    }
+  }
+}

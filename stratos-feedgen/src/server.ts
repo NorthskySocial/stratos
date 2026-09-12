@@ -1,3 +1,6 @@
+import { registerGetBlobHandler } from './api/blob/getBlob.js'
+import type { SpaceMutationFence } from './mutation-fence.js'
+import type { BlobService } from './blob/service.js'
 import type { Server as HttpServer } from 'node:http'
 import express, { type Express, type RequestHandler } from 'express'
 import { createServer as createXrpcServer } from '@atproto/xrpc-server'
@@ -19,6 +22,8 @@ import {
 } from './middleware/request-id.js'
 
 export interface FeedgenServerDeps {
+  mutationFence?: SpaceMutationFence
+  blobs?: BlobService
   feedgenServiceDid: string
   /** Public base URL of this feed gen, used as the DID document service endpoint. */
   feedgenPublicUrl: string
@@ -65,7 +70,18 @@ export function createFeedgenServer(
     readiness: deps.feedReadiness,
     metrics: deps.metrics,
     resolveHandle: deps.resolveHandle,
+    blobBaseUrl: deps.blobs ? deps.feedgenPublicUrl : undefined,
   })
+
+  if (deps.blobs)
+    registerGetBlobHandler(xrpc, {
+      store: deps.store,
+      enrollmentManager: deps.enrollmentManager,
+      verifier: deps.verifier,
+      readiness: deps.feedReadiness,
+      blobs: deps.blobs,
+      mutationFence: deps.mutationFence,
+    })
 
   registerDescribeFeedHandler(xrpc, {
     feedgenServiceDid: deps.feedgenServiceDid,

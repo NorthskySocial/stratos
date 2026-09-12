@@ -156,6 +156,29 @@ describe('zone.stratos.feedgen.getFeed', () => {
     })
   })
 
+  it('preserves attachment refs when no blob service is configured', async () => {
+    const value = makePost(
+      'at://did:plc:faye/zone.stratos.feed.post/one',
+      FAYE_DID,
+      '1998-01-01T00:00:00.000Z',
+    )
+    value.blobRefs = [
+      { cid: 'bafkreidnltm3txbyqufe7hbtf4b5gasd2jwyfo5qgzyg2nbkfspzvj5mxa' },
+    ]
+    ctx = await startServer({ posts: [value] })
+    const response = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed`,
+    )
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      feed: { post: { blobs?: unknown } }[]
+    }
+    expect(body.feed[0].post.blobs).toBeUndefined()
+    const blob = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getBlob?${new URLSearchParams({ uri: value.uri, cid: value.blobRefs[0].cid })}`,
+    )
+    expect(blob.status).toBe(404)
+  })
   it('fails closed while replay authorization is not ready', async () => {
     ctx = await startServer({
       readiness: { isReady: () => false },

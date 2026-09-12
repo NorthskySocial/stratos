@@ -417,3 +417,46 @@ describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS', () => {
     ).toThrow(/bare origin/)
   })
 })
+
+describe('blob cache configuration', () => {
+  it('provides bounded defaults and permits explicit limits', () => {
+    expect(loadFeedgenConfig(baseEnv)).toMatchObject({
+      blobCacheDirectory: './data/feedgen-blobs',
+      blobCacheMaxBytes: 536_870_912,
+      blobCacheTtlMs: 3_600_000,
+      blobMaxBytes: 26_214_400,
+      blobMaxConcurrentDownloads: 4,
+      feedgenAllowedLxms: [
+        'zone.stratos.feedgen.getFeed',
+        'zone.stratos.feedgen.getBlob',
+      ],
+    })
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_BLOB_CACHE_DIRECTORY: '/tmp/bebop',
+        FEEDGEN_BLOB_CACHE_MAX_BYTES: '123',
+        FEEDGEN_BLOB_CACHE_TTL_MS: '456',
+        FEEDGEN_BLOB_MAX_BYTES: '78',
+        FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS: '9',
+      }),
+    ).toMatchObject({
+      blobCacheDirectory: '/tmp/bebop',
+      blobCacheMaxBytes: 123,
+      blobCacheTtlMs: 456,
+      blobMaxBytes: 78,
+      blobMaxConcurrentDownloads: 9,
+    })
+  })
+  it.each([
+    'FEEDGEN_BLOB_CACHE_MAX_BYTES',
+    'FEEDGEN_BLOB_CACHE_TTL_MS',
+    'FEEDGEN_BLOB_MAX_BYTES',
+    'FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS',
+  ])('rejects unbounded or invalid %s', (name) => {
+    for (const value of ['0', '-1', 'NaN', 'Infinity', '1.5'])
+      expect(() => loadFeedgenConfig({ ...baseEnv, [name]: value })).toThrow(
+        `Invalid ${name}`,
+      )
+  })
+})
