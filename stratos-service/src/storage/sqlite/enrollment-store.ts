@@ -41,7 +41,9 @@ function toStoredEnrollment(row: Enrollment): StoredEnrollment {
 export class SqliteEnrollmentStore
   implements EnrollmentStore, EnrollmentStoreReader
 {
-  constructor(private db: ServiceDb) {}
+  constructor(
+    private db: Pick<ServiceDb, 'select' | 'insert' | 'update' | 'delete'>,
+  ) {}
 
   /**
    * Check if a DID is enrolled in the service

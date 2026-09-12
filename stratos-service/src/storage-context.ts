@@ -1,3 +1,12 @@
+import {
+  AuditedEnrollmentStore,
+  BoundaryAudit,
+  migrateBoundaryAudit,
+  PgBoundaryAuditBackend,
+  pgAuditSql,
+  SqliteBoundaryAuditBackend,
+  sqliteAuditSql,
+} from './features/boundary-audit/index.js'
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
 import { sql } from 'drizzle-orm'
@@ -57,6 +66,7 @@ export interface StorageContext {
   adminSessionStore: AdminSessionStore
   adminUserStore: AdminUserStore
   pdsSyncQueue: PdsSyncQueueStore
+  boundaryAudit: BoundaryAudit
   checkDbHealth: () => Promise<'ok' | 'error'>
   destroy: () => Promise<void>
 }
@@ -84,6 +94,7 @@ export async function createStorageContext(
   let adminSessionStore: AdminSessionStore
   let adminUserStore: AdminUserStore
   let pdsSyncQueue: PdsSyncQueueStore
+  let boundaryAudit: BoundaryAudit
   let actorStore: ActorStore
   let checkDbHealth: () => Promise<'ok' | 'error'>
   let destroy: () => Promise<void>
@@ -109,7 +120,15 @@ export async function createStorageContext(
       'postgres service database preflight passed',
     )
     await migrateServicePgDb(pgDb)
-    const pgEnrollmentStore = new PgEnrollmentStoreWriter(pgDb)
+    await migrateBoundaryAudit(pgAuditSql(pgDb))
+    boundaryAudit = new BoundaryAudit(
+      cfg.service.did,
+      new PgBoundaryAuditBackend(pgDb),
+    )
+    const pgEnrollmentStore = new AuditedEnrollmentStore(
+      new PgEnrollmentStoreWriter(pgDb),
+      boundaryAudit,
+    )
     const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore, {
       cacheTtlMs: 5 * 60 * 1000,
     })
@@ -142,8 +161,13 @@ export async function createStorageContext(
   } else {
     db = createServiceDb(serviceDbPath)
     await migrateServiceDb(db)
+    await migrateBoundaryAudit(sqliteAuditSql(db))
+    boundaryAudit = new BoundaryAudit(
+      cfg.service.did,
+      new SqliteBoundaryAuditBackend(db),
+    )
     enrollmentStore = new ReservedDomainEnrollmentStore(
-      new SqliteEnrollmentStore(db),
+      new AuditedEnrollmentStore(new SqliteEnrollmentStore(db), boundaryAudit),
       cfg.stratos.reservedDomain,
     )
     oauthStores = createSqliteOAuthStores(db)
@@ -180,6 +204,7 @@ export async function createStorageContext(
     adminSessionStore,
     adminUserStore,
     pdsSyncQueue,
+    boundaryAudit,
     actorStore,
     checkDbHealth,
     destroy,

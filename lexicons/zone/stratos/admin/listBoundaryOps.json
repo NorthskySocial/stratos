@@ -1,0 +1,77 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listBoundaryOps",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Page an actor\u2019s authority-signed boundary history. Requires OAuth admin authorization. Cursors bind actor, sequence, and hash. Never use user-repo signatures as boundary authorization.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["operations", "cursor", "hasMore"],
+          "properties": {
+            "operations": {
+              "type": "array",
+              "maxLength": 100,
+              "items": {
+                "type": "ref",
+                "ref": "#signedOperation"
+              }
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "hasMore": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryHistoryTruncated",
+          "description": "History is missing, inconsistent, or does not prove this cursor. Recover with getBoundaryAuditState."
+        }
+      ]
+    },
+    "signedOperation": {
+      "type": "object",
+      "required": ["operation", "hash", "signature"],
+      "properties": {
+        "operation": {
+          "type": "ref",
+          "ref": "zone.stratos.boundary.operation"
+        },
+        "hash": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "signature": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

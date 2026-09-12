@@ -109,6 +109,10 @@ export async function createAppContext(
     logger,
   )
   const { signingKey } = identity
+  storage.boundaryAudit.setSigner({
+    publicKey: signingKey.did(),
+    sign: (bytes) => signingKey.sign(bytes),
+  })
 
   const { enrollmentEvents, sequenceEvents } = initEventEmitters()
 
