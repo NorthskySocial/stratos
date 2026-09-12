@@ -919,10 +919,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "description": "Read a Stratos-hosted blob attached to an accessible indexed post. Requires service-auth scoped to this method. Responses are private and must not be shared or cached by HTTP intermediaries.",
       "parameters": {
         "type": "params",
-        "required": [
-          "uri",
-          "cid"
-        ],
+        "required": ["uri", "cid"],
         "properties": {
           "uri": {
             "type": "string",
@@ -963,9 +960,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "description": "Fetch a boundary-scoped hydrated feed. Requires service-auth.",
       "parameters": {
         "type": "params",
-        "required": [
-          "feed"
-        ],
+        "required": ["feed"],
         "properties": {
           "feed": {
             "type": "string",
@@ -986,9 +981,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": [
-            "feed"
-          ],
+          "required": ["feed"],
           "properties": {
             "cursor": {
               "type": "string"
@@ -1014,9 +1007,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "feedViewPost": {
       "type": "object",
-      "required": [
-        "post"
-      ],
+      "required": ["post"],
       "properties": {
         "post": {
           "type": "ref",
@@ -1026,14 +1017,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "postView": {
       "type": "object",
-      "required": [
-        "uri",
-        "cid",
-        "author",
-        "record",
-        "indexedAt",
-        "boundaries"
-      ],
+      "required": ["uri", "cid", "author", "record", "indexedAt", "boundaries"],
       "properties": {
         "uri": {
           "type": "string",
@@ -1073,9 +1057,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "authorView": {
       "type": "object",
-      "required": [
-        "did"
-      ],
+      "required": ["did"],
       "properties": {
         "did": {
           "type": "string",
@@ -1088,10 +1070,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "blobView": {
       "type": "object",
-      "required": [
-        "cid",
-        "url"
-      ],
+      "required": ["cid", "url"],
       "properties": {
         "cid": {
           "type": "string",
