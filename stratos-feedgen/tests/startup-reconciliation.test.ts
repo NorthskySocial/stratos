@@ -78,6 +78,7 @@ vi.mock('../src/lifecycle/shutdown.js', async (importOriginal) => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   vi.clearAllTimers()
   vi.useRealTimers()
 })
@@ -86,6 +87,9 @@ describe('startup reconciliation ownership', () => {
   it.each([true, false])(
     'owns the initial fetch and only continues startup if shutdown has not interrupted it (interrupted: %s)',
     async (interrupted) => {
+      // This harness owns the legacy static startup; the catalogue CLI smoke
+      // covers authoritative discovery and refresh against a local authority.
+      vi.stubEnv('FEEDGEN_BOUNDARY_CATALOG_MODE', 'static')
       vi.resetModules()
       vi.clearAllMocks()
       const { ActorPool, ServiceStream } =

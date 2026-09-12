@@ -56,6 +56,21 @@ export function describeStoreContract(
       await store.close()
     })
 
+    it('lists distinct indexed boundaries even without enrollment snapshots, and drops purged scopes', async () => {
+      expect(await store.listIndexedBoundaries()).toEqual([])
+      await store.upsertPost(makePost({ boundaries: ['zeta', 'alpha'] }))
+      await store.upsertPost(
+        makePost({
+          uri: `at://${FAYE_DID}/zone.stratos.feed.post/2`,
+          did: FAYE_DID,
+          boundaries: ['alpha'],
+        }),
+      )
+      expect(await store.listIndexedBoundaries()).toEqual(['alpha', 'zeta'])
+      await store.deletePostsByBoundary('zeta')
+      expect(await store.listIndexedBoundaries()).toEqual(['alpha'])
+    })
+
     describe('cursor encoding', () => {
       it('round-trips', () => {
         const c = encodeCursor('2024-01-01T00:00:00.000Z', 'at://x/y/z')
