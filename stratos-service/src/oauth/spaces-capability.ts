@@ -4,16 +4,9 @@ import type { Logger, SpacesCapability } from '@northskysocial/stratos-core'
 import { SPACE_COLLECTION, SPACE_TYPE } from './client.js'
 
 /**
- * Decides whether the enrolling user's PDS supports spaces, from the OAuth
- * scope it actually granted. `buildSpaceScope` always requests the space
- * scope; a PDS that does not understand `space:` scopes silently drops the
- * request and the token comes back with only the base scope granted, so the
- * absence of the grant is itself the "not capable" signal — no PDS probe is
- * needed.
- *
- * A failure to read the granted scope is reported as `'unknown'`, never
- * `'not-capable'`: this must never let a transient error downgrade a
- * spaces-capable PDS to Stratos custody.
+ * Enrollment always requests this authority's space scope. A missing grant
+ * cannot distinguish an unsupported PDS from withheld consent, so it leaves
+ * capability unknown. Reauthorization must never move custody on that basis.
  */
 export async function detectSpacesCapability(
   session: OAuthSession,
@@ -43,7 +36,7 @@ export async function detectSpacesCapability(
       collection: SPACE_COLLECTION,
       action: 'create',
     })
-    return canRead && canCreate ? 'capable' : 'not-capable'
+    if (canRead && canCreate) return 'capable'
   } catch (err) {
     logger?.warn(
       {
@@ -54,4 +47,10 @@ export async function detectSpacesCapability(
     )
     return 'unknown'
   }
+
+  logger?.warn(
+    { did: session.sub },
+    'requested space scope was not granted, cannot decide spaces capability',
+  )
+  return 'unknown'
 }
