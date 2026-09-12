@@ -455,6 +455,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
     }
   }
 
+  async listIndexedBoundaries(): Promise<string[]> {
+    const rows = await this.recordDb
+      .selectDistinct({ boundary: postBoundaryTbl.boundary })
+      .from(postBoundaryTbl)
+      .orderBy(asc(postBoundaryTbl.boundary))
+    return rows.map((row) => row.boundary)
+  }
+
   async deletePostsByBoundary(boundary: string): Promise<number> {
     // FK ON DELETE CASCADE removes every boundary row for matching posts.
     // Keep the selection in SQL so a large space never becomes an unbounded

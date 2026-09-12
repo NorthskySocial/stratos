@@ -122,7 +122,7 @@ unavailable or invalid answer fails closed so the replay can retry.
 | Replay authorization                       | Current authoritative membership check; snapshots are never permission grants                       |
 | Space credentials and DPoP keys            | In process; refreshed before expiry, never persisted                                                |
 | Blob cache                                 | S3 or filestore                                                                                     |
-| Feed configuration                         | Static — JSON/YAML file or env var                                                                  |
+| Feed configuration                         | Upstream authority catalogue; explicit static compatibility mode                                    |
 | Viewer boundary cache                      | In-process TTL + LRU (300 s default)                                                                |
 
 ### Moderation labels
@@ -164,6 +164,26 @@ tests/
 **Naming note.** The module is called `upstream` and the class `UpstreamStratosClient` to avoid colliding with the public [`@northskysocial/stratos-client`](../stratos-client/) package.
 
 ## Configuration
+
+The CLI now defaults to the authenticated upstream boundary catalogue, using
+`zone.stratos.sync.listBoundaries`. The Stratos service must provide that lexicon XRPC
+endpoint. Manage definitions in Stratos and separately grant the feed generator its
+boundary memberships through Enrollments; it never grants itself access.
+
+Existing installations can migrate by preserving their room IDs in the Stratos
+catalogue and removing `FEEDGEN_FEEDS_*` inputs. Catalogue mode ignores those inputs.
+For an older upstream or explicit file-based development setup, set
+`FEEDGEN_BOUNDARY_CATALOG_MODE=static` and retain one of the existing file/JSON/YAML
+inputs. There is no automatic fallback when the upstream catalogue is unavailable.
+
+Upstream mode refreshes every 30 seconds, expires snapshots after 60 seconds, and
+closes feed/blob reads on refresh failure until authority reconciliation succeeds.
+Unlisted feeds remain readable by current members using their known ID; closed
+joining does not remove reader access. Changed scopes drain sync workers, clear
+caches, purge stale projections, and reseed actor/space sync automatically.
+
+See the public [Feed generator boundary catalogue guide](../docs/operator/feedgen-boundary-catalog.md)
+for migration steps, freshness settings, replay behavior, and recovery.
 
 | Env var                                       | Required    | Description                                                                     |
 | --------------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
@@ -262,15 +282,15 @@ instead. Sentry reporting is independently enabled by `SENTRY_DSN`.
 ### `/health`
 
 Returns `{ok, feedReady, version, serviceStreamConnected, actorPoolSize}` with HTTP
-`200` when feed reads are ready and `503` while authorization reconciliation blocks
-them. Both `ok` and `feedReady` reflect the read gate. Disabling
+`200` when feed reads are ready and `503` while authorization reconciliation or
+catalogue freshness blocks them. Both `ok` and `feedReady` reflect the read gate. Disabling
 `FEEDGEN_SUBSCRIBE_ENROLLMENTS` leaves the serving deployment unhealthy.
 
 ### Shutdown semantics
 
 On SIGTERM/SIGINT the feedgen stops accepting connections and drains in-flight
-HTTP requests (15 s deadline, then open sockets are destroyed), waits for
-startup, stops the service stream, cancels reconciliation retries and drains the active
+HTTP requests (15 s deadline, then open sockets are destroyed), cancels and drains
+catalogue refresh, waits for startup, stops the service stream, cancels reconciliation retries and drains the active
 reconciliation, then drains the space scheduler. If the
 scheduler misses the deadline, shutdown aborts its active pass and still waits
 for every raw member call that can access the store. It then drains actor
@@ -301,17 +321,21 @@ pnpm --filter @northskysocial/stratos-feedgen build
 
 # unit tests (vitest)
 pnpm --filter @northskysocial/stratos-feedgen test
+
+# actual CLI with a bounded local HTTP/WebSocket authority (from workspace root)
+pnpm exec tsx stratos-feedgen/tests/boundary-catalog-cli.smoke.ts
 ```
 
 ### Testing conventions
 
-| Class       | Runner | Location                                                                                        |
-| ----------- | ------ | ----------------------------------------------------------------------------------------------- |
-| Unit        | vitest | `tests/**/*.test.ts` (in-process, fully mocked, no network)                                     |
-| Integration | vitest | `tests/**/*.integration.test.ts` (in-process with real SQLite / in-memory HTTP)                 |
-| Smoke / E2E | Deno   | [`stratos/test/scripts/feedgen-*.ts`](../test/scripts/) (phases of the existing Deno E2E suite) |
+| Class         | Runner | Location                                                                                        |
+| ------------- | ------ | ----------------------------------------------------------------------------------------------- |
+| Unit          | vitest | `tests/**/*.test.ts` (in-process, fully mocked, no network)                                     |
+| Integration   | vitest | `tests/**/*.integration.test.ts` (in-process with real SQLite / in-memory HTTP)                 |
+| Catalogue CLI | tsx    | `tests/boundary-catalog-cli.smoke.ts` (child process and local authority; run directly)         |
+| Smoke / E2E   | Deno   | [`stratos/test/scripts/feedgen-*.ts`](../test/scripts/) (phases of the existing Deno E2E suite) |
 
-Cross-service smoke and E2E live under `stratos/test/scripts/` and reuse the helpers in `stratos/test/scripts/lib/`. The feed gen does **not** carry per-package smoke scripts or `test/e2e/` directories. Manual staging runs use the same Deno scripts with `STRATOS_SERVICE_URL` (and friends) overridden — there is no separate "manual smoke" artifact.
+Cross-service smoke and E2E live under `stratos/test/scripts/` and reuse the helpers in `stratos/test/scripts/lib/`. The catalogue CLI smoke runs separately from Vitest and Stryker because it starts a child process. It checks default upstream discovery, failed-authority readiness, and clean shutdown without contacting remote services. Cross-service staging runs continue to use the Deno scripts with `STRATOS_SERVICE_URL` and related variables overridden.
 
 ## Private attachments
 

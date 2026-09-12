@@ -102,6 +102,9 @@ export interface FeedgenRecordStore {
   getPost: (uri: string) => Promise<IndexedPost | null>
   listPostsByBoundary: (opts: ListPostsOpts) => Promise<ListPostsResult>
 
+  /** Boundary names retained in the materialized index, including scopes removed while offline. */
+  listIndexedBoundaries: () => Promise<string[]>
+
   // deletion / purge helpers
   /** Delete every post (and its cascaded boundary rows) authored by `did`. Returns rows removed. */
   deletePostsByDid: (did: string) => Promise<number>

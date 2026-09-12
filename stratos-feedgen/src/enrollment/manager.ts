@@ -120,4 +120,9 @@ export class EnrollmentManager {
     this.cache.delete(did)
     this.inflight.delete(did)
   }
+
+  clear(): void {
+    this.cache.clear()
+    this.inflight.clear()
+  }
 }

@@ -283,6 +283,45 @@ describe('createShutdownHandler', () => {
     expect(exit).toHaveBeenCalledWith(0)
   })
 
+  it('awaits the boundary catalogue stop before worker teardown and store closure', async () => {
+    const events: string[] = []
+    const catalogueDrain = deferred()
+    const exit = vi.fn()
+    const handler = createShutdownHandler({
+      boundaryCatalog: {
+        stop: async () => {
+          events.push('catalogue.stop.start')
+          await catalogueDrain.promise
+          events.push('catalogue.stop.end')
+        },
+      },
+      serviceStream: {
+        stop: () => {
+          events.push('stream.stop')
+        },
+      },
+      store: {
+        close: async () => {
+          events.push('store.close')
+        },
+      },
+      logger: nullLogger,
+      exit,
+    })
+    const done = handler('SIGTERM')
+    await vi.waitFor(() => expect(events).toEqual(['catalogue.stop.start']))
+    expect(exit).not.toHaveBeenCalled()
+    catalogueDrain.resolve()
+    await done
+    expect(events).toEqual([
+      'catalogue.stop.start',
+      'catalogue.stop.end',
+      'stream.stop',
+      'store.close',
+    ])
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
   it('aborts the space sync scheduler at the deadline and keeps the store open until it drains', async () => {
     vi.useFakeTimers()
     try {

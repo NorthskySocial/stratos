@@ -21,6 +21,7 @@ export interface GetBlobDeps {
     SpaceMutationFence,
     'captureRevocationEpoch' | 'hasPendingDidMutation'
   >
+  configuredBoundaries?: ReadonlySet<string>
   readiness?: FeedReadiness
   blobs: Pick<BlobService, 'get'>
 }
@@ -76,7 +77,12 @@ async function authorize(
   if (
     !post ||
     !blob ||
-    !post.boundaries.some((boundary) => boundaries.includes(boundary))
+    !post.boundaries.some(
+      (boundary) =>
+        boundaries.includes(boundary) &&
+        (deps.configuredBoundaries === undefined ||
+          deps.configuredBoundaries.has(boundary)),
+    )
   ) {
     throw unavailableBlob()
   }

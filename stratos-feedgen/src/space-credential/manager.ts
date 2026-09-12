@@ -86,6 +86,7 @@ export class SpaceCredentialManager {
   private readonly held = new Map<string, HeldState>()
   private readonly inflight = new Map<string, Promise<HeldSpaceCredential>>()
   private dpopKeyPairPromise: Promise<DpopKeyPair> | undefined
+  private invalidation = new AbortController()
 
   constructor(opts: SpaceCredentialManagerOptions) {
     this.client = opts.client
@@ -114,6 +115,7 @@ export class SpaceCredentialManager {
     signal?: AbortSignal,
   ): Promise<HeldSpaceCredential> {
     signal?.throwIfAborted()
+    const invalidation = this.invalidation.signal
     const existing = this.held.get(boundary)
     if (existing && !this.needsRefresh(existing)) {
       return this.toHeld(boundary, existing)
@@ -121,7 +123,7 @@ export class SpaceCredentialManager {
 
     let mint = this.inflight.get(boundary)
     if (!mint) {
-      const startedMint = this.refresh(boundary, existing)
+      const startedMint = this.refresh(boundary, existing, invalidation)
       mint = startedMint
       this.inflight.set(boundary, startedMint)
       void startedMint.then(
@@ -129,7 +131,23 @@ export class SpaceCredentialManager {
         () => this.clearInflight(boundary, startedMint),
       )
     }
-    return await waitForCredential(mint, signal)
+    return await waitForCredential(
+      mint,
+      signal ? AbortSignal.any([signal, invalidation]) : invalidation,
+    )
+  }
+
+  clear(): void {
+    const invalidation = this.invalidation
+    this.invalidation = new AbortController()
+    this.held.clear()
+    this.inflight.clear()
+    invalidation.abort(
+      new StratosError(
+        'Space credentials were invalidated',
+        'CredentialInvalidated',
+      ),
+    )
   }
 
   private clearInflight(
@@ -150,12 +168,15 @@ export class SpaceCredentialManager {
   private async refresh(
     boundary: string,
     existing: HeldState | undefined,
+    invalidation: AbortSignal,
   ): Promise<HeldSpaceCredential> {
     try {
       const minted = await this.mint(boundary)
+      invalidation.throwIfAborted()
       this.held.set(boundary, minted)
       return this.toHeld(boundary, minted)
     } catch (err) {
+      invalidation.throwIfAborted()
       if (existing && this.now() < existing.expiresAtMs) {
         return this.toHeld(boundary, existing)
       }
