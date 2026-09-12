@@ -59,6 +59,7 @@ export interface SpaceCredentialHeader {
 
 /** Payload (claim set) of a minted space credential. Note: no `aud`. */
 export interface SpaceCredentialPayload {
+  stratosBoundaryRevision?: number
   iss: string
   sub: string
   iat: number
@@ -70,6 +71,7 @@ export interface SpaceCredentialPayload {
 
 /** Inputs to {@link mintSpaceCredential}. */
 export interface MintSpaceCredentialInput {
+  boundaryRevision?: number
   /** The space-authority signing keypair (this service's signing key). */
   signingKey: Keypair
   /** The space-authority DID → `iss`. */
@@ -132,6 +134,7 @@ export async function mintSpaceCredential(
     exp,
     jti,
   }
+  if (input.boundaryRevision !== undefined) payload.stratosBoundaryRevision = input.boundaryRevision
   if (input.jkt) {
     payload.cnf = { jkt: input.jkt }
   }

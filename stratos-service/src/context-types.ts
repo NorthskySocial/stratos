@@ -67,6 +67,8 @@ export interface IdentityContext {
  * Storage context for Stratos service
  */
 export interface StorageContext {
+  boundaryStore?: import('@northskysocial/stratos-core').BoundaryCatalogStore
+  boundaryConfiguration?: import('./features/boundary/configuration.js').BoundaryConfiguration
   db?: ServiceDb
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
@@ -129,6 +131,7 @@ export interface AppContext
     HydrationContext,
     BlobContext,
     RepoContext {
+  boundaryManager?: import('./features/boundary/manager.js').BoundaryManager
   cfg: StratosServiceConfig
   version: string
   authVerifier: AuthVerifiers

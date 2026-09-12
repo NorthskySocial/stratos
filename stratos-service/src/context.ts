@@ -1,3 +1,6 @@
+import { BoundaryManager } from './features/boundary/manager.js'
+import path from 'node:path'
+import * as fs from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import express from 'express'
 import * as crypto from '@atproto/crypto'
@@ -162,6 +165,7 @@ export async function createAppContext(
      * Destroy the application context
      */
     async destroy() {
+      await ctx.boundaryManager?.stop()
       await pdsSyncWorker.stop()
       await storageDestroy()
       await identity.serviceIdentity.close()
@@ -171,6 +175,30 @@ export async function createAppContext(
       }
     },
   }
+
+  ctx.boundaryManager = new BoundaryManager({
+    store: storage.boundaryStore,
+    configuration: storage.boundaryConfiguration,
+    serviceDid: cfg.service.did,
+    reservedBoundary: cfg.stratos.reservedDomain,
+    onError: (err) =>
+      logger?.error({ err }, 'boundary deactivation will retry'),
+    removeMembership: async (did, boundary) => {
+      await pdsSyncWorker.enqueue(did)
+      const priorBoundaries = await storage.enrollmentStore.getBoundaries(did)
+      await storage.enrollmentStore.removeBoundary(did, boundary)
+      await pdsSyncWorker.enqueue(did)
+      const boundaries = await storage.enrollmentStore.getBoundaries(did)
+      enrollmentEvents.emit('enrollment', {
+        did,
+        action: 'boundaries',
+        boundaries,
+        priorBoundaries: [...new Set([...priorBoundaries, boundary])],
+        time: new Date().toISOString(),
+      })
+    },
+  })
+  ctx.boundaryManager.start()
 
   setupMigrationCallback(ctx)
 

@@ -13,6 +13,7 @@ export interface ReconcileServiceEnrollmentsDeps {
   /** Service signing key DID recorded as the enrollment's signing key. */
   signingKeyDid: string
   logger?: Logger
+  resolveBoundaries?: (enrollment: ServiceEnrollment) => Promise<string[]>
 }
 
 /**
@@ -37,6 +38,7 @@ export async function reconcileServiceEnrollments(
   for (const enrollment of enrollments) {
     declared.add(enrollment.did)
 
+    const boundaries = deps.resolveBoundaries ? await deps.resolveBoundaries(enrollment) : enrollment.boundaries
     const existing = await store.getEnrollment(enrollment.did)
 
     if (existing) {
@@ -50,17 +52,17 @@ export async function reconcileServiceEnrollments(
         did: enrollment.did,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: undefined,
-        boundaries: enrollment.boundaries,
+        boundaries,
         signingKeyDid,
         active: true,
         isService: true,
       })
     }
 
-    await store.setBoundaries(enrollment.did, enrollment.boundaries)
+    await store.setBoundaries(enrollment.did, boundaries)
 
     logger?.info(
-      { did: enrollment.did, boundaries: enrollment.boundaries.length },
+      { did: enrollment.did, boundaries: boundaries.length },
       'reconciled service enrollment',
     )
   }

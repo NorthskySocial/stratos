@@ -100,14 +100,14 @@ describe('service enrollment config parsing', () => {
     )
   })
 
-  it('rejects boundaries outside allowedDomains', () => {
+  it('defers boundary existence to the persistent service catalog', () => {
     setEnv({
       STRATOS_SERVICE_ENROLLMENTS: JSON.stringify([
         { did: 'did:web:legato.appview', boundaries: ['secret'] },
       ]),
     })
 
-    expect(() => envToConfig(parseEnv())).toThrow(/not in allowedDomains/)
+    expect(envToConfig(parseEnv()).enrollment.serviceEnrollments[0].boundaries).toEqual(['did:web:host/secret'])
   })
 
   it('throws when the file cannot be read', () => {

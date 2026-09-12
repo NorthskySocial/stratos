@@ -44,6 +44,7 @@ export const handleRoomStatus = (
 ) => {
   return async (req: express.Request, res: express.Response) => {
     try {
+      await config.refreshBoundaryConfiguration?.()
       const did = await authenticateRequest(req, res)
       if (!did) return
 

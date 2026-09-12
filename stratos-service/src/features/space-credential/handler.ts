@@ -198,8 +198,17 @@ async function handleGetSpaceCredential(
     )
   }
 
-  // App-axis (client attestation) gating. `#open` spaces are a no-op.
-  await enforceAppAccess(ctx, boundary, input?.clientAttestation)
+  const definition = await ctx.boundaryStore?.get(boundary)
+  if (ctx.boundaryStore && definition?.status !== 'active') {
+    throw new InvalidRequestError('Space is unavailable', 'UnknownSpace')
+  }
+  // Bind authorization and the token to the same catalog revision.
+  const access: AppAccess = definition
+    ? definition.appAccess === 'open'
+      ? { kind: 'open' }
+      : { kind: 'allowList', clientIds: definition.clientIds }
+    : resolveAppAccess(ctx.cfg.stratos.spaceAppAccess, boundary)
+  await enforceAppAccess(ctx, access, input?.clientAttestation)
 
   // Key binding: the delegation path proves key possession with a standalone
   // mint-time DPoP proof; the DPoP path reuses the session proof's key.
@@ -226,6 +235,7 @@ async function handleGetSpaceCredential(
     issuerDid: ctx.serviceDid,
     spaceUri: space,
     ttlSeconds: ctx.cfg.stratos.spaceCredentialTtlSeconds,
+    boundaryRevision: definition?.revision,
     jkt,
   })
 
@@ -368,13 +378,9 @@ async function resolveDelegationIdentity(
  */
 async function enforceAppAccess(
   ctx: AppContext,
-  boundary: string,
+  access: AppAccess,
   clientAttestation: string | undefined,
 ): Promise<void> {
-  const access: AppAccess = resolveAppAccess(
-    ctx.cfg.stratos.spaceAppAccess,
-    boundary,
-  )
   if (access.kind === 'open') {
     // Open space: ignore any attestation supplied.
     return

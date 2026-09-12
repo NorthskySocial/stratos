@@ -11,6 +11,7 @@
   "mutate": [
     "src/attestation/**/*.ts",
     "src/network/**/*.ts",
+    "src/boundary/**/*.ts",
     "src/enrollment/**/*.ts",
     "src/hydration/**/*.ts",
     "src/spaces/**/*.ts",
