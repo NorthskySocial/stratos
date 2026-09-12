@@ -88,6 +88,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -117,7 +118,7 @@ export function onUnauthorized(handler: () => void): void {
  * @returns The parsed JSON body
  * @throws ApiError on any non-2xx response
  */
-async function request<T>(
+export async function request<T>(
   path: string,
   init: RequestInit = {},
   opts: { notifyUnauthorized?: boolean } = {},
@@ -128,10 +129,10 @@ async function request<T>(
     if (opts.notifyUnauthorized !== false) {
       unauthorizedHandler?.()
     }
-    throw new ApiError(res.status, await errorMessage(res))
+    throw await responseError(res)
   }
   if (!res.ok) {
-    throw new ApiError(res.status, await errorMessage(res))
+    throw await responseError(res)
   }
   return (await res.json()) as T
 }
@@ -139,14 +140,18 @@ async function request<T>(
 /**
  * Best-effort human-readable message from an error response.
  * @param res - The failed response
- * @returns The service's message, its error code, or the status text
+ * @returns The service error, retaining its XRPC code for recovery
  */
-async function errorMessage(res: Response): Promise<string> {
+async function responseError(res: Response): Promise<ApiError> {
   try {
     const body = (await res.json()) as { message?: string; error?: string }
-    return body.message || body.error || res.statusText
+    return new ApiError(
+      res.status,
+      body.message || body.error || res.statusText,
+      body.error,
+    )
   } catch {
-    return res.statusText
+    return new ApiError(res.status, res.statusText)
   }
 }
 
@@ -156,7 +161,7 @@ async function errorMessage(res: Response): Promise<string> {
  * @param body - Value serialized as the request body
  * @returns The parsed JSON body
  */
-function post<T>(path: string, body: unknown): Promise<T> {
+export function post<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
