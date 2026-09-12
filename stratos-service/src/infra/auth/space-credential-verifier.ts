@@ -114,6 +114,7 @@ interface SpaceCredentialHeader {
 }
 
 interface SpaceCredentialClaims {
+  stratosBoundaryRevision?: unknown
   iss?: string
   sub?: string
   iat?: number
@@ -124,6 +125,7 @@ interface SpaceCredentialClaims {
 
 /** Successful verification result. */
 export interface SpaceCredentialResult {
+  boundaryRevision?: number
   /** The target space URI (`sub`), byte-for-byte as presented. */
   spaceUri: string
   /** The `cnf.jkt` DPoP key binding, when the credential carries one. */
@@ -214,9 +216,14 @@ export async function verifySpaceCredential(
   // 6. signature against OUR OWN service key (no DID resolution).
   await verifyOwnKeySignature(parts, deps.serviceKey)
 
+  const boundaryRevision = payload.stratosBoundaryRevision
+  if (boundaryRevision !== undefined && (typeof boundaryRevision !== 'number' || !Number.isSafeInteger(boundaryRevision) || boundaryRevision < 1)) {
+    throw new SpaceCredentialVerificationError('Invalid boundary revision')
+  }
   const cnfJkt = payload.cnf?.jkt
   return {
     spaceUri: payload.sub,
+    ...(typeof boundaryRevision === 'number' ? { boundaryRevision } : {}),
     ...(typeof cnfJkt === 'string' && cnfJkt ? { cnfJkt } : {}),
   }
 }

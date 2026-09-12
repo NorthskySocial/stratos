@@ -1,0 +1,60 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.updateBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Update boundary settings if its revision still matches. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "revision", "settings"],
+          "properties": {
+            "boundary": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "settings": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#settings"
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
+      ]
+    }
+  }
+}

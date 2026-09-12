@@ -1,0 +1,47 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.server.listRooms",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List publicly listed rooms from the authority-owned boundary catalog. Unavailable rooms cannot accept joins.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["rooms"],
+          "properties": {
+            "rooms": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#room"
+              }
+            }
+          }
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "required": ["id", "boundary", "displayName", "description", "available"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "boundary": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

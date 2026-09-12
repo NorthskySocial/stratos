@@ -1,0 +1,64 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.listBoundaries",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Read the current active boundary catalog for an enrolled service. Only boundaries the authenticated service currently holds are returned. Joinability controls new joins, not existing member reads.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "boundaries"
+          ],
+          "properties": {
+            "boundaries": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#boundary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "required": [
+        "boundary",
+        "roomId",
+        "displayName",
+        "description",
+        "listed",
+        "joinable",
+        "revision"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "roomId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "listed": {
+          "type": "boolean"
+        },
+        "joinable": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

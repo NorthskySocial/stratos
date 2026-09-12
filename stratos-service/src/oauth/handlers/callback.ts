@@ -41,22 +41,23 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
     idResolver,
   } = config
 
-  const configuredEnrollBoundaries = selectEnrollBoundaries(
-    autoEnrollDomains,
-    defaultBoundaries,
-  )
-
   const isSecure = config.baseUrl.startsWith('https://')
   const allowedSchemes = isSecure ? ['https:'] : ['http:', 'https:']
 
   return async (req: express.Request, res: express.Response) => {
     try {
+      await config.refreshBoundaryConfiguration?.()
+      const configuredEnrollBoundaries = selectEnrollBoundaries(
+        autoEnrollDomains,
+        defaultBoundaries,
+      )
       const params = new URLSearchParams(req.url.split('?')[1] || '')
 
       // Complete the OAuth flow. `state` carries the redirect target that
       // `handleAuthorize` verified before it started this flow.
       const { session, state } = await oauthClient.callback(params)
       const did = session.sub
+      await config.refreshBoundaryConfiguration?.()
       const roomState =
         config.roomCatalog && isRoomOAuthStateCandidate(state)
           ? decodeRoomOAuthState(state, config.roomCatalog)

@@ -3,6 +3,7 @@ import {
   commaListSchema,
   dbConfigSchema,
   ENROLLMENT_MODE,
+  ensureQualifiedBoundaries,
   InvalidServiceEnrollmentError,
   isValidSkey,
   loggingConfigSchema,
@@ -566,7 +567,14 @@ function loadServiceEnrollments(
       new InvalidServiceEnrollmentError(message, options),
   })
 
-  return validateServiceEnrollments(raw, { serviceDid, allowedDomains })
+  // The persistent catalog validates references after the service database opens.
+  const declared = raw.flatMap((entry) =>
+    Array.isArray(entry?.boundaries) ? entry.boundaries.filter((b): b is string => typeof b === 'string' && b.length > 0) : [],
+  )
+  return validateServiceEnrollments(raw, {
+    serviceDid,
+    allowedDomains: [...allowedDomains, ...ensureQualifiedBoundaries(serviceDid, declared)],
+  })
 }
 
 /**

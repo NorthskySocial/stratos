@@ -142,6 +142,7 @@ export class StratosServer {
     await reconcileServiceEnrollments(cfg.enrollment.serviceEnrollments, {
       store: ctx.enrollmentStore,
       signingKeyDid: ctx.signingDidKey,
+      resolveBoundaries: (enrollment) => ctx.boundaryConfiguration!.serviceMemberships(enrollment, ctx.enrollmentStore),
       logger: ctx.logger,
     })
 
@@ -446,6 +447,7 @@ export class StratosServer {
       defaultBoundaries: cfg.stratos.allowedDomains,
       autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
       roomCatalog: cfg.roomCatalog,
+      refreshBoundaryConfiguration: () => ctx.boundaryConfiguration?.refresh() ?? Promise.resolve(),
       reservedBoundary: cfg.stratos.reservedDomain,
       allowedRedirectOrigins: cfg.allowedRedirectOrigins,
       logger: ctx.logger,

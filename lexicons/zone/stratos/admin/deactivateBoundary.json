@@ -1,0 +1,56 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.deactivateBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Block grants, remove every member, then mark the boundary inactive. Records and the boundary are retained. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "revision"],
+          "properties": {
+            "boundary": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
+      ]
+    }
+  }
+}

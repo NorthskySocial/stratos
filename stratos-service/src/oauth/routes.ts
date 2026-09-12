@@ -95,6 +95,7 @@ export interface OAuthRoutesConfig {
   defaultBoundaries?: string[]
   autoEnrollDomains?: string[]
   /** Enables public-alpha selected-room enrollment when present. */
+  refreshBoundaryConfiguration?: () => Promise<void>
   roomCatalog?: RoomCatalog
   /** Force-included by the enrollment-store decorator and profile publication. */
   reservedBoundary?: string

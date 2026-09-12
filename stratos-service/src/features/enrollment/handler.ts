@@ -671,6 +671,7 @@ function registerAddBoundaryHandler(
           })
         }
 
+        await ctx.boundaryConfiguration?.refresh()
         const allowedDomains = ctx.cfg.stratos.allowedDomains
         if (!allowedDomains.includes(boundary)) {
           return res.status(400).json({
@@ -826,6 +827,7 @@ function registerSetBoundariesHandler(
           })
         }
 
+        await ctx.boundaryConfiguration?.refresh()
         const allowedDomains = ctx.cfg.stratos.allowedDomains
         const invalid = boundaries.filter((b) => !allowedDomains.includes(b))
         if (invalid.length > 0) {
@@ -1284,8 +1286,9 @@ function registerGetRepoHostHandler(ctx: AppContext): void {
 function registerListDomainsHandler(ctx: AppContext): void {
   ctx.app.get(
     '/xrpc/zone.stratos.server.listDomains',
-    (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       try {
+        await ctx.boundaryConfiguration?.refresh()
         res.json({ domains: ctx.cfg.stratos.allowedDomains })
       } catch (err) {
         ctx.logger?.error(
