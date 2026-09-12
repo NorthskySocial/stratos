@@ -163,61 +163,22 @@ session lifetime. Reset enrollment state on account switch or logout.
 
 ### Verifying the attestation
 
-The enrollment record's `attestation` field is signed by the Stratos service's private key. To
-verify the enrollment is authentic, resolve the service's public key from its DID document and check
-the signature over the DAG-CBOR encoded payload:
+Verify the signature and its service identity together. Pass the expected service DID from trusted configuration:
 
 ```typescript
-import { encode as cborEncode } from '@atcute/cbor'
-import { getPublicKeyFromDidController } from '@atcute/crypto'
-import { getAtprotoVerificationMaterial } from '@atcute/identity'
-import { WebDidDocumentResolver } from '@atcute/identity-resolver'
-import type { StratosEnrollment } from '@northskysocial/stratos-client'
+import { verifyEnrollmentAttestation } from '@northskysocial/stratos-client'
 
-async function verifyEnrollmentAttestation(
-  enrollment: StratosEnrollment,
-  did: string,
-): Promise<boolean> {
-  const serviceDid = new URL(enrollment.service).hostname
-    .replaceAll('.', ':')
-    .replace(/^/, 'did:web:')
-
-  const resolver = new WebDidDocumentResolver()
-  const doc = await resolver.resolve(serviceDid as `did:web:${string}`)
-
-  const material = getAtprotoVerificationMaterial(doc)
-  if (!material) return false
-
-  const { publicKeyBytes } = getPublicKeyFromDidController(material)
-
-  // attestation payload is DAG-CBOR with sorted keys: {boundaries, did, signingKey}
-  const boundaries = enrollment.boundaries.map((b) => b.value).sort()
-  const payload = cborEncode({
-    boundaries,
-    did,
-    signingKey: enrollment.signingKey,
-  })
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    publicKeyBytes,
-    { name: 'ECDSA', namedCurve: 'K-256' },
-    false,
-    ['verify'],
-  )
-
-  return crypto.subtle.verify(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    key,
-    enrollment.attestation.sig,
-    payload,
-  )
-}
+const result = await verifyEnrollmentAttestation(enrollment, userDid, {
+  serviceDid: 'did:web:stratos.example.com',
+})
+if (!result.valid) throw new Error(result.error ?? 'Invalid attestation')
 ```
 
-This confirms the Stratos service vouches for the user's DID, boundaries, and signing key binding.
-The service's `did:web` DID document is the root of trust — cache the resolved key to avoid repeated
-lookups.
+The client checks the current DID key first. For a retired key, it verifies the public
+`zone.stratos.identity.getKeyHistory` hash chain, both rotation signatures, and the signed issue-time window.
+Legacy attestations without `issuedAt` are accepted only against the current DID key.
+`VerifyAttestationOptions.serviceDid` is required; an arbitrary embedded key no longer establishes service identity.
+See the [service key history design](../docs/architecture/service-key-history.md) for storage, rotation, and trust limits.
 
 ---
 

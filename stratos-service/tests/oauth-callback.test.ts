@@ -407,12 +407,23 @@ describe('handleCallback', () => {
         signingKeyDid: 'did:key:jet',
         custody: 'stratos',
       })
+      config.createAttestation.mockResolvedValue({
+        sig: new Uint8Array(),
+        signingKey: 'did:key:zQ3sh...',
+        issuedAt: '1995-10-04T12:00:00.000Z',
+      })
       mockEnrollmentStore.getBoundaries.mockResolvedValue([roomA, reserved])
 
       const response = makeRes()
       await callHandler(handleCallback(config), makeReq(), response)
 
       expect(mockEnrollmentStore.addBoundary).not.toHaveBeenCalled()
+      if (mockProfileRecordWriter.putEnrollmentRecord.mock.calls.length) {
+        expect(
+          mockProfileRecordWriter.putEnrollmentRecord.mock.calls.at(-1)[2]
+            .attestation.issuedAt,
+        ).toBe('1995-10-04T12:00:00.000Z')
+      }
       expect(response.status).not.toHaveBeenCalled()
     })
 
@@ -432,6 +443,11 @@ describe('handleCallback', () => {
         enrollmentRkey: 'did:web:localhost:3100',
         signingKeyDid: 'did:key:jet',
         custody: 'stratos',
+      })
+      config.createAttestation.mockResolvedValue({
+        sig: new Uint8Array(),
+        signingKey: 'did:key:zQ3sh...',
+        issuedAt: '1995-10-04T12:00:00.000Z',
       })
       mockEnrollmentStore.getBoundaries.mockResolvedValue([roomA, reserved])
 
@@ -837,67 +853,83 @@ describe('handleCallback', () => {
     expect(res.status).toHaveBeenCalledWith(500)
   })
 
-  it('sends the same attestation payload shape for both custody classes', async () => {
-    const keypair = await Secp256k1Keypair.create({ exportable: true })
+  it.each([undefined, '1995-10-04T12:00:00.000Z'])(
+    'preserves attestation issue time %s for both custody classes',
+    async (issuedAt) => {
+      config.createAttestation.mockResolvedValue({
+        sig: new Uint8Array(),
+        signingKey: 'did:key:zQ3sh...',
+        ...(issuedAt === undefined ? {} : { issuedAt }),
+      })
+      const keypair = await Secp256k1Keypair.create({ exportable: true })
 
-    // stratos custody
-    mockOauthClient.callback.mockResolvedValue({
-      session: sessionFor('did:plc:misato'),
-    })
-    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
-    mockEnrollmentValidator.validate.mockResolvedValue({
-      allowed: true,
-      pdsEndpoint: 'https://pds.example.com',
-    })
-    const stratosHandler = handleCallback(config)
-    await stratosHandler(
-      {
-        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      } as any,
-      {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn(),
-        redirect: vi.fn(),
-      } as any,
-    )
-    expect(config.createAttestation).toHaveBeenCalledWith(
-      'did:plc:misato',
-      expect.any(Array),
-      'did:key:zQ3sh...',
-    )
+      // stratos custody
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor('did:plc:misato'),
+      })
+      mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      const stratosHandler = handleCallback(config)
+      await stratosHandler(
+        {
+          url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+        } as any,
+        {
+          status: vi.fn().mockReturnThis(),
+          json: vi.fn(),
+          redirect: vi.fn(),
+        } as any,
+      )
+      expect(config.createAttestation).toHaveBeenCalledWith(
+        'did:plc:misato',
+        expect.any(Array),
+        'did:key:zQ3sh...',
+      )
 
-    // pds custody
-    config.createAttestation.mockClear()
-    mockOauthClient.callback.mockResolvedValue({
-      session: sessionFor(
+      // pds custody
+      config.createAttestation.mockClear()
+      mockOauthClient.callback.mockResolvedValue({
+        session: sessionFor(
+          'did:plc:asuka2',
+          `atproto ${buildSpaceScope(config.serviceDid)}`,
+        ),
+      })
+      mockEnrollmentValidator.validate.mockResolvedValue({
+        allowed: true,
+        pdsEndpoint: 'https://pds.example.com',
+      })
+      mockIdResolver.did.resolve.mockResolvedValue(
+        atprotoDidDoc('did:plc:asuka2', keypair),
+      )
+      const pdsHandler = handleCallback(config)
+      await pdsHandler(
+        {
+          url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
+        } as any,
+        {
+          status: vi.fn().mockReturnThis(),
+          json: vi.fn(),
+          redirect: vi.fn(),
+        } as any,
+      )
+      expect(config.createAttestation).toHaveBeenCalledWith(
         'did:plc:asuka2',
-        `atproto ${buildSpaceScope(config.serviceDid)}`,
-      ),
-    })
-    mockEnrollmentValidator.validate.mockResolvedValue({
-      allowed: true,
-      pdsEndpoint: 'https://pds.example.com',
-    })
-    mockIdResolver.did.resolve.mockResolvedValue(
-      atprotoDidDoc('did:plc:asuka2', keypair),
-    )
-    const pdsHandler = handleCallback(config)
-    await pdsHandler(
-      {
-        url: 'http://localhost:3100/oauth/callback?code=foo&state=bar',
-      } as any,
-      {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn(),
-        redirect: vi.fn(),
-      } as any,
-    )
-    expect(config.createAttestation).toHaveBeenCalledWith(
-      'did:plc:asuka2',
-      expect.any(Array),
-      keypair.did(),
-    )
-  })
+        expect.any(Array),
+        keypair.did(),
+      )
+      for (const call of mockProfileRecordWriter.putEnrollmentRecord.mock
+        .calls) {
+        expect(call[2].attestation).toStrictEqual({
+          sig: new Uint8Array(),
+          signingKey: 'did:key:zQ3sh...',
+          ...(issuedAt === undefined ? {} : { issuedAt }),
+        })
+      }
+    },
+  )
 
   it('handles successful existing enrollment', async () => {
     const session = sessionFor('did:plc:alice')

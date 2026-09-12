@@ -11,7 +11,13 @@ export function createAttestationPayload(
   did: string,
   boundaries: string[],
   userSigningKey: string,
+  issuedAt?: string,
 ): Uint8Array {
   const sorted = [...boundaries].sort()
-  return cborEncode({ boundaries: sorted, did, signingKey: userSigningKey })
+  return cborEncode({
+    boundaries: sorted,
+    did,
+    signingKey: userSigningKey,
+    issuedAt,
+  })
 }

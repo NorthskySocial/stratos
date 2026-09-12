@@ -1,5 +1,15 @@
 import { encode as cborEncode, fromBytes, isBytes } from '@atcute/cbor'
 import { verifySigWithDidKey } from '@atcute/crypto'
+import { resolveServiceSigningKey } from './verification.js'
+import { keyHistoryTimestamp } from './key-history.js'
+import type { ResolveSigningKeyOptions } from './types.js'
+
+export interface VerifyAttestationOptions extends Omit<
+  ResolveSigningKeyOptions,
+  'attestation'
+> {
+  serviceDid: string
+}
 
 /**
  * result of an enrollment attestation check.
@@ -17,7 +27,7 @@ export interface AttestationResult {
 
 interface EnrollmentWithAttestation {
   signingKey: string
-  attestation: { sig: unknown; signingKey: string }
+  attestation: { sig: unknown; signingKey: string; issuedAt?: string }
   boundaries?: unknown
 }
 
@@ -39,6 +49,7 @@ const isEnrollmentWithAttestation = (
   const att = obj.attestation as Record<string, unknown>
   return (
     typeof att.signingKey === 'string' &&
+    (att.issuedAt === undefined || typeof att.issuedAt === 'string') &&
     (isBytes(att.sig) || att.sig instanceof Uint8Array)
   )
 }
@@ -47,16 +58,19 @@ const isEnrollmentWithAttestation = (
  * verifies the service attestation in an enrollment record.
  *
  * the attestation is an ECDSA signature by the service did:key. the service
- * signs the DAG-CBOR encoding of {boundaries, did, signingKey}, where the
+ * signs the DAG-CBOR encoding of {boundaries, did, signingKey, issuedAt}, where the
  * keys are in sorted order and the boundaries are sorted strings.
+ * Legacy current-key attestations omit issuedAt from the signed payload.
  *
  * @param recordValue the raw enrollment record value (JSON or decoded CBOR)
  * @param userDid the DID of the enrolled user (repo owner)
+ * @param options trusted expected service DID and optional network configuration
  * @returns the attestation verification result; never throws
  */
 export const verifyEnrollmentAttestation = async (
   recordValue: unknown,
   userDid: string,
+  options: VerifyAttestationOptions,
 ): Promise<AttestationResult> => {
   if (!isEnrollmentWithAttestation(recordValue)) {
     return {
@@ -80,6 +94,12 @@ export const verifyEnrollmentAttestation = async (
     : []
 
   try {
+    if (attestation.issuedAt !== undefined)
+      keyHistoryTimestamp(attestation.issuedAt)
+    await resolveServiceSigningKey(options.serviceDid, {
+      ...options,
+      attestation,
+    })
     const sigBytes =
       attestation.sig instanceof Uint8Array
         ? attestation.sig
@@ -89,6 +109,7 @@ export const verifyEnrollmentAttestation = async (
       boundaries,
       did: userDid,
       signingKey: userSigningKey,
+      issuedAt: attestation.issuedAt,
     })
 
     const valid = await verifySigWithDidKey(

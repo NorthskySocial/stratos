@@ -20,10 +20,11 @@ The `zone.stratos.actor.enrollment` record on the user's PDS includes:
 
 The `attestation` object:
 
-| Field        | Type             | Description                                   |
-| ------------ | ---------------- | --------------------------------------------- |
-| `sig`        | bytes            | secp256k1 signature over the CBOR payload     |
-| `signingKey` | string (did:key) | Service public key that created the signature |
+| Field        | Type              | Description                                      |
+| ------------ | ----------------- | ------------------------------------------------ |
+| `sig`        | bytes             | secp256k1 signature over the CBOR payload        |
+| `signingKey` | string (did:key)  | Service public key that created the signature    |
+| `issuedAt`   | string (datetime) | Signed issue time, absent on legacy attestations |
 
 ## Using `stratos-client` for Key Resolution
 
@@ -62,42 +63,20 @@ const userKey = await resolveUserSigningKey(
 
 ## Verifying an Attestation
 
-Reconstruct the CBOR payload and check the signature:
+Use the client verifier with the expected service DID from trusted application configuration:
 
 ```typescript
-import { encode as cborEncode } from '@atcute/cbor'
-import { verifySignature } from '@atproto/crypto'
+import { verifyEnrollmentAttestation } from '@northskysocial/stratos-client'
 
-async function verifyAttestation(
-  enrollmentRecord: {
-    signingKey: string
-    attestation: { sig: Uint8Array; signingKey: string }
-    boundaries: Array<{ value: string }>
-  },
-  userDid: string,
-): Promise<boolean> {
-  const sortedBoundaries = enrollmentRecord.boundaries
-    .map((b) => b.value)
-    .sort()
-
-  const payload = cborEncode({
-    boundaries: sortedBoundaries,
-    did: userDid,
-    signingKey: enrollmentRecord.signingKey,
-  })
-
-  return verifySignature(
-    enrollmentRecord.attestation.signingKey,
-    payload,
-    enrollmentRecord.attestation.sig,
-  )
-}
+const result = await verifyEnrollmentAttestation(enrollmentRecord, userDid, {
+  serviceDid: 'did:web:stratos.example.com',
+})
 ```
 
-::: warning Boundary sort order matters
-The attestation payload encodes boundaries as a _sorted_ array. Reconstruct with `.sort()` or
-verification will fail.
-:::
+An embedded `did:key` proves a signature only. It does not establish the service's identity.
+The verifier checks that identity against the current DID key or authenticated service key history.
+New attestations include a signed `issuedAt`; legacy attestations without it require the current key.
+See [Service Key History](/architecture/service-key-history) for the hash chain, both rotation proofs, timestamp windows, and trust limits.
 
 ## Record-Level Verification
 

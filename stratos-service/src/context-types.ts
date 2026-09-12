@@ -40,6 +40,7 @@ export interface IdentityContext {
    * login cannot overwrite the same DID's enrollment OAuth session.
    */
   adminOauthClient: NodeOAuthClient
+  keyHistory: import('@northskysocial/stratos-client').ServiceKeyHistory
   signingKey: crypto.Keypair
   signingDidKey: string
   serviceDid: string
@@ -59,7 +60,7 @@ export interface IdentityContext {
     did: string,
     boundaries: string[],
     userDidKey: string,
-  ): Promise<{ sig: Uint8Array; signingKey: string }>
+  ): Promise<{ sig: Uint8Array; signingKey: string; issuedAt?: string }>
 }
 
 /**

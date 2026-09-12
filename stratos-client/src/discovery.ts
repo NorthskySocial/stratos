@@ -51,7 +51,13 @@ const parseAttestation = (val: unknown): ServiceAttestation | null => {
   if (typeof obj.signingKey !== 'string') return null
   const sig = decodeBytes(obj.sig)
   if (!sig) return null
-  return { sig, signingKey: obj.signingKey }
+  if (obj.issuedAt !== undefined && typeof obj.issuedAt !== 'string')
+    return null
+  return {
+    sig,
+    signingKey: obj.signingKey,
+    ...(obj.issuedAt === undefined ? {} : { issuedAt: obj.issuedAt }),
+  }
 }
 
 const isBoundary = (val: unknown): val is { value: string } =>
