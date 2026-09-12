@@ -52,6 +52,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
   const createAttestation = async () => ({
     sig: new Uint8Array([1, 2, 3]),
     signingKey: 'did:key:zServiceKey',
+    issuedAt: '1995-10-04T12:00:00.000Z',
   })
 
   function createWorker(
@@ -165,7 +166,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
       service: string
       custody: 'pds'
       repoHost: string
-      attestation: { sig: Uint8Array; signingKey: string }
+      attestation: { sig: Uint8Array; signingKey: string; issuedAt: string }
     }
     const values = record.boundaries.map((b) => b.value)
     expect(values).toContain(ENGINEERING)
@@ -177,6 +178,7 @@ describe('PDS enrollment sync (sqlite integration)', () => {
     expect(record.custody).toBe('pds')
     expect(record.repoHost).toBe('https://pds.juban.tokyo.jp')
     expect(record.attestation.signingKey).toBe('did:key:zServiceKey')
+    expect(record.attestation.issuedAt).toBe('1995-10-04T12:00:00.000Z')
     expect(Array.from(record.attestation.sig)).toEqual([1, 2, 3])
   })
 

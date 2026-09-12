@@ -113,7 +113,7 @@ export interface OAuthRoutesConfig {
     did: string,
     boundaries: string[],
     userDidKey: string,
-  ) => Promise<{ sig: Uint8Array; signingKey: string }>
+  ) => Promise<{ sig: Uint8Array; signingKey: string; issuedAt?: string }>
   /** Create a server-approved Stratos-custody room post. */
   createApprovedRoomPost: (input: {
     did: string

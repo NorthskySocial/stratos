@@ -61,7 +61,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "serviceAttestation": {
       "type": "object",
-      "description": "An attestation signed by the Stratos service key. The signed payload is DAG-CBOR encoded {boundaries, did, signingKey} with sorted keys.",
+      "description": "Service signature over DAG-CBOR {boundaries, did, signingKey, issuedAt}, with sorted boundaries. Legacy attestations omit issuedAt from the payload.",
       "required": ["sig", "signingKey"],
       "properties": {
         "sig": {
@@ -71,6 +71,11 @@ export const stratosLexicons: LexiconDoc[] = [
         "signingKey": {
           "type": "string",
           "description": "The Stratos service's public key as a did:key string, used to verify the attestation signature."
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Signed issue time. Required for historical service key verification. Legacy attestations omit this field."
         }
       }
     }
@@ -979,6 +984,75 @@ export const stratosLexicons: LexiconDoc[] = [
       "properties": {
         "did": { "type": "string", "format": "did" },
         "handle": { "type": "string" }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.identity.getKeyHistory",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Public, append-only service signing key history. Each rotation requires previous-key authorization and new-key acceptance. Anchor the final key to the current service DID document before trusting historical keys.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["serviceDid", "entries"],
+          "properties": {
+            "serviceDid": {
+              "type": "string",
+              "format": "did"
+            },
+            "entries": {
+              "type": "array",
+              "maxLength": 1024,
+              "items": {
+                "type": "ref",
+                "ref": "#entry"
+              }
+            }
+          }
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "versionId",
+        "key",
+        "validFrom",
+        "previousVersionId",
+        "proof",
+        "acceptance"
+      ],
+      "nullable": ["previousVersionId"],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "maxLength": 70
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "validFrom": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "previousVersionId": {
+          "type": "string",
+          "maxLength": 70
+        },
+        "proof": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "acceptance": {
+          "type": "string",
+          "maxLength": 256
+        }
       }
     }
   }

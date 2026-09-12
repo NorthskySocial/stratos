@@ -15,6 +15,9 @@ Key features:
 
 ## Installation
 
+Use Linux with `flock` installed and a local filesystem for the service data directory.
+The Docker image includes `flock`. See [service signing key history](../docs/architecture/service-key-history.md) for persistence and rotation requirements.
+
 ```bash
 cd stratos-service
 pnpm install

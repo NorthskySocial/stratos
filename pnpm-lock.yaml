@@ -170,6 +170,9 @@ importers:
       '@atcute/identity-resolver':
         specifier: ^2.0.1
         version: 2.0.1(@atcute/identity@2.0.2(@atcute/lexicons@2.1.0)(@typescript/typescript6@6.0.2))(@atcute/lexicons@2.1.0)(@typescript/typescript6@6.0.2)
+      '@atcute/multibase':
+        specifier: ^1.2.5
+        version: 1.2.5
       '@atcute/repo':
         specifier: ^1.0.2
         version: 1.0.2(@atcute/cbor@2.3.6(@atcute/cid@2.4.2))(@atcute/cid@2.4.2)(@atcute/lexicons@2.1.0)
@@ -567,6 +570,9 @@ importers:
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
+      '@northskysocial/stratos-client':
+        specifier: workspace:*
+        version: link:../stratos-client
       '@northskysocial/stratos-core':
         specifier: workspace:*
         version: link:../stratos-core

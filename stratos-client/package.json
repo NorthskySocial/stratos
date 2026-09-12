@@ -50,6 +50,7 @@
     "@atcute/crypto": "^2.4.4",
     "@atcute/identity": "^2.0.2",
     "@atcute/identity-resolver": "^2.0.1",
+    "@atcute/multibase": "^1.2.5",
     "@atcute/repo": "^1.0.2"
   },
   "devDependencies": {

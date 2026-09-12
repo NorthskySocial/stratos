@@ -10,6 +10,7 @@
   "reporters": ["html", "clear-text", "progress"],
   "mutate": [
     "src/identity-resolver.ts",
+    "src/features/identity/**/*.ts",
     "src/oauth/client.ts",
     "src/observability/browser-timing.ts",
     "src/config.ts",

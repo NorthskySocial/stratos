@@ -1,10 +1,7 @@
-import path from 'node:path'
-import * as fs from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import express from 'express'
 import * as crypto from '@atproto/crypto'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
-import { fileExists } from '@atproto/common'
 
 import {
   createAttestationPayload,
@@ -53,34 +50,13 @@ import { replayStoreFromCache } from './infra/auth/replay-store.js'
 import { JwksResolver } from './infra/auth/jwks-resolver.js'
 import { ExternalAllowListProvider } from './features/enrollment/internal/allow-list.js'
 import { RedisCache } from './infra/storage/redis-cache.js'
+import { openServiceSigningIdentity } from './infra/signing/service-identity.js'
 import { InProcessActorSigner } from './infra/signing/index.js'
 
 export * from './context-types.js'
 export { SqliteSequenceOps } from './storage/sqlite/sequence-ops.js'
 export { StratosActorStore } from './storage/sqlite/actor-store.js'
 export { SqliteEnrollmentStore } from './storage/sqlite/enrollment-store.js'
-
-/**
- * Loads the signing key from storage or creates a new one if it doesn't exist
- * @param cfg - Configuration options for the application context.
- * @returns Signing key
- */
-async function loadSigningKey(
-  cfg: AppContextOptions['cfg'],
-): Promise<crypto.Keypair> {
-  const keyPath = path.join(cfg.storage.dataDir, 'signing_key')
-  if (await fileExists(keyPath)) {
-    const keyBytes = await fs.readFile(keyPath)
-    return await crypto.Secp256k1Keypair.import(keyBytes)
-  } else {
-    const signingKey = await crypto.Secp256k1Keypair.create({
-      exportable: true,
-    })
-    const exported = await (signingKey as crypto.ExportableKeypair).export()
-    await fs.writeFile(keyPath, exported)
-    return signingKey
-  }
-}
 
 /**
  * Create application context
@@ -119,7 +95,10 @@ export async function createAppContext(
     enrollmentEvents,
     sequenceEvents,
     logger,
-  )
+  ).catch(async (error: unknown) => {
+    await identity.serviceIdentity.close()
+    throw error
+  })
 
   // Per-actor signing seam. Confines raw private key material — the TTL cache
   // and key-store access that previously lived here now live inside the signer.
@@ -181,6 +160,7 @@ export async function createAppContext(
     async destroy() {
       await pdsSyncWorker.stop()
       await storageDestroy()
+      await identity.serviceIdentity.close()
       services.repoCtx.repoWriteLocks.destroy()
       if (services.enrollmentCtx.allowListProvider) {
         await services.enrollmentCtx.allowListProvider.stop()
@@ -279,24 +259,40 @@ async function initIdentity(
   logger?: AppContext['logger'],
 ) {
   const idResolver = createIdResolver(cfg, fetchWithUserAgent, logger)
-  const signingKey = await loadSigningKey(cfg)
-  const stores = oauthStores as {
-    sessionStore: OAuthSessionStoreBackend
-    stateStore: OAuthStateStoreBackend
+  const serviceIdentity = await openServiceSigningIdentity(
+    cfg.storage.dataDir,
+    cfg.service.did,
+  )
+  const { signingKey, keyHistory } = serviceIdentity
+  try {
+    const stores = oauthStores as {
+      sessionStore: OAuthSessionStoreBackend
+      stateStore: OAuthStateStoreBackend
+    }
+    const oauthClient = await createOAuthClientContext(
+      cfg,
+      stores,
+      idResolver,
+      fetchWithUserAgent,
+    )
+    const adminOauthClient = await createAdminOAuthClientContext(
+      cfg,
+      stores,
+      idResolver,
+      fetchWithUserAgent,
+    )
+    return {
+      idResolver,
+      signingKey,
+      keyHistory,
+      serviceIdentity,
+      oauthClient,
+      adminOauthClient,
+    }
+  } catch (error) {
+    await serviceIdentity.close()
+    throw error
   }
-  const oauthClient = await createOAuthClientContext(
-    cfg,
-    stores,
-    idResolver,
-    fetchWithUserAgent,
-  )
-  const adminOauthClient = await createAdminOAuthClientContext(
-    cfg,
-    stores,
-    idResolver,
-    fetchWithUserAgent,
-  )
-  return { idResolver, signingKey, oauthClient, adminOauthClient }
 }
 
 /**
@@ -374,9 +370,15 @@ function initPdsSync(
     boundaries: string[],
     userDidKey: string,
   ) => {
-    const payload = createAttestationPayload(did, boundaries, userDidKey)
+    const issuedAt = new Date().toISOString()
+    const payload = createAttestationPayload(
+      did,
+      boundaries,
+      userDidKey,
+      issuedAt,
+    )
     const sig = await signingKey.sign(payload)
-    return { sig, signingKey: signingKey.did() }
+    return { sig, signingKey: signingKey.did(), issuedAt }
   }
 
   const pdsSyncWorker = new PdsEnrollmentSyncWorker(

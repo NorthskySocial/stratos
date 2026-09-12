@@ -27,6 +27,7 @@ RUN pnpm config set minimumReleaseAge 0 && pnpm config set strictDepBuilds false
 COPY tsconfig.json ./
 COPY stratos-core/ ./stratos-core/
 COPY stratos-service/ ./stratos-service/
+COPY stratos-client/ ./stratos-client/
 COPY stratos-indexer/ ./stratos-indexer/
 COPY lexicons/ ./lexicons/
 
@@ -36,6 +37,7 @@ RUN pnpm install --frozen-lockfile
 # Generate version module, then compile packages
 RUN pnpm run --filter stratos-service generate:version \
     && pnpm run --filter stratos-core build \
+    && pnpm run --filter stratos-client build \
     && pnpm run --filter stratos-service build
 
 # Patch stratos-core package.json to export compiled dist/ for production
@@ -51,6 +53,8 @@ RUN node -e " \
 # --- Production stage for Stratos Service ---
 FROM node:24-alpine AS stratos
 
+RUN apk add --no-cache flock
+
 RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
@@ -59,6 +63,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=builder /app/stratos-core/package.json ./stratos-core/
 COPY stratos-service/package.json ./stratos-service/
+COPY stratos-client/package.json ./stratos-client/
 
 # Install production dependencies only (no devDependencies)
 RUN pnpm config set minimumReleaseAge 0 && pnpm config set strictDepBuilds false && pnpm install --frozen-lockfile --prod
@@ -66,6 +71,7 @@ RUN pnpm config set minimumReleaseAge 0 && pnpm config set strictDepBuilds false
 # Copy compiled output from builder
 COPY --from=builder /app/stratos-core/dist/ ./stratos-core/dist/
 COPY --from=builder /app/stratos-service/dist/ ./stratos-service/dist/
+COPY --from=builder /app/stratos-client/dist/ ./stratos-client/dist/
 
 # Copy lexicons (needed at runtime for validation)
 COPY lexicons/ ./lexicons/
