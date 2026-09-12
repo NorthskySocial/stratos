@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listBoundaries",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List boundary definitions, lifecycle state, and member counts. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundaries"],
+          "properties": {
+            "boundaries": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "zone.stratos.admin.boundaryDefs#boundary"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

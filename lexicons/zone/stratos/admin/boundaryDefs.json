@@ -1,0 +1,133 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.boundaryDefs",
+  "defs": {
+    "settings": {
+      "type": "object",
+      "required": [
+        "displayName",
+        "description",
+        "listed",
+        "joinable",
+        "autoEnroll",
+        "appAccess",
+        "clientIds"
+      ],
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "listed": {
+          "type": "boolean"
+        },
+        "joinable": {
+          "type": "boolean"
+        },
+        "autoEnroll": {
+          "type": "boolean"
+        },
+        "appAccess": {
+          "type": "string",
+          "enum": ["open", "allowList"]
+        },
+        "clientIds": {
+          "type": "array",
+          "maxLength": 100,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "required": [
+        "displayName",
+        "description",
+        "listed",
+        "joinable",
+        "autoEnroll",
+        "appAccess",
+        "clientIds",
+        "boundary",
+        "roomId",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "revision",
+        "memberCount",
+        "reserved"
+      ],
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "listed": {
+          "type": "boolean"
+        },
+        "joinable": {
+          "type": "boolean"
+        },
+        "autoEnroll": {
+          "type": "boolean"
+        },
+        "appAccess": {
+          "type": "string",
+          "enum": ["open", "allowList"]
+        },
+        "clientIds": {
+          "type": "array",
+          "maxLength": 100,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        },
+        "boundary": {
+          "type": "string"
+        },
+        "roomId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "deactivating", "inactive"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memberCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reserved": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

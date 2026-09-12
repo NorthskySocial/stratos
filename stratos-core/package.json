@@ -41,6 +41,10 @@
     "./tests": {
       "types": "./tests/utils/index.ts",
       "import": "./tests/utils/index.ts"
+    },
+    "./boundary/types": {
+      "types": "./src/boundary/types.ts",
+      "import": "./src/boundary/types.ts"
     }
   },
   "scripts": {

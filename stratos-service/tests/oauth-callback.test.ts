@@ -159,6 +159,30 @@ describe('handleCallback', () => {
     }
   })
 
+  it('refreshes automatic membership after OAuth completes instead of retaining factory-time defaults', async () => {
+    const oldBoundary = 'did:web:localhost%3A3100/old'
+    const currentBoundary = 'did:web:localhost%3A3100/bebop'
+    config.defaultBoundaries = [oldBoundary]
+    config.autoEnrollDomains = [oldBoundary]
+    let oauthComplete = false
+    mockOauthClient.callback.mockImplementation(async () => {
+      oauthComplete = true
+      return { session: sessionFor('did:plc:spike') }
+    })
+    config.refreshBoundaryConfiguration = vi.fn(async () => {
+      await Promise.resolve()
+      expect(oauthComplete).toBe(true)
+      config.autoEnrollDomains.splice(0, 1, currentBoundary)
+    })
+    mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
+    const handler = handleCallback(config)
+    await callHandler(handler, makeReq(), makeRes())
+    expect(config.refreshBoundaryConfiguration).toHaveBeenCalledOnce()
+    expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ boundaries: [currentBoundary] }),
+    )
+  })
+
   it('handles successful new enrollment', async () => {
     const session = sessionFor('did:plc:alice')
     mockOauthClient.callback.mockResolvedValue({ session })

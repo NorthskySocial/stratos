@@ -100,15 +100,39 @@ describe('service enrollment config parsing', () => {
     )
   })
 
-  it('rejects boundaries outside allowedDomains', () => {
+  it('defers boundary existence to the persistent service catalog', () => {
     setEnv({
       STRATOS_SERVICE_ENROLLMENTS: JSON.stringify([
         { did: 'did:web:legato.appview', boundaries: ['secret'] },
       ]),
     })
 
-    expect(() => envToConfig(parseEnv())).toThrow(/not in allowedDomains/)
+    expect(
+      envToConfig(parseEnv()).enrollment.serviceEnrollments[0].boundaries,
+    ).toEqual(['did:web:host/secret'])
   })
+  it.each([
+    [null, 'missing a non-empty "did"'],
+    [{ did: 'did:web:bebop.example' }, 'must declare a "boundaries" array'],
+    [
+      { did: 'did:web:bebop.example', boundaries: [null] },
+      'has an invalid boundary',
+    ],
+    [
+      { did: 'did:web:bebop.example', boundaries: [''] },
+      'has an invalid boundary',
+    ],
+    [
+      { did: 'did:web:bebop.example', boundaries: [] },
+      'must declare at least one boundary',
+    ],
+  ])(
+    'rejects malformed service configuration %j before catalog startup',
+    (entry, message) => {
+      setEnv({ STRATOS_SERVICE_ENROLLMENTS: JSON.stringify([entry]) })
+      expect(() => envToConfig(parseEnv())).toThrow(message)
+    },
+  )
 
   it('throws when the file cannot be read', () => {
     const missing = join(tmp, 'missing.json')

@@ -113,15 +113,14 @@ export const handleAuthorize = (config: OAuthRoutesConfig) => {
       })
     }
 
-    const selection = selectRoom(config.roomCatalog, roomId, redirectUri)
-    if (selection.error) {
-      return res.status(400).json({
-        error: 'InvalidRequest',
-        message: selection.error,
-      })
-    }
-
     try {
+      await config.refreshBoundaryConfiguration?.()
+      const selection = selectRoom(config.roomCatalog, roomId, redirectUri)
+      if (selection.error) {
+        return res
+          .status(400)
+          .json({ error: 'InvalidRequest', message: selection.error })
+      }
       const redirectVerdict = await verifyAuthorizeRedirect({
         redirectUri,
         clientId,

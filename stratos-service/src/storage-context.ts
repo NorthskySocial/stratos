@@ -7,6 +7,20 @@ import {
   SqliteBoundaryAuditBackend,
   sqliteAuditSql,
 } from './features/boundary-audit/index.js'
+import {
+  createPgBoundaryStore,
+  createSqliteBoundaryStore,
+} from './features/boundary/store.js'
+import {
+  migratePgBoundaries,
+  migrateSqliteBoundaries,
+} from './features/boundary/migrate.js'
+import { ActiveBoundaryEnrollmentStore } from './features/boundary/enrollment-store.js'
+import {
+  BoundaryConfiguration,
+  initialBoundaryDefinitions,
+} from './features/boundary/configuration.js'
+import type { BoundaryCatalogStore } from '@northskysocial/stratos-core'
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
 import { sql } from 'drizzle-orm'
@@ -22,7 +36,6 @@ import {
   createServicePgDb,
   migrateServicePgDb,
 } from './db/pg.js'
-import { CachedEnrollmentStore } from './infra/storage/cached-enrollment-store.js'
 import { ReservedDomainEnrollmentStore } from './infra/storage/reserved-domain-enrollment-store.js'
 import {
   createPgOAuthStores,
@@ -57,6 +70,9 @@ import {
 
 export interface StorageContext {
   db?: ServiceDb
+  boundaryStore: BoundaryCatalogStore
+  boundaryConfiguration: BoundaryConfiguration
+  normalizeLegacyMemberships: () => Promise<void>
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
   oauthStores: {
@@ -85,6 +101,7 @@ export async function createStorageContext(
   const serviceDbPath = path.join(cfg.storage.dataDir, 'service.sqlite')
   await fs.mkdir(cfg.storage.dataDir, { recursive: true })
 
+  let boundaryStore: BoundaryCatalogStore
   let db: ServiceDb | undefined
   let enrollmentStore: EnrollmentStore & EnrollmentStoreReader
   let oauthStores: {
@@ -129,12 +146,10 @@ export async function createStorageContext(
       new PgEnrollmentStoreWriter(pgDb),
       boundaryAudit,
     )
-    const cachedEnrollmentStore = new CachedEnrollmentStore(pgEnrollmentStore, {
-      cacheTtlMs: 5 * 60 * 1000,
-    })
-    await cachedEnrollmentStore.warm()
+    await migratePgBoundaries(pgDb)
+    boundaryStore = createPgBoundaryStore(pgDb)
     enrollmentStore = new ReservedDomainEnrollmentStore(
-      cachedEnrollmentStore,
+      pgEnrollmentStore,
       cfg.stratos.reservedDomain,
     )
     oauthStores = createPgOAuthStores(pgDb)
@@ -166,6 +181,8 @@ export async function createStorageContext(
       cfg.service.did,
       new SqliteBoundaryAuditBackend(db),
     )
+    await migrateSqliteBoundaries(db)
+    boundaryStore = createSqliteBoundaryStore(db)
     enrollmentStore = new ReservedDomainEnrollmentStore(
       new AuditedEnrollmentStore(new SqliteEnrollmentStore(db), boundaryAudit),
       cfg.stratos.reservedDomain,
@@ -190,6 +207,15 @@ export async function createStorageContext(
     }
   }
 
+  await boundaryStore.initialize(initialBoundaryDefinitions(cfg))
+  const boundaryConfiguration = new BoundaryConfiguration(boundaryStore, cfg)
+  await boundaryConfiguration.refresh()
+  const activeBoundaryStore = new ActiveBoundaryEnrollmentStore(
+    enrollmentStore,
+    boundaryStore,
+  )
+  enrollmentStore = activeBoundaryStore
+
   const sweep = scheduleExpiredSessionSweep(adminSessionStore, logger)
   const closeBackend = destroy
   destroy = async () => {
@@ -198,7 +224,13 @@ export async function createStorageContext(
   }
 
   return {
+    normalizeLegacyMemberships: () =>
+      activeBoundaryStore.normalizeLegacyMemberships(cfg.service.did, (did) =>
+        pdsSyncQueue.upsertPending(did),
+      ),
     db,
+    boundaryStore,
+    boundaryConfiguration,
     enrollmentStore,
     oauthStores,
     adminSessionStore,

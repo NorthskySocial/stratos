@@ -112,6 +112,253 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.admin.boundaryDefs",
+  "defs": {
+    "settings": {
+      "type": "object",
+      "required": [
+        "displayName",
+        "description",
+        "listed",
+        "joinable",
+        "autoEnroll",
+        "appAccess",
+        "clientIds"
+      ],
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "listed": {
+          "type": "boolean"
+        },
+        "joinable": {
+          "type": "boolean"
+        },
+        "autoEnroll": {
+          "type": "boolean"
+        },
+        "appAccess": {
+          "type": "string",
+          "enum": ["open", "allowList"]
+        },
+        "clientIds": {
+          "type": "array",
+          "maxLength": 100,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "required": [
+        "displayName",
+        "description",
+        "listed",
+        "joinable",
+        "autoEnroll",
+        "appAccess",
+        "clientIds",
+        "boundary",
+        "roomId",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "revision",
+        "memberCount",
+        "reserved"
+      ],
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "listed": {
+          "type": "boolean"
+        },
+        "joinable": {
+          "type": "boolean"
+        },
+        "autoEnroll": {
+          "type": "boolean"
+        },
+        "appAccess": {
+          "type": "string",
+          "enum": ["open", "allowList"]
+        },
+        "clientIds": {
+          "type": "array",
+          "maxLength": 100,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        },
+        "boundary": {
+          "type": "string"
+        },
+        "roomId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "deactivating", "inactive"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memberCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reserved": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.createBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Create a persistent boundary. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["name", "settings"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "settings": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#settings"
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.deactivateBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Block grants, remove every member, then mark the boundary inactive. Records and the boundary are retained. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "revision"],
+          "properties": {
+            "boundary": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.admin.getBoundaryAuditState",
   "defs": {
     "main": {
@@ -266,6 +513,32 @@ export const stratosLexicons: LexiconDoc[] = [
           "type": "string",
           "format": "did",
           "description": "Who granted access. Absent for config admins."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listBoundaries",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List boundary definitions, lifecycle state, and member counts. Requires admin authorization.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundaries"],
+          "properties": {
+            "boundaries": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "zone.stratos.admin.boundaryDefs#boundary"
+              }
+            }
+          }
         }
       }
     }
@@ -551,6 +824,62 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.admin.reactivateBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Reactivate an empty inactive boundary without restoring memberships. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "revision"],
+          "properties": {
+            "boundary": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.admin.removeAdmin",
   "defs": {
     "main": {
@@ -650,6 +979,66 @@ export const stratosLexicons: LexiconDoc[] = [
       },
       "errors": [
         { "name": "NotFound", "description": "The DID is not enrolled." }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.updateBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Update boundary settings if its revision still matches. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary", "revision", "settings"],
+          "properties": {
+            "boundary": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "settings": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#settings"
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
       ]
     }
   }
@@ -1494,6 +1883,53 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.server.listRooms",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "List publicly listed rooms from the authority-owned boundary catalog. Unavailable rooms cannot accept joins.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["rooms"],
+          "properties": {
+            "rooms": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#room"
+              }
+            }
+          }
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "required": ["id", "boundary", "displayName", "description", "available"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "boundary": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.space.feed",
   "defs": {
     "main": {
@@ -1868,6 +2304,68 @@ export const stratosLexicons: LexiconDoc[] = [
           "description": "The requested repo does not exist or has no commits."
         }
       ]
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.sync.listBoundaries",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Read the current active boundary catalog for an enrolled service. Only boundaries the authenticated service currently holds are returned. Joinability controls new joins, not existing member reads.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundaries"],
+          "properties": {
+            "boundaries": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#boundary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "required": [
+        "boundary",
+        "roomId",
+        "displayName",
+        "description",
+        "listed",
+        "joinable",
+        "revision"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "roomId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "listed": {
+          "type": "boolean"
+        },
+        "joinable": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     }
   }
 },

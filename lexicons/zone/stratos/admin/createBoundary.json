@@ -1,0 +1,58 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.createBoundary",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Create a persistent boundary. Requires admin authorization.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["name", "settings"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "settings": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#settings"
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["boundary"],
+          "properties": {
+            "boundary": {
+              "type": "ref",
+              "ref": "zone.stratos.admin.boundaryDefs#boundary"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryNotFound"
+        },
+        {
+          "name": "BoundaryExists"
+        },
+        {
+          "name": "BoundaryConflict"
+        },
+        {
+          "name": "ReservedBoundary"
+        },
+        {
+          "name": "BoundaryUnavailable"
+        }
+      ]
+    }
+  }
+}

@@ -1,27 +1,36 @@
 <script lang="ts">
   import Router, { router } from 'svelte-spa-router'
-  import { auth, refreshAuth, setUnauthenticated } from './lib/stores/auth.svelte'
+  import {
+    auth,
+    refreshAuth,
+    setUnauthenticated,
+  } from './lib/stores/auth.svelte'
   import { logout } from './lib/api/client'
   import Logo from './lib/components/ui/Logo.svelte'
   import Identity from './lib/components/ui/Identity.svelte'
   import ThemeToggle from './lib/components/ui/ThemeToggle.svelte'
   import Login from './routes/Login.svelte'
   import Health from './routes/Health.svelte'
-  import Domains from './routes/Domains.svelte'
+  import Boundaries from './routes/Boundaries.svelte'
   import Enrollments from './routes/Enrollments.svelte'
   import Admins from './routes/Admins.svelte'
 
   const routes = {
     '/': Health,
     '/health': Health,
-    '/domains': Domains,
+    '/boundaries': Boundaries,
+    '/domains': Boundaries,
     '/enrollments': Enrollments,
     '/admins': Admins,
   }
 
   const nav = [
     { href: '#/health', label: 'Health', match: ['/', '/health'] },
-    { href: '#/domains', label: 'Domains', match: ['/domains'] },
+    {
+      href: '#/boundaries',
+      label: 'Boundaries',
+      match: ['/boundaries', '/domains'],
+    },
     { href: '#/enrollments', label: 'Enrollments', match: ['/enrollments'] },
     { href: '#/admins', label: 'Admins', match: ['/admins'] },
   ]
@@ -50,7 +59,7 @@
     class="mx-auto flex min-h-dvh w-full max-w-4xl flex-col px-5 pb-16"
     data-testid="admin-shell"
   >
-    <header class="flex items-center justify-between py-4">
+    <header class="flex flex-wrap items-center justify-between gap-3 py-4">
       <Logo />
       <div class="flex items-center gap-3">
         <span class="text-sm text-muted" data-testid="whoami-did">
@@ -68,7 +77,7 @@
       </div>
     </header>
 
-    <nav class="flex gap-2 pb-6">
+    <nav aria-label="Administration" class="flex flex-wrap gap-2 pb-6">
       {#each nav as item (item.href)}
         <a
           class="squish px-4 py-1.5 text-sm no-underline {item.match.includes(

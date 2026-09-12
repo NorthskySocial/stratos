@@ -179,6 +179,11 @@ async function handleGetSpaceCredential(
   // Membership: the user must be enrolled in the boundary for this space.
   const boundary = `${spaceDid}/${skey}`
 
+  const definition = await ctx.boundaryStore?.get(boundary)
+  if (ctx.boundaryStore && definition?.status !== 'active') {
+    throw new InvalidRequestError('Space is unavailable', 'UnknownSpace')
+  }
+
   // Boundary rows outlive deactivation, so a boundaries-only check would let a
   // suspended member keep minting credentials. Deny inactive enrollments first,
   // under the same NotEnrolled shape (no membership-status oracle).
@@ -198,8 +203,13 @@ async function handleGetSpaceCredential(
     )
   }
 
-  // App-axis (client attestation) gating. `#open` spaces are a no-op.
-  await enforceAppAccess(ctx, boundary, input?.clientAttestation)
+  // Bind authorization and the token to the same catalog revision.
+  const access: AppAccess = definition
+    ? definition.appAccess === 'open'
+      ? { kind: 'open' }
+      : { kind: 'allowList', clientIds: definition.clientIds }
+    : resolveAppAccess(ctx.cfg.stratos.spaceAppAccess, boundary)
+  await enforceAppAccess(ctx, access, input!.clientAttestation)
 
   // Key binding: the delegation path proves key possession with a standalone
   // mint-time DPoP proof; the DPoP path reuses the session proof's key.
@@ -215,6 +225,17 @@ async function handleGetSpaceCredential(
     )
   }
 
+  if (definition) {
+    const current = await ctx.boundaryStore!.get(boundary)
+    // Every lifecycle transition increments the revision, including inactivation.
+    if (current?.revision !== definition.revision) {
+      throw new InvalidRequestError(
+        'Space changed during authorization',
+        'UnknownSpace',
+      )
+    }
+  }
+
   // Burn the single-use delegation token LAST: every other gate has passed,
   // so a rejected attestation or missing mint proof does not spend it.
   if (delegation) {
@@ -226,6 +247,7 @@ async function handleGetSpaceCredential(
     issuerDid: ctx.serviceDid,
     spaceUri: space,
     ttlSeconds: ctx.cfg.stratos.spaceCredentialTtlSeconds,
+    boundaryRevision: definition?.revision,
     jkt,
   })
 
@@ -368,13 +390,9 @@ async function resolveDelegationIdentity(
  */
 async function enforceAppAccess(
   ctx: AppContext,
-  boundary: string,
+  access: AppAccess,
   clientAttestation: string | undefined,
 ): Promise<void> {
-  const access: AppAccess = resolveAppAccess(
-    ctx.cfg.stratos.spaceAppAccess,
-    boundary,
-  )
   if (access.kind === 'open') {
     // Open space: ignore any attestation supplied.
     return
