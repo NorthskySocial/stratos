@@ -107,8 +107,32 @@ describe('service enrollment config parsing', () => {
       ]),
     })
 
-    expect(envToConfig(parseEnv()).enrollment.serviceEnrollments[0].boundaries).toEqual(['did:web:host/secret'])
+    expect(
+      envToConfig(parseEnv()).enrollment.serviceEnrollments[0].boundaries,
+    ).toEqual(['did:web:host/secret'])
   })
+  it.each([
+    [null, 'missing a non-empty "did"'],
+    [{ did: 'did:web:bebop.example' }, 'must declare a "boundaries" array'],
+    [
+      { did: 'did:web:bebop.example', boundaries: [null] },
+      'has an invalid boundary',
+    ],
+    [
+      { did: 'did:web:bebop.example', boundaries: [''] },
+      'has an invalid boundary',
+    ],
+    [
+      { did: 'did:web:bebop.example', boundaries: [] },
+      'must declare at least one boundary',
+    ],
+  ])(
+    'rejects malformed service configuration %j before catalog startup',
+    (entry, message) => {
+      setEnv({ STRATOS_SERVICE_ENROLLMENTS: JSON.stringify([entry]) })
+      expect(() => envToConfig(parseEnv())).toThrow(message)
+    },
+  )
 
   it('throws when the file cannot be read', () => {
     const missing = join(tmp, 'missing.json')

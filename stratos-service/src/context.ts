@@ -93,6 +93,8 @@ export async function createAppContext(
     sign: (bytes) => signingKey.sign(bytes),
   })
 
+  await storage.normalizeLegacyMemberships()
+
   const { enrollmentEvents, sequenceEvents } = initEventEmitters()
 
   const services = await initCoreServices(
@@ -165,7 +167,7 @@ export async function createAppContext(
      * Destroy the application context
      */
     async destroy() {
-      await ctx.boundaryManager?.stop()
+      await ctx.boundaryManager!.stop()
       await pdsSyncWorker.stop()
       await storageDestroy()
       await identity.serviceIdentity.close()

@@ -22,13 +22,16 @@ export class BoundaryManager {
   private draining: Promise<void> | null = null
   private timer: ReturnType<typeof setInterval> | undefined
   private stopped = false
+  private readonly onError: (error: unknown) => void
 
-  constructor(private readonly deps: BoundaryManagerDeps) {}
+  constructor(private readonly deps: BoundaryManagerDeps) {
+    this.onError = deps.onError ?? (() => {})
+  }
 
   start(): void {
     if (this.timer || this.stopped) return
     this.timer = setInterval(() => {
-      void this.drain().catch((err: unknown) => this.deps.onError?.(err))
+      void this.drain().catch(this.onError)
     }, 5_000)
     this.timer.unref()
   }
@@ -51,11 +54,6 @@ export class BoundaryManager {
   ): Promise<BoundaryDetails> {
     const boundary = qualifyNewBoundary(this.deps.serviceDid, name)
     validateBoundarySettings(settings)
-    if (await this.deps.store.get(boundary))
-      throw new BoundaryManagementError(
-        'This boundary already exists',
-        'BoundaryExists',
-      )
     const now = new Date().toISOString()
     const definition: BoundaryDefinition = {
       ...settings,
@@ -66,7 +64,11 @@ export class BoundaryManager {
       updatedAt: now,
       revision: 1,
     }
-    await this.deps.store.create(definition)
+    if (!(await this.deps.store.create(definition)))
+      throw new BoundaryManagementError(
+        'This boundary name or room ID already exists',
+        'BoundaryExists',
+      )
     await this.deps.configuration.refresh()
     return this.details(definition)
   }
@@ -148,7 +150,7 @@ export class BoundaryManager {
         }
         await this.deps.store.finishDeactivation(definition.boundary)
       } catch (err) {
-        this.deps.onError?.(err)
+        this.onError(err)
       }
     }
     await this.deps.configuration.refresh()

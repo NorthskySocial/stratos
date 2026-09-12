@@ -31,6 +31,13 @@ describe('Postgres boundary catalog', () => {
     db = createServicePgDb(url)
     otherDb = createServicePgDb(url)
     await migrateServicePgDb(db)
+    // External mutation databases are reused, but migration tests need an empty catalog.
+    await db.execute(
+      sql`DROP TABLE IF EXISTS boundary_catalog_state, boundary_definition, boundary_deactivation_member CASCADE`,
+    )
+    await db.execute(
+      sql`DROP FUNCTION IF EXISTS stratos_guard_boundary_membership() CASCADE`,
+    )
     await migratePgBoundaries(db)
     await migratePgBoundaries(db)
     await db.execute(

@@ -58,13 +58,30 @@ export function validateServiceEnrollments(
   entries: RawServiceEnrollment[],
   options: ValidateServiceEnrollmentsOptions,
 ): ServiceEnrollment[] {
-  const { serviceDid, allowedDomains } = options
-  const allowed = new Set(allowedDomains)
+  const result = parseServiceEnrollments(entries, options.serviceDid)
+  const allowed = new Set(options.allowedDomains)
+  for (const enrollment of result) {
+    for (const boundary of enrollment.boundaries) {
+      if (!allowed.has(boundary)) {
+        throw new InvalidServiceEnrollmentError(
+          `service enrollment "${enrollment.did}" references boundary "${boundary}" not in allowedDomains`,
+        )
+      }
+    }
+  }
+  return result
+}
+
+/** Parse config shape and qualify identities; the persistent catalog checks existence later. */
+export function parseServiceEnrollments(
+  entries: RawServiceEnrollment[],
+  serviceDid: string,
+): ServiceEnrollment[] {
   const seen = new Set<string>()
   const result: ServiceEnrollment[] = []
 
   for (const entry of entries) {
-    const did = entry.did
+    const did = entry?.did
     if (typeof did !== 'string' || did.length === 0) {
       throw new InvalidServiceEnrollmentError(
         'service enrollment entry is missing a non-empty "did"',
@@ -103,14 +120,6 @@ export function validateServiceEnrollments(
       serviceDid,
       rawBoundaries as string[],
     )
-
-    for (const boundary of qualified) {
-      if (!allowed.has(boundary)) {
-        throw new InvalidServiceEnrollmentError(
-          `service enrollment "${did}" references boundary "${boundary}" not in allowedDomains`,
-        )
-      }
-    }
 
     const signingKey = validateSigningKey(did, entry.signingKey)
 

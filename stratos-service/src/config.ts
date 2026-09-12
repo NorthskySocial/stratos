@@ -3,14 +3,13 @@ import {
   commaListSchema,
   dbConfigSchema,
   ENROLLMENT_MODE,
-  ensureQualifiedBoundaries,
   InvalidServiceEnrollmentError,
   isValidSkey,
   loggingConfigSchema,
   qualifyBoundary,
   qualifyBoundaries,
   redisConfigSchema,
-  validateServiceEnrollments,
+  parseServiceEnrollments,
   type RawServiceEnrollment,
   type ServiceEnrollment,
 } from '@northskysocial/stratos-core'
@@ -550,13 +549,11 @@ function loadMergedJsonArray<T>(opts: {
  * Combines file and inline sources; duplicate DIDs across sources fail fast.
  * @param env - Environment variables object.
  * @param serviceDid - Bare service DID used to qualify boundaries.
- * @param allowedDomains - Qualified boundaries the service may grant.
  * @returns The validated service enrollments.
  */
 function loadServiceEnrollments(
   env: Env,
   serviceDid: string,
-  allowedDomains: string[],
 ): ServiceEnrollment[] {
   const raw = loadMergedJsonArray<RawServiceEnrollment>({
     filePath: env.STRATOS_SERVICE_ENROLLMENTS_FILE,
@@ -568,13 +565,7 @@ function loadServiceEnrollments(
   })
 
   // The persistent catalog validates references after the service database opens.
-  const declared = raw.flatMap((entry) =>
-    Array.isArray(entry?.boundaries) ? entry.boundaries.filter((b): b is string => typeof b === 'string' && b.length > 0) : [],
-  )
-  return validateServiceEnrollments(raw, {
-    serviceDid,
-    allowedDomains: [...allowedDomains, ...ensureQualifiedBoundaries(serviceDid, declared)],
-  })
+  return parseServiceEnrollments(raw, serviceDid)
 }
 
 /**
@@ -741,11 +732,7 @@ export function envToConfig(env: Env): StratosServiceConfig {
       allowListUrl: env.STRATOS_ALLOW_LIST_URI,
       allowListBootstrapName: env.STRATOS_ALLOW_LIST_BOOTSTRAP_NAME,
       valkeyUrl: env.STRATOS_VALKEY_URL,
-      serviceEnrollments: loadServiceEnrollments(
-        env,
-        serviceDid,
-        allowedBoundaries,
-      ),
+      serviceEnrollments: loadServiceEnrollments(env, serviceDid),
     },
     roomCatalog,
     pdsSync: pdsSyncConfig(env),

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sql } from 'drizzle-orm'
 import {
   setup,
   type Harness,
@@ -76,6 +77,48 @@ describe('boundary configuration migration', () => {
         true,
       )
     }
+  })
+  it('reserves explicit legacy room IDs before assigning collision-free hidden IDs', async () => {
+    const cfg = createTestConfig(h.dir)
+    cfg.stratos.allowedDomains = [GENERAL, ENGINEERING, `${SERVICE}/design`]
+    const rooms = [
+      {
+        id: 'general',
+        boundary: ENGINEERING,
+        displayName: 'Bebop',
+        description: '',
+        available: true,
+      },
+      {
+        id: 'general-2',
+        boundary: `${SERVICE}/design`,
+        displayName: 'Sailor Moon',
+        description: '',
+        available: true,
+      },
+    ]
+    cfg.roomCatalog = {
+      list: () => rooms,
+      get: (id) => rooms.find((room) => room.id === id),
+    }
+    const definitions = initialBoundaryDefinitions(cfg)
+    expect(definitions.map((d) => d.roomId)).toEqual([
+      'general-3',
+      'general',
+      'general-2',
+    ])
+    expect(definitions[0]).toMatchObject({
+      displayName: 'general',
+      listed: false,
+    })
+    await h.db.run(sql`DELETE FROM boundary_catalog_state`)
+    await h.db.run(sql`DELETE FROM boundary_definition`)
+    await h.store.initialize(definitions)
+    expect((await h.store.list()).map((d) => d.roomId).sort()).toEqual([
+      'general',
+      'general-2',
+      'general-3',
+    ])
   })
   it('updates shared array/map references and public rooms from persistent settings', async () => {
     const domains = h.cfg.stratos.allowedDomains
@@ -187,6 +230,35 @@ describe('boundary configuration migration', () => {
       ),
     ).toEqual([GENERAL])
   })
+  it('recovers from a failed refresh and serializes overlapping snapshots', async () => {
+    const list = vi
+      .spyOn(h.store, 'list')
+      .mockRejectedValueOnce(new Error('database unavailable'))
+    await expect(h.configuration.refresh()).rejects.toThrow(
+      'database unavailable',
+    )
+    await h.configuration.refresh()
+    let release!: (definitions: typeof h.seeds) => void
+    list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    const earlier = h.configuration.refresh()
+    await Promise.resolve()
+    await Promise.resolve()
+    const callCount = list.mock.calls.length
+    const later = h.configuration.refresh()
+    await h.store.update(ENGINEERING, { ...settings, displayName: 'Faye' }, 1)
+    expect(list).toHaveBeenCalledTimes(callCount)
+    release(h.seeds)
+    await Promise.all([earlier, later])
+    expect(h.configuration.rooms.get('engineering')).toMatchObject({
+      displayName: 'Faye',
+    })
+    list.mockRestore()
+  })
 })
 
 describe('authoritative active-boundary enrollment reads and writes', () => {
@@ -233,23 +305,100 @@ describe('authoritative active-boundary enrollment reads and writes', () => {
     expect(await h.members.enrollmentCount()).toBe(1)
     expect(await h.members.isEnrolled('did:plc:spike')).toBe(true)
   })
+  it('preserves optional boundary fields on metadata-only enrollment rows', async () => {
+    const metadata = (await h.raw.getEnrollment('did:plc:spike'))!
+    expect(metadata).not.toHaveProperty('boundaries')
+    const reader = Object.create(h.members) as typeof h.members
+    reader.getEnrollment = async () => metadata
+    reader.listEnrollments = async () => [metadata]
+    reader.listServiceEnrollments = async () => [metadata]
+    reader.listEnrollmentsByBoundary = async () => [metadata]
+    const guarded = new ActiveBoundaryEnrollmentStore(reader, h.store)
+    expect(await guarded.getEnrollment(metadata.did)).toEqual(metadata)
+    expect(await guarded.listEnrollments()).toEqual([metadata])
+    expect(await guarded.listServiceEnrollments()).toEqual([metadata])
+    expect(await guarded.listEnrollmentsByBoundary(GENERAL)).toEqual([metadata])
+  })
+  it('returns no members for an unknown boundary without consulting enrollment rows', async () => {
+    const list = vi.spyOn(h.raw, 'listEnrollmentsByBoundary')
+    expect(
+      await h.members.listEnrollmentsByBoundary(`${SERVICE}/unknown`),
+    ).toEqual([])
+    expect(list).not.toHaveBeenCalled()
+  })
+  it('allows enrollment without an explicit boundary list and retains the reserved membership', async () => {
+    await h.members.enroll({
+      did: 'did:plc:faye',
+      active: true,
+      enrolledAt: '2026-09-12T15:00:00.000Z',
+      signingKeyDid: 'did:key:faye',
+    })
+    expect(await h.members.getBoundaries('did:plc:faye')).toEqual([GENERAL])
+    expect(await h.raw.getBoundaries('did:plc:faye')).toEqual([GENERAL])
+    expect(await h.members.isEnrolled('did:plc:faye')).toBe(true)
+  })
+  it('canonicalizes legacy memberships through the signed store before enabling admin lifecycle', async () => {
+    await h.raw.enroll({
+      did: 'did:plc:faye',
+      active: true,
+      boundaries: ['engineering', ENGINEERING, 'unknown'],
+      enrolledAt: '2026-09-12T15:00:00.000Z',
+      signingKeyDid: 'did:key:faye',
+    })
+    const queued: string[] = []
+    expect(await h.store.listLegacyMembers(SERVICE, 1)).toEqual([
+      'did:plc:faye',
+    ])
+    await h.members.normalizeLegacyMemberships(SERVICE, async (did) => {
+      queued.push(did)
+    })
+    expect(queued).toEqual(['did:plc:faye', 'did:plc:faye'])
+    expect(await h.raw.getBoundaries('did:plc:faye')).toEqual([
+      ENGINEERING,
+      GENERAL,
+      'unknown',
+    ])
+    expect(await h.store.listLegacyMembers(SERVICE, 1)).toEqual([])
+    const page = await h.audit.list('did:plc:faye')
+    expect(page.operations.at(-1)?.operation.after.boundaries).toEqual([
+      ENGINEERING,
+      GENERAL,
+      'unknown',
+    ])
+    await h.manager.deactivate(ENGINEERING, 1)
+    await h.manager.reactivate(ENGINEERING, 3)
+    expect(await h.members.getBoundaries('did:plc:faye')).toEqual([GENERAL])
+  })
+
   it('guards every grant entry point while permitting revocation and metadata edits', async () => {
     await h.store.beginDeactivation(ENGINEERING, 1)
     const original = await h.raw.getEnrollment('did:plc:spike')
     await expect(
       h.members.enroll({ ...original!, boundaries: [ENGINEERING] }),
-    ).rejects.toMatchObject({ code: 'BoundaryUnavailable' })
+    ).rejects.toMatchObject({
+      code: 'BoundaryUnavailable',
+      message: 'The boundary is inactive or unavailable',
+    })
     await expect(
       h.members.setBoundaries('did:plc:spike', [ENGINEERING]),
-    ).rejects.toMatchObject({ code: 'BoundaryUnavailable' })
+    ).rejects.toMatchObject({
+      code: 'BoundaryUnavailable',
+      message: 'The boundary is inactive or unavailable',
+    })
     await expect(
       h.members.addBoundary('did:plc:spike', ENGINEERING),
-    ).rejects.toMatchObject({ code: 'BoundaryUnavailable' })
+    ).rejects.toMatchObject({
+      code: 'BoundaryUnavailable',
+      message: 'The boundary is inactive or unavailable',
+    })
     await expect(
       h.members.updateEnrollment('did:plc:spike', {
         boundaries: [ENGINEERING],
       }),
-    ).rejects.toMatchObject({ code: 'BoundaryUnavailable' })
+    ).rejects.toMatchObject({
+      code: 'BoundaryUnavailable',
+      message: 'The boundary is inactive or unavailable',
+    })
     await h.members.updateEnrollment('did:plc:spike', { active: false })
     expect(await h.members.isEnrolled('did:plc:spike')).toBe(false)
     await h.members.updateEnrollment('did:plc:spike', { boundaries: [GENERAL] })

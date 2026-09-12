@@ -46,11 +46,6 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
 
   return async (req: express.Request, res: express.Response) => {
     try {
-      await config.refreshBoundaryConfiguration?.()
-      const configuredEnrollBoundaries = selectEnrollBoundaries(
-        autoEnrollDomains,
-        defaultBoundaries,
-      )
       const params = new URLSearchParams(req.url.split('?')[1] || '')
 
       // Complete the OAuth flow. `state` carries the redirect target that
@@ -58,6 +53,10 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
       const { session, state } = await oauthClient.callback(params)
       const did = session.sub
       await config.refreshBoundaryConfiguration?.()
+      const configuredEnrollBoundaries = selectEnrollBoundaries(
+        autoEnrollDomains,
+        defaultBoundaries,
+      )
       const roomState =
         config.roomCatalog && isRoomOAuthStateCandidate(state)
           ? decodeRoomOAuthState(state, config.roomCatalog)

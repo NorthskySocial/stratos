@@ -1,4 +1,7 @@
-import { AuthRequiredError, type Server as XrpcServer } from '@atproto/xrpc-server'
+import {
+  AuthRequiredError,
+  type Server as XrpcServer,
+} from '@atproto/xrpc-server'
 import type { BoundarySettings } from '@northskysocial/stratos-core'
 import type { AppContext } from '../../context-types.js'
 import type { XrpcServerInternal } from '../../api/types.js'
@@ -22,7 +25,6 @@ export function registerBoundaryHandlers(
   ) => {
     const method = `zone.stratos.admin.${name}`
     xrpc.method(method, {
-      type: 'procedure',
       auth: ctx.authVerifier.admin,
       handler: createXrpcHandler<Input>(ctx, method, {
         handler: async ({ input }) => ({ boundary: await action(input) }),
@@ -45,7 +47,6 @@ export function registerBoundaryHandlers(
   )
   const listMethod = 'zone.stratos.admin.listBoundaries'
   xrpc.method(listMethod, {
-    type: 'query',
     auth: ctx.authVerifier.admin,
     handler: createXrpcHandler(ctx, listMethod, {
       handler: async () => ({ boundaries: await manager.list() }),
@@ -53,30 +54,40 @@ export function registerBoundaryHandlers(
   })
   const syncMethod = 'zone.stratos.sync.listBoundaries'
   xrpc.method(syncMethod, {
-    type: 'query',
     auth: ctx.authVerifier.service,
     handler: createXrpcHandler(ctx, syncMethod, {
       handler: async ({ auth }) => {
-        const did = auth?.credentials.did
-        const enrollment = did ? await ctx.enrollmentStore.getEnrollment(did) : null
-        if (!did || !enrollment?.active || !enrollment.isService) throw new AuthRequiredError('Service enrollment required')
+        const did = auth!.credentials.did
+        const enrollment = did
+          ? await ctx.enrollmentStore.getEnrollment(did)
+          : null
+        if (!did || !enrollment?.active || !enrollment.isService)
+          throw new AuthRequiredError('Service enrollment required')
         const membership = new Set(await ctx.enrollmentStore.getBoundaries(did))
         const definitions = await ctx.boundaryStore!.list()
-        return { boundaries: definitions.filter((d) => d.status === 'active' && membership.has(d.boundary)).map((d) => ({
-          boundary: d.boundary, roomId: d.roomId, displayName: d.displayName,
-          description: d.description, listed: d.listed, joinable: d.joinable, revision: d.revision,
-        })) }
+        return {
+          boundaries: definitions
+            .filter((d) => d.status === 'active' && membership.has(d.boundary))
+            .map((d) => ({
+              boundary: d.boundary,
+              roomId: d.roomId,
+              displayName: d.displayName,
+              description: d.description,
+              listed: d.listed,
+              joinable: d.joinable,
+              revision: d.revision,
+            })),
+        }
       },
     }),
   })
   const roomsMethod = 'zone.stratos.server.listRooms'
   xrpc.method(roomsMethod, {
-    type: 'query',
     handler: createXrpcHandler(ctx, roomsMethod, {
       requireAuth: false,
       handler: async () => {
-        await ctx.boundaryConfiguration?.refresh()
-        return { rooms: ctx.cfg.roomCatalog?.list() ?? [] }
+        await ctx.boundaryConfiguration!.refresh()
+        return { rooms: ctx.boundaryConfiguration!.rooms.list() }
       },
     }),
   })

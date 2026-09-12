@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   InvalidServiceEnrollmentError,
   validateServiceEnrollments,
+  parseServiceEnrollments,
 } from '../src'
 
 const SERVICE_DID = 'did:web:stratos.actor'
@@ -11,6 +12,77 @@ const OPTIONS = {
 }
 
 describe('validateServiceEnrollments', () => {
+  it('parses identities before database-owned boundary existence validation', () => {
+    expect(
+      parseServiceEnrollments(
+        [{ did: 'did:web:bebop.example', boundaries: ['new-room'] }],
+        SERVICE_DID,
+      ),
+    ).toEqual([
+      { did: 'did:web:bebop.example', boundaries: [`${SERVICE_DID}/new-room`] },
+    ])
+    expect(() => parseServiceEnrollments([null as never], SERVICE_DID)).toThrow(
+      'missing a non-empty "did"',
+    )
+  })
+  it('preserves an explicitly configured service signing key', () => {
+    expect(
+      parseServiceEnrollments(
+        [
+          {
+            did: 'did:web:bebop.example',
+            boundaries: ['engineering'],
+            signingKey: 'did:key:zSpike',
+          },
+        ],
+        SERVICE_DID,
+      ),
+    ).toEqual([
+      {
+        did: 'did:web:bebop.example',
+        boundaries: [`${SERVICE_DID}/engineering`],
+        signingKey: 'did:key:zSpike',
+      },
+    ])
+  })
+  it.each([undefined, null])('omits an absent service key %s', (signingKey) => {
+    expect(
+      parseServiceEnrollments(
+        [
+          {
+            did: 'did:web:bebop.example',
+            boundaries: ['engineering'],
+            signingKey,
+          },
+        ],
+        SERVICE_DID,
+      ),
+    ).toStrictEqual([
+      {
+        did: 'did:web:bebop.example',
+        boundaries: [`${SERVICE_DID}/engineering`],
+      },
+    ])
+  })
+  it.each(['', 123, 'https://bebop.example', 'zSpike:did:key:'])(
+    'rejects an invalid configured service key %s',
+    (signingKey) => {
+      expect(() =>
+        parseServiceEnrollments(
+          [
+            {
+              did: 'did:web:bebop.example',
+              boundaries: ['engineering'],
+              signingKey,
+            },
+          ],
+          SERVICE_DID,
+        ),
+      ).toThrow(
+        'service enrollment "did:web:bebop.example" has an invalid "signingKey" (must be a did:key)',
+      )
+    },
+  )
   it('qualifies bare boundary names against the service DID', () => {
     const result = validateServiceEnrollments(
       [{ did: 'did:web:nerv.appview', boundaries: ['engineering'] }],
