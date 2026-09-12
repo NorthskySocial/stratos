@@ -98,6 +98,12 @@ export function registerGetFeedHandler(
           deps.store,
         )
         assertReadiness(deps.readiness)
+        if (deps.feeds.get(feedId) !== feed) {
+          throw new NotEnoughResourcesError(
+            'Feed catalogue changed during the request',
+            'FeedNotReady',
+          )
+        }
         const output = {
           encoding: 'application/json',
           body: {

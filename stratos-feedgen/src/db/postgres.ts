@@ -303,6 +303,14 @@ export class PgFeedgenStore implements FeedgenStore {
     }
   }
 
+  async listIndexedBoundaries(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ boundary: postBoundaryTbl.boundary })
+      .from(postBoundaryTbl)
+      .orderBy(asc(postBoundaryTbl.boundary))
+    return rows.map((row) => row.boundary)
+  }
+
   async deletePostsByBoundary(boundary: string): Promise<number> {
     const deleted = await this.db
       .delete(postTbl)

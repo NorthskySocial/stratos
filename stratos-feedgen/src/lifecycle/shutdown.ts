@@ -12,6 +12,7 @@ export interface ShutdownDeps {
    * The promise must not reject.
    */
   startup?: Promise<void> | null
+  boundaryCatalog?: { stop: () => Promise<void> } | null
   serviceStream?: { stop: () => void | Promise<void> } | null
   reconcileScheduler?: {
     stop: () => Promise<void>
@@ -66,6 +67,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       if (deps.httpServer) {
         await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
       }
+      await deps.boundaryCatalog?.stop()
       await stopReconcileScheduler(
         deps.reconcileScheduler,
         drainTimeoutMs,

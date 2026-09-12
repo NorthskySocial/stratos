@@ -1,3 +1,8 @@
+import {
+  MAX_CATALOG_BYTES,
+  parseBoundaryCatalog,
+  type CatalogBoundary,
+} from '../feeds/catalog-model.js'
 import { Readable } from 'node:stream'
 import type { Keypair } from '@atproto/crypto'
 import type { Custody } from '@northskysocial/stratos-core'
@@ -11,6 +16,7 @@ import {
 } from '../observability/tracing.js'
 
 const LXM = {
+  listBoundaries: 'zone.stratos.sync.listBoundaries',
   resolveEnrollments: 'zone.stratos.identity.resolveEnrollments',
   hydrateRecords: 'zone.stratos.repo.hydrateRecords',
   getBlob: 'com.atproto.sync.getBlob',
@@ -146,6 +152,51 @@ export class UpstreamStratosClient {
     this.keypair = opts.keypair
     this.fetchImpl = opts.fetch ?? fetch
     this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+  }
+
+  async listBoundaries(signal: AbortSignal): Promise<CatalogBoundary[]> {
+    const lxm = LXM.listBoundaries
+    const url = `${this.serviceUrl}/xrpc/${lxm}`
+    const response = await this.request(lxm, url, {
+      method: 'GET',
+      signal,
+      headers: {
+        authorization: `Bearer ${await this.mintFor(lxm)}`,
+        accept: 'application/json',
+      },
+    })
+    await throwIfNotOk(response, url, lxm)
+    if (!response.body)
+      throw new StratosInvalidResponseError(
+        url,
+        lxm,
+        'Missing boundary catalogue',
+      )
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let length = 0
+    try {
+      signal.throwIfAborted()
+      let chunk = await reader.read()
+      while (!chunk.done) {
+        signal.throwIfAborted()
+        length += chunk.value.length
+        if (length > MAX_CATALOG_BYTES)
+          throw new StratosInvalidResponseError(
+            url,
+            lxm,
+            'Boundary catalogue exceeds response limit',
+          )
+        chunks.push(chunk.value)
+        chunk = await reader.read()
+      }
+      return parseBoundaryCatalog(
+        JSON.parse(Buffer.concat(chunks).toString()),
+        this.serviceDid,
+      )
+    } finally {
+      await reader.cancel()
+    }
   }
 
   async resolveEnrollments(
