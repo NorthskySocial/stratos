@@ -119,9 +119,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "description": "Read a consistent authority-signed actor membership checkpoint and resume cursor. Requires OAuth admin authorization. A checkpoint recovers current state; it does not reconstruct missing history.",
       "parameters": {
         "type": "params",
-        "required": [
-          "did"
-        ],
+        "required": ["did"],
         "properties": {
           "did": {
             "type": "string",
@@ -133,11 +131,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": [
-            "checkpoint",
-            "signature",
-            "cursor"
-          ],
+          "required": ["checkpoint", "signature", "cursor"],
           "properties": {
             "checkpoint": {
               "type": "ref",
@@ -286,9 +280,7 @@ export const stratosLexicons: LexiconDoc[] = [
       "description": "Page an actor\u2019s authority-signed boundary history. Requires OAuth admin authorization. Cursors bind actor, sequence, and hash. Never use user-repo signatures as boundary authorization.",
       "parameters": {
         "type": "params",
-        "required": [
-          "did"
-        ],
+        "required": ["did"],
         "properties": {
           "did": {
             "type": "string",
@@ -310,11 +302,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": [
-            "operations",
-            "cursor",
-            "hasMore"
-          ],
+          "required": ["operations", "cursor", "hasMore"],
           "properties": {
             "operations": {
               "type": "array",
@@ -342,11 +330,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "signedOperation": {
       "type": "object",
-      "required": [
-        "operation",
-        "hash",
-        "signature"
-      ],
+      "required": ["operation", "hash", "signature"],
       "properties": {
         "operation": {
           "type": "ref",
@@ -813,11 +797,7 @@ export const stratosLexicons: LexiconDoc[] = [
     },
     "state": {
       "type": "object",
-      "required": [
-        "enrolled",
-        "active",
-        "boundaries"
-      ],
+      "required": ["enrolled", "active", "boundaries"],
       "properties": {
         "enrolled": {
           "type": "boolean"
