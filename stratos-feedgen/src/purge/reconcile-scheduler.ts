@@ -1,38 +1,61 @@
-export type ReconcileTrigger = () => void
+export interface ReconcileTrigger {
+  (): void
+  stop: () => Promise<void>
+}
 
-/**
- * Serializes reconcile runs: a trigger during an in-flight run is coalesced
- * into exactly one follow-up run, so a reconnect storm cannot stack N
- * concurrent reconciles. Rejections are reported via `onError`, never thrown —
- * the next trigger retries.
- */
+const INITIAL_RETRY_DELAY_MS = 5_000
+const MAX_RETRY_DELAY_MS = 60_000
+
+/** Serialize reconciliation and retry incomplete authority checks until reads reopen. */
 export function createReconcileScheduler(
-  run: () => Promise<void>,
+  run: () => Promise<boolean>,
   onError: (err: Error) => void = defaultOnError,
 ): ReconcileTrigger {
-  let running = false
+  let running: Promise<void> | null = null
   let followUpRequested = false
+  let stopped = false
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let retryDelayMs = INITIAL_RETRY_DELAY_MS
 
-  const launch = (): void => {
-    running = true
-    run()
-      .catch((err: unknown) => onError(err as Error))
-      .finally(() => {
-        running = false
-        if (followUpRequested) {
-          followUpRequested = false
-          launch()
-        }
-      })
+  const execute = async (): Promise<boolean> => {
+    try {
+      return await run()
+    } catch (err) {
+      onError(err as Error)
+      return false
+    }
   }
 
-  return () => {
+  const trigger = (): void => {
+    if (stopped) return
+    clearTimeout(retryTimer)
     if (running) {
       followUpRequested = true
       return
     }
-    launch()
+    running = execute().then((released) => {
+      running = null
+      if (released) retryDelayMs = INITIAL_RETRY_DELAY_MS
+      if (!stopped) {
+        if (followUpRequested) {
+          followUpRequested = false
+          trigger()
+        } else if (!released) {
+          retryTimer = setTimeout(trigger, retryDelayMs)
+          retryTimer.unref()
+          retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS)
+        }
+      }
+    })
   }
+
+  return Object.assign(trigger, {
+    async stop(): Promise<void> {
+      stopped = true
+      clearTimeout(retryTimer)
+      await running
+    },
+  })
 }
 
 function defaultOnError(err: Error): void {

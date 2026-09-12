@@ -431,7 +431,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // persisted snapshot against a fresh resolveEnrollments snapshot. Bounded
   // via batching so upstream resolves don't fan out unbounded on large
   // tenants.
-  const runReconcile = async (): Promise<void> => {
+  const runReconcile = async (): Promise<boolean> => {
     const startedAt = performance.now()
     const generation = feedReadiness.beginReconciliation()
     metrics.setReady(false)
@@ -472,6 +472,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
           'feed remains unavailable until enrollment reconciliation is complete',
         )
       }
+      return released
     } catch (error) {
       metrics.recordReconciliation({
         outcome: 'failed',
@@ -484,6 +485,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   const triggerReconcile = createReconcileScheduler(runReconcile, (err) => {
     logger.error({ err }, 'reconnect reconciliation failed')
   })
+  deps.shutdownDeps.reconcileScheduler = triggerReconcile
 
   // Seed only AFTER reconciliation so the snapshot already reflects
   // revocations that landed while the feedgen was down - otherwise an actor

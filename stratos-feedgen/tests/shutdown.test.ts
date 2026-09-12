@@ -83,6 +83,27 @@ async function listen(
 }
 
 describe('createShutdownHandler', () => {
+  it('drains reconciliation before closing the store or stopping the actor pool', async () => {
+    const reconciliation = deferred()
+    const stop = vi.fn(() => reconciliation.promise)
+    const poolStop = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const handler = createShutdownHandler({
+      reconcileScheduler: { stop },
+      actorPool: { stop: poolStop },
+      store: { close },
+      logger: nullLogger,
+      exit: vi.fn(),
+    })
+    const shutdown = handler('SIGTERM')
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce())
+    expect(close).not.toHaveBeenCalled()
+    expect(poolStop).not.toHaveBeenCalled()
+    reconciliation.resolve()
+    await shutdown
+    expect(poolStop).toHaveBeenCalledOnce()
+    expect(close).toHaveBeenCalledOnce()
+  })
   it('drains an in-flight request, then stops streams, pool, and store in order', async () => {
     const events: string[] = []
     const lines: CapturedLine[] = []

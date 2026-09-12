@@ -234,6 +234,10 @@ XRPC error `FeedNotReady`. Reads become available only after a complete reconcil
 the current authority. A pass bounded by `FEEDGEN_RECONCILE_MAX_ACTORS` is deliberately
 partial and does not release the read gate.
 
+Incomplete or failed reconciliations retry automatically after 5 seconds, doubling the
+delay up to 60 seconds. A successful pass resets the delay. A new stream session triggers
+an immediate pass; overlapping triggers coalesce into one follow-up.
+
 Keep `FEEDGEN_SUBSCRIBE_ENROLLMENTS` enabled for any serving deployment. Setting it to
 `false` leaves feed reads unavailable, so it is not a static-feed or manual-soak serving
 mode.
@@ -257,17 +261,17 @@ instead. Sentry reporting is independently enabled by `SENTRY_DSN`.
 
 ### `/health`
 
-Returns `{ok, version, serviceStreamConnected, actorPoolSize}`. `ok` is
-independent of subscription state: with `FEEDGEN_SUBSCRIBE_ENROLLMENTS=false`
-the stream fields read `false`/`0` by design. `/health` is a liveness signal,
-not a feed-readiness signal: `getFeed` remains HTTP `503` `FeedNotReady` until
-the complete current-authority reconciliation releases its read gate.
+Returns `{ok, feedReady, version, serviceStreamConnected, actorPoolSize}` with HTTP
+`200` when feed reads are ready and `503` while authorization reconciliation blocks
+them. Both `ok` and `feedReady` reflect the read gate. Disabling
+`FEEDGEN_SUBSCRIBE_ENROLLMENTS` leaves the serving deployment unhealthy.
 
 ### Shutdown semantics
 
 On SIGTERM/SIGINT the feedgen stops accepting connections and drains in-flight
 HTTP requests (15 s deadline, then open sockets are destroyed), waits for
-startup, stops the service stream, and drains the space scheduler. If the
+startup, stops the service stream, cancels reconciliation retries and drains the active
+reconciliation, then drains the space scheduler. If the
 scheduler misses the deadline, shutdown aborts its active pass and still waits
 for every raw member call that can access the store. It then drains actor
 commit applies, closes the DB, and exits 0. Cursor writes are completed or

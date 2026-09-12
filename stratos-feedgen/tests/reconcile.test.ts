@@ -315,10 +315,11 @@ describe('reconcile on reconnect', () => {
     const purgeActor = vi.spyOn(purger, 'purgeReconciledActorWithinScope')
 
     const trigger = createReconcileScheduler(async () => {
-      await reconcileEnrollments(
+      const summary = await reconcileEnrollments(
         { store, purger, client, log: () => {} },
         new Set([CREW_BOUNDARY]),
       )
+      return summary.errors === 0 && !summary.truncated
     })
     trigger()
 
@@ -737,6 +738,7 @@ describe('reconcile on reconnect', () => {
         new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
       )
       runs.push(summary)
+      return summary.errors === 0 && !summary.truncated
     })
     trigger()
 

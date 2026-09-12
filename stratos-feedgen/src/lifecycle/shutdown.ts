@@ -13,6 +13,7 @@ export interface ShutdownDeps {
    */
   startup?: Promise<void> | null
   serviceStream?: { stop: () => void | Promise<void> } | null
+  reconcileScheduler?: { stop: () => Promise<void> } | null
   spaceSyncScheduler?: {
     stop: () => Promise<void>
     abortActivePass: () => void
@@ -64,6 +65,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       }
       await awaitStartup(deps.startup, drainTimeoutMs, deps.logger)
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
+      await deps.reconcileScheduler?.stop()
       await stopSpaceSyncScheduler(
         deps.spaceSyncScheduler,
         drainTimeoutMs,
