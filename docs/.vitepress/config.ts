@@ -90,6 +90,7 @@ export default defineConfig({
             { text: 'Operations', link: '/operator/operations' },
             { text: 'Security', link: '/operator/security' },
             { text: 'Boundary History', link: '/operator/boundary-history' },
+            { text: 'Manage Boundaries', link: '/operator/boundaries' },
             { text: 'Troubleshooting', link: '/operator/troubleshooting' },
           ],
         },

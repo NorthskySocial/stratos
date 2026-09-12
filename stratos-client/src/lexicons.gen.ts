@@ -2318,9 +2318,7 @@ export const stratosLexicons: LexiconDoc[] = [
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": [
-            "boundaries"
-          ],
+          "required": ["boundaries"],
           "properties": {
             "boundaries": {
               "type": "array",

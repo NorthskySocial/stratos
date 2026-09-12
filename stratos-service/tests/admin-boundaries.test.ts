@@ -367,6 +367,15 @@ function createCtx(opts: {
 
 describe('admin boundary endpoints', () => {
   vi.setConfig({ testTimeout: 15000 })
+  it('lists domains in a minimal legacy context without persistent boundary configuration', async () => {
+    const { app, ctx } = createCtx({})
+    const response = await invokeGetRoute(
+      app,
+      '/xrpc/zone.stratos.server.listDomains',
+    )
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({ domains: ctx.cfg.stratos.allowedDomains })
+  })
   describe('POST /xrpc/zone.stratos.admin.addBoundary', () => {
     it('adds a boundary to an enrolled user', async () => {
       const { app, enrollmentStore, pdsSyncQueue } = createCtx({})

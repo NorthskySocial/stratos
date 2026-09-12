@@ -217,13 +217,19 @@ export async function verifySpaceCredential(
   await verifyOwnKeySignature(parts, deps.serviceKey)
 
   const boundaryRevision = payload.stratosBoundaryRevision
-  if (boundaryRevision !== undefined && (typeof boundaryRevision !== 'number' || !Number.isSafeInteger(boundaryRevision) || boundaryRevision < 1)) {
+  if (
+    boundaryRevision !== undefined &&
+    (!Number.isSafeInteger(boundaryRevision) ||
+      (boundaryRevision as number) < 1)
+  ) {
     throw new SpaceCredentialVerificationError('Invalid boundary revision')
   }
   const cnfJkt = payload.cnf?.jkt
   return {
     spaceUri: payload.sub,
-    ...(typeof boundaryRevision === 'number' ? { boundaryRevision } : {}),
+    ...(boundaryRevision !== undefined
+      ? { boundaryRevision: boundaryRevision as number }
+      : {}),
     ...(typeof cnfJkt === 'string' && cnfJkt ? { cnfJkt } : {}),
   }
 }

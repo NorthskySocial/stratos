@@ -11,6 +11,7 @@ export function initialBoundaryDefinitions(
   cfg: StratosServiceConfig,
 ): BoundaryDefinition[] {
   const rooms = cfg.roomCatalog?.list() ?? []
+  const usedRoomIds = new Set(rooms.map((room) => room.id))
   const automatic =
     (cfg.enrollment.autoEnrollDomains?.length ?? 0) > 0
       ? cfg.enrollment.autoEnrollDomains!
@@ -18,11 +19,18 @@ export function initialBoundaryDefinitions(
   const now = new Date().toISOString()
   return cfg.stratos.allowedDomains.map((boundary) => {
     const room = rooms.find((entry) => entry.boundary === boundary)
-    const name = boundary.slice(cfg.service.did.length + 1)
+    const name = boundary.slice(boundary.lastIndexOf('/') + 1)
+    let roomId = room?.id
+    if (roomId === undefined) {
+      roomId = name
+      let suffix = 2
+      while (usedRoomIds.has(roomId)) roomId = `${name}-${suffix++}`
+      usedRoomIds.add(roomId)
+    }
     const access = cfg.stratos.spaceAppAccess?.byBoundary.get(boundary)
     return {
       boundary,
-      roomId: room?.id ?? name,
+      roomId,
       displayName: room?.displayName ?? name,
       description: room?.description ?? '',
       listed: room !== undefined,
@@ -108,11 +116,7 @@ export class BoundaryConfiguration {
     this.cfg.enrollment.autoEnrollDomains.splice(
       0,
       this.cfg.enrollment.autoEnrollDomains.length,
-      ...active
-        .filter(
-          (d) => d.autoEnroll || d.boundary === this.cfg.stratos.reservedDomain,
-        )
-        .map((d) => d.boundary),
+      ...active.filter((d) => d.autoEnroll).map((d) => d.boundary),
     )
     this.cfg.roomCatalog = this.rooms
     const policies = this.cfg.stratos.spaceAppAccess ?? {

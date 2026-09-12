@@ -67,8 +67,10 @@ class SqlBoundaryCatalogStore implements BoundaryCatalogStore {
         await db.read(sql`INSERT INTO boundary_catalog_state (singleton) VALUES (1)
         ON CONFLICT DO NOTHING RETURNING singleton`)
       if (claimed.length === 0) return
-      for (const definition of definitions)
-        await insertDefinition(db, definition)
+      for (const definition of definitions) {
+        if (!(await insertDefinition(db, definition)))
+          throw new Error('Boundary import contains duplicate identities')
+      }
     })
   }
 
@@ -87,7 +89,7 @@ class SqlBoundaryCatalogStore implements BoundaryCatalogStore {
     return row ? decodeDefinition(row) : null
   }
 
-  create(definition: BoundaryDefinition): Promise<void> {
+  create(definition: BoundaryDefinition): Promise<boolean> {
     return insertDefinition(this.db, definition)
   }
 
@@ -161,6 +163,17 @@ class SqlBoundaryCatalogStore implements BoundaryCatalogStore {
     )
   }
 
+  async listLegacyMembers(
+    serviceDid: string,
+    limit: number,
+  ): Promise<string[]> {
+    const rows = await this.db
+      .read(sql`SELECT DISTINCT member.did FROM enrollment_boundary member
+      JOIN boundary_definition definition ON definition.boundary = ${serviceDid} || '/' || member.boundary
+      WHERE definition.status = 'active' ORDER BY member.did LIMIT ${limit}`)
+    return rows.map((row) => String(row.did))
+  }
+
   async countMembers(boundary: string): Promise<number> {
     const [row] = await this.db.read(
       sql`SELECT count(*) AS count FROM enrollment_boundary WHERE boundary = ${boundary}`,
@@ -172,12 +185,14 @@ class SqlBoundaryCatalogStore implements BoundaryCatalogStore {
 async function insertDefinition(
   db: BoundarySql,
   definition: BoundaryDefinition,
-): Promise<void> {
+): Promise<boolean> {
   const d = definition
-  await db.write(sql`INSERT INTO boundary_definition
+  const rows = await db.read(sql`INSERT INTO boundary_definition
     (boundary, room_id, display_name, description, listed, joinable, auto_enroll, app_access, client_ids, status, created_at, updated_at, revision)
     VALUES (${d.boundary}, ${d.roomId}, ${d.displayName}, ${d.description}, ${Number(d.listed)}, ${Number(d.joinable)},
-      ${Number(d.autoEnroll)}, ${d.appAccess}, ${JSON.stringify(d.clientIds)}, ${d.status}, ${d.createdAt}, ${d.updatedAt}, ${d.revision})`)
+      ${Number(d.autoEnroll)}, ${d.appAccess}, ${JSON.stringify(d.clientIds)}, ${d.status}, ${d.createdAt}, ${d.updatedAt}, ${d.revision})
+    ON CONFLICT DO NOTHING RETURNING boundary`)
+  return rows.length > 0
 }
 
 function decodeDefinition(row: Record<string, unknown>): BoundaryDefinition {

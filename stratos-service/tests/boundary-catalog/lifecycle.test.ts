@@ -76,10 +76,169 @@ describe('persistent boundary lifecycle', () => {
         h.seeds[0],
         { ...h.seeds[1], roomId: h.seeds[0].roomId },
       ]),
-    ).rejects.toThrow()
+    ).rejects.toThrow('Boundary import contains duplicate identities')
     expect(await h.store.list()).toEqual([])
     await h.store.initialize(h.seeds)
     expect(await h.store.list()).toHaveLength(3)
+  })
+  it('rejects custom room ID collisions and concurrent creates without overwriting a boundary', async () => {
+    const definition = {
+      ...h.seeds[0],
+      boundary: `${SERVICE}/crew`,
+      roomId: 'bebop',
+    }
+    expect(await h.store.create(definition)).toBe(true)
+    await expect(h.manager.create('bebop', settings)).rejects.toMatchObject({
+      code: 'BoundaryExists',
+      message: 'This boundary name or room ID already exists',
+    })
+    expect(await h.store.get(`${SERVICE}/bebop`)).toBeNull()
+    const attempts = await Promise.allSettled([
+      h.manager.create('sailor-moon', settings),
+      h.manager.create('sailor-moon', { ...settings, displayName: 'Usagi' }),
+    ])
+    expect(
+      attempts.filter((attempt) => attempt.status === 'fulfilled'),
+    ).toHaveLength(1)
+    const rejected = attempts.find((attempt) => attempt.status === 'rejected')
+    expect(rejected).toMatchObject({ reason: { code: 'BoundaryExists' } })
+    expect(await h.store.get(definition.boundary)).toEqual(definition)
+  })
+  it('resumes queued removals periodically, shares an active drain, and waits for it on shutdown', async () => {
+    await h.enroll()
+    await h.store.beginDeactivation(ENGINEERING, 1)
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered!: () => void
+    const removing = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const removeMembership = vi.fn(async (did: string, boundary: string) => {
+      entered()
+      await blocked
+      await h.members.removeBoundary(did, boundary)
+    })
+    const worker = new BoundaryManager({
+      store: h.store,
+      configuration: h.configuration,
+      serviceDid: SERVICE,
+      reservedBoundary: GENERAL,
+      removeMembership,
+    })
+    vi.useFakeTimers()
+    try {
+      worker.start()
+      worker.start()
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(removeMembership).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await removing
+      expect(removeMembership).toHaveBeenCalledOnce()
+      const first = worker.drain()
+      expect(worker.drain()).toBe(first)
+      let stopped = false
+      const stopping = worker.stop().then(() => {
+        stopped = true
+      })
+      await Promise.resolve()
+      expect(stopped).toBe(false)
+      release()
+      await stopping
+      expect(await h.store.get(ENGINEERING)).toMatchObject({
+        status: 'inactive',
+      })
+      worker.start()
+      await worker.drain()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(removeMembership).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await worker.stop()
+      vi.useRealTimers()
+    }
+  })
+  it('leaves later queued work untouched once its worker has stopped', async () => {
+    await h.manager.stop()
+    await h.enroll()
+    await h.store.beginDeactivation(ENGINEERING, 1)
+    await h.manager.drain()
+    expect(await h.raw.getBoundaries('did:plc:spike')).toContain(ENGINEERING)
+    expect(await h.store.get(ENGINEERING)).toMatchObject({
+      status: 'deactivating',
+    })
+    expect(await h.store.listDeactivationMembers(ENGINEERING, 100)).toEqual([
+      'did:plc:spike',
+    ])
+  })
+  it.each(['configured', 'absent'] as const)(
+    'retries timer failures when the error callback is %s',
+    async (errorCallback) => {
+      const failure = new Error('Catalog temporarily unavailable')
+      const list = vi.spyOn(h.store, 'list').mockRejectedValueOnce(failure)
+      const onError = vi.fn()
+      const worker = new BoundaryManager({
+        store: h.store,
+        configuration: h.configuration,
+        serviceDid: SERVICE,
+        reservedBoundary: GENERAL,
+        removeMembership: async (did, boundary) => {
+          await h.members.removeBoundary(did, boundary)
+        },
+        ...(errorCallback === 'configured' ? { onError } : {}),
+      })
+      const drain = vi.spyOn(worker, 'drain')
+      vi.useFakeTimers()
+      try {
+        worker.start()
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(drain).toHaveBeenCalledOnce()
+        await expect(drain.mock.results[0].value).rejects.toBe(failure)
+        if (errorCallback === 'configured') {
+          expect(onError).toHaveBeenCalledExactlyOnceWith(failure)
+        }
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(drain).toHaveBeenCalledTimes(2)
+        await expect(drain.mock.results[1].value).resolves.toBeUndefined()
+        expect(list).toHaveBeenCalledTimes(3)
+      } finally {
+        await worker.stop()
+        list.mockRestore()
+        vi.useRealTimers()
+      }
+    },
+  )
+  it('only drains boundaries that are currently deactivating', async () => {
+    await h.manager.deactivate(`${SERVICE}/design`, 1)
+    await h.store.beginDeactivation(ENGINEERING, 1)
+    const pending = vi.spyOn(h.store, 'listDeactivationMembers')
+    const finish = vi.spyOn(h.store, 'finishDeactivation')
+    await h.manager.drain()
+    expect(pending).toHaveBeenCalledExactlyOnceWith(ENGINEERING, 100)
+    expect(finish).toHaveBeenCalledExactlyOnceWith(ENGINEERING)
+    expect(await h.store.get(GENERAL)).toMatchObject({
+      status: 'active',
+      revision: 1,
+    })
+    expect(await h.store.get(`${SERVICE}/design`)).toMatchObject({
+      status: 'inactive',
+      revision: 3,
+    })
+  })
+  it('reports whether a drained boundary transitioned to inactive', async () => {
+    expect(await h.store.beginDeactivation(ENGINEERING, 1)).toBe(true)
+    expect(await h.store.finishDeactivation(ENGINEERING)).toBe(true)
+    expect(await h.store.get(ENGINEERING)).toMatchObject({
+      status: 'inactive',
+      revision: 3,
+    })
+    expect(await h.store.finishDeactivation(ENGINEERING)).toBe(false)
+    expect(await h.store.get(ENGINEERING)).toMatchObject({
+      status: 'inactive',
+      revision: 3,
+    })
   })
   it('removes active, inactive and service members while preserving other memberships', async () => {
     await h.enroll('did:plc:spike')
@@ -159,57 +318,74 @@ describe('persistent boundary lifecycle', () => {
     expect(await h.store.get(ENGINEERING)).toMatchObject({ status: 'inactive' })
     expect(h.removals).toHaveLength(101)
   })
-  it('retries failed invalidation without starving other boundaries', async () => {
-    await h.enroll()
-    await h.enroll('did:plc:faye', [`${SERVICE}/design`])
-    await h.store.beginDeactivation(ENGINEERING, 1)
-    await h.store.beginDeactivation(`${SERVICE}/design`, 1)
-    const remove = vi.fn(async (did: string, boundary: string) => {
-      if (did === 'did:plc:spike') throw new Error('PDS queue unavailable')
-      await h.members.removeBoundary(did, boundary)
-    })
-    const errors = vi.fn()
-    const worker = new BoundaryManager({
-      store: h.store,
-      configuration: h.configuration,
-      serviceDid: SERVICE,
-      reservedBoundary: GENERAL,
-      removeMembership: remove,
-      onError: errors,
-    })
-    await worker.drain()
-    expect(errors).toHaveBeenCalledOnce()
-    expect(await h.store.get(`${SERVICE}/design`)).toMatchObject({
-      status: 'inactive',
-    })
-    expect(await h.store.get(ENGINEERING)).toMatchObject({
-      status: 'deactivating',
-    })
-    expect(await h.store.listDeactivationMembers(ENGINEERING, 100)).toEqual([
-      'did:plc:spike',
-    ])
-    await worker.stop()
-    await h.manager.drain()
-    expect(await h.store.get(ENGINEERING)).toMatchObject({ status: 'inactive' })
-  })
+  it.each(['configured', 'absent'] as const)(
+    'retries failed invalidation without starving other boundaries with error callback %s',
+    async (errorCallback) => {
+      await h.enroll()
+      await h.enroll('did:plc:faye', [`${SERVICE}/design`])
+      await h.store.beginDeactivation(ENGINEERING, 1)
+      await h.store.beginDeactivation(`${SERVICE}/design`, 1)
+      const remove = vi.fn(async (did: string, boundary: string) => {
+        if (did === 'did:plc:spike') throw new Error('PDS queue unavailable')
+        await h.members.removeBoundary(did, boundary)
+      })
+      const errors = vi.fn()
+      const worker = new BoundaryManager({
+        store: h.store,
+        configuration: h.configuration,
+        serviceDid: SERVICE,
+        reservedBoundary: GENERAL,
+        removeMembership: remove,
+        ...(errorCallback === 'configured' ? { onError: errors } : {}),
+      })
+      await expect(worker.drain()).resolves.toBeUndefined()
+      if (errorCallback === 'configured') {
+        expect(errors).toHaveBeenCalledExactlyOnceWith(
+          new Error('PDS queue unavailable'),
+        )
+      }
+      expect(await h.store.get(`${SERVICE}/design`)).toMatchObject({
+        status: 'inactive',
+      })
+      expect(await h.store.get(ENGINEERING)).toMatchObject({
+        status: 'deactivating',
+      })
+      expect(await h.store.listDeactivationMembers(ENGINEERING, 100)).toEqual([
+        'did:plc:spike',
+      ])
+      await worker.stop()
+      await h.manager.drain()
+      expect(await h.store.get(ENGINEERING)).toMatchObject({
+        status: 'inactive',
+      })
+    },
+  )
   it('requires the current revision and retains reserved boundary invariants', async () => {
     await expect(
       h.manager.update(ENGINEERING, settings, 42),
-    ).rejects.toMatchObject({ code: 'BoundaryConflict' })
+    ).rejects.toMatchObject({
+      code: 'BoundaryConflict',
+      message: 'The boundary changed. Reload it before making this change.',
+    })
     await expect(h.manager.deactivate(ENGINEERING, 42)).rejects.toMatchObject({
       code: 'BoundaryConflict',
+      message: 'The boundary changed. Reload it before making this change.',
     })
     await expect(h.manager.reactivate(ENGINEERING, 1)).rejects.toMatchObject({
       code: 'BoundaryConflict',
+      message: 'The boundary changed. Reload it before making this change.',
     })
     await expect(h.manager.update(GENERAL, settings, 1)).rejects.toMatchObject({
       code: 'ReservedBoundary',
+      message: 'The all-members boundary must enroll every member',
     })
     await expect(h.manager.deactivate(GENERAL, 1)).rejects.toMatchObject({
       code: 'ReservedBoundary',
+      message: 'The all-members boundary cannot be deactivated',
     })
     await expect(h.manager.reactivate(GENERAL, 1)).rejects.toMatchObject({
       code: 'ReservedBoundary',
+      message: 'The all-members boundary cannot be deactivated',
     })
     await expect(
       h.manager.create('engineering', settings),
@@ -219,7 +395,10 @@ describe('persistent boundary lifecycle', () => {
       () => h.manager.deactivate('missing', 1),
       () => h.manager.reactivate('missing', 1),
     ])
-      await expect(work()).rejects.toMatchObject({ code: 'BoundaryNotFound' })
+      await expect(work()).rejects.toMatchObject({
+        code: 'BoundaryNotFound',
+        message: 'Boundary not found',
+      })
     expect(
       await h.manager.update(GENERAL, { ...settings, autoEnroll: true }, 1),
     ).toMatchObject({ reserved: true, revision: 2 })

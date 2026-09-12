@@ -183,7 +183,7 @@ describe('room catalogue', () => {
     )
   })
 
-  it('returns the public approved catalogue from GET /oauth/boundaries', () => {
+  it('returns the public approved catalogue from GET /oauth/boundaries', async () => {
     const catalog = loadRoomCatalog(
       catalogFile(`feeds:
   - id: bebop
@@ -199,7 +199,7 @@ describe('room catalogue', () => {
       request: object,
       response: { json: (body: unknown) => void },
     ) => void
-    handler({}, { json })
+    await handler({}, { json })
     expect(json).toHaveBeenCalledWith({
       rooms: [
         {
@@ -213,7 +213,7 @@ describe('room catalogue', () => {
     expect(JSON.stringify(json.mock.calls[0][0])).not.toContain('boundary')
   })
 
-  it('fails closed when GET /oauth/boundaries has no operator catalogue', () => {
+  it('fails closed when GET /oauth/boundaries has no operator catalogue', async () => {
     const status = vi.fn()
     status.mockReturnThis()
     const json = vi.fn()
@@ -226,7 +226,7 @@ describe('room catalogue', () => {
       },
     ) => void
 
-    handler({}, { status, json })
+    await handler({}, { status, json })
 
     expect(status).toHaveBeenCalledWith(503)
     expect(json).toHaveBeenCalledWith({

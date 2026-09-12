@@ -24,12 +24,10 @@ export const handleRooms = (config: OAuthRoutesConfig) => {
     try {
       await config.refreshBoundaryConfiguration?.()
     } catch {
-      res
-        .status(503)
-        .json({
-          error: 'RoomCatalogUnavailable',
-          message: 'Room listing is temporarily unavailable',
-        })
+      res.status(503).json({
+        error: 'RoomCatalogUnavailable',
+        message: 'Room listing is temporarily unavailable',
+      })
       return
     }
     if (!config.roomCatalog) {

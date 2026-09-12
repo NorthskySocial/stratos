@@ -358,23 +358,77 @@ export function createSubscribeRecordsHandler(ctx: AppContext) {
       throw new AuthRequiredError('Service auth required')
     }
 
-    // Boundary rows outlive deactivation, so a boundaries-only check would keep
-    // a suspended caller streaming. Mirror verifyEnrolled: deny inactive first.
-    const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
-    if (!enrollment || !enrollment.active) {
-      throw new AuthRequiredError('Enrollment is missing or deactivated')
-    }
+    // Capture the catalog before membership so a lifecycle change between the
+    // reads cannot attach a new revision to an old grant.
+    const revisions = await activeBoundaryRevisions(ctx)
+    const callerBoundaries = await currentCallerBoundaries(ctx, callerDid)
+    const messages = did
+      ? actorHandler(did, cursor, domain, callerBoundaries, signal)
+      : serviceHandler(callerBoundaries, signal)
 
-    const boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
-    if (boundaries.length === 0) {
-      throw new AuthRequiredError('Service is not enrolled in any boundary')
+    for await (const message of messages) {
+      // Generators can pause at every yield. Even a buffered replay page must
+      // reauthorize each frame, independently of process-local change events.
+      await requireCurrentSubscription(
+        ctx,
+        callerDid,
+        callerBoundaries,
+        revisions,
+      )
+      if (signal.aborted) return
+      yield message
     }
-    const callerBoundaries = new Set(boundaries)
+  }
+}
 
-    if (did) {
-      yield* actorHandler(did, cursor, domain, callerBoundaries, signal)
-    } else {
-      yield* serviceHandler(callerBoundaries, signal)
+async function currentCallerBoundaries(
+  ctx: AppContext,
+  callerDid: string,
+): Promise<Set<string>> {
+  const enrollment = await ctx.enrollmentStore.getEnrollment(callerDid)
+  if (!enrollment || !enrollment.active) {
+    throw new AuthRequiredError('Enrollment is missing or deactivated')
+  }
+  const boundaries = await ctx.enrollmentStore.getBoundaries(callerDid)
+  if (boundaries.length === 0) {
+    throw new AuthRequiredError('Service is not enrolled in any boundary')
+  }
+  return new Set(boundaries)
+}
+
+async function activeBoundaryRevisions(
+  ctx: AppContext,
+): Promise<Map<string, number> | undefined> {
+  if (!ctx.boundaryStore) return undefined
+  return new Map(
+    (await ctx.boundaryStore.list())
+      .filter((definition) => definition.status === 'active')
+      .map((definition) => [definition.boundary, definition.revision]),
+  )
+}
+
+async function requireCurrentSubscription(
+  ctx: AppContext,
+  callerDid: string,
+  admittedBoundaries: ReadonlySet<string>,
+  admittedRevisions: ReadonlyMap<string, number> | undefined,
+): Promise<void> {
+  const currentBoundaries = await currentCallerBoundaries(ctx, callerDid)
+  for (const boundary of admittedBoundaries) {
+    if (!currentBoundaries.has(boundary)) {
+      throw new AuthRequiredError('Subscription authorization changed')
+    }
+  }
+  if (admittedRevisions) {
+    const currentRevisions = await activeBoundaryRevisions(ctx)
+    for (const boundary of admittedBoundaries) {
+      const revision = admittedRevisions.get(boundary)
+      if (
+        revision === undefined ||
+        currentRevisions?.get(boundary) !== revision
+      ) {
+        throw new AuthRequiredError('Subscription authorization changed')
+      }
     }
   }
 }

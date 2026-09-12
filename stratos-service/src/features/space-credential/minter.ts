@@ -134,7 +134,8 @@ export async function mintSpaceCredential(
     exp,
     jti,
   }
-  if (input.boundaryRevision !== undefined) payload.stratosBoundaryRevision = input.boundaryRevision
+  if (input.boundaryRevision !== undefined)
+    payload.stratosBoundaryRevision = input.boundaryRevision
   if (input.jkt) {
     payload.cnf = { jkt: input.jkt }
   }

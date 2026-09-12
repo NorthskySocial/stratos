@@ -72,6 +72,7 @@ export interface StorageContext {
   db?: ServiceDb
   boundaryStore: BoundaryCatalogStore
   boundaryConfiguration: BoundaryConfiguration
+  normalizeLegacyMemberships: () => Promise<void>
   actorStore: ActorStore
   enrollmentStore: EnrollmentStore & EnrollmentStoreReader
   oauthStores: {
@@ -209,10 +210,11 @@ export async function createStorageContext(
   await boundaryStore.initialize(initialBoundaryDefinitions(cfg))
   const boundaryConfiguration = new BoundaryConfiguration(boundaryStore, cfg)
   await boundaryConfiguration.refresh()
-  enrollmentStore = new ActiveBoundaryEnrollmentStore(
+  const activeBoundaryStore = new ActiveBoundaryEnrollmentStore(
     enrollmentStore,
     boundaryStore,
   )
+  enrollmentStore = activeBoundaryStore
 
   const sweep = scheduleExpiredSessionSweep(adminSessionStore, logger)
   const closeBackend = destroy
@@ -222,6 +224,10 @@ export async function createStorageContext(
   }
 
   return {
+    normalizeLegacyMemberships: () =>
+      activeBoundaryStore.normalizeLegacyMemberships(cfg.service.did, (did) =>
+        pdsSyncQueue.upsertPending(did),
+      ),
     db,
     boundaryStore,
     boundaryConfiguration,

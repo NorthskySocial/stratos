@@ -112,17 +112,28 @@ describe('boundary definition rules', () => {
   })
   it('reports InvalidRequest for every rejected input category', () => {
     const actions = [
-      () => qualifyNewBoundary('did:web:bebop.example',''),
-      () => qualifyNewBoundary('did:web:bebop.example','a'.repeat(129)),
-      () => validateBoundarySettings({...settings,displayName:''}),
-      () => validateBoundarySettings({...settings,appAccess:'invalid' as 'open'}),
-      () => validateBoundarySettings({...settings,appAccess:'allowList'}),
-      () => validateBoundarySettings({...settings,clientIds:['http://bebop.example']}),
+      () => qualifyNewBoundary('did:web:bebop.example', ''),
+      () => qualifyNewBoundary('did:web:bebop.example', 'a'.repeat(129)),
+      () => validateBoundarySettings({ ...settings, displayName: '' }),
+      () =>
+        validateBoundarySettings({
+          ...settings,
+          appAccess: 'invalid' as 'open',
+        }),
+      () => validateBoundarySettings({ ...settings, appAccess: 'allowList' }),
+      () =>
+        validateBoundarySettings({
+          ...settings,
+          clientIds: ['http://bebop.example'],
+        }),
     ]
     for (const action of actions) {
-      try { action(); expect.fail('invalid input accepted') }
-      catch (error) { expect(error).toMatchObject({code:'InvalidRequest'}) }
+      try {
+        action()
+        expect.fail('invalid input accepted')
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'InvalidRequest' })
+      }
     }
   })
-
 })

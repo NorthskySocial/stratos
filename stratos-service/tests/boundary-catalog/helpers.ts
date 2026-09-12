@@ -1,3 +1,11 @@
+import { Secp256k1Keypair } from '@atproto/crypto'
+import {
+  AuditedEnrollmentStore,
+  BoundaryAudit,
+  migrateBoundaryAudit,
+  SqliteBoundaryAuditBackend,
+  sqliteAuditSql,
+} from '../../src/features/boundary-audit/index.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -45,8 +53,13 @@ export async function setup() {
   const configuration = new BoundaryConfiguration(store, cfg)
   await configuration.refresh()
   const raw = new SqliteEnrollmentStore(db)
+  await migrateBoundaryAudit(sqliteAuditSql(db))
+  const audit = new BoundaryAudit(SERVICE, new SqliteBoundaryAuditBackend(db))
+  const key = await Secp256k1Keypair.create()
+  audit.setSigner({ publicKey: key.did(), sign: (bytes) => key.sign(bytes) })
+  const audited = new AuditedEnrollmentStore(raw, audit)
   const members = new ActiveBoundaryEnrollmentStore(
-    new ReservedDomainEnrollmentStore(raw, GENERAL),
+    new ReservedDomainEnrollmentStore(audited, GENERAL),
     store,
   )
   const removals: string[] = []
@@ -84,6 +97,7 @@ export async function setup() {
     cfg,
     configuration,
     raw,
+    audit,
     members,
     manager,
     seeds,

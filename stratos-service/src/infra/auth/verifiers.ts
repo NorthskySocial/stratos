@@ -451,7 +451,12 @@ function createSpaceCredentialVerifier(deps: {
           throw new AuthRequiredError('Authorization failed')
         }
       }
-      if (deps.boundaryStore) await requireActiveSpaceCredential(deps.boundaryStore, deps.serviceDid, result)
+      if (deps.boundaryStore)
+        await requireActiveSpaceCredential(
+          deps.boundaryStore,
+          deps.serviceDid,
+          result,
+        )
       return {
         credentials: {
           type: 'space-credential' as const,
@@ -615,7 +620,10 @@ async function verifyDpop(
       {
         method: ctx.req.method || 'GET',
         url: ctx.req.url || '/',
-        headers: ctx.req.headers,
+        headers: ctx.req.headers as Record<
+          string,
+          string | string[] | undefined
+        >,
       },
       {
         setHeader: (name, value) => ctx.res?.setHeader(name, value),

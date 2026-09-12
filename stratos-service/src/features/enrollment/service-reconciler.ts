@@ -19,8 +19,9 @@ export interface ReconcileServiceEnrollmentsDeps {
 /**
  * Reconcile config-declared service enrollments into the enrollment store.
  *
- * Configuration is the source of truth: each declared enrollment is upserted
- * with `isService = true` and its boundaries are set to exactly those declared.
+ * Configuration declares identities, each upserted with `isService = true`.
+ * The boundary resolver preserves persistent admin grants after initial creation;
+ * without a resolver, the standalone function uses the configured boundaries.
  * Service rows that are no longer present in the configuration are pruned. The
  * operation is idempotent and safe to run on every startup.
  *
@@ -38,7 +39,9 @@ export async function reconcileServiceEnrollments(
   for (const enrollment of enrollments) {
     declared.add(enrollment.did)
 
-    const boundaries = deps.resolveBoundaries ? await deps.resolveBoundaries(enrollment) : enrollment.boundaries
+    const boundaries = deps.resolveBoundaries
+      ? await deps.resolveBoundaries(enrollment)
+      : enrollment.boundaries
     const existing = await store.getEnrollment(enrollment.did)
 
     if (existing) {

@@ -21,6 +21,21 @@ describe('catalog credential revocation', () => {
   afterEach(async () => {
     await h.cleanup()
   })
+  it('preserves the legacy credential result shape when no revision was signed', async () => {
+    const key = await Secp256k1Keypair.create()
+    const minted = await mintSpaceCredential({
+      signingKey: key,
+      issuerDid: SERVICE,
+      spaceUri,
+      ttlSeconds: 3600,
+    })
+    expect(Object.hasOwn(minted.payload, 'stratosBoundaryRevision')).toBe(false)
+    const verified = await verifySpaceCredential(minted.credential, {
+      serviceKey: key,
+      serviceDid: SERVICE,
+    })
+    expect(verified).toStrictEqual({ spaceUri })
+  })
   it('binds signed credentials to a revision and rejects old credentials after edit and reactivation', async () => {
     const key = await Secp256k1Keypair.create()
     const minted = await mintSpaceCredential({

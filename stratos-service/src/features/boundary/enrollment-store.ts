@@ -22,6 +22,31 @@ export class ActiveBoundaryEnrollmentStore implements WrappedStore {
     private readonly catalog: BoundaryCatalogStore,
   ) {}
 
+  async normalizeLegacyMemberships(
+    serviceDid: string,
+    enqueue: (did: string) => Promise<unknown>,
+  ): Promise<void> {
+    const active = await this.activeSet()
+    for (;;) {
+      const dids = await this.catalog.listLegacyMembers(serviceDid, 100)
+      if (dids.length === 0) return
+      for (const did of dids) {
+        const boundaries = await this.inner.getBoundaries(did)
+        const normalized = [
+          ...new Set(
+            boundaries.map((boundary) => {
+              const qualified = `${serviceDid}/${boundary}`
+              return active.has(qualified) ? qualified : boundary
+            }),
+          ),
+        ]
+        await enqueue(did)
+        await this.inner.setBoundaries(did, normalized)
+        await enqueue(did)
+      }
+    }
+  }
+
   isEnrolled(did: string): Promise<boolean> {
     return this.inner.isEnrolled(did)
   }
