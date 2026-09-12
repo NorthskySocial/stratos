@@ -148,13 +148,16 @@ export class UpstreamStratosClient {
     this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
   }
 
-  async resolveEnrollments(did: string): Promise<ResolveEnrollmentsResult> {
+  async resolveEnrollments(
+    did: string,
+    signal?: AbortSignal,
+  ): Promise<ResolveEnrollmentsResult> {
     const url = new URL(`${this.serviceUrl}/xrpc/${LXM.resolveEnrollments}`)
     url.searchParams.set('did', did)
     const lxm = LXM.resolveEnrollments
     const res = await this.request(lxm, url, {
       method: 'GET',
-      signal: AbortSignal.timeout(this.requestTimeoutMs),
+      signal: requestSignal(this.requestTimeoutMs, signal),
       headers: {
         authorization: `Bearer ${await this.mintFor(lxm)}`,
         accept: 'application/json',

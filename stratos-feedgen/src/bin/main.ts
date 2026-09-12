@@ -241,6 +241,7 @@ async function main(): Promise<void> {
       () => undefined,
     )
     subscription = await starting
+    if (!subscription) return
   }
   subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
   subscriptionStatus.actorPool = subscription?.actorPool ?? null
@@ -389,7 +390,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream: ServiceStream
   actorPool: ActorPool
   purger: Purger
-}> {
+} | null> {
   const { cfg, upstream, store, indexer, enrollmentManager, logger, metrics } =
     deps
   const { configuredBoundaries, spaceMutationFence, feedReadiness } = deps
@@ -431,7 +432,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   // persisted snapshot against a fresh resolveEnrollments snapshot. Bounded
   // via batching so upstream resolves don't fan out unbounded on large
   // tenants.
-  const runReconcile = async (): Promise<boolean> => {
+  const runReconcile = async (signal: AbortSignal): Promise<boolean> => {
     const startedAt = performance.now()
     const generation = feedReadiness.beginReconciliation()
     metrics.setReady(false)
@@ -443,6 +444,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
           mutationFence: spaceMutationFence,
           actorPool: pool,
           client: upstream,
+          signal,
           log: (summary) =>
             logger.info({ ...summary }, 'enrollment reconciliation completed'),
           onError: (did, err) =>
@@ -481,11 +483,11 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
       throw error
     }
   }
-  await runReconcile()
   const triggerReconcile = createReconcileScheduler(runReconcile, (err) => {
     logger.error({ err }, 'reconnect reconciliation failed')
   })
   deps.shutdownDeps.reconcileScheduler = triggerReconcile
+  if (!(await triggerReconcile.initialize())) return null
 
   // Seed only AFTER reconciliation so the snapshot already reflects
   // revocations that landed while the feedgen was down - otherwise an actor

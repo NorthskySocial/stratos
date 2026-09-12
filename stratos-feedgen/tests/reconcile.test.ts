@@ -70,6 +70,183 @@ afterEach(async () => {
 })
 
 describe('reconcileEnrollments', () => {
+  it('does not read the store when already cancelled', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const snapshot = vi.spyOn(store, 'listEnrolledActors')
+    await expect(
+      reconcileEnrollments(
+        {
+          store,
+          purger: new Purger({ store }),
+          client: { resolveEnrollments: vi.fn() },
+          signal: controller.signal,
+        },
+        new Set([CREW_BOUNDARY]),
+      ),
+    ).rejects.toBe(controller.signal.reason)
+    expect(snapshot).not.toHaveBeenCalled()
+  })
+
+  it('rejects cancellation during the snapshot even when there are no actors', async () => {
+    const controller = new AbortController()
+    vi.spyOn(store, 'listEnrolledActors').mockImplementationOnce(async () => {
+      controller.abort()
+      return []
+    })
+    const log = vi.fn()
+    await expect(
+      reconcileEnrollments(
+        {
+          store,
+          purger: new Purger({ store }),
+          client: { resolveEnrollments: vi.fn() },
+          signal: controller.signal,
+          log,
+        },
+        new Set([CREW_BOUNDARY]),
+      ),
+    ).rejects.toBe(controller.signal.reason)
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('cancels every request in the active batch and never applies its results or starts another batch', async () => {
+    for (const did of [SPIKE, FAYE, VASH]) {
+      await store.upsertEnrolledActor(actor(did, [CREW_BOUNDARY]))
+    }
+    const controller = new AbortController()
+    const aborted: string[] = []
+    const client = {
+      resolveEnrollments: vi.fn(
+        (did: string, signal?: AbortSignal) =>
+          new Promise<ResolveEnrollmentsResult>((_resolve, reject) => {
+            signal!.addEventListener(
+              'abort',
+              () => {
+                aborted.push(did)
+                reject(signal!.reason)
+              },
+              { once: true },
+            )
+          }),
+      ),
+    }
+    const log = vi.fn()
+    const onError = vi.fn()
+    const purger = new Purger({ store, audit: () => {} })
+    const apply = vi.spyOn(purger, 'withDidScope')
+    const pending = reconcileEnrollments(
+      { store, purger, client, signal: controller.signal, log, onError },
+      new Set([CREW_BOUNDARY]),
+      { batchSize: 2 },
+    )
+    const rejected = expect(pending).rejects.toBeInstanceOf(DOMException)
+    await vi.waitFor(() =>
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(2),
+    )
+    controller.abort()
+    await rejected
+    expect(aborted).toHaveLength(2)
+    expect(client.resolveEnrollments).toHaveBeenCalledTimes(2)
+    expect(apply).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+    expect(await store.listEnrolledActors()).toHaveLength(3)
+  })
+
+  it.each([
+    { actors: 2, batchSize: 1 },
+    { actors: 2, batchSize: 2 },
+    { actors: 1, batchSize: 1 },
+  ])(
+    'finishes the current actor write but stops further work after cancellation ($actors actors, batch size $batchSize)',
+    async ({ actors, batchSize }) => {
+      for (const did of [SPIKE, FAYE].slice(0, actors)) {
+        await store.upsertEnrolledActor(actor(did, [CREW_BOUNDARY]))
+      }
+      const controller = new AbortController()
+      const originalWrite = store.upsertEnrolledActor.bind(store)
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const write = vi
+        .spyOn(store, 'upsertEnrolledActor')
+        .mockImplementation(async (entry) => {
+          await held
+          await originalWrite(entry)
+        })
+      const client = {
+        resolveEnrollments: vi.fn(async (did: string) => ({
+          did,
+          enrolled: true,
+          boundaries: [CREW_BOUNDARY, BOUNTY_BOUNDARY],
+        })),
+      }
+      const log = vi.fn()
+      const pending = reconcileEnrollments(
+        {
+          store,
+          purger: new Purger({ store, audit: () => {} }),
+          client,
+          signal: controller.signal,
+          log,
+        },
+        new Set([CREW_BOUNDARY, BOUNTY_BOUNDARY]),
+        { batchSize },
+      )
+      const settled = vi.fn()
+      const checked = pending.then(settled, (err: unknown) => {
+        expect(err).toBe(controller.signal.reason)
+        settled()
+      })
+      await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
+      controller.abort()
+      await Promise.resolve()
+      expect(settled).not.toHaveBeenCalled()
+      release()
+      await checked
+      expect(client.resolveEnrollments).toHaveBeenCalledTimes(batchSize)
+      expect(write).toHaveBeenCalledOnce()
+      expect(
+        (await store.listEnrolledActors()).filter((entry) =>
+          entry.boundaries.includes(BOUNTY_BOUNDARY),
+        ),
+      ).toHaveLength(1)
+      expect(log).not.toHaveBeenCalled()
+    },
+  )
+
+  it('skips actor mutations when cancelled while waiting for its DID scope', async () => {
+    await store.upsertEnrolledActor(actor(SPIKE, [CREW_BOUNDARY]))
+    const controller = new AbortController()
+    const purger = new Purger({ store, audit: () => {} })
+    const withDidScope = purger.withDidScope.bind(purger)
+    vi.spyOn(purger, 'withDidScope').mockImplementation(async (did, apply) => {
+      controller.abort()
+      return withDidScope(did, apply)
+    })
+    const read = vi.spyOn(store, 'getEnrolledActor')
+    const pending = reconcileEnrollments(
+      {
+        store,
+        purger,
+        client: {
+          resolveEnrollments: async (did) => ({
+            did,
+            enrolled: false,
+            boundaries: [],
+          }),
+        },
+        signal: controller.signal,
+      },
+      new Set([CREW_BOUNDARY]),
+    )
+    await expect(pending).rejects.toBeInstanceOf(DOMException)
+    expect(read).not.toHaveBeenCalled()
+    expect(await store.listEnrolledActors()).toHaveLength(1)
+  })
+
   it('purges actors that unenrolled and boundaries that shrank while down; leaves in-scope intact', async () => {
     // Stale persisted snapshot (what we cached before going down).
     await store.upsertEnrolledActor(actor(SPIKE, [CREW_BOUNDARY]))

@@ -29,6 +29,95 @@ describe('createReconcileScheduler', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
+  it('awaits the initial pass without requiring readiness before startup continues', async () => {
+    let finish!: (ready: boolean) => void
+    const run = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const trigger = createReconcileScheduler(run)
+    const initialized = vi.fn()
+    const starting = trigger.initialize().then(initialized)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(initialized).not.toHaveBeenCalled()
+    finish(false)
+    await starting
+    expect(initialized).toHaveBeenCalledExactlyOnceWith(true)
+    await trigger.stop()
+  })
+
+  it('shares an active pass with initialization and still coalesces reconnects', async () => {
+    const ctl = makeControlledRun()
+    const trigger = createReconcileScheduler(ctl.run)
+    trigger()
+    const starting = trigger.initialize()
+    trigger()
+    expect(ctl.starts).toBe(1)
+    ctl.finish()
+    expect(await starting).toBe(true)
+    expect(ctl.starts).toBe(2)
+    ctl.finish()
+    await trigger.stop()
+  })
+
+  it('propagates initial failures to startup', async () => {
+    const error = new Error('NERV store unavailable')
+    const trigger = createReconcileScheduler(async () => {
+      throw error
+    })
+    await expect(trigger.initialize()).rejects.toBe(error)
+    await trigger.stop()
+  })
+
+  it('drains a cancelled initial pass without continuing startup or reporting a background error', async () => {
+    let signal!: AbortSignal
+    const run = vi.fn((current: AbortSignal) => {
+      signal = current
+      return new Promise<boolean>((_resolve, reject) => {
+        current.addEventListener('abort', () => reject(current.reason), {
+          once: true,
+        })
+      })
+    })
+    const onError = vi.fn()
+    const trigger = createReconcileScheduler(run, onError)
+    const starting = trigger.initialize()
+    const stopping = trigger.stop()
+    expect(signal.aborted).toBe(false)
+    trigger.abortActivePass()
+    expect(signal.aborted).toBe(true)
+    expect(await starting).toBe(false)
+    await stopping
+    expect(await trigger.initialize()).toBe(false)
+    trigger()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(run).toHaveBeenCalledOnce()
+    expect(onError).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    expect(() => trigger.abortActivePass()).not.toThrow()
+  })
+
+  it('ignores expected cancellation errors from a stopped background pass', async () => {
+    const onError = vi.fn()
+    const trigger = createReconcileScheduler(
+      (signal) =>
+        new Promise<boolean>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          })
+        }),
+      onError,
+    )
+    trigger()
+    const stopping = trigger.stop()
+    trigger.abortActivePass()
+    await stopping
+    expect(onError).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('retries incomplete reconciliation without a reconnect and releases the gate', async () => {
     const gate = new FeedReadinessGate()
     gate.markSessionEstablished()

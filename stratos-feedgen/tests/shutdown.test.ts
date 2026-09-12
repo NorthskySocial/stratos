@@ -14,6 +14,7 @@ import {
   SubscriptionIndexer,
 } from '../src/index.js'
 import type { FeedgenStore } from '../src/db/index.js'
+import { createReconcileScheduler } from '../src/purge/index.js'
 
 const nullLogger: Logger = {
   debug: () => {},
@@ -83,13 +84,81 @@ async function listen(
 }
 
 describe('createShutdownHandler', () => {
+  it.each(['initial', 'background'] as const)(
+    'cancels a %s reconciliation at the deadline and drains its writes before closing the store',
+    async (phase) => {
+      vi.useFakeTimers()
+      try {
+        const writes = deferred()
+        const seed = vi.fn()
+        const close = vi.fn(async () => {})
+        const poolStop = vi.fn(async () => {})
+        const exit = vi.fn()
+        const lines: CapturedLine[] = []
+        let signal!: AbortSignal
+        const scheduler = createReconcileScheduler(async (current) => {
+          signal = current
+          await new Promise<void>((resolve) => {
+            current.addEventListener('abort', () => resolve(), { once: true })
+          })
+          // A request abort cannot abandon a store operation already in progress.
+          await writes.promise
+          current.throwIfAborted()
+          return true
+        })
+        const startup =
+          phase === 'initial'
+            ? scheduler.initialize().then((continueStartup) => {
+                if (continueStartup) seed()
+              })
+            : undefined
+        if (phase === 'background') scheduler()
+        const handler = createShutdownHandler({
+          startup,
+          reconcileScheduler: scheduler,
+          actorPool: { stop: poolStop },
+          store: { close },
+          logger: captureLogger(lines),
+          drainTimeoutMs: 50,
+          exit,
+        })
+        const shutdown = handler('SIGTERM')
+        await vi.advanceTimersByTimeAsync(49)
+        expect(signal.aborted).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(signal.aborted).toBe(true)
+        expect(close).not.toHaveBeenCalled()
+        expect(poolStop).not.toHaveBeenCalled()
+        expect(exit).not.toHaveBeenCalled()
+        expect(seed).not.toHaveBeenCalled()
+        writes.resolve()
+        await shutdown
+        expect(poolStop).toHaveBeenCalledOnce()
+        expect(close).toHaveBeenCalledOnce()
+        expect(seed).not.toHaveBeenCalled()
+        expect(exit).toHaveBeenCalledExactlyOnceWith(0)
+        expect(lines.filter((line) => line.level === 'warn')).toEqual([
+          {
+            level: 'warn',
+            obj: { timeoutMs: 50 },
+            msg: 'reconciliation drain deadline expired; aborting active pass',
+          },
+        ])
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
   it('drains reconciliation before closing the store or stopping the actor pool', async () => {
     const reconciliation = deferred()
     const stop = vi.fn(() => reconciliation.promise)
+    const abortActivePass = vi.fn()
     const poolStop = vi.fn(async () => {})
     const close = vi.fn(async () => {})
     const handler = createShutdownHandler({
-      reconcileScheduler: { stop },
+      reconcileScheduler: { stop, abortActivePass },
       actorPool: { stop: poolStop },
       store: { close },
       logger: nullLogger,
@@ -103,6 +172,7 @@ describe('createShutdownHandler', () => {
     await shutdown
     expect(poolStop).toHaveBeenCalledOnce()
     expect(close).toHaveBeenCalledOnce()
+    expect(abortActivePass).not.toHaveBeenCalled()
   })
   it('drains an in-flight request, then stops streams, pool, and store in order', async () => {
     const events: string[] = []

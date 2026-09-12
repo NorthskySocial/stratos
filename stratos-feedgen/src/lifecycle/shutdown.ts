@@ -13,7 +13,10 @@ export interface ShutdownDeps {
    */
   startup?: Promise<void> | null
   serviceStream?: { stop: () => void | Promise<void> } | null
-  reconcileScheduler?: { stop: () => Promise<void> } | null
+  reconcileScheduler?: {
+    stop: () => Promise<void>
+    abortActivePass: () => void
+  } | null
   spaceSyncScheduler?: {
     stop: () => Promise<void>
     abortActivePass: () => void
@@ -63,9 +66,13 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       if (deps.httpServer) {
         await drainHttpServer(deps.httpServer, drainTimeoutMs, deps.logger)
       }
+      await stopReconcileScheduler(
+        deps.reconcileScheduler,
+        drainTimeoutMs,
+        deps.logger,
+      )
       await awaitStartup(deps.startup, drainTimeoutMs, deps.logger)
       await stopServiceStream(deps.serviceStream, drainTimeoutMs, deps.logger)
-      await deps.reconcileScheduler?.stop()
       await stopSpaceSyncScheduler(
         deps.spaceSyncScheduler,
         drainTimeoutMs,
@@ -168,6 +175,24 @@ async function stopServiceStream(
       { timeoutMs },
       'service stream drain deadline expired; continuing shutdown',
     )
+  }
+}
+
+async function stopReconcileScheduler(
+  scheduler: ShutdownDeps['reconcileScheduler'],
+  timeoutMs: number,
+  logger: Logger,
+): Promise<void> {
+  if (!scheduler) return
+  const stopped = scheduler.stop()
+  if ((await raceDeadline(stopped, timeoutMs)) === 'timeout') {
+    logger.warn(
+      { timeoutMs },
+      'reconciliation drain deadline expired; aborting active pass',
+    )
+    scheduler.abortActivePass()
+    // Cancellation stops fetches and new actors; finish any current store work.
+    await stopped
   }
 }
 
