@@ -881,3 +881,16 @@ For apps that want to add basic Stratos support incrementally:
 1. Boundary-aware UI (show boundary chips, filter by boundary)
 2. AppView-side hydration for feed integration
 3. Blob support (implemented via `com.atproto.sync.getBlob`)
+
+### Administrative boundary history
+
+The generated lexicon bundle includes `zone.stratos.admin.listBoundaryOps` and
+`zone.stratos.admin.getBoundaryAuditState`. Both require an OAuth admin session;
+ordinary user or service tokens cannot read private membership history.
+
+`listBoundaryOps` pages authority-signed operations for one actor using a DID-bound
+sequence/hash cursor. `getBoundaryAuditState` returns a signed current-state
+checkpoint for recovery after `BoundaryHistoryTruncated`. These are authority
+operations, separate from user-signed repository commits, and work with both
+Stratos and PDS custody. See [Boundary History](../docs/operator/boundary-history.md)
+for signature verification, replay, retention, and trust requirements.
