@@ -81,8 +81,10 @@ export function createFeedgenServer(
   const version = deps.version ?? DEFAULT_VERSION
   const status = deps.subscriptionStatus
   app.get('/health', (_req, res) => {
-    res.json({
-      ok: true,
+    const ready = deps.feedReadiness?.isReady() ?? true
+    res.status(ready ? 200 : 503).json({
+      ok: ready,
+      feedReady: ready,
       version,
       serviceStreamConnected: status?.serviceStream?.isConnected() ?? false,
       actorPoolSize: status?.actorPool?.getStats().active ?? 0,

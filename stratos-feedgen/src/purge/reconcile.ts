@@ -5,10 +5,14 @@ import type { ResolveEnrollmentsResult } from '../upstream/index.js'
 import type { PurgeCounts, Purger } from './purger.js'
 
 export interface ReconcileEnrollmentsClient {
-  resolveEnrollments: (did: string) => Promise<ResolveEnrollmentsResult>
+  resolveEnrollments: (
+    did: string,
+    signal?: AbortSignal,
+  ) => Promise<ResolveEnrollmentsResult>
 }
 
 export interface ReconcileDeps {
+  signal?: AbortSignal
   store: FeedgenStore
   purger: Purger
   mutationFence?: Pick<SpaceMutationFence, 'hasPendingDidMutation'>
@@ -85,6 +89,7 @@ export async function reconcileEnrollments(
   const log = deps.log ?? defaultLog
   const onError = deps.onError ?? defaultOnError
 
+  deps.signal?.throwIfAborted()
   const runStartedAt = new Date().toISOString()
   const all = await deps.store.listEnrolledActors()
   const actors = maxActors > 0 ? all.slice(0, maxActors) : all
@@ -100,6 +105,7 @@ export async function reconcileEnrollments(
   }
 
   for (let i = 0; i < actors.length; i += batchSize) {
+    deps.signal?.throwIfAborted()
     const batch = actors.slice(i, i + batchSize)
     // Fan out the fresh-snapshot fetches (IO) concurrently to bound latency,
     // but apply the purges (writes) sequentially: the store may be a single
@@ -113,7 +119,10 @@ export async function reconcileEnrollments(
     const resolved = await Promise.all(
       batch.map(async (actor): Promise<Resolved> => {
         try {
-          const fresh = await deps.client.resolveEnrollments(actor.did)
+          const fresh = await deps.client.resolveEnrollments(
+            actor.did,
+            deps.signal,
+          )
           return { actor, fresh }
         } catch (err) {
           return { actor, error: err as Error }
@@ -122,6 +131,7 @@ export async function reconcileEnrollments(
     )
 
     for (const entry of resolved) {
+      deps.signal?.throwIfAborted()
       summary.examined++
       if ('error' in entry) {
         summary.errors++
@@ -138,6 +148,7 @@ export async function reconcileEnrollments(
     }
   }
 
+  deps.signal?.throwIfAborted()
   log(summary)
   return summary
 }
@@ -182,6 +193,7 @@ async function reconcileActorWithinScope(
   runStartedAt: string,
   scope: DidMutationScope,
 ): Promise<void> {
+  deps.signal?.throwIfAborted()
   if (didMutationPending(deps, actor.did)) return
   if (!fresh.enrolled) {
     await reconcileUnenrolledActor(deps, actor, summary, runStartedAt, scope)

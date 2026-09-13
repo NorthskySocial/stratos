@@ -121,6 +121,30 @@ describe('UpstreamStratosClient', () => {
   })
 
   describe('resolveEnrollments', () => {
+    it('cancels an enrollment request while the response body is pending', async () => {
+      let started!: () => void
+      const received = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      mock.handler = (_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.write('{')
+        started()
+      }
+      const controller = new AbortController()
+      const pending = client.resolveEnrollments(
+        'did:plc:shinji',
+        controller.signal,
+      )
+      const rejected = expect(pending).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+      await received
+      controller.abort()
+      await rejected
+      mock.server.closeAllConnections()
+    })
+
     it('GETs the endpoint and qualifies returned boundaries', async () => {
       mock.handler = (_req, res) => {
         res.setHeader('content-type', 'application/json')

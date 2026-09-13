@@ -17,17 +17,17 @@ The following upstream pull requests identify the vulnerability classes addresse
 
 ## Affected paths
 
-| Component | Exposure | Remediation |
-| --- | --- | --- |
-| `stratos-service` identity resolution | Unverified JWT issuers and OAuth identifiers could trigger `did:web` or HTTP handle resolution. Resolution did not filter private IP addresses, and HTTP handles followed redirects. | Route resolution through a shared public-address transport. Reject encoded DID authority delimiters and invalid handles. |
-| `stratos-service` OAuth | The supplied OAuth fetch could request private addresses during discovery, token exchange, and authenticated PDS operations. | Use the shared protected transport for enrollment and admin OAuth clients. |
-| `stratos-service` client metadata and JWKS | Literal-host checks and redirect rejection did not protect hostnames that resolved to private addresses. | Validate every resolved address when opening a socket, including `jwks_uri` requests. |
-| `PdsTokenVerifier` | Its metadata reader used unrestricted fetch. | Protect its transport so future production callers inherit the same policy. |
-| `stratos-feedgen` | Unverified JWT issuers, member DIDs, and commit-key DIDs could trigger private-network requests. Space host reads omitted reserved ranges and some IPv6 forms. | Protect identity and commit-key resolution. Share the complete address classifier with space host reads. |
-| `stratos-indexer` | User-controlled DIDs from indexed records reached the upstream identity resolver. | Use the shared protected resolver with the existing cache. |
-| Configured upstream HTTP clients | Feedgen upstream calls, indexer backfill, and PLC handle fallback could follow redirects beyond the configured destination or path. | Reject redirects while allowing operator-configured internal origins. |
-| Identity, OAuth, and metadata responses | Request paths could accept oversized decoded response bodies and did not consistently release rejected response bodies. | Limit decoded response bytes and request duration. Cancel rejected response bodies. |
-| Non-XRPC JSON request parsing | Oversized decoded request bodies produced HTTP 500 instead of HTTP 413. | Return HTTP 413 for `entity.too.large` errors. |
+| Component                                  | Exposure                                                                                                                                                                             | Remediation                                                                                                              |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `stratos-service` identity resolution      | Unverified JWT issuers and OAuth identifiers could trigger `did:web` or HTTP handle resolution. Resolution did not filter private IP addresses, and HTTP handles followed redirects. | Route resolution through a shared public-address transport. Reject encoded DID authority delimiters and invalid handles. |
+| `stratos-service` OAuth                    | The supplied OAuth fetch could request private addresses during discovery, token exchange, and authenticated PDS operations.                                                         | Use the shared protected transport for enrollment and admin OAuth clients.                                               |
+| `stratos-service` client metadata and JWKS | Literal-host checks and redirect rejection did not protect hostnames that resolved to private addresses.                                                                             | Validate every resolved address when opening a socket, including `jwks_uri` requests.                                    |
+| `PdsTokenVerifier`                         | Its metadata reader used unrestricted fetch.                                                                                                                                         | Protect its transport so future production callers inherit the same policy.                                              |
+| `stratos-feedgen`                          | Unverified JWT issuers, member DIDs, and commit-key DIDs could trigger private-network requests. Space host reads omitted reserved ranges and some IPv6 forms.                       | Protect identity and commit-key resolution. Share the complete address classifier with space host reads.                 |
+| `stratos-indexer`                          | User-controlled DIDs from indexed records reached the upstream identity resolver.                                                                                                    | Use the shared protected resolver with the existing cache.                                                               |
+| Configured upstream HTTP clients           | Feedgen upstream calls, indexer backfill, and PLC handle fallback could follow redirects beyond the configured destination or path.                                                  | Reject redirects while allowing operator-configured internal origins.                                                    |
+| Identity, OAuth, and metadata responses    | Request paths could accept oversized decoded response bodies and did not consistently release rejected response bodies.                                                              | Limit decoded response bytes and request duration. Cancel rejected response bodies.                                      |
+| Non-XRPC JSON request parsing              | Oversized decoded request bodies produced HTTP 500 instead of HTTP 413.                                                                                                              | Return HTTP 413 for `entity.too.large` errors.                                                                           |
 
 ## Security controls
 
@@ -51,17 +51,17 @@ The configured PLC resolver uses the bounded transport. DID web resolution uses 
 
 The lockfiles resolve the security releases listed below.
 
-| Dependency | Version | Purpose |
-| --- | --- | --- |
-| `@atproto/identity` | 0.5.13 | Protected defaults, HTTP handle timeout, fetch injection, and body cleanup |
-| `@atproto/oauth-provider` | 0.22.8 | Decoded request-body limits in the upstream HTTP parser |
-| `@atproto/oauth-client-node` | 0.5.7 | Updated OAuth client dependency chain |
-| `@atproto-labs/fetch-node` | 0.4.0 | URL policy checks at dispatch for redirect hops |
-| `@atproto-labs/fetch` | 0.3.6 | Bounded-response processor and URL policy helpers |
-| `@atproto/bsky` | 0.0.280 | Updated indexer SDK and protected identity dependency |
-| `@atproto/syntax` in the indexer | 0.7.6 | Matches the updated SDK `AtUri` API |
-| Direct `undici` dependencies | 7.29.1 | Node 24-compatible protected transport |
-| Direct `ipaddr.js` dependency | 2.5.0 | Address classifier |
+| Dependency                       | Version | Purpose                                                                    |
+| -------------------------------- | ------- | -------------------------------------------------------------------------- |
+| `@atproto/identity`              | 0.5.13  | Protected defaults, HTTP handle timeout, fetch injection, and body cleanup |
+| `@atproto/oauth-provider`        | 0.22.8  | Decoded request-body limits in the upstream HTTP parser                    |
+| `@atproto/oauth-client-node`     | 0.5.7   | Updated OAuth client dependency chain                                      |
+| `@atproto-labs/fetch-node`       | 0.4.0   | URL policy checks at dispatch for redirect hops                            |
+| `@atproto-labs/fetch`            | 0.3.6   | Bounded-response processor and URL policy helpers                          |
+| `@atproto/bsky`                  | 0.0.280 | Updated indexer SDK and protected identity dependency                      |
+| `@atproto/syntax` in the indexer | 0.7.6   | Matches the updated SDK `AtUri` API                                        |
+| Direct `undici` dependencies     | 7.29.1  | Node 24-compatible protected transport                                     |
+| Direct `ipaddr.js` dependency    | 2.5.0   | Address classifier                                                         |
 
 The pnpm release-age exceptions name exact verified ATProto releases and their dependencies. Deno lock generation uses a one-time publication cutoff after these releases. Neither configuration disables the default release-age policy globally.
 

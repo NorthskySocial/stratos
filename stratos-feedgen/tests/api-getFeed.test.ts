@@ -383,4 +383,15 @@ describe('/health', () => {
     expect(body.ok).toBe(true)
     expect(typeof body.version).toBe('string')
   })
+
+  it('reports 503 until feed readiness recovers and again after a disconnect', async () => {
+    let ready = false
+    ctx = await startServer({ readiness: { isReady: () => ready } })
+    for (const next of [false, true, false]) {
+      ready = next
+      const response = await fetch(`${ctx.baseUrl}/health`)
+      expect(response.status).toBe(next ? 200 : 503)
+      expect(await response.json()).toMatchObject({ ok: next, feedReady: next })
+    }
+  })
 })
