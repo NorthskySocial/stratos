@@ -2,10 +2,28 @@ import { describe, expect, it } from 'vitest'
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto'
 import { encode as cborEncode } from '@atcute/cbor'
 
-import { verifyEnrollmentAttestation } from '../src/index.js'
+import { verifyEnrollmentAttestation as verifyTrustedEnrollmentAttestation } from '../src/index.js'
 
 const USER_DID = 'did:plc:shinjiikari'
 const USER_SIGNING_KEY = 'did:key:zUserSigningKeyPlaceholder'
+const SERVICE_DID = 'did:web:stratos.nerv.tokyo.jp'
+let currentServiceKey = ''
+const verifyEnrollmentAttestation = (record: unknown, did: string) =>
+  verifyTrustedEnrollmentAttestation(record, did, {
+    serviceDid: SERVICE_DID,
+    fetchFn: async () =>
+      Response.json({
+        id: SERVICE_DID,
+        verificationMethod: [
+          {
+            id: `${SERVICE_DID}#atproto`,
+            controller: SERVICE_DID,
+            type: 'Multikey',
+            publicKeyMultibase: currentServiceKey.slice('did:key:'.length),
+          },
+        ],
+      }),
+  })
 const SERVICE_URL = 'https://stratos.nerv.tokyo.jp'
 
 const BOUNDARIES = [
@@ -28,6 +46,7 @@ const buildAttestedEnrollment = async (
     signedBoundaries?: Array<string>
   } = {},
 ) => {
+  currentServiceKey = serviceKeypair.did()
   const userDid = options.userDid ?? USER_DID
   const userSigningKey = options.userSigningKey ?? USER_SIGNING_KEY
   const boundaryValues = options.boundaryValues ?? BOUNDARIES

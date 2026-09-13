@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "stratos": "./dist/bin/stratos.js"
+    "stratos": "./dist/bin/stratos.js",
+    "stratos-rotate-service-key": "./dist/bin/rotate-service-key.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && pnpm run build:admin",
@@ -50,6 +51,7 @@
     "@atproto/xrpc-server": "^0.12.5",
     "@ipld/dag-cbor": "^9.2.5",
     "@libsql/client": "^0.17.0",
+    "@northskysocial/stratos-client": "workspace:*",
     "@northskysocial/stratos-core": "workspace:*",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.222.0",

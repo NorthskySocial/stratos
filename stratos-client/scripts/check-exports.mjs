@@ -51,6 +51,15 @@ const EXPECTED_EXPORTS = [
   // attestation
   'verifyEnrollmentAttestation',
   'AttestationResult',
+  'VerifyAttestationOptions',
+  'ServiceKeyHistory',
+  'ServiceKeyHistoryEntry',
+  'HistorySigner',
+  'appendServiceKeyHistory',
+  'verifyServiceKeyHistory',
+  'findHistoricalSigningKey',
+  'keyHistoryTimestamp',
+  'MAX_KEY_HISTORY_ENTRIES',
   // scopes
   'STRATOS_SCOPES',
   'buildCollectionScope',
@@ -60,6 +69,8 @@ const EXPECTED_EXPORTS = [
 
 const EXPECTED_MODULES = [
   'attestation.js',
+  'key-history.js',
+  'key-history-response.js',
   'discovery.js',
   'lexicons.js',
   'routing.js',

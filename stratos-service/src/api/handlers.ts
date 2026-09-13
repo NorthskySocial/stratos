@@ -1,4 +1,5 @@
 import { Server as XrpcServer } from '@atproto/xrpc-server'
+import { registerIdentityHandlers } from '../features/identity/handler.js'
 import type { AppContext } from '../context-types.js'
 import {
   registerEnrollmentHandlers,
@@ -97,6 +98,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
     handler: getRepoHandler(ctx),
   })
 
+  registerIdentityHandlers(server, ctx)
   registerEnrollmentHandlers(server, ctx)
   registerHydrationHandlers(server, ctx)
   registerSyncHandlers(server, ctx)

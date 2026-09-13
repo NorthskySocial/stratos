@@ -111,6 +111,10 @@ export default defineConfig({
               text: 'Repo-Host Discovery',
               link: '/architecture/repo-host-discovery',
             },
+            {
+              text: 'Service Key History',
+              link: '/architecture/service-key-history',
+            },
             { text: 'System Diagrams', link: '/architecture/diagrams' },
           ],
         },

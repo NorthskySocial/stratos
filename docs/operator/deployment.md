@@ -2,10 +2,11 @@
 
 ## Prerequisites
 
+- **Linux with `flock` installed** (`apk add flock` on Alpine, or `apt install util-linux` on Debian/Ubuntu). The Docker image includes it. The service identity directory must use a local filesystem supporting file locks, atomic rename, and directory fsync; see [service signing key history](/architecture/service-key-history).
 - **Node.js 20+**
 - **pnpm** (package manager)
 - **Domain with HTTPS** (for OAuth callbacks)
-- **DID** for the service (`did:web` or `did:plc`)
+- **`did:web` identifier** for the service
 
 ## Step 1: Clone and Build
 
@@ -18,7 +19,8 @@ pnpm build
 
 ## Step 2: Create Service DID
 
-For `did:web`, create a `.well-known/did.json` at your domain:
+Stratos serves its current key at `/.well-known/did.json`. Route that path to the service so rotations update the public document.
+The document has this shape; use the service's generated key, not the example value:
 
 ```json
 {
