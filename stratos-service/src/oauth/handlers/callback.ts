@@ -73,10 +73,8 @@ export const handleCallback = (config: OAuthRoutesConfig) => {
         return denyEnrollment(res, did, enrollmentResult.reason, oauthClient)
       }
 
-      // Read back the scope actually granted. A non-spaces PDS silently drops
-      // the space scope `handleAuthorize` requested, so the grant (or its
-      // absence) is the answer; a failed read is 'unknown', never a false
-      // 'not-capable'.
+      // A successful callback does not prove the requested space grant exists.
+      // Missing consent cannot establish that the PDS lacks spaces support.
       const spacesCapability = await detectSpacesCapability(
         session,
         serviceDid,

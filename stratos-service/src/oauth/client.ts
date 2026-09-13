@@ -31,8 +31,8 @@ export const SPACE_COLLECTION = 'zone.stratos.feed.post'
  * may hold no boundaries yet, so the scope cannot name a concrete space, and
  * a scope granted without `skey` covers every space added under this
  * authority later. A PDS that does not understand `space:` scopes ignores
- * it and authorization completes normally with only `atproto` granted —
- * that grant (or its absence) is what `detectSpacesCapability` reads back.
+ * it and authorization can complete without space access. The callback must
+ * check the grant; an absent grant leaves spaces capability unknown.
  */
 export function buildSpaceScope(serviceDid: string): string {
   // Encode the authority. The scope parser percent-decodes a parameter value,

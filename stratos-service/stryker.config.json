@@ -11,6 +11,7 @@
   "mutate": [
     "src/identity-resolver.ts",
     "src/oauth/client.ts",
+    "src/oauth/spaces-capability.ts",
     "src/observability/browser-timing.ts",
     "src/config.ts",
     "src/features/blob/adapter.ts",
