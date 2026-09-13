@@ -16,6 +16,7 @@ interface FeedViewPost {
     indexedAt?: string
     author?: { did: string; handle: string }
     boundaries?: unknown
+    blobs?: { cid: string; url: string; mimeType?: string }[]
   }
   reason?: unknown
 }
@@ -41,6 +42,8 @@ export interface FeedPost {
   text: string
   createdAt: string
   isPrivate: boolean
+  feedgenBlobs?: { cid: string; url: string; mimeType?: string }[]
+  loadFeedgenBlob?: (cid: string) => Promise<Blob | undefined>
   reply: ReplyRef | null
   embed?: {
     $type: string
@@ -262,6 +265,7 @@ function mapFeedViewPosts(
         isPrivate,
         reply: parseReplyRef(val),
         embed: val.embed as FeedPost['embed'],
+        ...(item.post.blobs ? { feedgenBlobs: item.post.blobs } : {}),
         author: did,
         authorHandle: handle !== did ? handle : '',
         boundaries,
@@ -439,7 +443,23 @@ export async function fetchFeedgenPosts(
     const body = (await res.json()) as StratosTimelineResponse
     console.log(`[feedgen] getFeed: ${body.feed?.length ?? 0} posts`)
     return {
-      posts: mapFeedViewPosts(body.feed ?? [], true),
+      posts: mapFeedViewPosts(body.feed ?? [], true).map((post) => ({
+        ...post,
+        loadFeedgenBlob: async (cid: string): Promise<Blob | undefined> => {
+          if (!post.feedgenBlobs?.some((blob) => blob.cid === cid))
+            return undefined
+          const parameters = new URLSearchParams({ uri: post.uri, cid })
+          const response = await session.fetchHandler(
+            `/xrpc/zone.stratos.feedgen.getBlob?${parameters}`,
+            {
+              method: 'GET',
+              headers: { 'atproto-proxy': `${feedgenDid}#stratos_feedgen` },
+            },
+          )
+          if (!response.ok) throw new Error('Private image is unavailable')
+          return response.blob()
+        },
+      })),
       cursor: body.cursor,
     }
   } catch (err) {

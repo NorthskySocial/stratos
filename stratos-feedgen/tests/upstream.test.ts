@@ -120,6 +120,29 @@ describe('UpstreamStratosClient', () => {
     await new Promise<void>((resolve) => mock.server.close(() => resolve()))
   })
 
+  it('times out a blob response while its body is still pending', async () => {
+    mock.handler = (_req, res) => {
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.write('partial')
+    }
+    const bounded = new UpstreamStratosClient({
+      serviceUrl: mock.baseUrl,
+      serviceDid: STRATOS_DID,
+      feedgenDid: FEEDGEN_DID,
+      keypair,
+      requestTimeoutMs: 500,
+    })
+    const result = await bounded.getBlob(
+      'did:plc:spike',
+      'bafkreidnltm3txbyqufe7hbtf4b5gasd2jwyfo5qgzyg2nbkfspzvj5mxa',
+    )
+    await expect(async () => {
+      for await (const _chunk of result.stream) {
+        /* wait for the body to settle */
+      }
+    }).rejects.toThrow()
+    expect(result.stream.destroyed).toBe(true)
+  })
   describe('resolveEnrollments', () => {
     it('cancels an enrollment request while the response body is pending', async () => {
       let started!: () => void

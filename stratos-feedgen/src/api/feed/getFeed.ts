@@ -3,6 +3,7 @@ import {
   type Server as XrpcServer,
 } from '@atproto/xrpc-server'
 import { withTelemetrySpan } from '../../observability/runtime.js'
+import { canServePostBlobs } from '../../blob/custody.js'
 import type { FeedgenStore, IndexedPost } from '../../db/index.js'
 import { decodeCursor, encodeCursor } from '../../db/index.js'
 import type { EnrollmentManager } from '../../enrollment/index.js'
@@ -22,8 +23,9 @@ const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
 
 export interface GetFeedDeps {
+  blobBaseUrl?: string
   feeds: FeedRegistry
-  store: Pick<FeedgenStore, 'listPostsByBoundary'>
+  store: Pick<FeedgenStore, 'listPostsByBoundary' | 'listSpaceMembers'>
   enrollmentManager: Pick<EnrollmentManager, 'getBoundaries'>
   verifier: FeedRequestVerifier
   metrics?: FeedgenMetrics
@@ -39,6 +41,7 @@ export interface PostView {
   author: { did: string; handle?: string }
   record: Record<string, unknown>
   indexedAt: string
+  blobs?: { cid: string; url: string; mimeType?: string }[]
   boundaries: string[]
 }
 
@@ -56,7 +59,7 @@ export function registerGetFeedHandler(
   deps: GetFeedDeps,
 ): void {
   server.method(NSID.getFeed, {
-    auth: toXrpcAuthVerifier(deps.verifier),
+    auth: toXrpcAuthVerifier(deps.verifier, NSID.getFeed),
     handler: async ({ params, auth }) => {
       try {
         assertReadiness(deps.readiness)
@@ -88,11 +91,18 @@ export function registerGetFeedHandler(
         )
         assertReadiness(deps.readiness)
 
+        const hydratedPosts = await toFeedViewPosts(
+          result.posts,
+          deps.resolveHandle,
+          deps.blobBaseUrl,
+          deps.store,
+        )
+        assertReadiness(deps.readiness)
         const output = {
           encoding: 'application/json',
           body: {
             cursor: result.cursor,
-            feed: await toFeedViewPosts(result.posts, deps.resolveHandle),
+            feed: hydratedPosts,
           } satisfies GetFeedOutput,
         }
         deps.metrics?.observeFeedRequest({
@@ -144,6 +154,8 @@ function normalizeCursor(cursor: string | undefined): string | undefined {
 async function toFeedViewPosts(
   posts: IndexedPost[],
   resolveHandle?: (did: string) => Promise<string | undefined>,
+  blobBaseUrl?: string,
+  store?: Pick<FeedgenStore, 'listSpaceMembers'>,
 ): Promise<FeedViewPost[]> {
   const handles = new Map<string, string | undefined>()
   if (resolveHandle) {
@@ -159,16 +171,41 @@ async function toFeedViewPosts(
       ),
     )
   }
-  return posts.map((post) => toFeedViewPost(post, handles.get(post.did)))
+  return Promise.all(
+    posts.map(async (post) =>
+      toFeedViewPost(
+        post,
+        handles.get(post.did),
+        blobBaseUrl &&
+          post.blobRefs.length > 0 &&
+          store &&
+          (await canServePostBlobs(store, post))
+          ? blobBaseUrl
+          : undefined,
+      ),
+    ),
+  )
 }
 
-function toFeedViewPost(post: IndexedPost, handle?: string): FeedViewPost {
+function toFeedViewPost(
+  post: IndexedPost,
+  handle?: string,
+  blobBaseUrl?: string,
+): FeedViewPost {
   return {
     post: {
       uri: post.uri,
       cid: post.cid,
       author: { did: post.did, ...(handle ? { handle } : {}) },
       record: post.record,
+      ...(blobBaseUrl
+        ? {
+            blobs: post.blobRefs.map((ref) => ({
+              ...ref,
+              url: `${blobBaseUrl}/xrpc/${NSID.getBlob}?${new URLSearchParams({ uri: post.uri, cid: ref.cid })}`,
+            })),
+          }
+        : {}),
       indexedAt: post.indexedAt,
       boundaries: post.boundaries,
     },

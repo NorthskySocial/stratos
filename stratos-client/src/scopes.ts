@@ -11,6 +11,7 @@ export const STRATOS_SCOPES: StratosScopes = {
   enrollment: ENROLLMENT_COLLECTION,
   post: 'zone.stratos.feed.post',
   getFeed: 'zone.stratos.feedgen.getFeed',
+  getBlob: 'zone.stratos.feedgen.getBlob',
 }
 
 /**
@@ -65,5 +66,6 @@ export const buildStratosScopes = (): string[] => {
     buildCollectionScope(STRATOS_SCOPES.enrollment),
     buildCollectionScope(STRATOS_SCOPES.post, ['create', 'delete']),
     buildRpcScope(STRATOS_SCOPES.getFeed),
+    buildRpcScope(STRATOS_SCOPES.getBlob),
   ]
 }

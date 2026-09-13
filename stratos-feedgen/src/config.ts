@@ -46,6 +46,11 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
+  blobCacheDirectory: string
+  blobCacheMaxBytes: number
+  blobCacheTtlMs: number
+  blobMaxBytes: number
+  blobMaxConcurrentDownloads: number
   /** Pino log level. */
   logLevel: string
   /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
@@ -81,9 +86,10 @@ export const DEFAULT_SQLITE_PATH = ':memory:'
 export const DEFAULT_BOUNDARY_CACHE_TTL_MS = 300_000
 export const DEFAULT_BOUNDARY_CACHE_MAX = 10_000
 
-/** Lxms accepted on inbound service-auth JWTs. WP9 will append `getBlob`. */
+/** Lxms accepted on inbound service-auth JWTs. */
 export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
   'zone.stratos.feedgen.getFeed',
+  'zone.stratos.feedgen.getBlob',
 ]
 
 export const DEFAULT_PLC_URL = 'https://plc.directory'
@@ -153,6 +159,29 @@ export function loadFeedgenConfig(
       env['FEEDGEN_BOUNDARY_CACHE_MAX'],
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
+    ),
+    blobCacheDirectory:
+      optionalEnv(env, 'FEEDGEN_BLOB_CACHE_DIRECTORY') ??
+      './data/feedgen-blobs',
+    blobCacheMaxBytes: parsePositiveInt(
+      env['FEEDGEN_BLOB_CACHE_MAX_BYTES'],
+      'FEEDGEN_BLOB_CACHE_MAX_BYTES',
+      536_870_912,
+    ),
+    blobCacheTtlMs: parsePositiveInt(
+      env['FEEDGEN_BLOB_CACHE_TTL_MS'],
+      'FEEDGEN_BLOB_CACHE_TTL_MS',
+      3_600_000,
+    ),
+    blobMaxBytes: parsePositiveInt(
+      env['FEEDGEN_BLOB_MAX_BYTES'],
+      'FEEDGEN_BLOB_MAX_BYTES',
+      26_214_400,
+    ),
+    blobMaxConcurrentDownloads: parsePositiveInt(
+      env['FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS'],
+      'FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS',
+      4,
     ),
     logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
     spaceSyncEnabled: parseBoolean(

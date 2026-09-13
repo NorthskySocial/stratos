@@ -291,6 +291,8 @@ describe('scopes', () => {
       'repo:zone.stratos.feed.post?action=create&action=delete',
     )
     expect(scopes).toContain('rpc:zone.stratos.feedgen.getFeed?aud=*')
+    expect(scopes).toContain('rpc:zone.stratos.feedgen.getBlob?aud=*')
+    expect(STRATOS_SCOPES.getBlob).toBe('zone.stratos.feedgen.getBlob')
     expect(scopes).not.toContain('transition:generic')
     expect(scopes).not.toContain('transition:chat.bsky')
   })

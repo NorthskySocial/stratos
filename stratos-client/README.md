@@ -560,6 +560,7 @@ OAuth metadata and scope selector UI.
 | `repo:zone.stratos.actor.enrollment`     | Read/write enrollment records       | None                                          |
 | `repo:zone.stratos.feed.post`            | Read/write Stratos posts            | Requires `repo:zone.stratos.actor.enrollment` |
 | `rpc:zone.stratos.feedgen.getFeed?aud=*` | Call any feed generator's `getFeed` | None                                          |
+| `rpc:zone.stratos.feedgen.getBlob?aud=*` | Read authorized feed attachments    | None                                          |
 
 ### Feed response records
 
@@ -570,6 +571,14 @@ service-qualified boundaries used to admit that indexed record to the feed.
 Clients should use `post.author.did` for attribution instead of deriving the
 author from a fixed URI segment, because space record URIs place the member DID
 after the space authority and key.
+
+`post.blobs` contains authenticated attachment views (`cid`, `url`, optional `mimeType`)
+for Stratos-hosted blobs. The signed record and its blob refs remain unchanged.
+Call `zone.stratos.feedgen.getBlob` with the exact post `uri` and attachment `cid`.
+Send the call through the authenticated PDS proxy with `atproto-proxy: <feedgenDid>#stratos_feedgen`.
+Render the response through a local object URL; a direct image URL cannot carry service auth.
+Missing blob views retain the existing custody-specific client path. PDS blob support is not added by this endpoint.
+See [Private feed attachments](../docs/client/feedgen-blobs.md) for the full contract and cache limits.
 
 ### Scope utilities
 
@@ -594,7 +603,8 @@ const scopes = buildStratosScopes()
 // => ['atproto',
 //     'repo:zone.stratos.actor.enrollment',
 //     'repo:zone.stratos.feed.post?action=create&action=delete',
-//     'rpc:zone.stratos.feedgen.getFeed?aud=*']
+//     'rpc:zone.stratos.feedgen.getFeed?aud=*',
+//     'rpc:zone.stratos.feedgen.getBlob?aud=*']
 ```
 
 ### OAuth client metadata
@@ -603,7 +613,7 @@ Add scopes to your `oauth-client-metadata.json`:
 
 ```json
 {
-  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post rpc:zone.stratos.feedgen.getFeed?aud=*"
+  "scope": "atproto repo:zone.stratos.actor.enrollment repo:zone.stratos.feed.post rpc:zone.stratos.feedgen.getFeed?aud=* rpc:zone.stratos.feedgen.getBlob?aud=*"
 }
 ```
 
