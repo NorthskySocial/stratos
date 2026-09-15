@@ -29,7 +29,7 @@ export default defineConfig({
       },
       {
         text: 'Architecture',
-        link: '/architecture/hydration',
+        link: '/architecture/permissioned-spaces',
         activeMatch: '/architecture/',
       },
       { text: 'Lexicons', link: '/lexicons/', activeMatch: '/lexicons/' },
@@ -97,8 +97,16 @@ export default defineConfig({
         {
           text: 'Architecture',
           items: [
+            {
+              text: 'Permissioned Spaces',
+              link: '/architecture/permissioned-spaces',
+            },
             { text: 'Hydration Architecture', link: '/architecture/hydration' },
             { text: 'Indexer Architecture', link: '/indexer-architecture' },
+            {
+              text: 'Feed Generator',
+              link: '/architecture/feed-generator',
+            },
             {
               text: 'Enrollment Signing',
               link: '/architecture/enrollment-signing',
