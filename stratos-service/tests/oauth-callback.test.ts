@@ -692,7 +692,7 @@ describe('handleCallback', () => {
     )
   })
 
-  it('keeps stratos custody end-to-end when the capability verdict is not-capable', async () => {
+  it('keeps ordinary PDS enrollment compatible when the space grant is absent', async () => {
     const session = sessionFor('did:plc:kenshin')
     mockOauthClient.callback.mockResolvedValue({ session })
     mockEnrollmentStore.isEnrolled.mockResolvedValue(false)
@@ -718,6 +718,7 @@ describe('handleCallback', () => {
         signingKeyDid: 'did:key:zQ3sh...',
         custody: 'stratos',
         repoHost: undefined,
+        capabilityVerdict: 'unknown',
       }),
     )
     expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
@@ -1099,9 +1100,10 @@ describe('handleCallback', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true, did: 'did:plc:alice' }),
     )
-    // With no stored target there is nothing to report. A guard that entered
-    // the redirect branch anyway would warn here.
-    expect(mockLogger.warn).not.toHaveBeenCalled()
+    expect(mockLogger.warn).toHaveBeenCalledExactlyOnceWith(
+      { did: 'did:plc:alice' },
+      'requested space scope was not granted, cannot decide spaces capability',
+    )
   })
 
   it('declines a stored redirect that uses a disallowed scheme', async () => {
@@ -1294,9 +1296,9 @@ describe('handleCallback', () => {
       )
     })
 
-    it('records the new verdict but keeps pds custody when the grant is revoked', async () => {
+    it('records unknown and preserves pds custody when the space grant is absent', async () => {
       mockOauthClient.callback.mockResolvedValue({
-        session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
+        session: sessionFor('did:plc:kaoru'), // base scope only: capability unknown
       })
       mockEnrollmentStore.getEnrollment.mockResolvedValue(
         existingEnrollment({
@@ -1311,7 +1313,7 @@ describe('handleCallback', () => {
       // second signing key, while the user's records stay on their PDS.
       expect(mockEnrollmentStore.updateEnrollment).toHaveBeenCalledWith(
         'did:plc:kaoru',
-        { capabilityVerdict: 'not-capable' },
+        { capabilityVerdict: 'unknown' },
       )
       expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalledWith(
         'did:plc:kaoru',
@@ -1321,13 +1323,12 @@ describe('handleCallback', () => {
           repoHost: 'https://pds.example.com',
         }),
       )
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          storedCustody: 'pds',
-          wantedCustody: 'stratos',
-        }),
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        expect.anything(),
         'custody diverged from the granted scope, migration required',
       )
+      expect(config.initRepo).not.toHaveBeenCalled()
+      expect(config.createSigningKey).not.toHaveBeenCalled()
     })
 
     it('never flips pds custody to stratos when the re-auth verdict is unknown', async () => {
@@ -1411,7 +1412,7 @@ describe('handleCallback', () => {
 
     it('refreshes the stored pdsEndpoint on stratos custody without setting a repoHost', async () => {
       mockOauthClient.callback.mockResolvedValue({
-        session: sessionFor('did:plc:kaoru'), // base scope only: not-capable
+        session: sessionFor('did:plc:kaoru'), // base scope only: capability unknown
       })
       mockEnrollmentValidator.validate.mockResolvedValue({
         allowed: true,
@@ -1422,7 +1423,7 @@ describe('handleCallback', () => {
           custody: 'stratos',
           repoHost: undefined,
           pdsEndpoint: 'https://pds.example.com',
-          capabilityVerdict: 'not-capable',
+          capabilityVerdict: 'unknown',
         }),
       )
 
@@ -1570,23 +1571,23 @@ describe('handleCallback', () => {
       expect(session.getTokenInfo).toHaveBeenCalledWith(false)
     })
 
-    it('reports not-capable when the PDS silently dropped the space scope', async () => {
+    it('reports unknown when the PDS silently dropped the space scope', async () => {
       // sessionFor defaults to the base-only grant, i.e. the scope a
       // non-spaces PDS returns after ignoring the space scope request.
       await runCallback(sessionFor('did:plc:kaoru'))
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        { did: 'did:plc:kaoru', spacesCapability: 'not-capable' },
+        { did: 'did:plc:kaoru', spacesCapability: 'unknown' },
         'detected PDS spaces capability',
       )
     })
 
-    it('reports not-capable when the granted scope names a different authority', async () => {
+    it('reports unknown when the granted scope names a different authority', async () => {
       const scope = `atproto ${buildSpaceScope('did:web:other.example.com')}`
       await runCallback(sessionFor('did:plc:sanosuke', scope))
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        { did: 'did:plc:sanosuke', spacesCapability: 'not-capable' },
+        { did: 'did:plc:sanosuke', spacesCapability: 'unknown' },
         'detected PDS spaces capability',
       )
     })
@@ -1626,17 +1627,17 @@ describe('handleCallback', () => {
       )
     })
 
-    it('reports not-capable when the grant can read but cannot create', async () => {
+    it('reports unknown when the grant can read but cannot create', async () => {
       // Custody decides where this user's records are written, so a read-only
       // grant is not capable of the flow we would put them in.
       const readOnly =
-        `atproto space:zone.stratos.space.feed?authority=${SERVICE_DID}` +
+        `atproto space:zone.stratos.space.feed?authority=${encodeURIComponent(SERVICE_DID)}` +
         `&collection=zone.stratos.feed.post&action=read`
       const session = sessionFor('did:plc:kenshin', readOnly)
       await runCallback(session)
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        { did: 'did:plc:kenshin', spacesCapability: 'not-capable' },
+        { did: 'did:plc:kenshin', spacesCapability: 'unknown' },
         'detected PDS spaces capability',
       )
       expect(mockEnrollmentStore.enroll).toHaveBeenCalledWith(

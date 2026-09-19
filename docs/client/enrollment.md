@@ -301,6 +301,31 @@ async function handleEnrollmentCallback() {
 Stratos records use AT Protocol auth scopes. Clients should declare the scopes they need in their
 OAuth metadata and scope selector UI.
 
+### Enrollment space grant and custody
+
+The Stratos enrollment client requests `atproto`, the enrollment record write scope, and a space
+scope for its own authority. The space scope covers `zone.stratos.space.feed`, collection
+`zone.stratos.feed.post`, and both `read` and `create`. It omits `skey` so future boundary memberships
+remain covered. A scope permits operations; Stratos boundary membership still controls access.
+
+Successful OAuth authorization does not establish spaces capability. The callback reads the granted
+scope with `session.getTokenInfo(false)` and checks the actual permissions. A grant for another
+authority, space type, collection, or only one action does not satisfy enrollment's request.
+
+| Granted scope                                    | Capability verdict | New enrollment custody |
+| ------------------------------------------------ | ------------------ | ---------------------- |
+| Matching space read and create permissions       | `capable`          | `pds`                  |
+| Missing, partial, unrelated, or unreadable grant | `unknown`          | `stratos`              |
+
+An absent grant can mean an ordinary PDS ignored the space request or a user withheld consent.
+It does not prove the PDS lacks spaces support. Stratos records `unknown` and logs the incomplete
+grant, while ordinary PDS users can continue enrolling with Stratos custody.
+
+Reauthorization preserves existing custody, signing keys, and records. Missing consent never moves
+a PDS-hosted repo to Stratos. Granting space access later never moves a Stratos-hosted repo to the
+PDS. Either custody change requires an explicit data migration. Stratos remains the space authority
+for both custody classes.
+
 ### Required scopes
 
 | Scope                                    | Description                         | Dependency                                    |
