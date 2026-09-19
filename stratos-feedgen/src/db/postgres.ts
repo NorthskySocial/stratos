@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import {
   pgEnrolledActor as enrolledActorTbl,
+  pgFeedgenMembershipMetadata as membershipMetadataTbl,
   pgPost as postTbl,
   pgPostBoundary as postBoundaryTbl,
   pgSpaceMemberSnapshot as spaceMemberSnapshotTbl,
@@ -27,6 +28,9 @@ import {
   SpaceMemberSnapshot,
   SpaceSyncStagePage,
 } from './types.js'
+import type { CatalogBoundary } from '../feeds/catalog-model.js'
+
+const CATALOG_BASELINE_KEY = 'boundary-catalog-baseline'
 
 export type PgDb = PostgresJsDatabase<typeof pgSchema> & {
   _client: postgres.Sql
@@ -133,6 +137,12 @@ export async function migratePgDb(
       custody TEXT NOT NULL,
       host TEXT,
       PRIMARY KEY (boundary, did)
+    )
+  `)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS feedgen_membership_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     )
   `)
 }
@@ -784,6 +794,29 @@ export class PgFeedgenStore implements FeedgenStore {
     }))
   }
 
+  async getCatalogBaseline(): Promise<CatalogBoundary[]> {
+    const rows = await this.db
+      .select({ value: membershipMetadataTbl.value })
+      .from(membershipMetadataTbl)
+      .where(eq(membershipMetadataTbl.key, CATALOG_BASELINE_KEY))
+      .limit(1)
+    if (rows.length === 0) return []
+    return parseCatalogBaseline(rows[0].value)
+  }
+
+  async replaceCatalogBaseline(
+    boundaries: readonly CatalogBoundary[],
+  ): Promise<void> {
+    const value = JSON.stringify(boundaries)
+    await this.db
+      .insert(membershipMetadataTbl)
+      .values({ key: CATALOG_BASELINE_KEY, value })
+      .onConflictDoUpdate({
+        target: membershipMetadataTbl.key,
+        set: { value },
+      })
+  }
+
   async replaceSpaceMembers(
     boundary: string,
     members: SpaceMemberSnapshot[],
@@ -917,6 +950,13 @@ function stageRowToPost(row: {
     blobRefs: JSON.parse(row.blobRefsJson) as PostUpsert['blobRefs'],
     boundaries: [row.boundary],
   }
+}
+
+function parseCatalogBaseline(value: string): CatalogBoundary[] {
+  const parsed: unknown = JSON.parse(value)
+  if (!Array.isArray(parsed))
+    throw new Error('Invalid persisted boundary catalogue')
+  return parsed as CatalogBoundary[]
 }
 
 function rowToEnrolledActor(row: {

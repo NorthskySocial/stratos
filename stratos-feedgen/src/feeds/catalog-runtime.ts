@@ -66,7 +66,7 @@ export class BoundaryCatalogRuntime {
       if (!previous.some((prior) => prior.boundary === entry.boundary))
         changed.add(entry.boundary)
     }
-    await this.deps.blobs.clear()
+    if (changed.size > 0) await this.deps.blobs.clear()
     for (const boundary of changed) {
       signal.throwIfAborted()
       await this.deps.purger().purgeBoundary(boundary)

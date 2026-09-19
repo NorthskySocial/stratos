@@ -93,3 +93,11 @@ export const pgSpaceMemberSnapshot = pgTable(
   },
   (table) => [primaryKey({ columns: [table.boundary, table.did] })],
 )
+
+export const pgFeedgenMembershipMetadata = pgTable(
+  'feedgen_membership_metadata',
+  {
+    key: text('key').primaryKey(),
+    value: text('value').notNull(),
+  },
+)

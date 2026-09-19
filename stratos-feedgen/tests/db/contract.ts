@@ -5,6 +5,7 @@ import type {
   PostUpsert,
 } from '../../src/db/index.js'
 import { decodeCursor, encodeCursor } from '../../src/db/index.js'
+import type { CatalogBoundary } from '../../src/feeds/catalog-model.js'
 
 export interface StoreFactory {
   build: () => Promise<FeedgenStore>
@@ -69,6 +70,23 @@ export function describeStoreContract(
       expect(await store.listIndexedBoundaries()).toEqual(['alpha', 'zeta'])
       await store.deletePostsByBoundary('zeta')
       expect(await store.listIndexedBoundaries()).toEqual(['alpha'])
+    })
+
+    it('stores the confirmed catalogue baseline in durable membership state', async () => {
+      const baseline: CatalogBoundary[] = [
+        {
+          boundary: 'did:web:nerv.example/pilots',
+          roomId: 'pilots',
+          displayName: 'Pilots',
+          description: 'NERV pilots',
+          listed: true,
+          joinable: true,
+          revision: 1,
+        },
+      ]
+      expect(await store.getCatalogBaseline()).toEqual([])
+      await store.replaceCatalogBaseline(baseline)
+      expect(await store.getCatalogBaseline()).toEqual(baseline)
     })
 
     describe('cursor encoding', () => {

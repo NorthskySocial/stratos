@@ -75,6 +75,7 @@ async function setup(initial = [boundary('bebop')]) {
   const configuredBoundaries = new Set<string>()
   const listBoundaries = vi.fn(async () => rows)
   const catalog = new BoundaryCatalog({
+    authority: AUTHORITY,
     client: { listBoundaries },
     configuredBoundaries,
     options: {

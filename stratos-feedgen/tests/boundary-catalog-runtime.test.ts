@@ -253,7 +253,7 @@ describe('catalogue projection transitions', () => {
   })
 
   it('keeps unrelated actor cursors and still refreshes membership when recovering unchanged catalogue state', async () => {
-    const { runtime, remote, createSpaces, membership } = fixture()
+    const { runtime, remote, createSpaces, membership, blobs } = fixture()
     remote.delete(ASUKA)
     await enroll(REI, [PILOTS])
     await store.upsertCursor(REI, 10, time)
@@ -261,6 +261,7 @@ describe('catalogue projection transitions', () => {
     await runtime.apply([row(PILOTS)], [row(PILOTS)], controller().signal)
     expect(await store.listIndexedBoundaries()).toEqual([PILOTS])
     expect(await store.getCursor(REI)).toBe(10)
+    expect(blobs.clear).not.toHaveBeenCalled()
     await runtime.suspend()
     await runtime.apply([row(PILOTS)], [row(PILOTS)], controller().signal)
     expect(createSpaces).toHaveBeenCalledTimes(2)

@@ -286,11 +286,16 @@ async function main(): Promise<void> {
   const catalog =
     catalogOptions.mode === 'upstream'
       ? new BoundaryCatalog({
+          authority: cfg.stratosServiceDid,
           client: upstream,
           configuredBoundaries,
           options: catalogOptions,
           apply: (previous, next, signal) =>
             catalogRuntime.apply(previous, next, signal),
+          baseline: {
+            load: () => store.getCatalogBaseline(),
+            save: (entries) => store.replaceCatalogBaseline(entries),
+          },
           suspend: () => catalogRuntime.suspend(),
           onError: (error) =>
             logger.error(

@@ -1,9 +1,10 @@
 import type { FeedDescription, FeedRegistry } from './config.js'
 import type { FeedReadiness } from '../readiness.js'
-import type { CatalogBoundary } from './catalog-model.js'
+import { parseBoundaryCatalog, type CatalogBoundary } from './catalog-model.js'
 import type { BoundaryCatalogOptions } from './catalog-options.js'
 
 export interface BoundaryCatalogDeps {
+  authority: string
   client: {
     listBoundaries: (signal: AbortSignal) => Promise<CatalogBoundary[]>
   }
@@ -14,6 +15,10 @@ export interface BoundaryCatalogDeps {
     next: readonly CatalogBoundary[],
     signal: AbortSignal,
   ) => Promise<void>
+  baseline?: {
+    load: () => Promise<CatalogBoundary[]>
+    save: (entries: readonly CatalogBoundary[]) => Promise<void>
+  }
   suspend: () => Promise<void>
   onError: (error: unknown) => void
   now?: () => number
@@ -53,7 +58,17 @@ export class BoundaryCatalog implements FeedRegistry, FeedReadiness {
 
   start(): Promise<void> {
     this.started = true
-    return this.refresh()
+    if (!this.deps.baseline) return this.refresh()
+    return this.deps.baseline
+      .load()
+      .then((entries) => {
+        this.restoreBaseline(entries)
+        return this.refresh()
+      })
+      .catch(async (error: unknown) => {
+        this.deps.onError(error)
+        await this.suspend()
+      })
   }
 
   refresh(): Promise<void> {
@@ -118,6 +133,7 @@ export class BoundaryCatalog implements FeedRegistry, FeedReadiness {
         if (JSON.stringify(confirmed) !== JSON.stringify(next))
           throw new Error('Boundary catalogue changed during reconciliation')
         next = confirmed
+        await this.deps.baseline?.save(next)
         this.feeds = new Map(
           next.map((entry) => [entry.roomId, toFeedDescription(entry)]),
         )
@@ -177,6 +193,20 @@ export class BoundaryCatalog implements FeedRegistry, FeedReadiness {
       )
         throw new Error('Boundary catalogue revision did not advance')
     }
+  }
+
+  private restoreBaseline(entries: readonly CatalogBoundary[]): void {
+    let validated: CatalogBoundary[]
+    try {
+      validated = parseBoundaryCatalog(
+        { boundaries: entries },
+        this.deps.authority,
+      )
+    } catch {
+      throw new Error('Invalid persisted boundary catalogue')
+    }
+    for (const entry of validated) this.known.set(entry.roomId, entry)
+    this.entries = validated
   }
 }
 

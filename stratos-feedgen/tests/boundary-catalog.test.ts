@@ -34,7 +34,7 @@ function deferred<T>() {
   })
   return { promise, resolve, reject }
 }
-function fixture() {
+function fixture(baseline?: CatalogBoundary[]) {
   const configuredBoundaries = new Set<string>()
   const client = {
     listBoundaries: vi
@@ -53,6 +53,9 @@ function fixture() {
     },
   )
   const onError = vi.fn()
+  const savedBaseline = vi.fn(
+    async (_entries: readonly CatalogBoundary[]) => {},
+  )
   const options = {
     mode: 'upstream' as const,
     refreshMs: 1000,
@@ -61,14 +64,31 @@ function fixture() {
     applyTimeoutMs: 10_000,
   }
   const catalog = new BoundaryCatalog({
+    authority: AUTHORITY,
     configuredBoundaries,
     client,
     suspend,
     apply,
+    ...(baseline
+      ? {
+          baseline: {
+            load: vi.fn(async () => baseline),
+            save: savedBaseline,
+          },
+        }
+      : {}),
     onError,
     options,
   })
-  return { catalog, client, suspend, apply, configuredBoundaries, onError }
+  return {
+    catalog,
+    client,
+    suspend,
+    apply,
+    configuredBoundaries,
+    onError,
+    savedBaseline,
+  }
 }
 const active: BoundaryCatalog[] = []
 afterEach(async () => {
@@ -103,6 +123,48 @@ describe('boundary catalogue refresh', () => {
       description: 'NERV pilots',
     })
     expect([...configuredBoundaries]).toEqual([PILOTS])
+  })
+
+  it('uses a confirmed baseline only to retain unchanged projections through restart', async () => {
+    const { catalog, apply, savedBaseline } = trackedFixture()
+    await catalog.start()
+    const baseline = [entry()]
+    const restarted = fixture(baseline)
+    active.push(restarted.catalog)
+    await restarted.catalog.start()
+    expect(restarted.catalog.isReady()).toBe(true)
+    expect(restarted.apply.mock.calls[0][0]).toEqual(baseline)
+    expect(restarted.apply.mock.calls[0][1]).toEqual(baseline)
+    expect(restarted.savedBaseline).toHaveBeenCalledWith(baseline)
+    expect(apply).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { boundary: 'unqualified' },
+    { boundary: 1 },
+    { roomId: ' ' },
+    { roomId: 1 },
+    { displayName: 1 },
+    { description: 1 },
+    { listed: 1 },
+    { joinable: 1 },
+    { revision: 0 },
+  ])('rejects malformed persisted baselines: %s', async (invalid) => {
+    const { catalog, client, configuredBoundaries, onError, suspend } = fixture(
+      [entry(invalid as Partial<CatalogBoundary>)],
+    )
+    active.push(catalog)
+
+    await catalog.start()
+
+    expect(catalog.isReady()).toBe(false)
+    expect(client.listBoundaries).not.toHaveBeenCalled()
+    expect(configuredBoundaries).toEqual(new Set())
+    expect(onError).toHaveBeenCalledOnce()
+    expect(onError.mock.calls[0][0].message).toBe(
+      'Invalid persisted boundary catalogue',
+    )
+    expect(suspend).toHaveBeenCalledOnce()
   })
 
   it('updates discovery metadata only after applying revisions and preserves object identity on unchanged refreshes', async () => {
@@ -245,6 +307,7 @@ describe('boundary catalogue refresh', () => {
     const configuredBoundaries = new Set<string>()
     const onError = vi.fn()
     const catalog = new BoundaryCatalog({
+      authority: AUTHORITY,
       configuredBoundaries,
       client: { listBoundaries: async () => [entry()] },
       options: {
