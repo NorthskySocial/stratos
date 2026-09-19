@@ -35,7 +35,9 @@ function toStoredEnrollment(row: PgEnrollment): StoredEnrollment {
 }
 
 export class PgEnrollmentStoreReader implements EnrollmentStoreReader {
-  constructor(protected db: ServicePgDb) {}
+  constructor(
+    protected db: Pick<ServicePgDb, 'select' | 'insert' | 'update' | 'delete'>,
+  ) {}
 
   async isEnrolled(did: string): Promise<boolean> {
     const rows = await this.db

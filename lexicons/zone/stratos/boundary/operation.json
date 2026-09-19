@@ -1,0 +1,76 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.boundary.operation",
+  "defs": {
+    "main": {
+      "type": "object",
+      "required": [
+        "$type",
+        "authority",
+        "did",
+        "sequence",
+        "recordedAt",
+        "signingKey",
+        "previousHash",
+        "before",
+        "after"
+      ],
+      "properties": {
+        "$type": {
+          "type": "string",
+          "const": "zone.stratos.boundary.operation"
+        },
+        "authority": {
+          "type": "string",
+          "format": "did"
+        },
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "signingKey": {
+          "type": "string",
+          "format": "did"
+        },
+        "previousHash": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "before": {
+          "type": "ref",
+          "ref": "#state"
+        },
+        "after": {
+          "type": "ref",
+          "ref": "#state"
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": ["enrolled", "active", "boundaries"],
+      "properties": {
+        "enrolled": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "boundaries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

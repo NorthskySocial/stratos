@@ -1,0 +1,53 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.boundary.checkpoint",
+  "defs": {
+    "main": {
+      "type": "object",
+      "required": [
+        "$type",
+        "authority",
+        "did",
+        "sequence",
+        "recordedAt",
+        "signingKey",
+        "headHash",
+        "state"
+      ],
+      "properties": {
+        "$type": {
+          "type": "string",
+          "const": "zone.stratos.boundary.checkpoint"
+        },
+        "authority": {
+          "type": "string",
+          "format": "did"
+        },
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "signingKey": {
+          "type": "string",
+          "format": "did"
+        },
+        "headHash": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "state": {
+          "type": "ref",
+          "ref": "zone.stratos.boundary.operation#state"
+        }
+      }
+    }
+  }
+}

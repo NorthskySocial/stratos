@@ -112,6 +112,45 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.admin.getBoundaryAuditState",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Read a consistent authority-signed actor membership checkpoint and resume cursor. Requires OAuth admin authorization. A checkpoint recovers current state; it does not reconstruct missing history.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did"
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["checkpoint", "signature", "cursor"],
+          "properties": {
+            "checkpoint": {
+              "type": "ref",
+              "ref": "zone.stratos.boundary.checkpoint"
+            },
+            "signature": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.admin.getRepoHost",
   "defs": {
     "main": {
@@ -227,6 +266,83 @@ export const stratosLexicons: LexiconDoc[] = [
           "type": "string",
           "format": "did",
           "description": "Who granted access. Absent for config admins."
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.listBoundaryOps",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Page an actor\u2019s authority-signed boundary history. Requires OAuth admin authorization. Cursors bind actor, sequence, and hash. Never use user-repo signatures as boundary authorization.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["operations", "cursor", "hasMore"],
+          "properties": {
+            "operations": {
+              "type": "array",
+              "maxLength": 100,
+              "items": {
+                "type": "ref",
+                "ref": "#signedOperation"
+              }
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "hasMore": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "BoundaryHistoryTruncated",
+          "description": "History is missing, inconsistent, or does not prove this cursor. Recover with getBoundaryAuditState."
+        }
+      ]
+    },
+    "signedOperation": {
+      "type": "object",
+      "required": ["operation", "hash", "signature"],
+      "properties": {
+        "operation": {
+          "type": "ref",
+          "ref": "zone.stratos.boundary.operation"
+        },
+        "hash": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "signature": {
+          "type": "string"
         }
       }
     }
@@ -540,6 +656,59 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.boundary.checkpoint",
+  "defs": {
+    "main": {
+      "type": "object",
+      "required": [
+        "$type",
+        "authority",
+        "did",
+        "sequence",
+        "recordedAt",
+        "signingKey",
+        "headHash",
+        "state"
+      ],
+      "properties": {
+        "$type": {
+          "type": "string",
+          "const": "zone.stratos.boundary.checkpoint"
+        },
+        "authority": {
+          "type": "string",
+          "format": "did"
+        },
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "signingKey": {
+          "type": "string",
+          "format": "did"
+        },
+        "headHash": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "state": {
+          "type": "ref",
+          "ref": "zone.stratos.boundary.operation#state"
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.boundary.defs",
   "defs": {
     "Domain": {
@@ -565,6 +734,82 @@ export const stratosLexicons: LexiconDoc[] = [
           "items": { "type": "ref", "ref": "#Domain" },
           "minLength": 1,
           "maxLength": 1
+        }
+      }
+    }
+  }
+},
+{
+  "lexicon": 1,
+  "id": "zone.stratos.boundary.operation",
+  "defs": {
+    "main": {
+      "type": "object",
+      "required": [
+        "$type",
+        "authority",
+        "did",
+        "sequence",
+        "recordedAt",
+        "signingKey",
+        "previousHash",
+        "before",
+        "after"
+      ],
+      "properties": {
+        "$type": {
+          "type": "string",
+          "const": "zone.stratos.boundary.operation"
+        },
+        "authority": {
+          "type": "string",
+          "format": "did"
+        },
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "signingKey": {
+          "type": "string",
+          "format": "did"
+        },
+        "previousHash": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "before": {
+          "type": "ref",
+          "ref": "#state"
+        },
+        "after": {
+          "type": "ref",
+          "ref": "#state"
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": ["enrolled", "active", "boundaries"],
+      "properties": {
+        "enrolled": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "boundaries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

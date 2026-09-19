@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.admin.getBoundaryAuditState",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Read a consistent authority-signed actor membership checkpoint and resume cursor. Requires OAuth admin authorization. A checkpoint recovers current state; it does not reconstruct missing history.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did"
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["checkpoint", "signature", "cursor"],
+          "properties": {
+            "checkpoint": {
+              "type": "ref",
+              "ref": "zone.stratos.boundary.checkpoint"
+            },
+            "signature": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

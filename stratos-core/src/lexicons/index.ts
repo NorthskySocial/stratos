@@ -1,3 +1,7 @@
+import zoneStratosBoundaryCheckpoint from '../../../lexicons/zone/stratos/boundary/checkpoint.json' with { type: 'json' }
+import zoneStratosBoundaryOperation from '../../../lexicons/zone/stratos/boundary/operation.json' with { type: 'json' }
+import zoneStratosAdminGetBoundaryAuditState from '../../../lexicons/zone/stratos/admin/getBoundaryAuditState.json' with { type: 'json' }
+import zoneStratosAdminListBoundaryOps from '../../../lexicons/zone/stratos/admin/listBoundaryOps.json' with { type: 'json' }
 import type { LexiconDoc } from '@atproto/lexicon'
 import { atprotoLexicons } from './atproto.js'
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
@@ -37,6 +41,10 @@ import zoneStratosSyncSubscribeRecords from '../../../lexicons/zone/stratos/sync
 
 export const stratosLexicons: LexiconDoc[] = [
   ...atprotoLexicons,
+  zoneStratosBoundaryCheckpoint as LexiconDoc,
+  zoneStratosBoundaryOperation as LexiconDoc,
+  zoneStratosAdminGetBoundaryAuditState as LexiconDoc,
+  zoneStratosAdminListBoundaryOps as LexiconDoc,
   zoneStratosActorEnrollment as LexiconDoc,
   zoneStratosAdminListEnrollments as LexiconDoc,
   zoneStratosAdminGetRepoHost as LexiconDoc,

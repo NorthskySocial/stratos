@@ -15,6 +15,7 @@
     "src/observability/browser-timing.ts",
     "src/config.ts",
     "src/features/blob/adapter.ts",
+    "src/features/boundary-audit/**/*.ts",
     "src/features/enrollment/**/*.ts",
     "src/features/hydration/**/*.ts",
     "src/features/sync/**/*.ts",

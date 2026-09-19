@@ -75,6 +75,7 @@ export interface StorageContext {
   }
   adminSessionStore: import('./oauth/admin-session-store.js').AdminSessionStore
   adminUserStore: import('./oauth/admin-user-store.js').AdminUserStore
+  boundaryAudit: import('./features/boundary-audit/index.js').BoundaryAudit
   pdsSyncQueue: import('./features/enrollment/internal/pds-sync-store.js').PdsSyncQueueStore
 }
 
