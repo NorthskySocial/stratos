@@ -18,6 +18,7 @@
 
   let inspectorOpen = $state(false)
   let imageUrls = $state<Record<string, string>>({})
+  let imageGeneration = 0
   let deleting = $state(false)
   let deleteError = $state('')
   let canDelete = $derived(post.author === currentDid)
@@ -70,6 +71,7 @@
   }
 
   $effect(() => {
+    const generation = ++imageGeneration
     const embed = post.embed
     if (!embed) {
       return
@@ -90,7 +92,7 @@
           const hasHydrated = img.thumb || img.fullsize || (typeof imageObj === 'object' && imageObj && 'url' in imageObj && imageObj.url)
           // Only load if we don't already have a hydrated URL
           if (!hasHydrated) {
-            loadBlob(imageObj as StratosImage['image'])
+            loadBlob(imageObj as StratosImage['image'], generation)
           }
         })
       } else if (e.image) {
@@ -98,12 +100,12 @@
         const imageObj = img.image || img
         const hasHydrated = img.thumb || img.fullsize || (typeof imageObj === 'object' && imageObj && 'url' in imageObj && imageObj.url)
         if (!hasHydrated) {
-          loadBlob(imageObj as StratosImage['image'])
+          loadBlob(imageObj as StratosImage['image'], generation)
         }
       } else if (e.$type === 'app.bsky.embed.external' || e.external) {
         const external = (e.external || e) as { thumb?: StratosImage['image']; uri?: string }
         if (external.thumb) {
-          loadBlob(external.thumb)
+          loadBlob(external.thumb, generation)
         }
       } else if ((e.$type === 'app.bsky.embed.recordWithMedia' || e.media) && (e.media || e.record)) {
         handleEmbed((e.media || e.record) as Record<string, unknown>)
@@ -113,6 +115,7 @@
     handleEmbed(embed)
 
     return () => {
+      imageGeneration++
       // Clean up object URLs
       Object.values(imageUrls).forEach((url) => {
         if (typeof url === 'string' && url.startsWith('blob:')) {
@@ -126,13 +129,21 @@
    * Load a blob from the given image object.
    * @param image - The image object.
    */
-  async function loadBlob(image: StratosImage['image']) {
+  async function loadBlob(image: StratosImage['image'], generation: number) {
     const cid = getCid(image)
     if (!cid || imageUrls[cid]) {
       return
     }
 
     try {
+      if (post.isPrivate && post.loadFeedgenBlob) {
+        const blob = await post.loadFeedgenBlob(cid)
+        if (generation !== imageGeneration) return
+        if (blob) {
+          imageUrls[cid] = URL.createObjectURL(blob)
+          return
+        }
+      }
       let resp: { data: Uint8Array } | null = null
       const agent = stratosAgent
       if (post.isPrivate && agent) {

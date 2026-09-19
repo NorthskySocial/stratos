@@ -912,6 +912,47 @@ export const stratosLexicons: LexiconDoc[] = [
 },
 {
   "lexicon": 1,
+  "id": "zone.stratos.feedgen.getBlob",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Read a Stratos-hosted blob attached to an accessible indexed post. Requires service-auth scoped to this method. Responses are private and must not be shared or cached by HTTP intermediaries.",
+      "parameters": {
+        "type": "params",
+        "required": ["uri", "cid"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "Exact indexed post URI, including space record URIs."
+          },
+          "cid": {
+            "type": "string",
+            "format": "cid"
+          }
+        }
+      },
+      "output": {
+        "encoding": "*/*"
+      },
+      "errors": [
+        {
+          "name": "BlobNotFound"
+        },
+        {
+          "name": "BlobTooLarge"
+        },
+        {
+          "name": "BlobBusy"
+        },
+        {
+          "name": "FeedNotReady"
+        }
+      ]
+    }
+  }
+},
+{
+  "lexicon": 1,
   "id": "zone.stratos.feedgen.getFeed",
   "defs": {
     "main": {
@@ -921,14 +962,19 @@ export const stratosLexicons: LexiconDoc[] = [
         "type": "params",
         "required": ["feed"],
         "properties": {
-          "feed": { "type": "string", "description": "Configured feed id." },
+          "feed": {
+            "type": "string",
+            "description": "Configured feed id."
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100,
             "default": 50
           },
-          "cursor": { "type": "string" }
+          "cursor": {
+            "type": "string"
+          }
         }
       },
       "output": {
@@ -937,21 +983,36 @@ export const stratosLexicons: LexiconDoc[] = [
           "type": "object",
           "required": ["feed"],
           "properties": {
-            "cursor": { "type": "string" },
+            "cursor": {
+              "type": "string"
+            },
             "feed": {
               "type": "array",
-              "items": { "type": "ref", "ref": "#feedViewPost" }
+              "items": {
+                "type": "ref",
+                "ref": "#feedViewPost"
+              }
             }
           }
         }
       },
-      "errors": [{ "name": "UnknownFeed" }, { "name": "BoundaryMismatch" }]
+      "errors": [
+        {
+          "name": "UnknownFeed"
+        },
+        {
+          "name": "BoundaryMismatch"
+        }
+      ]
     },
     "feedViewPost": {
       "type": "object",
       "required": ["post"],
       "properties": {
-        "post": { "type": "ref", "ref": "#postView" }
+        "post": {
+          "type": "ref",
+          "ref": "#postView"
+        }
       }
     },
     "postView": {
@@ -962,14 +1023,35 @@ export const stratosLexicons: LexiconDoc[] = [
           "type": "string",
           "description": "AT URI or permissioned space record URI."
         },
-        "cid": { "type": "string", "format": "cid" },
-        "author": { "type": "ref", "ref": "#authorView" },
-        "record": { "type": "unknown" },
-        "indexedAt": { "type": "string", "format": "datetime" },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "author": {
+          "type": "ref",
+          "ref": "#authorView"
+        },
+        "record": {
+          "type": "unknown"
+        },
+        "indexedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
         "boundaries": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minLength": 1
+        },
+        "blobs": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "#blobView"
+          },
+          "description": "Authenticated feedgen blob URLs. Record blob refs remain unchanged. Absent for custody whose blobs must be read from the host."
         }
       }
     },
@@ -977,8 +1059,30 @@ export const stratosLexicons: LexiconDoc[] = [
       "type": "object",
       "required": ["did"],
       "properties": {
-        "did": { "type": "string", "format": "did" },
-        "handle": { "type": "string" }
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "handle": {
+          "type": "string"
+        }
+      }
+    },
+    "blobView": {
+      "type": "object",
+      "required": ["cid", "url"],
+      "properties": {
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "mimeType": {
+          "type": "string"
+        }
       }
     }
   }

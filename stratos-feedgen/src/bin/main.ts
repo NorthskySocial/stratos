@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import '../observability/instrumentation.js'
+import { createBlobService } from '../blob/runtime.js'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import type { Logger } from '@northskysocial/stratos-core'
 import { normalizeMembershipBoundaries } from '../boundary-normalization.js'
@@ -131,7 +132,10 @@ async function main(): Promise<void> {
     idResolver,
   })
 
+  const blobs = await createBlobService(cfg, upstream)
   const server = createFeedgenServer({
+    blobs,
+    mutationFence: spaceMutationFence,
     feedgenServiceDid: cfg.feedgenServiceDid,
     feedgenPublicUrl: cfg.feedgenPublicUrl,
     publicKeyMultibase,

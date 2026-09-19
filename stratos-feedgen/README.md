@@ -18,7 +18,7 @@ flowchart TD
     Index[(Record projection<br/>posts, boundaries,<br/>sync_cursor)]
     Hydrate[Stratos hydrateRecords<br/>service-auth]
     Blob[Feed Gen getBlob]
-    S3[(S3 blob cache)]
+    S3[(local disk blob cache)]
     StratosBlob[Stratos com.atproto.sync.getBlob]
     ResolveEnr[Stratos enrollment and space APIs]
 
@@ -312,3 +312,11 @@ pnpm --filter @northskysocial/stratos-feedgen test
 | Smoke / E2E | Deno   | [`stratos/test/scripts/feedgen-*.ts`](../test/scripts/) (phases of the existing Deno E2E suite) |
 
 Cross-service smoke and E2E live under `stratos/test/scripts/` and reuse the helpers in `stratos/test/scripts/lib/`. The feed gen does **not** carry per-package smoke scripts or `test/e2e/` directories. Manual staging runs use the same Deno scripts with `STRATOS_SERVICE_URL` (and friends) overridden — there is no separate "manual smoke" artifact.
+
+## Private attachments
+
+`zone.stratos.feedgen.getBlob` serves authorized Stratos-hosted attachments with a bounded local disk cache.
+`getFeed` provides attachment views without modifying signed record blob refs.
+Every read rechecks post access, viewer boundaries, custody, and feed readiness, including cache hits.
+The client must request the `getBlob` OAuth scope and fetch through the authenticated PDS proxy.
+See [Private feed attachments](../docs/client/feedgen-blobs.md) for configuration, retention, and PDS-custody limits.
