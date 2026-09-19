@@ -246,6 +246,7 @@ async function initCoreServices(
     signingKey,
     cache,
     logger,
+    storage.boundaryStore,
   )
 
   const boundaryResolver = cfg.enrollment.valkeyUrl
@@ -352,6 +353,7 @@ function initAuth(
   signingKey: AppContext['signingKey'],
   cache: AppContext['cache'],
   logger?: AppContext['logger'],
+  boundaryStore?: AppContext['boundaryStore'],
 ) {
   const dpopVerifier = new DpopVerifier({
     serviceDid: cfg.service.did,
@@ -377,6 +379,7 @@ function initAuth(
     signingKey,
     replayStoreFromCache(cache, logger),
     logger,
+    boundaryStore,
   )
 
   return { dpopVerifier, authVerifier, lexiconProvider, xrpcServer }
