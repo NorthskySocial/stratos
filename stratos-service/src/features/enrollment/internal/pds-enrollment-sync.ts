@@ -12,7 +12,7 @@ export interface PdsEnrollmentSyncDeps {
     did: string,
     boundaries: string[],
     userDidKey: string,
-  ): Promise<{ sig: Uint8Array; signingKey: string }>
+  ): Promise<{ sig: Uint8Array; signingKey: string; issuedAt?: string }>
   oauthClient: Pick<NodeOAuthClient, 'restore'>
   serviceDid: string
   publicUrl: string
@@ -68,10 +68,7 @@ export async function syncEnrollmentRecordToPds(
         service: deps.publicUrl,
         boundaries: boundaries.map((value) => ({ value })),
         signingKey: enrollment.signingKeyDid,
-        attestation: {
-          sig: attestation.sig,
-          signingKey: attestation.signingKey,
-        },
+        attestation,
         createdAt: new Date().toISOString(),
         custody: enrollment.custody ?? 'stratos',
         ...(enrollment.custody === 'pds' && enrollment.repoHost

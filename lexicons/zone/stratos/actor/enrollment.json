@@ -53,7 +53,7 @@
     },
     "serviceAttestation": {
       "type": "object",
-      "description": "An attestation signed by the Stratos service key. The signed payload is DAG-CBOR encoded {boundaries, did, signingKey} with sorted keys.",
+      "description": "Service signature over DAG-CBOR {boundaries, did, signingKey, issuedAt}, with sorted boundaries. Legacy attestations omit issuedAt from the payload.",
       "required": ["sig", "signingKey"],
       "properties": {
         "sig": {
@@ -63,6 +63,11 @@
         "signingKey": {
           "type": "string",
           "description": "The Stratos service's public key as a did:key string, used to verify the attestation signature."
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Signed issue time. Required for historical service key verification. Legacy attestations omit this field."
         }
       }
     }

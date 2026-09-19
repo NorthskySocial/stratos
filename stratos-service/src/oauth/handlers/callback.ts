@@ -312,10 +312,7 @@ async function handleExistingEnrollment(deps: ExistingEnrollmentDeps) {
       service: serviceEndpoint,
       boundaries: boundaries.map((value: string) => ({ value })),
       signingKey: enrollment.signingKeyDid,
-      attestation: {
-        sig: attestation.sig,
-        signingKey: attestation.signingKey,
-      },
+      attestation,
       createdAt: new Date().toISOString(),
       custody,
       repoHost,
@@ -443,10 +440,7 @@ async function handleNewEnrollment(deps: {
     service: serviceEndpoint,
     boundaries: enrollBoundaries.map((value: string) => ({ value })),
     signingKey: userSigningKeyDid,
-    attestation: {
-      sig: attestation.sig,
-      signingKey: attestation.signingKey,
-    },
+    attestation,
     createdAt: new Date().toISOString(),
     custody,
     repoHost,

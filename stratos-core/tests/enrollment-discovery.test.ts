@@ -43,6 +43,31 @@ describe('Enrollment Discovery', () => {
       },
     }
 
+    it('preserves signed issue times and the legacy absence of that field', () => {
+      const issuedAt = '1995-10-04T12:00:00.000Z'
+      expect(
+        parseEnrollmentRecord(validRecord, 'nerv')?.attestation,
+      ).not.toHaveProperty('issuedAt')
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            attestation: { ...validRecord.attestation, issuedAt },
+          },
+          'nerv',
+        )?.attestation,
+      ).toStrictEqual({ ...validRecord.attestation, issuedAt })
+      expect(
+        parseEnrollmentRecord(
+          {
+            ...validRecord,
+            attestation: { ...validRecord.attestation, issuedAt: 42 },
+          },
+          'nerv',
+        ),
+      ).toBeNull()
+    })
+
     it('should parse a valid enrollment record', () => {
       const result = parseEnrollmentRecord(validRecord, 'rkey123')
       expect(result).not.toBeNull()

@@ -1,0 +1,69 @@
+{
+  "lexicon": 1,
+  "id": "zone.stratos.identity.getKeyHistory",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Public, append-only service signing key history. Each rotation requires previous-key authorization and new-key acceptance. Anchor the final key to the current service DID document before trusting historical keys.",
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["serviceDid", "entries"],
+          "properties": {
+            "serviceDid": {
+              "type": "string",
+              "format": "did"
+            },
+            "entries": {
+              "type": "array",
+              "maxLength": 1024,
+              "items": {
+                "type": "ref",
+                "ref": "#entry"
+              }
+            }
+          }
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "versionId",
+        "key",
+        "validFrom",
+        "previousVersionId",
+        "proof",
+        "acceptance"
+      ],
+      "nullable": ["previousVersionId"],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "maxLength": 70
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "validFrom": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "previousVersionId": {
+          "type": "string",
+          "maxLength": 70
+        },
+        "proof": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "acceptance": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    }
+  }
+}

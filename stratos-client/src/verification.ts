@@ -1,3 +1,4 @@
+import { readKeyHistoryResponse } from './key-history-response.js'
 import { verifyRecord as atcuteVerifyRecord } from '@atcute/repo'
 import { encode as cborEncode } from '@atcute/cbor'
 import {
@@ -12,6 +13,7 @@ import {
   type PublicKey,
   Secp256k1PublicKey,
 } from '@atcute/crypto'
+import { toBase58Btc } from '@atcute/multibase'
 import { getAtprotoVerificationMaterial } from '@atcute/identity'
 import { WebDidDocumentResolver } from '@atcute/identity-resolver'
 import type {
@@ -21,6 +23,11 @@ import type {
   VerifiedRecord,
 } from './types.js'
 import { getEnrollmentByServiceDid } from './discovery.js'
+
+import {
+  verifyServiceKeyHistory,
+  findHistoricalSigningKey,
+} from './key-history.js'
 
 type DidString = `did:plc:${string}` | `did:web:${string}`
 
@@ -108,16 +115,16 @@ export const verifyRecordCid = async (
  */
 export const resolveServiceSigningKey = async (
   serviceDid: string,
-  options?: ResolveSigningKeyOptions,
+  options: ResolveSigningKeyOptions = {},
 ): Promise<PublicKey> => {
-  const cached = options?.cache?.get(serviceDid)
-  if (cached) return cached
+  const cached = options.cache?.get(serviceDid)
+  if (cached && !options.attestation) return cached
 
   if (!serviceDid.startsWith('did:web:')) {
     throw new Error(`expected did:web, got: ${serviceDid}`)
   }
 
-  const fetchFn = options?.fetchFn
+  const fetchFn = options.fetchFn
   const resolver = new WebDidDocumentResolver(
     fetchFn ? { fetch: fetchFn } : undefined,
   )
@@ -140,8 +147,61 @@ export const resolveServiceSigningKey = async (
       break
   }
 
-  options?.cache?.set(serviceDid, key)
-  return key
+  options.cache?.set(serviceDid, key)
+  const attestation = options.attestation
+  const keyPrefix = found.type === 'p256' ? [0x80, 0x24] : [0xe7, 0x01]
+  const currentKey = `did:key:z${toBase58Btc(new Uint8Array([...keyPrefix, ...found.publicKeyBytes]))}`
+  if (!attestation || attestation.signingKey === currentKey) return key
+  return resolveHistoricalSigningKey(
+    serviceDid,
+    doc,
+    currentKey,
+    attestation,
+    fetchFn,
+  )
+}
+
+async function resolveHistoricalSigningKey(
+  serviceDid: string,
+  doc: Awaited<ReturnType<WebDidDocumentResolver['resolve']>>,
+  currentKey: string,
+  attestation: { signingKey: string; issuedAt?: string },
+  fetchFn?: typeof fetch,
+): Promise<PublicKey> {
+  if (!attestation.issuedAt)
+    throw new Error('Historical attestations require a signed issuedAt')
+  const endpoint = doc.service?.find(
+    (service) =>
+      (service.id === '#stratos' || service.id === `${serviceDid}#stratos`) &&
+      service.type === 'StratosService',
+  )?.serviceEndpoint
+  if (typeof endpoint !== 'string')
+    throw new Error('DID document has no Stratos service endpoint')
+  const url = new URL(endpoint)
+  if (url.protocol !== 'https:' || url.username || url.password)
+    throw new Error('Key history requires an HTTPS endpoint')
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/xrpc/zone.stratos.identity.getKeyHistory`
+  url.search = ''
+  url.hash = ''
+  const response = await (fetchFn ?? fetch)(url.href, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error('Failed to fetch service key history')
+  const history = await verifyServiceKeyHistory(
+    await readKeyHistoryResponse(response),
+    serviceDid,
+    currentKey,
+  )
+  const historicalKey = findHistoricalSigningKey(
+    history,
+    attestation.signingKey,
+    attestation.issuedAt,
+  )
+  const historical = parseDidKey(historicalKey)
+  return historical.type === 'p256'
+    ? P256PublicKey.importRaw(historical.publicKeyBytes)
+    : Secp256k1PublicKey.importRaw(historical.publicKeyBytes)
 }
 
 /**

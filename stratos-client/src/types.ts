@@ -15,9 +15,11 @@ export interface StratosEnrollment {
 
 /**
  * service attestation vouching for the user's enrollment, boundaries, and signing key.
- * the signed payload is DAG-CBOR encoded {boundaries, did, signingKey} with sorted keys.
+ * the signed payload is DAG-CBOR encoded {boundaries, did, signingKey, issuedAt}.
+ * Legacy current-key attestations omit issuedAt from both record and payload.
  */
 export interface ServiceAttestation {
+  issuedAt?: string
   sig: Uint8Array
   signingKey: string
 }
@@ -69,6 +71,8 @@ export interface FetchAndVerifyOptions {
  * options for resolveServiceSigningKey.
  */
 export interface ResolveSigningKeyOptions {
+  attestation?: { signingKey: string; issuedAt?: string }
+
   /**
    * optional fetch function for the DID document request.
    * defaults to global fetch.

@@ -111,3 +111,38 @@ describe('Attestation Domain', () => {
     })
   })
 })
+
+it('includes the exact signed issue time while retaining the legacy payload shape', () => {
+  const boundaries = [
+    'did:web:nerv.example/seele',
+    'did:web:nerv.example/engineering',
+  ]
+  const issuedAt = '1995-10-04T12:00:00.000Z'
+  const dated = cborDecode(
+    createAttestationPayload(
+      'did:plc:shinji',
+      boundaries,
+      'did:key:zActor',
+      issuedAt,
+    ),
+  )
+  expect(dated).toEqual({
+    did: 'did:plc:shinji',
+    signingKey: 'did:key:zActor',
+    boundaries: [...boundaries].sort(),
+    issuedAt,
+  })
+  expect(
+    cborDecode(
+      createAttestationPayload('did:plc:shinji', boundaries, 'did:key:zActor'),
+    ),
+  ).toEqual({
+    did: 'did:plc:shinji',
+    signingKey: 'did:key:zActor',
+    boundaries: [...boundaries].sort(),
+  })
+  expect(boundaries).toEqual([
+    'did:web:nerv.example/seele',
+    'did:web:nerv.example/engineering',
+  ])
+})

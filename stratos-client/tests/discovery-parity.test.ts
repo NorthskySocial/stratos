@@ -49,6 +49,29 @@ describe('discovery parity (client fork vs. core original)', () => {
       attestation: validAttestation,
     }
 
+    it('preserves signed issue times in both discovery implementations', () => {
+      const issuedAt = '1995-10-04T12:00:00.000Z'
+      const record = {
+        ...validRecord,
+        attestation: { ...validAttestation, issuedAt },
+      }
+      for (const parse of [parseEnrollmentRecord, coreParseEnrollmentRecord]) {
+        expect(parse(validRecord, 'nerv')?.attestation).not.toHaveProperty(
+          'issuedAt',
+        )
+        expect(parse(record, 'nerv')?.attestation).toEqual({
+          ...validAttestation,
+          issuedAt,
+        })
+        expect(
+          parse(
+            { ...record, attestation: { ...validAttestation, issuedAt: 42 } },
+            'nerv',
+          ),
+        ).toBeNull()
+      }
+    })
+
     const cases: Array<[name: string, value: unknown]> = [
       ['valid record with boundaries', validRecord],
       [

@@ -1,3 +1,14 @@
+export {
+  appendServiceKeyHistory,
+  verifyServiceKeyHistory,
+  findHistoricalSigningKey,
+  keyHistoryTimestamp,
+  MAX_KEY_HISTORY_ENTRIES,
+  type ServiceKeyHistory,
+  type ServiceKeyHistoryEntry,
+  type HistorySigner,
+} from './key-history.js'
+
 export type {
   FetchHandler,
   FetchHandlerObject,
@@ -35,6 +46,7 @@ export {
 export {
   verifyEnrollmentAttestation,
   type AttestationResult,
+  type VerifyAttestationOptions,
 } from './attestation.js'
 export {
   STRATOS_SCOPES,
