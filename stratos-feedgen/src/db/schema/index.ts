@@ -3,6 +3,7 @@ export * from './postgres.js'
 
 import {
   enrolledActor,
+  feedgenMembershipMetadata,
   post,
   postBoundary,
   spaceMemberSnapshot,
@@ -13,6 +14,7 @@ import {
 } from './sqlite.js'
 import {
   pgEnrolledActor,
+  pgFeedgenMembershipMetadata,
   pgPost,
   pgPostBoundary,
   pgSpaceMemberSnapshot,
@@ -31,6 +33,7 @@ export const sqliteSchema = {
   spaceSyncStage,
   spaceSyncPendingVerification,
   spaceMemberSnapshot,
+  feedgenMembershipMetadata,
 }
 
 export const pgSchema = {
@@ -42,4 +45,5 @@ export const pgSchema = {
   spaceSyncStage: pgSpaceSyncStage,
   spaceSyncPendingVerification: pgSpaceSyncPendingVerification,
   spaceMemberSnapshot: pgSpaceMemberSnapshot,
+  feedgenMembershipMetadata: pgFeedgenMembershipMetadata,
 }

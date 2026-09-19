@@ -92,3 +92,11 @@ export const spaceMemberSnapshot = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.boundary, table.did] })],
 )
+
+export const feedgenMembershipMetadata = sqliteTable(
+  'feedgen_membership_metadata',
+  {
+    key: text('key').primaryKey(),
+    value: text('value').notNull(),
+  },
+)

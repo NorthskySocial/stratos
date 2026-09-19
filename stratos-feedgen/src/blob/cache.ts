@@ -14,6 +14,8 @@ export interface BlobCache {
   get: (key: string) => Promise<Buffer | undefined>
   put: (key: string, bytes: Buffer) => Promise<void>
   remove: (key: string) => Promise<void>
+  /** Complete after earlier puts, removing their bytes before admitting later reads. */
+  clear: () => Promise<void>
 }
 
 export interface DiskBlobCacheOptions {
@@ -104,6 +106,12 @@ export class DiskBlobCache implements BlobCache {
 
   remove(key: string): Promise<void> {
     return this.serialize(() => this.removeEntry(key))
+  }
+
+  clear(): Promise<void> {
+    return this.serialize(async () => {
+      for (const key of this.entries.keys()) await this.removeEntry(key)
+    })
   }
 
   private async makeRoom(size: number): Promise<void> {

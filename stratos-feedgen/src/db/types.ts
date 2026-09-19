@@ -1,4 +1,5 @@
 import type { Custody } from '@northskysocial/stratos-core'
+import type { CatalogBoundary } from '../feeds/catalog-model.js'
 
 /** Four values are bound per row; 200 stays below conservative SQLite caps. */
 export const SPACE_MEMBER_INSERT_CHUNK_SIZE = 200
@@ -102,6 +103,9 @@ export interface FeedgenRecordStore {
   getPost: (uri: string) => Promise<IndexedPost | null>
   listPostsByBoundary: (opts: ListPostsOpts) => Promise<ListPostsResult>
 
+  /** Boundary names retained in the materialized index, including scopes removed while offline. */
+  listIndexedBoundaries: () => Promise<string[]>
+
   // deletion / purge helpers
   /** Delete every post (and its cascaded boundary rows) authored by `did`. Returns rows removed. */
   deletePostsByDid: (did: string) => Promise<number>
@@ -169,6 +173,12 @@ export interface FeedgenRecordStore {
  * own hot maps; this store supplies restart and reconciliation baselines.
  */
 export interface FeedgenMembershipStore {
+  /** Last confirmed authority catalogue, retained only as a restart comparison baseline. */
+  getCatalogBaseline: () => Promise<CatalogBoundary[]>
+  replaceCatalogBaseline: (
+    boundaries: readonly CatalogBoundary[],
+  ) => Promise<void>
+
   // completed space membership snapshots
   listSpaceMembers: (boundary: string) => Promise<SpaceMemberSnapshot[]>
   replaceSpaceMembers: (

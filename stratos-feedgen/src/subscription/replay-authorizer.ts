@@ -42,7 +42,10 @@ export class CurrentMembershipReplayAuthorizer implements ReplayAuthorizer {
 
   constructor(opts: CurrentMembershipReplayAuthorizerOptions) {
     this.client = opts.client
-    this.configuredBoundaries = new Set(opts.configuredBoundaries)
+    this.configuredBoundaries =
+      opts.configuredBoundaries instanceof Set
+        ? opts.configuredBoundaries
+        : new Set(opts.configuredBoundaries)
   }
 
   async authorize(

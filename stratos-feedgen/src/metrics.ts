@@ -6,6 +6,8 @@ import { metrics, type Meter } from '@opentelemetry/api'
  * holder instead of holding the objects directly.
  */
 export interface SubscriptionStatus {
+  /** Full runtime readiness, including catalogue freshness when configured. */
+  isReady?: () => boolean
   serviceStream: { isConnected: () => boolean } | null
   actorPool: {
     getStats: () => { active: number; waiting: number; max: number }
@@ -156,7 +158,7 @@ export function createFeedgenMetrics(
   meter.addBatchObservableCallback(
     (result) => {
       result.observe(heartbeat, Date.now() / 1_000)
-      result.observe(readiness, ready ? 1 : 0)
+      result.observe(readiness, (status.isReady?.() ?? ready) ? 1 : 0)
       result.observe(connected, status.serviceStream?.isConnected() ? 1 : 0, {
         'stream.kind': 'service',
       })

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import '../observability/instrumentation.js'
+import { BoundaryCatalog } from '../feeds/catalog.js'
+import { BoundaryCatalogRuntime } from '../feeds/catalog-runtime.js'
+import { loadBoundaryCatalogOptions } from '../feeds/catalog-options.js'
+import type { FeedRegistry } from '../feeds/config.js'
 import { createBlobService } from '../blob/runtime.js'
 import { Secp256k1Keypair } from '@atproto/crypto'
 import type { Logger } from '@northskysocial/stratos-core'
@@ -79,7 +83,14 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
   process.on('SIGINT', () => void shutdown('SIGINT'))
 
-  const feeds = loadFeedRegistry()
+  const catalogOptions = loadBoundaryCatalogOptions()
+  if (
+    catalogOptions.mode === 'upstream' &&
+    process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] === 'false'
+  )
+    throw new Error(
+      'Upstream boundary catalogues require the enrollment subscription',
+    )
   const port = parsePort(process.env['FEEDGEN_PORT']) ?? 3000
 
   const keypair = await Secp256k1Keypair.import(cfg.feedgenSigningKey)
@@ -132,125 +143,15 @@ async function main(): Promise<void> {
     idResolver,
   })
 
-  const blobs = await createBlobService(cfg, upstream)
-  const server = createFeedgenServer({
-    blobs,
-    mutationFence: spaceMutationFence,
-    feedgenServiceDid: cfg.feedgenServiceDid,
-    feedgenPublicUrl: cfg.feedgenPublicUrl,
-    publicKeyMultibase,
-    feeds,
-    store,
-    enrollmentManager,
-    verifier,
-    logger,
-    metrics,
-    subscriptionStatus,
-    feedReadiness,
-    resolveHandle: (did) => handleResolver.resolve(did),
-  })
-
-  const httpServer = await server.listen(port)
-  shutdownDeps.httpServer = httpServer
-  logger.info({ port }, 'stratos-feedgen listening')
-
-  const configuredBoundaries = new Set(
-    normalizeMembershipBoundaries(
-      cfg.stratosServiceDid,
-      feeds.list().map((feed) => feed.boundary),
-    ),
-  )
-  for (const actor of await store.listEnrolledActors()) {
-    const boundaries = normalizeMembershipBoundaries(
-      cfg.stratosServiceDid,
-      actor.boundaries,
-    )
-    if (
-      boundaries.length !== actor.boundaries.length ||
-      boundaries.some((boundary, index) => boundary !== actor.boundaries[index])
-    ) {
-      await store.upsertEnrolledActor({ ...actor, boundaries })
-    }
-  }
-  const replayAuthorizer = new CurrentMembershipReplayAuthorizer({
-    client: upstream,
-    configuredBoundaries,
-  })
-  const indexer = new SubscriptionIndexer(store, {
-    onPostIndexed: (operation) => metrics.recordIndexOperation(operation, 'ok'),
-    replayAuthorizer,
-  })
-
-  // Best-effort warm-up: a boundary this feedgen has no membership for yet
-  // (or a mint failure) must not block startup or crash the process. The sync
-  // path still acquires credentials on demand; this only reduces first-pass
-  // mint latency. Emit one completion event, not one line per boundary.
-  // Log the acquired count too. A summary with only failures makes a warm-up
-  // that never ran look the same as one that worked.
-  void Promise.all(
-    [...configuredBoundaries].map(async (boundary) => {
-      try {
-        await spaceCredentialManager.getCredential(boundary)
-        return { boundary }
-      } catch (err: unknown) {
-        return { boundary, reason: describeUpstreamError(err) }
-      }
-    }),
-  ).then((results) => {
-    const failed = results.filter(
-      (r): r is { boundary: string; reason: string } => 'reason' in r,
-    )
-    const context = {
-      attempted: results.length,
-      acquired: results.length - failed.length,
-      failed: failed.length,
-      failures: failed.slice(0, MAX_WARM_UP_FAILURES).map((failure) => ({
-        boundary: boundWarmUpField(failure.boundary),
-        reason: boundWarmUpField(failure.reason),
-      })),
-      omittedFailures: Math.max(0, failed.length - MAX_WARM_UP_FAILURES),
-    }
-    if (failed.length === 0) {
-      logger.info(context, 'space credential warm-up completed')
-    } else {
-      logger.warn(context, 'space credential warm-up completed with failures')
-    }
-  })
-
-  const subscribeEnrollments =
-    process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
   let subscription: {
     serviceStream: ServiceStream
     actorPool: ActorPool
     purger: Purger
+    reconcile: (signal: AbortSignal) => Promise<boolean>
   } | null = null
-  if (subscribeEnrollments) {
-    const starting = startSubscription({
-      cfg,
-      upstream,
-      store,
-      indexer,
-      enrollmentManager,
-      configuredBoundaries,
-      logger,
-      metrics,
-      shutdownDeps,
-      spaceMutationFence,
-      feedReadiness,
-    })
-    // Shutdown awaits this barrier before it closes the store. The swallow
-    // keeps a startup failure out of the panic path; main's catch reports it.
-    shutdownDeps.startup = starting.then(
-      () => undefined,
-      () => undefined,
-    )
-    subscription = await starting
-    if (!subscription) return
-  }
-  subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
-  subscriptionStatus.actorPool = subscription?.actorPool ?? null
-
-  if (cfg.spaceSyncEnabled) {
+  const configuredBoundaries = new Set<string>()
+  const blobs = await createBlobService(cfg, upstream)
+  const createSpaces = () => {
     const purger =
       subscription?.purger ??
       new Purger({
@@ -362,7 +263,173 @@ async function main(): Promise<void> {
       },
     })
     shutdownDeps.spaceSyncScheduler = scheduler
-    scheduler.start()
+    return { membership, scheduler }
+  }
+  const catalogRuntime = new BoundaryCatalogRuntime({
+    store,
+    configuredBoundaries,
+    enrollment: enrollmentManager,
+    credentials: spaceCredentialManager,
+    blobs,
+    purger: () =>
+      subscription?.purger ??
+      new Purger({
+        store,
+        mutationFence: spaceMutationFence,
+        enrollmentCache: enrollmentManager,
+        audit: (entry) => logger.info({ ...entry }, 'feedgen purge'),
+      }),
+    subscription: () => subscription,
+    createSpaces,
+    spaceSyncEnabled: cfg.spaceSyncEnabled,
+  })
+  const catalog =
+    catalogOptions.mode === 'upstream'
+      ? new BoundaryCatalog({
+          authority: cfg.stratosServiceDid,
+          client: upstream,
+          configuredBoundaries,
+          options: catalogOptions,
+          apply: (previous, next, signal) =>
+            catalogRuntime.apply(previous, next, signal),
+          baseline: {
+            load: () => store.getCatalogBaseline(),
+            save: (entries) => store.replaceCatalogBaseline(entries),
+          },
+          suspend: () => catalogRuntime.suspend(),
+          onError: (error) =>
+            logger.error(
+              { err: error },
+              'boundary catalogue refresh failed; feeds unavailable',
+            ),
+        })
+      : undefined
+  shutdownDeps.boundaryCatalog = catalog
+  const feeds: FeedRegistry = catalog ?? loadFeedRegistry()
+  if (!catalog)
+    for (const boundary of normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      feeds.list().map((feed) => feed.boundary),
+    ))
+      configuredBoundaries.add(boundary)
+  const readiness = {
+    isReady: () => feedReadiness.isReady() && (catalog?.isReady() ?? true),
+  }
+
+  subscriptionStatus.isReady = readiness.isReady
+  const server = createFeedgenServer({
+    blobs,
+    mutationFence: spaceMutationFence,
+    feedgenServiceDid: cfg.feedgenServiceDid,
+    feedgenPublicUrl: cfg.feedgenPublicUrl,
+    publicKeyMultibase,
+    feeds,
+    store,
+    enrollmentManager,
+    verifier,
+    logger,
+    metrics,
+    subscriptionStatus,
+    feedReadiness: readiness,
+    configuredBoundaries,
+    resolveHandle: (did) => handleResolver.resolve(did),
+  })
+
+  const httpServer = await server.listen(port)
+  shutdownDeps.httpServer = httpServer
+  logger.info({ port }, 'stratos-feedgen listening')
+
+  for (const actor of await store.listEnrolledActors()) {
+    const boundaries = normalizeMembershipBoundaries(
+      cfg.stratosServiceDid,
+      actor.boundaries,
+    )
+    if (
+      boundaries.length !== actor.boundaries.length ||
+      boundaries.some((boundary, index) => boundary !== actor.boundaries[index])
+    ) {
+      await store.upsertEnrolledActor({ ...actor, boundaries })
+    }
+  }
+  const replayAuthorizer = new CurrentMembershipReplayAuthorizer({
+    client: upstream,
+    configuredBoundaries,
+  })
+  const indexer = new SubscriptionIndexer(store, {
+    onPostIndexed: (operation) => metrics.recordIndexOperation(operation, 'ok'),
+    replayAuthorizer,
+  })
+
+  // Best-effort warm-up: a boundary this feedgen has no membership for yet
+  // (or a mint failure) must not block startup or crash the process. The sync
+  // path still acquires credentials on demand; this only reduces first-pass
+  // mint latency. Emit one completion event, not one line per boundary.
+  // Log the acquired count too. A summary with only failures makes a warm-up
+  // that never ran look the same as one that worked.
+  void Promise.all(
+    [...configuredBoundaries].map(async (boundary) => {
+      try {
+        await spaceCredentialManager.getCredential(boundary)
+        return { boundary }
+      } catch (err: unknown) {
+        return { boundary, reason: describeUpstreamError(err) }
+      }
+    }),
+  ).then((results) => {
+    const failed = results.filter(
+      (r): r is { boundary: string; reason: string } => 'reason' in r,
+    )
+    const context = {
+      attempted: results.length,
+      acquired: results.length - failed.length,
+      failed: failed.length,
+      failures: failed.slice(0, MAX_WARM_UP_FAILURES).map((failure) => ({
+        boundary: boundWarmUpField(failure.boundary),
+        reason: boundWarmUpField(failure.reason),
+      })),
+      omittedFailures: Math.max(0, failed.length - MAX_WARM_UP_FAILURES),
+    }
+    if (failed.length === 0) {
+      logger.info(context, 'space credential warm-up completed')
+    } else {
+      logger.warn(context, 'space credential warm-up completed with failures')
+    }
+  })
+
+  const subscribeEnrollments =
+    process.env['FEEDGEN_SUBSCRIBE_ENROLLMENTS'] !== 'false'
+  if (subscribeEnrollments) {
+    const starting = startSubscription({
+      cfg,
+      upstream,
+      store,
+      indexer,
+      enrollmentManager,
+      configuredBoundaries,
+      logger,
+      metrics,
+      shutdownDeps,
+      spaceMutationFence,
+      feedReadiness,
+    })
+    // Shutdown awaits this barrier before it closes the store. The swallow
+    // keeps a startup failure out of the panic path; main's catch reports it.
+    shutdownDeps.startup = starting.then(
+      () => undefined,
+      () => undefined,
+    )
+    subscription = await starting
+    if (!subscription) return
+  }
+  subscriptionStatus.serviceStream = subscription?.serviceStream ?? null
+  subscriptionStatus.actorPool = subscription?.actorPool ?? null
+
+  if (catalog) {
+    const startingCatalog = catalog.start()
+    shutdownDeps.startup = startingCatalog
+    await startingCatalog
+  } else if (cfg.spaceSyncEnabled) {
+    createSpaces().scheduler.start()
     logger.info({}, 'space sync scheduler started')
   }
 }
@@ -394,6 +461,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream: ServiceStream
   actorPool: ActorPool
   purger: Purger
+  reconcile: (signal: AbortSignal) => Promise<boolean>
 } | null> {
   const { cfg, upstream, store, indexer, enrollmentManager, logger, metrics } =
     deps
@@ -598,7 +666,7 @@ async function startSubscription(deps: StartSubscriptionDeps): Promise<{
   serviceStream.start()
   logger.info({}, 'service enrollment subscription started')
 
-  return { serviceStream, actorPool: pool, purger }
+  return { serviceStream, actorPool: pool, purger, reconcile: runReconcile }
 }
 
 function parsePort(value: string | undefined): number | undefined {

@@ -6,6 +6,7 @@ import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
 import {
   enrolledActor as enrolledActorTbl,
+  feedgenMembershipMetadata as membershipMetadataTbl,
   post as postTbl,
   postBoundary as postBoundaryTbl,
   spaceMemberSnapshot as spaceMemberSnapshotTbl,
@@ -30,6 +31,7 @@ import {
   SpaceMemberSnapshot,
   SpaceSyncStagePage,
 } from './types.js'
+import type { CatalogBoundary } from '../feeds/catalog-model.js'
 
 export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
   _client: Client
@@ -38,6 +40,7 @@ export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
 }
 
 const LEGACY_MEMBERSHIP_IMPORT_KEY = 'legacy-record-store-imported'
+const CATALOG_BASELINE_KEY = 'boundary-catalog-baseline'
 
 /**
  * SQLite permits a single writer, while a space membership pass deliberately
@@ -453,6 +456,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
       }
       throw err
     }
+  }
+
+  async listIndexedBoundaries(): Promise<string[]> {
+    const rows = await this.recordDb
+      .selectDistinct({ boundary: postBoundaryTbl.boundary })
+      .from(postBoundaryTbl)
+      .orderBy(asc(postBoundaryTbl.boundary))
+    return rows.map((row) => row.boundary)
   }
 
   async deletePostsByBoundary(boundary: string): Promise<number> {
@@ -944,6 +955,31 @@ export class SqliteFeedgenStore implements FeedgenStore {
     }))
   }
 
+  async getCatalogBaseline(): Promise<CatalogBoundary[]> {
+    const rows = await this.membershipDb
+      .select({ value: membershipMetadataTbl.value })
+      .from(membershipMetadataTbl)
+      .where(eq(membershipMetadataTbl.key, CATALOG_BASELINE_KEY))
+      .limit(1)
+    if (rows.length === 0) return []
+    return parseCatalogBaseline(rows[0].value)
+  }
+
+  async replaceCatalogBaseline(
+    boundaries: readonly CatalogBoundary[],
+  ): Promise<void> {
+    const value = JSON.stringify(boundaries)
+    await this.writeMembership(() =>
+      this.membershipDb
+        .insert(membershipMetadataTbl)
+        .values({ key: CATALOG_BASELINE_KEY, value })
+        .onConflictDoUpdate({
+          target: membershipMetadataTbl.key,
+          set: { value },
+        }),
+    )
+  }
+
   async replaceSpaceMembers(
     boundary: string,
     members: SpaceMemberSnapshot[],
@@ -1090,6 +1126,13 @@ function stageRowToPost(row: {
     blobRefs: JSON.parse(row.blobRefsJson) as PostUpsert['blobRefs'],
     boundaries: [row.boundary],
   }
+}
+
+function parseCatalogBaseline(value: string): CatalogBoundary[] {
+  const parsed: unknown = JSON.parse(value)
+  if (!Array.isArray(parsed))
+    throw new Error('Invalid persisted boundary catalogue')
+  return parsed as CatalogBoundary[]
 }
 
 function rowToEnrolledActor(row: {

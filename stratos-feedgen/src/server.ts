@@ -42,6 +42,7 @@ export interface FeedgenServerDeps {
   /** Late-bound subscription state reported by `/health`. */
   subscriptionStatus?: SubscriptionStatus
   /** Optional fail-closed gate for projections pending authorization replay. */
+  configuredBoundaries?: ReadonlySet<string>
   feedReadiness?: FeedReadiness
   resolveHandle?: (did: string) => Promise<string | undefined>
 }
@@ -80,6 +81,7 @@ export function createFeedgenServer(
       verifier: deps.verifier,
       readiness: deps.feedReadiness,
       blobs: deps.blobs,
+      configuredBoundaries: deps.configuredBoundaries,
       mutationFence: deps.mutationFence,
     })
 
