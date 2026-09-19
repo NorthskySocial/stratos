@@ -20,7 +20,16 @@ function publicRoomDescription(room: RoomDescription): PublicRoomDescription {
 
 /** Public display catalogue. OAuth authorization still resolves IDs server-side. */
 export const handleRooms = (config: OAuthRoutesConfig) => {
-  return (_req: express.Request, res: express.Response) => {
+  return async (_req: express.Request, res: express.Response) => {
+    try {
+      await config.refreshBoundaryConfiguration?.()
+    } catch {
+      res.status(503).json({
+        error: 'RoomCatalogUnavailable',
+        message: 'Room listing is temporarily unavailable',
+      })
+      return
+    }
     if (!config.roomCatalog) {
       res.status(503).json({
         error: 'RoomCatalogUnavailable',

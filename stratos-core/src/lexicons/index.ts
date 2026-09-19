@@ -2,6 +2,14 @@ import zoneStratosBoundaryCheckpoint from '../../../lexicons/zone/stratos/bounda
 import zoneStratosBoundaryOperation from '../../../lexicons/zone/stratos/boundary/operation.json' with { type: 'json' }
 import zoneStratosAdminGetBoundaryAuditState from '../../../lexicons/zone/stratos/admin/getBoundaryAuditState.json' with { type: 'json' }
 import zoneStratosAdminListBoundaryOps from '../../../lexicons/zone/stratos/admin/listBoundaryOps.json' with { type: 'json' }
+import zoneStratosSyncListBoundaries from '../../../lexicons/zone/stratos/sync/listBoundaries.json' with { type: 'json' }
+import zoneStratosAdminBoundaryDefs from '../../../lexicons/zone/stratos/admin/boundaryDefs.json' with { type: 'json' }
+import zoneStratosAdminCreateBoundary from '../../../lexicons/zone/stratos/admin/createBoundary.json' with { type: 'json' }
+import zoneStratosAdminUpdateBoundary from '../../../lexicons/zone/stratos/admin/updateBoundary.json' with { type: 'json' }
+import zoneStratosAdminDeactivateBoundary from '../../../lexicons/zone/stratos/admin/deactivateBoundary.json' with { type: 'json' }
+import zoneStratosAdminReactivateBoundary from '../../../lexicons/zone/stratos/admin/reactivateBoundary.json' with { type: 'json' }
+import zoneStratosAdminListBoundaries from '../../../lexicons/zone/stratos/admin/listBoundaries.json' with { type: 'json' }
+import zoneStratosServerListRooms from '../../../lexicons/zone/stratos/server/listRooms.json' with { type: 'json' }
 import type { LexiconDoc } from '@atproto/lexicon'
 import { atprotoLexicons } from './atproto.js'
 import zoneStratosActorEnrollment from '../../../lexicons/zone/stratos/actor/enrollment.json' with { type: 'json' }
@@ -46,6 +54,15 @@ export const stratosLexicons: LexiconDoc[] = [
   zoneStratosBoundaryOperation as LexiconDoc,
   zoneStratosAdminGetBoundaryAuditState as LexiconDoc,
   zoneStratosAdminListBoundaryOps as LexiconDoc,
+  zoneStratosSyncListBoundaries as LexiconDoc,
+  zoneStratosAdminBoundaryDefs as LexiconDoc,
+  zoneStratosAdminCreateBoundary as LexiconDoc,
+  zoneStratosAdminUpdateBoundary as LexiconDoc,
+  zoneStratosAdminDeactivateBoundary as LexiconDoc,
+  zoneStratosAdminReactivateBoundary as LexiconDoc,
+  zoneStratosAdminListBoundaries as LexiconDoc,
+  zoneStratosServerListRooms as LexiconDoc,
+
   zoneStratosActorEnrollment as LexiconDoc,
   zoneStratosAdminListEnrollments as LexiconDoc,
   zoneStratosAdminGetRepoHost as LexiconDoc,

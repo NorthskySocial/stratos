@@ -13,13 +13,15 @@ export interface ReconcileServiceEnrollmentsDeps {
   /** Service signing key DID recorded as the enrollment's signing key. */
   signingKeyDid: string
   logger?: Logger
+  resolveBoundaries?: (enrollment: ServiceEnrollment) => Promise<string[]>
 }
 
 /**
  * Reconcile config-declared service enrollments into the enrollment store.
  *
- * Configuration is the source of truth: each declared enrollment is upserted
- * with `isService = true` and its boundaries are set to exactly those declared.
+ * Configuration declares identities, each upserted with `isService = true`.
+ * The boundary resolver preserves persistent admin grants after initial creation;
+ * without a resolver, the standalone function uses the configured boundaries.
  * Service rows that are no longer present in the configuration are pruned. The
  * operation is idempotent and safe to run on every startup.
  *
@@ -37,6 +39,9 @@ export async function reconcileServiceEnrollments(
   for (const enrollment of enrollments) {
     declared.add(enrollment.did)
 
+    const boundaries = deps.resolveBoundaries
+      ? await deps.resolveBoundaries(enrollment)
+      : enrollment.boundaries
     const existing = await store.getEnrollment(enrollment.did)
 
     if (existing) {
@@ -50,17 +55,17 @@ export async function reconcileServiceEnrollments(
         did: enrollment.did,
         enrolledAt: new Date().toISOString(),
         pdsEndpoint: undefined,
-        boundaries: enrollment.boundaries,
+        boundaries,
         signingKeyDid,
         active: true,
         isService: true,
       })
     }
 
-    await store.setBoundaries(enrollment.did, enrollment.boundaries)
+    await store.setBoundaries(enrollment.did, boundaries)
 
     logger?.info(
-      { did: enrollment.did, boundaries: enrollment.boundaries.length },
+      { did: enrollment.did, boundaries: boundaries.length },
       'reconciled service enrollment',
     )
   }

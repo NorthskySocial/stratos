@@ -139,11 +139,21 @@ export class StratosServer {
     this.setupMiddleware(app, ctx)
     this.registerRoutes(app, ctx, cfg)
 
-    await reconcileServiceEnrollments(cfg.enrollment.serviceEnrollments, {
-      store: ctx.enrollmentStore,
-      signingKeyDid: ctx.signingDidKey,
-      logger: ctx.logger,
-    })
+    try {
+      await reconcileServiceEnrollments(cfg.enrollment.serviceEnrollments, {
+        store: ctx.enrollmentStore,
+        signingKeyDid: ctx.signingDidKey,
+        resolveBoundaries: (enrollment) =>
+          ctx.boundaryConfiguration!.serviceMemberships(
+            enrollment,
+            ctx.enrollmentStore,
+          ),
+        logger: ctx.logger,
+      })
+    } catch (err) {
+      await ctx.destroy()
+      throw err
+    }
 
     return new StratosServer(ctx, app)
   }
@@ -434,6 +444,7 @@ export class StratosServer {
     ctx: AppContext,
     cfg: StratosServiceConfig,
   ) {
+    const autoEnrollDomains = (cfg.enrollment.autoEnrollDomains ??= [])
     const oauthRoutes = createOAuthRoutes({
       oauthClient: ctx.oauthClient,
       enrollmentConfig: cfg.enrollment,
@@ -444,8 +455,9 @@ export class StratosServer {
       serviceEndpoint: cfg.service.publicUrl,
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
-      autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
+      autoEnrollDomains,
       roomCatalog: cfg.roomCatalog,
+      refreshBoundaryConfiguration: () => ctx.boundaryConfiguration!.refresh(),
       reservedBoundary: cfg.stratos.reservedDomain,
       allowedRedirectOrigins: cfg.allowedRedirectOrigins,
       logger: ctx.logger,

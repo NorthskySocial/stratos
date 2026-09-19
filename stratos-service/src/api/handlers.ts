@@ -1,4 +1,5 @@
 import { registerBoundaryAuditHandlers } from '../features/boundary-audit/handler.js'
+import { registerBoundaryHandlers } from '../features/boundary/handler.js'
 import { Server as XrpcServer } from '@atproto/xrpc-server'
 import { registerIdentityHandlers } from '../features/identity/handler.js'
 import type { AppContext } from '../context-types.js'
@@ -101,6 +102,7 @@ export function registerHandlers(server: XrpcServer, ctx: AppContext) {
 
   registerBoundaryAuditHandlers(server, ctx)
   registerIdentityHandlers(server, ctx)
+  registerBoundaryHandlers(server, ctx)
   registerEnrollmentHandlers(server, ctx)
   registerHydrationHandlers(server, ctx)
   registerSyncHandlers(server, ctx)

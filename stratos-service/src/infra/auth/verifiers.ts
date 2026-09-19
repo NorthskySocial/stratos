@@ -1,3 +1,4 @@
+import { requireActiveSpaceCredential } from '../../features/boundary/credential-access.js'
 import { IdResolver } from '@atproto/identity'
 import {
   AuthRequiredError,
@@ -134,6 +135,7 @@ export function createAuthVerifiers(
   signingKey: Pick<Keypair, 'did'>,
   replayStore: ReplayStore | undefined,
   logger?: Logger,
+  boundaryStore?: import('@northskysocial/stratos-core').BoundaryCatalogStore,
 ): AuthVerifiers {
   const standard = createStandardVerifier({
     devMode,
@@ -147,6 +149,7 @@ export function createAuthVerifiers(
   const spaceCredential = createSpaceCredentialVerifier({
     serviceDid,
     signingKey,
+    boundaryStore,
     proofChecker: new SpaceDpopProofChecker(cfg.service.publicUrl),
     replayStore,
     devMode,
@@ -385,6 +388,7 @@ function extractSpaceCredentialToken(
  *   or the credential or its proof fails verification.
  */
 function createSpaceCredentialVerifier(deps: {
+  boundaryStore?: import('@northskysocial/stratos-core').BoundaryCatalogStore
   serviceDid: string
   signingKey: Pick<Keypair, 'did'>
   proofChecker: SpaceDpopProofChecker
@@ -447,6 +451,12 @@ function createSpaceCredentialVerifier(deps: {
           throw new AuthRequiredError('Authorization failed')
         }
       }
+      if (deps.boundaryStore)
+        await requireActiveSpaceCredential(
+          deps.boundaryStore,
+          deps.serviceDid,
+          result,
+        )
       return {
         credentials: {
           type: 'space-credential' as const,
@@ -610,7 +620,10 @@ async function verifyDpop(
       {
         method: ctx.req.method || 'GET',
         url: ctx.req.url || '/',
-        headers: ctx.req.headers,
+        headers: ctx.req.headers as Record<
+          string,
+          string | string[] | undefined
+        >,
       },
       {
         setHeader: (name, value) => ctx.res?.setHeader(name, value),

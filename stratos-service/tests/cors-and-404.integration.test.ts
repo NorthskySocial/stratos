@@ -17,6 +17,7 @@ describe('CORS and 404 Verification', () => {
   let dataDir: string
   let httpServer: http.Server
   let url: string
+  let service: StratosServer
 
   beforeEach(async () => {
     dataDir = join(
@@ -28,7 +29,10 @@ describe('CORS and 404 Verification', () => {
     const cfg = createTestConfig(dataDir)
     // Use CLOSED mode to ensure unknown DIDs are not auto-enrolled
     cfg.enrollment.mode = ENROLLMENT_MODE.CLOSED
-    cfg.stratos.allowedDomains = ['example.com']
+    cfg.stratos.allowedDomains = [
+      'did:web:nerv.tokyo.jp/example.com',
+      cfg.stratos.reservedDomain,
+    ]
     cfg.allowedRedirectOrigins = ['http://localhost:5173']
 
     const server = await StratosServer.create(
@@ -37,6 +41,7 @@ describe('CORS and 404 Verification', () => {
       (content) => decode(content) as Record<string, unknown>,
     )
 
+    service = server
     await server.start()
     // @ts-ignore - accessing private property for testing
     httpServer = server.server
@@ -46,11 +51,7 @@ describe('CORS and 404 Verification', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
-    if (httpServer) {
-      await new Promise<void>((resolve) => {
-        httpServer.close(() => resolve())
-      })
-    }
+    await service?.stop()
     await rm(dataDir, { recursive: true, force: true })
   })
 
@@ -95,7 +96,7 @@ describe('CORS and 404 Verification', () => {
     expect(res.headers['access-control-allow-origin']).toBe(
       'http://localhost:5173',
     )
-    expect(res.data.domains).toContain('example.com')
+    expect(res.data.domains).toContain('did:web:nerv.tokyo.jp/example.com')
   })
 
   it('should have CORS headers on zone.stratos.enrollment.status', async () => {
