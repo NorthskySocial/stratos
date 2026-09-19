@@ -444,6 +444,7 @@ export class StratosServer {
     ctx: AppContext,
     cfg: StratosServiceConfig,
   ) {
+    const autoEnrollDomains = (cfg.enrollment.autoEnrollDomains ??= [])
     const oauthRoutes = createOAuthRoutes({
       oauthClient: ctx.oauthClient,
       enrollmentConfig: cfg.enrollment,
@@ -454,7 +455,7 @@ export class StratosServer {
       serviceEndpoint: cfg.service.publicUrl,
       serviceDid: ctx.serviceDid,
       defaultBoundaries: cfg.stratos.allowedDomains,
-      autoEnrollDomains: cfg.enrollment.autoEnrollDomains,
+      autoEnrollDomains,
       roomCatalog: cfg.roomCatalog,
       refreshBoundaryConfiguration: () => ctx.boundaryConfiguration!.refresh(),
       reservedBoundary: cfg.stratos.reservedDomain,

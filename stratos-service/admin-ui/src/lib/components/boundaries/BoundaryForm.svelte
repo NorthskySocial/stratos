@@ -120,6 +120,7 @@
         bind:value={draft.clientIdsText}
         aria-label="Allowed client IDs"
         aria-describedby="boundary-client-ids-help"
+        required
         rows="4"
         class="w-full rounded-2xl border border-muted/40 bg-bubble px-4 py-3 text-sm"
         spellcheck="false"
