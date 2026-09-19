@@ -418,12 +418,11 @@ describe('handleCallback', () => {
       await callHandler(handleCallback(config), makeReq(), response)
 
       expect(mockEnrollmentStore.addBoundary).not.toHaveBeenCalled()
-      if (mockProfileRecordWriter.putEnrollmentRecord.mock.calls.length) {
-        expect(
-          mockProfileRecordWriter.putEnrollmentRecord.mock.calls.at(-1)[2]
-            .attestation.issuedAt,
-        ).toBe('1995-10-04T12:00:00.000Z')
-      }
+      expect(mockProfileRecordWriter.putEnrollmentRecord).toHaveBeenCalled()
+      expect(
+        mockProfileRecordWriter.putEnrollmentRecord.mock.calls.at(-1)[2]
+          .attestation.issuedAt,
+      ).toBe('1995-10-04T12:00:00.000Z')
       expect(response.status).not.toHaveBeenCalled()
     })
 
