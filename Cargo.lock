@@ -366,7 +366,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stratos-feedgen-rust"
+name = "stratos-feedgen-ng"
 version = "0.1.0"
 dependencies = [
  "axum",

@@ -1,5 +1,5 @@
 [workspace]
-members = ["stratos-feedgen-rust"]
+members = ["stratos-feedgen-ng"]
 resolver = "3"
 
 [workspace.package]

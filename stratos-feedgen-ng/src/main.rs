@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use stratos_feedgen_rust::{config::FeedgenConfig, readiness::FeedReadinessGate, server};
+use stratos_feedgen_ng::{config::FeedgenConfig, readiness::FeedReadinessGate, server};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,8 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&address).await?;
 
-    // This initial surface is deliberately unavailable until stream and
-    // reconciliation implementations are ported and proven by the corpus.
+    // Feeds remain unavailable until verified reconciliation completes.
     let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
     axum::serve(listener, server::router(config, readiness)).await?;
     Ok(())
