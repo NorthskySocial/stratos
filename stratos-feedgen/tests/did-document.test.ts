@@ -95,7 +95,7 @@ describe('loadFeedgenConfig public URL derivation', () => {
     FEEDGEN_SIGNING_KEY: 'unused-by-this-test',
     STRATOS_SERVICE_URL: 'https://stratos.spiegelcorp.test',
     STRATOS_SERVICE_DID: 'did:web:stratos.spiegelcorp.test',
-    FEEDGEN_SQLITE_PATH: '/tmp/feedgen.sqlite',
+    FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-membership.sqlite',
   }
 
   it('derives the public URL from the did:web DID when unset', () => {

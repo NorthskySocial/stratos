@@ -25,6 +25,12 @@ export interface DiskBlobCacheOptions {
   now?: () => number
 }
 
+export interface MemoryBlobCacheOptions {
+  maxBytes: number
+  ttlMs: number
+  now?: () => number
+}
+
 interface Entry {
   size: number
   expiresAt: number
@@ -47,6 +53,12 @@ export class DiskBlobCache implements BlobCache {
   static async open(options: DiskBlobCacheOptions): Promise<DiskBlobCache> {
     const cache = new DiskBlobCache(options)
     await mkdir(options.directory, { recursive: true, mode: 0o700 })
+    const directory = await lstat(options.directory)
+    if (!directory.isDirectory() || (directory.mode & 0o077) !== 0) {
+      throw new Error(
+        `Blob cache directory must be a private directory: ${options.directory}`,
+      )
+    }
     for (const name of await readdir(options.directory)) {
       if (/^[a-f0-9]{64}\.tmp$/.test(name)) {
         await rm(join(options.directory, name))
@@ -125,6 +137,79 @@ export class DiskBlobCache implements BlobCache {
     const entry = this.entries.get(key)
     if (!entry) return
     await rm(join(this.options.directory, key), { force: true })
+    this.entries.delete(key)
+    this.totalBytes -= entry.size
+  }
+
+  private serialize<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(work)
+    this.tail = result.then(
+      () => {},
+      () => {},
+    )
+    return result
+  }
+}
+
+export class MemoryBlobCache implements BlobCache {
+  private readonly entries = new Map<string, Entry & { bytes: Buffer }>()
+  private totalBytes = 0
+  private tail = Promise.resolve()
+  private readonly now: () => number
+
+  constructor(private readonly options: MemoryBlobCacheOptions) {
+    this.now = options.now ?? Date.now
+  }
+
+  get(key: string): Promise<Buffer | undefined> {
+    return this.serialize(async () => {
+      const entry = this.entries.get(key)
+      if (!entry) return undefined
+      if (entry.expiresAt <= this.now()) {
+        this.removeEntry(key)
+        return undefined
+      }
+      this.entries.delete(key)
+      this.entries.set(key, entry)
+      return Buffer.from(entry.bytes)
+    })
+  }
+
+  put(key: string, bytes: Buffer): Promise<void> {
+    return this.serialize(async () => {
+      if (bytes.length > this.options.maxBytes) return
+      this.removeEntry(key)
+      this.makeRoom(bytes.length)
+      this.entries.set(key, {
+        bytes: Buffer.from(bytes),
+        size: bytes.length,
+        expiresAt: this.now() + this.options.ttlMs,
+      })
+      this.totalBytes += bytes.length
+    })
+  }
+
+  remove(key: string): Promise<void> {
+    return this.serialize(async () => this.removeEntry(key))
+  }
+
+  clear(): Promise<void> {
+    return this.serialize(async () => {
+      this.entries.clear()
+      this.totalBytes = 0
+    })
+  }
+
+  private makeRoom(size: number): void {
+    for (const key of this.entries.keys()) {
+      if (this.totalBytes + size <= this.options.maxBytes) break
+      this.removeEntry(key)
+    }
+  }
+
+  private removeEntry(key: string): void {
+    const entry = this.entries.get(key)
+    if (!entry) return
     this.entries.delete(key)
     this.totalBytes -= entry.size
   }

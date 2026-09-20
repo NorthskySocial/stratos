@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SQLITE_PATH,
+  DEFAULT_STORAGE_PROFILE,
   DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
   DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
   DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS,
@@ -35,6 +36,18 @@ const baseEnv = {
   FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop-membership.sqlite',
 }
 
+function encryptedVolumeEnv(overrides: Record<string, string | undefined>) {
+  return {
+    ...baseEnv,
+    FEEDGEN_STORAGE_PROFILE: 'encrypted-volume',
+    FEEDGEN_SQLITE_PATH: '/var/lib/feedgen/records.sqlite',
+    FEEDGEN_BLOB_CACHE_DIRECTORY: '/var/lib/feedgen/blobs',
+    FEEDGEN_PROJECTION_MAX_AGE_MS: '3600000',
+    FEEDGEN_PROJECTION_MAX_BYTES: '536870912',
+    ...overrides,
+  }
+}
+
 describe('loadFeedgenConfig SQLite storage split', () => {
   it('declares the in-memory record-index default', () => {
     expect(DEFAULT_SQLITE_PATH).toBe(':memory:')
@@ -47,12 +60,24 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     ).toBe(':memory:')
   })
 
-  it('derives a distinct sibling database for durable membership snapshots', () => {
-    const cfg = loadFeedgenConfig({
-      ...baseEnv,
-      FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-      FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
+  it('defaults to the ephemeral profile without a disk blob cache', () => {
+    expect(DEFAULT_STORAGE_PROFILE).toBe('ephemeral')
+    expect(loadFeedgenConfig(baseEnv)).toMatchObject({
+      storageProfile: 'ephemeral',
+      sqlitePath: ':memory:',
+      blobCacheDirectory: undefined,
+      projectionMaxAgeMs: undefined,
+      projectionMaxBytes: undefined,
     })
+  })
+
+  it('derives a distinct sibling database for durable membership snapshots', () => {
+    const cfg = loadFeedgenConfig(
+      encryptedVolumeEnv({
+        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+        FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
+      }),
+    )
 
     expect(cfg.sqlitePath).toBe('/tmp/feedgen-bebop.sqlite')
     expect(cfg.membershipSqlitePath).toBe(
@@ -67,6 +92,56 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     })
 
     expect(cfg.membershipSqlitePath).toBe('/var/lib/feedgen/membership.sqlite')
+  })
+
+  it('requires every durable projection setting', () => {
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_SQLITE_PATH: ':memory:' }),
+      ),
+    ).toThrow(/FEEDGEN_SQLITE_PATH/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_BLOB_CACHE_DIRECTORY: undefined }),
+      ),
+    ).toThrow(/FEEDGEN_BLOB_CACHE_DIRECTORY/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_PROJECTION_MAX_AGE_MS: undefined }),
+      ),
+    ).toThrow(/FEEDGEN_PROJECTION_MAX_AGE_MS/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_PROJECTION_MAX_BYTES: undefined }),
+      ),
+    ).toThrow(/FEEDGEN_PROJECTION_MAX_BYTES/)
+    expect(
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_SQLITE_PATH: '/var/lib/feedgen/records.sqlite',
+        }),
+      ),
+    ).toMatchObject({
+      storageProfile: 'encrypted-volume',
+      projectionMaxAgeMs: 3_600_000,
+      projectionMaxBytes: 536_870_912,
+      blobCacheDirectory: '/var/lib/feedgen/blobs',
+    })
+  })
+
+  it('rejects disk projection configuration in the ephemeral profile', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: '/var/lib/feedgen/records.sqlite',
+      }),
+    ).toThrow(/ephemeral storage profile/)
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_BLOB_CACHE_DIRECTORY: '/var/lib/feedgen/blobs',
+      }),
+    ).toThrow(/encrypted-volume storage profile/)
   })
 
   it('requires an explicit disk membership path for an in-memory record index', () => {
@@ -105,19 +180,21 @@ describe('loadFeedgenConfig SQLite storage split', () => {
 
   it('rejects a membership database that aliases the record database', () => {
     expect(() =>
-      loadFeedgenConfig({
-        ...baseEnv,
-        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-      }),
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+        }),
+      ),
     ).toThrow(/must differ/)
 
     expect(() =>
-      loadFeedgenConfig({
-        ...baseEnv,
-        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
-      }),
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
+        }),
+      ),
     ).toThrow(/must differ/)
   })
 
@@ -128,11 +205,12 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     try {
       symlinkSync(recordPath, membershipPath)
       expect(() =>
-        loadFeedgenConfig({
-          ...baseEnv,
-          FEEDGEN_SQLITE_PATH: recordPath,
-          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
-        }),
+        loadFeedgenConfig(
+          encryptedVolumeEnv({
+            FEEDGEN_SQLITE_PATH: recordPath,
+            FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+          }),
+        ),
       ).toThrow(/symbolic link/)
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -147,25 +225,35 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       writeFileSync(recordPath, '')
       linkSync(recordPath, membershipPath)
       expect(() =>
-        loadFeedgenConfig({
-          ...baseEnv,
-          FEEDGEN_SQLITE_PATH: recordPath,
-          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
-        }),
+        loadFeedgenConfig(
+          encryptedVolumeEnv({
+            FEEDGEN_SQLITE_PATH: recordPath,
+            FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+          }),
+        ),
       ).toThrow(/must differ/)
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
   })
 
-  it('still requires a Postgres URL for the Postgres backend', () => {
+  it('rejects the non-volume-bound Postgres backend', () => {
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
         FEEDGEN_STORAGE_BACKEND: 'postgres',
       }),
+    ).toThrow(/must be sqlite/)
+  })
+
+  it('rejects unknown storage profiles with an actionable error', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_STORAGE_PROFILE: 'disk',
+      }),
     ).toThrow(
-      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+      "Invalid FEEDGEN_STORAGE_PROFILE: disk (expected 'ephemeral' or 'encrypted-volume')",
     )
   })
 })
@@ -421,7 +509,7 @@ describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS', () => {
 describe('blob cache configuration', () => {
   it('provides bounded defaults and permits explicit limits', () => {
     expect(loadFeedgenConfig(baseEnv)).toMatchObject({
-      blobCacheDirectory: './data/feedgen-blobs',
+      blobCacheDirectory: undefined,
       blobCacheMaxBytes: 536_870_912,
       blobCacheTtlMs: 3_600_000,
       blobMaxBytes: 26_214_400,
@@ -432,14 +520,15 @@ describe('blob cache configuration', () => {
       ],
     })
     expect(
-      loadFeedgenConfig({
-        ...baseEnv,
-        FEEDGEN_BLOB_CACHE_DIRECTORY: '/tmp/bebop',
-        FEEDGEN_BLOB_CACHE_MAX_BYTES: '123',
-        FEEDGEN_BLOB_CACHE_TTL_MS: '456',
-        FEEDGEN_BLOB_MAX_BYTES: '78',
-        FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS: '9',
-      }),
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_BLOB_CACHE_DIRECTORY: '/tmp/bebop',
+          FEEDGEN_BLOB_CACHE_MAX_BYTES: '123',
+          FEEDGEN_BLOB_CACHE_TTL_MS: '456',
+          FEEDGEN_BLOB_MAX_BYTES: '78',
+          FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS: '9',
+        }),
+      ),
     ).toMatchObject({
       blobCacheDirectory: '/tmp/bebop',
       blobCacheMaxBytes: 123,
@@ -459,4 +548,15 @@ describe('blob cache configuration', () => {
         `Invalid ${name}`,
       )
   })
+
+  it.each(['FEEDGEN_PROJECTION_MAX_AGE_MS', 'FEEDGEN_PROJECTION_MAX_BYTES'])(
+    'rejects non-positive durable %s',
+    (name) => {
+      for (const value of ['0', '-1', 'NaN', 'Infinity', '1.5']) {
+        expect(() =>
+          loadFeedgenConfig(encryptedVolumeEnv({ [name]: value })),
+        ).toThrow(`Invalid ${name}`)
+      }
+    },
+  )
 })

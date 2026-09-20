@@ -1,4 +1,5 @@
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readFile,
@@ -17,7 +18,11 @@ import { createBlobService } from '../src/blob/runtime.js'
 import { loadFeedgenConfig } from '../src/config.js'
 import type { GetBlobResult } from '../src/upstream/client.js'
 import { BlobService } from '../src/blob/service.js'
-import { DiskBlobCache, blobCacheKey } from '../src/blob/cache.js'
+import {
+  DiskBlobCache,
+  MemoryBlobCache,
+  blobCacheKey,
+} from '../src/blob/cache.js'
 
 const SPIKE = 'bafkreidnltm3txbyqufe7hbtf4b5gasd2jwyfo5qgzyg2nbkfspzvj5mxa'
 const FAYE = 'bafkreicftohjg7qfzr2knf7ysksl5pyvt3xvdk4gijxsflft5ikuhqboy4'
@@ -137,6 +142,53 @@ describe('private disk blob cache', () => {
     await cache.put(key(FAYE), Buffer.from('Faye'))
     expect(await cache.get(key(FAYE))).toEqual(Buffer.from('Faye'))
   })
+
+  it('rejects a cache directory that is readable by other users', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bebop-public-blobs-'))
+    dirs.push(directory)
+    await chmod(directory, 0o755)
+    await expect(
+      DiskBlobCache.open({ directory, maxBytes: 100, ttlMs: 1000 }),
+    ).rejects.toThrow(/private directory/)
+  })
+})
+
+describe('private memory blob cache', () => {
+  it('evicts the least-recently-used entry before admitting another value', async () => {
+    const cache = new MemoryBlobCache({ maxBytes: 9, ttlMs: 1000 })
+    await cache.put(key(), Buffer.from('Spike'))
+    await cache.put(key(FAYE), Buffer.from('Faye'))
+    expect(await cache.get(key())).toEqual(Buffer.from('Spike'))
+    const jetKey = blobCacheKey('did:plc:jet', SPIKE)
+    await cache.put(jetKey, Buffer.from('Jet'))
+    expect(await cache.get(key(FAYE))).toBeUndefined()
+    expect(await cache.get(key())).toEqual(Buffer.from('Spike'))
+    expect(await cache.get(jetKey)).toEqual(Buffer.from('Jet'))
+  })
+
+  it('enforces capacity, expiry, and explicit removal without exposing bytes', async () => {
+    let now = 1000
+    const cache = new MemoryBlobCache({
+      maxBytes: 5,
+      ttlMs: 10,
+      now: () => now,
+    })
+    await cache.put(key(), Buffer.from('Spike'))
+    expect(await cache.get(key())).toEqual(Buffer.from('Spike'))
+    await cache.put(key(FAYE), Buffer.alloc(6))
+    expect(await cache.get(key(FAYE))).toBeUndefined()
+    const bytes = await cache.get(key())
+    bytes?.fill(0)
+    expect(await cache.get(key())).toEqual(Buffer.from('Spike'))
+    await cache.remove(key())
+    expect(await cache.get(key())).toBeUndefined()
+    await cache.put(key(), Buffer.from('Spike'))
+    await cache.clear()
+    expect(await cache.get(key())).toBeUndefined()
+    await cache.put(key(), Buffer.from('Spike'))
+    now = 1010
+    expect(await cache.get(key())).toBeUndefined()
+  })
 })
 
 describe('verified blob downloads', () => {
@@ -239,6 +291,58 @@ describe('verified blob downloads', () => {
 })
 
 describe('blob runtime configuration', () => {
+  it('uses an in-memory cache for the ephemeral profile', async () => {
+    const config = loadFeedgenConfig({
+      FEEDGEN_SERVICE_DID: 'did:web:bebop.test',
+      FEEDGEN_SIGNING_KEY: 'unused',
+      STRATOS_SERVICE_URL: 'https://nerve.test',
+      STRATOS_SERVICE_DID: 'did:web:nerve.test',
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/nerve-membership',
+      FEEDGEN_BLOB_CACHE_MAX_BYTES: '4',
+      FEEDGEN_BLOB_CACHE_TTL_MS: '1000',
+      FEEDGEN_BLOB_MAX_BYTES: '10',
+    })
+    const upstream = {
+      getBlob: vi.fn(async () => ({
+        stream: Readable.from([Buffer.from('Faye')]),
+        contentType: 'image/png',
+        contentLength: 4,
+      })),
+    }
+    const service = await createBlobService(config, upstream)
+    expect(await service.get(DID, FAYE)).toEqual(Buffer.from('Faye'))
+    expect(await service.get(DID, FAYE)).toEqual(Buffer.from('Faye'))
+    expect(upstream.getBlob).toHaveBeenCalledOnce()
+    upstream.getBlob.mockImplementation(async () => ({
+      stream: Readable.from([Buffer.from('Spike')]),
+      contentType: 'image/png',
+      contentLength: 5,
+    }))
+    expect(await service.get(DID, SPIKE)).toEqual(Buffer.from('Spike'))
+    expect(await service.get(DID, SPIKE)).toEqual(Buffer.from('Spike'))
+    expect(upstream.getBlob).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects a malformed durable config without a blob directory', async () => {
+    const config = loadFeedgenConfig({
+      FEEDGEN_SERVICE_DID: 'did:web:bebop.test',
+      FEEDGEN_SIGNING_KEY: 'unused',
+      STRATOS_SERVICE_URL: 'https://nerve.test',
+      STRATOS_SERVICE_DID: 'did:web:nerve.test',
+      FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/nerve-membership',
+    })
+    await expect(
+      createBlobService(
+        {
+          ...config,
+          storageProfile: 'encrypted-volume',
+          blobCacheDirectory: undefined,
+        },
+        { getBlob: vi.fn() },
+      ),
+    ).rejects.toThrow(/blobCacheDirectory/)
+  })
+
   it('wires cache location and limits into the running service', async () => {
     const { directory } = await disk()
     const config = loadFeedgenConfig({
@@ -246,8 +350,12 @@ describe('blob runtime configuration', () => {
       FEEDGEN_SIGNING_KEY: 'unused',
       STRATOS_SERVICE_URL: 'https://nerve.test',
       STRATOS_SERVICE_DID: 'did:web:nerve.test',
+      FEEDGEN_STORAGE_PROFILE: 'encrypted-volume',
       FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/nerve-membership',
+      FEEDGEN_SQLITE_PATH: '/tmp/nerve-records',
       FEEDGEN_BLOB_CACHE_DIRECTORY: directory,
+      FEEDGEN_PROJECTION_MAX_AGE_MS: '3600000',
+      FEEDGEN_PROJECTION_MAX_BYTES: '536870912',
       FEEDGEN_BLOB_CACHE_MAX_BYTES: '5',
       FEEDGEN_BLOB_CACHE_TTL_MS: '1',
       FEEDGEN_BLOB_MAX_BYTES: '5',

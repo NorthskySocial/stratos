@@ -27,8 +27,12 @@ function sqliteConfig(recordPath: string, membershipPath: string) {
     FEEDGEN_SIGNING_KEY: 'unused-by-this-test',
     STRATOS_SERVICE_URL: 'https://stratos.bebop.test',
     STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
+    FEEDGEN_STORAGE_PROFILE: 'encrypted-volume',
     FEEDGEN_SQLITE_PATH: recordPath,
     FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+    FEEDGEN_BLOB_CACHE_DIRECTORY: `${recordPath}.blobs`,
+    FEEDGEN_PROJECTION_MAX_AGE_MS: '3600000',
+    FEEDGEN_PROJECTION_MAX_BYTES: '536870912',
   })
 }
 

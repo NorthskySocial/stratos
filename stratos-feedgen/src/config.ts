@@ -31,6 +31,8 @@ export interface FeedgenConfig {
   feedgenAllowedLxms: readonly string[]
   /** Storage backend selection. */
   storageBackend: StorageBackend
+  /** Controls whether the private serving projection may reach disk. */
+  storageProfile: StorageProfile
   /** SQLite location used when `storageBackend === 'sqlite'`. */
   sqlitePath?: string
   /**
@@ -46,11 +48,16 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
-  blobCacheDirectory: string
+  /** File-backed only for the encrypted-volume profile. */
+  blobCacheDirectory?: string
   blobCacheMaxBytes: number
   blobCacheTtlMs: number
   blobMaxBytes: number
   blobMaxConcurrentDownloads: number
+  /** Maximum durable serving-projection age, required for encrypted-volume. */
+  projectionMaxAgeMs?: number
+  /** Maximum durable serving-projection bytes, required for encrypted-volume. */
+  projectionMaxBytes?: number
   /** Pino log level. */
   logLevel: string
   /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
@@ -81,7 +88,10 @@ export interface FeedgenConfig {
 
 export type StorageBackend = 'sqlite' | 'postgres'
 
+export type StorageProfile = 'ephemeral' | 'encrypted-volume'
+
 export const DEFAULT_STORAGE_BACKEND: StorageBackend = 'sqlite'
+export const DEFAULT_STORAGE_PROFILE: StorageProfile = 'ephemeral'
 export const DEFAULT_SQLITE_PATH = ':memory:'
 export const DEFAULT_BOUNDARY_CACHE_TTL_MS = 300_000
 export const DEFAULT_BOUNDARY_CACHE_MAX = 10_000
@@ -121,16 +131,29 @@ export interface FeedgenEnv {
 type StorageConfig = Pick<
   FeedgenConfig,
   | 'storageBackend'
+  | 'storageProfile'
   | 'sqlitePath'
   | 'membershipSqlitePath'
   | 'postgresUrl'
   | 'postgresSchema'
+  | 'projectionMaxAgeMs'
+  | 'projectionMaxBytes'
+>
+
+type BlobCacheConfig = Pick<
+  FeedgenConfig,
+  | 'blobCacheDirectory'
+  | 'blobCacheMaxBytes'
+  | 'blobCacheTtlMs'
+  | 'blobMaxBytes'
+  | 'blobMaxConcurrentDownloads'
 >
 
 export function loadFeedgenConfig(
   env: FeedgenEnv = process.env,
 ): FeedgenConfig {
   const storage = loadStorageConfig(env)
+  const blobCache = loadBlobCacheConfig(env, storage.storageProfile)
   const feedgenServiceDid = requireEnv(env, 'FEEDGEN_SERVICE_DID')
 
   return {
@@ -160,29 +183,7 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
-    blobCacheDirectory:
-      optionalEnv(env, 'FEEDGEN_BLOB_CACHE_DIRECTORY') ??
-      './data/feedgen-blobs',
-    blobCacheMaxBytes: parsePositiveInt(
-      env['FEEDGEN_BLOB_CACHE_MAX_BYTES'],
-      'FEEDGEN_BLOB_CACHE_MAX_BYTES',
-      536_870_912,
-    ),
-    blobCacheTtlMs: parsePositiveInt(
-      env['FEEDGEN_BLOB_CACHE_TTL_MS'],
-      'FEEDGEN_BLOB_CACHE_TTL_MS',
-      3_600_000,
-    ),
-    blobMaxBytes: parsePositiveInt(
-      env['FEEDGEN_BLOB_MAX_BYTES'],
-      'FEEDGEN_BLOB_MAX_BYTES',
-      26_214_400,
-    ),
-    blobMaxConcurrentDownloads: parsePositiveInt(
-      env['FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS'],
-      'FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS',
-      4,
-    ),
+    ...blobCache,
     logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
     spaceSyncEnabled: parseBoolean(
       env['FEEDGEN_SPACE_SYNC_ENABLED'],
@@ -246,25 +247,88 @@ export function loadFeedgenConfig(
 
 function loadStorageConfig(env: FeedgenEnv): StorageConfig {
   const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
+  const storageProfile = parseStorageProfile(env['FEEDGEN_STORAGE_PROFILE'])
   const sqlitePath = nonEmpty(env['FEEDGEN_SQLITE_PATH']) ?? DEFAULT_SQLITE_PATH
   const postgresUrl = env['FEEDGEN_POSTGRES_URL']
-  if (storageBackend === 'postgres' && !postgresUrl) {
+  if (storageBackend !== 'sqlite') {
     throw new Error(
-      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+      'FEEDGEN_STORAGE_BACKEND must be sqlite while durable Feedgen storage is volume-bound',
+    )
+  }
+  if (storageProfile === 'ephemeral' && sqlitePath !== ':memory:') {
+    throw new Error(
+      'FEEDGEN_SQLITE_PATH must be :memory: for the ephemeral storage profile',
+    )
+  }
+  if (storageProfile === 'encrypted-volume' && sqlitePath === ':memory:') {
+    throw new Error(
+      'FEEDGEN_SQLITE_PATH must be a file path for the encrypted-volume storage profile',
+    )
+  }
+  if (
+    storageProfile === 'ephemeral' &&
+    nonEmpty(env['FEEDGEN_BLOB_CACHE_DIRECTORY'])
+  ) {
+    throw new Error(
+      'FEEDGEN_BLOB_CACHE_DIRECTORY requires the encrypted-volume storage profile',
     )
   }
   return {
     storageBackend,
+    storageProfile,
     sqlitePath,
-    membershipSqlitePath:
-      storageBackend === 'sqlite'
-        ? resolveMembershipSqlitePath(
-            sqlitePath,
-            nonEmpty(env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']),
-          )
-        : undefined,
+    membershipSqlitePath: resolveMembershipSqlitePath(
+      sqlitePath,
+      nonEmpty(env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']),
+    ),
     postgresUrl,
     postgresSchema: env['FEEDGEN_POSTGRES_SCHEMA'],
+    projectionMaxAgeMs:
+      storageProfile === 'encrypted-volume'
+        ? requirePositiveInt(
+            env['FEEDGEN_PROJECTION_MAX_AGE_MS'],
+            'FEEDGEN_PROJECTION_MAX_AGE_MS',
+          )
+        : undefined,
+    projectionMaxBytes:
+      storageProfile === 'encrypted-volume'
+        ? requirePositiveInt(
+            env['FEEDGEN_PROJECTION_MAX_BYTES'],
+            'FEEDGEN_PROJECTION_MAX_BYTES',
+          )
+        : undefined,
+  }
+}
+
+function loadBlobCacheConfig(
+  env: FeedgenEnv,
+  storageProfile: StorageProfile,
+): BlobCacheConfig {
+  return {
+    blobCacheDirectory:
+      storageProfile === 'encrypted-volume'
+        ? requireEnv(env, 'FEEDGEN_BLOB_CACHE_DIRECTORY')
+        : undefined,
+    blobCacheMaxBytes: parsePositiveInt(
+      env['FEEDGEN_BLOB_CACHE_MAX_BYTES'],
+      'FEEDGEN_BLOB_CACHE_MAX_BYTES',
+      536_870_912,
+    ),
+    blobCacheTtlMs: parsePositiveInt(
+      env['FEEDGEN_BLOB_CACHE_TTL_MS'],
+      'FEEDGEN_BLOB_CACHE_TTL_MS',
+      3_600_000,
+    ),
+    blobMaxBytes: parsePositiveInt(
+      env['FEEDGEN_BLOB_MAX_BYTES'],
+      'FEEDGEN_BLOB_MAX_BYTES',
+      26_214_400,
+    ),
+    blobMaxConcurrentDownloads: parsePositiveInt(
+      env['FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS'],
+      'FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS',
+      4,
+    ),
   }
 }
 
@@ -359,6 +423,13 @@ function parsePositiveInt(
     throw new Error(`Invalid ${name}: ${value} (expected positive integer)`)
   }
   return parsed
+}
+
+function requirePositiveInt(value: string | undefined, name: string): number {
+  if (value === undefined || value === '') {
+    throw new Error(`Missing required env var ${name}`)
+  }
+  return parsePositiveInt(value, name, 0)
 }
 
 function parseSpaceSyncPageLimit(value: string | undefined): number {
@@ -460,6 +531,14 @@ function parseStorageBackend(value: string | undefined): StorageBackend {
   if (value === 'sqlite' || value === 'postgres') return value
   throw new Error(
     `Invalid FEEDGEN_STORAGE_BACKEND: ${value} (expected 'sqlite' or 'postgres')`,
+  )
+}
+
+function parseStorageProfile(value: string | undefined): StorageProfile {
+  if (value === undefined || value === '') return DEFAULT_STORAGE_PROFILE
+  if (value === 'ephemeral' || value === 'encrypted-volume') return value
+  throw new Error(
+    `Invalid FEEDGEN_STORAGE_PROFILE: ${value} (expected 'ephemeral' or 'encrypted-volume')`,
   )
 }
 
