@@ -39,6 +39,7 @@ export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
   _client: Client
   _memoryAnchor?: Client
   _initialized: Promise<void>
+  _location: string
 }
 
 const LEGACY_MEMBERSHIP_IMPORT_KEY = 'legacy-record-store-imported'
@@ -69,8 +70,10 @@ class SqliteWriteQueue {
 }
 
 export function createSqliteDb(location: string): SqliteDb {
-  const durableFileExisted = location !== ':memory:' && existsSync(location)
-  if (location !== ':memory:') assertPrivateSqlitePath(location)
+  const durableArtifacts = sqliteArtifactPaths(location)
+  if (location !== ':memory:') {
+    for (const artifact of durableArtifacts) assertPrivateSqlitePath(artifact)
+  }
   const url = sqliteClientUrl(location)
   const client = createClient({
     url,
@@ -78,6 +81,7 @@ export function createSqliteDb(location: string): SqliteDb {
   const baseDb = drizzle({ client, schema: sqliteSchema })
   const db = baseDb as unknown as SqliteDb
   db._client = client
+  db._location = location
   if (location === ':memory:') {
     // Drizzle releases libSQL connections after transactions. Keep this
     // connection open so the shared in-memory database survives that release.
@@ -91,11 +95,21 @@ export function createSqliteDb(location: string): SqliteDb {
       if (code !== 'SQLITE_BUSY') throw err
     }
     await db.run(sql.raw('PRAGMA foreign_keys = ON'))
-    if (!durableFileExisted && location !== ':memory:') {
-      chmodSync(location, 0o600)
-    }
+    secureSqliteArtifacts(db)
   })()
   return db
+}
+
+/** Apply private file modes to the database and its SQLite sidecars. */
+export function secureSqliteArtifacts(db: SqliteDb): void {
+  for (const artifact of sqliteArtifactPaths(db._location)) {
+    if (existsSync(artifact)) chmodSync(artifact, 0o600)
+  }
+}
+
+function sqliteArtifactPaths(location: string): string[] {
+  if (location === ':memory:') return []
+  return [location, `${location}-wal`, `${location}-shm`]
 }
 
 function sqliteClientUrl(location: string): string {
@@ -171,6 +185,7 @@ export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
       PRIMARY KEY (spaceUri, did)
     )
   `)
+  secureSqliteArtifacts(db)
 }
 
 /** Migrate durable enrollment and completed space-membership snapshots. */
@@ -199,6 +214,7 @@ export async function migrateMembershipSqliteDb(db: SqliteDb): Promise<void> {
       value TEXT NOT NULL
     )
   `)
+  secureSqliteArtifacts(db)
 }
 
 /**

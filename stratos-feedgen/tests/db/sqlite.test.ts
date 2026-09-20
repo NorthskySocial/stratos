@@ -193,6 +193,16 @@ describe('SQLite-specific behavior', () => {
     ).rejects.toThrow(/SQLite storage file must be private/)
   })
 
+  it('rejects an existing SQLite sidecar that is readable by other users', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    await writeFile(`${recordPath}-wal`, '')
+    await chmod(`${recordPath}-wal`, 0o644)
+    await expect(
+      createFeedgenStore(sqliteConfig(recordPath, membershipPath)),
+    ).rejects.toThrow(/SQLite storage file must be private/)
+  })
+
   it('rejects a durable database path below a non-private directory', async () => {
     const recordPath = join(tmpdir(), 'feedgen-public-records.sqlite')
     const membershipPath = join(tmpdir(), 'feedgen-public-membership.sqlite')
