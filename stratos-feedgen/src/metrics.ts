@@ -40,6 +40,11 @@ export interface FeedgenMetrics {
     outcome: 'ok' | 'expected_error' | 'error'
     postsReturned?: number
   }): void
+  observeFeedStage(input: {
+    stage: 'viewer_boundaries' | 'local_projection' | 'author_handles'
+    outcome: 'ok' | 'error'
+    durationSeconds: number
+  }): void
   recordReconnect(kind: 'service' | 'actor'): void
   recordIndexOperation(
     operation: 'upsert' | 'delete',
@@ -91,6 +96,13 @@ export function createFeedgenMetrics(
     {
       description: 'Posts returned from a feed request.',
       unit: '{posts}',
+    },
+  )
+  const feedStageDuration = meter.createHistogram(
+    'stratos.feedgen.feed.stage.duration',
+    {
+      description: 'Duration of a bounded Feedgen read-path stage.',
+      unit: 's',
     },
   )
   const reconnects = meter.createCounter(
@@ -148,6 +160,20 @@ export function createFeedgenMetrics(
   const actorPool = meter.createObservableGauge('stratos.feedgen.actor_pool', {
     description: 'Actor-pool utilization.',
   })
+  const processRss = meter.createObservableGauge(
+    'stratos.feedgen.process.memory.rss',
+    {
+      description: 'Feedgen process resident memory.',
+      unit: 'By',
+    },
+  )
+  const processHeapUsed = meter.createObservableGauge(
+    'stratos.feedgen.process.memory.heap_used',
+    {
+      description: 'Feedgen process used JavaScript heap.',
+      unit: 'By',
+    },
+  )
   const lastSuccess = meter.createObservableGauge(
     'stratos.feedgen.space_sync.last_success',
     {
@@ -166,10 +192,21 @@ export function createFeedgenMetrics(
       result.observe(actorPool, pool?.active ?? 0, { state: 'active' })
       result.observe(actorPool, pool?.waiting ?? 0, { state: 'waiting' })
       result.observe(actorPool, pool?.max ?? 0, { state: 'capacity' })
+      const memory = process.memoryUsage()
+      result.observe(processRss, memory.rss)
+      result.observe(processHeapUsed, memory.heapUsed)
       if (lastSpaceSyncSuccess > 0)
         result.observe(lastSuccess, lastSpaceSyncSuccess)
     },
-    [heartbeat, readiness, connected, actorPool, lastSuccess],
+    [
+      heartbeat,
+      readiness,
+      connected,
+      actorPool,
+      processRss,
+      processHeapUsed,
+      lastSuccess,
+    ],
   )
 
   return {
@@ -193,6 +230,9 @@ export function createFeedgenMetrics(
     observeFeedRequest({ outcome, postsReturned: count }) {
       feedRequests.add(1, { outcome })
       if (count !== undefined) postsReturned.record(count)
+    },
+    observeFeedStage({ stage, outcome, durationSeconds }) {
+      feedStageDuration.record(durationSeconds, { stage, outcome })
     },
     recordReconnect(kind) {
       reconnects.add(1, { 'stream.kind': kind })

@@ -32,6 +32,7 @@ export const METRIC_ATTRIBUTE_KEYS = [
   'storage.backend',
   'room.id',
   'state',
+  'stage',
 ]
 let telemetry: { shutdown(): Promise<void> } = { shutdown: async () => {} }
 

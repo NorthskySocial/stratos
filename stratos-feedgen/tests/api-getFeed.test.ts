@@ -6,6 +6,9 @@ import * as Sentry from '@sentry/node'
 import {
   buildFeedRegistry,
   createFeedgenServer,
+  feedStageDurationSeconds,
+  measureFeedStage,
+  type FeedgenMetrics,
   type FeedRequestVerifier,
   type IndexedPost,
   type ListPostsOpts,
@@ -43,6 +46,7 @@ async function startServer(opts?: {
   /** Override verifier to simulate auth failure or alternative viewer DIDs. */
   verifier?: FeedRequestVerifier
   resolveHandle?: (did: string) => Promise<string | undefined>
+  metrics?: FeedgenMetrics
 }): Promise<TestServerCtx> {
   const viewerBoundaries = opts?.viewerBoundaries ?? ['engineering']
   const posts = opts?.posts ?? []
@@ -89,6 +93,7 @@ async function startServer(opts?: {
       typeof createFeedgenServer
     >[0]['enrollmentManager'],
     verifier,
+    metrics: opts?.metrics,
     feedReadiness: opts?.readiness,
     resolveHandle: opts?.resolveHandle,
   })
@@ -178,6 +183,89 @@ describe('zone.stratos.feedgen.getFeed', () => {
       `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getBlob?${new URLSearchParams({ uri: value.uri, cid: value.blobRefs[0].cid })}`,
     )
     expect(blob.status).toBe(404)
+  })
+
+  it('records only bounded stage labels for an authorized feed read', async () => {
+    const observeFeedStage = vi.fn()
+    const metrics = {
+      beginHttpRequest: () => ({
+        complete: vi.fn(),
+        abort: vi.fn(),
+      }),
+      observeFeedRequest: vi.fn(),
+      observeFeedStage,
+    } as unknown as FeedgenMetrics
+    ctx = await startServer({
+      posts: [
+        makePost(
+          'at://did:plc:fayevalentine/zone.stratos.feed.post/julia',
+          FAYE_DID,
+          '2024-01-01T00:00:00.000Z',
+        ),
+      ],
+      metrics,
+      resolveHandle: async () => 'faye.tokyo3.test',
+    })
+
+    const response = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed`,
+      { headers: { authorization: 'Bearer test-token' } },
+    )
+
+    expect(response.status).toBe(200)
+    expect(
+      observeFeedStage.mock.calls.map(([input]) => ({
+        stage: input.stage,
+        outcome: input.outcome,
+      })),
+    ).toEqual([
+      { stage: 'viewer_boundaries', outcome: 'ok' },
+      { stage: 'local_projection', outcome: 'ok' },
+      { stage: 'author_handles', outcome: 'ok' },
+    ])
+    for (const [input] of observeFeedStage.mock.calls) {
+      expect(input).toEqual({
+        stage: expect.any(String),
+        outcome: 'ok',
+        durationSeconds: expect.any(Number),
+      })
+      expect(input.durationSeconds).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('records the failed stage and rethrows the original failure', async () => {
+    const observeFeedStage = vi.fn()
+    const failure = new Error('projection unavailable')
+
+    await expect(
+      measureFeedStage(
+        { observeFeedStage } as unknown as FeedgenMetrics,
+        'local_projection',
+        async () => {
+          throw failure
+        },
+      ),
+    ).rejects.toBe(failure)
+
+    expect(observeFeedStage).toHaveBeenCalledWith({
+      stage: 'local_projection',
+      outcome: 'error',
+      durationSeconds: expect.any(Number),
+    })
+  })
+
+  it('preserves elapsed seconds at nanosecond precision', () => {
+    expect(feedStageDurationSeconds(1_000_000_000n, 3_500_000_000n)).toBe(2.5)
+  })
+
+  it('rethrows a stage failure when metrics are disabled', async () => {
+    const failure = new Error('boundary service unavailable')
+
+    await expect(
+      measureFeedStage(undefined, 'viewer_boundaries', async () => {
+        throw failure
+      }),
+    ).rejects.toBe(failure)
   })
   it('fails closed while replay authorization is not ready', async () => {
     ctx = await startServer({

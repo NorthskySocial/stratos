@@ -14,13 +14,17 @@ import {
   BoundaryMismatchError,
   UnknownFeedError,
   toXrpcAuthVerifier,
-  type XrpcAuthCredentials,
 } from '../util.js'
 import type { FeedRequestVerifier } from '../../auth/index.js'
 import type { FeedgenMetrics } from '../../metrics.js'
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
+
+export type FeedStage =
+  | 'viewer_boundaries'
+  | 'local_projection'
+  | 'author_handles'
 
 export interface GetFeedDeps {
   blobBaseUrl?: string
@@ -72,30 +76,40 @@ export function registerGetFeedHandler(
         const feed = deps.feeds.get(feedId)
         if (!feed) throw new UnknownFeedError(feedId)
 
-        const viewerBoundaries =
-          await deps.enrollmentManager.getBoundaries(viewerDid)
+        const viewerBoundaries = await measureFeedStage(
+          deps.metrics,
+          'viewer_boundaries',
+          () => deps.enrollmentManager.getBoundaries(viewerDid),
+        )
         assertReadiness(deps.readiness)
         if (!viewerBoundaries.includes(feed.boundary)) {
           throw new BoundaryMismatchError(feed.boundary)
         }
 
-        const result = await withTelemetrySpan(
-          'feedgen.feed.query',
-          'db.query',
+        const result = await measureFeedStage(
+          deps.metrics,
+          'local_projection',
           () =>
-            deps.store.listPostsByBoundary({
-              boundary: feed.boundary,
-              limit,
-              cursor: normalizeCursor(cursor),
-            }),
+            withTelemetrySpan('feedgen.feed.query', 'db.query', () =>
+              deps.store.listPostsByBoundary({
+                boundary: feed.boundary,
+                limit,
+                cursor: normalizeCursor(cursor),
+              }),
+            ),
         )
         assertReadiness(deps.readiness)
 
-        const hydratedPosts = await toFeedViewPosts(
-          result.posts,
-          deps.resolveHandle,
-          deps.blobBaseUrl,
-          deps.store,
+        const hydratedPosts = await measureFeedStage(
+          deps.metrics,
+          'author_handles',
+          () =>
+            toFeedViewPosts(
+              result.posts,
+              deps.resolveHandle,
+              deps.blobBaseUrl,
+              deps.store,
+            ),
         )
         assertReadiness(deps.readiness)
         if (deps.feeds.get(feedId) !== feed) {
@@ -155,6 +169,37 @@ function normalizeCursor(cursor: string | undefined): string | undefined {
   if (cursor === undefined) return undefined
   if (decodeCursor(cursor) === null) return undefined
   return cursor
+}
+
+export async function measureFeedStage<T>(
+  metrics: FeedgenMetrics | undefined,
+  stage: FeedStage,
+  work: () => Promise<T>,
+): Promise<T> {
+  const startedAt = process.hrtime.bigint()
+  try {
+    const result = await work()
+    metrics?.observeFeedStage({
+      stage,
+      outcome: 'ok',
+      durationSeconds: feedStageDurationSeconds(startedAt),
+    })
+    return result
+  } catch (error) {
+    metrics?.observeFeedStage({
+      stage,
+      outcome: 'error',
+      durationSeconds: feedStageDurationSeconds(startedAt),
+    })
+    throw error
+  }
+}
+
+export function feedStageDurationSeconds(
+  startedAt: bigint,
+  endedAt = process.hrtime.bigint(),
+): number {
+  return Number(endedAt - startedAt) / 1_000_000_000
 }
 
 async function toFeedViewPosts(
