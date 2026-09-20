@@ -130,6 +130,11 @@ describe('OTLP metrics', () => {
       durationSeconds: 0.125,
     })
     metrics.observeFeedRequest({ outcome: 'ok', postsReturned: 2 })
+    metrics.observeFeedStage({
+      stage: 'local_projection',
+      outcome: 'ok',
+      durationSeconds: 0.0625,
+    })
     metrics.recordReconnect('service')
     metrics.recordIndexOperation('upsert', 'ok')
     metrics.recordBoundaryCache('hit')
@@ -155,6 +160,9 @@ describe('OTLP metrics', () => {
         'http.server.request.duration',
         'http.server.active_requests',
         'stratos.feedgen.feed.requests',
+        'stratos.feedgen.feed.stage.duration',
+        'stratos.feedgen.process.memory.rss',
+        'stratos.feedgen.process.memory.heap_used',
         'stratos.feedgen.subscription.reconnects',
         'stratos.feedgen.index.operations',
         'stratos.feedgen.cache.requests',
@@ -178,6 +186,39 @@ describe('OTLP metrics', () => {
       'http.route': '/xrpc/zone.stratos.feedgen.getFeed',
       'http.response.status_code': 200,
     })
+    const feedStage = exported
+      .flatMap((resource) => resource.scopeMetrics)
+      .flatMap((scope) => scope.metrics)
+      .find(
+        (metric) =>
+          metric.descriptor.name === 'stratos.feedgen.feed.stage.duration',
+      )
+    expect(feedStage?.dataPoints[0]?.attributes).toEqual({
+      stage: 'local_projection',
+      outcome: 'ok',
+    })
+    expect(feedStage?.descriptor).toMatchObject({
+      description: 'Duration of a bounded Feedgen read-path stage.',
+      unit: 's',
+    })
+    for (const [name, description] of [
+      [
+        'stratos.feedgen.process.memory.rss',
+        'Feedgen process resident memory.',
+      ],
+      [
+        'stratos.feedgen.process.memory.heap_used',
+        'Feedgen process used JavaScript heap.',
+      ],
+    ]) {
+      const metric = exported
+        .flatMap((resource) => resource.scopeMetrics)
+        .flatMap((scope) => scope.metrics)
+        .find((candidate) => candidate.descriptor.name === name)
+      expect(metric?.descriptor).toMatchObject({ description, unit: 'By' })
+      expect(metric?.dataPoints[0]?.attributes).toEqual({})
+      expect(metric?.dataPoints[0]?.value).toEqual(expect.any(Number))
+    }
     expect(exported[0]?.resource.attributes).toMatchObject({
       'service.name': 'stratos-feedgen',
       'service.instance.id': 'feedgen-observability-test',

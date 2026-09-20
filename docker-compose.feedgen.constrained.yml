@@ -1,0 +1,12 @@
+# Resource-constrained Feedgen profile for Plan 001 measurements.
+#
+# Run with the normal Feedgen overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.feedgen.yml \
+#     -f docker-compose.feedgen.constrained.yml up --build
+#
+# This limits Feedgen itself. The Stratos and Collector allocations must be
+# reported separately; do not claim the entire stack fits this envelope.
+services:
+  feedgen:
+    cpus: '1.0'
+    mem_limit: 512m
