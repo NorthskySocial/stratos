@@ -1,0 +1,17 @@
+[package]
+name = "stratos-feedgen-rust"
+version = "0.1.0"
+description = "Rust implementation of the Stratos Feedgen"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+serde_json = "1"
+tower = { version = "0.5", features = ["util"] }
