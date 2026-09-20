@@ -32,7 +32,9 @@ see [Security](/operator/security#cors-configuration).
 
 ## High Latency Under Load
 
-See the Performance Investigation Playbook. Key checkpoints:
+For Feedgen, use the [low-resource triage sequence](/operator/operations#feedgen-low-resource-triage)
+and compare its bounded read-path stages before changing persistence or cache
+behavior. For Stratos write traffic, key checkpoints are:
 
 1. **DB connection pool exhaustion** — increase `STRATOS_PG_ACTOR_POOL_SIZE`.
 2. **RDS IOPS saturation** — check `WriteIOPS` vs baseline (gp2: `allocatedStorageGiB × 3` IOPS).

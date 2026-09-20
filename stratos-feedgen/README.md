@@ -276,8 +276,27 @@ requests are counted in metrics but not logged.
 
 Feedgen emits bounded OpenTelemetry metrics by OTLP/HTTP only when
 `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is configured. The local listener does
-not expose `/metrics`; scrape the Collector's private Prometheus endpoint
-instead. Sentry reporting is independently enabled by `SENTRY_DSN`.
+not expose `/metrics`; scrape only a private Collector Prometheus endpoint.
+The repository's development Collector (`observability/otel-collector.yml`)
+currently uses the `debug` exporter, so a deployment must provision its
+Collector-to-Prometheus route before PromQL queries can return Feedgen data.
+Sentry reporting is independently enabled by `SENTRY_DSN`.
+
+The read path emits `stratos.feedgen.feed.stage.duration` with only the
+bounded `stage` (`viewer_boundaries`, `local_projection`, or
+`author_handles`) and `outcome` labels. It also emits unlabelled
+`stratos.feedgen.process.memory.rss` and
+`stratos.feedgen.process.memory.heap_used` gauges. These metrics never carry
+viewer DIDs, feed IDs, boundaries, post URIs, CIDs, or request IDs.
+
+To apply the Feedgen-only 1 vCPU / 512 MiB measurement envelope locally, add
+the constrained overlay; it does not claim the accompanying Stratos or
+Collector processes fit within that allocation:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.feedgen.yml \
+  -f docker-compose.feedgen.constrained.yml up --build
+```
 
 ### `/health`
 
