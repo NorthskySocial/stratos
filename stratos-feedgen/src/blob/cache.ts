@@ -67,7 +67,11 @@ export class DiskBlobCache implements BlobCache {
       if (!/^[a-f0-9]{64}$/.test(name)) continue
       const info = await lstat(join(options.directory, name))
       const expiresAt = info.mtimeMs + options.ttlMs
-      if (!info.isFile() || expiresAt <= cache.now()) {
+      if (!info.isFile()) {
+        await rm(join(options.directory, name))
+      } else if ((info.mode & 0o077) !== 0) {
+        throw new Error(`Blob cache file must be private: ${name}`)
+      } else if (expiresAt <= cache.now()) {
         await rm(join(options.directory, name))
       } else {
         cache.entries.set(name, { size: info.size, expiresAt })

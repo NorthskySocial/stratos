@@ -265,6 +265,14 @@ function loadStorageConfig(env: FeedgenEnv): StorageConfig {
       'FEEDGEN_SQLITE_PATH must be a file path for the encrypted-volume storage profile',
     )
   }
+  const configuredMembershipPath = nonEmpty(
+    env['FEEDGEN_MEMBERSHIP_SQLITE_PATH'],
+  )
+  if (storageProfile === 'encrypted-volume' && !configuredMembershipPath) {
+    throw new Error(
+      'Missing required env var FEEDGEN_MEMBERSHIP_SQLITE_PATH for the encrypted-volume storage profile',
+    )
+  }
   if (
     storageProfile === 'ephemeral' &&
     nonEmpty(env['FEEDGEN_BLOB_CACHE_DIRECTORY'])
@@ -279,7 +287,7 @@ function loadStorageConfig(env: FeedgenEnv): StorageConfig {
     sqlitePath,
     membershipSqlitePath: resolveMembershipSqlitePath(
       sqlitePath,
-      nonEmpty(env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']),
+      configuredMembershipPath,
     ),
     postgresUrl,
     postgresSchema: env['FEEDGEN_POSTGRES_SCHEMA'],
@@ -366,6 +374,47 @@ export function assertDistinctSqlitePaths(
     throw new Error(
       'FEEDGEN_MEMBERSHIP_SQLITE_PATH must differ from FEEDGEN_SQLITE_PATH',
     )
+  }
+}
+
+/** Reject a durable SQLite path that an unintended local user can read. */
+export function assertPrivateSqlitePath(location: string): void {
+  const absolute = resolve(location)
+  try {
+    const entry = lstatSync(absolute)
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error(`SQLite storage path must be a regular file: ${location}`)
+    }
+    if ((entry.mode & 0o077) !== 0) {
+      throw new Error(`SQLite storage file must be private: ${location}`)
+    }
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'ENOENT') throw err
+  }
+
+  let parent = dirname(absolute)
+  for (;;) {
+    try {
+      const entry = lstatSync(parent)
+      if (entry.isSymbolicLink() || !entry.isDirectory()) {
+        throw new Error(
+          `SQLite storage parent must be a directory: ${location}`,
+        )
+      }
+      if ((entry.mode & 0o077) !== 0) {
+        throw new Error(`SQLite storage directory must be private: ${parent}`)
+      }
+      return
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      const next = dirname(parent)
+      if (next === parent) {
+        throw new Error(`SQLite storage parent does not exist: ${location}`, {
+          cause: err,
+        })
+      }
+      parent = next
+    }
   }
 }
 

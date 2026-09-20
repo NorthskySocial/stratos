@@ -151,6 +151,15 @@ describe('private disk blob cache', () => {
       DiskBlobCache.open({ directory, maxBytes: 100, ttlMs: 1000 }),
     ).rejects.toThrow(/private directory/)
   })
+
+  it('rejects an existing cache file that is readable by other users', async () => {
+    const { cache, directory } = await disk()
+    await cache.put(key(), Buffer.from('Spike'))
+    await chmod(join(directory, key()), 0o644)
+    await expect(
+      DiskBlobCache.open({ directory, maxBytes: 100, ttlMs: 1000 }),
+    ).rejects.toThrow(/cache file must be private/)
+  })
 })
 
 describe('private memory blob cache', () => {

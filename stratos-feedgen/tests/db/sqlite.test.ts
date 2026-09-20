@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sql } from 'drizzle-orm'
@@ -173,6 +181,38 @@ describe('SQLite-specific behavior', () => {
     )
     expect(result?.journal_mode).toBe('wal')
     db._client.close()
+  })
+
+  it('rejects an existing durable database file that is readable by other users', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    await writeFile(recordPath, '')
+    await chmod(recordPath, 0o644)
+    await expect(
+      createFeedgenStore(sqliteConfig(recordPath, membershipPath)),
+    ).rejects.toThrow(/SQLite storage file must be private/)
+  })
+
+  it('rejects a durable database path below a non-private directory', async () => {
+    const recordPath = join(tmpdir(), 'feedgen-public-records.sqlite')
+    const membershipPath = join(tmpdir(), 'feedgen-public-membership.sqlite')
+    await expect(
+      createFeedgenStore(sqliteConfig(recordPath, membershipPath)),
+    ).rejects.toThrow(/SQLite storage directory must be private/)
+  })
+
+  it('creates durable database files with private permissions', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    const store = await createFeedgenStore(
+      sqliteConfig(recordPath, membershipPath),
+    )
+    try {
+      expect((await stat(recordPath)).mode & 0o077).toBe(0)
+      expect((await stat(membershipPath)).mode & 0o077).toBe(0)
+    } finally {
+      await store.close()
+    }
   })
 
   it('migration is idempotent', async () => {

@@ -71,18 +71,14 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     })
   })
 
-  it('derives a distinct sibling database for durable membership snapshots', () => {
-    const cfg = loadFeedgenConfig(
-      encryptedVolumeEnv({
-        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
-      }),
-    )
-
-    expect(cfg.sqlitePath).toBe('/tmp/feedgen-bebop.sqlite')
-    expect(cfg.membershipSqlitePath).toBe(
-      '/tmp/feedgen-bebop.sqlite.membership',
-    )
+  it('requires an explicit membership database for durable projection', () => {
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
+        }),
+      ),
+    ).toThrow(/FEEDGEN_MEMBERSHIP_SQLITE_PATH/)
   })
 
   it('keeps an explicitly configured membership database path', () => {

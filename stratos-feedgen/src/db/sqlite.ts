@@ -1,4 +1,5 @@
 import { Client, createClient } from '@libsql/client'
+import { chmodSync, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -32,6 +33,7 @@ import {
   SpaceSyncStagePage,
 } from './types.js'
 import type { CatalogBoundary } from '../feeds/catalog-model.js'
+import { assertPrivateSqlitePath } from '../config.js'
 
 export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
   _client: Client
@@ -67,6 +69,8 @@ class SqliteWriteQueue {
 }
 
 export function createSqliteDb(location: string): SqliteDb {
+  const durableFileExisted = location !== ':memory:' && existsSync(location)
+  if (location !== ':memory:') assertPrivateSqlitePath(location)
   const url = sqliteClientUrl(location)
   const client = createClient({
     url,
@@ -87,6 +91,9 @@ export function createSqliteDb(location: string): SqliteDb {
       if (code !== 'SQLITE_BUSY') throw err
     }
     await db.run(sql.raw('PRAGMA foreign_keys = ON'))
+    if (!durableFileExisted && location !== ':memory:') {
+      chmodSync(location, 0o600)
+    }
   })()
   return db
 }
