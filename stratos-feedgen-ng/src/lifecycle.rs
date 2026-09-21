@@ -8,7 +8,7 @@ use crate::{
     feeds::FeedRegistry,
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
-    store::{ActorPage, StoreError},
+    store::{ActorPage, StoreError, StoreInterrupt},
 };
 
 pub struct ControlLifecycle {
@@ -16,6 +16,7 @@ pub struct ControlLifecycle {
     authorizations: Mutex<ViewerAuthorizations>,
     readiness: Arc<Mutex<FeedReadinessGate>>,
     projection: Arc<Mutex<ProjectionReader>>,
+    interrupt: StoreInterrupt,
 }
 
 impl ControlLifecycle {
@@ -32,11 +33,13 @@ impl ControlLifecycle {
         readiness: Arc<Mutex<FeedReadinessGate>>,
         authorizations: ViewerAuthorizations,
     ) -> Self {
+        let interrupt = projection.interrupt_handle();
         Self {
             transition: Mutex::new(()),
             authorizations: Mutex::new(authorizations),
             readiness,
             projection: Arc::new(Mutex::new(projection)),
+            interrupt,
         }
     }
 
@@ -53,6 +56,14 @@ impl ControlLifecycle {
         query: FeedQuery<'_>,
     ) -> Result<Vec<u8>, FeedServiceError> {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        if !self
+            .readiness
+            .lock()
+            .expect("readiness lock poisoned")
+            .is_ready()
+        {
+            return Err(FeedServiceError::FeedNotReady);
+        }
         let authorization = self
             .authorizations
             .lock()
@@ -68,6 +79,10 @@ impl ControlLifecycle {
             },
             query,
         )
+    }
+
+    pub fn interrupt_feed_work(&self) {
+        self.interrupt.interrupt();
     }
 
     pub fn session_established(&self) {
@@ -220,6 +235,30 @@ mod tests {
                 truncated: false,
             },
         ));
+        assert!(lifecycle.read(|projection| projection.prepare(request()).unwrap().is_none()));
+    }
+
+    #[test]
+    fn rejects_a_late_successful_reconciliation_after_timeout_closure() {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let lifecycle = ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+        );
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+
+        lifecycle.mark_unavailable();
+        assert!(!lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+        assert!(!readiness.lock().unwrap().is_ready());
         assert!(lifecycle.read(|projection| projection.prepare(request()).unwrap().is_none()));
     }
 

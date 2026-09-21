@@ -74,6 +74,20 @@ pub trait IdentityKeyResolver: Send + Sync {
     ) -> Result<String, IdentityResolutionError>;
 }
 
+#[async_trait]
+impl<T> IdentityKeyResolver for std::sync::Arc<T>
+where
+    T: IdentityKeyResolver + ?Sized,
+{
+    async fn resolve_atproto_key(
+        &self,
+        did: &str,
+        force_refresh: bool,
+    ) -> Result<String, IdentityResolutionError> {
+        self.as_ref().resolve_atproto_key(did, force_refresh).await
+    }
+}
+
 pub struct FeedRequestVerifier<R> {
     feedgen_did: String,
     allowed_lxms: Vec<String>,

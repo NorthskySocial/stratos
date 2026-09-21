@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use stratos_feedgen_ng::{
-    config::FeedgenConfig, lifecycle::ControlLifecycle, readiness::FeedReadinessGate,
-    runtime::open_projection_store, server, service::ProjectionReader,
+    auth::FeedRequestVerifier, config::FeedgenConfig, identity::HttpIdentityKeyResolver,
+    lifecycle::ControlLifecycle, readiness::FeedReadinessGate, runtime::open_projection_store,
+    server, service::ProjectionReader,
 };
 
 #[tokio::main]
@@ -19,7 +20,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Feeds remain unavailable until verified reconciliation completes.
     let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
-    let _lifecycle = ControlLifecycle::new(projection, Arc::clone(&readiness));
-    axum::serve(listener, server::router(config, feeds, readiness)).await?;
+    let lifecycle = Arc::new(ControlLifecycle::new(projection, Arc::clone(&readiness)));
+    let resolver = Arc::new(HttpIdentityKeyResolver::new(Some(&config.plc_url))?);
+    let verifier = FeedRequestVerifier::new(
+        config.service_did.clone(),
+        ["zone.stratos.feedgen.getFeed".to_owned()],
+        resolver as Arc<dyn stratos_feedgen_ng::auth::IdentityKeyResolver>,
+    );
+    axum::serve(
+        listener,
+        server::router_with_feed(config, feeds, readiness, lifecycle, verifier),
+    )
+    .await?;
     Ok(())
 }

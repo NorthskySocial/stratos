@@ -1,7 +1,7 @@
 use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
-    store::{ActorPage, EncryptedStore, FeedPage, StoreError},
+    store::{ActorPage, EncryptedStore, FeedPage, StoreError, StoreInterrupt},
 };
 use std::collections::BTreeSet;
 
@@ -26,6 +26,9 @@ impl ProjectionReader {
             admission: ReadAdmission::default(),
             store,
         }
+    }
+    pub fn interrupt_handle(&self) -> StoreInterrupt {
+        self.store.interrupt_handle()
     }
     pub fn establish_session(&mut self) {
         self.admission.establish_session();

@@ -95,6 +95,7 @@ mod tests {
                 service_did: fixture.input.service_did,
                 public_url: fixture.input.public_url,
                 public_key_multibase: fixture.input.public_key_multibase,
+                plc_url: "https://plc.example.test".to_owned(),
                 storage: StorageProfile::Memory,
             },
             FeedRegistry::new(Vec::new()).unwrap(),

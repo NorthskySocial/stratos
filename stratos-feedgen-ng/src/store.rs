@@ -8,6 +8,7 @@ use std::{
         unix::{ffi::OsStrExt, fs::MetadataExt, fs::PermissionsExt},
     },
     path::{Component, Path},
+    sync::Arc,
 };
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
@@ -19,6 +20,7 @@ const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
 const SQLITE_CACHE_KIB: u32 = 16 * 1024;
 const MAX_PURGE_BATCH: u16 = 512;
 const MAX_SPACE_PROMOTION_BATCH: u16 = 512;
+const SQLITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
 pub struct StorageKey([u8; STORAGE_KEY_BYTES]);
 
@@ -196,8 +198,18 @@ fn hex_nibble(value: u8) -> Option<u8> {
     }
 }
 
+#[derive(Clone)]
+pub struct StoreInterrupt(Arc<rusqlite::InterruptHandle>);
+
+impl StoreInterrupt {
+    pub fn interrupt(&self) {
+        self.0.interrupt();
+    }
+}
+
 pub struct EncryptedStore {
     connection: Connection,
+    interrupt: StoreInterrupt,
 }
 
 pub struct ProjectionPost {
@@ -291,6 +303,10 @@ impl EncryptedStore {
         self.connection
             .query_row("PRAGMA cipher_version", [], |row| row.get(0))
             .map_err(StoreError::Open)
+    }
+
+    pub fn interrupt_handle(&self) -> StoreInterrupt {
+        self.interrupt.clone()
     }
 
     pub fn apply_actor_page(&mut self, page: ActorPage) -> Result<(), StoreError> {
@@ -592,6 +608,9 @@ impl EncryptedStore {
                 key.as_hex()
             ))
             .map_err(StoreError::Open)?;
+        connection
+            .busy_timeout(SQLITE_BUSY_TIMEOUT)
+            .map_err(StoreError::Open)?;
         let cipher_version: String = connection
             .query_row("PRAGMA cipher_version", [], |row| row.get(0))
             .map_err(StoreError::Open)?;
@@ -599,7 +618,11 @@ impl EncryptedStore {
             return Err(StoreError::CipherUnavailable);
         }
         migrations::apply(&mut connection).map_err(StoreError::Open)?;
-        Ok(Self { connection })
+        let interrupt = StoreInterrupt(Arc::new(connection.get_interrupt_handle()));
+        Ok(Self {
+            connection,
+            interrupt,
+        })
     }
 }
 
@@ -1007,6 +1030,9 @@ mod tests {
         fs,
         os::unix::fs::{PermissionsExt, symlink},
         path::PathBuf,
+        sync::mpsc,
+        thread,
+        time::Duration,
     };
 
     use rusqlite::Connection;
@@ -1089,6 +1115,31 @@ mod tests {
     fn opens_only_when_sqlcipher_is_available() {
         let store = EncryptedStore::open_memory(key(7)).unwrap();
         assert!(!store.cipher_version().unwrap().is_empty());
+    }
+
+    #[test]
+    fn interrupt_handle_stops_a_running_query() {
+        let store = EncryptedStore::open_memory(key(7)).unwrap();
+        let interrupt = store.interrupt_handle();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            started_sender.send(()).unwrap();
+            store
+                .connection
+                .query_row(
+                    "WITH RECURSIVE counter(value) AS (VALUES(0) UNION ALL SELECT value + 1 FROM counter WHERE value < 1000000000) SELECT sum(value) FROM counter",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .is_err()
+        });
+
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        thread::sleep(Duration::from_millis(20));
+        interrupt.interrupt();
+        assert!(worker.join().unwrap());
     }
 
     #[test]

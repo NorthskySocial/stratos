@@ -19,6 +19,7 @@ pub struct FeedgenConfig {
     pub service_did: String,
     pub public_url: String,
     pub public_key_multibase: String,
+    pub plc_url: String,
     pub storage: StorageProfile,
 }
 
@@ -49,7 +50,7 @@ impl std::error::Error for ConfigError {}
 
 impl FeedgenConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_values(
+        let mut config = Self::from_values(
             env::var("FEEDGEN_SERVICE_DID").ok(),
             env::var("FEEDGEN_PUBLIC_URL").ok(),
             env::var("FEEDGEN_PUBLIC_KEY_MULTIBASE").ok(),
@@ -57,7 +58,12 @@ impl FeedgenConfig {
             env::var("FEEDGEN_STORAGE_PROFILE").ok(),
             env::var("FEEDGEN_SQLITE_PATH").ok(),
             env::var("FEEDGEN_STORAGE_KEY_PATH").ok(),
-        )
+        )?;
+        config.plc_url = env::var("FEEDGEN_PLC_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "https://plc.directory".to_owned());
+        Ok(config)
     }
 
     pub fn load_feed_registry_from_env() -> Result<FeedRegistry, FeedRegistryLoadError> {
@@ -94,6 +100,7 @@ impl FeedgenConfig {
                 public_key_multibase,
                 "FEEDGEN_PUBLIC_KEY_MULTIBASE",
             )?,
+            plc_url: "https://plc.directory".to_owned(),
             storage: parse_storage(storage_backend, storage_profile, sqlite_path, key_path)?,
         })
     }
