@@ -18,6 +18,7 @@ use tokio_tungstenite::{
 use url::Url;
 
 use crate::{
+    config::MAX_ACTOR_CONNECTIONS,
     lifecycle::{ActorFrameResult, ControlLifecycle},
     service_auth::{ServiceSigningKey, mint_service_jwt},
     store::StoreError,
@@ -449,7 +450,8 @@ async fn run_actor_connection(
 }
 
 fn validate_config(config: &ActorStreamConfig) -> Result<(), ActorPoolError> {
-    if config.max_connections == 0 || config.retention.is_zero() {
+    if !(1..=MAX_ACTOR_CONNECTIONS).contains(&config.max_connections) || config.retention.is_zero()
+    {
         return Err(ActorPoolError::InvalidConfiguration);
     }
     actor_subscription_url(&config.service_url, &config.feedgen_did, None).map(|_| ())
@@ -561,6 +563,33 @@ mod tests {
             .unwrap(),
             "1970-01-01T00:01:00.000Z"
         );
+    }
+
+    #[test]
+    fn rejects_actor_connection_limits_outside_the_resource_budget() {
+        let config = ActorStreamConfig {
+            service_url: "https://stratos.example.test".to_owned(),
+            service_did: "did:web:stratos.example.test".to_owned(),
+            feedgen_did: "did:web:feedgen.example.test".to_owned(),
+            signing_key: crate::service_auth::ServiceSigningKey::from_hex(&"11".repeat(32))
+                .unwrap(),
+            retention: Duration::from_secs(60),
+            max_connections: crate::config::MAX_ACTOR_CONNECTIONS.saturating_add(1),
+        };
+        let lifecycle = Arc::new(
+            ControlLifecycle::for_authority(
+                ProjectionReader::new(
+                    EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+                ),
+                Arc::new(Mutex::new(FeedReadinessGate::default())),
+                "did:web:stratos.example.test",
+            )
+            .unwrap(),
+        );
+        assert!(matches!(
+            ActorPool::start(config, lifecycle),
+            Err(ActorPoolError::InvalidConfiguration)
+        ));
     }
 
     #[tokio::test]

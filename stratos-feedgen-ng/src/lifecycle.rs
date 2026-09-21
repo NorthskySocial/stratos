@@ -175,6 +175,19 @@ impl ControlLifecycle {
             .apply_actor_page(page)
     }
 
+    pub fn compact_projection(
+        &self,
+        as_of: &str,
+        max_bytes: u64,
+        limit: u16,
+    ) -> Result<crate::store::ProjectionCompaction, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .compact_projection(as_of, max_bytes, limit)
+    }
+
     pub fn actor_sync_state(
         &self,
         authority_did: &str,

@@ -3,7 +3,7 @@ use crate::{
     cursor::FeedCursor,
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
-        FeedPage, StoreError, StoreInterrupt,
+        FeedPage, ProjectionCompaction, StoreError, StoreInterrupt,
     },
 };
 use std::collections::BTreeSet;
@@ -107,6 +107,18 @@ impl ProjectionReader {
     pub fn revoke_boundary(&mut self, boundary: &str) -> Result<u64, StoreError> {
         self.admission.invalidate_boundary(boundary);
         self.store.purge_boundary(boundary)
+    }
+    pub fn compact_projection(
+        &mut self,
+        as_of: &str,
+        max_bytes: u64,
+        limit: u16,
+    ) -> Result<ProjectionCompaction, StoreError> {
+        let result = self.store.compact_projection(as_of, max_bytes, limit)?;
+        if result.deleted != 0 {
+            self.admission.replace_projection();
+        }
+        Ok(result)
     }
     pub fn prepare(
         &self,

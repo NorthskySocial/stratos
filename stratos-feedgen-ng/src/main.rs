@@ -11,6 +11,7 @@ use stratos_feedgen_ng::{
     identity::HttpIdentityKeyResolver,
     lifecycle::ControlLifecycle,
     readiness::FeedReadinessGate,
+    retention::RetentionCompactor,
     runtime::open_projection_store,
     server,
     service::ProjectionReader,
@@ -37,6 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&readiness),
         config.stratos_service_did.clone(),
     )?);
+    let compactor = RetentionCompactor::start(Arc::clone(&lifecycle), config.retention.clone())?;
     let authority: Arc<dyn AuthorityClient> = Arc::new(HttpAuthorityClient::new(
         &config.stratos_service_url,
         config.stratos_service_did.clone(),
@@ -78,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .with_graceful_shutdown(shutdown)
     .await;
+    compactor.stop().await;
     stream.stop().await;
     result?;
     Ok(())

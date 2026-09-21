@@ -7,6 +7,8 @@ use std::{
 use crate::feeds::{FeedRegistry, FeedRegistryLoadError, load_feed_registry};
 use crate::service_auth::ServiceSigningKey;
 
+pub const MAX_ACTOR_CONNECTIONS: u16 = 64;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageProfile {
     Memory,
@@ -224,7 +226,7 @@ fn parse_actor_connection_limit(value: Option<String>) -> Result<u16, ConfigErro
     value
         .parse::<u16>()
         .ok()
-        .filter(|value| (1..=64).contains(value))
+        .filter(|value| (1..=MAX_ACTOR_CONNECTIONS).contains(value))
         .ok_or(ConfigError::InvalidActorConnectionLimit)
 }
 

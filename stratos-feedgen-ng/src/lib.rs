@@ -18,6 +18,7 @@ pub mod identity;
 pub mod lifecycle;
 pub mod readiness;
 pub mod reconciliation;
+pub mod retention;
 pub mod runtime;
 pub mod server;
 pub mod service;
