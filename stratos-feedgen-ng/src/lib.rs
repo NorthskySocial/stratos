@@ -10,6 +10,7 @@ pub mod cursor;
 pub mod feed_service;
 pub mod feeds;
 pub mod identifier;
+pub mod lifecycle;
 pub mod readiness;
 pub mod runtime;
 pub mod server;
