@@ -3,6 +3,7 @@
 //! Exposes discovery and readiness only; it does not serve feeds or persist data.
 
 pub mod admission;
+pub mod auth;
 pub mod config;
 pub mod conformance;
 pub mod cursor;
