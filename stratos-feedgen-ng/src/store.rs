@@ -17,6 +17,7 @@ mod migrations;
 const STORAGE_KEY_BYTES: usize = 32;
 const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
 const SQLITE_CACHE_KIB: u32 = 16 * 1024;
+const MAX_PURGE_BATCH: u16 = 512;
 
 pub struct StorageKey([u8; STORAGE_KEY_BYTES]);
 
@@ -324,11 +325,15 @@ impl EncryptedStore {
         boundary: &str,
         cursor: Option<&crate::cursor::FeedCursor>,
         limit: u16,
+        as_of: &str,
     ) -> Result<FeedPage, StoreError> {
+        if !is_utc_timestamp(as_of) {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
         let limit = i64::from(limit.clamp(1, crate::cursor::MAX_FEED_LIMIT));
         let posts = match cursor {
-            Some(cursor) => self.list_posts_after_cursor(boundary, cursor, limit)?,
-            None => self.list_initial_posts(boundary, limit)?,
+            Some(cursor) => self.list_posts_after_cursor(boundary, cursor, limit, as_of)?,
+            None => self.list_initial_posts(boundary, limit, as_of)?,
         };
         let cursor = if posts.len() == limit as usize {
             posts.last().map(|post| crate::cursor::FeedCursor {
@@ -341,17 +346,35 @@ impl EncryptedStore {
         Ok(FeedPage { posts, cursor })
     }
 
-    fn list_initial_posts(&self, boundary: &str, limit: i64) -> Result<Vec<FeedPost>, StoreError> {
+    pub fn purge_expired(&mut self, as_of: &str, limit: u16) -> Result<u64, StoreError> {
+        if !is_utc_timestamp(as_of) {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        let deleted = transaction.execute("DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 ORDER BY retained_at ASC, uri ASC LIMIT ?2)", params![as_of, i64::from(limit.clamp(1, MAX_PURGE_BATCH))]).map_err(StoreError::Open)?;
+        transaction.commit().map_err(StoreError::Open)?;
+        Ok(deleted as u64)
+    }
+
+    fn list_initial_posts(
+        &self,
+        boundary: &str,
+        limit: i64,
+        as_of: &str,
+    ) -> Result<Vec<FeedPost>, StoreError> {
         let mut statement = self
             .connection
             .prepare(
                 "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json
              FROM post_boundary b JOIN post p ON p.uri = b.uri
-             WHERE b.boundary = ?1 ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?2",
+             WHERE b.boundary = ?1 AND p.retained_at > ?2 ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?3",
             )
             .map_err(StoreError::Open)?;
         statement
-            .query_map(params![boundary, limit], feed_post_from_row)
+            .query_map(params![boundary, as_of, limit], feed_post_from_row)
             .map_err(StoreError::Open)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::Open)
@@ -362,19 +385,20 @@ impl EncryptedStore {
         boundary: &str,
         cursor: &crate::cursor::FeedCursor,
         limit: i64,
+        as_of: &str,
     ) -> Result<Vec<FeedPost>, StoreError> {
         let mut statement = self
             .connection
             .prepare(
                 "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json
              FROM post_boundary b JOIN post p ON p.uri = b.uri
-             WHERE b.boundary = ?1 AND (b.sort_at < ?2 OR (b.sort_at = ?2 AND b.uri > ?3))
-             ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?4",
+             WHERE b.boundary = ?1 AND p.retained_at > ?2 AND (b.sort_at < ?3 OR (b.sort_at = ?3 AND b.uri > ?4))
+             ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?5",
             )
             .map_err(StoreError::Open)?;
         statement
             .query_map(
-                params![boundary, cursor.sort_at, cursor.uri, limit],
+                params![boundary, as_of, cursor.sort_at, cursor.uri, limit],
                 feed_post_from_row,
             )
             .map_err(StoreError::Open)?
@@ -423,6 +447,50 @@ fn projection_bytes(post: &ProjectionPost) -> i64 {
         + post.blob_refs_json.len()) as i64
 }
 
+fn is_utc_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let shaped = bytes.len() == 24
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
+        && bytes[23] == b'Z'
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 23) || byte.is_ascii_digit()
+        });
+    if !shaped {
+        return false;
+    }
+    let year = decimal(&bytes[0..4]);
+    let month = decimal(&bytes[5..7]);
+    let day = decimal(&bytes[8..10]);
+    (1..=12).contains(&month)
+        && day >= 1
+        && day <= days_in_month(year, month)
+        && decimal(&bytes[11..13]) < 24
+        && decimal(&bytes[14..16]) < 60
+        && decimal(&bytes[17..19]) < 60
+}
+
+fn decimal(value: &[u8]) -> u16 {
+    value
+        .iter()
+        .fold(0, |number, byte| number * 10 + u16::from(byte - b'0'))
+}
+
+fn days_in_month(year: u16, month: u16) -> u16 {
+    match month {
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
     crate::identifier::Did::parse(page.authority_did.clone())
         .map_err(|_| StoreError::InvalidProjectionMutation)?;
@@ -433,6 +501,9 @@ fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
             .map_err(|_| StoreError::InvalidProjectionMutation)?;
         if uri.author().as_str() != post.author_did
             || !record_belongs_to_page(&uri, page)
+            || !is_utc_timestamp(&post.sort_at)
+            || !is_utc_timestamp(&post.indexed_at)
+            || !is_utc_timestamp(&post.retained_at)
             || post.boundaries.is_empty()
             || post.boundaries.iter().any(|boundary| boundary.is_empty())
         {
@@ -717,14 +788,21 @@ mod tests {
             .apply_actor_page(actor_page(8, vec![second, first], Vec::new()))
             .unwrap();
 
-        let first_page = store.list_posts_by_boundary("bebop", None, 1).unwrap();
+        let first_page = store
+            .list_posts_by_boundary("bebop", None, 1, "1998-04-03T12:00:00.000Z")
+            .unwrap();
         assert_eq!(first_page.posts.len(), 1);
         assert_eq!(
             first_page.posts[0].uri,
             "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you"
         );
         let second_page = store
-            .list_posts_by_boundary("bebop", first_page.cursor.as_ref(), 1)
+            .list_posts_by_boundary(
+                "bebop",
+                first_page.cursor.as_ref(),
+                1,
+                "1998-04-03T12:00:00.000Z",
+            )
             .unwrap();
         assert_eq!(
             second_page.posts[0].uri,
@@ -732,9 +810,41 @@ mod tests {
         );
         assert!(second_page.cursor.is_some());
         let empty_page = store
-            .list_posts_by_boundary("bebop", second_page.cursor.as_ref(), 1)
+            .list_posts_by_boundary(
+                "bebop",
+                second_page.cursor.as_ref(),
+                1,
+                "1998-04-03T12:00:00.000Z",
+            )
             .unwrap();
         assert!(empty_page.posts.is_empty());
+    }
+
+    #[test]
+    fn never_lists_expired_posts_and_purges_them_with_boundaries() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let mut expired = spike_post();
+        expired.retained_at = "1998-04-03T00:00:00.000Z".to_string();
+        store
+            .apply_actor_page(actor_page(8, vec![expired], Vec::new()))
+            .unwrap();
+
+        let page = store
+            .list_posts_by_boundary("bebop", None, 50, "1998-04-03T12:00:00.000Z")
+            .unwrap();
+        assert!(page.posts.is_empty());
+        assert_eq!(
+            store.purge_expired("1998-04-03T12:00:00.000Z", 1).unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post_boundary", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
