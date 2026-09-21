@@ -487,6 +487,24 @@ impl EncryptedStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
         transaction
+            .execute(
+                "DELETE FROM space_cursor WHERE boundary = ?1 OR boundary = ''",
+                [boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM space_sync_pending_verification WHERE boundary = ?1 OR boundary = ''",
+                [boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM space_sync_stage WHERE boundary = ?1",
+                [boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
             .execute("DELETE FROM post_boundary WHERE boundary = ?1", [boundary])
             .map_err(StoreError::Open)?;
         let deleted = transaction
@@ -669,17 +687,19 @@ fn update_space_stage_checkpoint(
     if let Some(cursor) = &page.next_cursor {
         transaction
             .execute(
-                "INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(space_uri, did) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
-                params![page.space_uri, page.actor_did, cursor, page.updated_at],
+                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(space_uri, did) DO UPDATE SET boundary = excluded.boundary,
+                   cursor = excluded.cursor, updated_at = excluded.updated_at",
+                params![page.space_uri, page.actor_did, page.boundary, cursor, page.updated_at],
             )
             .map_err(StoreError::Open)?;
     } else {
         transaction
             .execute(
-                "INSERT INTO space_sync_pending_verification (space_uri, did, updated_at) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(space_uri, did) DO UPDATE SET updated_at = excluded.updated_at",
-                params![page.space_uri, page.actor_did, page.updated_at],
+                "INSERT INTO space_sync_pending_verification (space_uri, did, boundary, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(space_uri, did) DO UPDATE SET boundary = excluded.boundary,
+                   updated_at = excluded.updated_at",
+                params![page.space_uri, page.actor_did, page.boundary, page.updated_at],
             )
             .map_err(StoreError::Open)?;
     }
@@ -1314,6 +1334,43 @@ mod tests {
                 .posts
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn boundary_purge_removes_staged_space_state_before_it_can_promote() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .stage_space_page(space_stage_page(Some("firehose:8")), Vec::new())
+            .unwrap();
+        store
+            .stage_space_page(space_stage_page(None), Vec::new())
+            .unwrap();
+
+        assert_eq!(store.purge_boundary("bebop").unwrap(), 0);
+        assert!(matches!(
+            store.promote_verified_space_stage(
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                "did:plc:spikespiegel",
+                "1998-04-04T00:00:00.000Z",
+            ),
+            Err(StoreError::UnverifiedSpaceStage)
+        ));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_cursor", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 

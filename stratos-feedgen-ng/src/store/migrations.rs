@@ -5,9 +5,10 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: r#"
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: r#"
         CREATE TABLE schema_migration (
           version INTEGER PRIMARY KEY,
           applied_at INTEGER NOT NULL
@@ -116,7 +117,18 @@ const MIGRATIONS: &[Migration] = &[Migration {
         CREATE INDEX suppression_marker_source_sequence_idx
           ON suppression_marker(source_id, sequence);
     "#,
-}];
+    },
+    Migration {
+        version: 2,
+        sql: r#"
+        ALTER TABLE space_cursor ADD COLUMN boundary TEXT NOT NULL DEFAULT '';
+        ALTER TABLE space_sync_pending_verification ADD COLUMN boundary TEXT NOT NULL DEFAULT '';
+        CREATE INDEX space_cursor_boundary_idx ON space_cursor(boundary, space_uri, did);
+        CREATE INDEX space_sync_pending_verification_boundary_idx
+          ON space_sync_pending_verification(boundary, space_uri, did);
+    "#,
+    },
+];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
     let latest_version = MIGRATIONS.last().map_or(0, |migration| migration.version);
@@ -155,13 +167,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 1);
+        assert_eq!(migration_count, 2);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -208,9 +220,42 @@ mod tests {
     }
 
     #[test]
+    fn migrates_existing_space_lifecycle_rows_to_unlabelled_state() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(super::MIGRATIONS[0].sql).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migration (version, applied_at) VALUES (1, 0)",
+                [],
+            )
+            .unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                    "firehose:8",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+
+        apply(&mut connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT boundary FROM space_cursor", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            ""
+        );
+    }
+
+    #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 2).unwrap();
+        connection.pragma_update(None, "user_version", 3).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }
