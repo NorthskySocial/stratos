@@ -10,7 +10,7 @@ use std::{
     path::{Component, Path},
 };
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
 mod migrations;
 
@@ -60,6 +60,8 @@ pub enum StoreError {
     KeyFileAccess,
     InsecureKeyFile,
     InvalidKeyFile,
+    InvalidProjectionMutation,
+    StaleCursor,
 }
 
 impl fmt::Debug for StoreError {
@@ -70,6 +72,8 @@ impl fmt::Debug for StoreError {
             Self::KeyFileAccess => "KeyFileAccess",
             Self::InsecureKeyFile => "InsecureKeyFile",
             Self::InvalidKeyFile => "InvalidKeyFile",
+            Self::InvalidProjectionMutation => "InvalidProjectionMutation",
+            Self::StaleCursor => "StaleCursor",
         };
         formatter.write_str(name)
     }
@@ -85,6 +89,10 @@ impl fmt::Display for StoreError {
             }
             Self::InsecureKeyFile => formatter.write_str("storage key file permissions are unsafe"),
             Self::InvalidKeyFile => formatter.write_str("storage key file is invalid"),
+            Self::InvalidProjectionMutation => {
+                formatter.write_str("projection mutation is invalid")
+            }
+            Self::StaleCursor => formatter.write_str("projection cursor is stale"),
         }
     }
 }
@@ -185,6 +193,27 @@ pub struct EncryptedStore {
     connection: Connection,
 }
 
+pub struct ProjectionPost {
+    pub uri: String,
+    pub author_did: String,
+    pub cid: String,
+    pub sort_at: String,
+    pub indexed_at: String,
+    pub retained_at: String,
+    pub record_json: Vec<u8>,
+    pub blob_refs_json: Vec<u8>,
+    pub boundaries: Vec<String>,
+}
+
+pub struct ActorPage {
+    pub authority_did: String,
+    pub actor_did: String,
+    pub sequence: u64,
+    pub upserts: Vec<ProjectionPost>,
+    pub deletes: Vec<String>,
+    pub updated_at: String,
+}
+
 impl EncryptedStore {
     pub fn open(path: &Path, key: StorageKey) -> Result<Self, StoreError> {
         let connection = Connection::open_with_flags(
@@ -204,6 +233,74 @@ impl EncryptedStore {
         self.connection
             .query_row("PRAGMA cipher_version", [], |row| row.get(0))
             .map_err(StoreError::Open)
+    }
+
+    pub fn apply_actor_page(&mut self, page: ActorPage) -> Result<(), StoreError> {
+        let sequence =
+            i64::try_from(page.sequence).map_err(|_| StoreError::InvalidProjectionMutation)?;
+        validate_actor_page(&page)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        let current_sequence: Option<i64> = transaction
+            .query_row(
+                "SELECT sequence FROM actor_cursor WHERE authority_did = ?1 AND did = ?2",
+                params![page.authority_did, page.actor_did],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::Open)?;
+        if current_sequence.is_some_and(|current| current > sequence) {
+            return Err(StoreError::StaleCursor);
+        }
+        for post in &page.upserts {
+            transaction
+                .execute(
+                    "INSERT INTO post (uri, author_did, cid, sort_at, indexed_at, retained_at, projection_bytes, record_json, blob_refs_json, row_version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)
+                     ON CONFLICT(uri) DO UPDATE SET author_did = excluded.author_did, cid = excluded.cid,
+                       sort_at = excluded.sort_at, indexed_at = excluded.indexed_at, retained_at = excluded.retained_at,
+                       projection_bytes = excluded.projection_bytes, record_json = excluded.record_json,
+                       blob_refs_json = excluded.blob_refs_json, row_version = post.row_version + 1",
+                    params![
+                        post.uri,
+                        post.author_did,
+                        post.cid,
+                        post.sort_at,
+                        post.indexed_at,
+                        post.retained_at,
+                        projection_bytes(post),
+                        post.record_json,
+                        post.blob_refs_json,
+                    ],
+                )
+                .map_err(StoreError::Open)?;
+            transaction
+                .execute("DELETE FROM post_boundary WHERE uri = ?1", [&post.uri])
+                .map_err(StoreError::Open)?;
+            for boundary in &post.boundaries {
+                transaction
+                    .execute(
+                        "INSERT INTO post_boundary (uri, boundary, sort_at) VALUES (?1, ?2, ?3)",
+                        params![post.uri, boundary, post.sort_at],
+                    )
+                    .map_err(StoreError::Open)?;
+            }
+        }
+        for uri in &page.deletes {
+            transaction
+                .execute("DELETE FROM post WHERE uri = ?1", [uri])
+                .map_err(StoreError::Open)?;
+        }
+        transaction
+            .execute(
+                "INSERT INTO actor_cursor (authority_did, did, sequence, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(authority_did, did) DO UPDATE SET sequence = excluded.sequence, updated_at = excluded.updated_at",
+                params![page.authority_did, page.actor_did, sequence, page.updated_at],
+            )
+            .map_err(StoreError::Open)?;
+        transaction.commit().map_err(StoreError::Open)
     }
 
     fn configure(mut connection: Connection, key: StorageKey) -> Result<Self, StoreError> {
@@ -226,6 +323,48 @@ impl EncryptedStore {
     }
 }
 
+fn projection_bytes(post: &ProjectionPost) -> i64 {
+    (post.uri.len()
+        + post.author_did.len()
+        + post.cid.len()
+        + post.sort_at.len()
+        + post.indexed_at.len()
+        + post.record_json.len()
+        + post.blob_refs_json.len()) as i64
+}
+
+fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
+    crate::identifier::Did::parse(page.authority_did.clone())
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    crate::identifier::Did::parse(page.actor_did.clone())
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    for post in &page.upserts {
+        let uri = crate::identifier::RecordUri::parse(&post.uri)
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        if uri.author().as_str() != post.author_did
+            || !record_belongs_to_page(&uri, page)
+            || post.boundaries.is_empty()
+            || post.boundaries.iter().any(|boundary| boundary.is_empty())
+        {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+    }
+    for uri in &page.deletes {
+        let uri = crate::identifier::RecordUri::parse(uri)
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        if !record_belongs_to_page(&uri, page) {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+    }
+    Ok(())
+}
+
+fn record_belongs_to_page(uri: &crate::identifier::RecordUri, page: &ActorPage) -> bool {
+    uri.author().as_str() == page.actor_did
+        && (!matches!(uri, crate::identifier::RecordUri::Space { .. })
+            || uri.authority().as_str() == page.authority_did)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -236,10 +375,41 @@ mod tests {
 
     use rusqlite::Connection;
 
-    use super::{EncryptedStore, StorageKey};
+    use super::{ActorPage, EncryptedStore, ProjectionPost, StorageKey, StoreError};
 
     fn key(byte: u8) -> StorageKey {
         StorageKey::from_bytes([byte; 32])
+    }
+
+    fn spike_post() -> ProjectionPost {
+        ProjectionPost {
+            uri: "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string(),
+            author_did: "did:plc:spikespiegel".to_string(),
+            cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_string(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_string(),
+            retained_at: "1998-04-04T00:00:00.000Z".to_string(),
+            record_json: br#"{"text":"Bang"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
+            boundaries: vec!["bebop".to_string()],
+        }
+    }
+
+    fn space_post() -> ProjectionPost {
+        let mut post = spike_post();
+        post.uri = "at://did:web:other.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string();
+        post
+    }
+
+    fn actor_page(sequence: u64, upserts: Vec<ProjectionPost>, deletes: Vec<String>) -> ActorPage {
+        ActorPage {
+            authority_did: "did:web:stratos.example".to_string(),
+            actor_did: "did:plc:spikespiegel".to_string(),
+            sequence,
+            upserts,
+            deletes,
+            updated_at: "1998-04-03T00:00:02.000Z".to_string(),
+        }
     }
 
     fn temporary_path(name: &str) -> PathBuf {
@@ -318,6 +488,133 @@ mod tests {
         let error =
             super::StoreError::Open(rusqlite::Error::InvalidParameterName(secret.to_string()));
         assert!(!format!("{error:?}").contains(secret));
+    }
+
+    #[test]
+    fn applies_posts_and_actor_cursor_in_one_transaction() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .apply_actor_page(actor_page(8, vec![spike_post()], Vec::new()))
+            .unwrap();
+
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT sequence FROM actor_cursor", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            8
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM post WHERE uri = ?1",
+                    ["at://did:plc:spikespiegel/zone.stratos.feed.post/see-you"],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT sort_at FROM post_boundary WHERE boundary = 'bebop'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "1998-04-03T00:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn rejects_a_stale_page_without_deleting_its_existing_projection() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let post = spike_post();
+        store
+            .apply_actor_page(actor_page(8, vec![post], Vec::new()))
+            .unwrap();
+
+        assert!(matches!(
+            store.apply_actor_page(actor_page(
+                7,
+                Vec::new(),
+                vec!["at://did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string()],
+            )),
+            Err(StoreError::StaleCursor)
+        ));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn rejects_posts_that_do_not_belong_to_the_cursor_actor() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let mut page = actor_page(8, vec![spike_post()], Vec::new());
+        page.actor_did = "did:plc:fayevalentine".to_string();
+
+        assert!(matches!(
+            store.apply_actor_page(page),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn rejects_deletes_that_do_not_belong_to_the_cursor_actor() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let post = spike_post();
+        store
+            .apply_actor_page(actor_page(8, vec![post], Vec::new()))
+            .unwrap();
+        let mut page = actor_page(
+            9,
+            Vec::new(),
+            vec!["at://did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string()],
+        );
+        page.actor_did = "did:plc:fayevalentine".to_string();
+
+        assert!(matches!(
+            store.apply_actor_page(page),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn rejects_space_posts_from_a_different_authority() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+
+        assert!(matches!(
+            store.apply_actor_page(actor_page(8, vec![space_post()], Vec::new())),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
