@@ -8,6 +8,7 @@ use stratos_feedgen_ng::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = FeedgenConfig::from_env()?;
+    let _feeds = FeedgenConfig::load_feed_registry_from_env()?;
     let _projection = ProjectionReader::new(open_projection_store(&config.storage)?);
     let port = std::env::var("FEEDGEN_PORT")
         .ok()

@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::feeds::{FeedRegistry, FeedRegistryLoadError, load_feed_registry};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageProfile {
     Memory,
@@ -57,6 +59,22 @@ impl FeedgenConfig {
             env::var("FEEDGEN_STORAGE_KEY_PATH").ok(),
         )
     }
+
+    pub fn load_feed_registry_from_env() -> Result<FeedRegistry, FeedRegistryLoadError> {
+        load_feed_registry_from_values(
+            env::var("FEEDGEN_FEEDS_FILE").ok(),
+            env::var("FEEDGEN_FEEDS_JSON").ok(),
+            env::var("FEEDGEN_FEEDS_YAML").ok(),
+        )
+    }
+}
+
+fn load_feed_registry_from_values(
+    file: Option<String>,
+    inline_json: Option<String>,
+    inline_yaml: Option<String>,
+) -> Result<FeedRegistry, FeedRegistryLoadError> {
+    load_feed_registry(file.map(PathBuf::from), inline_json, inline_yaml)
 }
 
 impl FeedgenConfig {
@@ -134,7 +152,7 @@ fn required_value(value: Option<String>, name: &'static str) -> Result<String, C
 
 #[cfg(test)]
 mod tests {
-    use super::FeedgenConfig;
+    use super::{FeedgenConfig, load_feed_registry_from_values};
 
     #[test]
     fn configuration_errors_name_the_missing_value() {
@@ -205,5 +223,16 @@ mod tests {
             .unwrap_err(),
             super::ConfigError::InvalidStorageProfile
         );
+    }
+
+    #[test]
+    fn loads_the_catalogue_before_startup_from_the_configured_source() {
+        let registry = load_feed_registry_from_values(
+            None,
+            Some(r#"{"feeds":[{"id":"bebop","boundary":"bebop"}]}"#.to_string()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(registry.get("bebop").unwrap().boundary, "bebop");
     }
 }
