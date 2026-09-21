@@ -2,6 +2,7 @@
 //!
 //! Exposes discovery and readiness only; it does not serve feeds or persist data.
 
+pub mod actor_event;
 pub mod admission;
 pub mod auth;
 pub mod authority;
