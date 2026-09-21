@@ -31,7 +31,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Feeds remain unavailable until verified reconciliation completes.
     let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
-    let lifecycle = Arc::new(ControlLifecycle::new(projection, Arc::clone(&readiness)));
+    let lifecycle = Arc::new(ControlLifecycle::for_authority(
+        projection,
+        Arc::clone(&readiness),
+        config.stratos_service_did.clone(),
+    )?);
     let authority: Arc<dyn AuthorityClient> = Arc::new(HttpAuthorityClient::new(
         &config.stratos_service_url,
         config.stratos_service_did.clone(),

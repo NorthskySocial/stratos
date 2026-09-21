@@ -242,6 +242,12 @@ pub struct ActorEnrollment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActorSyncState {
+    pub boundaries: Vec<String>,
+    pub cursor: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EnrollmentReconciliation {
     pub removed_boundaries: Vec<String>,
     pub removed_posts: u64,
@@ -427,6 +433,45 @@ impl EncryptedStore {
             .map_err(StoreError::Open)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::Open)
+    }
+
+    pub fn actor_sync_state(
+        &self,
+        authority_did: &str,
+        did: &str,
+    ) -> Result<Option<ActorSyncState>, StoreError> {
+        crate::identifier::Did::parse(authority_did.to_owned())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        crate::identifier::Did::parse(did.to_owned())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        let enrollment: Option<Vec<String>> = self
+            .connection
+            .query_row(
+                "SELECT boundaries_json FROM actor_enrollment WHERE did = ?1 AND enrolled = 1",
+                [did],
+                |row| {
+                    serde_json::from_slice(&row.get::<_, Vec<u8>>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)
+                },
+            )
+            .optional()
+            .map_err(StoreError::Open)?;
+        let Some(boundaries) = enrollment else {
+            return Ok(None);
+        };
+        let cursor: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT sequence FROM actor_cursor WHERE authority_did = ?1 AND did = ?2",
+                params![authority_did, did],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::Open)?;
+        let cursor = cursor
+            .map(|cursor| u64::try_from(cursor).map_err(|_| StoreError::InvalidProjectionMutation))
+            .transpose()?;
+        Ok(Some(ActorSyncState { boundaries, cursor }))
     }
 
     pub fn reconcile_actor_enrollment(
@@ -1718,6 +1763,48 @@ mod tests {
                 )
                 .unwrap(),
             "1998-04-03T00:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn returns_actor_sync_state_only_while_the_actor_is_enrolled() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        assert!(
+            store
+                .actor_sync_state("did:web:stratos.example", "did:plc:spikespiegel")
+                .unwrap()
+                .is_none()
+        );
+        store
+            .reconcile_actor_enrollment(
+                "did:plc:spikespiegel",
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: "did:plc:spikespiegel".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        store
+            .apply_actor_page(actor_page(8, vec![spike_post()], Vec::new()))
+            .unwrap();
+        assert_eq!(
+            store
+                .actor_sync_state("did:web:stratos.example", "did:plc:spikespiegel")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            Some(8)
+        );
+        store
+            .reconcile_actor_enrollment("did:plc:spikespiegel", "1998-04-03T00:00:01.000Z", None)
+            .unwrap();
+        assert!(
+            store
+                .actor_sync_state("did:web:stratos.example", "did:plc:spikespiegel")
+                .unwrap()
+                .is_none()
         );
     }
 

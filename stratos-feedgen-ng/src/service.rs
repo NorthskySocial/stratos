@@ -2,8 +2,8 @@ use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
     store::{
-        ActorEnrollment, ActorPage, EncryptedStore, EnrollmentReconciliation, FeedPage, StoreError,
-        StoreInterrupt,
+        ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
+        FeedPage, StoreError, StoreInterrupt,
     },
 };
 use std::collections::BTreeSet;
@@ -70,6 +70,13 @@ impl ProjectionReader {
             self.admission.invalidate_boundary(&boundary);
         }
         Ok(())
+    }
+    pub fn actor_sync_state(
+        &self,
+        authority_did: &str,
+        did: &str,
+    ) -> Result<Option<ActorSyncState>, StoreError> {
+        self.store.actor_sync_state(authority_did, did)
     }
     pub fn list_actor_enrollments_page(
         &self,

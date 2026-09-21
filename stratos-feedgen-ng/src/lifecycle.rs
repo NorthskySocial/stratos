@@ -1,16 +1,41 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
+    actor_event::{ActorEventError, parse_actor_commit},
     authorization::{AuthorizationError, ViewerAuthorization, ViewerAuthorizations},
     feed_service::{
         FeedQuery, FeedService, FeedServiceError, ViewerAuthorization as FeedViewerAuthorization,
     },
     feeds::FeedRegistry,
+    identifier::Did,
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
     service_event::{EnrollmentAction, EnrollmentEvent},
-    store::{ActorEnrollment, ActorPage, EnrollmentReconciliation, StoreError, StoreInterrupt},
+    store::{
+        ActorEnrollment, ActorPage, ActorSyncState, EnrollmentReconciliation, StoreError,
+        StoreInterrupt,
+    },
 };
+
+#[derive(Debug)]
+pub enum ActorFrameError {
+    Event(ActorEventError),
+    Store(StoreError),
+}
+
+impl std::fmt::Display for ActorFrameError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("actor frame could not be applied")
+    }
+}
+
+impl std::error::Error for ActorFrameError {}
+
+pub enum ActorFrameResult {
+    Applied,
+    Ignored,
+    NotEnrolled,
+}
 
 pub struct ControlLifecycle {
     transition: Mutex<()>,
@@ -18,6 +43,7 @@ pub struct ControlLifecycle {
     readiness: Arc<Mutex<FeedReadinessGate>>,
     projection: Arc<Mutex<ProjectionReader>>,
     interrupt: StoreInterrupt,
+    authority_did: Option<String>,
 }
 
 impl ControlLifecycle {
@@ -26,13 +52,30 @@ impl ControlLifecycle {
             projection,
             readiness,
             ViewerAuthorizations::new(crate::authorization::DEFAULT_AUTHORIZATION_BYTES),
+            None,
         )
+    }
+
+    pub fn for_authority(
+        projection: ProjectionReader,
+        readiness: Arc<Mutex<FeedReadinessGate>>,
+        authority_did: impl Into<String>,
+    ) -> Result<Self, crate::identifier::IdentifierError> {
+        let authority_did = authority_did.into();
+        Did::parse(authority_did.clone())?;
+        Ok(Self::with_authorizations(
+            projection,
+            readiness,
+            ViewerAuthorizations::new(crate::authorization::DEFAULT_AUTHORIZATION_BYTES),
+            Some(authority_did),
+        ))
     }
 
     fn with_authorizations(
         projection: ProjectionReader,
         readiness: Arc<Mutex<FeedReadinessGate>>,
         authorizations: ViewerAuthorizations,
+        authority_did: Option<String>,
     ) -> Self {
         let interrupt = projection.interrupt_handle();
         Self {
@@ -41,6 +84,7 @@ impl ControlLifecycle {
             readiness,
             projection: Arc::new(Mutex::new(projection)),
             interrupt,
+            authority_did,
         }
     }
 
@@ -131,6 +175,51 @@ impl ControlLifecycle {
             .apply_actor_page(page)
     }
 
+    pub fn actor_sync_state(
+        &self,
+        authority_did: &str,
+        did: &str,
+    ) -> Result<Option<ActorSyncState>, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .actor_sync_state(authority_did, did)
+    }
+
+    pub fn apply_actor_frame(
+        &self,
+        frame: &[u8],
+        authority_did: &str,
+        actor_did: &str,
+        retained_at: &str,
+    ) -> Result<ActorFrameResult, ActorFrameError> {
+        if self.authority_did.as_deref() != Some(authority_did) {
+            return Err(ActorFrameError::Event(
+                ActorEventError::InvalidConfiguration,
+            ));
+        }
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let mut projection = self.projection.lock().expect("projection lock poisoned");
+        let Some(state) = projection
+            .actor_sync_state(authority_did, actor_did)
+            .map_err(ActorFrameError::Store)?
+        else {
+            return Ok(ActorFrameResult::NotEnrolled);
+        };
+        let boundaries = state.boundaries.into_iter().collect();
+        let Some(page) =
+            parse_actor_commit(frame, authority_did, actor_did, &boundaries, retained_at)
+                .map_err(ActorFrameError::Event)?
+        else {
+            return Ok(ActorFrameResult::Ignored);
+        };
+        projection
+            .apply_actor_page(page)
+            .map_err(ActorFrameError::Store)?;
+        Ok(ActorFrameResult::Applied)
+    }
+
     pub fn list_actor_enrollments_page(
         &self,
         after_did: Option<&str>,
@@ -205,7 +294,7 @@ mod tests {
 
     use crate::{
         authorization::{AuthorizationError, ViewerAuthorization, ViewerAuthorizations},
-        lifecycle::ControlLifecycle,
+        lifecycle::{ActorFrameError, ActorFrameResult, ControlLifecycle},
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         service::{ProjectionReader, ReadRequest},
         service_event::{EnrollmentAction, EnrollmentEvent},
@@ -359,6 +448,7 @@ mod tests {
             ),
             readiness,
             ViewerAuthorizations::new(310),
+            None,
         );
         lifecycle.session_established();
         let generation = lifecycle.begin_reconciliation();
@@ -498,5 +588,112 @@ mod tests {
             lifecycle.list_actor_enrollments_page(None, 1).unwrap()[0].boundaries,
             ["bebop"]
         );
+    }
+
+    #[test]
+    fn applies_only_current_authority_actor_frames_without_advancing_invalid_cursors() {
+        let lifecycle = ControlLifecycle::for_authority(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            "did:web:stratos.example.test",
+        )
+        .unwrap();
+        lifecycle
+            .reconcile_actor_enrollment(
+                "did:plc:faye",
+                "1998-04-03T00:00:00.000Z",
+                Some(crate::store::ActorEnrollment {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["did:web:stratos.example.test/bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        let header = serde_cbor::to_vec(&serde_json::json!({"t":"#commit"})).unwrap();
+        let valid_body = serde_cbor::to_vec(&serde_json::json!({
+            "seq":7,
+            "did":"did:plc:faye",
+            "time":"1998-04-03T00:00:00.000Z",
+            "rev":"3jzfcijpj2z2a",
+            "ops":[{"action":"create","path":"zone.stratos.feed.post/see-you","cid":"bafyreia","record":{"$type":"zone.stratos.feed.post","boundary":{"values":[{"value":"bebop"}]}}}]
+        })).unwrap();
+        let mut valid = header.clone();
+        valid.extend(valid_body);
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &valid,
+                "did:web:stratos.example.test",
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Ok(ActorFrameResult::Applied)
+        ));
+        assert_eq!(
+            lifecycle
+                .actor_sync_state("did:web:stratos.example.test", "did:plc:faye")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            Some(7)
+        );
+        let info = serde_cbor::to_vec(&serde_json::json!({"t":"#info"})).unwrap();
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &info,
+                "did:web:stratos.example.test",
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Ok(ActorFrameResult::Ignored)
+        ));
+        let invalid_body = serde_cbor::to_vec(&serde_json::json!({
+            "seq":8,
+            "did":"did:plc:faye",
+            "time":"1998-04-03T00:00:00.000Z",
+            "rev":"3jzfcijpj2z2a",
+            "ops":[{"action":"update","path":"zone.stratos.feed.post/see-you","record":{"$type":"zone.stratos.feed.post"}}]
+        })).unwrap();
+        let mut invalid = header;
+        invalid.extend(invalid_body);
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &invalid,
+                "did:web:stratos.example.test",
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Err(ActorFrameError::Event(_))
+        ));
+        assert_eq!(
+            lifecycle
+                .actor_sync_state("did:web:stratos.example.test", "did:plc:faye")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            Some(7)
+        );
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                &valid,
+                "did:web:other.example.test",
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Err(ActorFrameError::Event(_))
+        ));
+        lifecycle
+            .reconcile_actor_enrollment("did:plc:faye", "1998-04-03T00:00:01.000Z", None)
+            .unwrap();
+        assert!(matches!(
+            lifecycle.apply_actor_frame(
+                b"not cbor",
+                "did:web:stratos.example.test",
+                "did:plc:faye",
+                "1998-05-03T00:00:00.000Z",
+            ),
+            Ok(ActorFrameResult::NotEnrolled)
+        ));
     }
 }
