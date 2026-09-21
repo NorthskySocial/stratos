@@ -4,6 +4,7 @@
 
 pub mod admission;
 pub mod auth;
+pub mod authorization;
 pub mod config;
 pub mod conformance;
 pub mod cursor;
