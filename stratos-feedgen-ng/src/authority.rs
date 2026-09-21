@@ -222,7 +222,7 @@ fn parse_resolution(
     })
 }
 
-fn normalize_boundary(service_did: &str, boundary: &str) -> Option<String> {
+pub(crate) fn normalize_boundary(service_did: &str, boundary: &str) -> Option<String> {
     if boundary.starts_with("did:") && boundary.contains('/') {
         let (boundary_service_did, name) = boundary.split_once('/')?;
         if boundary_service_did != service_did || name.is_empty() {

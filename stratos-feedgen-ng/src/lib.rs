@@ -20,4 +20,5 @@ pub mod runtime;
 pub mod server;
 pub mod service;
 pub mod service_auth;
+pub mod service_event;
 pub mod store;

@@ -16,6 +16,7 @@ p256 = { version = "0.13", features = ["ecdsa"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }

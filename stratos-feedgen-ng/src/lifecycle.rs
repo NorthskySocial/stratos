@@ -8,6 +8,7 @@ use crate::{
     feeds::FeedRegistry,
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
+    service_event::{EnrollmentAction, EnrollmentEvent},
     store::{ActorEnrollment, ActorPage, EnrollmentReconciliation, StoreError, StoreInterrupt},
 };
 
@@ -155,6 +156,23 @@ impl ControlLifecycle {
             .reconcile_actor_enrollment(did, observed_at, enrollment)
     }
 
+    pub fn apply_enrollment_event(
+        &self,
+        event: EnrollmentEvent,
+    ) -> Result<EnrollmentReconciliation, StoreError> {
+        let enrollment = match event.action {
+            EnrollmentAction::Enroll | EnrollmentAction::BoundariesChanged => {
+                Some(ActorEnrollment {
+                    did: event.did.clone(),
+                    boundaries: event.boundaries,
+                    observed_at: event.observed_at.clone(),
+                })
+            }
+            EnrollmentAction::Unenroll => None,
+        };
+        self.reconcile_actor_enrollment(&event.did, &event.observed_at, enrollment)
+    }
+
     pub fn apply_viewer_authorization(
         &self,
         authorization: ViewerAuthorization,
@@ -190,6 +208,7 @@ mod tests {
         lifecycle::ControlLifecycle,
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         service::{ProjectionReader, ReadRequest},
+        service_event::{EnrollmentAction, EnrollmentEvent},
         store::{EncryptedStore, StorageKey},
     };
 
@@ -430,5 +449,54 @@ mod tests {
             lifecycle.serve_viewer_feed("did:plc:faye", &feeds, expired),
             Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
         ));
+    }
+
+    #[test]
+    fn enrollment_events_replace_durable_boundaries_and_invalidate_reads() {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let lifecycle = ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::clone(&readiness),
+        );
+        lifecycle
+            .apply_enrollment_event(EnrollmentEvent {
+                did: "did:plc:spike".to_owned(),
+                action: EnrollmentAction::Enroll,
+                boundaries: vec!["crew".to_owned()],
+                observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            })
+            .unwrap();
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+        let crew_request = ReadRequest {
+            boundary: "crew",
+            ..request()
+        };
+        let (token, page) =
+            lifecycle.read(|projection| projection.prepare(crew_request).unwrap().unwrap());
+
+        lifecycle
+            .apply_enrollment_event(EnrollmentEvent {
+                did: "did:plc:spike".to_owned(),
+                action: EnrollmentAction::BoundariesChanged,
+                boundaries: vec!["bebop".to_owned()],
+                observed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+            })
+            .unwrap();
+
+        assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_none()));
+        assert_eq!(
+            lifecycle.list_actor_enrollments_page(None, 1).unwrap()[0].boundaries,
+            ["bebop"]
+        );
     }
 }

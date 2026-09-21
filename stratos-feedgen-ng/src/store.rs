@@ -1183,7 +1183,7 @@ fn projection_bytes_from_fields(
         + blob_refs_json.len()) as i64
 }
 
-fn is_utc_timestamp(value: &str) -> bool {
+pub(crate) fn is_utc_timestamp(value: &str) -> bool {
     let bytes = value.as_bytes();
     let shaped = bytes.len() == 24
         && bytes[4] == b'-'
