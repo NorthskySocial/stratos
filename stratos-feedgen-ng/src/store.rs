@@ -263,6 +263,7 @@ pub struct FeedPost {
     pub sort_at: String,
     pub indexed_at: String,
     pub record_json: Vec<u8>,
+    pub boundaries: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -523,7 +524,8 @@ impl EncryptedStore {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json
+                "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json,
+              COALESCE((SELECT json_group_array(boundary) FROM post_boundary WHERE uri = p.uri), '[]')
              FROM post_boundary b JOIN post p ON p.uri = b.uri
              WHERE b.boundary = ?1 AND p.retained_at > ?2 ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?3",
             )
@@ -545,7 +547,8 @@ impl EncryptedStore {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json
+                "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json,
+              COALESCE((SELECT json_group_array(boundary) FROM post_boundary WHERE uri = p.uri), '[]')
              FROM post_boundary b JOIN post p ON p.uri = b.uri
              WHERE b.boundary = ?1 AND p.retained_at > ?2 AND (b.sort_at < ?3 OR (b.sort_at = ?3 AND b.uri > ?4))
              ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?5",
@@ -853,6 +856,8 @@ fn feed_post_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedPost> {
         sort_at: row.get(3)?,
         indexed_at: row.get(4)?,
         record_json: row.get(5)?,
+        boundaries: serde_json::from_str(&row.get::<_, String>(6)?)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
     })
 }
 

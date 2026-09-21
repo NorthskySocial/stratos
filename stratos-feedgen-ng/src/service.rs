@@ -66,8 +66,10 @@ impl ProjectionReader {
             )?,
         )))
     }
-    pub fn release(&self, token: ReadToken, page: FeedPage, now: u64) -> Option<FeedPage> {
-        self.admission.assert_current(&token, now).then_some(page)
+    pub fn release<T>(&self, token: ReadToken, response: T, now: u64) -> Option<T> {
+        self.admission
+            .assert_current(&token, now)
+            .then_some(response)
     }
 }
 

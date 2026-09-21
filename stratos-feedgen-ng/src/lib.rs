@@ -6,6 +6,7 @@ pub mod admission;
 pub mod config;
 pub mod conformance;
 pub mod cursor;
+pub mod feed_service;
 pub mod feeds;
 pub mod identifier;
 pub mod readiness;
