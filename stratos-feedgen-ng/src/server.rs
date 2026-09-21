@@ -469,6 +469,8 @@ mod tests {
             public_url: "https://feedgen.example.test".to_string(),
             public_key_multibase: "zTestKey".to_string(),
             signing_key: ServiceSigningKey::from_hex(&"11".repeat(32)).unwrap(),
+            stratos_service_url: "https://stratos.example.test".to_string(),
+            stratos_service_did: "did:web:stratos.example.test".to_string(),
             plc_url: "https://plc.example.test".to_string(),
             storage: StorageProfile::Memory,
         }

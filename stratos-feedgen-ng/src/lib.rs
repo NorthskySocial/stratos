@@ -4,6 +4,7 @@
 
 pub mod admission;
 pub mod auth;
+pub mod authority;
 pub mod authorization;
 pub mod config;
 pub mod conformance;

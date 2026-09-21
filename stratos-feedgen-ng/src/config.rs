@@ -21,6 +21,8 @@ pub struct FeedgenConfig {
     pub public_url: String,
     pub public_key_multibase: String,
     pub signing_key: ServiceSigningKey,
+    pub stratos_service_url: String,
+    pub stratos_service_did: String,
     pub plc_url: String,
     pub storage: StorageProfile,
 }
@@ -29,6 +31,7 @@ pub struct FeedgenConfig {
 pub enum ConfigError {
     Missing(&'static str),
     InvalidSigningKey,
+    InvalidStratosServiceUrl,
     UnsupportedStorageBackend,
     InvalidStorageProfile,
 }
@@ -43,6 +46,7 @@ impl std::fmt::Display for ConfigError {
                 formatter.write_str("only sqlite storage is supported by Feedgen NG")
             }
             Self::InvalidSigningKey => formatter.write_str("invalid Feedgen NG signing key"),
+            Self::InvalidStratosServiceUrl => formatter.write_str("invalid Stratos service URL"),
             Self::InvalidStorageProfile => {
                 formatter.write_str("invalid Feedgen NG storage profile")
             }
@@ -59,6 +63,8 @@ impl FeedgenConfig {
             env::var("FEEDGEN_PUBLIC_URL").ok(),
             env::var("FEEDGEN_PUBLIC_KEY_MULTIBASE").ok(),
             env::var("FEEDGEN_SIGNING_KEY").ok(),
+            env::var("STRATOS_SERVICE_URL").ok(),
+            env::var("STRATOS_SERVICE_DID").ok(),
             StorageValues {
                 backend: env::var("FEEDGEN_STORAGE_BACKEND").ok(),
                 profile: env::var("FEEDGEN_STORAGE_PROFILE").ok(),
@@ -96,6 +102,8 @@ impl FeedgenConfig {
         public_url: Option<String>,
         public_key_multibase: Option<String>,
         signing_key: Option<String>,
+        stratos_service_url: Option<String>,
+        stratos_service_did: Option<String>,
         storage: StorageValues,
     ) -> Result<Self, ConfigError> {
         Ok(Self {
@@ -110,6 +118,11 @@ impl FeedgenConfig {
                 "FEEDGEN_SIGNING_KEY",
             )?)
             .map_err(|_| ConfigError::InvalidSigningKey)?,
+            stratos_service_url: normalize_service_url(required_value(
+                stratos_service_url,
+                "STRATOS_SERVICE_URL",
+            )?)?,
+            stratos_service_did: required_value(stratos_service_did, "STRATOS_SERVICE_DID")?,
             plc_url: "https://plc.directory".to_owned(),
             storage: parse_storage(
                 storage.backend,
@@ -119,6 +132,20 @@ impl FeedgenConfig {
             )?,
         })
     }
+}
+
+fn normalize_service_url(value: String) -> Result<String, ConfigError> {
+    let parsed = url::Url::parse(&value).map_err(|_| ConfigError::InvalidStratosServiceUrl)?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(ConfigError::InvalidStratosServiceUrl);
+    }
+    Ok(value.trim_end_matches('/').to_owned())
 }
 
 struct StorageValues {
@@ -205,6 +232,8 @@ mod tests {
                 Some("https://feedgen.example.test".to_string()),
                 Some("zTestKey".to_string()),
                 Some("11".repeat(32)),
+                Some("https://stratos.example.test".to_string()),
+                Some("did:web:stratos.example.test".to_string()),
                 storage(None, None, None, None),
             )
             .unwrap_err()
@@ -221,39 +250,47 @@ mod tests {
                 Some("https://feedgen.example.test".to_string()),
                 Some("zTestKey".to_string()),
                 Some("11".repeat(32)),
+                Some("https://stratos.example.test".to_string()),
+                Some("did:web:stratos.example.test".to_string()),
             )
         };
-        let (did, url, key, signing_key) = base();
+        let (did, url, key, signing_key, stratos_url, stratos_did) = base();
         assert_eq!(
             FeedgenConfig::from_values(
                 did,
                 url,
                 key,
                 signing_key,
+                stratos_url,
+                stratos_did,
                 storage(Some("postgres"), None, None, None),
             )
             .unwrap_err(),
             super::ConfigError::UnsupportedStorageBackend
         );
-        let (did, url, key, signing_key) = base();
+        let (did, url, key, signing_key, stratos_url, stratos_did) = base();
         assert_eq!(
             FeedgenConfig::from_values(
                 did,
                 url,
                 key,
                 signing_key,
+                stratos_url,
+                stratos_did,
                 storage(None, Some("encrypted-volume"), Some(":memory:"), None),
             )
             .unwrap_err(),
             super::ConfigError::InvalidStorageProfile
         );
-        let (did, url, key, signing_key) = base();
+        let (did, url, key, signing_key, stratos_url, stratos_did) = base();
         assert_eq!(
             FeedgenConfig::from_values(
                 did,
                 url,
                 key,
                 signing_key,
+                stratos_url,
+                stratos_did,
                 storage(
                     None,
                     Some("encrypted-volume"),
