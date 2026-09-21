@@ -214,6 +214,22 @@ pub struct ActorPage {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeedPost {
+    pub uri: String,
+    pub author_did: String,
+    pub cid: String,
+    pub sort_at: String,
+    pub indexed_at: String,
+    pub record_json: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeedPage {
+    pub posts: Vec<FeedPost>,
+    pub cursor: Option<crate::cursor::FeedCursor>,
+}
+
 impl EncryptedStore {
     pub fn open(path: &Path, key: StorageKey) -> Result<Self, StoreError> {
         let connection = Connection::open_with_flags(
@@ -303,6 +319,69 @@ impl EncryptedStore {
         transaction.commit().map_err(StoreError::Open)
     }
 
+    pub fn list_posts_by_boundary(
+        &self,
+        boundary: &str,
+        cursor: Option<&crate::cursor::FeedCursor>,
+        limit: u16,
+    ) -> Result<FeedPage, StoreError> {
+        let limit = i64::from(limit.clamp(1, crate::cursor::MAX_FEED_LIMIT));
+        let posts = match cursor {
+            Some(cursor) => self.list_posts_after_cursor(boundary, cursor, limit)?,
+            None => self.list_initial_posts(boundary, limit)?,
+        };
+        let cursor = if posts.len() == limit as usize {
+            posts.last().map(|post| crate::cursor::FeedCursor {
+                sort_at: post.sort_at.clone(),
+                uri: post.uri.clone(),
+            })
+        } else {
+            None
+        };
+        Ok(FeedPage { posts, cursor })
+    }
+
+    fn list_initial_posts(&self, boundary: &str, limit: i64) -> Result<Vec<FeedPost>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json
+             FROM post_boundary b JOIN post p ON p.uri = b.uri
+             WHERE b.boundary = ?1 ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?2",
+            )
+            .map_err(StoreError::Open)?;
+        statement
+            .query_map(params![boundary, limit], feed_post_from_row)
+            .map_err(StoreError::Open)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::Open)
+    }
+
+    fn list_posts_after_cursor(
+        &self,
+        boundary: &str,
+        cursor: &crate::cursor::FeedCursor,
+        limit: i64,
+    ) -> Result<Vec<FeedPost>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT p.uri, p.author_did, p.cid, p.sort_at, p.indexed_at, p.record_json
+             FROM post_boundary b JOIN post p ON p.uri = b.uri
+             WHERE b.boundary = ?1 AND (b.sort_at < ?2 OR (b.sort_at = ?2 AND b.uri > ?3))
+             ORDER BY b.sort_at DESC, b.uri ASC LIMIT ?4",
+            )
+            .map_err(StoreError::Open)?;
+        statement
+            .query_map(
+                params![boundary, cursor.sort_at, cursor.uri, limit],
+                feed_post_from_row,
+            )
+            .map_err(StoreError::Open)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::Open)
+    }
+
     fn configure(mut connection: Connection, key: StorageKey) -> Result<Self, StoreError> {
         connection
             .execute_batch(&format!(
@@ -321,6 +400,17 @@ impl EncryptedStore {
         migrations::apply(&mut connection).map_err(StoreError::Open)?;
         Ok(Self { connection })
     }
+}
+
+fn feed_post_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedPost> {
+    Ok(FeedPost {
+        uri: row.get(0)?,
+        author_did: row.get(1)?,
+        cid: row.get(2)?,
+        sort_at: row.get(3)?,
+        indexed_at: row.get(4)?,
+        record_json: row.get(5)?,
+    })
 }
 
 fn projection_bytes(post: &ProjectionPost) -> i64 {
@@ -615,6 +705,36 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn lists_boundary_posts_with_the_typescript_cursor_order() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let first = spike_post();
+        let mut second = spike_post();
+        second.uri = "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra".to_string();
+        store
+            .apply_actor_page(actor_page(8, vec![second, first], Vec::new()))
+            .unwrap();
+
+        let first_page = store.list_posts_by_boundary("bebop", None, 1).unwrap();
+        assert_eq!(first_page.posts.len(), 1);
+        assert_eq!(
+            first_page.posts[0].uri,
+            "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you"
+        );
+        let second_page = store
+            .list_posts_by_boundary("bebop", first_page.cursor.as_ref(), 1)
+            .unwrap();
+        assert_eq!(
+            second_page.posts[0].uri,
+            "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra"
+        );
+        assert!(second_page.cursor.is_some());
+        let empty_page = store
+            .list_posts_by_boundary("bebop", second_page.cursor.as_ref(), 1)
+            .unwrap();
+        assert!(empty_page.posts.is_empty());
     }
 
     #[test]
