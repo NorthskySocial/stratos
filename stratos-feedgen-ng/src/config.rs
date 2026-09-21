@@ -1,4 +1,7 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageProfile {
@@ -99,13 +102,24 @@ fn parse_storage(
         }
         "encrypted-volume" => {
             let database_path = required_value(sqlite_path, "FEEDGEN_SQLITE_PATH")?;
-            if database_path == ":memory:" {
+            let database_path = PathBuf::from(database_path);
+            if database_path == Path::new(":memory:") || !database_path.is_absolute() {
                 return Err(ConfigError::InvalidStorageProfile);
             }
             let key_path = required_value(key_path, "FEEDGEN_STORAGE_KEY_PATH")?;
+            let key_path = PathBuf::from(key_path);
+            let Some(database_directory) = database_path.parent() else {
+                return Err(ConfigError::InvalidStorageProfile);
+            };
+            if !key_path.is_absolute()
+                || key_path == database_path
+                || key_path.starts_with(database_directory)
+            {
+                return Err(ConfigError::InvalidStorageProfile);
+            }
             Ok(StorageProfile::EncryptedVolume {
-                database_path: PathBuf::from(database_path),
-                key_path: PathBuf::from(key_path),
+                database_path,
+                key_path,
             })
         }
         _ => Err(ConfigError::InvalidStorageProfile),
@@ -173,6 +187,20 @@ mod tests {
                 Some("encrypted-volume".to_string()),
                 Some(":memory:".to_string()),
                 None,
+            )
+            .unwrap_err(),
+            super::ConfigError::InvalidStorageProfile
+        );
+        let (did, url, key) = base();
+        assert_eq!(
+            FeedgenConfig::from_values(
+                did,
+                url,
+                key,
+                None,
+                Some("encrypted-volume".to_string()),
+                Some("/var/lib/feedgen/feedgen.sqlite".to_string()),
+                Some("/var/lib/feedgen/key".to_string()),
             )
             .unwrap_err(),
             super::ConfigError::InvalidStorageProfile
