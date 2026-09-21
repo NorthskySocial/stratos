@@ -10,6 +10,7 @@ repository.workspace = true
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
