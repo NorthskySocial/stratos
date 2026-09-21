@@ -450,7 +450,7 @@ mod tests {
 
     use crate::{
         auth::{FeedRequestVerifier, IdentityKeyResolver, IdentityResolutionError},
-        config::{FeedgenConfig, StorageProfile},
+        config::{FeedgenConfig, ProjectionRetention, StorageProfile},
         feeds::{FeedDescription, FeedRegistry},
         lifecycle::ControlLifecycle,
         readiness::FeedReadinessGate,
@@ -471,6 +471,11 @@ mod tests {
             stratos_service_did: "did:web:stratos.example.test".to_string(),
             plc_url: "https://plc.example.test".to_string(),
             storage: StorageProfile::Memory,
+            retention: ProjectionRetention {
+                max_age: std::time::Duration::from_secs(60 * 60),
+                max_bytes: 16 * 1024 * 1024,
+            },
+            actor_max_connections: 8,
         }
     }
 

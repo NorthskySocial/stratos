@@ -4,6 +4,7 @@ use std::{
 };
 
 use stratos_feedgen_ng::{
+    actor_stream::{ActorPool, ActorStreamConfig},
     auth::FeedRequestVerifier,
     authority::{AuthorityClient, HttpAuthorityClient},
     config::FeedgenConfig,
@@ -42,6 +43,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.service_did.clone(),
         config.signing_key.clone(),
     )?);
+    let actors = ActorPool::start(
+        ActorStreamConfig {
+            service_url: config.stratos_service_url.clone(),
+            service_did: config.stratos_service_did.clone(),
+            feedgen_did: config.service_did.clone(),
+            signing_key: config.signing_key.clone(),
+            retention: config.retention.max_age,
+            max_connections: config.actor_max_connections,
+        },
+        Arc::clone(&lifecycle),
+    )?;
     let stream = ServiceStream::start(
         ServiceStreamConfig {
             service_url: config.stratos_service_url.clone(),
@@ -52,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Arc::clone(&lifecycle),
         authority,
+        actors,
     )?;
     let resolver = Arc::new(HttpIdentityKeyResolver::new(Some(&config.plc_url))?);
     let verifier = FeedRequestVerifier::new(

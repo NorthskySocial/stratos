@@ -101,6 +101,11 @@ mod tests {
                 stratos_service_did: "did:web:stratos.example.test".to_owned(),
                 plc_url: "https://plc.example.test".to_owned(),
                 storage: StorageProfile::Memory,
+                retention: crate::config::ProjectionRetention {
+                    max_age: std::time::Duration::from_secs(60 * 60),
+                    max_bytes: 16 * 1024 * 1024,
+                },
+                actor_max_connections: 8,
             },
             FeedRegistry::new(Vec::new()).unwrap(),
             Arc::new(Mutex::new(FeedReadinessGate::default())),

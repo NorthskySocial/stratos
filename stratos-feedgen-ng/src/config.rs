@@ -1,6 +1,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crate::feeds::{FeedRegistry, FeedRegistryLoadError, load_feed_registry};
@@ -15,6 +16,13 @@ pub enum StorageProfile {
     },
 }
 
+/// Bounds how long and how much encrypted projection data may remain local.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectionRetention {
+    pub max_age: Duration,
+    pub max_bytes: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedgenConfig {
     pub service_did: String,
@@ -25,6 +33,8 @@ pub struct FeedgenConfig {
     pub stratos_service_did: String,
     pub plc_url: String,
     pub storage: StorageProfile,
+    pub retention: ProjectionRetention,
+    pub actor_max_connections: u16,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -34,6 +44,8 @@ pub enum ConfigError {
     InvalidStratosServiceUrl,
     UnsupportedStorageBackend,
     InvalidStorageProfile,
+    InvalidProjectionRetention,
+    InvalidActorConnectionLimit,
 }
 
 impl std::fmt::Display for ConfigError {
@@ -49,6 +61,12 @@ impl std::fmt::Display for ConfigError {
             Self::InvalidStratosServiceUrl => formatter.write_str("invalid Stratos service URL"),
             Self::InvalidStorageProfile => {
                 formatter.write_str("invalid Feedgen NG storage profile")
+            }
+            Self::InvalidProjectionRetention => {
+                formatter.write_str("invalid Feedgen NG projection retention configuration")
+            }
+            Self::InvalidActorConnectionLimit => {
+                formatter.write_str("invalid Feedgen NG actor connection limit")
             }
         }
     }
@@ -70,12 +88,16 @@ impl FeedgenConfig {
                 profile: env::var("FEEDGEN_STORAGE_PROFILE").ok(),
                 sqlite_path: env::var("FEEDGEN_SQLITE_PATH").ok(),
                 key_path: env::var("FEEDGEN_STORAGE_KEY_PATH").ok(),
+                projection_max_age_ms: env::var("FEEDGEN_PROJECTION_MAX_AGE_MS").ok(),
+                projection_max_bytes: env::var("FEEDGEN_PROJECTION_MAX_BYTES").ok(),
             },
         )?;
         config.plc_url = env::var("FEEDGEN_PLC_URL")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "https://plc.directory".to_owned());
+        config.actor_max_connections =
+            parse_actor_connection_limit(env::var("FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS").ok())?;
         Ok(config)
     }
 
@@ -106,6 +128,16 @@ impl FeedgenConfig {
         stratos_service_did: Option<String>,
         storage: StorageValues,
     ) -> Result<Self, ConfigError> {
+        let StorageValues {
+            backend,
+            profile,
+            sqlite_path,
+            key_path,
+            projection_max_age_ms,
+            projection_max_bytes,
+        } = storage;
+        let storage = parse_storage(backend, profile, sqlite_path, key_path)?;
+        let retention = parse_retention(&storage, projection_max_age_ms, projection_max_bytes)?;
         Ok(Self {
             service_did: required_value(service_did, "FEEDGEN_SERVICE_DID")?,
             public_url: required_value(public_url, "FEEDGEN_PUBLIC_URL")?,
@@ -124,12 +156,9 @@ impl FeedgenConfig {
             )?)?,
             stratos_service_did: required_value(stratos_service_did, "STRATOS_SERVICE_DID")?,
             plc_url: "https://plc.directory".to_owned(),
-            storage: parse_storage(
-                storage.backend,
-                storage.profile,
-                storage.sqlite_path,
-                storage.key_path,
-            )?,
+            storage,
+            retention,
+            actor_max_connections: 8,
         })
     }
 }
@@ -153,6 +182,50 @@ struct StorageValues {
     profile: Option<String>,
     sqlite_path: Option<String>,
     key_path: Option<String>,
+    projection_max_age_ms: Option<String>,
+    projection_max_bytes: Option<String>,
+}
+
+const MEMORY_RETENTION_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+const MEMORY_RETENTION_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+fn parse_retention(
+    storage: &StorageProfile,
+    max_age_ms: Option<String>,
+    max_bytes: Option<String>,
+) -> Result<ProjectionRetention, ConfigError> {
+    if matches!(storage, StorageProfile::Memory) {
+        return Ok(ProjectionRetention {
+            max_age: MEMORY_RETENTION_MAX_AGE,
+            max_bytes: MEMORY_RETENTION_MAX_BYTES,
+        });
+    }
+    let max_age_ms = required_positive_u64(max_age_ms, "FEEDGEN_PROJECTION_MAX_AGE_MS")?;
+    let max_bytes = required_positive_u64(max_bytes, "FEEDGEN_PROJECTION_MAX_BYTES")?;
+    Ok(ProjectionRetention {
+        max_age: Duration::from_millis(max_age_ms),
+        max_bytes,
+    })
+}
+
+fn required_positive_u64(value: Option<String>, name: &'static str) -> Result<u64, ConfigError> {
+    let value = required_value(value, name)?;
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value != 0)
+        .ok_or(ConfigError::InvalidProjectionRetention)
+}
+
+fn parse_actor_connection_limit(value: Option<String>) -> Result<u16, ConfigError> {
+    let Some(value) = value else {
+        return Ok(8);
+    };
+    value
+        .parse::<u16>()
+        .ok()
+        .filter(|value| (1..=64).contains(value))
+        .ok_or(ConfigError::InvalidActorConnectionLimit)
 }
 
 fn parse_storage(
@@ -221,6 +294,8 @@ mod tests {
             profile: profile.map(str::to_owned),
             sqlite_path: sqlite_path.map(str::to_owned),
             key_path: key_path.map(str::to_owned),
+            projection_max_age_ms: None,
+            projection_max_bytes: None,
         }
     }
 
@@ -312,5 +387,78 @@ mod tests {
         )
         .unwrap();
         assert_eq!(registry.get("bebop").unwrap().boundary, "bebop");
+    }
+
+    #[test]
+    fn durable_storage_requires_explicit_bounded_projection_retention() {
+        let base = || {
+            (
+                Some("did:web:feedgen.example.test".to_owned()),
+                Some("https://feedgen.example.test".to_owned()),
+                Some("zTestKey".to_owned()),
+                Some("11".repeat(32)),
+                Some("https://stratos.example.test".to_owned()),
+                Some("did:web:stratos.example.test".to_owned()),
+            )
+        };
+        let (did, url, key, signing_key, stratos_url, stratos_did) = base();
+        let mut missing_retention = storage(
+            None,
+            Some("encrypted-volume"),
+            Some("/var/lib/feedgen/projection.sqlite"),
+            Some("/var/lib/secrets/feedgen.key"),
+        );
+        missing_retention.projection_max_age_ms = None;
+        missing_retention.projection_max_bytes = Some("1024".to_owned());
+        assert_eq!(
+            FeedgenConfig::from_values(
+                did,
+                url,
+                key,
+                signing_key,
+                stratos_url,
+                stratos_did,
+                missing_retention,
+            )
+            .unwrap_err()
+            .to_string(),
+            "missing required environment variable FEEDGEN_PROJECTION_MAX_AGE_MS"
+        );
+
+        let (did, url, key, signing_key, stratos_url, stratos_did) = base();
+        let mut retention = storage(
+            None,
+            Some("encrypted-volume"),
+            Some("/var/lib/feedgen/projection.sqlite"),
+            Some("/var/lib/secrets/feedgen.key"),
+        );
+        retention.projection_max_age_ms = Some("60000".to_owned());
+        retention.projection_max_bytes = Some("1024".to_owned());
+        let config = FeedgenConfig::from_values(
+            did,
+            url,
+            key,
+            signing_key,
+            stratos_url,
+            stratos_did,
+            retention,
+        )
+        .unwrap();
+        assert_eq!(config.retention.max_age.as_secs(), 60);
+        assert_eq!(config.retention.max_bytes, 1024);
+        assert_eq!(config.actor_max_connections, 8);
+    }
+
+    #[test]
+    fn bounds_the_actor_connection_limit_for_small_hosts() {
+        assert_eq!(super::parse_actor_connection_limit(None).unwrap(), 8);
+        assert_eq!(
+            super::parse_actor_connection_limit(Some("64".to_owned())).unwrap(),
+            64
+        );
+        assert_eq!(
+            super::parse_actor_connection_limit(Some("65".to_owned())),
+            Err(super::ConfigError::InvalidActorConnectionLimit)
+        );
     }
 }

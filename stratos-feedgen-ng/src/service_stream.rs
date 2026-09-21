@@ -14,6 +14,7 @@ use tokio_tungstenite::{
 use url::Url;
 
 use crate::{
+    actor_stream::ActorPool,
     authority::AuthorityClient,
     lifecycle::ControlLifecycle,
     reconciliation::{ReconciliationOptions, ReconciliationSummary, reconcile_current_session},
@@ -57,6 +58,7 @@ pub struct ServiceStream {
     shutdown: watch::Sender<bool>,
     task: Mutex<Option<JoinHandle<()>>>,
     lifecycle: Arc<ControlLifecycle>,
+    actors: Arc<ActorPool>,
 }
 
 impl ServiceStream {
@@ -64,6 +66,7 @@ impl ServiceStream {
         config: ServiceStreamConfig,
         lifecycle: Arc<ControlLifecycle>,
         authority: Arc<dyn AuthorityClient>,
+        actors: Arc<ActorPool>,
     ) -> Result<Self, ServiceStreamError> {
         let subscription_url = subscription_url(&config.service_url)?;
         let (shutdown, receiver) = watch::channel(false);
@@ -72,12 +75,14 @@ impl ServiceStream {
             subscription_url,
             Arc::clone(&lifecycle),
             authority,
+            Arc::clone(&actors),
             receiver,
         ));
         Ok(Self {
             shutdown,
             task: Mutex::new(Some(task)),
             lifecycle,
+            actors,
         })
     }
 
@@ -91,6 +96,7 @@ impl ServiceStream {
         if let Some(task) = task {
             let _ = task.await;
         }
+        self.actors.stop().await;
         self.lifecycle.mark_unavailable();
     }
 }
@@ -100,6 +106,7 @@ async fn run_forever(
     subscription_url: Url,
     lifecycle: Arc<ControlLifecycle>,
     authority: Arc<dyn AuthorityClient>,
+    actors: Arc<ActorPool>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut attempt = 0_u32;
@@ -109,6 +116,7 @@ async fn run_forever(
             &subscription_url,
             &lifecycle,
             authority.as_ref(),
+            actors.as_ref(),
             &mut shutdown,
         )
         .await;
@@ -138,6 +146,7 @@ async fn run_connection(
     subscription_url: &Url,
     lifecycle: &ControlLifecycle,
     authority: &dyn AuthorityClient,
+    actors: &ActorPool,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<(), ServiceStreamError> {
     let now = OffsetDateTime::now_utc();
@@ -186,6 +195,10 @@ async fn run_connection(
     if summary.errors != 0 || summary.truncated {
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
+    actors
+        .sync_from_store()
+        .await
+        .map_err(|_| ServiceStreamError::ReconciliationIncomplete)?;
 
     loop {
         tokio::select! {
@@ -204,7 +217,11 @@ async fn run_connection(
                             .map_err(|_| ServiceStreamError::InvalidFrame)?
                         {
                             lifecycle
-                                .apply_enrollment_event(event)
+                                .apply_enrollment_event(event.clone())
+                                .map_err(|_| ServiceStreamError::InvalidFrame)?;
+                            actors
+                                .sync_actor(&event.did)
+                                .await
                                 .map_err(|_| ServiceStreamError::InvalidFrame)?;
                         }
                     }
