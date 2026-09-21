@@ -20,6 +20,10 @@ impl FeedReadinessGate {
         self.ready
     }
 
+    pub fn has_authoritative_session(&self) -> bool {
+        self.has_authoritative_session
+    }
+
     pub fn mark_unavailable(&mut self) {
         self.ready = false;
         self.has_authoritative_session = false;
@@ -73,6 +77,7 @@ mod tests {
         ));
 
         gate.mark_session_established();
+        assert!(gate.has_authoritative_session());
         let current_session = gate.begin_reconciliation();
         assert!(gate.complete_reconciliation(
             current_session,
@@ -100,6 +105,7 @@ mod tests {
 
         let stale = gate.begin_reconciliation();
         gate.mark_unavailable();
+        assert!(!gate.has_authoritative_session());
         assert!(!gate.complete_reconciliation(
             stale,
             ReconciliationOutcome {

@@ -166,11 +166,9 @@ fn feed_server_state(
 }
 
 async fn health(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    let ready = state
-        .readiness
-        .lock()
-        .expect("readiness lock poisoned")
-        .is_ready();
+    let readiness = state.readiness.lock().expect("readiness lock poisoned");
+    let ready = readiness.is_ready();
+    let service_stream_connected = readiness.has_authoritative_session();
     let status = if ready {
         StatusCode::OK
     } else {
@@ -182,7 +180,7 @@ async fn health(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
             ok: ready,
             feed_ready: ready,
             version: env!("CARGO_PKG_VERSION"),
-            service_stream_connected: false,
+            service_stream_connected,
             actor_pool_size: 0,
         }),
     )
@@ -593,6 +591,29 @@ mod tests {
         assert_eq!(
             body,
             r#"{"ok":false,"feedReady":false,"version":"0.1.0","serviceStreamConnected":false,"actorPoolSize":0}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn health_reports_an_established_authoritative_session() {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        readiness.lock().unwrap().mark_session_established();
+        let app = router(config(), feeds(), readiness);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            body,
+            r#"{"ok":false,"feedReady":false,"version":"0.1.0","serviceStreamConnected":true,"actorPoolSize":0}"#
         );
     }
 
