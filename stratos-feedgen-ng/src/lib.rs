@@ -4,5 +4,7 @@
 
 pub mod config;
 pub mod conformance;
+pub mod cursor;
+pub mod identifier;
 pub mod readiness;
 pub mod server;
