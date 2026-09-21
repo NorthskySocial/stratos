@@ -359,6 +359,24 @@ impl EncryptedStore {
         Ok(deleted as u64)
     }
 
+    pub fn purge_boundary(&mut self, boundary: &str) -> Result<u64, StoreError> {
+        if boundary.is_empty() {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute("DELETE FROM post_boundary WHERE boundary = ?1", [boundary])
+            .map_err(StoreError::Open)?;
+        let deleted = transaction
+            .execute("DELETE FROM post WHERE NOT EXISTS (SELECT 1 FROM post_boundary WHERE post_boundary.uri = post.uri)", [])
+            .map_err(StoreError::Open)?;
+        transaction.commit().map_err(StoreError::Open)?;
+        Ok(deleted as u64)
+    }
+
     fn list_initial_posts(
         &self,
         boundary: &str,
@@ -844,6 +862,33 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn boundary_purge_preserves_posts_still_scoped_to_another_boundary() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let mut post = spike_post();
+        post.boundaries.push("red-tail".to_string());
+        store
+            .apply_actor_page(actor_page(8, vec![post], Vec::new()))
+            .unwrap();
+
+        assert_eq!(store.purge_boundary("bebop").unwrap(), 0);
+        assert!(
+            store
+                .list_posts_by_boundary("bebop", None, 50, "1998-04-03T12:00:00.000Z")
+                .unwrap()
+                .posts
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_posts_by_boundary("red-tail", None, 50, "1998-04-03T12:00:00.000Z")
+                .unwrap()
+                .posts
+                .len(),
+            1
         );
     }
 

@@ -40,6 +40,10 @@ impl ProjectionReader {
     pub fn replace_projection(&mut self) {
         self.admission.replace_projection();
     }
+    pub fn revoke_boundary(&mut self, boundary: &str) -> Result<u64, StoreError> {
+        self.admission.invalidate_boundary(boundary);
+        self.store.purge_boundary(boundary)
+    }
     pub fn prepare(
         &self,
         request: ReadRequest<'_>,
@@ -111,6 +115,26 @@ mod tests {
         let (token, page) = reader.prepare(request).unwrap().unwrap();
         reader.close_session();
         reader.establish_session();
+        assert!(reader.release(token, page, 2).is_none());
+    }
+
+    #[test]
+    fn boundary_revocation_rejects_a_prepared_page() {
+        let mut reader = ProjectionReader::new(
+            EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+        );
+        reader.establish_session();
+        let request = ReadRequest {
+            viewer: "did:plc:spike",
+            boundary: "bebop",
+            authority_expires_at: 100,
+            now: 1,
+            cursor: None,
+            limit: 50,
+            as_of: "1998-04-03T00:00:00.000Z",
+        };
+        let (token, page) = reader.prepare(request).unwrap().unwrap();
+        assert_eq!(reader.revoke_boundary("bebop").unwrap(), 0);
         assert!(reader.release(token, page, 2).is_none());
     }
 }
