@@ -9,4 +9,5 @@ pub mod cursor;
 pub mod identifier;
 pub mod readiness;
 pub mod server;
+pub mod service;
 pub mod store;
