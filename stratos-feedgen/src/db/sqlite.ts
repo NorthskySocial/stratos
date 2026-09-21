@@ -3,7 +3,18 @@ import { chmodSync, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm'
 import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql'
 import {
   enrolledActor as enrolledActorTbl,
@@ -20,6 +31,7 @@ import { sqliteSchema } from './schema/index.js'
 import {
   decodeCursor,
   encodeCursor,
+  BlobRef,
   EnrolledActor,
   EnrolledActorUpsert,
   FeedgenStore,
@@ -28,11 +40,14 @@ import {
   ListPostsOpts,
   ListPostsResult,
   PostUpsert,
+  ProjectionCompactionBatch,
+  ProjectionRetentionOptions,
   SPACE_MEMBER_INSERT_CHUNK_SIZE,
   SpaceMemberSnapshot,
   SpaceSyncStagePage,
 } from './types.js'
 import type { CatalogBoundary } from '../feeds/catalog-model.js'
+import { blobCacheKey } from '../blob/cache.js'
 import { assertPrivateSqlitePath } from '../config.js'
 
 export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
@@ -44,6 +59,8 @@ export type SqliteDb = LibSQLDatabase<typeof sqliteSchema> & {
 
 const LEGACY_MEMBERSHIP_IMPORT_KEY = 'legacy-record-store-imported'
 const CATALOG_BASELINE_KEY = 'boundary-catalog-baseline'
+const DEFAULT_COMPACTION_BATCH_SIZE = 100
+const PROJECTION_BYTES_METADATA_KEY = 'projection-bytes'
 
 /**
  * SQLite permits a single writer, while a space membership pass deliberately
@@ -118,6 +135,205 @@ function sqliteClientUrl(location: string): string {
   return `file:${encodeURIComponent(uri)}`
 }
 
+function serializedPostBytes(input: PostUpsert): number {
+  return Buffer.byteLength(
+    [
+      input.uri,
+      input.did,
+      input.cid,
+      input.sortAt,
+      input.indexedAt,
+      JSON.stringify(input.record),
+      JSON.stringify(input.blobRefs),
+    ].join('\n'),
+  )
+}
+
+function emptyCompactionResult(): ProjectionCompactionBatch {
+  return {
+    posts: 0,
+    blobCacheEntries: 0,
+    syncCursors: 0,
+    spaceCursors: 0,
+    stagedRecords: 0,
+    pendingVerifications: 0,
+    hasMore: false,
+    blobCacheKeys: [],
+  }
+}
+
+interface CompactedPostRow {
+  uri: string
+  did: string
+  blobRefsJson: string
+  projectionBytes: number
+}
+
+interface BlobReference {
+  did: string
+  cid: string
+}
+
+type SqliteMutationDb = Pick<SqliteDb, 'all' | 'delete' | 'get' | 'run'>
+
+async function deletePostRows(
+  db: SqliteMutationDb,
+  rows: readonly CompactedPostRow[],
+): Promise<number> {
+  const uris = rows.map((row) => row.uri)
+  if (uris.length === 0) return 0
+  const deleted = await db.delete(postTbl).where(inArray(postTbl.uri, uris))
+  return deleted.rowsAffected
+}
+
+async function evictOverBudgetPosts(
+  db: SqliteMutationDb,
+  currentBytes: number,
+  maxBytes: number,
+  limit: number,
+): Promise<CompactedPostRow[]> {
+  if (currentBytes <= maxBytes || limit <= 0) return []
+  const candidates = await db.all<CompactedPostRow>(sql`
+    SELECT uri, did, blobRefsJson, projectionBytes FROM post
+    ORDER BY retainedAt ASC, sortAt ASC, uri ASC
+    LIMIT ${limit}
+  `)
+  const selected: CompactedPostRow[] = []
+  let remaining = currentBytes
+  for (const candidate of candidates) {
+    if (remaining <= maxBytes) break
+    selected.push(candidate)
+    remaining -= candidate.projectionBytes
+  }
+  return selected
+}
+
+function blobReferencesForRows(
+  rows: readonly CompactedPostRow[],
+): BlobReference[] {
+  const references = new Map<string, BlobReference>()
+  for (const row of rows) {
+    for (const ref of parseBlobRefsForCompaction(row.blobRefsJson)) {
+      const key = blobCacheKey(row.did, ref.cid)
+      references.set(key, { did: row.did, cid: ref.cid })
+    }
+  }
+  return [...references.values()]
+}
+
+function parseBlobRefsForCompaction(blobRefsJson: string): BlobRef[] {
+  try {
+    const parsed: unknown = JSON.parse(blobRefsJson)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (entry): entry is BlobRef =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof (entry as { cid?: unknown }).cid === 'string',
+    )
+  } catch {
+    return []
+  }
+}
+
+async function selectPosts(
+  db: Pick<SqliteDb, 'all'>,
+  condition: SQL,
+): Promise<CompactedPostRow[]> {
+  return db.all<CompactedPostRow>(sql`
+    SELECT uri, did, blobRefsJson, projectionBytes FROM post WHERE ${condition}
+  `)
+}
+
+async function queueBlobCacheEvictions(
+  db: Pick<SqliteDb, 'run'>,
+  keys: readonly string[],
+  queuedAt: string,
+): Promise<void> {
+  for (const key of keys) {
+    await db.run(sql`
+      INSERT INTO blob_cache_eviction (key, queuedAt)
+      VALUES (${key}, ${queuedAt})
+      ON CONFLICT(key) DO NOTHING
+    `)
+  }
+}
+
+async function replacePostBlobRefs(
+  db: Pick<SqliteDb, 'run'>,
+  uri: string,
+  did: string,
+  refs: readonly BlobRef[],
+): Promise<void> {
+  await db.run(sql`DELETE FROM post_blob_ref WHERE uri = ${uri}`)
+  for (const cid of new Set(refs.map((ref) => ref.cid))) {
+    await db.run(sql`
+      INSERT INTO post_blob_ref (uri, did, cid)
+      VALUES (${uri}, ${did}, ${cid})
+    `)
+  }
+}
+
+async function queueOrphanedPostBlobs(
+  db: Pick<SqliteDb, 'get' | 'run'>,
+  rows: readonly CompactedPostRow[],
+  queuedAt: string,
+): Promise<void> {
+  const keys: string[] = []
+  for (const reference of blobReferencesForRows(rows)) {
+    const remaining = await db.get<{ found: number }>(sql`
+      SELECT EXISTS(
+        SELECT 1 FROM post_blob_ref
+        WHERE did = ${reference.did} AND cid = ${reference.cid}
+      ) AS found
+    `)
+    if (remaining.found === 0) {
+      keys.push(blobCacheKey(reference.did, reference.cid))
+    }
+  }
+  await queueBlobCacheEvictions(db, keys, queuedAt)
+}
+
+async function hasCompactionWork(
+  db: Pick<SqliteDb, 'get'>,
+  cutoff: string,
+  maxBytes: number,
+): Promise<boolean> {
+  const result = await db.get<{ hasWork: number }>(sql`
+    SELECT EXISTS(
+      SELECT 1 FROM post WHERE retainedAt <= ${cutoff}
+      UNION ALL SELECT 1 FROM sync_cursor WHERE updatedAt <= ${cutoff}
+      UNION ALL SELECT 1 FROM space_sync_cursor WHERE updatedAt <= ${cutoff}
+      UNION ALL SELECT 1 FROM space_sync_stage WHERE updatedAt <= ${cutoff}
+      UNION ALL SELECT 1 FROM space_sync_pending_verification WHERE updatedAt <= ${cutoff}
+      UNION ALL SELECT 1 FROM projection_retention_metadata
+      WHERE key = ${PROJECTION_BYTES_METADATA_KEY} AND value > ${maxBytes}
+      UNION ALL SELECT 1 FROM blob_cache_eviction
+    ) AS hasWork
+  `)
+  return result.hasWork === 1
+}
+
+async function markPendingVerification(
+  db: Pick<SqliteDb, 'insert'>,
+  input: SpaceSyncStagePage,
+): Promise<void> {
+  await db
+    .insert(spaceSyncPendingVerificationTbl)
+    .values({
+      spaceUri: input.spaceUri,
+      did: input.did,
+      updatedAt: input.updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: [
+        spaceSyncPendingVerificationTbl.spaceUri,
+        spaceSyncPendingVerificationTbl.did,
+      ],
+      set: { updatedAt: input.updatedAt },
+    })
+}
+
 /** Migrate the materialized record index and its checkpointed sync state. */
 export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
   await db._initialized
@@ -128,6 +344,8 @@ export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
       cid TEXT NOT NULL,
       sortAt TEXT NOT NULL,
       indexedAt TEXT NOT NULL,
+      retainedAt TEXT NOT NULL,
+      projectionBytes INTEGER NOT NULL,
       recordJson TEXT NOT NULL,
       blobRefsJson TEXT NOT NULL
     )
@@ -175,6 +393,7 @@ export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
       indexedAt TEXT,
       recordJson TEXT,
       blobRefsJson TEXT,
+      updatedAt TEXT NOT NULL,
       PRIMARY KEY (spaceUri, did, uri)
     )
   `)
@@ -182,10 +401,150 @@ export async function migrateRecordSqliteDb(db: SqliteDb): Promise<void> {
     CREATE TABLE IF NOT EXISTS space_sync_pending_verification (
       spaceUri TEXT NOT NULL,
       did TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
       PRIMARY KEY (spaceUri, did)
     )
   `)
+  await addRetentionColumns(db)
+  await migratePostBlobRefs(db)
+  await migrateProjectionByteMetadata(db)
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS post_retained_at_uri_idx ON post(retainedAt, uri)
+  `)
   secureSqliteArtifacts(db)
+}
+
+async function migratePostBlobRefs(db: SqliteDb): Promise<void> {
+  const existed = await sqliteTableExists(db, 'post_blob_ref')
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS post_blob_ref (
+      uri TEXT NOT NULL,
+      did TEXT NOT NULL,
+      cid TEXT NOT NULL,
+      PRIMARY KEY (uri, cid),
+      FOREIGN KEY (uri) REFERENCES post(uri) ON DELETE CASCADE
+    )
+  `)
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS post_blob_ref_did_cid_idx
+      ON post_blob_ref(did, cid)
+  `)
+  if (existed) return
+  const rows = await db.all<CompactedPostRow>(sql`
+    SELECT uri, did, blobRefsJson, projectionBytes FROM post
+  `)
+  for (const row of rows) {
+    await replacePostBlobRefs(
+      db,
+      row.uri,
+      row.did,
+      parseBlobRefsForCompaction(row.blobRefsJson),
+    )
+  }
+}
+
+async function migrateProjectionByteMetadata(db: SqliteDb): Promise<void> {
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS projection_retention_metadata (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    )
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS blob_cache_eviction (
+      key TEXT PRIMARY KEY,
+      queuedAt TEXT NOT NULL
+    )
+  `)
+  await db.run(sql`
+    INSERT OR IGNORE INTO projection_retention_metadata (key, value)
+    SELECT ${PROJECTION_BYTES_METADATA_KEY}, COALESCE(SUM(projectionBytes), 0)
+    FROM post
+  `)
+  await db.run(
+    sql.raw(`
+    CREATE TRIGGER IF NOT EXISTS post_projection_bytes_insert
+    AFTER INSERT ON post
+    BEGIN
+      UPDATE projection_retention_metadata
+      SET value = value + NEW.projectionBytes
+      WHERE key = '${PROJECTION_BYTES_METADATA_KEY}';
+    END
+  `),
+  )
+  await db.run(
+    sql.raw(`
+    CREATE TRIGGER IF NOT EXISTS post_projection_bytes_update
+    AFTER UPDATE OF projectionBytes ON post
+    BEGIN
+      UPDATE projection_retention_metadata
+      SET value = value - OLD.projectionBytes + NEW.projectionBytes
+      WHERE key = '${PROJECTION_BYTES_METADATA_KEY}';
+    END
+  `),
+  )
+  await db.run(
+    sql.raw(`
+    CREATE TRIGGER IF NOT EXISTS post_projection_bytes_delete
+    AFTER DELETE ON post
+    BEGIN
+      UPDATE projection_retention_metadata
+      SET value = value - OLD.projectionBytes
+      WHERE key = '${PROJECTION_BYTES_METADATA_KEY}';
+    END
+  `),
+  )
+}
+
+async function addRetentionColumns(db: SqliteDb): Promise<void> {
+  const now = new Date().toISOString()
+  await addColumnIfMissing(
+    db,
+    'post',
+    'retainedAt',
+    `TEXT NOT NULL DEFAULT '${now}'`,
+  )
+  await addColumnIfMissing(
+    db,
+    'post',
+    'projectionBytes',
+    'INTEGER NOT NULL DEFAULT 0',
+  )
+  await db.run(sql`
+    UPDATE post
+    SET projectionBytes = length(CAST(uri AS BLOB)) + length(CAST(did AS BLOB))
+      + length(CAST(cid AS BLOB)) + length(CAST(sortAt AS BLOB))
+      + length(CAST(indexedAt AS BLOB)) + length(CAST(recordJson AS BLOB))
+      + length(CAST(blobRefsJson AS BLOB))
+    WHERE projectionBytes = 0
+  `)
+  await addColumnIfMissing(
+    db,
+    'space_sync_stage',
+    'updatedAt',
+    `TEXT NOT NULL DEFAULT '${now}'`,
+  )
+  await addColumnIfMissing(
+    db,
+    'space_sync_pending_verification',
+    'updatedAt',
+    `TEXT NOT NULL DEFAULT '${now}'`,
+  )
+}
+
+async function addColumnIfMissing(
+  db: SqliteDb,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const columns = await db.all<{ name: string }>(
+    sql.raw(`PRAGMA table_info(${table})`),
+  )
+  if (columns.some((entry) => entry.name === column)) return
+  await db.run(
+    sql.raw(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`),
+  )
 }
 
 /** Migrate durable enrollment and completed space-membership snapshots. */
@@ -293,11 +652,22 @@ async function sqliteTableExists(
 export class SqliteFeedgenStore implements FeedgenStore {
   private readonly recordWrites = new SqliteWriteQueue()
   private readonly membershipWrites = new SqliteWriteQueue()
+  private readonly retention: Required<ProjectionRetentionOptions> | undefined
 
   constructor(
     private readonly recordDb: SqliteDb,
     private readonly membershipDb: SqliteDb = recordDb,
-  ) {}
+    retention?: ProjectionRetentionOptions,
+  ) {
+    this.retention = retention
+      ? {
+          maxAgeMs: retention.maxAgeMs,
+          maxBytes: retention.maxBytes,
+          batchSize: retention.batchSize ?? DEFAULT_COMPACTION_BATCH_SIZE,
+          now: retention.now ?? Date.now,
+        }
+      : undefined
+  }
 
   private writeRecord<T>(operation: () => Promise<T>): Promise<T> {
     return this.recordWrites.run(operation)
@@ -312,8 +682,11 @@ export class SqliteFeedgenStore implements FeedgenStore {
   }
 
   async upsertPost(input: PostUpsert): Promise<void> {
+    const retainedAt = this.retainedAt()
+    const projectionBytes = serializedPostBytes(input)
     await this.writeRecord(() =>
       this.recordDb.transaction(async (tx) => {
+        const replaced = await selectPosts(tx, sql`uri = ${input.uri}`)
         await tx
           .insert(postTbl)
           .values({
@@ -322,6 +695,8 @@ export class SqliteFeedgenStore implements FeedgenStore {
             cid: input.cid,
             sortAt: input.sortAt,
             indexedAt: input.indexedAt,
+            retainedAt,
+            projectionBytes,
             recordJson: JSON.stringify(input.record),
             blobRefsJson: JSON.stringify(input.blobRefs),
           })
@@ -332,10 +707,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
               cid: input.cid,
               sortAt: input.sortAt,
               indexedAt: input.indexedAt,
+              retainedAt,
+              projectionBytes,
               recordJson: JSON.stringify(input.record),
               blobRefsJson: JSON.stringify(input.blobRefs),
             },
           })
+        await replacePostBlobRefs(tx, input.uri, input.did, input.blobRefs)
+        await this.queuePostBlobs(tx, replaced)
         await tx
           .delete(postBoundaryTbl)
           .where(eq(postBoundaryTbl.uri, input.uri))
@@ -349,18 +728,28 @@ export class SqliteFeedgenStore implements FeedgenStore {
         }
       }),
     )
+    await this.compactProjection()
   }
 
   async deletePost(uri: string): Promise<void> {
     await this.writeRecord(() =>
-      this.recordDb.delete(postTbl).where(eq(postTbl.uri, uri)),
+      this.recordDb.transaction(async (tx) => {
+        const rows = await selectPosts(tx, sql`uri = ${uri}`)
+        await tx.delete(postTbl).where(eq(postTbl.uri, uri))
+        await this.queuePostBlobs(tx, rows)
+      }),
     )
   }
 
   async deletePostsByDid(did: string): Promise<number> {
     // FK ON DELETE CASCADE removes the matching post_boundary rows.
     const res = await this.writeRecord(() =>
-      this.recordDb.delete(postTbl).where(eq(postTbl.did, did)),
+      this.recordDb.transaction(async (tx) => {
+        const rows = await selectPosts(tx, sql`did = ${did}`)
+        const deleted = await tx.delete(postTbl).where(eq(postTbl.did, did))
+        await this.queuePostBlobs(tx, rows)
+        return deleted
+      }),
     )
     return res.rowsAffected
   }
@@ -374,21 +763,31 @@ export class SqliteFeedgenStore implements FeedgenStore {
         // Delete posts for which the removed boundary is the last one. Testing
         // for that boundary before deletion keeps pre-existing boundaryless
         // posts out of scope without materializing every URI into SQL binds.
-        const deleted = await tx.delete(postTbl).where(
-          and(
-            eq(postTbl.did, did),
-            sql`EXISTS (
+        const deleteCondition = and(
+          eq(postTbl.did, did),
+          sql`EXISTS (
             SELECT 1 FROM post_boundary target
             WHERE target.uri = ${postTbl.uri}
               AND target.boundary = ${boundary}
           )`,
-            sql`NOT EXISTS (
+          sql`NOT EXISTS (
             SELECT 1 FROM post_boundary other
             WHERE other.uri = ${postTbl.uri}
               AND other.boundary <> ${boundary}
           )`,
-          ),
         )
+        const rows = await selectPosts(
+          tx,
+          sql`did = ${did} AND EXISTS (
+              SELECT 1 FROM post_boundary target
+              WHERE target.uri = post.uri AND target.boundary = ${boundary}
+            ) AND NOT EXISTS (
+              SELECT 1 FROM post_boundary other
+              WHERE other.uri = post.uri AND other.boundary <> ${boundary}
+            )`,
+        )
+        const deleted = await tx.delete(postTbl).where(deleteCondition)
+        await this.queuePostBlobs(tx, rows)
 
         // Multi-boundary posts survived the first statement; remove only their
         // lost boundary membership with a set-based author filter.
@@ -440,6 +839,16 @@ export class SqliteFeedgenStore implements FeedgenStore {
                 eq(spaceSyncPendingVerificationTbl.did, did),
               ),
             )
+          const rows = await selectPosts(
+            tx,
+            sql`did = ${did} AND EXISTS (
+                SELECT 1 FROM post_boundary target
+                WHERE target.uri = post.uri AND target.boundary = ${boundary}
+              ) AND NOT EXISTS (
+                SELECT 1 FROM post_boundary other
+                WHERE other.uri = post.uri AND other.boundary <> ${boundary}
+              )`,
+          )
           const postDelete = await tx.delete(postTbl).where(
             and(
               eq(postTbl.did, did),
@@ -455,6 +864,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
             )`,
             ),
           )
+          await this.queuePostBlobs(tx, rows)
           await tx.delete(postBoundaryTbl).where(
             and(
               eq(postBoundaryTbl.boundary, boundary),
@@ -494,11 +904,20 @@ export class SqliteFeedgenStore implements FeedgenStore {
     // Keep the selection in SQL so a large space never becomes an unbounded
     // application-side URI list or exceeds the backend's bind limit.
     const res = await this.writeRecord(() =>
-      this.recordDb.delete(postTbl).where(sql`EXISTS (
-      SELECT 1 FROM post_boundary scoped
-      WHERE scoped.uri = ${postTbl.uri}
-        AND scoped.boundary = ${boundary}
-    )`),
+      this.recordDb.transaction(async (tx) => {
+        const condition = sql`EXISTS (
+          SELECT 1 FROM post_boundary scoped
+          WHERE scoped.uri = post.uri AND scoped.boundary = ${boundary}
+        )`
+        const rows = await selectPosts(tx, condition)
+        const deleted = await tx.delete(postTbl).where(sql`EXISTS (
+          SELECT 1 FROM post_boundary scoped
+          WHERE scoped.uri = ${postTbl.uri}
+            AND scoped.boundary = ${boundary}
+        )`)
+        await this.queuePostBlobs(tx, rows)
+        return deleted
+      }),
     )
     return res.rowsAffected
   }
@@ -560,6 +979,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
                 indexedAt: null,
                 recordJson: null,
                 blobRefsJson: null,
+                updatedAt: input.updatedAt,
               })
               .onConflictDoUpdate({
                 target: [
@@ -575,6 +995,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
                   indexedAt: null,
                   recordJson: null,
                   blobRefsJson: null,
+                  updatedAt: input.updatedAt,
                 },
               })
             continue
@@ -594,6 +1015,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
               indexedAt: post.indexedAt,
               recordJson: JSON.stringify(post.record),
               blobRefsJson: JSON.stringify(post.blobRefs),
+              updatedAt: input.updatedAt,
             })
             .onConflictDoUpdate({
               target: [
@@ -609,6 +1031,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
                 indexedAt: post.indexedAt,
                 recordJson: JSON.stringify(post.record),
                 blobRefsJson: JSON.stringify(post.blobRefs),
+                updatedAt: input.updatedAt,
               },
             })
         }
@@ -627,10 +1050,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
             })
         }
         if (input.nextCursor === undefined) {
-          await tx
-            .insert(spaceSyncPendingVerificationTbl)
-            .values({ spaceUri: input.spaceUri, did: input.did })
-            .onConflictDoNothing()
+          await markPendingVerification(tx, input)
         }
       }),
     )
@@ -650,10 +1070,13 @@ export class SqliteFeedgenStore implements FeedgenStore {
           )
         for (const stage of stages) {
           if (stage.deleted) {
+            const rows = await selectPosts(tx, sql`uri = ${stage.uri}`)
             await tx.delete(postTbl).where(eq(postTbl.uri, stage.uri))
+            await this.queuePostBlobs(tx, rows)
             continue
           }
           const post = stageRowToPost(stage)
+          const replaced = await selectPosts(tx, sql`uri = ${post.uri}`)
           await tx
             .insert(postTbl)
             .values({
@@ -662,6 +1085,8 @@ export class SqliteFeedgenStore implements FeedgenStore {
               cid: post.cid,
               sortAt: post.sortAt,
               indexedAt: post.indexedAt,
+              retainedAt: this.retainedAt(),
+              projectionBytes: serializedPostBytes(post),
               recordJson: JSON.stringify(post.record),
               blobRefsJson: JSON.stringify(post.blobRefs),
             })
@@ -672,10 +1097,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
                 cid: post.cid,
                 sortAt: post.sortAt,
                 indexedAt: post.indexedAt,
+                retainedAt: this.retainedAt(),
+                projectionBytes: serializedPostBytes(post),
                 recordJson: JSON.stringify(post.record),
                 blobRefsJson: JSON.stringify(post.blobRefs),
               },
             })
+          await replacePostBlobRefs(tx, post.uri, post.did, post.blobRefs)
+          await this.queuePostBlobs(tx, replaced)
           await tx
             .delete(postBoundaryTbl)
             .where(eq(postBoundaryTbl.uri, post.uri))
@@ -702,6 +1131,7 @@ export class SqliteFeedgenStore implements FeedgenStore {
           )
       }),
     )
+    await this.compactProjection()
   }
 
   async resetPendingSpaceSyncState(
@@ -827,7 +1257,14 @@ export class SqliteFeedgenStore implements FeedgenStore {
     const rows = await this.recordDb
       .select()
       .from(postTbl)
-      .where(eq(postTbl.uri, uri))
+      .where(
+        this.retention
+          ? and(
+              eq(postTbl.uri, uri),
+              gt(postTbl.retainedAt, this.retentionCutoff()),
+            )
+          : eq(postTbl.uri, uri),
+      )
       .limit(1)
     if (rows.length === 0) return null
     const boundaries = await this.recordDb
@@ -851,6 +1288,10 @@ export class SqliteFeedgenStore implements FeedgenStore {
           ),
         )
       : undefined
+    const boundaryCondition = eq(postBoundaryTbl.boundary, opts.boundary)
+    const retentionCondition = this.retention
+      ? gt(postTbl.retainedAt, this.retentionCutoff())
+      : undefined
     const rows = await this.recordDb
       .select({
         uri: postTbl.uri,
@@ -865,8 +1306,8 @@ export class SqliteFeedgenStore implements FeedgenStore {
       .innerJoin(postBoundaryTbl, eq(postBoundaryTbl.uri, postTbl.uri))
       .where(
         cursorCondition
-          ? and(eq(postBoundaryTbl.boundary, opts.boundary), cursorCondition)
-          : eq(postBoundaryTbl.boundary, opts.boundary),
+          ? and(boundaryCondition, cursorCondition, retentionCondition)
+          : and(boundaryCondition, retentionCondition),
       )
       .orderBy(desc(postTbl.sortAt), asc(postTbl.uri))
       .limit(opts.limit)
@@ -883,6 +1324,144 @@ export class SqliteFeedgenStore implements FeedgenStore {
           ? encodeCursor(last.sortAt, last.uri)
           : undefined,
     }
+  }
+
+  /** Remove one bounded batch of expired or over-budget serving state. */
+  async compactProjection(): Promise<ProjectionCompactionBatch> {
+    if (!this.retention) return this.drainBlobCacheEvictions()
+    const retention = this.retention
+    const cutoff = this.retentionCutoff()
+    const limit = retention.batchSize
+    return this.writeRecord(() =>
+      this.recordDb.transaction(async (tx) => {
+        const expired = await tx.all<CompactedPostRow>(sql`
+          SELECT uri, did, blobRefsJson, projectionBytes FROM post
+          WHERE retainedAt <= ${cutoff}
+          ORDER BY retainedAt ASC, uri ASC
+          LIMIT ${limit}
+        `)
+        const expiredPosts = await deletePostRows(tx, expired)
+        const current = await tx.get<{ bytes: number }>(sql`
+          SELECT value AS bytes FROM projection_retention_metadata
+          WHERE key = ${PROJECTION_BYTES_METADATA_KEY}
+        `)
+        const byteEvictions = await evictOverBudgetPosts(
+          tx,
+          Math.max(0, Number(current.bytes)),
+          retention.maxBytes,
+          limit - expiredPosts,
+        )
+        await deletePostRows(tx, byteEvictions)
+        await this.queuePostBlobs(tx, [...expired, ...byteEvictions])
+        const pendingBlobCacheKeys = await tx.all<{ key: string }>(sql`
+          SELECT key FROM blob_cache_eviction
+          ORDER BY queuedAt ASC, key ASC
+          LIMIT ${limit}
+        `)
+        const syncCursors = await tx.run(sql`
+          DELETE FROM sync_cursor
+          WHERE did IN (
+            SELECT did FROM sync_cursor
+            WHERE updatedAt <= ${cutoff}
+            ORDER BY updatedAt ASC, did ASC
+            LIMIT ${limit}
+          )
+        `)
+        const spaceCursors = await tx.run(sql`
+          DELETE FROM space_sync_cursor
+          WHERE rowid IN (
+            SELECT rowid FROM space_sync_cursor
+            WHERE updatedAt <= ${cutoff}
+            ORDER BY updatedAt ASC, spaceUri ASC, did ASC
+            LIMIT ${limit}
+          )
+        `)
+        const stagedRecords = await tx.run(sql`
+          DELETE FROM space_sync_stage
+          WHERE rowid IN (
+            SELECT rowid FROM space_sync_stage
+            WHERE updatedAt <= ${cutoff}
+            ORDER BY updatedAt ASC, spaceUri ASC, did ASC, uri ASC
+            LIMIT ${limit}
+          )
+        `)
+        const pendingVerifications = await tx.run(sql`
+          DELETE FROM space_sync_pending_verification
+          WHERE rowid IN (
+            SELECT rowid FROM space_sync_pending_verification
+            WHERE updatedAt <= ${cutoff}
+            ORDER BY updatedAt ASC, spaceUri ASC, did ASC
+            LIMIT ${limit}
+          )
+        `)
+        const hasMore = await hasCompactionWork(tx, cutoff, retention.maxBytes)
+        return {
+          posts: expiredPosts + byteEvictions.length,
+          blobCacheEntries: pendingBlobCacheKeys.length,
+          syncCursors: syncCursors.rowsAffected,
+          spaceCursors: spaceCursors.rowsAffected,
+          stagedRecords: stagedRecords.rowsAffected,
+          pendingVerifications: pendingVerifications.rowsAffected,
+          hasMore,
+          blobCacheKeys: pendingBlobCacheKeys.map((entry) => entry.key),
+        }
+      }),
+    )
+  }
+
+  async completeBlobCacheEvictions(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return
+    await this.writeRecord(() =>
+      this.recordDb.transaction(async (tx) => {
+        for (const key of keys) {
+          await tx.run(sql`DELETE FROM blob_cache_eviction WHERE key = ${key}`)
+        }
+      }),
+    )
+  }
+
+  private async drainBlobCacheEvictions(): Promise<ProjectionCompactionBatch> {
+    return this.writeRecord(() =>
+      this.recordDb.transaction(async (tx) => {
+        const keys = await tx.all<{ key: string }>(sql`
+          SELECT key FROM blob_cache_eviction
+          ORDER BY queuedAt ASC, key ASC
+          LIMIT ${DEFAULT_COMPACTION_BATCH_SIZE}
+        `)
+        const more = await tx.get<{ hasMore: number }>(sql`
+          SELECT EXISTS(
+            SELECT 1 FROM blob_cache_eviction
+            ORDER BY queuedAt ASC, key ASC
+            LIMIT 1 OFFSET ${DEFAULT_COMPACTION_BATCH_SIZE}
+          ) AS hasMore
+        `)
+        return {
+          ...emptyCompactionResult(),
+          blobCacheEntries: keys.length,
+          blobCacheKeys: keys.map((entry) => entry.key),
+          hasMore: more.hasMore === 1,
+        }
+      }),
+    )
+  }
+
+  private async queuePostBlobs(
+    db: Pick<SqliteDb, 'get' | 'run'>,
+    rows: readonly CompactedPostRow[],
+  ): Promise<void> {
+    await queueOrphanedPostBlobs(db, rows, this.retainedAt())
+  }
+
+  private retainedAt(): string {
+    return new Date(this.retention?.now() ?? Date.now()).toISOString()
+  }
+
+  private retentionCutoff(): string {
+    if (!this.retention)
+      throw new Error('projection retention is not configured')
+    return new Date(
+      this.retention.now() - this.retention.maxAgeMs,
+    ).toISOString()
   }
 
   private async fetchBoundaries(

@@ -201,6 +201,17 @@ describe('private memory blob cache', () => {
 })
 
 describe('verified blob downloads', () => {
+  it('removes queued cache keys without fetching their blobs', async () => {
+    const { cache } = await disk()
+    const { service, upstream } = makeService(cache)
+    await cache.put(key(), Buffer.from('Spike'))
+
+    await service.removeCacheEntries([key()])
+
+    expect(await cache.get(key())).toBeUndefined()
+    expect(upstream.getBlob).not.toHaveBeenCalled()
+  })
+
   it('fetches once then verifies cache hits and isolates actors', async () => {
     const { cache } = await disk()
     const { service, upstream } = makeService(cache)

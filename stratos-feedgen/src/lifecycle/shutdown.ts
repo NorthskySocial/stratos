@@ -23,6 +23,7 @@ export interface ShutdownDeps {
     abortActivePass: () => void
   } | null
   actorPool?: { stop: () => Promise<void> } | null
+  projectionCompactor?: { stop: () => Promise<void> } | null
   store?: { close: () => Promise<void> } | null
   telemetry?: { shutdown: () => Promise<void> } | null
   logger: Logger
@@ -81,6 +82,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
         deps.logger,
       )
       await deps.actorPool?.stop()
+      await deps.projectionCompactor?.stop()
       await deps.telemetry?.shutdown()
       await deps.store?.close()
       deps.logger.info({ signal }, 'shutdown complete')

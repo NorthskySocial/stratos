@@ -7,11 +7,17 @@ import {
   migrateRecordSqliteDb,
   SqliteFeedgenStore,
 } from './sqlite.js'
-import type { FeedgenStore } from './types.js'
+import type { FeedgenStore, ProjectionCompactionStore } from './types.js'
 
 export * from './types.js'
 export * from './sqlite.js'
 export * from './postgres.js'
+
+export function isProjectionCompactionStore(
+  store: FeedgenStore,
+): store is FeedgenStore & ProjectionCompactionStore {
+  return 'compactProjection' in store
+}
 
 export async function createFeedgenStore(
   cfg: FeedgenConfig,
@@ -36,7 +42,22 @@ export async function createFeedgenStore(
       migrateMembershipSqliteDb(membershipDb),
     ])
     await importLegacyMembershipSnapshots(recordDb, membershipDb)
-    return new SqliteFeedgenStore(recordDb, membershipDb)
+    return new SqliteFeedgenStore(
+      recordDb,
+      membershipDb,
+      cfg.storageProfile === 'encrypted-volume'
+        ? {
+            maxAgeMs: requireProjectionValue(
+              cfg.projectionMaxAgeMs,
+              'projectionMaxAgeMs',
+            ),
+            maxBytes: requireProjectionValue(
+              cfg.projectionMaxBytes,
+              'projectionMaxBytes',
+            ),
+          }
+        : undefined,
+    )
   }
   if (!cfg.postgresUrl) {
     throw new Error('postgresUrl is required for postgres backend')
@@ -44,4 +65,14 @@ export async function createFeedgenStore(
   const db = createPgDb(cfg.postgresUrl, cfg.postgresSchema)
   await migratePgDb(db, cfg.postgresSchema)
   return new PgFeedgenStore(db)
+}
+
+function requireProjectionValue(
+  value: number | undefined,
+  field: string,
+): number {
+  if (value === undefined) {
+    throw new Error(`${field} is required for encrypted-volume storage`)
+  }
+  return value
 }

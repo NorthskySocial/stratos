@@ -14,7 +14,11 @@ import {
   createIdResolver,
 } from '../auth/index.js'
 import { type FeedgenConfig, loadFeedgenConfig } from '../config.js'
-import { createFeedgenStore, type FeedgenStore } from '../db/index.js'
+import {
+  createFeedgenStore,
+  isProjectionCompactionStore,
+  type FeedgenStore,
+} from '../db/index.js'
 import { EnrollmentManager } from '../enrollment/index.js'
 import { loadFeedRegistry } from '../feeds/index.js'
 import {
@@ -39,6 +43,7 @@ import {
 } from '../purge/index.js'
 import { SpaceMutationFence } from '../mutation-fence.js'
 import { FeedReadinessGate } from '../readiness.js'
+import { ProjectionCompactor } from '../retention/index.js'
 import { createFeedgenServer } from '../server.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
@@ -130,8 +135,30 @@ async function main(): Promise<void> {
     authorityDid: cfg.stratosServiceDid,
   })
 
+  const blobs = await createBlobService(cfg, upstream)
   const store = await createFeedgenStore(cfg)
   shutdownDeps.store = store
+  if (isProjectionCompactionStore(store)) {
+    const compactor = new ProjectionCompactor({
+      store,
+      evictBlobCacheEntries: (keys) => blobs.removeCacheEntries(keys),
+      onError: (error) =>
+        logger.error({ error }, 'projection compaction failed'),
+      onResult: (result) => {
+        if (
+          result.posts > 0 ||
+          result.blobCacheEntries > 0 ||
+          result.syncCursors > 0 ||
+          result.spaceCursors > 0
+        ) {
+          logger.info(result, 'projection compaction completed')
+        }
+      },
+    })
+    await compactor.runRequired()
+    compactor.start()
+    shutdownDeps.projectionCompactor = compactor
+  }
   const spaceMutationFence = new SpaceMutationFence()
   // Never serve the local projection until the enrollment stream has opened
   // and a complete current-authority reconciliation has finished.
@@ -150,7 +177,6 @@ async function main(): Promise<void> {
     reconcile: (signal: AbortSignal) => Promise<boolean>
   } | null = null
   const configuredBoundaries = new Set<string>()
-  const blobs = await createBlobService(cfg, upstream)
   const createSpaces = () => {
     const purger =
       subscription?.purger ??

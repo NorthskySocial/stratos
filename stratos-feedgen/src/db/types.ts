@@ -92,6 +92,36 @@ export interface GuardedBoundaryDeleteResult {
   spaceCursors: number
 }
 
+/** Bounds the durable serving projection without retaining it as an archive. */
+export interface ProjectionRetentionOptions {
+  maxAgeMs: number
+  maxBytes: number
+  batchSize?: number
+  now?: () => number
+}
+
+/** One bounded compaction pass over the serving projection. */
+export interface ProjectionCompactionResult {
+  posts: number
+  blobCacheEntries: number
+  syncCursors: number
+  spaceCursors: number
+  stagedRecords: number
+  pendingVerifications: number
+  hasMore: boolean
+}
+
+/** A compaction result with cache entries that still require disk removal. */
+export interface ProjectionCompactionBatch extends ProjectionCompactionResult {
+  blobCacheKeys: string[]
+}
+
+/** Store capability used only by the bounded durable-projection compactor. */
+export interface ProjectionCompactionStore {
+  compactProjection: () => Promise<ProjectionCompactionBatch>
+  completeBlobCacheEvictions?: (keys: readonly string[]) => Promise<void>
+}
+
 /**
  * Ephemeral materialized feed state. Sync cursors belong here because a
  * cursor is only valid while the records it checkpoints are available.
