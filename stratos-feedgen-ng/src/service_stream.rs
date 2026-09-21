@@ -110,6 +110,7 @@ async fn run_forever(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut attempt = 0_u32;
+    let mut actor_failures = actors.failure_receiver();
     while !*shutdown.borrow() {
         let result = run_connection(
             &config,
@@ -117,6 +118,7 @@ async fn run_forever(
             &lifecycle,
             authority.as_ref(),
             actors.as_ref(),
+            &mut actor_failures,
             &mut shutdown,
         )
         .await;
@@ -147,6 +149,7 @@ async fn run_connection(
     lifecycle: &ControlLifecycle,
     authority: &dyn AuthorityClient,
     actors: &ActorPool,
+    actor_failures: &mut watch::Receiver<u64>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<(), ServiceStreamError> {
     let now = OffsetDateTime::now_utc();
@@ -195,6 +198,7 @@ async fn run_connection(
     if summary.errors != 0 || summary.truncated {
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
+    actor_failures.borrow_and_update();
     actors
         .sync_from_store()
         .await
@@ -207,6 +211,9 @@ async fn run_connection(
                     let _ = socket.close(None).await;
                     return Ok(());
                 }
+            }
+            _ = actor_failures.changed() => {
+                return Err(ServiceStreamError::ReconciliationIncomplete);
             }
             message = socket.next() => {
                 let message = message.ok_or(ServiceStreamError::Connection)?

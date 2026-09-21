@@ -11,6 +11,7 @@ use crate::{
 
 const COMPACTION_INTERVAL: Duration = Duration::from_secs(60);
 const COMPACTION_BATCH: u16 = 128;
+const MAX_BACKGROUND_PASSES: u8 = 4;
 
 #[derive(Debug)]
 pub enum RetentionError {
@@ -37,7 +38,7 @@ impl RetentionCompactor {
         lifecycle: Arc<ControlLifecycle>,
         retention: ProjectionRetention,
     ) -> Result<Self, RetentionError> {
-        compact_once(&lifecycle, &retention).map_err(RetentionError::Store)?;
+        compact_until_current(&lifecycle, &retention).map_err(RetentionError::Store)?;
         let (shutdown, receiver) = watch::channel(false);
         let task = tokio::spawn(run_forever(lifecycle, retention, receiver));
         Ok(Self {
@@ -62,7 +63,10 @@ async fn run_forever(
     loop {
         tokio::select! {
             _ = tokio::time::sleep(COMPACTION_INTERVAL) => {
-                let _ = compact_once(&lifecycle, &retention);
+                if compact_bounded(&lifecycle, &retention).is_err() {
+                    lifecycle.mark_unavailable();
+                    return;
+                }
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -82,6 +86,26 @@ fn compact_once(
         retention.max_bytes,
         COMPACTION_BATCH,
     )
+}
+
+fn compact_until_current(
+    lifecycle: &ControlLifecycle,
+    retention: &ProjectionRetention,
+) -> Result<(), StoreError> {
+    while compact_once(lifecycle, retention)?.has_more {}
+    Ok(())
+}
+
+fn compact_bounded(
+    lifecycle: &ControlLifecycle,
+    retention: &ProjectionRetention,
+) -> Result<(), StoreError> {
+    for _ in 0..MAX_BACKGROUND_PASSES {
+        if !compact_once(lifecycle, retention)?.has_more {
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn format_utc_millis(value: OffsetDateTime) -> String {

@@ -90,6 +90,7 @@ pub struct ActorPoolStats {
 pub struct ActorPool {
     lifecycle: Arc<ControlLifecycle>,
     service_did: String,
+    failures: watch::Sender<u64>,
     commands: mpsc::Sender<PoolCommand>,
     manager: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -101,13 +102,15 @@ impl ActorPool {
     ) -> Result<Arc<Self>, ActorPoolError> {
         validate_config(&config)?;
         let (commands, receiver) = mpsc::channel(32);
+        let (failures, _) = watch::channel(0_u64);
         let pool = Arc::new(Self {
             lifecycle: Arc::clone(&lifecycle),
             service_did: config.service_did.clone(),
+            failures: failures.clone(),
             commands,
             manager: tokio::sync::Mutex::new(None),
         });
-        let manager = tokio::spawn(run_manager(config, lifecycle, receiver));
+        let manager = tokio::spawn(run_manager(config, lifecycle, failures, receiver));
         *pool
             .manager
             .try_lock()
@@ -164,6 +167,11 @@ impl ActorPool {
             .await
             .map_err(|_| ActorPoolError::Stopped)?;
         result.await.map_err(|_| ActorPoolError::Stopped)
+    }
+
+    /// Signals that an actor failed to keep its durable projection current.
+    pub fn failure_receiver(&self) -> watch::Receiver<u64> {
+        self.failures.subscribe()
     }
 
     /// Stops workers and waits for every frame already admitted by the lifecycle.
@@ -223,6 +231,7 @@ struct WorkerFinished {
 async fn run_manager(
     config: ActorStreamConfig,
     lifecycle: Arc<ControlLifecycle>,
+    failures: watch::Sender<u64>,
     mut commands: mpsc::Receiver<PoolCommand>,
 ) {
     let (finished, mut workers) = mpsc::unbounded_channel::<WorkerFinished>();
@@ -243,7 +252,7 @@ async fn run_manager(
                 if active.get(&completion.did).is_some_and(|worker: &ActiveWorker| worker.id == completion.id) {
                     active.remove(&completion.did);
                 }
-                start_waiting_workers(&config, &lifecycle, &finished, &desired, &mut active, &mut next_id);
+                start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut next_id);
             }
             command = commands.recv() => {
                 let Some(command) = command else {
@@ -258,7 +267,7 @@ async fn run_manager(
                         }
                         desired = actors;
                         stop_removed_workers(&active, &desired);
-                        start_waiting_workers(&config, &lifecycle, &finished, &desired, &mut active, &mut next_id);
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut next_id);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::SetActor { did, enrolled, reply } => {
@@ -274,7 +283,7 @@ async fn run_manager(
                                 let _ = worker.shutdown.send(true);
                             }
                         }
-                        start_waiting_workers(&config, &lifecycle, &finished, &desired, &mut active, &mut next_id);
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut next_id);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::Stats { reply } => {
@@ -320,6 +329,7 @@ fn stop_removed_workers(active: &BTreeMap<String, ActiveWorker>, desired: &BTree
 fn start_waiting_workers(
     config: &ActorStreamConfig,
     lifecycle: &Arc<ControlLifecycle>,
+    failures: &watch::Sender<u64>,
     finished: &mpsc::UnboundedSender<WorkerFinished>,
     desired: &BTreeSet<String>,
     active: &mut BTreeMap<String, ActiveWorker>,
@@ -339,9 +349,10 @@ fn start_waiting_workers(
         active.insert(did.clone(), ActiveWorker { id, shutdown });
         let config = config.clone();
         let lifecycle = Arc::clone(lifecycle);
+        let failures = failures.clone();
         let finished = finished.clone();
         tokio::spawn(async move {
-            run_actor_worker(config, lifecycle, did.clone(), receiver).await;
+            run_actor_worker(config, lifecycle, failures, did.clone(), receiver).await;
             let _ = finished.send(WorkerFinished { did, id });
         });
     }
@@ -350,6 +361,7 @@ fn start_waiting_workers(
 async fn run_actor_worker(
     config: ActorStreamConfig,
     lifecycle: Arc<ControlLifecycle>,
+    failures: watch::Sender<u64>,
     did: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -362,6 +374,7 @@ async fn run_actor_worker(
         if *shutdown.borrow() || matches!(result, Ok(ActorFrameResult::NotEnrolled)) {
             return;
         }
+        failures.send_modify(|count| *count = count.saturating_add(1));
         attempt = attempt.saturating_add(1);
         tokio::select! {
             _ = tokio::time::sleep(reconnect_delay(attempt)) => {}
@@ -630,6 +643,7 @@ mod tests {
             lifecycle,
         )
         .unwrap();
+        let mut failures = pool.failure_receiver();
         assert_eq!(
             pool.sync_from_store().await.unwrap(),
             super::ActorPoolStats {
@@ -638,6 +652,10 @@ mod tests {
                 max_connections: 1,
             }
         );
+        tokio::time::timeout(Duration::from_secs(1), failures.changed())
+            .await
+            .unwrap()
+            .unwrap();
         tokio::time::timeout(Duration::from_millis(100), pool.stop())
             .await
             .unwrap();
