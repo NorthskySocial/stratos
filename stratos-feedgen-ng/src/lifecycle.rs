@@ -8,7 +8,7 @@ use crate::{
     feeds::FeedRegistry,
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
-    store::{ActorPage, StoreError, StoreInterrupt},
+    store::{ActorEnrollment, ActorPage, EnrollmentReconciliation, StoreError, StoreInterrupt},
 };
 
 pub struct ControlLifecycle {
@@ -128,6 +128,31 @@ impl ControlLifecycle {
             .lock()
             .expect("projection lock poisoned")
             .apply_actor_page(page)
+    }
+
+    pub fn list_actor_enrollments_page(
+        &self,
+        after_did: Option<&str>,
+        limit: u16,
+    ) -> Result<Vec<ActorEnrollment>, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .list_actor_enrollments_page(after_did, limit)
+    }
+
+    pub fn reconcile_actor_enrollment(
+        &self,
+        did: &str,
+        observed_at: &str,
+        enrollment: Option<ActorEnrollment>,
+    ) -> Result<EnrollmentReconciliation, StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .reconcile_actor_enrollment(did, observed_at, enrollment)
     }
 
     pub fn apply_viewer_authorization(

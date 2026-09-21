@@ -15,6 +15,7 @@ pub mod identifier;
 pub mod identity;
 pub mod lifecycle;
 pub mod readiness;
+pub mod reconciliation;
 pub mod runtime;
 pub mod server;
 pub mod service;

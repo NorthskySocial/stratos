@@ -1,7 +1,10 @@
 use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
-    store::{ActorPage, EncryptedStore, FeedPage, StoreError, StoreInterrupt},
+    store::{
+        ActorEnrollment, ActorPage, EncryptedStore, EnrollmentReconciliation, FeedPage, StoreError,
+        StoreInterrupt,
+    },
 };
 use std::collections::BTreeSet;
 
@@ -67,6 +70,32 @@ impl ProjectionReader {
             self.admission.invalidate_boundary(&boundary);
         }
         Ok(())
+    }
+    pub fn list_actor_enrollments_page(
+        &self,
+        after_did: Option<&str>,
+        limit: u16,
+    ) -> Result<Vec<ActorEnrollment>, StoreError> {
+        self.store.list_actor_enrollments_page(after_did, limit)
+    }
+    pub fn reconcile_actor_enrollment(
+        &mut self,
+        did: &str,
+        observed_at: &str,
+        enrollment: Option<ActorEnrollment>,
+    ) -> Result<EnrollmentReconciliation, StoreError> {
+        let mut affected = enrollment
+            .as_ref()
+            .map(|entry| entry.boundaries.iter().cloned().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
+        let result = self
+            .store
+            .reconcile_actor_enrollment(did, observed_at, enrollment)?;
+        affected.extend(result.removed_boundaries.iter().cloned());
+        for boundary in affected {
+            self.admission.invalidate_boundary(&boundary);
+        }
+        Ok(result)
     }
     pub fn revoke_boundary(&mut self, boundary: &str) -> Result<u64, StoreError> {
         self.admission.invalidate_boundary(boundary);
