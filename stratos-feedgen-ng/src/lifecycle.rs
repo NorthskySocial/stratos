@@ -178,6 +178,7 @@ impl ControlLifecycle {
     pub fn compact_projection(
         &self,
         as_of: &str,
+        maximum_retained_at: &str,
         max_bytes: u64,
         limit: u16,
     ) -> Result<crate::store::ProjectionCompaction, StoreError> {
@@ -185,7 +186,7 @@ impl ControlLifecycle {
         self.projection
             .lock()
             .expect("projection lock poisoned")
-            .compact_projection(as_of, max_bytes, limit)
+            .compact_projection(as_of, maximum_retained_at, max_bytes, limit)
     }
 
     pub fn actor_sync_state(

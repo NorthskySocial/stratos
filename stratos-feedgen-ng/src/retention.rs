@@ -12,15 +12,24 @@ use crate::{
 const COMPACTION_INTERVAL: Duration = Duration::from_secs(60);
 const COMPACTION_BATCH: u16 = 128;
 const MAX_BACKGROUND_PASSES: u8 = 4;
+const MAX_STARTUP_PASSES: u8 = 64;
 
 #[derive(Debug)]
 pub enum RetentionError {
     Store(StoreError),
+    NotCaughtUp,
 }
 
 impl fmt::Display for RetentionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Feedgen NG projection retention could not start")
+        match self {
+            Self::Store(_) => {
+                formatter.write_str("Feedgen NG projection retention could not start")
+            }
+            Self::NotCaughtUp => {
+                formatter.write_str("Feedgen NG projection retention is not caught up")
+            }
+        }
     }
 }
 
@@ -38,7 +47,7 @@ impl RetentionCompactor {
         lifecycle: Arc<ControlLifecycle>,
         retention: ProjectionRetention,
     ) -> Result<Self, RetentionError> {
-        compact_until_current(&lifecycle, &retention).map_err(RetentionError::Store)?;
+        compact_until_current(&lifecycle, &retention)?;
         let (shutdown, receiver) = watch::channel(false);
         let task = tokio::spawn(run_forever(lifecycle, retention, receiver));
         Ok(Self {
@@ -81,8 +90,15 @@ fn compact_once(
     lifecycle: &ControlLifecycle,
     retention: &ProjectionRetention,
 ) -> Result<ProjectionCompaction, StoreError> {
+    let now = OffsetDateTime::now_utc();
+    let seconds = i64::try_from(retention.max_age.as_secs())
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    let maximum_retained_at = now
+        .checked_add(time::Duration::seconds(seconds))
+        .ok_or(StoreError::InvalidProjectionMutation)?;
     lifecycle.compact_projection(
-        &format_utc_millis(OffsetDateTime::now_utc()),
+        &format_utc_millis(now),
+        &format_utc_millis(maximum_retained_at),
         retention.max_bytes,
         COMPACTION_BATCH,
     )
@@ -91,9 +107,16 @@ fn compact_once(
 fn compact_until_current(
     lifecycle: &ControlLifecycle,
     retention: &ProjectionRetention,
-) -> Result<(), StoreError> {
-    while compact_once(lifecycle, retention)?.has_more {}
-    Ok(())
+) -> Result<(), RetentionError> {
+    for _ in 0..MAX_STARTUP_PASSES {
+        if !compact_once(lifecycle, retention)
+            .map_err(RetentionError::Store)?
+            .has_more
+        {
+            return Ok(());
+        }
+    }
+    Err(RetentionError::NotCaughtUp)
 }
 
 fn compact_bounded(

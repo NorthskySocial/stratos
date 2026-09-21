@@ -772,10 +772,11 @@ impl EncryptedStore {
     pub fn compact_projection(
         &mut self,
         as_of: &str,
+        maximum_retained_at: &str,
         max_bytes: u64,
         limit: u16,
     ) -> Result<ProjectionCompaction, StoreError> {
-        if !is_utc_timestamp(as_of) {
+        if !is_utc_timestamp(as_of) || !is_utc_timestamp(maximum_retained_at) {
             return Err(StoreError::InvalidProjectionMutation);
         }
         let max_bytes =
@@ -787,8 +788,8 @@ impl EncryptedStore {
             .map_err(StoreError::Open)?;
         let expired = transaction
             .execute(
-                "DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 ORDER BY retained_at ASC, uri ASC LIMIT ?2)",
-                params![as_of, limit],
+                "DELETE FROM post WHERE uri IN (SELECT uri FROM post WHERE retained_at <= ?1 OR retained_at > ?2 ORDER BY retained_at ASC, uri ASC LIMIT ?3)",
+                params![as_of, maximum_retained_at, limit],
             )
             .map_err(StoreError::Open)?;
         let deleted = if expired != 0 {
@@ -814,8 +815,8 @@ impl EncryptedStore {
         };
         let expired_remaining: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM post WHERE retained_at <= ?1)",
-                [as_of],
+                "SELECT EXISTS(SELECT 1 FROM post WHERE retained_at <= ?1 OR retained_at > ?2)",
+                params![as_of, maximum_retained_at],
                 |row| row.get(0),
             )
             .map_err(StoreError::Open)?;
@@ -2092,7 +2093,12 @@ mod tests {
 
         assert_eq!(
             store
-                .compact_projection("1998-04-01T00:00:00.000Z", (total - 1) as u64, 1)
+                .compact_projection(
+                    "1998-04-01T00:00:00.000Z",
+                    "1998-06-01T00:00:00.000Z",
+                    (total - 1) as u64,
+                    1,
+                )
                 .unwrap(),
             ProjectionCompaction {
                 deleted: 1,
@@ -2105,6 +2111,29 @@ mod tests {
                 .query_row("SELECT uri FROM post", [], |row| row.get::<_, String>(0))
                 .unwrap(),
             "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra"
+        );
+    }
+
+    #[test]
+    fn compaction_applies_a_shortened_retention_policy_to_existing_posts() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let mut post = spike_post();
+        post.retained_at = "1998-05-03T00:00:00.000Z".to_owned();
+        store
+            .apply_actor_page(actor_page(8, vec![post], Vec::new()))
+            .unwrap();
+
+        assert_eq!(
+            store
+                .compact_projection(
+                    "1998-04-03T00:00:00.000Z",
+                    "1998-04-04T00:00:00.000Z",
+                    u64::MAX / 2,
+                    1,
+                )
+                .unwrap()
+                .deleted,
+            1
         );
     }
 

@@ -111,10 +111,13 @@ impl ProjectionReader {
     pub fn compact_projection(
         &mut self,
         as_of: &str,
+        maximum_retained_at: &str,
         max_bytes: u64,
         limit: u16,
     ) -> Result<ProjectionCompaction, StoreError> {
-        let result = self.store.compact_projection(as_of, max_bytes, limit)?;
+        let result = self
+            .store
+            .compact_projection(as_of, maximum_retained_at, max_bytes, limit)?;
         if result.deleted != 0 {
             self.admission.replace_projection();
         }
