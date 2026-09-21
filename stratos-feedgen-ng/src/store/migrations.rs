@@ -128,6 +128,24 @@ const MIGRATIONS: &[Migration] = &[
           ON space_sync_pending_verification(boundary, space_uri, did);
     "#,
     },
+    Migration {
+        version: 3,
+        sql: r#"
+        CREATE TABLE actor_enrollment (
+          did TEXT PRIMARY KEY,
+          boundaries_json BLOB NOT NULL,
+          observed_at TEXT NOT NULL,
+          enrolled INTEGER NOT NULL CHECK (enrolled IN (0, 1))
+        );
+    "#,
+    },
+    Migration {
+        version: 4,
+        sql: r#"
+        CREATE INDEX actor_enrollment_enrolled_did_idx
+          ON actor_enrollment(enrolled, did);
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -167,13 +185,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 4);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 2);
+        assert_eq!(migration_count, 4);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -255,7 +273,7 @@ mod tests {
     #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 3).unwrap();
+        connection.pragma_update(None, "user_version", 5).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }

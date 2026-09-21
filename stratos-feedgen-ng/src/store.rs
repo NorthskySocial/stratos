@@ -20,6 +20,7 @@ const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
 const SQLITE_CACHE_KIB: u32 = 16 * 1024;
 const MAX_PURGE_BATCH: u16 = 512;
 const MAX_SPACE_PROMOTION_BATCH: u16 = 512;
+const MAX_ACTOR_ENROLLMENT_PAGE: u16 = 512;
 const SQLITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
 pub struct StorageKey([u8; STORAGE_KEY_BYTES]);
@@ -233,6 +234,25 @@ pub struct ActorPage {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActorEnrollment {
+    pub did: String,
+    pub boundaries: Vec<String>,
+    pub observed_at: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnrollmentReconciliation {
+    pub removed_boundaries: Vec<String>,
+    pub removed_posts: u64,
+    pub enrolled: bool,
+}
+
+struct StoredActorEnrollment {
+    enrollment: Option<ActorEnrollment>,
+    observed_at: String,
+}
+
 pub struct SpaceStagePage {
     pub space_uri: String,
     pub actor_did: String,
@@ -376,6 +396,189 @@ impl EncryptedStore {
             )
             .map_err(StoreError::Open)?;
         transaction.commit().map_err(StoreError::Open)
+    }
+
+    pub fn list_actor_enrollments_page(
+        &self,
+        after_did: Option<&str>,
+        limit: u16,
+    ) -> Result<Vec<ActorEnrollment>, StoreError> {
+        if limit == 0 || limit > MAX_ACTOR_ENROLLMENT_PAGE {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT did, boundaries_json, observed_at FROM actor_enrollment
+                 WHERE enrolled = 1 AND (?1 IS NULL OR did > ?1)
+                 ORDER BY did ASC LIMIT ?2",
+            )
+            .map_err(StoreError::Open)?;
+        statement
+            .query_map(params![after_did, i64::from(limit)], |row| {
+                let boundaries: Vec<String> = serde_json::from_slice(&row.get::<_, Vec<u8>>(1)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                Ok(ActorEnrollment {
+                    did: row.get(0)?,
+                    boundaries,
+                    observed_at: row.get(2)?,
+                })
+            })
+            .map_err(StoreError::Open)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::Open)
+    }
+
+    pub fn reconcile_actor_enrollment(
+        &mut self,
+        did: &str,
+        observed_at: &str,
+        enrollment: Option<ActorEnrollment>,
+    ) -> Result<EnrollmentReconciliation, StoreError> {
+        crate::identifier::Did::parse(did.to_owned())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        if !is_utc_timestamp(observed_at) {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        if let Some(entry) = &enrollment {
+            validate_actor_enrollment(entry)?;
+            if entry.did != did || entry.observed_at != observed_at {
+                return Err(StoreError::InvalidProjectionMutation);
+            }
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        let previous = load_actor_enrollment(&transaction, did)?;
+        if let Some(previous) = &previous {
+            if previous.observed_at.as_str() > observed_at {
+                return Err(StoreError::StaleCursor);
+            }
+            if previous.observed_at == observed_at {
+                if previous.enrollment.as_ref() == enrollment.as_ref() {
+                    return Ok(EnrollmentReconciliation {
+                        removed_boundaries: Vec::new(),
+                        removed_posts: 0,
+                        enrolled: enrollment.is_some(),
+                    });
+                }
+                return Err(StoreError::StaleCursor);
+            }
+        }
+        let (removed_boundaries, removed_posts, enrolled) = match enrollment {
+            Some(entry) => {
+                let current = entry
+                    .boundaries
+                    .iter()
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>();
+                let removed_boundaries = previous
+                    .as_ref()
+                    .and_then(|previous| previous.enrollment.as_ref())
+                    .map(|previous| {
+                        previous
+                            .boundaries
+                            .iter()
+                            .filter(|boundary| !current.contains(*boundary))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                for boundary in &removed_boundaries {
+                    transaction
+                        .execute(
+                            "DELETE FROM post_boundary WHERE boundary = ?1 AND uri IN (SELECT uri FROM post WHERE author_did = ?2)",
+                            params![boundary, did],
+                        )
+                        .map_err(StoreError::Open)?;
+                    transaction
+                        .execute(
+                            "DELETE FROM source_coverage WHERE source_id = ?1 AND boundary = ?2",
+                            params![did, boundary],
+                        )
+                        .map_err(StoreError::Open)?;
+                    transaction
+                        .execute(
+                            "DELETE FROM space_cursor WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
+                            params![did, boundary],
+                        )
+                        .map_err(StoreError::Open)?;
+                    transaction
+                        .execute(
+                            "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
+                            params![did, boundary],
+                        )
+                        .map_err(StoreError::Open)?;
+                    transaction
+                        .execute(
+                            "DELETE FROM space_sync_stage WHERE did = ?1 AND boundary = ?2",
+                            params![did, boundary],
+                        )
+                        .map_err(StoreError::Open)?;
+                }
+                let removed_posts = transaction
+                    .execute(
+                        "DELETE FROM post WHERE author_did = ?1 AND NOT EXISTS (SELECT 1 FROM post_boundary WHERE post_boundary.uri = post.uri)",
+                        [did],
+                    )
+                    .map_err(StoreError::Open)? as u64;
+                let boundaries_json = serde_json::to_vec(&entry.boundaries)
+                    .map_err(|_| StoreError::InvalidProjectionMutation)?;
+                transaction
+                    .execute(
+                        "INSERT INTO actor_enrollment (did, boundaries_json, observed_at, enrolled) VALUES (?1, ?2, ?3, 1)
+                         ON CONFLICT(did) DO UPDATE SET boundaries_json = excluded.boundaries_json, observed_at = excluded.observed_at, enrolled = excluded.enrolled",
+                        params![entry.did, boundaries_json, observed_at],
+                    )
+                    .map_err(StoreError::Open)?;
+                (removed_boundaries, removed_posts, true)
+            }
+            None => {
+                let removed_boundaries = previous
+                    .and_then(|previous| previous.enrollment)
+                    .map(|previous| previous.boundaries)
+                    .unwrap_or_default();
+                let removed_posts = transaction
+                    .execute("DELETE FROM post WHERE author_did = ?1", [did])
+                    .map_err(StoreError::Open)? as u64;
+                transaction
+                    .execute("DELETE FROM actor_cursor WHERE did = ?1", [did])
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute("DELETE FROM source_coverage WHERE source_id = ?1", [did])
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute("DELETE FROM suppression_marker WHERE source_id = ?1", [did])
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute("DELETE FROM space_cursor WHERE did = ?1", [did])
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute(
+                        "DELETE FROM space_sync_pending_verification WHERE did = ?1",
+                        [did],
+                    )
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute("DELETE FROM space_sync_stage WHERE did = ?1", [did])
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute(
+                        "INSERT INTO actor_enrollment (did, boundaries_json, observed_at, enrolled) VALUES (?1, '[]', ?2, 0)
+                         ON CONFLICT(did) DO UPDATE SET boundaries_json = excluded.boundaries_json, observed_at = excluded.observed_at, enrolled = excluded.enrolled",
+                        params![did, observed_at],
+                    )
+                    .map_err(StoreError::Open)?;
+                (removed_boundaries, removed_posts, false)
+            }
+        };
+        transaction.commit().map_err(StoreError::Open)?;
+        Ok(EnrollmentReconciliation {
+            removed_boundaries,
+            removed_posts,
+            enrolled,
+        })
     }
 
     pub fn list_boundaries_for_uris(&self, uris: &[String]) -> Result<Vec<String>, StoreError> {
@@ -634,6 +837,53 @@ fn is_space_uri(value: &str) -> bool {
         .collect();
     matches!(segments.as_slice(), [authority, "space", space_type, space_key]
         if crate::identifier::RecordUri::parse(&format!("at://{authority}/space/{space_type}/{space_key}/did:plc:spikespiegel/zone.stratos.feed.post/x")).is_ok())
+}
+
+fn load_actor_enrollment(
+    transaction: &rusqlite::Transaction<'_>,
+    did: &str,
+) -> Result<Option<StoredActorEnrollment>, StoreError> {
+    transaction
+        .query_row(
+            "SELECT did, boundaries_json, observed_at, enrolled FROM actor_enrollment WHERE did = ?1",
+            [did],
+            |row| {
+                let boundaries: Vec<String> = serde_json::from_slice(&row.get::<_, Vec<u8>>(1)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                let observed_at: String = row.get(2)?;
+                let enrolled: bool = row.get(3)?;
+                Ok(StoredActorEnrollment {
+                    enrollment: enrolled.then_some(ActorEnrollment {
+                        did: row.get(0)?,
+                        boundaries,
+                        observed_at: observed_at.clone(),
+                    }),
+                    observed_at,
+                })
+            },
+        )
+        .optional()
+        .map_err(StoreError::Open)
+}
+
+fn validate_actor_enrollment(enrollment: &ActorEnrollment) -> Result<(), StoreError> {
+    if enrollment.boundaries.len() > 128
+        || enrollment
+            .boundaries
+            .iter()
+            .any(|boundary| boundary.is_empty() || boundary.len() > 256 || !boundary.is_ascii())
+        || !is_utc_timestamp(&enrollment.observed_at)
+    {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    let unique = enrollment
+        .boundaries
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if unique.len() != enrollment.boundaries.len() {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    Ok(())
 }
 
 fn validate_space_stage_page(page: &SpaceStagePage) -> Result<(), StoreError> {
@@ -1038,8 +1288,8 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        ActorPage, EncryptedStore, ProjectionPost, SpaceStageMutation, SpaceStagePage, StorageKey,
-        StoreError,
+        ActorEnrollment, ActorPage, EncryptedStore, MAX_ACTOR_ENROLLMENT_PAGE, ProjectionPost,
+        SpaceStageMutation, SpaceStagePage, StorageKey, StoreError,
     };
 
     fn key(byte: u8) -> StorageKey {
@@ -1115,6 +1365,236 @@ mod tests {
     fn opens_only_when_sqlcipher_is_available() {
         let store = EncryptedStore::open_memory(key(7)).unwrap();
         assert!(!store.cipher_version().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reconciles_actor_enrollment_shrink_and_unenrollment_atomically() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let mut post = spike_post();
+        post.boundaries = vec!["bebop".to_owned(), "crew".to_owned()];
+        store
+            .apply_actor_page(actor_page(1, vec![post], Vec::new()))
+            .unwrap();
+        let initial = ActorEnrollment {
+            did: "did:plc:spikespiegel".to_owned(),
+            boundaries: vec!["bebop".to_owned(), "crew".to_owned()],
+            observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+        };
+        assert!(
+            store
+                .reconcile_actor_enrollment(
+                    "did:plc:spikespiegel",
+                    "1998-04-03T00:00:00.000Z",
+                    Some(initial),
+                )
+                .unwrap()
+                .removed_boundaries
+                .is_empty()
+        );
+        store
+            .connection
+            .execute(
+                "INSERT INTO source_coverage (authority_did, source_id, boundary, start_sequence, end_sequence, verified_at)
+                 VALUES ('did:plc:authority', 'did:plc:spikespiegel', 'crew', 0, 1, '1998-04-03T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO space_sync_pending_verification (space_uri, did, boundary, updated_at)
+                 VALUES ('at://did:web:stratos.example/space/zone.stratos.space.feed/crew', 'did:plc:spikespiegel', 'crew', '1998-04-03T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO suppression_marker (authority_did, source_id, uri, sequence)
+                 VALUES ('did:plc:authority', 'did:plc:spikespiegel', 'at://did:plc:spikespiegel/zone.stratos.feed.post/spike', 1)",
+                [],
+            )
+            .unwrap();
+
+        let shrunk = ActorEnrollment {
+            did: "did:plc:spikespiegel".to_owned(),
+            boundaries: vec!["bebop".to_owned()],
+            observed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+        };
+        let result = store
+            .reconcile_actor_enrollment(
+                "did:plc:spikespiegel",
+                "1998-04-03T00:00:01.000Z",
+                Some(shrunk),
+            )
+            .unwrap();
+        assert_eq!(result.removed_boundaries, ["crew"]);
+        assert_eq!(result.removed_posts, 0);
+        assert_eq!(store.list_actor_enrollments_page(None, 1).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM post_boundary WHERE boundary = 'crew'",
+                    [],
+                    |row| row.get::<_, u64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM source_coverage WHERE boundary = 'crew'",
+                    [],
+                    |row| row.get::<_, u64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM space_sync_pending_verification WHERE boundary = 'crew'",
+                    [],
+                    |row| row.get::<_, u64>(0)
+                )
+                .unwrap(),
+            0
+        );
+
+        store
+            .stage_space_page(
+                space_stage_page(Some("firehose:8")),
+                vec![staged_space_post()],
+            )
+            .unwrap();
+        store
+            .stage_space_page(space_stage_page(None), Vec::new())
+            .unwrap();
+
+        let result = store
+            .reconcile_actor_enrollment("did:plc:spikespiegel", "1998-04-03T00:00:02.000Z", None)
+            .unwrap();
+        assert!(!result.enrolled);
+        assert_eq!(result.removed_posts, 1);
+        assert!(
+            store
+                .list_actor_enrollments_page(None, 1)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM actor_cursor", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(matches!(
+            store.promote_verified_space_stage(
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                "did:plc:spikespiegel",
+                "1998-04-04T00:00:00.000Z",
+            ),
+            Err(StoreError::UnverifiedSpaceStage)
+        ));
+        for table in [
+            "space_cursor",
+            "space_sync_pending_verification",
+            "space_sync_stage",
+        ] {
+            let count: u64 = store
+                .connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table}");
+        }
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM source_coverage", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM suppression_marker", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn rejects_a_stale_unenrollment_after_a_later_enrollment() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let enrolled = ActorEnrollment {
+            did: "did:plc:spikespiegel".to_owned(),
+            boundaries: vec!["bebop".to_owned()],
+            observed_at: "1998-04-03T00:00:02.000Z".to_owned(),
+        };
+        store
+            .reconcile_actor_enrollment(
+                "did:plc:spikespiegel",
+                "1998-04-03T00:00:02.000Z",
+                Some(enrolled),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            store.reconcile_actor_enrollment(
+                "did:plc:spikespiegel",
+                "1998-04-03T00:00:01.000Z",
+                None,
+            ),
+            Err(StoreError::StaleCursor)
+        ));
+        assert_eq!(store.list_actor_enrollments_page(None, 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn bounds_actor_enrollment_pages() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        for (did, boundary, observed_at) in [
+            ("did:plc:spike", "bebop", "1998-04-03T00:00:00.000Z"),
+            ("did:plc:jet", "crew", "1998-04-03T00:00:01.000Z"),
+        ] {
+            store
+                .reconcile_actor_enrollment(
+                    did,
+                    observed_at,
+                    Some(ActorEnrollment {
+                        did: did.to_owned(),
+                        boundaries: vec![boundary.to_owned()],
+                        observed_at: observed_at.to_owned(),
+                    }),
+                )
+                .unwrap();
+        }
+
+        let first_page = store.list_actor_enrollments_page(None, 1).unwrap();
+        assert_eq!(first_page.len(), 1);
+        let second_page = store
+            .list_actor_enrollments_page(Some(&first_page[0].did), 1)
+            .unwrap();
+        assert_eq!(second_page.len(), 1);
+        assert_ne!(first_page[0].did, second_page[0].did);
+        assert!(matches!(
+            store.list_actor_enrollments_page(None, 0),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert!(matches!(
+            store.list_actor_enrollments_page(None, MAX_ACTOR_ENROLLMENT_PAGE + 1),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
     }
 
     #[test]
