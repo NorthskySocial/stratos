@@ -215,6 +215,14 @@ pub struct ActorPage {
     pub updated_at: String,
 }
 
+pub struct SpaceStagePage {
+    pub space_uri: String,
+    pub actor_did: String,
+    pub boundary: String,
+    pub next_cursor: Option<String>,
+    pub updated_at: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedPost {
     pub uri: String,
@@ -317,6 +325,39 @@ impl EncryptedStore {
                 params![page.authority_did, page.actor_did, sequence, page.updated_at],
             )
             .map_err(StoreError::Open)?;
+        transaction.commit().map_err(StoreError::Open)
+    }
+
+    pub fn mark_space_stage_terminal(&mut self, page: SpaceStagePage) -> Result<(), StoreError> {
+        crate::identifier::Did::parse(page.actor_did.clone())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        if !is_space_uri(&page.space_uri)
+            || page.boundary.is_empty()
+            || !is_utc_timestamp(&page.updated_at)
+        {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        if let Some(cursor) = page.next_cursor {
+            transaction
+                .execute(
+                    "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
+                    params![page.space_uri, page.actor_did],
+                )
+                .map_err(StoreError::Open)?;
+            transaction.execute("INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(space_uri, did) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at", params![page.space_uri, page.actor_did, cursor, page.updated_at]).map_err(StoreError::Open)?;
+        } else {
+            transaction
+                .execute(
+                    "DELETE FROM space_cursor WHERE space_uri = ?1 AND did = ?2",
+                    params![page.space_uri, page.actor_did],
+                )
+                .map_err(StoreError::Open)?;
+            transaction.execute("INSERT INTO space_sync_pending_verification (space_uri, did, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(space_uri, did) DO UPDATE SET updated_at = excluded.updated_at", params![page.space_uri, page.actor_did, page.updated_at]).map_err(StoreError::Open)?;
+        }
         transaction.commit().map_err(StoreError::Open)
     }
 
@@ -442,6 +483,16 @@ impl EncryptedStore {
         migrations::apply(&mut connection).map_err(StoreError::Open)?;
         Ok(Self { connection })
     }
+}
+
+fn is_space_uri(value: &str) -> bool {
+    let segments: Vec<_> = value
+        .strip_prefix("at://")
+        .unwrap_or_default()
+        .split('/')
+        .collect();
+    matches!(segments.as_slice(), [authority, "space", space_type, space_key]
+        if crate::identifier::RecordUri::parse(&format!("at://{authority}/space/{space_type}/{space_key}/did:plc:spikespiegel/zone.stratos.feed.post/x")).is_ok())
 }
 
 fn feed_post_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedPost> {
@@ -889,6 +940,39 @@ mod tests {
                 .posts
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn terminal_space_stage_stays_invisible_until_promotion() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .mark_space_stage_terminal(super::SpaceStagePage {
+                space_uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop"
+                    .to_string(),
+                actor_did: "did:plc:spikespiegel".to_string(),
+                boundary: "bebop".to_string(),
+                next_cursor: None,
+                updated_at: "1998-04-03T00:00:00.000Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM space_sync_pending_verification",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 
