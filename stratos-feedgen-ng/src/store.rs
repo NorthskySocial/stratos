@@ -223,6 +223,20 @@ pub struct SpaceStagePage {
     pub updated_at: String,
 }
 
+pub enum SpaceStageMutation {
+    Upsert {
+        uri: String,
+        cid: String,
+        sort_at: String,
+        indexed_at: String,
+        record_json: Vec<u8>,
+        blob_refs_json: Vec<u8>,
+    },
+    Delete {
+        uri: String,
+    },
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedPost {
     pub uri: String,
@@ -329,35 +343,23 @@ impl EncryptedStore {
     }
 
     pub fn mark_space_stage_terminal(&mut self, page: SpaceStagePage) -> Result<(), StoreError> {
-        crate::identifier::Did::parse(page.actor_did.clone())
-            .map_err(|_| StoreError::InvalidProjectionMutation)?;
-        if !is_space_uri(&page.space_uri)
-            || page.boundary.is_empty()
-            || !is_utc_timestamp(&page.updated_at)
-        {
-            return Err(StoreError::InvalidProjectionMutation);
-        }
+        self.stage_space_page(page, Vec::new())
+    }
+
+    pub fn stage_space_page(
+        &mut self,
+        page: SpaceStagePage,
+        mutations: Vec<SpaceStageMutation>,
+    ) -> Result<(), StoreError> {
+        validate_space_stage_page(&page)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
-        if let Some(cursor) = page.next_cursor {
-            transaction
-                .execute(
-                    "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
-                    params![page.space_uri, page.actor_did],
-                )
-                .map_err(StoreError::Open)?;
-            transaction.execute("INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(space_uri, did) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at", params![page.space_uri, page.actor_did, cursor, page.updated_at]).map_err(StoreError::Open)?;
-        } else {
-            transaction
-                .execute(
-                    "DELETE FROM space_cursor WHERE space_uri = ?1 AND did = ?2",
-                    params![page.space_uri, page.actor_did],
-                )
-                .map_err(StoreError::Open)?;
-            transaction.execute("INSERT INTO space_sync_pending_verification (space_uri, did, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(space_uri, did) DO UPDATE SET updated_at = excluded.updated_at", params![page.space_uri, page.actor_did, page.updated_at]).map_err(StoreError::Open)?;
+        for mutation in mutations {
+            stage_space_mutation(&transaction, &page, mutation)?;
         }
+        update_space_stage_checkpoint(&transaction, &page)?;
         transaction.commit().map_err(StoreError::Open)
     }
 
@@ -495,6 +497,131 @@ fn is_space_uri(value: &str) -> bool {
         if crate::identifier::RecordUri::parse(&format!("at://{authority}/space/{space_type}/{space_key}/did:plc:spikespiegel/zone.stratos.feed.post/x")).is_ok())
 }
 
+fn validate_space_stage_page(page: &SpaceStagePage) -> Result<(), StoreError> {
+    crate::identifier::Did::parse(page.actor_did.clone())
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    if !is_space_uri(&page.space_uri)
+        || page.boundary.is_empty()
+        || page.next_cursor.as_deref().is_some_and(str::is_empty)
+        || !is_utc_timestamp(&page.updated_at)
+    {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    Ok(())
+}
+
+fn stage_space_mutation(
+    transaction: &rusqlite::Transaction<'_>,
+    page: &SpaceStagePage,
+    mutation: SpaceStageMutation,
+) -> Result<(), StoreError> {
+    match mutation {
+        SpaceStageMutation::Upsert {
+            uri,
+            cid,
+            sort_at,
+            indexed_at,
+            record_json,
+            blob_refs_json,
+        } => {
+            validate_space_stage_uri(page, &uri)?;
+            if cid.is_empty() || !is_utc_timestamp(&sort_at) || !is_utc_timestamp(&indexed_at) {
+                return Err(StoreError::InvalidProjectionMutation);
+            }
+            transaction
+                .execute(
+                    "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, cid, sort_at, indexed_at, record_json, blob_refs_json, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)
+                     ON CONFLICT(space_uri, did, uri) DO UPDATE SET boundary = excluded.boundary,
+                       deleted = excluded.deleted, cid = excluded.cid, sort_at = excluded.sort_at,
+                       indexed_at = excluded.indexed_at, record_json = excluded.record_json,
+                       blob_refs_json = excluded.blob_refs_json, updated_at = excluded.updated_at",
+                    params![
+                        page.space_uri,
+                        page.actor_did,
+                        uri,
+                        page.boundary,
+                        cid,
+                        sort_at,
+                        indexed_at,
+                        record_json,
+                        blob_refs_json,
+                        page.updated_at,
+                    ],
+                )
+                .map_err(StoreError::Open)?;
+        }
+        SpaceStageMutation::Delete { uri } => {
+            validate_space_stage_uri(page, &uri)?;
+            transaction
+                .execute(
+                    "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, cid, sort_at, indexed_at, record_json, blob_refs_json, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, 1, NULL, NULL, NULL, NULL, NULL, ?5)
+                     ON CONFLICT(space_uri, did, uri) DO UPDATE SET boundary = excluded.boundary,
+                       deleted = excluded.deleted, cid = NULL, sort_at = NULL, indexed_at = NULL,
+                       record_json = NULL, blob_refs_json = NULL, updated_at = excluded.updated_at",
+                    params![
+                        page.space_uri,
+                        page.actor_did,
+                        uri,
+                        page.boundary,
+                        page.updated_at,
+                    ],
+                )
+                .map_err(StoreError::Open)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_space_stage_uri(page: &SpaceStagePage, value: &str) -> Result<(), StoreError> {
+    let uri = crate::identifier::RecordUri::parse(value)
+        .map_err(|_| StoreError::InvalidProjectionMutation)?;
+    if !matches!(uri, crate::identifier::RecordUri::Space { .. })
+        || uri.author().as_str() != page.actor_did
+        || !value.starts_with(&format!("{}/", page.space_uri))
+    {
+        return Err(StoreError::InvalidProjectionMutation);
+    }
+    Ok(())
+}
+
+fn update_space_stage_checkpoint(
+    transaction: &rusqlite::Transaction<'_>,
+    page: &SpaceStagePage,
+) -> Result<(), StoreError> {
+    if let Some(cursor) = &page.next_cursor {
+        transaction
+            .execute(
+                "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
+                params![page.space_uri, page.actor_did],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(space_uri, did) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
+                params![page.space_uri, page.actor_did, cursor, page.updated_at],
+            )
+            .map_err(StoreError::Open)?;
+    } else {
+        transaction
+            .execute(
+                "DELETE FROM space_cursor WHERE space_uri = ?1 AND did = ?2",
+                params![page.space_uri, page.actor_did],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "INSERT INTO space_sync_pending_verification (space_uri, did, updated_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(space_uri, did) DO UPDATE SET updated_at = excluded.updated_at",
+                params![page.space_uri, page.actor_did, page.updated_at],
+            )
+            .map_err(StoreError::Open)?;
+    }
+    Ok(())
+}
+
 fn feed_post_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedPost> {
     Ok(FeedPost {
         uri: row.get(0)?,
@@ -605,7 +732,10 @@ mod tests {
 
     use rusqlite::Connection;
 
-    use super::{ActorPage, EncryptedStore, ProjectionPost, StorageKey, StoreError};
+    use super::{
+        ActorPage, EncryptedStore, ProjectionPost, SpaceStageMutation, SpaceStagePage, StorageKey,
+        StoreError,
+    };
 
     fn key(byte: u8) -> StorageKey {
         StorageKey::from_bytes([byte; 32])
@@ -639,6 +769,28 @@ mod tests {
             upserts,
             deletes,
             updated_at: "1998-04-03T00:00:02.000Z".to_string(),
+        }
+    }
+
+    fn space_stage_page(next_cursor: Option<&str>) -> SpaceStagePage {
+        SpaceStagePage {
+            space_uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop"
+                .to_string(),
+            actor_did: "did:plc:spikespiegel".to_string(),
+            boundary: "bebop".to_string(),
+            next_cursor: next_cursor.map(str::to_string),
+            updated_at: "1998-04-03T00:00:00.000Z".to_string(),
+        }
+    }
+
+    fn staged_space_post() -> SpaceStageMutation {
+        SpaceStageMutation::Upsert {
+            uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string(),
+            cid: "bafyreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_string(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_string(),
+            record_json: br#"{\"text\":\"Bang\"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
         }
     }
 
@@ -947,14 +1099,7 @@ mod tests {
     fn terminal_space_stage_stays_invisible_until_promotion() {
         let mut store = EncryptedStore::open_memory(key(7)).unwrap();
         store
-            .mark_space_stage_terminal(super::SpaceStagePage {
-                space_uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop"
-                    .to_string(),
-                actor_did: "did:plc:spikespiegel".to_string(),
-                boundary: "bebop".to_string(),
-                next_cursor: None,
-                updated_at: "1998-04-03T00:00:00.000Z".to_string(),
-            })
+            .stage_space_page(space_stage_page(None), vec![staged_space_post()])
             .unwrap();
         assert_eq!(
             store
@@ -970,7 +1115,100 @@ mod tests {
         assert_eq!(
             store
                 .connection
+                .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .connection
                 .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn space_staging_replaces_a_cursor_with_terminal_verification() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .stage_space_page(
+                space_stage_page(Some("firehose:8")),
+                vec![staged_space_post()],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT cursor FROM space_cursor", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            "firehose:8"
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM space_sync_pending_verification",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+
+        store
+            .stage_space_page(space_stage_page(None), Vec::new())
+            .unwrap();
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_cursor", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM space_sync_pending_verification",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn space_staging_rejects_a_record_outside_its_space_atomically() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let invalid = SpaceStageMutation::Delete {
+            uri: "at://did:web:stratos.example/space/zone.stratos.space.feed/red-tail/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string(),
+        };
+
+        assert!(matches!(
+            store.stage_space_page(
+                space_stage_page(Some("firehose:8")),
+                vec![staged_space_post(), invalid]
+            ),
+            Err(StoreError::InvalidProjectionMutation)
+        ));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_cursor", [], |row| row
+                    .get::<_, i64>(0))
                 .unwrap(),
             0
         );
