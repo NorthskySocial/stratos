@@ -593,24 +593,12 @@ fn update_space_stage_checkpoint(
     if let Some(cursor) = &page.next_cursor {
         transaction
             .execute(
-                "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
-                params![page.space_uri, page.actor_did],
-            )
-            .map_err(StoreError::Open)?;
-        transaction
-            .execute(
                 "INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(space_uri, did) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
                 params![page.space_uri, page.actor_did, cursor, page.updated_at],
             )
             .map_err(StoreError::Open)?;
     } else {
-        transaction
-            .execute(
-                "DELETE FROM space_cursor WHERE space_uri = ?1 AND did = ?2",
-                params![page.space_uri, page.actor_did],
-            )
-            .map_err(StoreError::Open)?;
         transaction
             .execute(
                 "INSERT INTO space_sync_pending_verification (space_uri, did, updated_at) VALUES (?1, ?2, ?3)
@@ -1130,7 +1118,7 @@ mod tests {
     }
 
     #[test]
-    fn space_staging_replaces_a_cursor_with_terminal_verification() {
+    fn terminal_space_staging_preserves_the_resumable_cursor() {
         let mut store = EncryptedStore::open_memory(key(7)).unwrap();
         store
             .stage_space_page(
@@ -1164,10 +1152,10 @@ mod tests {
         assert_eq!(
             store
                 .connection
-                .query_row("SELECT COUNT(*) FROM space_cursor", [], |row| row
-                    .get::<_, i64>(0))
+                .query_row("SELECT cursor FROM space_cursor", [], |row| row
+                    .get::<_, String>(0))
                 .unwrap(),
-            0
+            "firehose:8"
         );
         assert_eq!(
             store
