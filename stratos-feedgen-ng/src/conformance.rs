@@ -9,6 +9,7 @@ mod tests {
 
     use crate::{
         config::{FeedgenConfig, StorageProfile},
+        feeds::FeedRegistry,
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         server,
     };
@@ -96,6 +97,7 @@ mod tests {
                 public_key_multibase: fixture.input.public_key_multibase,
                 storage: StorageProfile::Memory,
             },
+            FeedRegistry::new(Vec::new()).unwrap(),
             Arc::new(Mutex::new(FeedReadinessGate::default())),
         );
         let response = app

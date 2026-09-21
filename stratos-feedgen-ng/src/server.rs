@@ -3,11 +3,15 @@ use std::sync::{Arc, Mutex};
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use serde::Serialize;
 
-use crate::{config::FeedgenConfig, readiness::FeedReadinessGate};
+use crate::{
+    config::FeedgenConfig,
+    feeds::{FeedDescription, FeedRegistry},
+    readiness::FeedReadinessGate,
+};
 
-#[derive(Clone)]
 struct ServerState {
     config: FeedgenConfig,
+    feeds: FeedRegistry,
     readiness: Arc<Mutex<FeedReadinessGate>>,
 }
 
@@ -52,15 +56,33 @@ struct Service {
     service_endpoint: String,
 }
 
-pub fn router(config: FeedgenConfig, readiness: Arc<Mutex<FeedReadinessGate>>) -> Router {
-    let state = ServerState { config, readiness };
+#[derive(Serialize)]
+struct DescribeFeedResponse {
+    did: String,
+    feeds: Vec<FeedDescription>,
+}
+
+pub fn router(
+    config: FeedgenConfig,
+    feeds: FeedRegistry,
+    readiness: Arc<Mutex<FeedReadinessGate>>,
+) -> Router {
+    let state = Arc::new(ServerState {
+        config,
+        feeds,
+        readiness,
+    });
     Router::new()
         .route("/health", get(health))
         .route("/.well-known/did.json", get(did_document))
+        .route(
+            "/xrpc/zone.stratos.feedgen.describeFeed",
+            get(describe_feed),
+        )
         .with_state(state)
 }
 
-async fn health(State(state): State<ServerState>) -> impl IntoResponse {
+async fn health(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let ready = state
         .readiness
         .lock()
@@ -83,25 +105,31 @@ async fn health(State(state): State<ServerState>) -> impl IntoResponse {
     )
 }
 
-async fn did_document(State(state): State<ServerState>) -> Json<DidDocument> {
-    let config = state.config;
+async fn did_document(State(state): State<Arc<ServerState>>) -> Json<DidDocument> {
     Json(DidDocument {
         context: [
             "https://www.w3.org/ns/did/v1",
             "https://w3id.org/security/multikey/v1",
         ],
-        id: config.service_did.clone(),
+        id: state.config.service_did.clone(),
         verification_method: [VerificationMethod {
-            id: format!("{}#atproto", config.service_did),
+            id: format!("{}#atproto", state.config.service_did),
             kind: "Multikey",
-            controller: config.service_did,
-            public_key_multibase: config.public_key_multibase,
+            controller: state.config.service_did.clone(),
+            public_key_multibase: state.config.public_key_multibase.clone(),
         }],
         service: [Service {
             id: "#stratos_feedgen",
             kind: "NorthskyStratosFeedGen",
-            service_endpoint: config.public_url,
+            service_endpoint: state.config.public_url.clone(),
         }],
+    })
+}
+
+async fn describe_feed(State(state): State<Arc<ServerState>>) -> Json<DescribeFeedResponse> {
+    Json(DescribeFeedResponse {
+        did: state.config.service_did.clone(),
+        feeds: state.feeds.list().cloned().collect(),
     })
 }
 
@@ -115,6 +143,7 @@ mod tests {
 
     use crate::{
         config::{FeedgenConfig, StorageProfile},
+        feeds::{FeedDescription, FeedRegistry},
         readiness::FeedReadinessGate,
     };
 
@@ -129,9 +158,23 @@ mod tests {
         }
     }
 
+    fn feeds() -> FeedRegistry {
+        FeedRegistry::new([FeedDescription {
+            id: "bebop".to_string(),
+            boundary: "bebop".to_string(),
+            display_name: Some("Bebop".to_string()),
+            description: None,
+        }])
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn health_starts_unavailable() {
-        let app = router(config(), Arc::new(Mutex::new(FeedReadinessGate::default())));
+        let app = router(
+            config(),
+            feeds(),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        );
         let response = app
             .oneshot(
                 Request::builder()
@@ -152,7 +195,11 @@ mod tests {
 
     #[tokio::test]
     async fn serves_a_did_document_matching_the_typescript_contract() {
-        let app = router(config(), Arc::new(Mutex::new(FeedReadinessGate::default())));
+        let app = router(
+            config(),
+            feeds(),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        );
         let response = app
             .oneshot(
                 Request::builder()
@@ -174,6 +221,30 @@ mod tests {
         assert_eq!(
             json["service"][0]["serviceEndpoint"],
             "https://feedgen.example.test"
+        );
+    }
+
+    #[tokio::test]
+    async fn describes_the_configured_catalogue() {
+        let app = router(
+            config(),
+            feeds(),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/xrpc/zone.stratos.feedgen.describeFeed")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            body,
+            r#"{"did":"did:web:feedgen.example.test","feeds":[{"id":"bebop","boundary":"bebop","displayName":"Bebop"}]}"#
         );
     }
 }

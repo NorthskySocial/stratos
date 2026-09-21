@@ -4,13 +4,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct FeedDescription {
     pub id: String,
     pub boundary: String,
+    #[serde(rename = "displayName")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
@@ -64,6 +67,7 @@ impl fmt::Display for FeedRegistryLoadError {
 
 impl std::error::Error for FeedRegistryLoadError {}
 
+#[derive(Clone)]
 pub struct FeedRegistry {
     feeds: BTreeMap<String, FeedDescription>,
 }

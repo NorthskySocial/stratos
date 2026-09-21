@@ -8,7 +8,7 @@ use stratos_feedgen_ng::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = FeedgenConfig::from_env()?;
-    let _feeds = FeedgenConfig::load_feed_registry_from_env()?;
+    let feeds = FeedgenConfig::load_feed_registry_from_env()?;
     let _projection = ProjectionReader::new(open_projection_store(&config.storage)?);
     let port = std::env::var("FEEDGEN_PORT")
         .ok()
@@ -19,6 +19,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Feeds remain unavailable until verified reconciliation completes.
     let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
-    axum::serve(listener, server::router(config, readiness)).await?;
+    axum::serve(listener, server::router(config, feeds, readiness)).await?;
     Ok(())
 }
