@@ -12,6 +12,8 @@ use std::{
 
 use rusqlite::{Connection, OpenFlags};
 
+mod migrations;
+
 const STORAGE_KEY_BYTES: usize = 32;
 const MAX_ENCODED_KEY_BYTES: usize = STORAGE_KEY_BYTES * 2 + 1;
 const SQLITE_CACHE_KIB: u32 = 16 * 1024;
@@ -204,12 +206,12 @@ impl EncryptedStore {
             .map_err(StoreError::Open)
     }
 
-    fn configure(connection: Connection, key: StorageKey) -> Result<Self, StoreError> {
+    fn configure(mut connection: Connection, key: StorageKey) -> Result<Self, StoreError> {
         connection
             .execute_batch(&format!(
                 "PRAGMA key = \"x'{}'\"; PRAGMA cipher_memory_security = ON; \
                  PRAGMA temp_store = MEMORY; PRAGMA cache_size = -{SQLITE_CACHE_KIB}; \
-                 PRAGMA mmap_size = 0;",
+                 PRAGMA mmap_size = 0; PRAGMA foreign_keys = ON;",
                 key.as_hex()
             ))
             .map_err(StoreError::Open)?;
@@ -219,11 +221,7 @@ impl EncryptedStore {
         if cipher_version.is_empty() {
             return Err(StoreError::CipherUnavailable);
         }
-        connection
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS feedgen_state (key TEXT PRIMARY KEY, value BLOB NOT NULL);",
-            )
-            .map_err(StoreError::Open)?;
+        migrations::apply(&mut connection).map_err(StoreError::Open)?;
         Ok(Self { connection })
     }
 }
@@ -272,7 +270,7 @@ mod tests {
             store
                 .connection
                 .execute(
-                    "INSERT INTO feedgen_state (key, value) VALUES ('probe', X'01')",
+                    "INSERT INTO retention_metadata (key, value) VALUES ('probe', 1)",
                     [],
                 )
                 .unwrap();
@@ -284,12 +282,12 @@ mod tests {
             reopened
                 .connection
                 .query_row(
-                    "SELECT value FROM feedgen_state WHERE key = 'probe'",
+                    "SELECT value FROM retention_metadata WHERE key = 'probe'",
                     [],
-                    |row| { row.get::<_, Vec<u8>>(0) }
+                    |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            vec![1]
+            1
         );
         assert!(EncryptedStore::open(&path, key(8)).is_err());
         fs::remove_file(path).unwrap();
