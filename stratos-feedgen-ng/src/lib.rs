@@ -17,4 +17,5 @@ pub mod readiness;
 pub mod runtime;
 pub mod server;
 pub mod service;
+pub mod service_auth;
 pub mod store;

@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::feeds::{FeedRegistry, FeedRegistryLoadError, load_feed_registry};
+use crate::service_auth::ServiceSigningKey;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageProfile {
@@ -19,6 +20,7 @@ pub struct FeedgenConfig {
     pub service_did: String,
     pub public_url: String,
     pub public_key_multibase: String,
+    pub signing_key: ServiceSigningKey,
     pub plc_url: String,
     pub storage: StorageProfile,
 }
@@ -26,6 +28,7 @@ pub struct FeedgenConfig {
 #[derive(Debug, Eq, PartialEq)]
 pub enum ConfigError {
     Missing(&'static str),
+    InvalidSigningKey,
     UnsupportedStorageBackend,
     InvalidStorageProfile,
 }
@@ -39,6 +42,7 @@ impl std::fmt::Display for ConfigError {
             Self::UnsupportedStorageBackend => {
                 formatter.write_str("only sqlite storage is supported by Feedgen NG")
             }
+            Self::InvalidSigningKey => formatter.write_str("invalid Feedgen NG signing key"),
             Self::InvalidStorageProfile => {
                 formatter.write_str("invalid Feedgen NG storage profile")
             }
@@ -54,10 +58,13 @@ impl FeedgenConfig {
             env::var("FEEDGEN_SERVICE_DID").ok(),
             env::var("FEEDGEN_PUBLIC_URL").ok(),
             env::var("FEEDGEN_PUBLIC_KEY_MULTIBASE").ok(),
-            env::var("FEEDGEN_STORAGE_BACKEND").ok(),
-            env::var("FEEDGEN_STORAGE_PROFILE").ok(),
-            env::var("FEEDGEN_SQLITE_PATH").ok(),
-            env::var("FEEDGEN_STORAGE_KEY_PATH").ok(),
+            env::var("FEEDGEN_SIGNING_KEY").ok(),
+            StorageValues {
+                backend: env::var("FEEDGEN_STORAGE_BACKEND").ok(),
+                profile: env::var("FEEDGEN_STORAGE_PROFILE").ok(),
+                sqlite_path: env::var("FEEDGEN_SQLITE_PATH").ok(),
+                key_path: env::var("FEEDGEN_STORAGE_KEY_PATH").ok(),
+            },
         )?;
         config.plc_url = env::var("FEEDGEN_PLC_URL")
             .ok()
@@ -88,10 +95,8 @@ impl FeedgenConfig {
         service_did: Option<String>,
         public_url: Option<String>,
         public_key_multibase: Option<String>,
-        storage_backend: Option<String>,
-        storage_profile: Option<String>,
-        sqlite_path: Option<String>,
-        key_path: Option<String>,
+        signing_key: Option<String>,
+        storage: StorageValues,
     ) -> Result<Self, ConfigError> {
         Ok(Self {
             service_did: required_value(service_did, "FEEDGEN_SERVICE_DID")?,
@@ -100,10 +105,27 @@ impl FeedgenConfig {
                 public_key_multibase,
                 "FEEDGEN_PUBLIC_KEY_MULTIBASE",
             )?,
+            signing_key: ServiceSigningKey::from_hex(&required_value(
+                signing_key,
+                "FEEDGEN_SIGNING_KEY",
+            )?)
+            .map_err(|_| ConfigError::InvalidSigningKey)?,
             plc_url: "https://plc.directory".to_owned(),
-            storage: parse_storage(storage_backend, storage_profile, sqlite_path, key_path)?,
+            storage: parse_storage(
+                storage.backend,
+                storage.profile,
+                storage.sqlite_path,
+                storage.key_path,
+            )?,
         })
     }
+}
+
+struct StorageValues {
+    backend: Option<String>,
+    profile: Option<String>,
+    sqlite_path: Option<String>,
+    key_path: Option<String>,
 }
 
 fn parse_storage(
@@ -159,7 +181,21 @@ fn required_value(value: Option<String>, name: &'static str) -> Result<String, C
 
 #[cfg(test)]
 mod tests {
-    use super::{FeedgenConfig, load_feed_registry_from_values};
+    use super::{FeedgenConfig, StorageValues, load_feed_registry_from_values};
+
+    fn storage(
+        backend: Option<&str>,
+        profile: Option<&str>,
+        sqlite_path: Option<&str>,
+        key_path: Option<&str>,
+    ) -> StorageValues {
+        StorageValues {
+            backend: backend.map(str::to_owned),
+            profile: profile.map(str::to_owned),
+            sqlite_path: sqlite_path.map(str::to_owned),
+            key_path: key_path.map(str::to_owned),
+        }
+    }
 
     #[test]
     fn configuration_errors_name_the_missing_value() {
@@ -168,10 +204,8 @@ mod tests {
                 None,
                 Some("https://feedgen.example.test".to_string()),
                 Some("zTestKey".to_string()),
-                None,
-                None,
-                None,
-                None,
+                Some("11".repeat(32)),
+                storage(None, None, None, None),
             )
             .unwrap_err()
             .to_string(),
@@ -186,46 +220,46 @@ mod tests {
                 Some("did:web:feedgen.example.test".to_string()),
                 Some("https://feedgen.example.test".to_string()),
                 Some("zTestKey".to_string()),
+                Some("11".repeat(32)),
             )
         };
-        let (did, url, key) = base();
+        let (did, url, key, signing_key) = base();
         assert_eq!(
             FeedgenConfig::from_values(
                 did,
                 url,
                 key,
-                Some("postgres".to_string()),
-                None,
-                None,
-                None,
+                signing_key,
+                storage(Some("postgres"), None, None, None),
             )
             .unwrap_err(),
             super::ConfigError::UnsupportedStorageBackend
         );
-        let (did, url, key) = base();
+        let (did, url, key, signing_key) = base();
         assert_eq!(
             FeedgenConfig::from_values(
                 did,
                 url,
                 key,
-                None,
-                Some("encrypted-volume".to_string()),
-                Some(":memory:".to_string()),
-                None,
+                signing_key,
+                storage(None, Some("encrypted-volume"), Some(":memory:"), None),
             )
             .unwrap_err(),
             super::ConfigError::InvalidStorageProfile
         );
-        let (did, url, key) = base();
+        let (did, url, key, signing_key) = base();
         assert_eq!(
             FeedgenConfig::from_values(
                 did,
                 url,
                 key,
-                None,
-                Some("encrypted-volume".to_string()),
-                Some("/var/lib/feedgen/feedgen.sqlite".to_string()),
-                Some("/var/lib/feedgen/key".to_string()),
+                signing_key,
+                storage(
+                    None,
+                    Some("encrypted-volume"),
+                    Some("/var/lib/feedgen/feedgen.sqlite"),
+                    Some("/var/lib/feedgen/key"),
+                ),
             )
             .unwrap_err(),
             super::ConfigError::InvalidStorageProfile

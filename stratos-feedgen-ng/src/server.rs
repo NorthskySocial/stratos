@@ -457,6 +457,7 @@ mod tests {
         lifecycle::ControlLifecycle,
         readiness::FeedReadinessGate,
         service::ProjectionReader,
+        service_auth::ServiceSigningKey,
         store::{EncryptedStore, StorageKey},
     };
 
@@ -467,6 +468,7 @@ mod tests {
             service_did: "did:web:feedgen.example.test".to_string(),
             public_url: "https://feedgen.example.test".to_string(),
             public_key_multibase: "zTestKey".to_string(),
+            signing_key: ServiceSigningKey::from_hex(&"11".repeat(32)).unwrap(),
             plc_url: "https://plc.example.test".to_string(),
             storage: StorageProfile::Memory,
         }

@@ -95,6 +95,8 @@ mod tests {
                 service_did: fixture.input.service_did,
                 public_url: fixture.input.public_url,
                 public_key_multibase: fixture.input.public_key_multibase,
+                signing_key: crate::service_auth::ServiceSigningKey::from_hex(&"11".repeat(32))
+                    .unwrap(),
                 plc_url: "https://plc.example.test".to_owned(),
                 storage: StorageProfile::Memory,
             },
