@@ -294,9 +294,10 @@ impl EncryptedStore {
     }
 
     pub fn apply_actor_page(&mut self, page: ActorPage) -> Result<(), StoreError> {
+        validate_actor_page(&page)?;
+        let page = normalize_actor_page(page);
         let sequence =
             i64::try_from(page.sequence).map_err(|_| StoreError::InvalidProjectionMutation)?;
-        validate_actor_page(&page)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -359,6 +360,24 @@ impl EncryptedStore {
             )
             .map_err(StoreError::Open)?;
         transaction.commit().map_err(StoreError::Open)
+    }
+
+    pub fn list_boundaries_for_uris(&self, uris: &[String]) -> Result<Vec<String>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT boundary FROM post_boundary WHERE uri = ?1 ORDER BY boundary ASC")
+            .map_err(StoreError::Open)?;
+        let mut boundaries = Vec::new();
+        for uri in uris {
+            let rows = statement
+                .query_map([uri], |row| row.get(0))
+                .map_err(StoreError::Open)?;
+            boundaries.extend(
+                rows.collect::<Result<Vec<String>, _>>()
+                    .map_err(StoreError::Open)?,
+            );
+        }
+        Ok(boundaries)
     }
 
     pub fn mark_space_stage_terminal(&mut self, page: SpaceStagePage) -> Result<(), StoreError> {
@@ -948,7 +967,6 @@ fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
             || !is_utc_timestamp(&post.sort_at)
             || !is_utc_timestamp(&post.indexed_at)
             || !is_utc_timestamp(&post.retained_at)
-            || post.boundaries.is_empty()
             || post.boundaries.iter().any(|boundary| boundary.is_empty())
         {
             return Err(StoreError::InvalidProjectionMutation);
@@ -962,6 +980,20 @@ fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
         }
     }
     Ok(())
+}
+
+fn normalize_actor_page(mut page: ActorPage) -> ActorPage {
+    let denied_uris = page
+        .upserts
+        .iter()
+        .filter(|post| post.boundaries.is_empty())
+        .map(|post| post.uri.clone())
+        .collect::<Vec<_>>();
+    page.upserts.retain(|post| !post.boundaries.is_empty());
+    page.deletes.extend(denied_uris);
+    page.deletes.sort_unstable();
+    page.deletes.dedup();
+    page
 }
 
 fn record_belongs_to_page(uri: &crate::identifier::RecordUri, page: &ActorPage) -> bool {
@@ -1199,6 +1231,36 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn removes_a_post_when_authority_withdraws_all_boundaries() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .apply_actor_page(actor_page(8, vec![spike_post()], Vec::new()))
+            .unwrap();
+        let mut withdrawn = spike_post();
+        withdrawn.boundaries.clear();
+
+        store
+            .apply_actor_page(actor_page(9, vec![withdrawn], Vec::new()))
+            .unwrap();
+
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM post", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT sequence FROM actor_cursor", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            9
         );
     }
 

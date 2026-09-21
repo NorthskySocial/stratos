@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use crate::{
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
+    store::{ActorPage, StoreError},
 };
 
 pub struct ControlLifecycle {
@@ -60,6 +61,14 @@ impl ControlLifecycle {
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         readiness.mark_unavailable();
         projection.close_session();
+    }
+
+    pub fn apply_actor_page(&self, page: ActorPage) -> Result<(), StoreError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .apply_actor_page(page)
     }
 }
 
