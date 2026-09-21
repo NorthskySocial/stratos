@@ -47,7 +47,23 @@ impl std::fmt::Display for AuthError {
 impl std::error::Error for AuthError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IdentityResolutionError;
+pub enum IdentityResolutionError {
+    InvalidResolverUrl,
+    UnsupportedDid,
+    UnsafeResolverAddress,
+    NotFound,
+    DocumentTooLarge,
+    InvalidDocument,
+    Unavailable,
+}
+
+impl std::fmt::Display for IdentityResolutionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("could not resolve identity key")
+    }
+}
+
+impl std::error::Error for IdentityResolutionError {}
 
 #[async_trait]
 pub trait IdentityKeyResolver: Send + Sync {
@@ -321,7 +337,7 @@ mod tests {
         ) -> Result<String, IdentityResolutionError> {
             self.calls.lock().unwrap().push(force_refresh);
             if self.fail {
-                return Err(IdentityResolutionError);
+                return Err(IdentityResolutionError::Unavailable);
             }
             Ok(self.keys[usize::from(force_refresh)].clone())
         }
