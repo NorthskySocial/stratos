@@ -2,6 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     authorization::{AuthorizationError, ViewerAuthorization, ViewerAuthorizations},
+    feed_service::{
+        FeedQuery, FeedService, FeedServiceError, ViewerAuthorization as FeedViewerAuthorization,
+    },
+    feeds::FeedRegistry,
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
     store::{ActorPage, StoreError},
@@ -36,9 +40,34 @@ impl ControlLifecycle {
         }
     }
 
-    pub fn read<T>(&self, action: impl FnOnce(&ProjectionReader) -> T) -> T {
+    #[cfg(test)]
+    fn read<T>(&self, action: impl FnOnce(&ProjectionReader) -> T) -> T {
         let projection = self.projection.lock().expect("projection lock poisoned");
         action(&projection)
+    }
+
+    pub fn serve_viewer_feed(
+        &self,
+        did: &str,
+        feeds: &FeedRegistry,
+        query: FeedQuery<'_>,
+    ) -> Result<Vec<u8>, FeedServiceError> {
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        let authorization = self
+            .authorizations
+            .lock()
+            .expect("authorization lock poisoned")
+            .current(did, query.now)
+            .ok_or(FeedServiceError::AuthorizationUnavailable)?;
+        let projection = self.projection.lock().expect("projection lock poisoned");
+        FeedService::new(feeds, &projection).serve_serialized(
+            FeedViewerAuthorization {
+                did: &authorization.did,
+                boundaries: &authorization.boundaries,
+                expires_at: authorization.expires_at,
+            },
+            query,
+        )
     }
 
     pub fn session_established(&self) {
@@ -225,6 +254,15 @@ mod tests {
                 1,
             )
             .unwrap();
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
 
         assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_none()));
     }
@@ -273,5 +311,60 @@ mod tests {
             Err(AuthorizationError::CapacityExceeded)
         );
         assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_none()));
+    }
+
+    #[test]
+    fn serves_only_with_a_current_viewer_authorization() {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let lifecycle = ControlLifecycle::new(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            readiness,
+        );
+        lifecycle
+            .apply_viewer_authorization(
+                ViewerAuthorization {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    expires_at: 100,
+                },
+                1,
+            )
+            .unwrap();
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+
+        let feeds = crate::feeds::FeedRegistry::new([crate::feeds::FeedDescription {
+            id: "bebop".to_owned(),
+            boundary: "bebop".to_owned(),
+            display_name: None,
+            description: None,
+        }])
+        .unwrap();
+        let query = crate::feed_service::FeedQuery {
+            feed_id: "bebop",
+            cursor: None,
+            limit: 50,
+            now: 2,
+            as_of: "1998-04-03T00:00:00.000Z",
+        };
+        assert!(
+            lifecycle
+                .serve_viewer_feed("did:plc:faye", &feeds, query)
+                .is_ok()
+        );
+        let expired = crate::feed_service::FeedQuery { now: 100, ..query };
+        assert!(matches!(
+            lifecycle.serve_viewer_feed("did:plc:faye", &feeds, expired),
+            Err(crate::feed_service::FeedServiceError::AuthorizationUnavailable)
+        ));
     }
 }

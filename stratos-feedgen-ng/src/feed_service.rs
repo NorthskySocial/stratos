@@ -53,6 +53,7 @@ pub struct AuthorView {
 
 #[derive(Debug)]
 pub enum FeedServiceError {
+    AuthorizationUnavailable,
     UnknownFeed,
     BoundaryMismatch,
     FeedNotReady,
@@ -63,6 +64,7 @@ pub enum FeedServiceError {
 impl std::fmt::Display for FeedServiceError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
+            Self::AuthorizationUnavailable => "viewer authorization is unavailable",
             Self::UnknownFeed => "configured feed was not found",
             Self::BoundaryMismatch => "viewer is not authorized for the configured feed",
             Self::FeedNotReady => "feed is unavailable while authorization state is reconciling",
@@ -84,11 +86,36 @@ impl<'a> FeedService<'a> {
         Self { feeds, reader }
     }
 
-    pub fn serve(
+    #[cfg(test)]
+    pub(crate) fn serve(
         &self,
         authorization: ViewerAuthorization<'_>,
         query: FeedQuery<'_>,
     ) -> Result<FeedResponse, FeedServiceError> {
+        let (token, response) = self.prepare(authorization, query)?;
+        self.reader
+            .release(token, response, query.now)
+            .ok_or(FeedServiceError::FeedNotReady)
+    }
+
+    pub(crate) fn serve_serialized(
+        &self,
+        authorization: ViewerAuthorization<'_>,
+        query: FeedQuery<'_>,
+    ) -> Result<Vec<u8>, FeedServiceError> {
+        let (token, response) = self.prepare(authorization, query)?;
+        let response =
+            serde_json::to_vec(&response).map_err(|_| FeedServiceError::InvalidProjection)?;
+        self.reader
+            .release(token, response, query.now)
+            .ok_or(FeedServiceError::FeedNotReady)
+    }
+
+    fn prepare(
+        &self,
+        authorization: ViewerAuthorization<'_>,
+        query: FeedQuery<'_>,
+    ) -> Result<(crate::admission::ReadToken, FeedResponse), FeedServiceError> {
         let feed = self
             .feeds
             .get(query.feed_id)
@@ -124,9 +151,7 @@ impl<'a> FeedService<'a> {
                 .map(|post| to_feed_view_post(post, authorization.boundaries))
                 .collect::<Result<_, _>>()?,
         };
-        self.reader
-            .release(token, response, query.now)
-            .ok_or(FeedServiceError::FeedNotReady)
+        Ok((token, response))
     }
 }
 
@@ -265,6 +290,28 @@ mod tests {
             service.serve(authorization, query("red-tail", None)),
             Err(FeedServiceError::BoundaryMismatch)
         ));
+    }
+
+    #[test]
+    fn serializes_before_releasing_the_admitted_page() {
+        let feeds = registry();
+        let reader = reader_with_post();
+        let service = FeedService::new(&feeds, &reader);
+        let boundaries = ["bebop".to_owned()];
+
+        let response = service
+            .serve_serialized(
+                ViewerAuthorization {
+                    did: "did:plc:faye",
+                    boundaries: &boundaries,
+                    expires_at: NOW + 60,
+                },
+                query("bebop", None),
+            )
+            .unwrap();
+
+        let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+        assert_eq!(response["feed"][0]["post"]["record"]["text"], "Bang");
     }
 
     #[test]
