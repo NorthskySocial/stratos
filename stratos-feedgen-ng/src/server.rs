@@ -113,7 +113,10 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    use crate::{config::FeedgenConfig, readiness::FeedReadinessGate};
+    use crate::{
+        config::{FeedgenConfig, StorageProfile},
+        readiness::FeedReadinessGate,
+    };
 
     use super::router;
 
@@ -122,6 +125,7 @@ mod tests {
             service_did: "did:web:feedgen.example.test".to_string(),
             public_url: "https://feedgen.example.test".to_string(),
             public_key_multibase: "zTestKey".to_string(),
+            storage: StorageProfile::Memory,
         }
     }
 

@@ -8,7 +8,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
-        config::FeedgenConfig,
+        config::{FeedgenConfig, StorageProfile},
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         server,
     };
@@ -94,6 +94,7 @@ mod tests {
                 service_did: fixture.input.service_did,
                 public_url: fixture.input.public_url,
                 public_key_multibase: fixture.input.public_key_multibase,
+                storage: StorageProfile::Memory,
             },
             Arc::new(Mutex::new(FeedReadinessGate::default())),
         );
