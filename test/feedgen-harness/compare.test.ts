@@ -108,4 +108,26 @@ describe('compareFeedEndpoints', () => {
     ).rejects.toThrow('compare requires loopback endpoints')
     expect(fetch).not.toHaveBeenCalled()
   })
+
+  it('bounds a stalled endpoint by the configured request deadline', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new Error('request aborted'))
+          })
+        }),
+    )
+
+    await expect(
+      compareFeedEndpoints({
+        tsBaseUrl: 'http://localhost:3000',
+        rustBaseUrl: 'http://localhost:3001',
+        authorization: 'Bearer private-token',
+        feed: 'bebop',
+        requestTimeoutMs: 10,
+        fetch,
+      }),
+    ).rejects.toThrow('request aborted')
+  })
 })
