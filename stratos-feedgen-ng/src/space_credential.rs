@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::{
     SecretKey,
@@ -102,7 +104,7 @@ struct DpopClaims<'a> {
     access_token_hash: Option<String>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SpaceCredentialError {
     InvalidProofTarget,
     InvalidMethod,
@@ -124,14 +126,14 @@ impl std::error::Error for SpaceCredentialError {}
 
 pub struct HeldSpaceCredential {
     credential: String,
-    key: DpopKey,
+    key: Arc<DpopKey>,
     now: fn() -> u64,
 }
 
 impl HeldSpaceCredential {
     pub fn new(
         credential: String,
-        key: DpopKey,
+        key: Arc<DpopKey>,
         now: fn() -> u64,
     ) -> Result<Self, SpaceCredentialError> {
         if credential.is_empty() {

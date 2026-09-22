@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
+use async_trait::async_trait;
+
 use crate::{
     identifier::Did,
     service_auth::{ServiceSigningKey, SpaceDelegationClaims, mint_space_delegation},
@@ -18,7 +20,7 @@ const MAX_MINT_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_CREDENTIAL_BYTES: usize = 16 * 1024;
 const MAX_CREDENTIAL_LIFETIME_SECONDS: u64 = 4 * 60 * 60;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialMintError {
     InvalidConfiguration,
     Authentication,
@@ -53,10 +55,25 @@ impl std::fmt::Display for CredentialMintError {
 
 impl std::error::Error for CredentialMintError {}
 
+#[async_trait]
+pub trait SpaceCredentialIssuer: Send + Sync {
+    async fn mint(
+        &self,
+        space_uri: &str,
+        key: &DpopKey,
+        now: u64,
+    ) -> Result<IssuedSpaceCredential, CredentialMintError>;
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CredentialExpiry(u64);
 
 impl CredentialExpiry {
+    #[cfg(test)]
+    pub(crate) fn from_epoch_seconds(value: u64) -> Self {
+        Self(value)
+    }
+
     pub fn as_epoch_seconds(self) -> u64 {
         self.0
     }
@@ -106,7 +123,7 @@ impl HttpSpaceCredentialIssuer {
         })
     }
 
-    pub async fn mint(
+    async fn mint_inner(
         &self,
         space_uri: &str,
         key: &DpopKey,
@@ -157,6 +174,18 @@ impl HttpSpaceCredentialIssuer {
             return Err(CredentialMintError::Unavailable);
         }
         decode_issued_credential(&response_bytes(response).await?, now)
+    }
+}
+
+#[async_trait]
+impl SpaceCredentialIssuer for HttpSpaceCredentialIssuer {
+    async fn mint(
+        &self,
+        space_uri: &str,
+        key: &DpopKey,
+        now: u64,
+    ) -> Result<IssuedSpaceCredential, CredentialMintError> {
+        self.mint_inner(space_uri, key, now).await
     }
 }
 

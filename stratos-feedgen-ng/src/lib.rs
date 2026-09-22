@@ -11,6 +11,7 @@ pub mod authorization;
 pub mod config;
 pub mod conformance;
 pub mod credential_issuer;
+pub mod credential_manager;
 pub mod cursor;
 pub mod feed_service;
 pub mod feeds;
