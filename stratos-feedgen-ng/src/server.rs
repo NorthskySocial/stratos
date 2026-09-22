@@ -410,6 +410,7 @@ async fn get_feed(
                     limit,
                     now,
                     as_of: &as_of,
+                    blob_base_url: &server.config.public_url,
                 },
             )
         }),

@@ -1,8 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::{
     cursor::FeedCursor,
     feeds::FeedRegistry,
+    identifier::RecordUri,
     service::{ProjectionReader, ReadRequest},
     store::StoreError,
 };
@@ -21,6 +23,7 @@ pub struct FeedQuery<'a> {
     pub limit: u16,
     pub now: u64,
     pub as_of: &'a str,
+    pub blob_base_url: &'a str,
 }
 
 #[derive(Serialize)]
@@ -41,9 +44,55 @@ pub struct PostView {
     pub cid: String,
     pub author: AuthorView,
     pub record: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blobs: Option<Vec<BlobView>>,
     #[serde(rename = "indexedAt")]
     pub indexed_at: String,
     pub boundaries: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct BlobView {
+    pub cid: String,
+    pub url: String,
+    #[serde(rename = "mimeType")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StoredBlobReference {
+    cid: String,
+    #[serde(rename = "mimeType")]
+    mime_type: Option<String>,
+}
+
+struct BlobUrlBuilder(Url);
+
+impl BlobUrlBuilder {
+    fn new(base_url: &str) -> Result<Self, FeedServiceError> {
+        let base_url = Url::parse(base_url).map_err(|_| FeedServiceError::InvalidProjection)?;
+        if !matches!(base_url.scheme(), "http" | "https")
+            || base_url.host_str().is_none()
+            || !base_url.username().is_empty()
+            || base_url.password().is_some()
+            || base_url.query().is_some()
+            || base_url.fragment().is_some()
+        {
+            return Err(FeedServiceError::InvalidProjection);
+        }
+        Ok(Self(base_url))
+    }
+
+    fn build(&self, uri: &str, cid: &str) -> String {
+        let mut url = self.0.clone();
+        let base = url.path().trim_end_matches('/');
+        url.set_path(&format!("{base}/xrpc/zone.stratos.feedgen.getBlob"));
+        url.query_pairs_mut()
+            .append_pair("uri", uri)
+            .append_pair("cid", cid);
+        url.to_string()
+    }
 }
 
 #[derive(Serialize)]
@@ -128,6 +177,7 @@ impl<'a> FeedService<'a> {
             return Err(FeedServiceError::BoundaryMismatch);
         }
         let cursor = query.cursor.and_then(FeedCursor::decode);
+        let blob_urls = BlobUrlBuilder::new(query.blob_base_url)?;
         let Some((token, page)) = self
             .reader
             .prepare(ReadRequest {
@@ -148,7 +198,7 @@ impl<'a> FeedService<'a> {
             feed: page
                 .posts
                 .into_iter()
-                .map(|post| to_feed_view_post(post, authorization.boundaries))
+                .map(|post| to_feed_view_post(post, authorization.boundaries, &blob_urls))
                 .collect::<Result<_, _>>()?,
         };
         Ok((token, response))
@@ -158,7 +208,9 @@ impl<'a> FeedService<'a> {
 fn to_feed_view_post(
     post: crate::store::FeedPost,
     viewer_boundaries: &[String],
+    blob_urls: &BlobUrlBuilder,
 ) -> Result<FeedViewPost, FeedServiceError> {
+    let blobs = blob_views(&post, blob_urls);
     Ok(FeedViewPost {
         post: PostView {
             uri: post.uri,
@@ -168,6 +220,7 @@ fn to_feed_view_post(
             },
             record: serde_json::from_slice(&post.record_json)
                 .map_err(|_| FeedServiceError::InvalidProjection)?,
+            blobs,
             indexed_at: post.indexed_at,
             boundaries: post
                 .boundaries
@@ -176,6 +229,24 @@ fn to_feed_view_post(
                 .collect(),
         },
     })
+}
+
+fn blob_views(post: &crate::store::FeedPost, urls: &BlobUrlBuilder) -> Option<Vec<BlobView>> {
+    if !matches!(RecordUri::parse(&post.uri), Ok(RecordUri::Repo { .. })) {
+        return None;
+    }
+    let references =
+        serde_json::from_slice::<Vec<StoredBlobReference>>(&post.blob_refs_json).ok()?;
+    let blobs = references
+        .into_iter()
+        .filter(|reference| cid::Cid::try_from(reference.cid.as_str()).is_ok())
+        .map(|reference| BlobView {
+            url: urls.build(&post.uri, &reference.cid),
+            cid: reference.cid,
+            mime_type: reference.mime_type,
+        })
+        .collect::<Vec<_>>();
+    (!blobs.is_empty()).then_some(blobs)
 }
 
 #[cfg(test)]
@@ -215,17 +286,7 @@ mod tests {
                 authority_did: "did:plc:stratos".to_owned(),
                 actor_did: "did:plc:spike".to_owned(),
                 sequence: 1,
-                upserts: vec![ProjectionPost {
-                    uri: "at://did:plc:spike/zone.stratos.feed.post/see-you".to_owned(),
-                    author_did: "did:plc:spike".to_owned(),
-                    cid: "bafyreia".to_owned(),
-                    sort_at: "2026-09-21T01:00:00.000Z".to_owned(),
-                    indexed_at: "2026-09-21T01:00:00.000Z".to_owned(),
-                    retained_at: "2026-09-22T01:00:00.000Z".to_owned(),
-                    record_json: br#"{"$type":"zone.stratos.feed.post","text":"Bang"}"#.to_vec(),
-                    blob_refs_json: b"[]".to_vec(),
-                    boundaries: vec!["bebop".to_owned(), "red-tail".to_owned()],
-                }],
+                upserts: vec![reader_post()],
                 deletes: Vec::new(),
                 updated_at: "2026-09-21T01:00:00.000Z".to_owned(),
             })
@@ -235,6 +296,20 @@ mod tests {
         reader
     }
 
+    fn reader_post() -> ProjectionPost {
+        ProjectionPost {
+            uri: "at://did:plc:spike/zone.stratos.feed.post/see-you".to_owned(),
+            author_did: "did:plc:spike".to_owned(),
+            cid: "bafyreia".to_owned(),
+            sort_at: "2026-09-21T01:00:00.000Z".to_owned(),
+            indexed_at: "2026-09-21T01:00:00.000Z".to_owned(),
+            retained_at: "2026-09-22T01:00:00.000Z".to_owned(),
+            record_json: br#"{"$type":"zone.stratos.feed.post","text":"Bang"}"#.to_vec(),
+            blob_refs_json: b"[]".to_vec(),
+            boundaries: vec!["bebop".to_owned(), "red-tail".to_owned()],
+        }
+    }
+
     fn query<'a>(feed_id: &'a str, cursor: Option<&'a str>) -> FeedQuery<'a> {
         FeedQuery {
             feed_id,
@@ -242,6 +317,7 @@ mod tests {
             limit: 50,
             now: NOW,
             as_of: AS_OF,
+            blob_base_url: "https://feedgen.example.test/service/",
         }
     }
 
@@ -312,6 +388,55 @@ mod tests {
 
         let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
         assert_eq!(response["feed"][0]["post"]["record"]["text"], "Bang");
+    }
+
+    #[test]
+    fn exposes_only_verified_repository_blob_urls() {
+        let feeds = registry();
+        let mut reader = reader_with_post();
+        let cid = cid::Cid::new_v1(
+            0x55,
+            multihash::Multihash::<64>::wrap(0x12, &[7; 32]).unwrap(),
+        )
+        .to_string();
+        reader
+            .apply_actor_page(ActorPage {
+                authority_did: "did:plc:stratos".to_owned(),
+                actor_did: "did:plc:spike".to_owned(),
+                sequence: 2,
+                upserts: vec![ProjectionPost {
+                    blob_refs_json: serde_json::to_vec(&serde_json::json!([
+                        { "cid": cid, "mimeType": "image/png" },
+                        { "cid": "not-a-cid" }
+                    ]))
+                    .unwrap(),
+                    ..reader_post()
+                }],
+                deletes: Vec::new(),
+                updated_at: "2026-09-21T01:00:01.000Z".to_owned(),
+            })
+            .unwrap();
+        let service = FeedService::new(&feeds, &reader);
+        let boundaries = ["bebop".to_owned()];
+
+        let response = service
+            .serve(
+                ViewerAuthorization {
+                    did: "did:plc:faye",
+                    boundaries: &boundaries,
+                    expires_at: NOW + 60,
+                },
+                query("bebop", None),
+            )
+            .unwrap();
+
+        let blob = &response.feed[0].post.blobs.as_ref().unwrap()[0];
+        assert_eq!(blob.mime_type.as_deref(), Some("image/png"));
+        assert!(
+            blob.url
+                .starts_with("https://feedgen.example.test/service/xrpc/")
+        );
+        assert!(blob.url.contains("uri=at%3A%2F%2Fdid%3Aplc%3Aspike"));
     }
 
     #[test]
