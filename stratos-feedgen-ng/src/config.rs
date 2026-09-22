@@ -6,6 +6,7 @@ use std::{
 
 use crate::feeds::{FeedRegistry, FeedRegistryLoadError, load_feed_registry};
 use crate::service_auth::ServiceSigningKey;
+use crate::store::read_secret_file;
 
 pub const MAX_ACTOR_CONNECTIONS: u16 = 64;
 
@@ -45,6 +46,8 @@ pub struct FeedgenConfig {
 pub enum ConfigError {
     Missing(&'static str),
     InvalidSigningKey,
+    AmbiguousSigningKeySource,
+    UnreadableSigningKeyFile,
     InvalidStratosServiceUrl,
     UnsupportedStorageBackend,
     InvalidStorageProfile,
@@ -62,6 +65,12 @@ impl std::fmt::Display for ConfigError {
                 formatter.write_str("only sqlite storage is supported by Feedgen NG")
             }
             Self::InvalidSigningKey => formatter.write_str("invalid Feedgen NG signing key"),
+            Self::AmbiguousSigningKeySource => {
+                formatter.write_str("configure exactly one Feedgen NG signing key source")
+            }
+            Self::UnreadableSigningKeyFile => {
+                formatter.write_str("unable to load the Feedgen NG signing key")
+            }
             Self::InvalidStratosServiceUrl => formatter.write_str("invalid Stratos service URL"),
             Self::InvalidStorageProfile => {
                 formatter.write_str("invalid Feedgen NG storage profile")
@@ -80,11 +89,15 @@ impl std::error::Error for ConfigError {}
 
 impl FeedgenConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
+        let signing_key = load_signing_key(
+            env::var("FEEDGEN_SIGNING_KEY").ok(),
+            env::var("FEEDGEN_SIGNING_KEY_FILE").ok(),
+        )?;
         let mut config = Self::from_values(
             env::var("FEEDGEN_SERVICE_DID").ok(),
             env::var("FEEDGEN_PUBLIC_URL").ok(),
             env::var("FEEDGEN_PUBLIC_KEY_MULTIBASE").ok(),
-            env::var("FEEDGEN_SIGNING_KEY").ok(),
+            signing_key,
             env::var("STRATOS_SERVICE_URL").ok(),
             env::var("STRATOS_SERVICE_DID").ok(),
             StorageValues {
@@ -118,6 +131,28 @@ impl FeedgenConfig {
             env::var("FEEDGEN_FEEDS_JSON").ok(),
             env::var("FEEDGEN_FEEDS_YAML").ok(),
         )
+    }
+}
+
+fn load_signing_key(
+    inline_value: Option<String>,
+    file_path: Option<String>,
+) -> Result<Option<String>, ConfigError> {
+    match (
+        inline_value.filter(|value| !value.trim().is_empty()),
+        file_path.filter(|value| !value.trim().is_empty()),
+    ) {
+        (Some(_), Some(_)) => Err(ConfigError::AmbiguousSigningKeySource),
+        (Some(value), None) => Ok(Some(value)),
+        (None, Some(path)) => {
+            let mut contents = read_secret_file(Path::new(&path), 128)
+                .map_err(|_| ConfigError::UnreadableSigningKeyFile)?;
+            let value = String::from_utf8(contents.clone())
+                .map_err(|_| ConfigError::UnreadableSigningKeyFile)?;
+            contents.fill(0);
+            Ok(Some(value.trim().to_owned()))
+        }
+        (None, None) => Ok(None),
     }
 }
 
@@ -308,7 +343,11 @@ fn required_value(value: Option<String>, name: &'static str) -> Result<String, C
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt, symlink},
+        path::Path,
+    };
 
     use super::{FeedgenConfig, StorageProfile, StorageValues, load_feed_registry_from_values};
 
@@ -496,5 +535,58 @@ mod tests {
             super::parse_actor_connection_limit(Some("65".to_owned())),
             Err(super::ConfigError::InvalidActorConnectionLimit)
         );
+    }
+
+    #[test]
+    fn loads_a_trimmed_signing_key_from_a_private_file_without_exposing_its_path() {
+        let directory =
+            std::env::temp_dir().join(format!("feedgen-ng-config-test-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let secret_path = directory.join("signing-key");
+        fs::write(&secret_path, "11\n").unwrap();
+        fs::set_permissions(&secret_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert_eq!(
+            super::load_signing_key(None, Some(secret_path.display().to_string())).unwrap(),
+            Some("11".to_owned())
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_unreadable_signing_key_sources_without_exposing_paths() {
+        assert_eq!(
+            super::load_signing_key(Some("11".to_owned()), Some("/secret/key".to_owned())),
+            Err(super::ConfigError::AmbiguousSigningKeySource)
+        );
+        let error =
+            super::load_signing_key(None, Some("/private/missing-key".to_owned())).unwrap_err();
+        assert_eq!(error, super::ConfigError::UnreadableSigningKeyFile);
+        assert!(!error.to_string().contains("missing-key"));
+    }
+
+    #[test]
+    fn rejects_insecure_or_symlinked_signing_key_files() {
+        let directory = std::env::temp_dir().join(format!(
+            "feedgen-ng-signing-key-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let key_path = directory.join("signing-key");
+        fs::write(&key_path, "11").unwrap();
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            super::load_signing_key(None, Some(key_path.display().to_string())),
+            Err(super::ConfigError::UnreadableSigningKeyFile)
+        );
+
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let link_path = directory.join("signing-key-link");
+        symlink(&key_path, &link_path).unwrap();
+        assert_eq!(
+            super::load_signing_key(None, Some(link_path.display().to_string())),
+            Err(super::ConfigError::UnreadableSigningKeyFile)
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }

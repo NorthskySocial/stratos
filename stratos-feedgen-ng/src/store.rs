@@ -38,14 +38,7 @@ impl StorageKey {
     }
 
     pub fn from_secret_file(path: &Path) -> Result<Self, StoreError> {
-        let mut file = open_secret_file(path)?;
-        validate_secret_file(&file)?;
-
-        let mut encoded = Vec::with_capacity(MAX_ENCODED_KEY_BYTES);
-        file.by_ref()
-            .take((MAX_ENCODED_KEY_BYTES + 1) as u64)
-            .read_to_end(&mut encoded)
-            .map_err(|_| StoreError::KeyFileAccess)?;
+        let mut encoded = read_secret_file(path, MAX_ENCODED_KEY_BYTES)?;
         let key = if encoded.len() > MAX_ENCODED_KEY_BYTES {
             Err(StoreError::InvalidKeyFile)
         } else {
@@ -58,6 +51,21 @@ impl StorageKey {
     fn as_hex(&self) -> String {
         self.0.iter().map(|byte| format!("{byte:02x}")).collect()
     }
+}
+
+pub(crate) fn read_secret_file(path: &Path, max_bytes: usize) -> Result<Vec<u8>, StoreError> {
+    let mut file = open_secret_file(path)?;
+    validate_secret_file(&file)?;
+    let mut contents = Vec::with_capacity(max_bytes);
+    file.by_ref()
+        .take((max_bytes + 1) as u64)
+        .read_to_end(&mut contents)
+        .map_err(|_| StoreError::KeyFileAccess)?;
+    if contents.len() > max_bytes {
+        contents.fill(0);
+        return Err(StoreError::InvalidKeyFile);
+    }
+    Ok(contents)
 }
 
 impl fmt::Debug for StorageKey {
