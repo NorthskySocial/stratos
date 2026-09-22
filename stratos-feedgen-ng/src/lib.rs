@@ -1,6 +1,7 @@
 //! Fail-closed Feedgen implementation.
 //!
-//! Exposes discovery and readiness only; it does not serve feeds or persist data.
+//! Maintains an encrypted bounded projection and serves authenticated,
+//! boundary-scoped feeds after authority reconciliation.
 
 pub mod actor_event;
 pub mod actor_stream;
