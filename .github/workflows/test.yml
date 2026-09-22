@@ -15,6 +15,36 @@ on:
       - chore/*
 
 jobs:
+  rust-feedgen-ng:
+    name: Rust Feedgen NG
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Feedgen NG
+        run: cargo clippy --locked -p stratos-feedgen-ng --all-targets -- -D warnings
+
+      - name: Test Feedgen NG protocol and SQLCipher contracts
+        run: cargo test --locked -p stratos-feedgen-ng --no-fail-fast
+
+      - name: Build Feedgen NG release binary
+        run: cargo build --locked --release -p stratos-feedgen-ng
+
   test:
     name: Run Tests
     runs-on: ubuntu-latest
