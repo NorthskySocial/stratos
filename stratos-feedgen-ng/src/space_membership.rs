@@ -13,7 +13,8 @@ pub const MAX_MEMBERSHIP_PAGE: usize = 1_000;
 const MAX_CURSOR_BYTES: usize = 4 * 1024;
 const MAX_HOST_BYTES: usize = 2_048;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum RepoCustody {
     Pds,
     Stratos,
@@ -82,7 +83,7 @@ impl HttpSpaceMembershipClient {
         limit: usize,
     ) -> Result<SpaceMembershipPage, SpaceMembershipError> {
         validate_request(space_uri, cursor, limit)?;
-        let mut request_url = endpoint(&self.service_url)?;
+        let mut request_url = endpoint(&self.service_url);
         {
             let mut query = request_url.query_pairs_mut();
             query.append_pair("space", space_uri);
@@ -91,7 +92,9 @@ impl HttpSpaceMembershipClient {
                 query.append_pair("cursor", cursor);
             }
         }
-        let public_endpoint = endpoint(&self.public_url)?;
+        // The authority verifies htu against its configured public endpoint,
+        // which can differ from the private URL used to reach the service.
+        let public_endpoint = endpoint(&self.public_url);
         let proof = credential
             .presentation_proof("GET", public_endpoint.as_str())
             .await
@@ -132,12 +135,12 @@ fn validate_base_url(value: &str) -> Result<Url, SpaceMembershipError> {
     Ok(url)
 }
 
-fn endpoint(base: &Url) -> Result<Url, SpaceMembershipError> {
+fn endpoint(base: &Url) -> Url {
     let mut endpoint = base.clone();
     let base_path = endpoint.path().trim_end_matches('/');
     endpoint.set_path(&format!("{base_path}/xrpc/{LIST_REPOS_LXM}"));
     endpoint.set_query(None);
-    Ok(endpoint)
+    endpoint
 }
 
 fn validate_request(
@@ -178,54 +181,61 @@ async fn response_bytes(mut response: reqwest::Response) -> Result<Vec<u8>, Spac
 }
 
 fn decode_page(bytes: &[u8]) -> Result<SpaceMembershipPage, SpaceMembershipError> {
-    let raw: RawPage =
+    let response: ListReposResponse =
         serde_json::from_slice(bytes).map_err(|_| SpaceMembershipError::InvalidResponse)?;
-    if raw.repos.len() > MAX_MEMBERSHIP_PAGE
-        || raw
+    if response.repos.len() > MAX_MEMBERSHIP_PAGE
+        || response
             .cursor
             .as_deref()
             .is_some_and(|cursor| cursor.is_empty() || cursor.len() > MAX_CURSOR_BYTES)
     {
         return Err(SpaceMembershipError::InvalidResponse);
     }
-    let mut members = Vec::with_capacity(raw.repos.len());
-    for repo in raw.repos {
+    let mut members = Vec::with_capacity(response.repos.len());
+    for repo in response.repos {
         Did::parse(repo.did.clone()).map_err(|_| SpaceMembershipError::InvalidResponse)?;
-        if repo
-            .host
-            .as_deref()
-            .is_some_and(|host| host.is_empty() || host.len() > MAX_HOST_BYTES)
-        {
-            return Err(SpaceMembershipError::InvalidResponse);
-        }
+        let host = (repo.custody == RepoCustody::Pds)
+            .then(|| repo.host.filter(|host| is_valid_pds_origin(host)))
+            .flatten();
         members.push(SpaceRepoMember {
             did: repo.did,
-            custody: if repo.custody.as_deref() == Some("pds") {
-                RepoCustody::Pds
-            } else {
-                RepoCustody::Stratos
-            },
-            host: repo.host,
+            custody: repo.custody,
+            host,
         });
     }
     Ok(SpaceMembershipPage {
         members,
-        next_cursor: raw.cursor,
+        next_cursor: response.cursor,
     })
 }
 
+fn is_valid_pds_origin(value: &str) -> bool {
+    if value.is_empty() || value.len() > MAX_HOST_BYTES {
+        return false;
+    }
+    let Ok(origin) = Url::parse(value) else {
+        return false;
+    };
+    origin.scheme() == "https"
+        && origin.host_str().is_some()
+        && origin.username().is_empty()
+        && origin.password().is_none()
+        && origin.query().is_none()
+        && origin.fragment().is_none()
+        && origin.path() == "/"
+}
+
 #[derive(Deserialize)]
-struct RawPage {
-    repos: Vec<RawRepo>,
+struct ListReposResponse {
+    repos: Vec<ListRepoResponse>,
     #[serde(default)]
     cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct RawRepo {
+struct ListRepoResponse {
     did: String,
-    #[serde(default)]
-    custody: Option<String>,
+    custody: RepoCustody,
     #[serde(default)]
     host: Option<String>,
 }
@@ -238,9 +248,9 @@ mod tests {
     };
 
     #[test]
-    fn decodes_explicit_pds_custody_and_fails_closed_for_unknown_custody() {
+    fn decodes_explicit_pds_custody_and_rejects_unknown_custody() {
         let page = decode_page(
-            br#"{"repos":[{"did":"did:plc:member","custody":"pds","host":"https://pds.example.test/"},{"did":"did:web:stratos.example.test","custody":"unknown"}],"cursor":"next"}"#,
+            br#"{"repos":[{"did":"did:plc:member","custody":"pds","host":"https://pds.example.test/"},{"did":"did:web:stratos.example.test","custody":"stratos"}],"cursor":"next"}"#,
         )
         .unwrap();
         assert_eq!(page.members[0].custody, RepoCustody::Pds);
@@ -250,6 +260,10 @@ mod tests {
         );
         assert_eq!(page.members[1].custody, RepoCustody::Stratos);
         assert_eq!(page.next_cursor.as_deref(), Some("next"));
+        assert_eq!(
+            decode_page(br#"{"repos":[{"did":"did:plc:member","custody":"unknown"}]}"#),
+            Err(SpaceMembershipError::InvalidResponse)
+        );
     }
 
     #[test]
@@ -275,6 +289,16 @@ mod tests {
     }
 
     #[test]
+    fn leaves_an_unresolvable_member_without_a_polling_host() {
+        let page = decode_page(
+            br#"{"repos":[{"did":"did:plc:member","custody":"pds","host":"http://unsafe.example.test/"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(page.members[0].custody, RepoCustody::Pds);
+        assert_eq!(page.members[0].host, None);
+    }
+
+    #[test]
     fn keeps_service_and_public_endpoints_separate() {
         let client = HttpSpaceMembershipClient::new(
             "http://stratos.internal.test/base",
@@ -282,11 +306,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            endpoint(&client.service_url).unwrap().as_str(),
+            endpoint(&client.service_url).as_str(),
             "http://stratos.internal.test/base/xrpc/zone.stratos.space.listRepos"
         );
         assert_eq!(
-            endpoint(&client.public_url).unwrap().as_str(),
+            endpoint(&client.public_url).as_str(),
             "https://stratos.example.test/base/xrpc/zone.stratos.space.listRepos"
         );
     }
