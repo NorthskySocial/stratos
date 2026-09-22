@@ -197,6 +197,31 @@ impl ProjectionReader {
             )?,
         )))
     }
+    pub fn prepare_blob(
+        &self,
+        request: ReadRequest<'_>,
+        uri: &str,
+    ) -> Result<Option<(ReadToken, crate::store::BlobPost)>, StoreError> {
+        let Some(token) = self.admission.begin(
+            request.viewer,
+            request.boundary,
+            request.authority_expires_at,
+            request.now,
+        ) else {
+            return Ok(None);
+        };
+        let Some(post) = self.store.blob_post(uri, request.as_of)? else {
+            return Ok(None);
+        };
+        Ok(Some((token, post)))
+    }
+    pub fn blob_post(
+        &self,
+        uri: &str,
+        as_of: &str,
+    ) -> Result<Option<crate::store::BlobPost>, StoreError> {
+        self.store.blob_post(uri, as_of)
+    }
     pub fn release<T>(&self, token: ReadToken, response: T, now: u64) -> Option<T> {
         self.admission
             .assert_current(&token, now)

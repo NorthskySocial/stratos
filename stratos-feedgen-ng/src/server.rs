@@ -14,6 +14,7 @@ use tokio::{sync::Semaphore, time::timeout};
 
 use crate::{
     auth::{FeedRequestVerifier, IdentityKeyResolver},
+    blob_service::{BlobService, BlobServiceError},
     config::FeedgenConfig,
     feed_service::{FeedQuery, FeedServiceError},
     feeds::{FeedDescription, FeedRegistry},
@@ -42,6 +43,7 @@ struct FeedServerState {
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
     request_permits: Arc<Semaphore>,
+    blobs: Option<Arc<BlobService>>,
 }
 
 #[derive(Serialize)]
@@ -129,7 +131,7 @@ pub fn router_with_feed(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
 ) -> Router {
-    router_with_feed_with_sync_status(config, feeds, readiness, lifecycle, verifier, None)
+    router_with_feed_with_sync_status(config, feeds, readiness, lifecycle, verifier, None, None)
 }
 
 pub fn router_with_feed_with_pds_space_sync(
@@ -139,6 +141,7 @@ pub fn router_with_feed_with_pds_space_sync(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
     pds_space_sync: Arc<Mutex<PdsSpaceSyncStatus>>,
+    blobs: Arc<BlobService>,
 ) -> Router {
     router_with_feed_with_sync_status(
         config,
@@ -147,6 +150,7 @@ pub fn router_with_feed_with_pds_space_sync(
         lifecycle,
         verifier,
         Some(pds_space_sync),
+        Some(blobs),
     )
 }
 
@@ -157,6 +161,7 @@ fn router_with_feed_with_sync_status(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
     pds_space_sync: Option<Arc<Mutex<PdsSpaceSyncStatus>>>,
+    blobs: Option<Arc<BlobService>>,
 ) -> Router {
     router_with_feed_with_request_limit(
         ServerState {
@@ -168,6 +173,7 @@ fn router_with_feed_with_sync_status(
         lifecycle,
         verifier,
         MAX_CONCURRENT_FEED_REQUESTS,
+        blobs,
     )
 }
 
@@ -176,9 +182,10 @@ fn router_with_feed_with_request_limit(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
     request_limit: usize,
+    blobs: Option<Arc<BlobService>>,
 ) -> Router {
     let server = Arc::new(server);
-    let state = feed_server_state(server, lifecycle, verifier, request_limit);
+    let state = feed_server_state(server, lifecycle, verifier, request_limit, blobs);
     Router::new()
         .route("/health", get(feed_health))
         .route("/.well-known/did.json", get(feed_did_document))
@@ -187,6 +194,7 @@ fn router_with_feed_with_request_limit(
             get(feed_describe_feed),
         )
         .route("/xrpc/zone.stratos.feedgen.getFeed", get(get_feed))
+        .route("/xrpc/zone.stratos.feedgen.getBlob", get(get_blob))
         .with_state(state)
 }
 
@@ -195,12 +203,14 @@ fn feed_server_state(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
     request_limit: usize,
+    blobs: Option<Arc<BlobService>>,
 ) -> Arc<FeedServerState> {
     Arc::new(FeedServerState {
         server,
         lifecycle,
         verifier,
         request_permits: Arc::new(Semaphore::new(request_limit)),
+        blobs,
     })
 }
 
@@ -282,6 +292,12 @@ struct GetFeedParameters {
     feed: String,
     cursor: Option<String>,
     limit: Option<u16>,
+}
+
+#[derive(Deserialize)]
+struct GetBlobParameters {
+    uri: String,
+    cid: String,
 }
 
 #[derive(Serialize)]
@@ -419,6 +435,174 @@ async fn get_feed(
     }
 }
 
+async fn get_blob(
+    State(state): State<Arc<FeedServerState>>,
+    headers: HeaderMap,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let Some(blobs) = &state.blobs else {
+        return xrpc_error(StatusCode::NOT_FOUND, "BlobNotFound", "blob is unavailable");
+    };
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let now = OffsetDateTime::now_utc().unix_timestamp().max(0) as u64;
+    let verified = match timeout(
+        FEED_REQUEST_TIMEOUT,
+        state.verifier.verify_authorization(authorization, now),
+    )
+    .await
+    {
+        Ok(Ok(value)) => value,
+        Ok(Err(error)) => {
+            return xrpc_error(
+                StatusCode::UNAUTHORIZED,
+                error.code(),
+                "authentication failed",
+            );
+        }
+        Err(_) => {
+            return xrpc_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "FeedNotReady",
+                "feed is unavailable",
+            );
+        }
+    };
+    let Some(query) = raw_query else {
+        return xrpc_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "blob request parameters are invalid",
+        );
+    };
+    if query.len() > MAX_GET_FEED_QUERY_BYTES {
+        return xrpc_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "blob request parameters are invalid",
+        );
+    }
+    let parameters: GetBlobParameters = match serde_urlencoded::from_str(&query) {
+        Ok(value) => value,
+        Err(_) => {
+            return xrpc_error(
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "blob request parameters are invalid",
+            );
+        }
+    };
+    if parameters.uri.len() > 2_048 || parameters.cid.len() > 256 {
+        return xrpc_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "blob request parameters are invalid",
+        );
+    }
+    let _permit = match Arc::clone(&state.request_permits).try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return xrpc_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "FeedNotReady",
+                "feed is unavailable",
+            );
+        }
+    };
+    let as_of = current_timestamp();
+    let lifecycle = Arc::clone(&state.lifecycle);
+    let server = Arc::clone(&state.server);
+    let viewer = verified.viewer_did;
+    let uri = parameters.uri;
+    let cid = parameters.cid;
+    let prepared = match tokio::task::spawn_blocking(move || {
+        lifecycle.prepare_viewer_blob(&viewer, &server.feeds, &uri, now, &as_of)
+    })
+    .await
+    {
+        Ok(Ok(Some(value))) => value,
+        Ok(Ok(None)) => {
+            return xrpc_error(
+                StatusCode::BAD_REQUEST,
+                "BlobNotFound",
+                "blob is unavailable",
+            );
+        }
+        _ => {
+            return xrpc_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "FeedNotReady",
+                "feed is unavailable",
+            );
+        }
+    };
+    let (token, post) = prepared;
+    let mime = blob_mime(&post.blob_refs_json, &cid);
+    if mime.is_none() {
+        return xrpc_error(
+            StatusCode::BAD_REQUEST,
+            "BlobNotFound",
+            "blob is unavailable",
+        );
+    }
+    let bytes = match blobs.get(&post.author_did, &cid, now).await {
+        Ok(bytes) => bytes,
+        Err(error) => return blob_error(error),
+    };
+    if state.lifecycle.release_blob(token, (), now).is_none() {
+        blobs.remove(&post.author_did, &cid);
+        return xrpc_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FeedNotReady",
+            "feed is unavailable",
+        );
+    }
+    private_bytes(bytes.to_vec(), mime.unwrap_or("application/octet-stream"))
+}
+
+fn blob_mime(references: &[u8], cid: &str) -> Option<&'static str> {
+    let values: Vec<serde_json::Value> = serde_json::from_slice(references).ok()?;
+    let mime = values
+        .iter()
+        .find(|value| value.get("cid").and_then(serde_json::Value::as_str) == Some(cid))?
+        .get("mimeType")
+        .and_then(serde_json::Value::as_str);
+    match mime {
+        Some("image/jpeg") => Some("image/jpeg"),
+        Some("image/png") => Some("image/png"),
+        Some("image/gif") => Some("image/gif"),
+        Some("image/webp") => Some("image/webp"),
+        Some("image/avif") => Some("image/avif"),
+        Some("video/mp4") => Some("video/mp4"),
+        Some("video/webm") => Some("video/webm"),
+        Some("audio/mpeg") => Some("audio/mpeg"),
+        Some("audio/ogg") => Some("audio/ogg"),
+        Some("audio/wav") => Some("audio/wav"),
+        _ => Some("application/octet-stream"),
+    }
+}
+
+fn blob_error(error: BlobServiceError) -> Response {
+    match error {
+        BlobServiceError::TooLarge => xrpc_error(
+            StatusCode::BAD_REQUEST,
+            "BlobTooLarge",
+            "blob is unavailable",
+        ),
+        BlobServiceError::Busy => xrpc_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "BlobBusy",
+            "blob is unavailable",
+        ),
+        BlobServiceError::Unavailable => xrpc_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FeedNotReady",
+            "blob is unavailable",
+        ),
+    }
+}
+
 fn feed_error(error: FeedServiceError) -> Response {
     match error {
         FeedServiceError::AuthorizationUnavailable => xrpc_error(
@@ -469,6 +653,33 @@ fn private_json(status: StatusCode, body: Vec<u8>) -> Response {
     response
 }
 
+fn private_bytes(body: Vec<u8>, content_type: &'static str) -> Response {
+    let mut response = Response::new(Body::from(body));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("Authorization"));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    response.headers_mut().insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response.headers_mut().insert(
+        "content-security-policy",
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    response.headers_mut().insert(
+        "content-disposition",
+        HeaderValue::from_static("attachment"),
+    );
+    response
+}
+
 fn current_timestamp() -> String {
     let now = OffsetDateTime::now_utc();
     format!(
@@ -485,7 +696,10 @@ fn current_timestamp() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
 
     use async_trait::async_trait;
     use axum::{
@@ -493,22 +707,27 @@ mod tests {
         http::{Request, StatusCode},
     };
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use cid::Cid;
     use http_body_util::BodyExt;
     use p256::ecdsa::{SigningKey, signature::Signer};
+    use sha2::{Digest, Sha256};
     use tower::ServiceExt;
 
     use crate::{
         auth::{FeedRequestVerifier, IdentityKeyResolver, IdentityResolutionError},
+        blob_cache::BlobCache,
+        blob_service::BlobService,
+        blob_upstream::{BlobUpstream, BlobUpstreamError},
         config::{FeedgenConfig, ProjectionRetention, StorageProfile},
         feeds::{FeedDescription, FeedRegistry},
         lifecycle::ControlLifecycle,
         readiness::FeedReadinessGate,
         service::ProjectionReader,
         service_auth::ServiceSigningKey,
-        store::{EncryptedStore, StorageKey},
+        store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
     };
 
-    use super::{ServerState, feed_error, router, router_with_feed_with_request_limit};
+    use super::{ServerState, blob_mime, feed_error, router, router_with_feed_with_request_limit};
 
     fn config() -> FeedgenConfig {
         FeedgenConfig {
@@ -559,13 +778,17 @@ mod tests {
     }
 
     fn jwt(key: &SigningKey, expires_at: u64) -> String {
+        jwt_for(key, expires_at, "zone.stratos.feedgen.getFeed")
+    }
+
+    fn jwt_for(key: &SigningKey, expires_at: u64, method: &str) -> String {
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256","typ":"JWT"}"#);
         let claims = URL_SAFE_NO_PAD.encode(
             serde_json::to_vec(&serde_json::json!({
                 "iss": "did:plc:faye",
                 "aud": "did:web:feedgen.example.test",
                 "exp": expires_at,
-                "lxm": "zone.stratos.feedgen.getFeed",
+                "lxm": method,
             }))
             .unwrap(),
         );
@@ -575,19 +798,38 @@ mod tests {
     }
 
     fn authenticated_router(key: &SigningKey) -> axum::Router {
-        authenticated_router_with_request_limit(key, super::MAX_CONCURRENT_FEED_REQUESTS, None)
+        authenticated_router_with_request_limit(
+            key,
+            super::MAX_CONCURRENT_FEED_REQUESTS,
+            None,
+            None,
+            Vec::new(),
+        )
     }
 
     fn authenticated_router_with_request_limit(
         key: &SigningKey,
         request_limit: usize,
         pds_space_sync: Option<Arc<Mutex<crate::pds_space_scheduler::PdsSpaceSyncStatus>>>,
+        blobs: Option<Arc<BlobService>>,
+        posts: Vec<ProjectionPost>,
     ) -> axum::Router {
         let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        if !posts.is_empty() {
+            store
+                .apply_actor_page(ActorPage {
+                    authority_did: "did:web:stratos.example.test".to_owned(),
+                    actor_did: "did:plc:spike".to_owned(),
+                    sequence: 1,
+                    upserts: posts,
+                    deletes: Vec::new(),
+                    updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+                })
+                .unwrap();
+        }
         let lifecycle = Arc::new(ControlLifecycle::new(
-            ProjectionReader::new(
-                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
-            ),
+            ProjectionReader::new(store),
             Arc::clone(&readiness),
         ));
         lifecycle
@@ -612,7 +854,10 @@ mod tests {
         let resolver: Arc<dyn IdentityKeyResolver> = Arc::new(StaticResolver(did_key(key)));
         let verifier = FeedRequestVerifier::new(
             "did:web:feedgen.example.test",
-            ["zone.stratos.feedgen.getFeed".to_owned()],
+            [
+                "zone.stratos.feedgen.getFeed".to_owned(),
+                "zone.stratos.feedgen.getBlob".to_owned(),
+            ],
             resolver,
         );
         router_with_feed_with_request_limit(
@@ -625,7 +870,47 @@ mod tests {
             lifecycle,
             verifier,
             request_limit,
+            blobs,
         )
+    }
+
+    struct StaticBlobUpstream(Vec<u8>);
+
+    #[async_trait]
+    impl BlobUpstream for StaticBlobUpstream {
+        async fn get(
+            &self,
+            _did: &str,
+            _cid: &str,
+            _now: u64,
+        ) -> Result<Vec<u8>, BlobUpstreamError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn blob_cid(bytes: &[u8]) -> String {
+        Cid::new_v1(
+            0x55,
+            multihash::Multihash::<64>::wrap(0x12, &Sha256::digest(bytes)).unwrap(),
+        )
+        .to_string()
+    }
+
+    fn blob_post(cid: &str) -> ProjectionPost {
+        ProjectionPost {
+            uri: "at://did:plc:spike/zone.stratos.feed.post/see-you".to_owned(),
+            author_did: "did:plc:spike".to_owned(),
+            cid: "bafyrecord".to_owned(),
+            sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+            indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+            retained_at: "2998-04-04T00:00:00.000Z".to_owned(),
+            record_json: b"{}".to_vec(),
+            blob_refs_json: serde_json::to_vec(&serde_json::json!([
+                { "cid": cid, "mimeType": "image/png" }
+            ]))
+            .unwrap(),
+            boundaries: vec!["bebop".to_owned()],
+        }
     }
 
     #[tokio::test]
@@ -685,6 +970,8 @@ mod tests {
             Some(Arc::new(Mutex::new(
                 crate::pds_space_scheduler::PdsSpaceSyncStatus::default(),
             ))),
+            None,
+            Vec::new(),
         );
         let response = app
             .oneshot(
@@ -785,6 +1072,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn serves_an_authorized_cid_verified_blob_with_private_headers() {
+        let key = SigningKey::from_bytes((&[7_u8; 32]).into()).unwrap();
+        let bytes = b"the real folk blues".to_vec();
+        let cid = blob_cid(&bytes);
+        let blobs = Arc::new(
+            BlobService::new(
+                Arc::new(Mutex::new(
+                    BlobCache::new(1024, Duration::from_secs(60)).unwrap(),
+                )),
+                Arc::new(StaticBlobUpstream(bytes.clone())),
+                1,
+            )
+            .unwrap(),
+        );
+        let app = authenticated_router_with_request_limit(
+            &key,
+            super::MAX_CONCURRENT_FEED_REQUESTS,
+            None,
+            Some(blobs),
+            vec![blob_post(&cid)],
+        );
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 60;
+        let query = serde_urlencoded::to_string([
+            ("uri", "at://did:plc:spike/zone.stratos.feed.post/see-you"),
+            ("cid", cid.as_str()),
+        ])
+        .unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/xrpc/zone.stratos.feedgen.getBlob?{query}"))
+                    .header(
+                        "authorization",
+                        format!(
+                            "Bearer {}",
+                            jwt_for(&key, expires_at, "zone.stratos.feedgen.getBlob")
+                        ),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "private, no-store");
+        assert_eq!(response.headers()["content-type"], "image/png");
+        assert_eq!(response.headers()["content-disposition"], "attachment");
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn preserves_only_the_legacy_safe_blob_media_types() {
+        assert_eq!(
+            blob_mime(
+                br#"[{"cid":"bafyblob","mimeType":"audio/ogg"}]"#,
+                "bafyblob"
+            ),
+            Some("audio/ogg")
+        );
+        assert_eq!(
+            blob_mime(
+                br#"[{"cid":"bafyblob","mimeType":"text/html"}]"#,
+                "bafyblob"
+            ),
+            Some("application/octet-stream")
+        );
+    }
+
+    #[tokio::test]
     async fn rejects_missing_authentication_without_releasing_a_feed() {
         let key = SigningKey::from_bytes((&[7_u8; 32]).into()).unwrap();
         let response = authenticated_router(&key)
@@ -821,7 +1185,7 @@ mod tests {
             .unwrap()
             .as_secs()
             + 60;
-        let response = authenticated_router_with_request_limit(&key, 0, None)
+        let response = authenticated_router_with_request_limit(&key, 0, None, None, Vec::new())
             .oneshot(
                 Request::builder()
                     .uri("/xrpc/zone.stratos.feedgen.getFeed?feed=bebop")

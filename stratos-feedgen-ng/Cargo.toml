@@ -29,6 +29,7 @@ url = "2"
 serde_urlencoded = "0.7"
 sha2 = "0.10"
 hmac = "0.12"
+multihash = "0.19"
 
 [dev-dependencies]
 http-body-util = "0.1"

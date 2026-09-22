@@ -1555,6 +1555,7 @@ dependencies = [
  "http-body-util",
  "k256",
  "libc",
+ "multihash",
  "p256",
  "reqwest",
  "rusqlite",

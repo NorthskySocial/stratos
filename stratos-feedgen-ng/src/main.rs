@@ -7,6 +7,9 @@ use stratos_feedgen_ng::{
     actor_stream::{ActorPool, ActorStreamConfig},
     auth::FeedRequestVerifier,
     authority::{AuthorityClient, HttpAuthorityClient},
+    blob_cache::{BlobCache, BlobCacheSweeper, MAX_CACHE_BYTES},
+    blob_service::BlobService,
+    blob_upstream::HttpBlobUpstream,
     config::FeedgenConfig,
     credential_issuer::HttpSpaceCredentialIssuer,
     credential_manager::SpaceCredentialManager,
@@ -75,6 +78,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         feeds.list().map(|feed| feed.boundary.clone()),
         config.retention.clone(),
     );
+    let blob_cache = Arc::new(Mutex::new(BlobCache::new(
+        MAX_CACHE_BYTES,
+        std::time::Duration::from_secs(300),
+    )?));
+    let blob_service = Arc::new(BlobService::new(
+        Arc::clone(&blob_cache),
+        Arc::new(HttpBlobUpstream::new(
+            &config.stratos_service_url,
+            config.stratos_service_did.clone(),
+            config.service_did.clone(),
+            config.signing_key.clone(),
+        )?),
+        2,
+    )?);
+    let blob_sweeper = BlobCacheSweeper::start(blob_cache);
     let authority: Arc<dyn AuthorityClient> = Arc::new(HttpAuthorityClient::new(
         &config.stratos_service_url,
         config.stratos_service_did.clone(),
@@ -106,7 +124,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let verifier = FeedRequestVerifier::new(
         config.service_did.clone(),
-        ["zone.stratos.feedgen.getFeed".to_owned()],
+        [
+            "zone.stratos.feedgen.getFeed".to_owned(),
+            "zone.stratos.feedgen.getBlob".to_owned(),
+        ],
         resolver as Arc<dyn stratos_feedgen_ng::auth::IdentityKeyResolver>,
     );
     let result = axum::serve(
@@ -118,11 +139,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             lifecycle,
             verifier,
             pds_scheduler.status(),
+            blob_service,
         ),
     )
     .with_graceful_shutdown(shutdown)
     .await;
     pds_scheduler.stop().await;
+    blob_sweeper.stop().await;
     compactor.stop().await;
     stream.stop().await;
     result?;

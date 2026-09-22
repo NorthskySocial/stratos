@@ -7,7 +7,7 @@ use crate::{
         FeedQuery, FeedService, FeedServiceError, ViewerAuthorization as FeedViewerAuthorization,
     },
     feeds::FeedRegistry,
-    identifier::Did,
+    identifier::{Did, RecordUri},
     readiness::{FeedReadinessGate, ReconciliationOutcome},
     service::ProjectionReader,
     service_event::{EnrollmentAction, EnrollmentEvent},
@@ -125,6 +125,74 @@ impl ControlLifecycle {
             },
             query,
         )
+    }
+
+    pub fn prepare_viewer_blob(
+        &self,
+        did: &str,
+        feeds: &FeedRegistry,
+        uri: &str,
+        now: u64,
+        as_of: &str,
+    ) -> Result<Option<(crate::admission::ReadToken, crate::store::BlobPost)>, FeedServiceError>
+    {
+        if !matches!(RecordUri::parse(uri), Ok(RecordUri::Repo { .. })) {
+            return Ok(None);
+        }
+        let _transition = self.transition.lock().expect("lifecycle lock poisoned");
+        if !self
+            .readiness
+            .lock()
+            .expect("readiness lock poisoned")
+            .is_ready()
+        {
+            return Err(FeedServiceError::FeedNotReady);
+        }
+        let authorization = self
+            .authorizations
+            .lock()
+            .expect("authorization lock poisoned")
+            .current(did, now)
+            .ok_or(FeedServiceError::AuthorizationUnavailable)?;
+        let projection = self.projection.lock().expect("projection lock poisoned");
+        let Some(post) = projection
+            .blob_post(uri, as_of)
+            .map_err(FeedServiceError::Store)?
+        else {
+            return Ok(None);
+        };
+        let Some(boundary) = post.boundaries.iter().find(|boundary| {
+            authorization.boundaries.contains(boundary)
+                && feeds.list().any(|feed| &feed.boundary == *boundary)
+        }) else {
+            return Ok(None);
+        };
+        projection
+            .prepare_blob(
+                crate::service::ReadRequest {
+                    viewer: &authorization.did,
+                    boundary,
+                    authority_expires_at: authorization.expires_at,
+                    now,
+                    cursor: None,
+                    limit: 1,
+                    as_of,
+                },
+                uri,
+            )
+            .map_err(FeedServiceError::Store)
+    }
+
+    pub fn release_blob<T>(
+        &self,
+        token: crate::admission::ReadToken,
+        value: T,
+        now: u64,
+    ) -> Option<T> {
+        self.projection
+            .lock()
+            .expect("projection lock poisoned")
+            .release(token, value, now)
     }
 
     pub fn interrupt_feed_work(&self) {
@@ -383,11 +451,12 @@ mod tests {
 
     use crate::{
         authorization::{AuthorizationError, ViewerAuthorization, ViewerAuthorizations},
+        feeds::{FeedDescription, FeedRegistry},
         lifecycle::{ActorFrameError, ActorFrameResult, ControlLifecycle},
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         service::{ProjectionReader, ReadRequest},
         service_event::{EnrollmentAction, EnrollmentEvent},
-        store::{EncryptedStore, StorageKey},
+        store::{ActorPage, EncryptedStore, ProjectionPost, StorageKey},
     };
 
     fn request() -> ReadRequest<'static> {
@@ -526,6 +595,91 @@ mod tests {
         ));
 
         assert!(lifecycle.read(|projection| projection.release(token, page, 2).is_none()));
+    }
+
+    #[test]
+    fn blob_reads_require_a_configured_boundary_and_recheck_the_admission_token() {
+        let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
+        let mut store = EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap();
+        store
+            .apply_actor_page(ActorPage {
+                authority_did: "did:web:stratos.example".to_owned(),
+                actor_did: "did:plc:spike".to_owned(),
+                sequence: 1,
+                upserts: vec![ProjectionPost {
+                    uri: "at://did:plc:spike/zone.stratos.feed.post/see-you".to_owned(),
+                    author_did: "did:plc:spike".to_owned(),
+                    cid: "bafyrecord".to_owned(),
+                    sort_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                    indexed_at: "1998-04-03T00:00:01.000Z".to_owned(),
+                    retained_at: "1998-04-04T00:00:00.000Z".to_owned(),
+                    record_json: b"{}".to_vec(),
+                    blob_refs_json: b"[]".to_vec(),
+                    boundaries: vec!["bebop".to_owned()],
+                }],
+                deletes: Vec::new(),
+                updated_at: "1998-04-03T00:00:02.000Z".to_owned(),
+            })
+            .unwrap();
+        let lifecycle = ControlLifecycle::new(ProjectionReader::new(store), readiness);
+        let feeds = FeedRegistry::new([FeedDescription {
+            id: "bebop".to_owned(),
+            boundary: "bebop".to_owned(),
+            display_name: None,
+            description: None,
+        }])
+        .unwrap();
+        lifecycle
+            .apply_viewer_authorization(
+                ViewerAuthorization {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["bebop".to_owned()],
+                    expires_at: 100,
+                },
+                1,
+            )
+            .unwrap();
+        lifecycle.session_established();
+        let generation = lifecycle.begin_reconciliation();
+        assert!(lifecycle.complete_reconciliation(
+            generation,
+            ReconciliationOutcome {
+                errors: 0,
+                truncated: false,
+            },
+        ));
+
+        let (token, _) = lifecycle
+            .prepare_viewer_blob(
+                "did:plc:faye",
+                &feeds,
+                "at://did:plc:spike/zone.stratos.feed.post/see-you",
+                1,
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap()
+            .unwrap();
+        assert!(lifecycle
+            .prepare_viewer_blob(
+                "did:plc:faye",
+                &feeds,
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spike/zone.stratos.feed.post/see-you",
+                1,
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap()
+            .is_none());
+        lifecycle
+            .apply_viewer_authorization(
+                ViewerAuthorization {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: Vec::new(),
+                    expires_at: 100,
+                },
+                1,
+            )
+            .unwrap();
+        assert!(lifecycle.release_blob(token, (), 1).is_none());
     }
 
     #[test]

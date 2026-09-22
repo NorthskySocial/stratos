@@ -388,6 +388,14 @@ pub struct FeedPost {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlobPost {
+    pub uri: String,
+    pub author_did: String,
+    pub blob_refs_json: Vec<u8>,
+    pub boundaries: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedPage {
     pub posts: Vec<FeedPost>,
     pub cursor: Option<crate::cursor::FeedCursor>,
@@ -975,6 +983,28 @@ impl EncryptedStore {
             None
         };
         Ok(FeedPage { posts, cursor })
+    }
+
+    pub fn blob_post(&self, uri: &str, as_of: &str) -> Result<Option<BlobPost>, StoreError> {
+        if !is_utc_timestamp(as_of) {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        self.connection
+            .query_row(
+                "SELECT p.uri, p.author_did, p.blob_refs_json,
+                 COALESCE((SELECT json_group_array(boundary) FROM post_boundary WHERE uri = p.uri), '[]')
+                 FROM post p WHERE p.uri = ?1 AND p.retained_at > ?2",
+                params![uri, as_of],
+                |row| Ok(BlobPost {
+                    uri: row.get(0)?,
+                    author_did: row.get(1)?,
+                    blob_refs_json: row.get(2)?,
+                    boundaries: serde_json::from_str(&row.get::<_, String>(3)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                }),
+            )
+            .optional()
+            .map_err(StoreError::Open)
     }
 
     pub fn purge_expired(&mut self, as_of: &str, limit: u16) -> Result<u64, StoreError> {
@@ -2137,6 +2167,39 @@ mod tests {
                 )
                 .unwrap(),
             "1998-04-03T00:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn exposes_only_a_retained_post_with_its_authoritative_boundaries_for_blob_reads() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        let mut post = spike_post();
+        post.blob_refs_json = br#"[{\"cid\":\"bafyblob\",\"mimeType\":\"image/png\"}]"#.to_vec();
+        store
+            .apply_actor_page(actor_page(1, vec![post], Vec::new()))
+            .unwrap();
+
+        let blob_post = store
+            .blob_post(
+                "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(blob_post.author_did, "did:plc:spikespiegel");
+        assert_eq!(blob_post.boundaries, ["bebop"]);
+        assert_eq!(
+            blob_post.blob_refs_json,
+            br#"[{\"cid\":\"bafyblob\",\"mimeType\":\"image/png\"}]"#
+        );
+        assert!(
+            store
+                .blob_post(
+                    "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+                    "1998-04-04T00:00:00.000Z",
+                )
+                .unwrap()
+                .is_none()
         );
     }
 
