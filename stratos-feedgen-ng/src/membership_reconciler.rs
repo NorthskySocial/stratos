@@ -28,6 +28,11 @@ pub struct MembershipReconciliation {
     pub targets: Vec<PdsPollTarget>,
 }
 
+pub struct MembershipSnapshot {
+    pub members: Vec<PdsSpaceMember>,
+    pub targets: Vec<PdsPollTarget>,
+}
+
 #[derive(Debug)]
 pub enum MembershipReconciliationError {
     Credential(CredentialManagerError),
@@ -70,6 +75,22 @@ impl MembershipReconciler {
         boundary: &str,
         reconciled_at: &str,
     ) -> Result<MembershipReconciliation, MembershipReconciliationError> {
+        let snapshot = self.discover(boundary).await?;
+        let pds_members = u16::try_from(snapshot.members.len()).expect("membership cap fits u16");
+        store
+            .replace_pds_space_members(boundary, snapshot.members, reconciled_at)
+            .map_err(MembershipReconciliationError::Store)?;
+        Ok(MembershipReconciliation {
+            pds_members,
+            targets: snapshot.targets,
+        })
+    }
+
+    /// Enumerates all members before any caller updates its durable baseline.
+    pub async fn discover(
+        &self,
+        boundary: &str,
+    ) -> Result<MembershipSnapshot, MembershipReconciliationError> {
         let space_uri =
             boundary_to_space_uri(boundary).map_err(MembershipReconciliationError::Credential)?;
         let credential = self
@@ -82,16 +103,12 @@ impl MembershipReconciler {
             .values()
             .filter(|member| member.custody == RepoCustody::Pds)
             .collect::<Vec<_>>();
-        let pds_member_count = u16::try_from(pds_members.len()).expect("membership cap fits u16");
         let baseline = pds_members
             .iter()
             .map(|member| PdsSpaceMember {
                 did: member.did.clone(),
             })
             .collect();
-        store
-            .replace_pds_space_members(boundary, baseline, reconciled_at)
-            .map_err(MembershipReconciliationError::Store)?;
         let targets = pds_members
             .into_iter()
             .filter_map(|member| {
@@ -103,8 +120,8 @@ impl MembershipReconciler {
                 })
             })
             .collect();
-        Ok(MembershipReconciliation {
-            pds_members: pds_member_count,
+        Ok(MembershipSnapshot {
+            members: baseline,
             targets,
         })
     }

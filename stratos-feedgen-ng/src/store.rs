@@ -332,6 +332,7 @@ pub struct EnrollmentReconciliation {
 
 /// The authority-derived PDS members permitted to supply space records for a
 /// boundary. This is distinct from an actor's own enrollment boundaries.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PdsSpaceMember {
     pub did: String,
 }
@@ -914,7 +915,8 @@ impl EncryptedStore {
         transaction.commit().map_err(StoreError::Open)
     }
 
-    pub fn discard_authorized_space_stage(
+    /// Removes unverified staging data without requiring current membership.
+    pub fn discard_unverified_space_stage(
         &mut self,
         boundary: &str,
         space_uri: &str,
@@ -928,9 +930,6 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
-        if !has_current_pds_space_member(&transaction, boundary, actor_did)? {
-            return Err(StoreError::UnauthorizedSpaceMember);
-        }
         transaction
             .execute(
                 "DELETE FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3",
@@ -1700,7 +1699,7 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        ActorEnrollment, ActorPage, EncryptedStore, MAX_ACTOR_ENROLLMENT_PAGE,
+        ActorEnrollment, ActorPage, EncryptedStore, MAX_ACTOR_ENROLLMENT_PAGE, PdsSpaceMember,
         ProjectionCompaction, ProjectionPost, SpaceStageMutation, SpaceStagePage, StorageKey,
         StoreError,
     };
@@ -2751,7 +2750,7 @@ mod tests {
             .stage_authorized_space_page(authorized_space_stage_page(None), Vec::new())
             .unwrap();
         store
-            .discard_authorized_space_stage(
+            .discard_unverified_space_stage(
                 "did:web:stratos.example/bebop",
                 "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
                 "did:plc:spikespiegel",
@@ -2776,6 +2775,41 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn discarding_unverified_state_succeeds_after_membership_revocation() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .replace_pds_space_members(
+                "did:web:stratos.example/bebop",
+                vec![PdsSpaceMember {
+                    did: "did:plc:spikespiegel".to_owned(),
+                }],
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+        store
+            .stage_authorized_space_page(
+                authorized_space_stage_page(Some("unverified")),
+                vec![staged_space_post()],
+            )
+            .unwrap();
+        store
+            .replace_pds_space_members(
+                "did:web:stratos.example/bebop",
+                Vec::new(),
+                "1998-04-03T00:01:00.000Z",
+            )
+            .unwrap();
+
+        store
+            .discard_unverified_space_stage(
+                "did:web:stratos.example/bebop",
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                "did:plc:spikespiegel",
+            )
+            .unwrap();
     }
 
     #[test]

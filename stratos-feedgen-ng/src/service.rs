@@ -1,9 +1,10 @@
 use crate::{
     admission::{ReadAdmission, ReadToken},
     cursor::FeedCursor,
+    space_sync::{PreparedSpacePage, SpaceSyncError, SpaceSyncTarget, stage_space_page},
     store::{
         ActorEnrollment, ActorPage, ActorSyncState, EncryptedStore, EnrollmentReconciliation,
-        FeedPage, ProjectionCompaction, StoreError, StoreInterrupt,
+        FeedPage, PdsSpaceMember, ProjectionCompaction, StoreError, StoreInterrupt,
     },
 };
 use std::collections::BTreeSet;
@@ -84,6 +85,57 @@ impl ProjectionReader {
         limit: u16,
     ) -> Result<Vec<ActorEnrollment>, StoreError> {
         self.store.list_actor_enrollments_page(after_did, limit)
+    }
+    pub fn replace_pds_space_members(
+        &mut self,
+        boundary: &str,
+        members: Vec<PdsSpaceMember>,
+        reconciled_at: &str,
+    ) -> Result<(), StoreError> {
+        self.store
+            .replace_pds_space_members(boundary, members, reconciled_at)?;
+        self.admission.invalidate_boundary(boundary);
+        Ok(())
+    }
+    pub fn pds_space_target(
+        &self,
+        space_uri: impl Into<String>,
+        boundary: impl Into<String>,
+        actor_did: impl Into<String>,
+    ) -> Result<SpaceSyncTarget, SpaceSyncError> {
+        SpaceSyncTarget::from_authoritative_membership(&self.store, space_uri, boundary, actor_did)
+    }
+    pub fn space_sync_cursor(
+        &self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+    ) -> Result<Option<String>, StoreError> {
+        self.store.space_sync_cursor(boundary, space_uri, actor_did)
+    }
+    pub fn stage_pds_space_page(&mut self, page: PreparedSpacePage) -> Result<(), SpaceSyncError> {
+        stage_space_page(&mut self.store, page)
+    }
+    pub fn promote_pds_space_stage(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        retained_at: &str,
+    ) -> Result<(), StoreError> {
+        self.store
+            .promote_authorized_space_stage(boundary, space_uri, actor_did, retained_at)?;
+        self.admission.invalidate_boundary(boundary);
+        Ok(())
+    }
+    pub fn discard_pds_space_stage(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+    ) -> Result<(), StoreError> {
+        self.store
+            .discard_unverified_space_stage(boundary, space_uri, actor_did)
     }
     pub fn reconcile_actor_enrollment(
         &mut self,
