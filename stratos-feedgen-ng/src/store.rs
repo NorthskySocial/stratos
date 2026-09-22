@@ -21,6 +21,7 @@ const SQLITE_CACHE_KIB: u32 = 16 * 1024;
 const MAX_PURGE_BATCH: u16 = 512;
 const MAX_SPACE_PROMOTION_BATCH: u16 = 512;
 const MAX_ACTOR_ENROLLMENT_PAGE: u16 = 512;
+const MAX_PDS_SPACE_MEMBER_PAGE: usize = 1_000;
 const SQLITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
 pub struct StorageKey([u8; STORAGE_KEY_BYTES]);
@@ -114,6 +115,50 @@ impl fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
+
+fn purge_departed_pds_member(
+    transaction: &rusqlite::Transaction<'_>,
+    boundary: &str,
+    did: &str,
+) -> Result<(), StoreError> {
+    let (authority, _) = boundary
+        .split_once('/')
+        .ok_or(StoreError::InvalidProjectionMutation)?;
+    let space_prefix = format!("at://{authority}/space/");
+    transaction
+        .execute(
+            "DELETE FROM post_boundary WHERE boundary = ?1 AND uri IN (
+               SELECT uri FROM post WHERE author_did = ?2 AND substr(uri, 1, length(?3)) = ?3
+             )",
+            params![boundary, did, space_prefix],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM post WHERE NOT EXISTS (SELECT 1 FROM post_boundary WHERE post_boundary.uri = post.uri)",
+            [],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_cursor WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_stage WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    Ok(())
+}
 
 fn open_secret_file(path: &Path) -> Result<File, StoreError> {
     if !path.is_absolute() {
@@ -258,6 +303,12 @@ pub struct EnrollmentReconciliation {
     pub removed_boundaries: Vec<String>,
     pub removed_posts: u64,
     pub enrolled: bool,
+}
+
+/// The authority-derived PDS members permitted to supply space records for a
+/// boundary. This is distinct from an actor's own enrollment boundaries.
+pub struct PdsSpaceMember {
+    pub did: String,
 }
 
 struct StoredActorEnrollment {
@@ -478,6 +529,84 @@ impl EncryptedStore {
             .map(|cursor| u64::try_from(cursor).map_err(|_| StoreError::InvalidProjectionMutation))
             .transpose()?;
         Ok(Some(ActorSyncState { boundaries, cursor }))
+    }
+
+    pub fn replace_pds_space_members(
+        &mut self,
+        boundary: &str,
+        members: Vec<PdsSpaceMember>,
+        reconciled_at: &str,
+    ) -> Result<(), StoreError> {
+        if boundary.is_empty()
+            || boundary.len() > 256
+            || !boundary.is_ascii()
+            || members.len() > MAX_PDS_SPACE_MEMBER_PAGE
+            || !is_utc_timestamp(reconciled_at)
+        {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let Some((authority, name)) = boundary.split_once('/') else {
+            return Err(StoreError::InvalidProjectionMutation);
+        };
+        if name.is_empty() || crate::identifier::Did::parse(authority.to_owned()).is_err() {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let mut unique = std::collections::BTreeSet::new();
+        for member in &members {
+            crate::identifier::Did::parse(member.did.clone())
+                .map_err(|_| StoreError::InvalidProjectionMutation)?;
+            if !unique.insert(member.did.clone()) {
+                return Err(StoreError::InvalidProjectionMutation);
+            }
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        let prior = transaction
+            .prepare("SELECT did FROM membership_baseline WHERE boundary = ?1 AND custody = 'pds'")
+            .map_err(StoreError::Open)?
+            .query_map([boundary], |row| row.get::<_, String>(0))
+            .map_err(StoreError::Open)?
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM membership_baseline WHERE boundary = ?1 AND custody = 'pds'",
+                [boundary],
+            )
+            .map_err(StoreError::Open)?;
+        for did in prior.difference(&unique) {
+            purge_departed_pds_member(&transaction, boundary, did)?;
+        }
+        for member in members {
+            transaction
+                .execute(
+                    "INSERT INTO membership_baseline (boundary, did, custody, repo_host, reconciled_at) VALUES (?1, ?2, 'pds', NULL, ?3)",
+                    params![boundary, member.did, reconciled_at],
+                )
+                .map_err(StoreError::Open)?;
+        }
+        transaction.commit().map_err(StoreError::Open)
+    }
+
+    pub fn is_current_pds_space_member(
+        &self,
+        boundary: &str,
+        did: &str,
+    ) -> Result<bool, StoreError> {
+        if boundary.is_empty() {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        crate::identifier::Did::parse(did.to_owned())
+            .map_err(|_| StoreError::InvalidProjectionMutation)?;
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM membership_baseline WHERE boundary = ?1 AND did = ?2 AND custody = 'pds')",
+                params![boundary, did],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Open)
     }
 
     pub fn reconcile_actor_enrollment(
