@@ -7,6 +7,7 @@ import {
   fingerprintFixture,
 } from './oracle.js'
 import { compareFeedEndpoints } from './compare.js'
+import { runRustContracts, type RustContractKind } from './contracts.js'
 import { inspectCgroupResources } from './resources.js'
 
 interface OracleReport {
@@ -31,11 +32,22 @@ interface CompareReport {
   rustStatus: number
 }
 
+interface ContractReport {
+  command: RustContractKind
+  implementation: 'rust'
+  reportPath: string
+  assertions: number
+}
+
 async function main(args: readonly string[]): Promise<void> {
   if (args[0] === 'limits') return reportLimits(args)
   if (args[0] === 'compare') return reportComparison(args)
+  if (args[0] === 'privacy' || args[0] === 'recovery')
+    return reportRustContracts(args[0], args)
   if (args[0] !== 'oracle')
-    throw new Error('Supported commands: oracle, limits, compare')
+    throw new Error(
+      'Supported commands: oracle, limits, compare, privacy, recovery',
+    )
   const implementation = implementationFrom(args)
   const fixture = createSmallOracleFixture()
   const directory = await mkdtemp(join(tmpdir(), 'stratos-feedgen-harness-'))
@@ -52,6 +64,27 @@ async function main(args: readonly string[]): Promise<void> {
       fingerprint: fingerprintFixture(fixture),
     },
     postsByBoundary: countPostsByBoundary(fixture),
+  }
+  await writeFile(path, `${JSON.stringify(report)}\n`, { mode: 0o600 })
+  process.stdout.write(`${JSON.stringify(report)}\n`)
+}
+
+async function reportRustContracts(
+  kind: RustContractKind,
+  args: readonly string[],
+): Promise<void> {
+  if (implementationFrom(args) !== 'rust') {
+    throw new Error(`${kind} supports only --implementation rust`)
+  }
+  const assertions = await runRustContracts(kind)
+  const directory = await mkdtemp(join(tmpdir(), 'stratos-feedgen-harness-'))
+  await chmod(directory, 0o700)
+  const path = join(directory, `${kind}.json`)
+  const report: ContractReport = {
+    command: kind,
+    implementation: 'rust',
+    reportPath: path,
+    assertions,
   }
   await writeFile(path, `${JSON.stringify(report)}\n`, { mode: 0o600 })
   process.stdout.write(`${JSON.stringify(report)}\n`)
