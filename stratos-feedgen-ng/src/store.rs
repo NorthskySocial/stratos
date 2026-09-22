@@ -75,6 +75,7 @@ pub enum StoreError {
     InvalidProjectionMutation,
     StaleCursor,
     UnverifiedSpaceStage,
+    UnauthorizedSpaceMember,
 }
 
 impl fmt::Debug for StoreError {
@@ -88,6 +89,7 @@ impl fmt::Debug for StoreError {
             Self::InvalidProjectionMutation => "InvalidProjectionMutation",
             Self::StaleCursor => "StaleCursor",
             Self::UnverifiedSpaceStage => "UnverifiedSpaceStage",
+            Self::UnauthorizedSpaceMember => "UnauthorizedSpaceMember",
         };
         formatter.write_str(name)
     }
@@ -109,6 +111,9 @@ impl fmt::Display for StoreError {
             Self::StaleCursor => formatter.write_str("projection cursor is stale"),
             Self::UnverifiedSpaceStage => {
                 formatter.write_str("space stage has not completed verification")
+            }
+            Self::UnauthorizedSpaceMember => {
+                formatter.write_str("space member is no longer authorized")
             }
         }
     }
@@ -158,6 +163,20 @@ fn purge_departed_pds_member(
         )
         .map_err(StoreError::Open)?;
     Ok(())
+}
+
+fn has_current_pds_space_member(
+    transaction: &rusqlite::Transaction<'_>,
+    boundary: &str,
+    did: &str,
+) -> Result<bool, StoreError> {
+    transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM membership_baseline WHERE boundary = ?1 AND did = ?2 AND custody = 'pds')",
+            params![boundary, did],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::Open)
 }
 
 fn open_secret_file(path: &Path) -> Result<File, StoreError> {
@@ -779,11 +798,8 @@ impl EncryptedStore {
         Ok(boundaries)
     }
 
-    pub fn mark_space_stage_terminal(&mut self, page: SpaceStagePage) -> Result<(), StoreError> {
-        self.stage_space_page(page, Vec::new())
-    }
-
-    pub fn stage_space_page(
+    #[cfg(test)]
+    pub(crate) fn stage_space_page(
         &mut self,
         page: SpaceStagePage,
         mutations: Vec<SpaceStageMutation>,
@@ -800,7 +816,28 @@ impl EncryptedStore {
         transaction.commit().map_err(StoreError::Open)
     }
 
-    pub fn promote_verified_space_stage(
+    pub fn stage_authorized_space_page(
+        &mut self,
+        page: SpaceStagePage,
+        mutations: Vec<SpaceStageMutation>,
+    ) -> Result<(), StoreError> {
+        validate_space_stage_page(&page)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        if !has_current_pds_space_member(&transaction, &page.boundary, &page.actor_did)? {
+            return Err(StoreError::UnauthorizedSpaceMember);
+        }
+        for mutation in mutations {
+            stage_space_mutation(&transaction, &page, mutation)?;
+        }
+        update_space_stage_checkpoint(&transaction, &page)?;
+        transaction.commit().map_err(StoreError::Open)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn promote_verified_space_stage(
         &mut self,
         space_uri: &str,
         actor_did: &str,
@@ -814,47 +851,29 @@ impl EncryptedStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StoreError::Open)?;
-        let pending: Option<i64> = transaction
-            .query_row(
-                "SELECT 1 FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
-                params![space_uri, actor_did],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(StoreError::Open)?;
-        if pending.is_none() {
-            return Err(StoreError::UnverifiedSpaceStage);
+        promote_space_stage_transaction(&transaction, space_uri, actor_did, retained_at)?;
+        transaction.commit().map_err(StoreError::Open)
+    }
+
+    pub fn promote_authorized_space_stage(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+        retained_at: &str,
+    ) -> Result<(), StoreError> {
+        validate_space_stage_scope(space_uri, actor_did)?;
+        if boundary.is_empty() || !is_utc_timestamp(retained_at) {
+            return Err(StoreError::InvalidProjectionMutation);
         }
-        let mut after_uri = None;
-        loop {
-            let stages =
-                load_space_stage_rows(&transaction, space_uri, actor_did, after_uri.as_deref())?;
-            let Some(last_uri) = stages.last().map(|stage| stage.uri.clone()) else {
-                break;
-            };
-            for stage in stages {
-                apply_verified_space_stage_row(
-                    &transaction,
-                    space_uri,
-                    actor_did,
-                    retained_at,
-                    stage,
-                )?;
-            }
-            after_uri = Some(last_uri);
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        if !has_current_pds_space_member(&transaction, boundary, actor_did)? {
+            return Err(StoreError::UnauthorizedSpaceMember);
         }
-        transaction
-            .execute(
-                "DELETE FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2",
-                params![space_uri, actor_did],
-            )
-            .map_err(StoreError::Open)?;
-        transaction
-            .execute(
-                "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
-                params![space_uri, actor_did],
-            )
-            .map_err(StoreError::Open)?;
+        promote_space_stage_transaction(&transaction, space_uri, actor_did, retained_at)?;
         transaction.commit().map_err(StoreError::Open)
     }
 
@@ -1253,6 +1272,50 @@ fn validate_space_stage_scope(space_uri: &str, actor_did: &str) -> Result<(), St
     if !is_space_uri(space_uri) {
         return Err(StoreError::InvalidProjectionMutation);
     }
+    Ok(())
+}
+
+fn promote_space_stage_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    space_uri: &str,
+    actor_did: &str,
+    retained_at: &str,
+) -> Result<(), StoreError> {
+    let pending: Option<i64> = transaction
+        .query_row(
+            "SELECT 1 FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
+            params![space_uri, actor_did],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Open)?;
+    if pending.is_none() {
+        return Err(StoreError::UnverifiedSpaceStage);
+    }
+    let mut after_uri = None;
+    loop {
+        let stages =
+            load_space_stage_rows(transaction, space_uri, actor_did, after_uri.as_deref())?;
+        let Some(last_uri) = stages.last().map(|stage| stage.uri.clone()) else {
+            break;
+        };
+        for stage in stages {
+            apply_verified_space_stage_row(transaction, space_uri, actor_did, retained_at, stage)?;
+        }
+        after_uri = Some(last_uri);
+    }
+    transaction
+        .execute(
+            "DELETE FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2",
+            params![space_uri, actor_did],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
+            params![space_uri, actor_did],
+        )
+        .map_err(StoreError::Open)?;
     Ok(())
 }
 

@@ -63,8 +63,8 @@ pub struct SpacePage {
 
 pub struct PreparedSpacePage {
     target: SpaceSyncTarget,
-    pub page: SpaceStagePage,
-    pub mutations: Vec<SpaceStageMutation>,
+    page: SpaceStagePage,
+    mutations: Vec<SpaceStageMutation>,
     pub indexed: u16,
     pub deleted: u16,
     pub skipped: u16,
@@ -209,15 +209,18 @@ pub fn stage_space_page(
     store: &mut EncryptedStore,
     prepared: PreparedSpacePage,
 ) -> Result<(), SpaceSyncError> {
-    if !store
-        .is_current_pds_space_member(&prepared.target.boundary, &prepared.target.actor_did)
-        .map_err(SpaceSyncError::Store)?
+    if prepared.page.space_uri != prepared.target.space_uri
+        || prepared.page.boundary != prepared.target.boundary
+        || prepared.page.actor_did != prepared.target.actor_did
     {
-        return Err(SpaceSyncError::UnauthorizedTarget);
+        return Err(SpaceSyncError::InvalidTarget);
     }
     store
-        .stage_space_page(prepared.page, prepared.mutations)
-        .map_err(SpaceSyncError::Store)
+        .stage_authorized_space_page(prepared.page, prepared.mutations)
+        .map_err(|error| match error {
+            StoreError::UnauthorizedSpaceMember => SpaceSyncError::UnauthorizedTarget,
+            error => SpaceSyncError::Store(error),
+        })
 }
 
 fn validate_target(target: &SpaceSyncTarget) -> Result<(), SpaceSyncError> {
@@ -455,7 +458,7 @@ mod tests {
                 .is_empty()
         );
         store
-            .promote_verified_space_stage(SPACE, ACTOR, "2026-09-23T00:00:00.000Z")
+            .promote_authorized_space_stage(BOUNDARY, SPACE, ACTOR, "2026-09-23T00:00:00.000Z")
             .unwrap();
         assert_eq!(
             store
@@ -519,11 +522,15 @@ mod tests {
             .replace_pds_space_members(BOUNDARY, vec![], "2026-09-22T00:01:00.000Z")
             .unwrap();
 
-        assert!(
-            store
-                .promote_verified_space_stage(SPACE, ACTOR, "2026-09-23T00:00:00.000Z")
-                .is_err()
-        );
+        assert!(matches!(
+            store.promote_authorized_space_stage(
+                BOUNDARY,
+                SPACE,
+                ACTOR,
+                "2026-09-23T00:00:00.000Z",
+            ),
+            Err(crate::store::StoreError::UnauthorizedSpaceMember)
+        ));
         assert!(
             store
                 .list_posts_by_boundary(BOUNDARY, None, 50, NOW)
