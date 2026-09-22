@@ -1737,12 +1737,30 @@ mod tests {
     };
 
     use rusqlite::Connection;
+    use serde::Deserialize;
 
     use super::{
         ActorEnrollment, ActorPage, EncryptedStore, MAX_ACTOR_ENROLLMENT_PAGE, PdsSpaceMember,
         ProjectionCompaction, ProjectionPost, SpaceStageMutation, SpaceStagePage, StorageKey,
         StoreError,
     };
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FeedOrderFixture {
+        version: u8,
+        boundary: String,
+        limit: u16,
+        posts: Vec<FeedOrderPost>,
+        expected_pages: Vec<Vec<String>>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FeedOrderPost {
+        uri: String,
+        sort_at: String,
+    }
 
     fn key(byte: u8) -> StorageKey {
         StorageKey::from_bytes([byte; 32])
@@ -2374,45 +2392,42 @@ mod tests {
     }
 
     #[test]
-    fn lists_boundary_posts_with_the_typescript_cursor_order() {
+    fn follows_the_shared_tied_timestamp_ordering_fixture() {
+        let fixture: FeedOrderFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/feed-order.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
         let mut store = EncryptedStore::open_memory(key(7)).unwrap();
-        let first = spike_post();
-        let mut second = spike_post();
-        second.uri = "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra".to_string();
+        let posts = fixture
+            .posts
+            .into_iter()
+            .map(|value| ProjectionPost {
+                uri: value.uri,
+                sort_at: value.sort_at,
+                retained_at: "2998-04-04T00:00:00.000Z".to_string(),
+                ..spike_post()
+            })
+            .collect();
         store
-            .apply_actor_page(actor_page(8, vec![second, first], Vec::new()))
+            .apply_actor_page(actor_page(8, posts, Vec::new()))
             .unwrap();
-
-        let first_page = store
-            .list_posts_by_boundary("bebop", None, 1, "1998-04-03T12:00:00.000Z")
-            .unwrap();
-        assert_eq!(first_page.posts.len(), 1);
-        assert_eq!(
-            first_page.posts[0].uri,
-            "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you"
-        );
-        let second_page = store
-            .list_posts_by_boundary(
-                "bebop",
-                first_page.cursor.as_ref(),
-                1,
-                "1998-04-03T12:00:00.000Z",
-            )
-            .unwrap();
-        assert_eq!(
-            second_page.posts[0].uri,
-            "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra"
-        );
-        assert!(second_page.cursor.is_some());
-        let empty_page = store
-            .list_posts_by_boundary(
-                "bebop",
-                second_page.cursor.as_ref(),
-                1,
-                "1998-04-03T12:00:00.000Z",
-            )
-            .unwrap();
-        assert!(empty_page.posts.is_empty());
+        let mut cursor = None;
+        for expected_uris in fixture.expected_pages {
+            let page = store
+                .list_posts_by_boundary(
+                    &fixture.boundary,
+                    cursor.as_ref(),
+                    fixture.limit,
+                    "2024-02-01T00:00:00.000Z",
+                )
+                .unwrap();
+            assert_eq!(
+                page.posts.iter().map(|post| &post.uri).collect::<Vec<_>>(),
+                expected_uris.iter().collect::<Vec<_>>()
+            );
+            cursor = page.cursor;
+        }
     }
 
     #[test]

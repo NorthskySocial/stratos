@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type {
   EnrolledActorUpsert,
@@ -15,6 +16,21 @@ const SPIKE_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
 const VASH_DID = 'did:plc:vashstampede'
 const SHINJI_DID = 'did:plc:shinjiikari'
+
+interface FeedOrderFixture {
+  version: number
+  boundary: string
+  limit: number
+  posts: Array<{ uri: string; sortAt: string }>
+  expectedPages: string[][]
+}
+
+const feedOrderFixture = JSON.parse(
+  readFileSync(
+    new URL('../../testdata/conformance/v1/feed-order.json', import.meta.url),
+    'utf8',
+  ),
+) as FeedOrderFixture
 
 function makePost(overrides: Partial<PostUpsert> = {}): PostUpsert {
   return {
@@ -152,40 +168,27 @@ export function describeStoreContract(
     })
 
     describe('listPostsByBoundary', () => {
-      it('returns posts in DESC sortAt order with stable URI tiebreak', async () => {
-        await store.upsertPost(
-          makePost({
-            uri: `at://${SPIKE_DID}/p/1`,
-            sortAt: '2024-01-01T00:00:00.000Z',
-            boundaries: ['feed'],
-          }),
-        )
-        await store.upsertPost(
-          makePost({
-            uri: `at://${FAYE_DID}/p/2`,
-            did: FAYE_DID,
-            sortAt: '2024-01-03T00:00:00.000Z',
-            boundaries: ['feed'],
-          }),
-        )
-        await store.upsertPost(
-          makePost({
-            uri: `at://${VASH_DID}/p/3`,
-            did: VASH_DID,
-            sortAt: '2024-01-02T00:00:00.000Z',
-            boundaries: ['feed'],
-          }),
-        )
-        const res = await store.listPostsByBoundary({
-          boundary: 'feed',
-          limit: 10,
-        })
-        expect(res.posts.map((p) => p.uri)).toEqual([
-          `at://${FAYE_DID}/p/2`,
-          `at://${VASH_DID}/p/3`,
-          `at://${SPIKE_DID}/p/1`,
-        ])
-        expect(res.cursor).toBeUndefined()
+      it('follows the shared tied-timestamp ordering fixture', async () => {
+        expect(feedOrderFixture.version).toBe(1)
+        for (const post of feedOrderFixture.posts) {
+          await store.upsertPost(
+            makePost({
+              uri: post.uri,
+              sortAt: post.sortAt,
+              boundaries: [feedOrderFixture.boundary],
+            }),
+          )
+        }
+        let cursor: string | undefined
+        for (const expectedUris of feedOrderFixture.expectedPages) {
+          const page = await store.listPostsByBoundary({
+            boundary: feedOrderFixture.boundary,
+            limit: feedOrderFixture.limit,
+            cursor,
+          })
+          expect(page.posts.map((post) => post.uri)).toEqual(expectedUris)
+          cursor = page.cursor
+        }
       })
 
       it('only returns posts matching the requested boundary', async () => {

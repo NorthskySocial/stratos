@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "boundary": "bebop",
+  "limit": 2,
+  "posts": [
+    {
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra",
+      "sortAt": "2024-01-02T00:00:00.000Z"
+    },
+    {
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/bravo",
+      "sortAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/alpha",
+      "sortAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/old",
+      "sortAt": "2023-12-31T00:00:00.000Z"
+    }
+  ],
+  "expectedPages": [
+    [
+      "at://did:plc:spikespiegel/zone.stratos.feed.post/zebra",
+      "at://did:plc:spikespiegel/zone.stratos.feed.post/alpha"
+    ],
+    [
+      "at://did:plc:spikespiegel/zone.stratos.feed.post/bravo",
+      "at://did:plc:spikespiegel/zone.stratos.feed.post/old"
+    ],
+    []
+  ]
+}
