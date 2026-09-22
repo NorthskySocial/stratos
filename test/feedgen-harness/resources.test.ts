@@ -2,7 +2,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { inspectCgroupLimits, parseCgroupLimits } from './resources.js'
+import {
+  inspectCgroupLimits,
+  inspectCgroupResources,
+  parseCgroupLimits,
+  parseCgroupUsage,
+} from './resources.js'
 
 describe('cgroup resource gate', () => {
   const directories: string[] = []
@@ -55,6 +60,55 @@ describe('cgroup resource gate', () => {
       reason: 'unavailable',
     })
   })
+
+  it('returns aggregate cgroup usage only under the target resource envelope', async () => {
+    const directory = await fixtureDirectory('100000 100000', '536870912')
+    await Promise.all([
+      writeFile(join(directory, 'memory.current'), '12345'),
+      writeFile(join(directory, 'memory.peak'), '23456'),
+      writeFile(join(directory, 'cpu.stat'), 'usage_usec 34567\nuser_usec 12'),
+    ])
+    await expect(inspectCgroupResources(directory)).resolves.toEqual({
+      passed: true,
+      limits: {
+        cpuQuotaMicros: 100000,
+        cpuPeriodMicros: 100000,
+        memoryBytes: 536870912,
+      },
+      usage: {
+        memoryCurrentBytes: 12345,
+        memoryPeakBytes: 23456,
+        cpuUsageMicros: 34567,
+      },
+    })
+  })
+
+  it('fails closed when required cgroup accounting is absent', async () => {
+    const directory = await fixtureDirectory('100000 100000', '536870912')
+    await expect(inspectCgroupResources(directory)).resolves.toEqual({
+      passed: false,
+      limits: {
+        cpuQuotaMicros: 100000,
+        cpuPeriodMicros: 100000,
+        memoryBytes: 536870912,
+      },
+      reason: 'unavailable',
+    })
+  })
+
+  it.each([
+    ['missing usage', '12', '34', 'user_usec 12'],
+    ['repeated usage', '12', '34', 'usage_usec 12\nusage_usec 13'],
+    ['negative memory', '-1', '34', 'usage_usec 12'],
+    ['overflowing peak', '12', '9007199254740992', 'usage_usec 12'],
+  ])(
+    'rejects malformed resource accounting: %s',
+    (_name, memoryCurrent, memoryPeak, cpuStat) => {
+      expect(
+        parseCgroupUsage(memoryCurrent, memoryPeak, cpuStat),
+      ).toBeUndefined()
+    },
+  )
 
   async function fixtureDirectory(
     cpuMax: string,

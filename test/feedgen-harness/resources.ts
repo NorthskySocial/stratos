@@ -19,6 +19,16 @@ export interface ResourceGate {
     | 'unexpected-memory-limit'
 }
 
+export interface CgroupUsage {
+  memoryCurrentBytes: number
+  memoryPeakBytes: number
+  cpuUsageMicros: number
+}
+
+export interface ResourceMeasurement extends ResourceGate {
+  usage?: CgroupUsage
+}
+
 /** Read cgroup v2 limits without guessing from host CPU/RAM. */
 export async function inspectCgroupLimits(root: string): Promise<ResourceGate> {
   try {
@@ -43,6 +53,27 @@ export async function inspectCgroupLimits(root: string): Promise<ResourceGate> {
   }
 }
 
+/** Read aggregate process-group accounting after the required limits pass. */
+export async function inspectCgroupResources(
+  root: string,
+): Promise<ResourceMeasurement> {
+  const gate = await inspectCgroupLimits(root)
+  if (!gate.passed) return gate
+  try {
+    const [memoryCurrent, memoryPeak, cpuStat] = await Promise.all([
+      readFile(join(root, 'memory.current'), 'utf8'),
+      readFile(join(root, 'memory.peak'), 'utf8'),
+      readFile(join(root, 'cpu.stat'), 'utf8'),
+    ])
+    const usage = parseCgroupUsage(memoryCurrent, memoryPeak, cpuStat)
+    return usage
+      ? { passed: true, limits: gate.limits, usage }
+      : { passed: false, limits: gate.limits, reason: 'invalid' }
+  } catch {
+    return { passed: false, limits: gate.limits, reason: 'unavailable' }
+  }
+}
+
 export function parseCgroupLimits(
   cpuMax: string,
   memoryMax: string,
@@ -64,8 +95,39 @@ export function parseCgroupLimits(
   return { cpuQuotaMicros, cpuPeriodMicros, memoryBytes }
 }
 
+export function parseCgroupUsage(
+  memoryCurrent: string,
+  memoryPeak: string,
+  cpuStat: string,
+): CgroupUsage | undefined {
+  const memoryCurrentBytes = parseNonNegativeInteger(memoryCurrent.trim())
+  const memoryPeakBytes = parseNonNegativeInteger(memoryPeak.trim())
+  const cpuUsageMicros = parseCpuUsageMicros(cpuStat)
+  if (
+    memoryCurrentBytes === undefined ||
+    memoryPeakBytes === undefined ||
+    cpuUsageMicros === undefined
+  ) {
+    return undefined
+  }
+  return { memoryCurrentBytes, memoryPeakBytes, cpuUsageMicros }
+}
+
+function parseCpuUsageMicros(value: string): number | undefined {
+  const entries = value.trim().split(/\n/)
+  const usage = entries.filter((entry) => entry.startsWith('usage_usec '))
+  if (usage.length !== 1) return undefined
+  return parseNonNegativeInteger(usage[0].slice('usage_usec '.length).trim())
+}
+
 function parsePositiveInteger(value: string): number | undefined {
   if (!/^\d+$/.test(value)) return undefined
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function parseNonNegativeInteger(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : undefined
 }

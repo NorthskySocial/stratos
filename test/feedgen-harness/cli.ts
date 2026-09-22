@@ -6,7 +6,7 @@ import {
   createSmallOracleFixture,
   fingerprintFixture,
 } from './oracle.js'
-import { inspectCgroupLimits } from './resources.js'
+import { inspectCgroupResources } from './resources.js'
 
 interface OracleReport {
   command: 'oracle'
@@ -50,7 +50,7 @@ async function reportLimits(args: readonly string[]): Promise<void> {
   const position = args.indexOf('--cgroup-root')
   const root = position === -1 ? '/sys/fs/cgroup' : args[position + 1]
   if (!root) throw new Error('limits requires a cgroup root')
-  const result = await inspectCgroupLimits(root)
+  const result = await inspectCgroupResources(root)
   process.stdout.write(`${JSON.stringify({ command: 'limits', ...result })}\n`)
   if (!result.passed) process.exitCode = 1
 }
