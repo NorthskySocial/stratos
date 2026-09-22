@@ -218,6 +218,7 @@ mod tests {
                 signing_key: crate::service_auth::ServiceSigningKey::from_hex(&"11".repeat(32))
                     .unwrap(),
                 stratos_service_url: "https://stratos.example.test".to_owned(),
+                stratos_public_url: "https://stratos.example.test".to_owned(),
                 stratos_service_did: "did:web:stratos.example.test".to_owned(),
                 plc_url: "https://plc.example.test".to_owned(),
                 storage: StorageProfile::Memory,

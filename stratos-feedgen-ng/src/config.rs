@@ -32,6 +32,7 @@ pub struct FeedgenConfig {
     pub public_key_multibase: String,
     pub signing_key: ServiceSigningKey,
     pub stratos_service_url: String,
+    pub stratos_public_url: String,
     pub stratos_service_did: String,
     pub plc_url: String,
     pub storage: StorageProfile,
@@ -98,6 +99,12 @@ impl FeedgenConfig {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "https://plc.directory".to_owned());
+        config.stratos_public_url = env::var("STRATOS_PUBLIC_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(normalize_service_url)
+            .transpose()?
+            .unwrap_or_else(|| config.stratos_service_url.clone());
         config.actor_max_connections =
             parse_actor_connection_limit(env::var("FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS").ok())?;
         Ok(config)
@@ -140,6 +147,8 @@ impl FeedgenConfig {
         } = storage;
         let storage = parse_storage(backend, profile, sqlite_path, key_path)?;
         let retention = parse_retention(&storage, projection_max_age_ms, projection_max_bytes)?;
+        let stratos_service_url =
+            normalize_service_url(required_value(stratos_service_url, "STRATOS_SERVICE_URL")?)?;
         Ok(Self {
             service_did: required_value(service_did, "FEEDGEN_SERVICE_DID")?,
             public_url: required_value(public_url, "FEEDGEN_PUBLIC_URL")?,
@@ -152,10 +161,8 @@ impl FeedgenConfig {
                 "FEEDGEN_SIGNING_KEY",
             )?)
             .map_err(|_| ConfigError::InvalidSigningKey)?,
-            stratos_service_url: normalize_service_url(required_value(
-                stratos_service_url,
-                "STRATOS_SERVICE_URL",
-            )?)?,
+            stratos_public_url: stratos_service_url.clone(),
+            stratos_service_url,
             stratos_service_did: required_value(stratos_service_did, "STRATOS_SERVICE_DID")?,
             plc_url: "https://plc.directory".to_owned(),
             storage,
@@ -449,6 +456,7 @@ mod tests {
         assert_eq!(config.retention.max_age.as_secs(), 60);
         assert_eq!(config.retention.max_bytes, 1024);
         assert_eq!(config.actor_max_connections, 8);
+        assert_eq!(config.stratos_public_url, "https://stratos.example.test");
     }
 
     #[test]

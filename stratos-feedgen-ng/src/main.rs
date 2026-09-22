@@ -8,14 +8,21 @@ use stratos_feedgen_ng::{
     auth::FeedRequestVerifier,
     authority::{AuthorityClient, HttpAuthorityClient},
     config::FeedgenConfig,
+    credential_issuer::HttpSpaceCredentialIssuer,
+    credential_manager::SpaceCredentialManager,
     identity::HttpIdentityKeyResolver,
     lifecycle::ControlLifecycle,
+    membership_reconciler::MembershipReconciler,
+    pds_space_scheduler::PdsSpaceScheduler,
+    pds_space_sync::{PdsSpaceSynchronizer, PinnedSpacePageSource},
     readiness::FeedReadinessGate,
     retention::RetentionCompactor,
     runtime::open_projection_store,
     server,
     service::ProjectionReader,
     service_stream::{ServiceStream, ServiceStreamConfig},
+    space_commit::SpaceCommitVerifier,
+    space_membership::HttpSpaceMembershipClient,
 };
 
 #[tokio::main]
@@ -39,6 +46,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.stratos_service_did.clone(),
     )?);
     let compactor = RetentionCompactor::start(Arc::clone(&lifecycle), config.retention.clone())?;
+    let resolver = Arc::new(HttpIdentityKeyResolver::new(Some(&config.plc_url))?);
+    let credential_manager = Arc::new(SpaceCredentialManager::new(Arc::new(
+        HttpSpaceCredentialIssuer::new(
+            &config.stratos_service_url,
+            &config.stratos_public_url,
+            config.stratos_service_did.clone(),
+            config.service_did.clone(),
+            config.signing_key.clone(),
+        )?,
+    )));
+    let membership = Arc::new(MembershipReconciler::new(
+        Arc::new(HttpSpaceMembershipClient::new(
+            &config.stratos_service_url,
+            &config.stratos_public_url,
+        )?),
+        Arc::clone(&credential_manager),
+    ));
+    let synchronizer = Arc::new(PdsSpaceSynchronizer::new(
+        Arc::new(PinnedSpacePageSource),
+        credential_manager,
+        Arc::new(SpaceCommitVerifier::new(Box::new(Arc::clone(&resolver)))),
+    ));
+    let pds_scheduler = PdsSpaceScheduler::start(
+        Arc::clone(&lifecycle),
+        membership,
+        synchronizer,
+        feeds.list().map(|feed| feed.boundary.clone()),
+        config.retention.clone(),
+    );
     let authority: Arc<dyn AuthorityClient> = Arc::new(HttpAuthorityClient::new(
         &config.stratos_service_url,
         config.stratos_service_did.clone(),
@@ -68,7 +104,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         authority,
         actors,
     )?;
-    let resolver = Arc::new(HttpIdentityKeyResolver::new(Some(&config.plc_url))?);
     let verifier = FeedRequestVerifier::new(
         config.service_did.clone(),
         ["zone.stratos.feedgen.getFeed".to_owned()],
@@ -76,10 +111,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let result = axum::serve(
         listener,
-        server::router_with_feed(config, feeds, readiness, lifecycle, verifier),
+        server::router_with_feed_with_pds_space_sync(
+            config,
+            feeds,
+            readiness,
+            lifecycle,
+            verifier,
+            pds_scheduler.status(),
+        ),
     )
     .with_graceful_shutdown(shutdown)
     .await;
+    pds_scheduler.stop().await;
     compactor.stop().await;
     stream.stop().await;
     result?;

@@ -18,6 +18,7 @@ use crate::{
     feed_service::{FeedQuery, FeedServiceError},
     feeds::{FeedDescription, FeedRegistry},
     lifecycle::ControlLifecycle,
+    pds_space_scheduler::{PdsSpacePass, PdsSpaceSyncStatus},
     readiness::FeedReadinessGate,
 };
 
@@ -25,6 +26,7 @@ struct ServerState {
     config: FeedgenConfig,
     feeds: FeedRegistry,
     readiness: Arc<Mutex<FeedReadinessGate>>,
+    pds_space_sync: Option<Arc<Mutex<PdsSpaceSyncStatus>>>,
 }
 
 pub type RuntimeVerifier = FeedRequestVerifier<Arc<dyn IdentityKeyResolver>>;
@@ -52,6 +54,16 @@ struct HealthResponse {
     service_stream_connected: bool,
     #[serde(rename = "actorPoolSize")]
     actor_pool_size: u32,
+    #[serde(
+        rename = "pdsSpaceSyncHealthy",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pds_space_sync_healthy: Option<bool>,
+    #[serde(
+        rename = "pdsSpaceSyncLastPass",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pds_space_sync_last_pass: Option<PdsSpacePass>,
 }
 
 #[derive(Serialize)]
@@ -98,6 +110,7 @@ pub fn router(
         config,
         feeds,
         readiness,
+        pds_space_sync: None,
     });
     Router::new()
         .route("/health", get(health))
@@ -116,10 +129,42 @@ pub fn router_with_feed(
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
 ) -> Router {
-    router_with_feed_with_request_limit(
+    router_with_feed_with_sync_status(config, feeds, readiness, lifecycle, verifier, None)
+}
+
+pub fn router_with_feed_with_pds_space_sync(
+    config: FeedgenConfig,
+    feeds: FeedRegistry,
+    readiness: Arc<Mutex<FeedReadinessGate>>,
+    lifecycle: Arc<ControlLifecycle>,
+    verifier: RuntimeVerifier,
+    pds_space_sync: Arc<Mutex<PdsSpaceSyncStatus>>,
+) -> Router {
+    router_with_feed_with_sync_status(
         config,
         feeds,
         readiness,
+        lifecycle,
+        verifier,
+        Some(pds_space_sync),
+    )
+}
+
+fn router_with_feed_with_sync_status(
+    config: FeedgenConfig,
+    feeds: FeedRegistry,
+    readiness: Arc<Mutex<FeedReadinessGate>>,
+    lifecycle: Arc<ControlLifecycle>,
+    verifier: RuntimeVerifier,
+    pds_space_sync: Option<Arc<Mutex<PdsSpaceSyncStatus>>>,
+) -> Router {
+    router_with_feed_with_request_limit(
+        ServerState {
+            config,
+            feeds,
+            readiness,
+            pds_space_sync,
+        },
         lifecycle,
         verifier,
         MAX_CONCURRENT_FEED_REQUESTS,
@@ -127,18 +172,12 @@ pub fn router_with_feed(
 }
 
 fn router_with_feed_with_request_limit(
-    config: FeedgenConfig,
-    feeds: FeedRegistry,
-    readiness: Arc<Mutex<FeedReadinessGate>>,
+    server: ServerState,
     lifecycle: Arc<ControlLifecycle>,
     verifier: RuntimeVerifier,
     request_limit: usize,
 ) -> Router {
-    let server = Arc::new(ServerState {
-        config,
-        feeds,
-        readiness,
-    });
+    let server = Arc::new(server);
     let state = feed_server_state(server, lifecycle, verifier, request_limit);
     Router::new()
         .route("/health", get(feed_health))
@@ -169,6 +208,14 @@ async fn health(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let readiness = state.readiness.lock().expect("readiness lock poisoned");
     let ready = readiness.is_ready();
     let service_stream_connected = readiness.has_authoritative_session();
+    let (pds_space_sync_healthy, pds_space_sync_last_pass) = state
+        .pds_space_sync
+        .as_ref()
+        .map(|status| {
+            let status = status.lock().expect("PDS space scheduler status poisoned");
+            (Some(status.is_healthy()), status.last_pass())
+        })
+        .unwrap_or((None, None));
     let status = if ready {
         StatusCode::OK
     } else {
@@ -182,6 +229,8 @@ async fn health(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
             version: env!("CARGO_PKG_VERSION"),
             service_stream_connected,
             actor_pool_size: 0,
+            pds_space_sync_healthy,
+            pds_space_sync_last_pass,
         }),
     )
 }
@@ -459,7 +508,7 @@ mod tests {
         store::{EncryptedStore, StorageKey},
     };
 
-    use super::{feed_error, router, router_with_feed_with_request_limit};
+    use super::{ServerState, feed_error, router, router_with_feed_with_request_limit};
 
     fn config() -> FeedgenConfig {
         FeedgenConfig {
@@ -468,6 +517,7 @@ mod tests {
             public_key_multibase: "zTestKey".to_string(),
             signing_key: ServiceSigningKey::from_hex(&"11".repeat(32)).unwrap(),
             stratos_service_url: "https://stratos.example.test".to_string(),
+            stratos_public_url: "https://stratos.example.test".to_string(),
             stratos_service_did: "did:web:stratos.example.test".to_string(),
             plc_url: "https://plc.example.test".to_string(),
             storage: StorageProfile::Memory,
@@ -525,12 +575,13 @@ mod tests {
     }
 
     fn authenticated_router(key: &SigningKey) -> axum::Router {
-        authenticated_router_with_request_limit(key, super::MAX_CONCURRENT_FEED_REQUESTS)
+        authenticated_router_with_request_limit(key, super::MAX_CONCURRENT_FEED_REQUESTS, None)
     }
 
     fn authenticated_router_with_request_limit(
         key: &SigningKey,
         request_limit: usize,
+        pds_space_sync: Option<Arc<Mutex<crate::pds_space_scheduler::PdsSpaceSyncStatus>>>,
     ) -> axum::Router {
         let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
         let lifecycle = Arc::new(ControlLifecycle::new(
@@ -565,9 +616,12 @@ mod tests {
             resolver,
         );
         router_with_feed_with_request_limit(
-            config(),
-            feeds(),
-            readiness,
+            ServerState {
+                config: config(),
+                feeds: feeds(),
+                readiness,
+                pds_space_sync,
+            },
             lifecycle,
             verifier,
             request_limit,
@@ -620,6 +674,33 @@ mod tests {
             body,
             r#"{"ok":false,"feedReady":false,"version":"0.1.0","serviceStreamConnected":true,"actorPoolSize":0}"#
         );
+    }
+
+    #[tokio::test]
+    async fn health_exposes_a_pds_sync_that_has_not_completed() {
+        let key = SigningKey::from_bytes((&[9_u8; 32]).into()).unwrap();
+        let app = authenticated_router_with_request_limit(
+            &key,
+            super::MAX_CONCURRENT_FEED_REQUESTS,
+            Some(Arc::new(Mutex::new(
+                crate::pds_space_scheduler::PdsSpaceSyncStatus::default(),
+            ))),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["pdsSpaceSyncHealthy"], false);
+        assert!(value.get("pdsSpaceSyncLastPass").is_none());
     }
 
     #[tokio::test]
@@ -740,7 +821,7 @@ mod tests {
             .unwrap()
             .as_secs()
             + 60;
-        let response = authenticated_router_with_request_limit(&key, 0)
+        let response = authenticated_router_with_request_limit(&key, 0, None)
             .oneshot(
                 Request::builder()
                     .uri("/xrpc/zone.stratos.feedgen.getFeed?feed=bebop")

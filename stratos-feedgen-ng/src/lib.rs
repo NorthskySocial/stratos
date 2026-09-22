@@ -20,6 +20,7 @@ pub mod identity;
 mod identity_key;
 pub mod lifecycle;
 pub mod membership_reconciler;
+pub mod pds_space_scheduler;
 pub mod pds_space_sync;
 pub mod readiness;
 pub mod reconciliation;
