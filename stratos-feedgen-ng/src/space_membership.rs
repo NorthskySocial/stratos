@@ -8,8 +8,6 @@ use crate::{
     identifier::Did, space_credential::HeldSpaceCredential, space_host::SpaceCredentialProof,
 };
 
-use crate::membership_reconciler::SpaceMembershipClient;
-
 const LIST_REPOS_LXM: &str = "zone.stratos.space.listRepos";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
@@ -35,6 +33,17 @@ pub struct SpaceRepoMember {
 pub struct SpaceMembershipPage {
     pub members: Vec<SpaceRepoMember>,
     pub next_cursor: Option<String>,
+}
+
+#[async_trait::async_trait]
+pub trait SpaceMembershipClient: Send + Sync {
+    async fn list(
+        &self,
+        space_uri: &str,
+        credential: &HeldSpaceCredential,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<SpaceMembershipPage, SpaceMembershipError>;
 }
 
 #[derive(Debug, Eq, PartialEq)]

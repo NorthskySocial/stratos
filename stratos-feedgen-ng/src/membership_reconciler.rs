@@ -3,13 +3,11 @@ use std::{
     sync::Arc,
 };
 
-use async_trait::async_trait;
-
 use crate::{
     credential_manager::{CredentialManagerError, SpaceCredentialManager, boundary_to_space_uri},
     space_credential::HeldSpaceCredential,
     space_membership::{
-        MAX_MEMBERSHIP_PAGE, RepoCustody, SpaceMembershipError, SpaceMembershipPage,
+        MAX_MEMBERSHIP_PAGE, RepoCustody, SpaceMembershipClient, SpaceMembershipError,
         SpaceRepoMember,
     },
     store::{EncryptedStore, PdsSpaceMember, StoreError},
@@ -17,17 +15,6 @@ use crate::{
 
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = MAX_MEMBERSHIP_PAGE / PAGE_SIZE;
-
-#[async_trait]
-pub trait SpaceMembershipClient: Send + Sync {
-    async fn list(
-        &self,
-        space_uri: &str,
-        credential: &HeldSpaceCredential,
-        cursor: Option<&str>,
-        limit: usize,
-    ) -> Result<SpaceMembershipPage, SpaceMembershipError>;
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PdsPollTarget {
@@ -97,6 +84,7 @@ impl MembershipReconciler {
             .values()
             .filter(|member| member.custody == RepoCustody::Pds)
             .collect::<Vec<_>>();
+        let pds_member_count = u16::try_from(pds_members.len()).expect("membership cap fits u16");
         let baseline = pds_members
             .iter()
             .map(|member| PdsSpaceMember {
@@ -118,13 +106,7 @@ impl MembershipReconciler {
             })
             .collect();
         Ok(MembershipReconciliation {
-            pds_members: u16::try_from(
-                members
-                    .values()
-                    .filter(|member| member.custody == RepoCustody::Pds)
-                    .count(),
-            )
-            .expect("membership cap fits u16"),
+            pds_members: pds_member_count,
             targets,
         })
     }
@@ -176,12 +158,13 @@ mod tests {
         },
         space_credential::DpopKey,
         space_membership::{
-            RepoCustody, SpaceMembershipError, SpaceMembershipPage, SpaceRepoMember,
+            RepoCustody, SpaceMembershipClient, SpaceMembershipError, SpaceMembershipPage,
+            SpaceRepoMember,
         },
         store::{EncryptedStore, PdsSpaceMember, StorageKey},
     };
 
-    use super::{MembershipReconciler, MembershipReconciliationError, SpaceMembershipClient};
+    use super::{MembershipReconciler, MembershipReconciliationError};
 
     const BOUNDARY: &str = "did:web:stratos.example.test/bebop";
     const NOW: &str = "2026-09-22T00:00:00.000Z";
