@@ -310,7 +310,7 @@ fn validate_resolver_url(url: &Url) -> Result<(), IdentityResolutionError> {
     Ok(())
 }
 
-fn is_public_address(address: IpAddr) -> bool {
+pub(crate) fn is_public_address(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
             let [first, second, third, _] = address.octets();
