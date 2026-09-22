@@ -11,7 +11,7 @@ use crate::{
 const LIST_REPOS_LXM: &str = "zone.stratos.space.listRepos";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
-pub const MAX_MEMBERSHIP_PAGE: usize = 1_000;
+pub const MAX_MEMBERSHIP_RESPONSE_MEMBERS: usize = 1_000;
 const MAX_CURSOR_BYTES: usize = 4 * 1024;
 const MAX_HOST_BYTES: usize = 2_048;
 
@@ -178,7 +178,7 @@ fn validate_request(
         || space_uri.len() > 2_048
         || cursor.is_some_and(|cursor| cursor.is_empty() || cursor.len() > MAX_CURSOR_BYTES)
         || limit == 0
-        || limit > MAX_MEMBERSHIP_PAGE
+        || limit > MAX_MEMBERSHIP_RESPONSE_MEMBERS
     {
         return Err(SpaceMembershipError::InvalidRequest);
     }
@@ -209,7 +209,7 @@ async fn response_bytes(mut response: reqwest::Response) -> Result<Vec<u8>, Spac
 fn decode_page(bytes: &[u8]) -> Result<SpaceMembershipPage, SpaceMembershipError> {
     let response: ListReposResponse =
         serde_json::from_slice(bytes).map_err(|_| SpaceMembershipError::InvalidResponse)?;
-    if response.repos.len() > MAX_MEMBERSHIP_PAGE
+    if response.repos.len() > MAX_MEMBERSHIP_RESPONSE_MEMBERS
         || response
             .cursor
             .as_deref()

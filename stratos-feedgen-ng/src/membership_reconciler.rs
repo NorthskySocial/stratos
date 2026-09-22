@@ -6,15 +6,13 @@ use std::{
 use crate::{
     credential_manager::{CredentialManagerError, SpaceCredentialManager, boundary_to_space_uri},
     space_credential::HeldSpaceCredential,
-    space_membership::{
-        MAX_MEMBERSHIP_PAGE, RepoCustody, SpaceMembershipClient, SpaceMembershipError,
-        SpaceRepoMember,
-    },
+    space_membership::{RepoCustody, SpaceMembershipClient, SpaceMembershipError, SpaceRepoMember},
     store::{EncryptedStore, PdsSpaceMember, StoreError},
 };
 
 const PAGE_SIZE: usize = 100;
-const MAX_PAGES: usize = MAX_MEMBERSHIP_PAGE / PAGE_SIZE;
+const MAX_RECONCILED_MEMBERS: usize = 1_000;
+const MAX_RECONCILIATION_PAGES: usize = MAX_RECONCILED_MEMBERS;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PdsPollTarget {
@@ -119,14 +117,14 @@ impl MembershipReconciler {
         let mut cursor = None;
         let mut cursors = BTreeSet::new();
         let mut members = BTreeMap::new();
-        for _ in 0..MAX_PAGES {
+        for _ in 0..MAX_RECONCILIATION_PAGES {
             let page = self
                 .client
                 .list(space_uri, credential, cursor.as_deref(), PAGE_SIZE)
                 .await
                 .map_err(MembershipReconciliationError::Membership)?;
             for member in page.members {
-                if members.len() >= MAX_MEMBERSHIP_PAGE || members.contains_key(&member.did) {
+                if members.len() >= MAX_RECONCILED_MEMBERS || members.contains_key(&member.did) {
                     return Err(MembershipReconciliationError::DuplicateMember);
                 }
                 members.insert(member.did.clone(), member);
