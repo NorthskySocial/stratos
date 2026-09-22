@@ -67,13 +67,6 @@ impl SpaceCommitVerifier {
         if commit.version != COMMIT_VERSION {
             return CommitVerification::Rejected(CommitVerificationFailure::UnsupportedVersion);
         }
-        let Ok(context) = commit_context(space_uri, author_did, &commit.revision, &commit.ikm)
-        else {
-            return CommitVerification::Rejected(CommitVerificationFailure::MalformedCommit);
-        };
-        if !has_valid_mac(&commit, &context) {
-            return CommitVerification::Rejected(CommitVerificationFailure::MacMismatch);
-        }
         let key = match self.resolve(author_did, false).await {
             KeyResolution::Key(key) => key,
             KeyResolution::Deferred => return CommitVerification::DeferredKeyResolution,
@@ -81,6 +74,13 @@ impl SpaceCommitVerifier {
                 return CommitVerification::Rejected(CommitVerificationFailure::KeyUnresolvable);
             }
         };
+        let Ok(context) = commit_context(space_uri, author_did, &commit.revision, &commit.ikm)
+        else {
+            return CommitVerification::Rejected(CommitVerificationFailure::MalformedCommit);
+        };
+        if !has_valid_mac(&commit, &context) {
+            return CommitVerification::Rejected(CommitVerificationFailure::MacMismatch);
+        }
         if verifies_signature(&key, &context, &commit.signature) {
             return CommitVerification::Verified;
         }
@@ -173,6 +173,7 @@ fn has_valid_mac(commit: &SignedSpaceCommit, context: &[u8]) -> bool {
         return false;
     };
     extract.update(context);
+    extract.update(&[1]);
     let expand_key = extract.finalize().into_bytes();
     let Ok(mut mac) = HmacSha256::new_from_slice(&expand_key) else {
         return false;
@@ -268,6 +269,19 @@ mod tests {
         refreshed: String,
     }
 
+    struct UnavailableKey;
+
+    #[async_trait]
+    impl CommitKeyResolver for UnavailableKey {
+        async fn resolve_atproto_key(
+            &self,
+            _: &str,
+            _: bool,
+        ) -> Result<String, CommitKeyResolutionError> {
+            Err(CommitKeyResolutionError { transient: true })
+        }
+    }
+
     #[async_trait]
     impl CommitKeyResolver for RotatingKey {
         async fn resolve_atproto_key(
@@ -305,6 +319,7 @@ mod tests {
         let context = commit_context(SPACE, AUTHOR, "rev", &ikm).unwrap();
         let mut extract = HmacSha256::new_from_slice(&ikm).unwrap();
         extract.update(&context);
+        extract.update(&[1]);
         let expand_key = extract.finalize().into_bytes();
         let mut mac = HmacSha256::new_from_slice(&expand_key).unwrap();
         mac.update(&hash);
@@ -338,6 +353,7 @@ mod tests {
         let context = commit_context(SPACE, AUTHOR, "rev", &ikm).unwrap();
         let mut extract = HmacSha256::new_from_slice(&ikm).unwrap();
         extract.update(&context);
+        extract.update(&[1]);
         let expand_key = extract.finalize().into_bytes();
         let mut mac = HmacSha256::new_from_slice(&expand_key).unwrap();
         mac.update(&hash);
@@ -385,6 +401,19 @@ mod tests {
                 .verify(SPACE, AUTHOR, Some(&invalid))
                 .await,
             CommitVerification::Rejected(CommitVerificationFailure::MacMismatch)
+        );
+    }
+
+    #[tokio::test]
+    async fn defers_a_bad_commit_when_the_signing_key_is_temporarily_unavailable() {
+        let key = SigningKey::from_slice(&[9; 32]).unwrap();
+        let mut invalid = commit(&key);
+        invalid["mac"]["$bytes"] =
+            json!(base64::engine::general_purpose::STANDARD.encode([0_u8; 32]));
+        let verifier = SpaceCommitVerifier::new(Box::new(UnavailableKey));
+        assert_eq!(
+            verifier.verify(SPACE, AUTHOR, Some(&invalid)).await,
+            CommitVerification::DeferredKeyResolution
         );
     }
 
