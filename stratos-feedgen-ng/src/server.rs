@@ -652,6 +652,9 @@ fn private_json(status: StatusCode, body: Vec<u8>) -> Response {
         HeaderValue::from_static("private, no-store"),
     );
     response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("Authorization"));
+    response
 }
 
 fn private_bytes(body: Vec<u8>, content_type: &'static str) -> Response {
@@ -1068,6 +1071,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK, "{response:?}");
         assert_eq!(response.headers()["cache-control"], "private, no-store");
+        assert_eq!(response.headers()["vary"], "Authorization");
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, r#"{"feed":[]}"#);
     }
@@ -1123,6 +1127,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["cache-control"], "private, no-store");
+        assert_eq!(response.headers()["vary"], "Authorization");
         assert_eq!(response.headers()["content-type"], "image/png");
         assert_eq!(response.headers()["content-disposition"], "attachment");
         assert_eq!(
@@ -1164,6 +1169,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(response.headers()["cache-control"], "private, no-store");
+        assert_eq!(response.headers()["vary"], "Authorization");
     }
 
     #[tokio::test]
