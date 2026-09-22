@@ -18,6 +18,7 @@ pub mod feeds;
 pub mod identifier;
 pub mod identity;
 pub mod lifecycle;
+pub mod membership_reconciler;
 pub mod readiness;
 pub mod reconciliation;
 pub mod retention;

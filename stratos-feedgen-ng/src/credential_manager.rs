@@ -194,7 +194,7 @@ async fn wait_for_flight(
     }
 }
 
-fn boundary_to_space_uri(boundary: &str) -> Result<String, CredentialManagerError> {
+pub(crate) fn boundary_to_space_uri(boundary: &str) -> Result<String, CredentialManagerError> {
     let Some((authority, key)) = boundary.split_once('/') else {
         return Err(CredentialManagerError::InvalidBoundary);
     };

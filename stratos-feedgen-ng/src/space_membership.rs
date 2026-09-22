@@ -4,7 +4,11 @@ use reqwest::{Client, StatusCode, redirect::Policy};
 use serde::Deserialize;
 use url::Url;
 
-use crate::{identifier::Did, space_host::SpaceCredentialProof};
+use crate::{
+    identifier::Did, space_credential::HeldSpaceCredential, space_host::SpaceCredentialProof,
+};
+
+use crate::membership_reconciler::SpaceMembershipClient;
 
 const LIST_REPOS_LXM: &str = "zone.stratos.space.listRepos";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -118,6 +122,19 @@ impl HttpSpaceMembershipClient {
             return Err(SpaceMembershipError::Unavailable);
         }
         decode_page(&response_bytes(response).await?)
+    }
+}
+
+#[async_trait::async_trait]
+impl SpaceMembershipClient for HttpSpaceMembershipClient {
+    async fn list(
+        &self,
+        space_uri: &str,
+        credential: &HeldSpaceCredential,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<SpaceMembershipPage, SpaceMembershipError> {
+        HttpSpaceMembershipClient::list(self, space_uri, credential, cursor, limit).await
     }
 }
 
