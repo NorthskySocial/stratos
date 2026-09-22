@@ -98,6 +98,13 @@ impl RecordUri {
         }
     }
 
+    pub fn parse_space_record(value: &str) -> Result<Self, IdentifierError> {
+        match Self::parse(value)? {
+            space @ Self::Space { .. } => Ok(space),
+            Self::Repo { .. } => Err(IdentifierError::InvalidRecordUri),
+        }
+    }
+
     pub fn author(&self) -> &Did {
         match self {
             Self::Repo { author, .. } | Self::Space { author, .. } => author,
@@ -205,6 +212,16 @@ mod tests {
         .unwrap();
         assert_eq!(uri.authority().as_str(), "did:web:stratos.example");
         assert_eq!(uri.author().as_str(), "did:plc:fayevalentine");
+    }
+
+    #[test]
+    fn space_record_parser_rejects_public_repository_records() {
+        assert_eq!(
+            RecordUri::parse_space_record(
+                "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you"
+            ),
+            Err(IdentifierError::InvalidRecordUri)
+        );
     }
 
     #[test]

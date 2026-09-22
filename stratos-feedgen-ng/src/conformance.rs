@@ -174,7 +174,8 @@ mod tests {
         assert_eq!(fixture.version, 1);
 
         for case in fixture.valid {
-            let uri = RecordUri::parse(&case.input).unwrap_or_else(|_| panic!("{}", case.name));
+            let uri = RecordUri::parse_space_record(&case.input)
+                .unwrap_or_else(|_| panic!("{}", case.name));
             let RecordUri::Space {
                 authority,
                 space_type,
@@ -195,7 +196,7 @@ mod tests {
         }
         for case in fixture.invalid {
             assert!(
-                !matches!(RecordUri::parse(&case.input), Ok(RecordUri::Space { .. })),
+                RecordUri::parse_space_record(&case.input).is_err(),
                 "{}",
                 case.name
             );
