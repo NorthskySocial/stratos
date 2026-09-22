@@ -1551,6 +1551,7 @@ dependencies = [
  "bs58",
  "cid",
  "futures-util",
+ "hmac",
  "http-body-util",
  "k256",
  "libc",

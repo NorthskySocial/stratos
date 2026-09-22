@@ -28,6 +28,7 @@ time = { version = "0.3", features = ["parsing"] }
 url = "2"
 serde_urlencoded = "0.7"
 sha2 = "0.10"
+hmac = "0.12"
 
 [dev-dependencies]
 http-body-util = "0.1"
