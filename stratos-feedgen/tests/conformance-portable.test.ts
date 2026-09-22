@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { parseRecordUri } from '@northskysocial/stratos-core'
+import { buildFeedBlobUrl } from '../src/api/feed/getFeed.js'
+import { isStratosRepositoryRecordUri } from '../src/blob/custody.js'
 import { decodeCursor, encodeCursor } from '../src/db/index.js'
 
 interface CursorFixture {
@@ -29,6 +31,17 @@ interface SpaceRecordFixture {
     }
   }>
   invalid: Array<{ name: string; input: string }>
+}
+
+interface BlobUrlFixture {
+  version: number
+  cases: Array<{
+    name: string
+    baseUrl: string
+    uri: string
+    cid: string
+    expectedUrl: string | null
+  }>
 }
 
 function readFixture(name: string): unknown {
@@ -68,6 +81,18 @@ describe('portable conformance fixtures', () => {
     }
     for (const testCase of fixture.invalid) {
       expect(parseRecordUri(testCase.input).ok, testCase.name).toBe(false)
+    }
+  })
+
+  it('projects blob URLs only for repository custody', () => {
+    const fixture = readFixture('blob-url.json') as BlobUrlFixture
+    expect(fixture.version).toBe(1)
+
+    for (const testCase of fixture.cases) {
+      const actual = isStratosRepositoryRecordUri(testCase.uri)
+        ? buildFeedBlobUrl(testCase.baseUrl, testCase.uri, testCase.cid)
+        : null
+      expect(actual, testCase.name).toBe(testCase.expectedUrl)
     }
   })
 })

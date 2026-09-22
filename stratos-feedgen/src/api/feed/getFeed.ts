@@ -208,7 +208,7 @@ function toFeedViewPost(
         ? {
             blobs: post.blobRefs.map((ref) => ({
               ...ref,
-              url: `${blobBaseUrl}/xrpc/${NSID.getBlob}?${new URLSearchParams({ uri: post.uri, cid: ref.cid })}`,
+              url: buildFeedBlobUrl(blobBaseUrl, post.uri, ref.cid),
             })),
           }
         : {}),
@@ -216,6 +216,14 @@ function toFeedViewPost(
       boundaries: post.boundaries,
     },
   }
+}
+
+export function buildFeedBlobUrl(
+  blobBaseUrl: string,
+  uri: string,
+  cid: string,
+): string {
+  return `${blobBaseUrl}/xrpc/${NSID.getBlob}?${new URLSearchParams({ uri, cid })}`
 }
 
 export { encodeCursor }

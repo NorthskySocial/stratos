@@ -95,6 +95,15 @@ impl BlobUrlBuilder {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn build_blob_url(
+    base_url: &str,
+    uri: &str,
+    cid: &str,
+) -> Result<String, FeedServiceError> {
+    Ok(BlobUrlBuilder::new(base_url)?.build(uri, cid))
+}
+
 #[derive(Serialize)]
 pub struct AuthorView {
     pub did: String,

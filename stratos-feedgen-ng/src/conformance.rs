@@ -10,6 +10,7 @@ mod tests {
     use crate::{
         config::{FeedgenConfig, StorageProfile},
         cursor::FeedCursor,
+        feed_service::build_blob_url,
         feeds::FeedRegistry,
         identifier::RecordUri,
         readiness::{FeedReadinessGate, ReconciliationOutcome},
@@ -79,6 +80,23 @@ mod tests {
         version: u8,
         valid: Vec<ValidSpaceRecordCase>,
         invalid: Vec<InvalidSpaceRecordCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlobUrlFixture {
+        version: u8,
+        cases: Vec<BlobUrlCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlobUrlCase {
+        name: String,
+        base_url: String,
+        uri: String,
+        cid: String,
+        expected_url: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -200,6 +218,25 @@ mod tests {
                 "{}",
                 case.name
             );
+        }
+    }
+
+    #[test]
+    fn follows_the_shared_blob_url_fixture() {
+        let fixture: BlobUrlFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/blob-url.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
+
+        for case in fixture.cases {
+            let actual = match RecordUri::parse(&case.uri) {
+                Ok(RecordUri::Repo { .. }) => {
+                    build_blob_url(&case.base_url, &case.uri, &case.cid).ok()
+                }
+                _ => None,
+            };
+            assert_eq!(actual, case.expected_url, "{}", case.name);
         }
     }
 

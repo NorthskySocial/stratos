@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "encodes a repository blob URL below a public base path",
+      "baseUrl": "https://feedgen.example.test/service",
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": "https://feedgen.example.test/service/xrpc/zone.stratos.feedgen.getBlob?uri=at%3A%2F%2Fdid%3Aplc%3Aspikespiegel%2Fzone.stratos.feed.post%2Fsee-you&cid=bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+    },
+    {
+      "name": "never projects a PDS space blob through Feedgen",
+      "baseUrl": "https://feedgen.example.test",
+      "uri": "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop/did:plc:fayevalentine/zone.stratos.feed.post/see-you",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": null
+    },
+    {
+      "name": "never projects a malformed record URI through Feedgen",
+      "baseUrl": "https://feedgen.example.test",
+      "uri": "not-an-at-uri",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": null
+    },
+    {
+      "name": "never projects a repository URI with a query",
+      "baseUrl": "https://feedgen.example.test",
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you?cursor=1",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": null
+    },
+    {
+      "name": "never projects a repository URI with a fragment",
+      "baseUrl": "https://feedgen.example.test",
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post/see-you#fragment",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": null
+    },
+    {
+      "name": "never projects a non-record repository URI",
+      "baseUrl": "https://feedgen.example.test",
+      "uri": "at://did:plc:spikespiegel/zone.stratos.feed.post",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+      "expectedUrl": null
+    }
+  ]
+}
