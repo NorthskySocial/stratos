@@ -9,7 +9,9 @@ mod tests {
 
     use crate::{
         config::{FeedgenConfig, StorageProfile},
+        cursor::FeedCursor,
         feeds::FeedRegistry,
+        identifier::RecordUri,
         readiness::{FeedReadinessGate, ReconciliationOutcome},
         server,
     };
@@ -52,6 +54,57 @@ mod tests {
         public_key_multibase: String,
     }
 
+    #[derive(Deserialize)]
+    struct CursorFixture {
+        version: u8,
+        cases: Vec<CursorCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct CursorCase {
+        name: String,
+        input: String,
+        expected: Option<CursorValue>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    struct CursorValue {
+        sort_at: String,
+        uri: String,
+    }
+
+    #[derive(Deserialize)]
+    struct SpaceRecordFixture {
+        version: u8,
+        valid: Vec<ValidSpaceRecordCase>,
+        invalid: Vec<InvalidSpaceRecordCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct ValidSpaceRecordCase {
+        name: String,
+        input: String,
+        expected: SpaceRecordValue,
+    }
+
+    #[derive(Deserialize)]
+    struct InvalidSpaceRecordCase {
+        name: String,
+        input: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SpaceRecordValue {
+        space_did: String,
+        space_type: String,
+        skey: String,
+        author_did: String,
+        collection: String,
+        rkey: String,
+    }
+
     #[test]
     fn follows_the_shared_readiness_fixture() {
         let fixture: ReadinessFixture = serde_json::from_str(include_str!(
@@ -80,6 +133,72 @@ mod tests {
                 }
             }
             assert_eq!(gate.is_ready(), case.expected_ready, "{}", case.name);
+        }
+    }
+
+    #[test]
+    fn follows_the_shared_cursor_fixture() {
+        let fixture: CursorFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/cursor.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
+
+        for case in fixture.cases {
+            let actual = FeedCursor::decode(&case.input).map(|cursor| CursorValue {
+                sort_at: cursor.sort_at,
+                uri: cursor.uri,
+            });
+            assert_eq!(actual, case.expected, "{}", case.name);
+            if let Some(expected) = case.expected {
+                assert_eq!(
+                    FeedCursor {
+                        sort_at: expected.sort_at,
+                        uri: expected.uri,
+                    }
+                    .encode(),
+                    case.input,
+                    "{}",
+                    case.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn follows_the_shared_space_record_uri_fixture() {
+        let fixture: SpaceRecordFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/space-record-uri.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
+
+        for case in fixture.valid {
+            let uri = RecordUri::parse(&case.input).unwrap_or_else(|_| panic!("{}", case.name));
+            let RecordUri::Space {
+                authority,
+                space_type,
+                space_key,
+                author,
+                collection,
+                rkey,
+            } = uri
+            else {
+                panic!("{}", case.name);
+            };
+            assert_eq!(authority.as_str(), case.expected.space_did, "{}", case.name);
+            assert_eq!(space_type, case.expected.space_type, "{}", case.name);
+            assert_eq!(space_key, case.expected.skey, "{}", case.name);
+            assert_eq!(author.as_str(), case.expected.author_did, "{}", case.name);
+            assert_eq!(collection, case.expected.collection, "{}", case.name);
+            assert_eq!(rkey, case.expected.rkey, "{}", case.name);
+        }
+        for case in fixture.invalid {
+            assert!(
+                !matches!(RecordUri::parse(&case.input), Ok(RecordUri::Space { .. })),
+                "{}",
+                case.name
+            );
         }
     }
 

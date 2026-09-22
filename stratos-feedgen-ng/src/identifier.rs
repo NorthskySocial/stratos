@@ -153,11 +153,11 @@ fn is_valid_nsid(value: &str) -> bool {
             let bytes = label.as_bytes();
             !bytes.is_empty()
                 && bytes.len() <= 63
-                && bytes[0].is_ascii_lowercase()
+                && bytes[0].is_ascii_alphabetic()
                 && bytes[bytes.len() - 1].is_ascii_alphanumeric()
                 && bytes
                     .iter()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
         })
 }
 
@@ -238,7 +238,7 @@ mod tests {
         for value in [
             "at://did:web:stratos.example/space/not_an_nsid/bebop/did:plc:faye/zone.stratos.feed.post/1",
             "at://did:web:stratos.example/space/zone.stratos.space.feed/../did:plc:faye/zone.stratos.feed.post/1",
-            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:faye/Zone.stratos.feed.post/1",
+            "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:faye/zone..feed.post/1",
             "at://did:plc:spike/zone.stratos.feed.post/not/a/rkey",
         ] {
             assert_eq!(
