@@ -29,5 +29,6 @@ pub mod service_event;
 pub mod service_stream;
 pub mod space_credential;
 pub mod space_host;
+pub mod space_membership;
 pub mod space_sync;
 pub mod store;
