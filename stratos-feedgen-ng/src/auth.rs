@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use p256::ecdsa::signature::Verifier;
 use serde::Deserialize;
+
+use crate::identity_key::DidVerificationKey;
 
 const FORBIDDEN_TOKEN_TYPES: [&str; 3] = ["at+jwt", "dpop+jwt", "refresh+jwt"];
 
@@ -119,9 +120,9 @@ where
         let parsed = ParsedJwt::parse(token)?;
         parsed.validate_claims(&self.feedgen_did, &self.allowed_lxms, now)?;
         let key = self.resolve_key(&parsed.claims.issuer, false).await?;
-        if !key.verify(&parsed) {
+        if !verifies_jwt_signature(&key, &parsed) {
             let refreshed_key = self.resolve_key(&parsed.claims.issuer, true).await?;
-            if !refreshed_key.verify(&parsed) {
+            if !verifies_jwt_signature(&refreshed_key, &parsed) {
                 return Err(AuthError::BadJwtSignature);
             }
         }
@@ -135,13 +136,13 @@ where
         &self,
         issuer: &str,
         force_refresh: bool,
-    ) -> Result<VerificationKey, AuthError> {
+    ) -> Result<DidVerificationKey, AuthError> {
         let did_key = self
             .resolver
             .resolve_atproto_key(issuer, force_refresh)
             .await
             .map_err(|_| AuthError::CouldNotResolveIssuer)?;
-        VerificationKey::from_did_key(&did_key)
+        DidVerificationKey::parse(&did_key).ok_or(AuthError::InvalidToken)
     }
 }
 
@@ -258,66 +259,12 @@ impl JwtAlgorithm {
     }
 }
 
-enum VerificationKey {
-    P256(p256::ecdsa::VerifyingKey),
-    Secp256k1(k256::ecdsa::VerifyingKey),
-}
-
-impl VerificationKey {
-    fn from_did_key(value: &str) -> Result<Self, AuthError> {
-        let encoded = value
-            .strip_prefix("did:key:z")
-            .ok_or(AuthError::InvalidToken)?;
-        let bytes = bs58::decode(encoded)
-            .into_vec()
-            .map_err(|_| AuthError::InvalidToken)?;
-        let (codec, key) = decode_multicodec(&bytes)?;
-        match codec {
-            0x1200 => p256::ecdsa::VerifyingKey::from_sec1_bytes(key)
-                .map(Self::P256)
-                .map_err(|_| AuthError::InvalidToken),
-            0xe7 => k256::ecdsa::VerifyingKey::from_sec1_bytes(key)
-                .map(Self::Secp256k1)
-                .map_err(|_| AuthError::InvalidToken),
-            _ => Err(AuthError::InvalidToken),
-        }
+fn verifies_jwt_signature(key: &DidVerificationKey, jwt: &ParsedJwt) -> bool {
+    match jwt.algorithm {
+        JwtAlgorithm::Es256 => key.verifies_p256(&jwt.signed_data, &jwt.signature),
+        JwtAlgorithm::Es256k => key.verifies_secp256k1(&jwt.signed_data, &jwt.signature),
     }
-
-    fn verify(&self, jwt: &ParsedJwt) -> bool {
-        match (self, jwt.algorithm) {
-            (Self::P256(key), JwtAlgorithm::Es256) => {
-                p256::ecdsa::Signature::from_slice(&jwt.signature)
-                    .is_ok_and(|signature| key.verify(&jwt.signed_data, &signature).is_ok())
-            }
-            (Self::Secp256k1(key), JwtAlgorithm::Es256k) => {
-                k256::ecdsa::Signature::from_slice(&jwt.signature)
-                    .is_ok_and(|signature| key.verify(&jwt.signed_data, &signature).is_ok())
-            }
-            _ => false,
-        }
-    }
-}
-
-fn decode_multicodec(bytes: &[u8]) -> Result<(u64, &[u8]), AuthError> {
-    let mut value = 0_u64;
-    for (index, byte) in bytes.iter().copied().enumerate() {
-        let shift = index.checked_mul(7).ok_or(AuthError::InvalidToken)?;
-        if shift >= u64::BITS as usize {
-            return Err(AuthError::InvalidToken);
-        }
-        let payload = byte & 0x7f;
-        if shift == 63 && (payload > 1 || byte & 0x80 != 0) {
-            return Err(AuthError::InvalidToken);
-        }
-        value |= u64::from(payload) << shift;
-        if byte & 0x80 == 0 {
-            if index > 0 && payload == 0 {
-                return Err(AuthError::InvalidToken);
-            }
-            return Ok((value, &bytes[index + 1..]));
-        }
-    }
-    Err(AuthError::InvalidToken)
+    .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -621,10 +568,12 @@ mod tests {
 
     #[test]
     fn rejects_noncanonical_and_overflowing_multicodecs() {
-        assert!(super::decode_multicodec(&[0x80, 0xa4, 0x00]).is_err());
+        assert!(crate::identity_key::decode_multicodec(&[0x80, 0xa4, 0x00]).is_none());
         assert!(
-            super::decode_multicodec(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x02])
-                .is_err()
+            crate::identity_key::decode_multicodec(&[
+                0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x02
+            ])
+            .is_none()
         );
     }
 }

@@ -1,14 +1,15 @@
-use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
-use k256::ecdsa::signature::Verifier;
 use serde_json::Value;
 use sha2::Sha256;
 
+use crate::{
+    auth::{IdentityKeyResolver, IdentityResolutionError},
+    identity_key::DidVerificationKey,
+};
+
 const COMMIT_VERSION: u64 = 1;
 const DOMAIN_PREFIX: &[u8] = b"atproto-space-v1";
-const P256_MULTICODEC: u64 = 0x1200;
-const SECP256K1_MULTICODEC: u64 = 0xe7;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -29,26 +30,12 @@ pub enum CommitVerification {
     DeferredKeyResolution,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CommitKeyResolutionError {
-    pub transient: bool,
-}
-
-#[async_trait]
-pub trait CommitKeyResolver: Send + Sync {
-    async fn resolve_atproto_key(
-        &self,
-        did: &str,
-        force_refresh: bool,
-    ) -> Result<String, CommitKeyResolutionError>;
-}
-
 pub struct SpaceCommitVerifier {
-    resolver: Box<dyn CommitKeyResolver>,
+    resolver: Box<dyn IdentityKeyResolver>,
 }
 
 impl SpaceCommitVerifier {
-    pub fn new(resolver: Box<dyn CommitKeyResolver>) -> Self {
+    pub fn new(resolver: Box<dyn IdentityKeyResolver>) -> Self {
         Self { resolver }
     }
 
@@ -81,8 +68,12 @@ impl SpaceCommitVerifier {
         if !has_valid_mac(&commit, &context) {
             return CommitVerification::Rejected(CommitVerificationFailure::MacMismatch);
         }
-        if verifies_signature(&key, &context, &commit.signature) {
-            return CommitVerification::Verified;
+        match key.verifies_any(&context, &commit.signature) {
+            None => {
+                return CommitVerification::Rejected(CommitVerificationFailure::SignatureInvalid);
+            }
+            Some(true) => return CommitVerification::Verified,
+            Some(false) => {}
         }
         let key = match self.resolve(author_did, true).await {
             KeyResolution::Key(key) => key,
@@ -91,27 +82,27 @@ impl SpaceCommitVerifier {
                 return CommitVerification::Rejected(CommitVerificationFailure::KeyUnresolvable);
             }
         };
-        if verifies_signature(&key, &context, &commit.signature) {
-            CommitVerification::Verified
-        } else {
-            CommitVerification::Rejected(CommitVerificationFailure::SignatureInvalid)
-        }
+        matches!(key.verifies_any(&context, &commit.signature), Some(true))
+            .then_some(CommitVerification::Verified)
+            .unwrap_or(CommitVerification::Rejected(
+                CommitVerificationFailure::SignatureInvalid,
+            ))
     }
 
     async fn resolve(&self, did: &str, force_refresh: bool) -> KeyResolution {
         let resolved = self.resolver.resolve_atproto_key(did, force_refresh).await;
         match resolved {
-            Ok(key) => VerificationKey::parse(&key)
+            Ok(key) => DidVerificationKey::parse(&key)
                 .map(KeyResolution::Key)
                 .unwrap_or(KeyResolution::Invalid),
-            Err(error) if error.transient => KeyResolution::Deferred,
+            Err(IdentityResolutionError::Unavailable) => KeyResolution::Deferred,
             Err(_) => KeyResolution::Invalid,
         }
     }
 }
 
 enum KeyResolution {
-    Key(VerificationKey),
+    Key(DidVerificationKey),
     Deferred,
     Invalid,
 }
@@ -182,61 +173,10 @@ fn has_valid_mac(commit: &SignedSpaceCommit, context: &[u8]) -> bool {
     mac.verify_slice(&commit.mac).is_ok()
 }
 
-enum VerificationKey {
-    P256(p256::ecdsa::VerifyingKey),
-    Secp256k1(k256::ecdsa::VerifyingKey),
-}
-
-impl VerificationKey {
-    fn parse(value: &str) -> Option<Self> {
-        let encoded = value.strip_prefix("did:key:z")?;
-        let bytes = bs58::decode(encoded).into_vec().ok()?;
-        let (codec, key) = decode_multicodec(&bytes)?;
-        match codec {
-            P256_MULTICODEC => p256::ecdsa::VerifyingKey::from_sec1_bytes(key)
-                .ok()
-                .map(Self::P256),
-            SECP256K1_MULTICODEC => k256::ecdsa::VerifyingKey::from_sec1_bytes(key)
-                .ok()
-                .map(Self::Secp256k1),
-            _ => None,
-        }
-    }
-}
-
-fn verifies_signature(key: &VerificationKey, context: &[u8], signature: &[u8]) -> bool {
-    match key {
-        VerificationKey::P256(key) => p256::ecdsa::Signature::from_slice(signature)
-            .is_ok_and(|signature| key.verify(context, &signature).is_ok()),
-        VerificationKey::Secp256k1(key) => k256::ecdsa::Signature::from_slice(signature)
-            .is_ok_and(|signature| key.verify(context, &signature).is_ok()),
-    }
-}
-
-fn decode_multicodec(bytes: &[u8]) -> Option<(u64, &[u8])> {
-    let mut value = 0_u64;
-    for (index, byte) in bytes.iter().copied().enumerate() {
-        let shift = index.checked_mul(7)?;
-        if shift >= u64::BITS as usize {
-            return None;
-        }
-        let payload = byte & 0x7f;
-        if shift == 63 && (payload > 1 || byte & 0x80 != 0) {
-            return None;
-        }
-        value |= u64::from(payload) << shift;
-        if byte & 0x80 == 0 {
-            if index > 0 && payload == 0 {
-                return None;
-            }
-            return Some((value, &bytes[index + 1..]));
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use async_trait::async_trait;
     use base64::Engine;
     use hmac::Mac;
@@ -244,9 +184,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        COMMIT_VERSION, CommitKeyResolutionError, CommitKeyResolver, CommitVerification,
-        CommitVerificationFailure, HmacSha256, SpaceCommitVerifier, commit_context,
+        COMMIT_VERSION, CommitVerification, CommitVerificationFailure, HmacSha256,
+        SpaceCommitVerifier, commit_context,
     };
+    use crate::auth::{IdentityKeyResolver, IdentityResolutionError};
 
     const SPACE: &str = "at://did:web:stratos.example.test/space/zone.stratos.space.feed/bebop";
     const AUTHOR: &str = "did:plc:spike";
@@ -254,12 +195,12 @@ mod tests {
     struct Key(String);
 
     #[async_trait]
-    impl CommitKeyResolver for Key {
+    impl IdentityKeyResolver for Key {
         async fn resolve_atproto_key(
             &self,
             _: &str,
             _: bool,
-        ) -> Result<String, CommitKeyResolutionError> {
+        ) -> Result<String, IdentityResolutionError> {
             Ok(self.0.clone())
         }
     }
@@ -267,28 +208,30 @@ mod tests {
     struct RotatingKey {
         first: String,
         refreshed: String,
+        calls: Arc<Mutex<Vec<bool>>>,
     }
 
     struct UnavailableKey;
 
     #[async_trait]
-    impl CommitKeyResolver for UnavailableKey {
+    impl IdentityKeyResolver for UnavailableKey {
         async fn resolve_atproto_key(
             &self,
             _: &str,
             _: bool,
-        ) -> Result<String, CommitKeyResolutionError> {
-            Err(CommitKeyResolutionError { transient: true })
+        ) -> Result<String, IdentityResolutionError> {
+            Err(IdentityResolutionError::Unavailable)
         }
     }
 
     #[async_trait]
-    impl CommitKeyResolver for RotatingKey {
+    impl IdentityKeyResolver for RotatingKey {
         async fn resolve_atproto_key(
             &self,
             _: &str,
             force_refresh: bool,
-        ) -> Result<String, CommitKeyResolutionError> {
+        ) -> Result<String, IdentityResolutionError> {
+            self.calls.lock().unwrap().push(force_refresh);
             Ok(if force_refresh {
                 self.refreshed.clone()
             } else {
@@ -313,7 +256,7 @@ mod tests {
         format!("did:key:z{}", bs58::encode(bytes).into_string())
     }
 
-    fn commit(key: &SigningKey) -> serde_json::Value {
+    fn commit_with_signature(signature: Vec<u8>) -> serde_json::Value {
         let hash = [3_u8; 32];
         let ikm = [7_u8; 32];
         let context = commit_context(SPACE, AUTHOR, "rev", &ikm).unwrap();
@@ -323,15 +266,20 @@ mod tests {
         let expand_key = extract.finalize().into_bytes();
         let mut mac = HmacSha256::new_from_slice(&expand_key).unwrap();
         mac.update(&hash);
-        let signature: k256::ecdsa::Signature = key.sign(&context);
         json!({
             "ver": COMMIT_VERSION,
             "rev": "rev",
             "hash": {"$bytes": base64::engine::general_purpose::STANDARD.encode(hash)},
             "ikm": {"$bytes": base64::engine::general_purpose::STANDARD.encode(ikm)},
             "mac": {"$bytes": base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())},
-            "sig": {"$bytes": base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())},
+            "sig": {"$bytes": base64::engine::general_purpose::STANDARD.encode(signature)},
         })
+    }
+
+    fn commit(key: &SigningKey) -> serde_json::Value {
+        let context = commit_context(SPACE, AUTHOR, "rev", &[7_u8; 32]).unwrap();
+        let signature: k256::ecdsa::Signature = key.sign(&context);
+        commit_with_signature(signature.to_bytes().to_vec())
     }
 
     #[tokio::test]
@@ -348,24 +296,9 @@ mod tests {
     #[tokio::test]
     async fn accepts_a_valid_p256_space_commit() {
         let key = p256::ecdsa::SigningKey::from_slice(&[8; 32]).unwrap();
-        let hash = [3_u8; 32];
-        let ikm = [7_u8; 32];
-        let context = commit_context(SPACE, AUTHOR, "rev", &ikm).unwrap();
-        let mut extract = HmacSha256::new_from_slice(&ikm).unwrap();
-        extract.update(&context);
-        extract.update(&[1]);
-        let expand_key = extract.finalize().into_bytes();
-        let mut mac = HmacSha256::new_from_slice(&expand_key).unwrap();
-        mac.update(&hash);
+        let context = commit_context(SPACE, AUTHOR, "rev", &[7_u8; 32]).unwrap();
         let signature: p256::ecdsa::Signature = key.sign(&context);
-        let commit = json!({
-            "ver": COMMIT_VERSION,
-            "rev": "rev",
-            "hash": {"$bytes": base64::engine::general_purpose::STANDARD.encode(hash)},
-            "ikm": {"$bytes": base64::engine::general_purpose::STANDARD.encode(ikm)},
-            "mac": {"$bytes": base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())},
-            "sig": {"$bytes": base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())},
-        });
+        let commit = commit_with_signature(signature.to_bytes().to_vec());
         assert_eq!(
             verifier(p256_did_key(&key))
                 .verify(SPACE, AUTHOR, Some(&commit))
@@ -378,9 +311,11 @@ mod tests {
     async fn refreshes_the_signing_key_once_after_a_signature_mismatch() {
         let old = SigningKey::from_slice(&[9; 32]).unwrap();
         let current = SigningKey::from_slice(&[10; 32]).unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
         let verifier = SpaceCommitVerifier::new(Box::new(RotatingKey {
             first: did_key(&old),
             refreshed: did_key(&current),
+            calls: Arc::clone(&calls),
         }));
         assert_eq!(
             verifier
@@ -388,6 +323,7 @@ mod tests {
                 .await,
             CommitVerification::Verified
         );
+        assert_eq!(calls.lock().unwrap().as_slice(), [false, true]);
     }
 
     #[tokio::test]
@@ -435,5 +371,26 @@ mod tests {
             verifier.verify(SPACE, AUTHOR, Some(&invalid)).await,
             CommitVerification::Rejected(CommitVerificationFailure::UnsupportedVersion)
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_signatures_without_refreshing_the_key() {
+        let key = SigningKey::from_slice(&[9; 32]).unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let rotating = RotatingKey {
+            first: did_key(&key),
+            refreshed: did_key(&key),
+            calls: Arc::clone(&calls),
+        };
+        let mut invalid = commit(&key);
+        invalid["sig"]["$bytes"] =
+            json!(base64::engine::general_purpose::STANDARD.encode([0_u8; 63]));
+        let verifier = SpaceCommitVerifier::new(Box::new(rotating));
+
+        assert_eq!(
+            verifier.verify(SPACE, AUTHOR, Some(&invalid)).await,
+            CommitVerification::Rejected(CommitVerificationFailure::SignatureInvalid)
+        );
+        assert_eq!(calls.lock().unwrap().as_slice(), [false]);
     }
 }

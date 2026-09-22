@@ -17,6 +17,7 @@ pub mod feed_service;
 pub mod feeds;
 pub mod identifier;
 pub mod identity;
+mod identity_key;
 pub mod lifecycle;
 pub mod membership_reconciler;
 pub mod readiness;
