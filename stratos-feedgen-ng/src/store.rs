@@ -152,6 +152,12 @@ fn purge_departed_pds_member(
         .map_err(StoreError::Open)?;
     transaction
         .execute(
+            "DELETE FROM space_sync_stage_cursor WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
             "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND boundary = ?2",
             params![did, boundary],
         )
@@ -628,6 +634,28 @@ impl EncryptedStore {
             .map_err(StoreError::Open)
     }
 
+    pub fn space_sync_cursor(
+        &self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+    ) -> Result<Option<String>, StoreError> {
+        validate_space_stage_scope(space_uri, actor_did)?;
+        if boundary.is_empty() {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        self.connection
+            .query_row(
+                "SELECT COALESCE(
+                   (SELECT cursor FROM space_sync_stage_cursor WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3),
+                   (SELECT cursor FROM space_cursor WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3)
+                 )",
+                params![space_uri, actor_did, boundary],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Open)
+    }
+
     pub fn reconcile_actor_enrollment(
         &mut self,
         did: &str,
@@ -705,6 +733,12 @@ impl EncryptedStore {
                         .map_err(StoreError::Open)?;
                     transaction
                         .execute(
+                            "DELETE FROM space_sync_stage_cursor WHERE did = ?1 AND boundary = ?2",
+                            params![did, boundary],
+                        )
+                        .map_err(StoreError::Open)?;
+                    transaction
+                        .execute(
                             "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND (boundary = ?2 OR boundary = '')",
                             params![did, boundary],
                         )
@@ -752,6 +786,9 @@ impl EncryptedStore {
                     .map_err(StoreError::Open)?;
                 transaction
                     .execute("DELETE FROM space_cursor WHERE did = ?1", [did])
+                    .map_err(StoreError::Open)?;
+                transaction
+                    .execute("DELETE FROM space_sync_stage_cursor WHERE did = ?1", [did])
                     .map_err(StoreError::Open)?;
                 transaction
                     .execute(
@@ -877,6 +914,44 @@ impl EncryptedStore {
         transaction.commit().map_err(StoreError::Open)
     }
 
+    pub fn discard_authorized_space_stage(
+        &mut self,
+        boundary: &str,
+        space_uri: &str,
+        actor_did: &str,
+    ) -> Result<(), StoreError> {
+        validate_space_stage_scope(space_uri, actor_did)?;
+        if boundary.is_empty() {
+            return Err(StoreError::InvalidProjectionMutation);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::Open)?;
+        if !has_current_pds_space_member(&transaction, boundary, actor_did)? {
+            return Err(StoreError::UnauthorizedSpaceMember);
+        }
+        transaction
+            .execute(
+                "DELETE FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3",
+                params![space_uri, actor_did, boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3",
+                params![space_uri, actor_did, boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM space_sync_stage_cursor WHERE space_uri = ?1 AND did = ?2 AND boundary = ?3",
+                params![space_uri, actor_did, boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction.commit().map_err(StoreError::Open)
+    }
+
     pub fn list_posts_by_boundary(
         &self,
         boundary: &str,
@@ -993,6 +1068,12 @@ impl EncryptedStore {
         transaction
             .execute(
                 "DELETE FROM space_cursor WHERE boundary = ?1 OR boundary = ''",
+                [boundary],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "DELETE FROM space_sync_stage_cursor WHERE boundary = ?1",
                 [boundary],
             )
             .map_err(StoreError::Open)?;
@@ -1247,7 +1328,13 @@ fn update_space_stage_checkpoint(
     if let Some(cursor) = &page.next_cursor {
         transaction
             .execute(
-                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                "DELETE FROM space_sync_pending_verification WHERE space_uri = ?1 AND did = ?2",
+                params![page.space_uri, page.actor_did],
+            )
+            .map_err(StoreError::Open)?;
+        transaction
+            .execute(
+                "INSERT INTO space_sync_stage_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(space_uri, did) DO UPDATE SET boundary = excluded.boundary,
                    cursor = excluded.cursor, updated_at = excluded.updated_at",
                 params![page.space_uri, page.actor_did, page.boundary, cursor, page.updated_at],
@@ -1307,6 +1394,22 @@ fn promote_space_stage_transaction(
     transaction
         .execute(
             "DELETE FROM space_sync_stage WHERE space_uri = ?1 AND did = ?2",
+            params![space_uri, actor_did],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at)
+             SELECT space_uri, did, boundary, cursor, updated_at
+             FROM space_sync_stage_cursor WHERE space_uri = ?1 AND did = ?2
+             ON CONFLICT(space_uri, did) DO UPDATE SET boundary = excluded.boundary,
+               cursor = excluded.cursor, updated_at = excluded.updated_at",
+            params![space_uri, actor_did],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_stage_cursor WHERE space_uri = ?1 AND did = ?2",
             params![space_uri, actor_did],
         )
         .map_err(StoreError::Open)?;
@@ -1645,6 +1748,13 @@ mod tests {
             boundary: "bebop".to_string(),
             next_cursor: next_cursor.map(str::to_string),
             updated_at: "1998-04-03T00:00:00.000Z".to_string(),
+        }
+    }
+
+    fn authorized_space_stage_page(next_cursor: Option<&str>) -> SpaceStagePage {
+        SpaceStagePage {
+            boundary: "did:web:stratos.example/bebop".to_owned(),
+            ..space_stage_page(next_cursor)
         }
     }
 
@@ -2391,6 +2501,15 @@ mod tests {
                 .unwrap(),
             0
         );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_sync_stage_cursor", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -2428,7 +2547,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_space_staging_preserves_the_resumable_cursor() {
+    fn terminal_space_staging_keeps_the_resumable_cursor_uncommitted() {
         let mut store = EncryptedStore::open_memory(key(7)).unwrap();
         store
             .stage_space_page(
@@ -2439,8 +2558,9 @@ mod tests {
         assert_eq!(
             store
                 .connection
-                .query_row("SELECT cursor FROM space_cursor", [], |row| row
-                    .get::<_, String>(0))
+                .query_row("SELECT cursor FROM space_sync_stage_cursor", [], |row| {
+                    row.get::<_, String>(0)
+                })
                 .unwrap(),
             "firehose:8"
         );
@@ -2462,8 +2582,9 @@ mod tests {
         assert_eq!(
             store
                 .connection
-                .query_row("SELECT cursor FROM space_cursor", [], |row| row
-                    .get::<_, String>(0))
+                .query_row("SELECT cursor FROM space_sync_stage_cursor", [], |row| {
+                    row.get::<_, String>(0)
+                })
                 .unwrap(),
             "firehose:8"
         );
@@ -2478,6 +2599,26 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn restarting_a_staged_page_requires_a_new_terminal_verification() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .stage_space_page(space_stage_page(None), vec![staged_space_post()])
+            .unwrap();
+        store
+            .stage_space_page(space_stage_page(Some("retry")), Vec::new())
+            .unwrap();
+
+        assert!(matches!(
+            store.promote_verified_space_stage(
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                "did:plc:spikespiegel",
+                "1998-04-04T00:00:00.000Z",
+            ),
+            Err(StoreError::UnverifiedSpaceStage)
+        ));
     }
 
     #[test]
@@ -2565,6 +2706,73 @@ mod tests {
                     [],
                     |row| row.get::<_, i64>(0),
                 )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn discarding_an_unverified_stage_preserves_the_last_verified_cursor() {
+        let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+        store
+            .replace_pds_space_members(
+                "did:web:stratos.example/bebop",
+                vec![super::PdsSpaceMember {
+                    did: "did:plc:spikespiegel".to_owned(),
+                }],
+                "1998-04-03T00:00:00.000Z",
+            )
+            .unwrap();
+        store
+            .stage_authorized_space_page(
+                authorized_space_stage_page(Some("verified")),
+                vec![staged_space_post()],
+            )
+            .unwrap();
+        store
+            .stage_authorized_space_page(authorized_space_stage_page(None), Vec::new())
+            .unwrap();
+        store
+            .promote_authorized_space_stage(
+                "did:web:stratos.example/bebop",
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                "did:plc:spikespiegel",
+                "1998-04-04T00:00:00.000Z",
+            )
+            .unwrap();
+
+        store
+            .stage_authorized_space_page(
+                authorized_space_stage_page(Some("unverified")),
+                vec![staged_space_post()],
+            )
+            .unwrap();
+        store
+            .stage_authorized_space_page(authorized_space_stage_page(None), Vec::new())
+            .unwrap();
+        store
+            .discard_authorized_space_stage(
+                "did:web:stratos.example/bebop",
+                "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                "did:plc:spikespiegel",
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .space_sync_cursor(
+                    "did:web:stratos.example/bebop",
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                )
+                .unwrap(),
+            Some("verified".to_owned())
+        );
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM space_sync_stage", [], |row| row
+                    .get::<_, i64>(0))
                 .unwrap(),
             0
         );

@@ -146,6 +146,34 @@ const MIGRATIONS: &[Migration] = &[
           ON actor_enrollment(enrolled, did);
     "#,
     },
+    Migration {
+        version: 5,
+        sql: r#"
+        CREATE TABLE space_sync_stage_cursor (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          cursor TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did)
+        ) WITHOUT ROWID;
+        CREATE INDEX space_sync_stage_cursor_boundary_idx
+          ON space_sync_stage_cursor(boundary, space_uri, did);
+
+        INSERT INTO space_sync_stage_cursor (space_uri, did, boundary, cursor, updated_at)
+          SELECT cursor.space_uri, cursor.did, cursor.boundary, cursor.cursor, cursor.updated_at
+          FROM space_cursor AS cursor
+          WHERE EXISTS (
+            SELECT 1 FROM space_sync_stage AS stage
+            WHERE stage.space_uri = cursor.space_uri AND stage.did = cursor.did
+          );
+        DELETE FROM space_cursor
+          WHERE EXISTS (
+            SELECT 1 FROM space_sync_stage AS stage
+            WHERE stage.space_uri = space_cursor.space_uri AND stage.did = space_cursor.did
+          );
+    "#,
+    },
 ];
 
 pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -185,13 +213,13 @@ mod tests {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         let migration_count: u32 = connection
             .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 4);
+        assert_eq!(migration_count, 5);
         let post_boundary_sql: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
@@ -271,9 +299,75 @@ mod tests {
     }
 
     #[test]
+    fn keeps_preexisting_staged_cursors_uncommitted_during_upgrade() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for migration in &super::MIGRATIONS[..4] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migration (version, applied_at) VALUES (?1, 0)",
+                    [migration.version],
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", migration.version)
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                    "did:web:stratos.example/bebop",
+                    "unverified",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+                    "did:web:stratos.example/bebop",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:faye",
+                    "did:web:stratos.example/bebop",
+                    "verified",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+
+        apply(&mut connection).unwrap();
+
+        let committed: String = connection
+            .query_row("SELECT cursor FROM space_cursor", [], |row| row.get(0))
+            .unwrap();
+        let staged: String = connection
+            .query_row("SELECT cursor FROM space_sync_stage_cursor", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(committed, "verified");
+        assert_eq!(staged, "unverified");
+    }
+
+    #[test]
     fn rejects_a_database_from_a_newer_store_format() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 5).unwrap();
+        connection.pragma_update(None, "user_version", 6).unwrap();
 
         assert!(apply(&mut connection).is_err());
     }
