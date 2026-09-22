@@ -6,6 +6,7 @@ import {
   createSmallOracleFixture,
   fingerprintFixture,
 } from './oracle.js'
+import { inspectCgroupLimits } from './resources.js'
 
 interface OracleReport {
   command: 'oracle'
@@ -21,9 +22,9 @@ interface OracleReport {
 }
 
 async function main(args: readonly string[]): Promise<void> {
-  if (args[0] !== 'oracle') {
-    throw new Error('Only the deterministic oracle command is available')
-  }
+  if (args[0] === 'limits') return reportLimits(args)
+  if (args[0] !== 'oracle')
+    throw new Error('Supported commands: oracle, limits')
   const implementation = implementationFrom(args)
   const fixture = createSmallOracleFixture()
   const directory = await mkdtemp(join(tmpdir(), 'stratos-feedgen-harness-'))
@@ -43,6 +44,15 @@ async function main(args: readonly string[]): Promise<void> {
   }
   await writeFile(path, `${JSON.stringify(report)}\n`, { mode: 0o600 })
   process.stdout.write(`${JSON.stringify(report)}\n`)
+}
+
+async function reportLimits(args: readonly string[]): Promise<void> {
+  const position = args.indexOf('--cgroup-root')
+  const root = position === -1 ? '/sys/fs/cgroup' : args[position + 1]
+  if (!root) throw new Error('limits requires a cgroup root')
+  const result = await inspectCgroupLimits(root)
+  process.stdout.write(`${JSON.stringify({ command: 'limits', ...result })}\n`)
+  if (!result.passed) process.exitCode = 1
 }
 
 function implementationFrom(args: readonly string[]): 'ts' | 'rust' {
