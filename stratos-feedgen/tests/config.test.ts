@@ -23,6 +23,9 @@ import {
   DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
+  DEFAULT_SHADOW_MAX_CONCURRENT,
+  DEFAULT_SHADOW_REQUEST_TIMEOUT_MS,
+  DEFAULT_SHADOW_SAMPLE_RATE,
   MAX_SPACE_MEMBERSHIP_PAGE_LIMIT,
   loadFeedgenConfig,
 } from '../src/config.js'
@@ -270,6 +273,49 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       }),
     ).toThrow(
       "Invalid FEEDGEN_STORAGE_PROFILE: disk (expected 'ephemeral' or 'encrypted-volume')",
+    )
+  })
+})
+
+describe('loadFeedgenConfig shadow reader', () => {
+  it('keeps authenticated shadow reads disabled by default', () => {
+    expect(loadFeedgenConfig(baseEnv)).toMatchObject({
+      shadowReaderUrl: undefined,
+      shadowSampleRate: DEFAULT_SHADOW_SAMPLE_RATE,
+      shadowRequestTimeoutMs: DEFAULT_SHADOW_REQUEST_TIMEOUT_MS,
+      shadowMaxConcurrent: DEFAULT_SHADOW_MAX_CONCURRENT,
+    })
+  })
+
+  it('accepts an explicit loopback sidecar and bounded sampling controls', () => {
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SHADOW_READER_URL: 'http://127.0.0.1:3001/',
+        FEEDGEN_SHADOW_SAMPLE_RATE: '0.25',
+        FEEDGEN_SHADOW_REQUEST_TIMEOUT_MS: '500',
+        FEEDGEN_SHADOW_MAX_CONCURRENT: '3',
+      }),
+    ).toMatchObject({
+      shadowReaderUrl: 'http://127.0.0.1:3001',
+      shadowSampleRate: 0.25,
+      shadowRequestTimeoutMs: 500,
+      shadowMaxConcurrent: 3,
+    })
+  })
+
+  it.each([
+    [
+      'a remote URL',
+      { FEEDGEN_SHADOW_READER_URL: 'https://shadow.example.test' },
+    ],
+    ['localhost DNS', { FEEDGEN_SHADOW_READER_URL: 'http://localhost:3001' }],
+    ['userinfo', { FEEDGEN_SHADOW_READER_URL: 'http://user@127.0.0.1:3001' }],
+    ['an invalid rate', { FEEDGEN_SHADOW_SAMPLE_RATE: '1.01' }],
+    ['a rate without a reader', { FEEDGEN_SHADOW_SAMPLE_RATE: '0.1' }],
+  ])('rejects %s', (_name, values) => {
+    expect(() => loadFeedgenConfig({ ...baseEnv, ...values })).toThrow(
+      /FEEDGEN_SHADOW/,
     )
   })
 })

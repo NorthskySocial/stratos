@@ -16,6 +16,7 @@ import {
 import { FEEDGEN_LEXICONS } from './lexicon/index.js'
 import type { FeedgenMetrics, SubscriptionStatus } from './metrics.js'
 import type { FeedReadiness } from './readiness.js'
+import type { ShadowFeedReader } from './shadow/index.js'
 import {
   getRequestContext,
   requestIdMiddleware,
@@ -45,6 +46,8 @@ export interface FeedgenServerDeps {
   configuredBoundaries?: ReadonlySet<string>
   feedReadiness?: FeedReadiness
   resolveHandle?: (did: string) => Promise<string | undefined>
+  /** Optional asynchronous Rust reader parity observer. */
+  shadowReader?: ShadowFeedReader
 }
 
 export interface FeedgenHttpServer {
@@ -70,6 +73,7 @@ export function createFeedgenServer(
     verifier: deps.verifier,
     readiness: deps.feedReadiness,
     metrics: deps.metrics,
+    shadowReader: deps.shadowReader,
     resolveHandle: deps.resolveHandle,
     blobBaseUrl: deps.blobs ? deps.feedgenPublicUrl : undefined,
   })

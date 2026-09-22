@@ -46,6 +46,7 @@ import { SpaceMutationFence } from '../mutation-fence.js'
 import { FeedReadinessGate } from '../readiness.js'
 import { ProjectionCompactor } from '../retention/index.js'
 import { createFeedgenServer } from '../server.js'
+import { HttpShadowFeedReader } from '../shadow/index.js'
 import { SpaceCredentialManager } from '../space-credential/index.js'
 import {
   CommitVerifier,
@@ -124,6 +125,16 @@ async function main(): Promise<void> {
       actorPool: null,
     }
     const metrics = createFeedgenMetrics(subscriptionStatus)
+    const shadowReader =
+      cfg.shadowReaderUrl && cfg.shadowSampleRate > 0
+        ? new HttpShadowFeedReader({
+            baseUrl: cfg.shadowReaderUrl,
+            sampleRate: cfg.shadowSampleRate,
+            requestTimeoutMs: cfg.shadowRequestTimeoutMs,
+            maxConcurrent: cfg.shadowMaxConcurrent,
+            metrics,
+          })
+        : undefined
 
     const enrollmentManager = new EnrollmentManager({
       client: upstream,
@@ -365,6 +376,7 @@ async function main(): Promise<void> {
       feedReadiness: readiness,
       configuredBoundaries,
       resolveHandle: (did) => handleResolver.resolve(did),
+      shadowReader,
     })
 
     const httpServer = await server.listen(port)

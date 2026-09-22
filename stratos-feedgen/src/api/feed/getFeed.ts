@@ -14,10 +14,10 @@ import {
   BoundaryMismatchError,
   UnknownFeedError,
   toXrpcAuthVerifier,
-  type XrpcAuthCredentials,
 } from '../util.js'
 import type { FeedRequestVerifier } from '../../auth/index.js'
 import type { FeedgenMetrics } from '../../metrics.js'
+import type { ShadowFeedReader } from '../../shadow/index.js'
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
@@ -29,6 +29,8 @@ export interface GetFeedDeps {
   enrollmentManager: Pick<EnrollmentManager, 'getBoundaries'>
   verifier: FeedRequestVerifier
   metrics?: FeedgenMetrics
+  /** Optional asynchronous Rust parity observer. */
+  shadowReader?: ShadowFeedReader
   /** Omitted means the caller has no replay-readiness requirement. */
   readiness?: FeedReadiness
   /** Resolve a DID to its current handle; the identity resolver owns caching. */
@@ -115,6 +117,21 @@ export function registerGetFeedHandler(
           outcome: 'ok',
           postsReturned: output.body.feed.length,
         })
+        if (auth.credentials.shadowAuthorization) {
+          deps.shadowReader?.observe({
+            authorization: auth.credentials.shadowAuthorization,
+            feed: feedId,
+            cursor,
+            limit,
+            primary: {
+              status: 200,
+              cursor: output.body.cursor,
+              postIdentifiers: output.body.feed.map(
+                ({ post }) => `${post.uri}#${post.cid}`,
+              ),
+            },
+          })
+        }
         return output
       } catch (error) {
         deps.metrics?.observeFeedRequest({

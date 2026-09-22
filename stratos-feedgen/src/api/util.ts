@@ -6,6 +6,11 @@ import { getRequestContext } from '../middleware/request-id.js'
 export interface XrpcAuthCredentials {
   viewerDid: string
   lxm: string
+  /**
+   * The verified header is available only to the handler for an optional
+   * same-host shadow request. Do not log or return it.
+   */
+  shadowAuthorization?: string
 }
 
 /**
@@ -28,9 +33,19 @@ export function toXrpcAuthVerifier(
     const ctx = getRequestContext()
     if (ctx) ctx.viewerDid = result.viewerDid
     return {
-      credentials: { viewerDid: result.viewerDid, lxm: result.lxm },
+      credentials: {
+        viewerDid: result.viewerDid,
+        lxm: result.lxm,
+        shadowAuthorization: firstHeaderValue(req.headers.authorization),
+      },
     }
   }
+}
+
+function firstHeaderValue(
+  value: RequestHeaders['authorization'],
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value
 }
 
 export class UnknownFeedError extends InvalidRequestError {

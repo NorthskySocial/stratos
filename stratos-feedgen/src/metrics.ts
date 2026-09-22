@@ -40,6 +40,17 @@ export interface FeedgenMetrics {
     outcome: 'ok' | 'expected_error' | 'error'
     postsReturned?: number
   }): void
+  recordShadowFeed(
+    outcome:
+      | 'matched'
+      | 'unavailable'
+      | 'dropped'
+      | 'mismatch_status'
+      | 'mismatch_error'
+      | 'mismatch_cursor'
+      | 'mismatch_post-count'
+      | 'mismatch_post-order',
+  ): void
   recordReconnect(kind: 'service' | 'actor'): void
   recordIndexOperation(
     operation: 'upsert' | 'delete',
@@ -93,6 +104,9 @@ export function createFeedgenMetrics(
       unit: '{posts}',
     },
   )
+  const shadowFeed = meter.createCounter('stratos.feedgen.shadow_feed.reads', {
+    description: 'Sampled Rust shadow-reader decisions by bounded outcome.',
+  })
   const reconnects = meter.createCounter(
     'stratos.feedgen.subscription.reconnects',
     {
@@ -193,6 +207,9 @@ export function createFeedgenMetrics(
     observeFeedRequest({ outcome, postsReturned: count }) {
       feedRequests.add(1, { outcome })
       if (count !== undefined) postsReturned.record(count)
+    },
+    recordShadowFeed(outcome) {
+      shadowFeed.add(1, { outcome })
     },
     recordReconnect(kind) {
       reconnects.add(1, { 'stream.kind': kind })

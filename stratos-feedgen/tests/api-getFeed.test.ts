@@ -10,6 +10,7 @@ import {
   type IndexedPost,
   type ListPostsOpts,
   type ListPostsResult,
+  type ShadowFeedReader,
 } from '../src/index.js'
 
 vi.mock('@sentry/node', async (importOriginal) => ({
@@ -43,6 +44,7 @@ async function startServer(opts?: {
   /** Override verifier to simulate auth failure or alternative viewer DIDs. */
   verifier?: FeedRequestVerifier
   resolveHandle?: (did: string) => Promise<string | undefined>
+  shadowReader?: ShadowFeedReader
 }): Promise<TestServerCtx> {
   const viewerBoundaries = opts?.viewerBoundaries ?? ['engineering']
   const posts = opts?.posts ?? []
@@ -91,6 +93,7 @@ async function startServer(opts?: {
     verifier,
     feedReadiness: opts?.readiness,
     resolveHandle: opts?.resolveHandle,
+    shadowReader: opts?.shadowReader,
   })
 
   const httpServer = await server.listen(0, '127.0.0.1')
@@ -153,6 +156,25 @@ describe('zone.stratos.feedgen.getFeed', () => {
       boundary: 'engineering',
       limit: 50,
       cursor: undefined,
+    })
+  })
+
+  it('samples only the completed authoritative response for the Rust sidecar', async () => {
+    const observe = vi.fn()
+    ctx = await startServer({ shadowReader: { observe } })
+
+    const res = await fetch(
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed`,
+      { headers: { authorization: 'Bearer private-token' } },
+    )
+
+    expect(res.status).toBe(200)
+    expect(observe).toHaveBeenCalledWith({
+      authorization: 'Bearer private-token',
+      feed: 'eng-feed',
+      cursor: undefined,
+      limit: 50,
+      primary: { status: 200, postIdentifiers: [] },
     })
   })
 

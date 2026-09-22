@@ -48,6 +48,14 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
+  /** Loopback-only Rust reader used for opt-in asynchronous parity checks. */
+  shadowReaderUrl?: string
+  /** Fraction of successful authorized reads duplicated to the shadow reader. */
+  shadowSampleRate: number
+  /** Maximum time a background shadow request may occupy one local slot. */
+  shadowRequestTimeoutMs: number
+  /** Maximum concurrent shadow requests. */
+  shadowMaxConcurrent: number
   /** File-backed only for the encrypted-volume profile. */
   blobCacheDirectory?: string
   blobCacheMaxBytes: number
@@ -97,6 +105,11 @@ export const DEFAULT_STORAGE_PROFILE: StorageProfile = 'ephemeral'
 export const DEFAULT_SQLITE_PATH = ':memory:'
 export const DEFAULT_BOUNDARY_CACHE_TTL_MS = 300_000
 export const DEFAULT_BOUNDARY_CACHE_MAX = 10_000
+export const DEFAULT_SHADOW_SAMPLE_RATE = 0
+export const DEFAULT_SHADOW_REQUEST_TIMEOUT_MS = 250
+export const MAX_SHADOW_REQUEST_TIMEOUT_MS = 2_000
+export const DEFAULT_SHADOW_MAX_CONCURRENT = 2
+export const MAX_SHADOW_MAX_CONCURRENT = 4
 
 /** Lxms accepted on inbound service-auth JWTs. */
 export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
@@ -186,6 +199,7 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
+    ...loadShadowReaderConfig(env),
     ...blobCache,
     logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
     spaceSyncEnabled: parseBoolean(
@@ -244,6 +258,42 @@ export function loadFeedgenConfig(
     ),
     spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
+    ),
+  }
+}
+
+type ShadowReaderConfig = Pick<
+  FeedgenConfig,
+  | 'shadowReaderUrl'
+  | 'shadowSampleRate'
+  | 'shadowRequestTimeoutMs'
+  | 'shadowMaxConcurrent'
+>
+
+function loadShadowReaderConfig(env: FeedgenEnv): ShadowReaderConfig {
+  const shadowReaderUrl = parseShadowReaderUrl(
+    optionalEnv(env, 'FEEDGEN_SHADOW_READER_URL'),
+  )
+  const shadowSampleRate = parseSampleRate(env['FEEDGEN_SHADOW_SAMPLE_RATE'])
+  if (shadowSampleRate > 0 && !shadowReaderUrl) {
+    throw new Error(
+      'FEEDGEN_SHADOW_SAMPLE_RATE requires FEEDGEN_SHADOW_READER_URL',
+    )
+  }
+  return {
+    shadowReaderUrl,
+    shadowSampleRate,
+    shadowRequestTimeoutMs: parseBoundedPositiveInt(
+      env['FEEDGEN_SHADOW_REQUEST_TIMEOUT_MS'],
+      'FEEDGEN_SHADOW_REQUEST_TIMEOUT_MS',
+      DEFAULT_SHADOW_REQUEST_TIMEOUT_MS,
+      MAX_SHADOW_REQUEST_TIMEOUT_MS,
+    ),
+    shadowMaxConcurrent: parseBoundedPositiveInt(
+      env['FEEDGEN_SHADOW_MAX_CONCURRENT'],
+      'FEEDGEN_SHADOW_MAX_CONCURRENT',
+      DEFAULT_SHADOW_MAX_CONCURRENT,
+      MAX_SHADOW_MAX_CONCURRENT,
     ),
   }
 }
@@ -538,6 +588,49 @@ function parseBoolean(
   throw new Error(`Invalid ${name}: ${value} (expected 'true' or 'false')`)
 }
 
+function parseSampleRate(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_SHADOW_SAMPLE_RATE
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(
+      `Invalid FEEDGEN_SHADOW_SAMPLE_RATE: ${value} (expected a number from 0 to 1)`,
+    )
+  }
+  return parsed
+}
+
+/**
+ * The authenticated shadow reader is deliberately limited to a same-host
+ * sidecar. Forwarding user service-auth tokens to a network destination would
+ * create a new disclosure path, so a remote URL is a configuration error.
+ */
+function parseShadowReaderUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error('Invalid FEEDGEN_SHADOW_READER_URL: not a valid URL')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(
+      'Invalid FEEDGEN_SHADOW_READER_URL: expected an http:// or https:// URL',
+    )
+  }
+  if (
+    url.username !== '' ||
+    url.password !== '' ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    !isLiteralLoopbackHostname(url.hostname)
+  ) {
+    throw new Error(
+      'Invalid FEEDGEN_SHADOW_READER_URL: expected a literal loopback URL with no userinfo, query, or fragment',
+    )
+  }
+  return trimTrailingSlash(url.toString())
+}
+
 /**
  * Parses `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS` into the exact set of
  * literal loopback `http://` origins a member host is allowed to use.
@@ -584,9 +677,12 @@ function parseHttpOrigin(entry: string): string {
 }
 
 function isLoopbackHttpHostname(hostname: string): boolean {
+  return isLiteralLoopbackHostname(hostname) || hostname === 'localhost'
+}
+
+function isLiteralLoopbackHostname(hostname: string): boolean {
   const normalized = stripIpv6Brackets(hostname)
   return (
-    normalized === 'localhost' ||
     normalized === '::1' ||
     (isIP(normalized) === 4 && normalized.startsWith('127.'))
   )

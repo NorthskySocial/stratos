@@ -14,10 +14,9 @@ export type ShadowMismatchReason =
   | 'post-count'
   | 'post-order'
 
-export interface ShadowComparison {
-  matched: boolean
-  reason?: ShadowMismatchReason
-}
+export type ShadowComparison =
+  | { matched: true }
+  | { matched: false; reason: ShadowMismatchReason }
 
 /**
  * Compares two already-authorized feed decisions without returning any private
