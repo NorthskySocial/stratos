@@ -31,6 +31,7 @@ interface FeedLimitFixture {
     name: string
     limit: number | null
     expectedStatus: number
+    expectedError: string | null
     expectedAppliedLimit: number | null
   }>
 }
@@ -429,6 +430,9 @@ describe('zone.stratos.feedgen.getFeed', () => {
     )
 
     expect(res.status).toBe(fixture.expectedStatus)
+    if (fixture.expectedError !== null) {
+      expect(await res.json()).toMatchObject({ error: fixture.expectedError })
+    }
     if (fixture.expectedAppliedLimit === null) {
       expect(ctx.listPosts).not.toHaveBeenCalled()
       return

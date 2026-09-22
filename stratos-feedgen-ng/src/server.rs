@@ -747,6 +747,7 @@ mod tests {
         name: String,
         limit: Option<u16>,
         expected_status: u16,
+        expected_error: Option<String>,
         expected_applied_limit: Option<u16>,
     }
 
@@ -1310,19 +1311,19 @@ mod tests {
                 "{}",
                 case.name
             );
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            if let Some(expected_error) = case.expected_error {
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["error"], expected_error, "{}", case.name);
+            }
             if let Some(expected_limit) = case.expected_applied_limit {
-                let body: serde_json::Value = serde_json::from_slice(
-                    &response.into_body().collect().await.unwrap().to_bytes(),
-                )
-                .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
                 assert_eq!(
                     body["feed"].as_array().unwrap().len(),
                     expected_limit as usize,
                     "{}",
                     case.name
                 );
-            } else {
-                assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{}", case.name);
             }
         }
     }
