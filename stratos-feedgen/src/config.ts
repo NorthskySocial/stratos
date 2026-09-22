@@ -58,6 +58,8 @@ export interface FeedgenConfig {
   projectionMaxAgeMs?: number
   /** Maximum durable serving-projection bytes, required for encrypted-volume. */
   projectionMaxBytes?: number
+  /** Crash-sticky ownership fence for a durable projection writer. */
+  writerLockPath?: string
   /** Pino log level. */
   logLevel: string
   /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
@@ -138,6 +140,7 @@ type StorageConfig = Pick<
   | 'postgresSchema'
   | 'projectionMaxAgeMs'
   | 'projectionMaxBytes'
+  | 'writerLockPath'
 >
 
 type BlobCacheConfig = Pick<
@@ -268,6 +271,13 @@ function loadStorageConfig(env: FeedgenEnv): StorageConfig {
   const configuredMembershipPath = nonEmpty(
     env['FEEDGEN_MEMBERSHIP_SQLITE_PATH'],
   )
+  const configuredWriterLockPath =
+    storageProfile === 'encrypted-volume'
+      ? resolve(
+          nonEmpty(env['FEEDGEN_WRITER_LOCK_PATH']) ??
+            `${sqlitePath}.writer-lock`,
+        )
+      : undefined
   if (storageProfile === 'encrypted-volume' && !configuredMembershipPath) {
     throw new Error(
       'Missing required env var FEEDGEN_MEMBERSHIP_SQLITE_PATH for the encrypted-volume storage profile',
@@ -281,14 +291,26 @@ function loadStorageConfig(env: FeedgenEnv): StorageConfig {
       'FEEDGEN_BLOB_CACHE_DIRECTORY requires the encrypted-volume storage profile',
     )
   }
+  const membershipSqlitePath = resolveMembershipSqlitePath(
+    sqlitePath,
+    configuredMembershipPath,
+  )
+  const writerLockPath = configuredWriterLockPath
+  if (
+    writerLockPath &&
+    (canonicalSqlitePath(writerLockPath) === canonicalSqlitePath(sqlitePath) ||
+      canonicalSqlitePath(writerLockPath) ===
+        canonicalSqlitePath(membershipSqlitePath))
+  ) {
+    throw new Error(
+      'FEEDGEN_WRITER_LOCK_PATH must differ from Feedgen SQLite storage paths',
+    )
+  }
   return {
     storageBackend,
     storageProfile,
     sqlitePath,
-    membershipSqlitePath: resolveMembershipSqlitePath(
-      sqlitePath,
-      configuredMembershipPath,
-    ),
+    membershipSqlitePath,
     postgresUrl,
     postgresSchema: env['FEEDGEN_POSTGRES_SCHEMA'],
     projectionMaxAgeMs:
@@ -305,6 +327,7 @@ function loadStorageConfig(env: FeedgenEnv): StorageConfig {
             'FEEDGEN_PROJECTION_MAX_BYTES',
           )
         : undefined,
+    writerLockPath,
   }
 }
 

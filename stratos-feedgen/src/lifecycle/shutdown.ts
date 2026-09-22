@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'node:http'
 import type { Logger } from '@northskysocial/stratos-core'
+import type { WriterLock } from './writer-lock.js'
 import {
   captureUnexpectedError,
   shutdownTelemetry,
@@ -25,6 +26,7 @@ export interface ShutdownDeps {
   actorPool?: { stop: () => Promise<void> } | null
   projectionCompactor?: { stop: () => Promise<void> } | null
   store?: { close: () => Promise<void> } | null
+  writerLock?: WriterLock | null
   telemetry?: { shutdown: () => Promise<void> } | null
   logger: Logger
   /** In-flight HTTP drain deadline before open sockets are destroyed. */
@@ -85,6 +87,7 @@ export function createShutdownHandler(deps: ShutdownDeps): ShutdownHandler {
       await deps.projectionCompactor?.stop()
       await deps.telemetry?.shutdown()
       await deps.store?.close()
+      await deps.writerLock?.release()
       deps.logger.info({ signal }, 'shutdown complete')
       exit(0)
     } catch (err) {

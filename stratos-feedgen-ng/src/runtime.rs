@@ -37,6 +37,7 @@ pub fn open_projection_store(profile: &StorageProfile) -> Result<EncryptedStore,
         StorageProfile::EncryptedVolume {
             database_path,
             key_path,
+            ..
         } => open_encrypted_store(database_path, key_path),
     }
 }
@@ -79,6 +80,7 @@ mod tests {
         let profile = StorageProfile::EncryptedVolume {
             database_path: database_path.clone(),
             key_path: key_path.clone(),
+            writer_lock_path: directory.join("writer.lock"),
         };
 
         assert!(open_projection_store(&profile).is_ok());

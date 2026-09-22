@@ -68,6 +68,7 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       blobCacheDirectory: undefined,
       projectionMaxAgeMs: undefined,
       projectionMaxBytes: undefined,
+      writerLockPath: undefined,
     })
   })
 
@@ -122,6 +123,7 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       projectionMaxAgeMs: 3_600_000,
       projectionMaxBytes: 536_870_912,
       blobCacheDirectory: '/var/lib/feedgen/blobs',
+      writerLockPath: '/var/lib/feedgen/records.sqlite.writer-lock',
     })
   })
 
@@ -192,6 +194,24 @@ describe('loadFeedgenConfig SQLite storage split', () => {
         }),
       ),
     ).toThrow(/must differ/)
+  })
+
+  it('rejects a writer lock path that aliases a SQLite data path', () => {
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_WRITER_LOCK_PATH: '/var/lib/feedgen/records.sqlite',
+        }),
+      ),
+    ).toThrow(/FEEDGEN_WRITER_LOCK_PATH must differ/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/var/lib/feedgen/membership.sqlite',
+          FEEDGEN_WRITER_LOCK_PATH: '/var/lib/feedgen/membership.sqlite',
+        }),
+      ),
+    ).toThrow(/FEEDGEN_WRITER_LOCK_PATH must differ/)
   })
 
   it('rejects a membership database symlink', () => {

@@ -15,6 +15,7 @@ pub enum StorageProfile {
     EncryptedVolume {
         database_path: PathBuf,
         key_path: PathBuf,
+        writer_lock_path: PathBuf,
     },
 }
 
@@ -91,6 +92,7 @@ impl FeedgenConfig {
                 profile: env::var("FEEDGEN_STORAGE_PROFILE").ok(),
                 sqlite_path: env::var("FEEDGEN_SQLITE_PATH").ok(),
                 key_path: env::var("FEEDGEN_STORAGE_KEY_PATH").ok(),
+                writer_lock_path: env::var("FEEDGEN_WRITER_LOCK_PATH").ok(),
                 projection_max_age_ms: env::var("FEEDGEN_PROJECTION_MAX_AGE_MS").ok(),
                 projection_max_bytes: env::var("FEEDGEN_PROJECTION_MAX_BYTES").ok(),
             },
@@ -142,10 +144,11 @@ impl FeedgenConfig {
             profile,
             sqlite_path,
             key_path,
+            writer_lock_path,
             projection_max_age_ms,
             projection_max_bytes,
         } = storage;
-        let storage = parse_storage(backend, profile, sqlite_path, key_path)?;
+        let storage = parse_storage(backend, profile, sqlite_path, key_path, writer_lock_path)?;
         let retention = parse_retention(&storage, projection_max_age_ms, projection_max_bytes)?;
         let stratos_service_url =
             normalize_service_url(required_value(stratos_service_url, "STRATOS_SERVICE_URL")?)?;
@@ -191,6 +194,7 @@ struct StorageValues {
     profile: Option<String>,
     sqlite_path: Option<String>,
     key_path: Option<String>,
+    writer_lock_path: Option<String>,
     projection_max_age_ms: Option<String>,
     projection_max_bytes: Option<String>,
 }
@@ -242,6 +246,7 @@ fn parse_storage(
     profile: Option<String>,
     sqlite_path: Option<String>,
     key_path: Option<String>,
+    writer_lock_path: Option<String>,
 ) -> Result<StorageProfile, ConfigError> {
     if backend.as_deref().is_some_and(|value| value != "sqlite") {
         return Err(ConfigError::UnsupportedStorageBackend);
@@ -273,9 +278,22 @@ fn parse_storage(
             {
                 return Err(ConfigError::InvalidStorageProfile);
             }
+            let writer_lock_path = writer_lock_path
+                .filter(|value| !value.trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(format!("{}.writer-lock", database_path.display()))
+                });
+            if !writer_lock_path.is_absolute()
+                || writer_lock_path == database_path
+                || writer_lock_path == key_path
+            {
+                return Err(ConfigError::InvalidStorageProfile);
+            }
             Ok(StorageProfile::EncryptedVolume {
                 database_path,
                 key_path,
+                writer_lock_path,
             })
         }
         _ => Err(ConfigError::InvalidStorageProfile),
@@ -290,7 +308,9 @@ fn required_value(value: Option<String>, name: &'static str) -> Result<String, C
 
 #[cfg(test)]
 mod tests {
-    use super::{FeedgenConfig, StorageValues, load_feed_registry_from_values};
+    use std::path::Path;
+
+    use super::{FeedgenConfig, StorageProfile, StorageValues, load_feed_registry_from_values};
 
     fn storage(
         backend: Option<&str>,
@@ -303,6 +323,7 @@ mod tests {
             profile: profile.map(str::to_owned),
             sqlite_path: sqlite_path.map(str::to_owned),
             key_path: key_path.map(str::to_owned),
+            writer_lock_path: None,
             projection_max_age_ms: None,
             projection_max_bytes: None,
         }
@@ -457,6 +478,11 @@ mod tests {
         assert_eq!(config.retention.max_bytes, 1024);
         assert_eq!(config.actor_max_connections, 8);
         assert_eq!(config.stratos_public_url, "https://stratos.example.test");
+        assert!(matches!(
+            config.storage,
+            StorageProfile::EncryptedVolume { writer_lock_path, .. }
+            if writer_lock_path == Path::new("/var/lib/feedgen/projection.sqlite.writer-lock")
+        ));
     }
 
     #[test]

@@ -26,11 +26,26 @@ use stratos_feedgen_ng::{
     service_stream::{ServiceStream, ServiceStreamConfig},
     space_commit::SpaceCommitVerifier,
     space_membership::HttpSpaceMembershipClient,
+    writer_lock::WriterLock,
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = FeedgenConfig::from_env()?;
+    let writer_lock = match &config.storage {
+        stratos_feedgen_ng::config::StorageProfile::Memory => None,
+        stratos_feedgen_ng::config::StorageProfile::EncryptedVolume {
+            writer_lock_path, ..
+        } => Some(WriterLock::acquire(writer_lock_path)?),
+    };
+    let result = run(config).await;
+    if let Some(writer_lock) = writer_lock {
+        writer_lock.release()?;
+    }
+    result
+}
+
+async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
     let feeds = FeedgenConfig::load_feed_registry_from_env()?;
     let shutdown = shutdown_signal()?;
     let projection = ProjectionReader::new(open_projection_store(&config.storage)?);
@@ -48,7 +63,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&readiness),
         config.stratos_service_did.clone(),
     )?);
-    let compactor = RetentionCompactor::start(Arc::clone(&lifecycle), config.retention.clone())?;
     let resolver = Arc::new(HttpIdentityKeyResolver::new(Some(&config.plc_url))?);
     let credential_manager = Arc::new(SpaceCredentialManager::new(Arc::new(
         HttpSpaceCredentialIssuer::new(
@@ -71,13 +85,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         credential_manager,
         Arc::new(SpaceCommitVerifier::new(Box::new(Arc::clone(&resolver)))),
     ));
-    let pds_scheduler = PdsSpaceScheduler::start(
-        Arc::clone(&lifecycle),
-        membership,
-        synchronizer,
-        feeds.list().map(|feed| feed.boundary.clone()),
-        config.retention.clone(),
-    );
     let blob_cache = Arc::new(Mutex::new(BlobCache::new(
         MAX_CACHE_BYTES,
         std::time::Duration::from_secs(300),
@@ -92,7 +99,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?),
         2,
     )?);
-    let blob_sweeper = BlobCacheSweeper::start(blob_cache);
     let authority: Arc<dyn AuthorityClient> = Arc::new(HttpAuthorityClient::new(
         &config.stratos_service_url,
         config.stratos_service_did.clone(),
@@ -110,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Arc::clone(&lifecycle),
     )?;
-    let stream = ServiceStream::start(
+    let stream = match ServiceStream::start(
         ServiceStreamConfig {
             service_url: config.stratos_service_url.clone(),
             service_did: config.stratos_service_did.clone(),
@@ -120,8 +126,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Arc::clone(&lifecycle),
         authority,
-        actors,
-    )?;
+        Arc::clone(&actors),
+    ) {
+        Ok(stream) => stream,
+        Err(error) => {
+            actors.stop().await;
+            return Err(error.into());
+        }
+    };
     let verifier = FeedRequestVerifier::new(
         config.service_did.clone(),
         [
@@ -129,6 +141,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "zone.stratos.feedgen.getBlob".to_owned(),
         ],
         resolver as Arc<dyn stratos_feedgen_ng::auth::IdentityKeyResolver>,
+    );
+    let compactor =
+        match RetentionCompactor::start(Arc::clone(&lifecycle), config.retention.clone()) {
+            Ok(compactor) => compactor,
+            Err(error) => {
+                stream.stop().await;
+                return Err(error.into());
+            }
+        };
+    let blob_sweeper = BlobCacheSweeper::start(blob_cache);
+    let pds_scheduler = PdsSpaceScheduler::start(
+        Arc::clone(&lifecycle),
+        membership,
+        synchronizer,
+        feeds.list().map(|feed| feed.boundary.clone()),
+        config.retention.clone(),
     );
     let result = axum::serve(
         listener,

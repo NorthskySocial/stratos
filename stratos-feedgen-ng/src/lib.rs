@@ -40,3 +40,4 @@ pub mod space_host;
 pub mod space_membership;
 pub mod space_sync;
 pub mod store;
+pub mod writer_lock;
