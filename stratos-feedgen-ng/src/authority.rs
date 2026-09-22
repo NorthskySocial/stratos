@@ -171,9 +171,9 @@ impl AuthorityClient for HttpAuthorityClient {
 
 fn map_service_auth_error(error: ServiceAuthError) -> AuthorityError {
     match error {
-        ServiceAuthError::InvalidSigningKey | ServiceAuthError::Serialization => {
-            AuthorityError::InvalidConfiguration
-        }
+        ServiceAuthError::InvalidSigningKey
+        | ServiceAuthError::InvalidDelegationClaims
+        | ServiceAuthError::Serialization => AuthorityError::InvalidConfiguration,
     }
 }
 
