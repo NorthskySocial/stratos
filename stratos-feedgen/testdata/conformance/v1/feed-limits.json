@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "uses the default page size",
+      "limit": null,
+      "expectedStatus": 200,
+      "expectedAppliedLimit": 50
+    },
+    {
+      "name": "accepts the maximum page size",
+      "limit": 100,
+      "expectedStatus": 200,
+      "expectedAppliedLimit": 100
+    },
+    {
+      "name": "rejects a page size above the wire maximum",
+      "limit": 101,
+      "expectedStatus": 400,
+      "expectedAppliedLimit": null
+    }
+  ]
+}

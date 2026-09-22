@@ -714,6 +714,7 @@ mod tests {
     use cid::Cid;
     use http_body_util::BodyExt;
     use p256::ecdsa::{SigningKey, signature::Signer};
+    use serde::Deserialize;
     use sha2::{Digest, Sha256};
     use tower::ServiceExt;
 
@@ -732,6 +733,22 @@ mod tests {
     };
 
     use super::{ServerState, blob_mime, feed_error, router, router_with_feed_with_request_limit};
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FeedLimitFixture {
+        version: u8,
+        cases: Vec<FeedLimitCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FeedLimitCase {
+        name: String,
+        limit: Option<u16>,
+        expected_status: u16,
+        expected_applied_limit: Option<u16>,
+    }
 
     fn config() -> FeedgenConfig {
         FeedgenConfig {
@@ -913,6 +930,20 @@ mod tests {
                 { "cid": cid, "mimeType": "image/png" }
             ]))
             .unwrap(),
+            boundaries: vec!["bebop".to_owned()],
+        }
+    }
+
+    fn feed_post(index: usize) -> ProjectionPost {
+        ProjectionPost {
+            uri: format!("at://did:plc:spike/zone.stratos.feed.post/{index}"),
+            author_did: "did:plc:spike".to_owned(),
+            cid: format!("bafyrecord{index}"),
+            sort_at: format!("1998-04-03T00:00:{:02}.000Z", index % 60),
+            indexed_at: "1998-04-03T00:01:00.000Z".to_owned(),
+            retained_at: "2998-04-04T00:00:00.000Z".to_owned(),
+            record_json: b"{}".to_vec(),
+            blob_refs_json: b"[]".to_vec(),
             boundaries: vec!["bebop".to_owned()],
         }
     }
@@ -1228,6 +1259,72 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(response.headers()["cache-control"], "private, no-store");
+    }
+
+    #[tokio::test]
+    async fn follows_the_shared_feed_limit_fixture() {
+        let fixture: FeedLimitFixture = serde_json::from_str(include_str!(
+            "../../stratos-feedgen/testdata/conformance/v1/feed-limits.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.version, 1);
+        let key = SigningKey::from_bytes((&[7_u8; 32]).into()).unwrap();
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 60;
+
+        for case in fixture.cases {
+            let mut uri = "/xrpc/zone.stratos.feedgen.getFeed?feed=bebop".to_owned();
+            if let Some(limit) = case.limit {
+                uri.push_str(&format!("&limit={limit}"));
+            }
+            let posts = (1..=101).map(feed_post).collect();
+            let response = authenticated_router_with_request_limit(
+                &key,
+                super::MAX_CONCURRENT_FEED_REQUESTS,
+                None,
+                None,
+                posts,
+            )
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", format!("Bearer {}", jwt(&key, expires_at)))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                response.status().as_u16(),
+                case.expected_status,
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                response.headers()["cache-control"],
+                "private, no-store",
+                "{}",
+                case.name
+            );
+            if let Some(expected_limit) = case.expected_applied_limit {
+                let body: serde_json::Value = serde_json::from_slice(
+                    &response.into_body().collect().await.unwrap().to_bytes(),
+                )
+                .unwrap();
+                assert_eq!(
+                    body["feed"].as_array().unwrap().len(),
+                    expected_limit as usize,
+                    "{}",
+                    case.name
+                );
+            } else {
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{}", case.name);
+            }
+        }
     }
 
     #[tokio::test]

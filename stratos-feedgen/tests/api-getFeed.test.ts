@@ -1,5 +1,6 @@
 import type { AddressInfo } from 'node:net'
 import type { Server as HttpServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as Sentry from '@sentry/node'
 
@@ -23,6 +24,23 @@ beforeEach(() => vi.clearAllMocks())
 const FEEDGEN_DID = 'did:web:feedgen.spiegelcorp.test'
 const VIEWER_DID = 'did:plc:spikespiegel'
 const FAYE_DID = 'did:plc:fayevalentine'
+
+interface FeedLimitFixture {
+  version: number
+  cases: Array<{
+    name: string
+    limit: number | null
+    expectedStatus: number
+    expectedAppliedLimit: number | null
+  }>
+}
+
+const feedLimitFixture = JSON.parse(
+  readFileSync(
+    new URL('../testdata/conformance/v1/feed-limits.json', import.meta.url),
+    'utf8',
+  ),
+) as FeedLimitFixture
 
 interface TestServerCtx {
   httpServer: HttpServer
@@ -397,18 +415,29 @@ describe('zone.stratos.feedgen.getFeed', () => {
     })
   })
 
-  it('clamps limit above the lexicon max', async () => {
-    ctx = await startServer()
+  it('uses the expected shared limit fixture version', () => {
+    expect(feedLimitFixture.version).toBe(1)
+  })
 
+  it.each(feedLimitFixture.cases)('$name', async (fixture) => {
+    ctx = await startServer()
+    const params = new URLSearchParams({ feed: 'eng-feed' })
+    if (fixture.limit !== null) params.set('limit', String(fixture.limit))
     const res = await fetch(
-      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?feed=eng-feed&limit=500`,
+      `${ctx.baseUrl}/xrpc/zone.stratos.feedgen.getFeed?${params}`,
       { headers: { authorization: 'Bearer test-token' } },
     )
 
-    // The lexicon enforces max=100 at the parameter layer, so an out-of-range
-    // value yields an InvalidRequest before our handler runs.
-    expect(res.status).toBe(400)
-    expect(ctx.listPosts).not.toHaveBeenCalled()
+    expect(res.status).toBe(fixture.expectedStatus)
+    if (fixture.expectedAppliedLimit === null) {
+      expect(ctx.listPosts).not.toHaveBeenCalled()
+      return
+    }
+    expect(ctx.listPosts).toHaveBeenCalledWith({
+      boundary: 'engineering',
+      limit: fixture.expectedAppliedLimit,
+      cursor: undefined,
+    })
   })
 })
 
