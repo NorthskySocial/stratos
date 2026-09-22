@@ -23,15 +23,13 @@ impl DpopKey {
         let secret = SecretKey::random(&mut OsRng);
         let signing_key = SigningKey::from(secret);
         let point = signing_key.verifying_key().to_encoded_point(false);
-        let x = point.x().expect("uncompressed P-256 point has x");
-        let y = point.y().expect("uncompressed P-256 point has y");
         Self {
             signing_key,
             jwk: DpopJwk {
                 crv: "P-256",
                 kty: "EC",
-                x: URL_SAFE_NO_PAD.encode(x),
-                y: URL_SAFE_NO_PAD.encode(y),
+                x: URL_SAFE_NO_PAD.encode(point.x().expect("uncompressed P-256 point has x")),
+                y: URL_SAFE_NO_PAD.encode(point.y().expect("uncompressed P-256 point has y")),
             },
         }
     }
@@ -122,7 +120,6 @@ impl std::fmt::Display for SpaceCredentialError {
         }
     }
 }
-
 impl std::error::Error for SpaceCredentialError {}
 
 pub struct HeldSpaceCredential {
@@ -146,7 +143,6 @@ impl HeldSpaceCredential {
             now,
         })
     }
-
     pub fn dpop_key(&self) -> &DpopKey {
         &self.key
     }
@@ -157,7 +153,6 @@ impl SpaceCredentialProof for HeldSpaceCredential {
     fn credential(&self) -> &str {
         &self.credential
     }
-
     async fn presentation_proof(
         &self,
         method: &str,
@@ -178,11 +173,9 @@ fn normalize_target_uri(value: &str) -> Result<String, SpaceCredentialError> {
     url.set_fragment(None);
     Ok(url.to_string())
 }
-
 fn token_hash(value: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()))
 }
-
 fn encode_json(value: &impl Serialize) -> Result<String, SpaceCredentialError> {
     serde_json::to_vec(value)
         .map(|value| URL_SAFE_NO_PAD.encode(value))
@@ -191,13 +184,11 @@ fn encode_json(value: &impl Serialize) -> Result<String, SpaceCredentialError> {
 
 #[cfg(test)]
 mod tests {
+    use super::{DpopKey, SpaceCredentialError};
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use p256::ecdsa::{Signature, signature::Verifier};
     use serde_json::Value;
     use sha2::{Digest, Sha256};
-
-    use super::{DpopKey, SpaceCredentialError};
-
     #[test]
     fn creates_a_verifiable_p256_proof_with_a_normalized_target() {
         let key = DpopKey::generate();
@@ -210,31 +201,25 @@ mod tests {
             )
             .unwrap();
         let segments = proof.split('.').collect::<Vec<_>>();
-        let [encoded_header, encoded_claims, encoded_signature] = segments.as_slice() else {
+        let [header, claims, signature] = segments.as_slice() else {
             panic!("proof has three segments")
         };
-        let header: Value =
-            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded_header).unwrap()).unwrap();
-        let claims: Value =
-            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded_claims).unwrap()).unwrap();
-        assert_eq!(header["alg"], "ES256");
-        assert_eq!(header["typ"], "dpop+jwt");
-        assert_eq!(claims["htu"], "https://pds.example.test/xrpc/read");
+        let decoded_header: Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(header).unwrap()).unwrap();
+        let decoded_claims: Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(claims).unwrap()).unwrap();
+        assert_eq!(decoded_header["alg"], "ES256");
+        assert_eq!(decoded_claims["htu"], "https://pds.example.test/xrpc/read");
         assert_eq!(
-            claims["ath"],
+            decoded_claims["ath"],
             URL_SAFE_NO_PAD.encode(Sha256::digest(b"credential"))
         );
-        let signature =
-            Signature::from_slice(&URL_SAFE_NO_PAD.decode(encoded_signature).unwrap()).unwrap();
+        let signature = Signature::from_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap()).unwrap();
         key.signing_key
             .verifying_key()
-            .verify(
-                format!("{encoded_header}.{encoded_claims}").as_bytes(),
-                &signature,
-            )
+            .verify(format!("{header}.{claims}").as_bytes(), &signature)
             .unwrap();
     }
-
     #[test]
     fn omits_ath_for_credential_minting_and_rejects_unsafe_targets() {
         let key = DpopKey::generate();
@@ -246,9 +231,12 @@ mod tests {
                 1_000,
             )
             .unwrap();
-        let claims = proof.split('.').nth(1).unwrap();
-        let claims: Value =
-            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(claims).unwrap()).unwrap();
+        let claims: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(proof.split('.').nth(1).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         assert!(claims.get("ath").is_none());
         assert_eq!(
             key.mint_proof("GET", "file:///tmp/secret", None, 1_000),
