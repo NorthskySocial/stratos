@@ -200,7 +200,7 @@ stratos-service/src/features/{feature}/
 | `pds/pds-firehose.ts`       | Connects to the PDS firehose and discovers enrollment records                                                                                                                      |
 | `pds/pds-subscriber.ts`     | Wires PDS firehose work into the indexing service, handle dedup, and the worker pool                                                                                               |
 | `storage/cursor-manager.ts` | Manages PDS and Stratos sync cursors with periodic flush                                                                                                                           |
-| `storage/db.ts`             | Kysely Postgres connection setup, DID-resolver cache, legacy lowercase-column migration                                                                                            |
+| `storage/db.ts`             | Kysely Postgres connection setup, DID-resolver cache, startup repair of legacy column layouts (renames + `boundaries` add)                                                         |
 | `storage/schema.ts`         | Kysely table types for sync cursors, enrollments, indexed records, record boundaries, and posts                                                                                    |
 | `sync/stratos-sync.ts`      | Service and actor-level WebSocket subscription handlers                                                                                                                            |
 | `sync/actor-syncer.ts`      | Decodes per-actor sync frames; upserts every record into the AppView database (`stratos_record` + `stratos_record_boundary`, plus a `post` row for feed posts) and applies deletes |
