@@ -22,6 +22,7 @@ use crate::{
     lifecycle::{ActorFrameResult, ControlLifecycle},
     service_auth::{ServiceSigningKey, mint_service_jwt},
     store::StoreError,
+    websocket_client::authenticated_client_request,
 };
 
 const SUBSCRIBE_RECORDS_LXM: &str = "zone.stratos.sync.subscribeRecords";
@@ -409,10 +410,7 @@ async fn run_actor_connection(
         now.unix_timestamp().max(0) as u64,
     )
     .map_err(|_| ActorPoolError::InvalidConfiguration)?;
-    let request = tokio_tungstenite::tungstenite::http::Request::builder()
-        .uri(url.as_str())
-        .header("authorization", format!("Bearer {token}"))
-        .body(())
+    let request = authenticated_client_request(&url, &token)
         .map_err(|_| ActorPoolError::InvalidConfiguration)?;
     let websocket_config = WebSocketConfig::default()
         .read_buffer_size(4 * 1024)

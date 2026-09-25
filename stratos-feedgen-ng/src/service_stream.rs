@@ -20,6 +20,7 @@ use crate::{
     reconciliation::{ReconciliationOptions, ReconciliationSummary, reconcile_current_session},
     service_auth::{ServiceSigningKey, mint_service_jwt},
     service_event::parse_enrollment_event,
+    websocket_client::authenticated_client_request,
 };
 
 const SUBSCRIBE_RECORDS_LXM: &str = "zone.stratos.sync.subscribeRecords";
@@ -161,10 +162,7 @@ async fn run_connection(
         now.unix_timestamp().max(0) as u64,
     )
     .map_err(|_| ServiceStreamError::Authentication)?;
-    let request = tokio_tungstenite::tungstenite::http::Request::builder()
-        .uri(subscription_url.as_str())
-        .header("authorization", format!("Bearer {token}"))
-        .body(())
+    let request = authenticated_client_request(subscription_url, &token)
         .map_err(|_| ServiceStreamError::InvalidConfiguration)?;
     let websocket_config = WebSocketConfig::default()
         .read_buffer_size(4 * 1024)
@@ -177,8 +175,14 @@ async fn run_connection(
         connect_async_with_config(request, Some(websocket_config), true),
     )
     .await
-    .map_err(|_| ServiceStreamError::Connection)?
-    .map_err(|_| ServiceStreamError::Connection)?;
+    .map_err(|_| {
+        eprintln!("event=service_stream_connect_failed kind=timeout");
+        ServiceStreamError::Connection
+    })?
+    .map_err(|error| {
+        eprintln!("event=service_stream_connect_failed kind=websocket error={error}");
+        ServiceStreamError::Connection
+    })?;
 
     lifecycle.session_established();
     let summary = reconcile_with_shutdown(
