@@ -4,14 +4,24 @@ use tokio_tungstenite::tungstenite::{
 };
 use url::Url;
 
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum WebSocketRequestError {
+    InvalidUrl,
+    InvalidAuthorization,
+}
+
 pub(crate) fn authenticated_client_request(
     url: &Url,
     token: &str,
-) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, ()> {
-    let mut request = url.as_str().into_client_request().map_err(|_| ())?;
+) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, WebSocketRequestError> {
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|_| WebSocketRequestError::InvalidUrl)?;
     request.headers_mut().insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| ())?,
+        HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|_| WebSocketRequestError::InvalidAuthorization)?,
     );
     Ok(request)
 }
