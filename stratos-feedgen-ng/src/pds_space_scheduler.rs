@@ -221,7 +221,7 @@ async fn run_pass(
                 pass.membership_failures += 1;
                 eprintln!(
                     "event=pds_space_membership_failed kind={}",
-                    membership_failure_kind(&error)
+                    membership_failure_kind(&error),
                 );
                 continue;
             }
