@@ -77,13 +77,13 @@ request. No public `/metrics` endpoint is served.
 
 The resource `service.name` is fixed to `stratos-feedgen-ng`, and the scope is
 `stratos.feedgen.ng`; the metric namespace is
-`stratos.feedgen.*` for comparison with the existing Feedgen runtime. The
+`stratos.feedgen.*` for comparison with the previous TypeScript Feed Generator. The
 Collector adds `otel_scope_name=stratos.feedgen.ng`, allowing Rust and
 TypeScript series to be selected separately without changing metric names.
 The exporter has no listener of its own: route the private Collector to its
 existing private Prometheus exporter/scrape path, never through this service.
 
-| Metric                                                                                                                  | Rust Feedgen NG behavior                                                                                     | TypeScript comparison                                                                                          |
+| Metric                                                                                                                  | Rust Feed Generator behavior                                                                                 | TypeScript comparison                                                                                          |
 | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `stratos.telemetry.heartbeat`, `stratos.feedgen.ready`                                                                  | 60-second callback gauges, including idle processes                                                          | Same name and intent                                                                                           |
 | `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects`                                     | Service-stream WebSocket state plus service and failed actor-worker reconnects                               | Same name; intentional actor idle/lease rotation is not counted                                                |
