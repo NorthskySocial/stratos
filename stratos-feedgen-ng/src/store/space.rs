@@ -1,5 +1,69 @@
 use super::*;
 
+fn purge_departed_pds_member(
+    transaction: &rusqlite::Transaction<'_>,
+    boundary: &str,
+    did: &str,
+) -> Result<(), StoreError> {
+    let (authority, _) = boundary
+        .split_once('/')
+        .ok_or(StoreError::InvalidProjectionMutation)?;
+    let space_prefix = format!("at://{authority}/space/");
+    transaction
+        .execute(
+            "DELETE FROM post_boundary WHERE boundary = ?1 AND uri IN (
+               SELECT uri FROM post WHERE author_did = ?2 AND substr(uri, 1, length(?3)) = ?3
+             )",
+            params![boundary, did, space_prefix],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM post WHERE NOT EXISTS (SELECT 1 FROM post_boundary WHERE post_boundary.uri = post.uri)",
+            [],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_cursor WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_stage_cursor WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_pending_verification WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    transaction
+        .execute(
+            "DELETE FROM space_sync_stage WHERE did = ?1 AND boundary = ?2",
+            params![did, boundary],
+        )
+        .map_err(StoreError::Open)?;
+    Ok(())
+}
+
+fn has_current_pds_space_member(
+    transaction: &rusqlite::Transaction<'_>,
+    boundary: &str,
+    did: &str,
+) -> Result<bool, StoreError> {
+    transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM membership_baseline WHERE boundary = ?1 AND did = ?2 AND custody = 'pds')",
+            params![boundary, did],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::Open)
+}
+
 impl EncryptedStore {
     pub fn replace_pds_space_members(
         &mut self,
