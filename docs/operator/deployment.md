@@ -129,3 +129,24 @@ curl https://stratos.example.com/.well-known/did.json
 # Check enrollment status
 curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=did:plc:abc123"
 ```
+
+## Add the Feed Generator
+
+To serve private feeds, deploy the Rust `stratos-feedgen-ng` service with its
+own DID, signing key, feed list, and encrypted data volume. Do not reuse the
+older TypeScript feed generator's database. See [Feed Generator](/operator/feedgen-ng)
+for how it collects posts, checks membership, and protects local data.
+
+> Before startup, the feed generator's `did:web` **must be under the
+> Stratos-controlled space domain**. For example, if Stratos uses
+> `did:web:stratos.example.com`, set
+> `FEEDGEN_SERVICE_DID=did:web:feeds.stratos.example.com` and
+> `FEEDGEN_PUBLIC_URL=https://feeds.stratos.example.com`. Configure DNS,
+> HTTPS, and routing for that host. Grant the same DID service membership in
+> each feed boundary through Stratos Enrollments; a feed registry entry alone
+> grants no access. After startup, check the feed host's
+> `/.well-known/did.json` and make an authenticated feed request.
+
+Start it with a separate, empty database and test an authenticated feed request
+before changing traffic routing. Follow `stratos-feedgen-ng/CUTOVER.md` for
+comparison and rollback.

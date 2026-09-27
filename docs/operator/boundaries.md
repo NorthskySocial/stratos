@@ -8,25 +8,44 @@ Use the member link to open the existing Enrollments view for that boundary. The
 
 ## Move from file configuration
 
-On the first startup with this feature, Stratos imports the configured allowed boundaries into its SQLite or PostgreSQL service database. It also imports room IDs and metadata from the room catalog, automatic enrollment settings, and per-space application access policies. The import and its completion marker are one transaction; a failed import is retried without a partial catalog.
+On the first startup with database-backed boundaries, Stratos copies the
+configured boundaries, room details, automatic enrollment settings, and
+per-space application rules into its database. The copy is all-or-nothing: if
+it fails, Stratos retries without leaving half the settings imported.
 
-The relevant legacy settings are `STRATOS_ALLOWED_DOMAINS`, `STRATOS_AUTO_ENROLL_DOMAINS`, `STRATOS_ROOM_CATALOG_FILE`, and `STRATOS_SPACE_APP_ACCESS_FILE` / `STRATOS_SPACE_APP_ACCESS`. They seed the catalog once. Subsequent restarts preserve database edits and inactive boundaries instead of restoring those file values.
+The older `STRATOS_ALLOWED_DOMAINS`, `STRATOS_AUTO_ENROLL_DOMAINS`,
+`STRATOS_ROOM_CATALOG_FILE`, and `STRATOS_SPACE_APP_ACCESS_FILE` /
+`STRATOS_SPACE_APP_ACCESS` settings are used only for that first copy. Later
+restarts keep changes made in the database, including inactive boundaries.
 
 After checking the imported definitions in the admin tab, remove these legacy boundary configuration entries, including environment references to retired files. Keep the service DID and reserved all-members boundary name stable. The reserved boundary must remain present and active; changing it to an unknown or inactive definition prevents startup.
 
 When automatic enrollment was previously unspecified or empty, the import preserves the old default of automatically enrolling members in the configured allowed boundaries. Newly created boundaries default to no automatic enrollment. Review this setting explicitly when creating a boundary.
 
-Existing bare membership names are normalized to the authority-qualified name through the signed membership transaction layer before startup completes. The conversion preserves unrelated membership rows and queues enrollment-record synchronization.
+Before startup completes, Stratos converts existing short boundary names to
+full identifiers. It keeps other memberships and queues updates to users'
+enrollment records.
 
-Service-account configuration still declares service identities and keys. For a new service account, its initial boundary references must exist in the persistent catalog and only active boundaries are granted. After that first grant, the database owns its memberships; restarting does not overwrite admin changes with the old boundary list. Removing a service identity from its configuration retains the existing service-reconciliation behavior of pruning that account.
+Service-account configuration still defines service identities and keys. A
+new account can initially receive only active boundaries that already exist.
+After that, admins manage its membership in the database; restarting does not
+restore the original boundary list. Removing the identity from configuration
+removes its service account when that configuration is applied.
 
-Back up the service database along with the service identity and actor data. It now contains the authoritative boundary catalog, membership audit, and unfinished deactivation work.
+Back up the service database along with the service identity and user data.
+It holds the current boundary list, membership history, and any unfinished
+boundary deactivations.
 
 ## Deactivate and reactivate
 
 The web interface cannot delete a boundary. **Deactivate** first prevents new grants, then removes every membership, and finally marks the boundary inactive. This includes inactive users and service accounts. The boundary name, room ID, records, and signed history remain stored.
 
-The UI shows **Deactivating** while removals are in progress. Each pass handles at most 100 members per boundary. A durable per-member work queue lets the service resume after a crash, including a crash between removing a membership and delivering its PDS/sync invalidation. A failed delivery remains pending and retries; one failing boundary does not stop other boundaries progressing. The service marks the boundary inactive only after both its memberships and pending work are empty.
+The UI shows **Deactivating** while removals are in progress. Stratos handles
+at most 100 members per pass and saves the remaining work so it can resume
+after a crash. This includes notifying users' PDSs and active sync clients
+that access changed. Failed notifications are retried and do not stop other
+boundaries. The boundary becomes inactive only when all members have been
+removed and all notifications have finished.
 
 The database rejects membership inserts or changes into deactivating and inactive boundaries. This includes grants racing a deactivation on another service process. Membership replacement and signed audit persistence share a transaction, so a rejected grant cannot partially erase the member's other boundaries.
 
@@ -34,7 +53,10 @@ The database rejects membership inserts or changes into deactivating and inactiv
 
 Boundary changes use a revision check. When another admin has changed a definition, reload its current state before retrying your edit.
 
-Established sync streams check current enrollment, memberships, and held boundary revisions before each emitted frame. Removing a grant or editing a held boundary closes the stream; consumers reconnect and authorize their new scope. A later grant never widens an already-open stream.
+Active sync connections check enrollment and membership before each update.
+Removing access or changing a boundary closes the connection; the client must
+reconnect with its current permissions. Newly granted access also requires a
+new connection.
 
 ## Application access and credentials
 
@@ -60,7 +82,13 @@ All new admin requests use the existing HttpOnly admin session and CSRF checks. 
 
 Mutation responses return the current `boundary`; listing returns `boundaries`. The service catalog includes room metadata, listing/joinability flags, and revision, but excludes administrative member counts and application allow-lists. An inactive or ordinary user enrollment cannot use the service catalog.
 
-A feed generator consuming the service catalog can follow admin changes without a separate feed-definition file. Grant it membership explicitly through Enrollments. Catalog discovery never grants the consumer additional access; room joinability is distinct from permission to read existing content.
+The feed generator uses an explicit feed registry rather than the service catalogue to
+map feed IDs to boundaries. Update that registry when adding or removing a
+feed, then restart the feed generator and verify readiness. Grant its service identity
+membership through Enrollments; a feed definition alone grants no access.
+Room joinability is distinct from permission to read existing content. The
+`zone.stratos.sync.listBoundaries` endpoint remains available to other service
+consumers but is not the feed generator's feed-registry source.
 
 ## Removing a member versus suspending one
 

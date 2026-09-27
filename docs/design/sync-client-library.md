@@ -1,17 +1,8 @@
 # Design Document: Shared Stratos Sync-Client Library
 
-**Audited at commit `52da35b`** (branch `advisor/015-sync-library-design`),
-2026-08-08; corrected 2026-08-21. Every claim about current behaviour below
-carries a `file:line` reference at that commit. Paths are relative to the
-`stratos/` repository root unless prefixed with `atproto-stratos/`, whose
-references are at that repository's `99471e537`.
-
-> **Re-stamp before executing.** The sync code is under active repair (plans 008,
-> 011, 016 all landed in the days before this audit). `6aefc4d` (cool-down
-> eviction fence) has already landed **above** the audited commit and shifts line
-> references into the indexer's `actor-syncer.ts`, `stratos-sync.ts`,
-> `config.ts`, and `sync-manager.ts`. If execution starts more than a few weeks
-> out, re-verify section 2 against the tree.
+> Historical design note for the older TypeScript feed generator and indexer.
+> The current [Feed Generator](/operator/feedgen-ng) uses Rust sync code and
+> does not use the library proposed here.
 
 ---
 

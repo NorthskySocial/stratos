@@ -2,40 +2,39 @@
 
 ## Boundary
 
-A **boundary** is an access-control scope. Records carry one or more boundary values; a viewer must
-share at least one boundary with a record to access it.
+A **boundary** is a named access group. A viewer must belong to at least one
+group named on a post to read it.
 
-Boundary values are addressable in `{serviceDid}/{name}` format:
+Each boundary has a full identifier made from the Stratos service DID and a
+short name (`{serviceDid}/{name}`):
 
 ```text
 did:web:stratos.example.com/general
 did:web:stratos.example.com/writers
 ```
 
-The bare name (e.g. `general`) is what operators configure in `STRATOS_ALLOWED_DOMAINS`. At startup
-the service qualifies each name with its own DID. Clients must send the fully-qualified form when
-creating records.
+Operators configure short names such as `general` in
+`STRATOS_ALLOWED_DOMAINS`. Stratos adds its DID. Apps must use the full
+identifier when creating records.
 
 ## Enrollment
 
-Enrollment is the process of a user registering with a Stratos service. It happens via ATprotocol
-OAuth. On successful enrollment the service:
-
-1. Initialises a per-user repo (empty signed commit + MST).
-2. Generates a P-256 signing keypair for the user.
-3. Creates a service attestation (DAG-CBOR payload signed by the service secp256k1 key).
-4. Writes a `zone.stratos.actor.enrollment` record to the user's PDS.
-
-The enrollment record on the PDS is the public anchor for discovery: any AppView or client can read
-it to find the Stratos endpoint and verify the user's boundaries.
+Enrollment is how a user joins a Stratos service with their AT Protocol account
+through OAuth. Stratos records the user's boundaries and publishes a
+`zone.stratos.actor.enrollment` record to their PDS. Apps can read that record
+to find the Stratos service and verify the enrollment. Depending on whether
+the PDS supports protected spaces, private posts are stored by Stratos or in
+a protected space on the user's PDS.
 
 ## Source Field
 
-Stratos does **not** write per-record stub records to the user's PDS. The only artifact Stratos
-writes to a user's mainstream PDS is the `zone.stratos.actor.enrollment` record (see above).
+For Stratos-hosted posts, Stratos does **not** write a separate public record
+for each private post to the user's PDS. The public enrollment record lets
+apps find the service.
 
-When a client or AppView hydrates a Stratos record (via `zone.stratos.repo.hydrateRecords`), the
-returned record carries a `source` field pointing back to Stratos:
+When a client fetches the full content of a Stratos-hosted record through
+`zone.stratos.repo.hydrateRecords`, the returned record carries a `source`
+field identifying where it came from:
 
 ```json
 {
@@ -52,17 +51,16 @@ returned record carries a `source` field pointing back to Stratos:
 }
 ```
 
-The `source` field lets a consumer verify which service backs the record and re-fetch the full
-content subject to boundary checks. Discovery of a user's Stratos endpoint flows through the
-enrollment record; per-actor record writes are announced over the sync stream (below).
+The `source` field lets an app check which service supplied the record and
+fetch it again, subject to access checks. The app finds that service through
+the user's enrollment record.
 
 ## Sync Stream
 
-The `zone.stratos.sync.subscribeRecords` WebSocket endpoint emits a commit event for every record
-write in a user's repo. This is the same pattern as the ATProto PDS firehose, but scoped per-actor
-and protected by service auth.
-
-AppViews subscribe once per enrolled user and maintain a cursor to resume after disconnects.
+The `zone.stratos.sync.subscribeRecords` WebSocket endpoint sends updates for
+Stratos-hosted records. The feed generator uses it to stay current and saves
+its place so it can resume after a disconnect. For posts hosted in protected
+PDS spaces, it checks Stratos membership before reading from the member's PDS.
 
 ## Profile Record
 
@@ -78,8 +76,9 @@ The `zone.stratos.actor.enrollment` record on the user's PDS is the **profile re
 
 ## MST Repo
 
-Every enrolled user gets a per-user MST repository compatible with the ATProto PDS repo format.
-Every record write produces a new signed commit, enabling:
+Private records use an AT Protocol-compatible repository hosted by Stratos or,
+for users with spaces support, by their PDS. For Stratos-hosted repositories,
+these endpoints allow:
 
 - Inclusion proofs: `com.atproto.sync.getRecord` returns a CAR with the signed commit, MST path, and
   record block.
@@ -88,9 +87,9 @@ Every record write produces a new signed commit, enabling:
 
 ## Trust Model
 
-Boundary access is enforced internally — when a request arrives, Stratos validates the caller's
-actual current membership before returning any content. No enforcement is delegated to a client or
-AppView (though it is encouraged).
+Before returning private content, Stratos checks the caller's current
+membership. The feed generator also checks membership before serving a feed.
+Apps must not treat a boundary written inside a PDS-hosted post as permission.
 
 The attestation serves a separate, complementary purpose: it is a public declaration written to the
 user's PDS repo that lets any app verify independently that the user is enrolled with a specific
@@ -102,6 +101,5 @@ the service's secp256k1 key.
 
 <TrustChainAnimation />
 
-The attestation proves service endorsement of the enrollment and enables user authorship
-verification on individual records. Actual access to create/access content is always gated by
-Stratos's live boundary check.
+The attestation shows that Stratos approved the enrollment; it is not a grant
+to read posts. Access to feeds and records depends on current membership.

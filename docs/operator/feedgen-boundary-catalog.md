@@ -1,5 +1,9 @@
 # Feed generator boundary catalogue
 
+> Historical TypeScript feedgen behavior. The upstream boundary-catalog refresh
+> settings below are not implemented by the current feed generator. For its
+> design, use [Feed Generator](/operator/feedgen-ng) and its explicit feed registry.
+
 The feed generator reads its boundary catalogue from Stratos by default.
 Administrators manage boundary definitions in Stratos and separately grant the feed generator membership through Enrollments.
 Changing a boundary's metadata, membership, or lifecycle no longer requires editing feed configuration files or restarting the feed generator.

@@ -1,9 +1,9 @@
 # Private feed attachments
 
-The feed generator reads Stratos-hosted attachments on demand and caches verified bytes on its local disk.
-Repeated reads avoid another upstream download. A CDN is not required for this benefit.
-An S3 cache is not required: the local cache has explicit byte and retention limits and can be discarded.
-The `BlobCache` interface separates storage from authorization and download integrity checks.
+The feed generator downloads attachments from Stratos when needed. It checks
+each file against its content ID (CID) and keeps a temporary copy in memory,
+not on disk. Repeated requests can use that copy instead of downloading the
+file again.
 
 ## Feed response
 
@@ -21,18 +21,18 @@ It adds a `post.blobs` view for attachments the feed generator can serve:
 Match a view to the record attachment by CID. Do not replace the record's CID with a URL.
 Use `post.author.did` for attribution. Space record URIs start with the space authority, not the author.
 
-The cache transport currently supports **Stratos custody**. It does not discover or download blobs from arbitrary PDS hosts.
-PDS-custody posts, and space posts without a current custody snapshot, have no feedgen blob view.
-Clients retain their existing host read path for those records. The example webapp retains its authenticated Stratos-agent path.
-Availability on that path still depends on the host's blob support; a feedgen view does not claim to add PDS blob support.
-Clubhouse currently renders post text only and does not render attachments.
+This attachment path works only for files hosted by Stratos. The feed
+generator does not download files from arbitrary PDSs. For posts hosted on a
+PDS, clients must use that host's existing authenticated file-read path, if
+the host supports it.
 
 ## Authenticated downloads
 
-The new Lexicon XRPC query is `zone.stratos.feedgen.getBlob` with required `uri` and `cid` parameters.
-`uri` identifies the exact indexed post that references the blob, including seven-segment space record URIs.
-The request requires a viewer service-auth JWT with the feedgen audience and `lxm=zone.stratos.feedgen.getBlob`.
-A token issued for `getFeed` cannot call `getBlob`, and vice versa.
+Call `zone.stratos.feedgen.getBlob` with the post's `uri` and the attachment's
+`cid`. Use the full post URI, including all seven segments for a space post.
+The request needs a signed service token for the feed generator with
+`lxm=zone.stratos.feedgen.getBlob`. A token for `getFeed` cannot download an
+attachment.
 
 Add `rpc:zone.stratos.feedgen.getBlob?aud=*` to OAuth client metadata and the requested scopes.
 `buildStratosScopes()` includes this scope. Existing sessions need to authorize the new scope.
@@ -61,33 +61,29 @@ Never place an access token in a URL. A denied feedgen request must not trigger 
 
 ## Authorization and retention
 
-Every request, including a cache hit, checks the current viewer boundaries against the indexed post boundaries.
-The blob CID must still be attached to that post. Record-supplied boundary claims do not grant access.
-The handler checks again after the download. A purge, custody change, or reconciliation transition prevents the bytes from being returned.
-Cached content is keyed by indexed author DID and CID. Raw SHA-256 CIDs are verified before caching and on cache hits.
-The upstream request has a timeout. Declared content length and the bytes actually received are bounded.
+Every request checks the viewer's current membership and confirms that the
+post still includes the attachment's CID, even when the file is in memory.
+A boundary claimed inside the post does not grant access. The service checks
+again after downloading, so a deletion, hosting change, or membership change
+can stop the file from being returned. It verifies SHA-256 CIDs before storing
+or reusing a file, and limits download time and file size.
 
 Responses use `Cache-Control: private, no-store`, `Vary: Authorization`, `nosniff`, a sandbox CSP, and attachment disposition.
 Known passive image, video, and audio types keep their MIME type; other content is `application/octet-stream`.
 There is no public cache URL, range response, redirect, or CDN authorization bypass.
 
-Purging a post removes its blob authorization immediately; a retained cache file does not grant access.
-Cached bytes can remain on disk until eviction, expiry on access, or the next startup scan.
-The TTL is not a scheduled secure-erasure guarantee. Existing local object URLs also require client cleanup after sign-out or removal.
-Use a dedicated cache directory per feedgen process. Protect its volume as private data.
-The container image uses `/app/cache/blobs`, outside the durable control volume.
-That cache is ephemeral unless an operator mounts a separate private cache volume.
-Deleting the cache directory while the service is stopped is safe; subsequent requests refill it.
+Once the feed generator processes a post deletion, it removes permission to
+download its attachments.
+The memory cache can hold up to 16 MiB across 128 files, for at most five
+minutes, with a 4 MiB limit per file. At most two downloads run at once.
+Expired files are removed and the cache disappears when the process stops;
+this does not guarantee secure erasure from memory. Browsers must still
+revoke local object URLs after sign-out or removal. The older TypeScript
+`FEEDGEN_BLOB_CACHE_*` settings do not apply to the current feed generator.
 
-| Environment variable                    | Default                | Purpose                                                             |
-| --------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
-| `FEEDGEN_BLOB_CACHE_DIRECTORY`          | `./data/feedgen-blobs` | Dedicated private disk cache                                        |
-| `FEEDGEN_BLOB_CACHE_MAX_BYTES`          | `536870912` (512 MiB)  | Total retained cache bytes; least recently read entries are evicted |
-| `FEEDGEN_BLOB_CACHE_TTL_MS`             | `3600000` (one hour)   | Maximum entry age before reuse; reads do not extend it              |
-| `FEEDGEN_BLOB_MAX_BYTES`                | `26214400` (25 MiB)    | Maximum accepted attachment size                                    |
-| `FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS` | `4`                    | Maximum simultaneous upstream downloads                             |
-
-A blob exceeding the object limit returns `BlobTooLarge`. Saturated download capacity returns `BlobBusy` (503).
-An inaccessible, unattached, missing, or unsupported-custody blob returns `BlobNotFound`.
-While authorization is reconciling, requests return `FeedNotReady` (503).
-Download failures and CID mismatches are not cached. Clients can retry after readiness or upstream service recovers.
+A file over 4 MiB returns `BlobTooLarge`. If two downloads are already running,
+the service returns `BlobBusy` (503). A missing file, one not attached to the
+post, or one hosted on an unsupported PDS returns `BlobNotFound`. While the
+service checks membership after startup or a disconnect, it returns
+`FeedNotReady` (503). Failed downloads and files with the wrong CID are not
+cached; clients can retry when the service is ready.

@@ -20,9 +20,14 @@ import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreati
 
 <RecordCreationAnimation />
 
-### AppView Indexing
+### Private feed storage
 
-<IndexerSyncAnimation />
+The feed generator collects posts hosted by Stratos and protected posts from
+PDS users whom Stratos lists as members. It checks each PDS user's signed
+update before adding those posts to its encrypted local database. A viewer
+can read posts and attachments only from boundaries they currently belong to.
+See [Feed Generator](/operator/feedgen-ng) for storage, access, and startup
+checks.
 
 ## Repository & MST Architecture
 

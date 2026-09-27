@@ -1,8 +1,8 @@
 # Overview
 
-Stratos is a **private namespace service** for ATprotocol that enables users to store content
-visible only within specific community domains. Unlike public `app.bsky` records that are globally
-visible, Stratos records have **domain boundaries** that restrict visibility.
+Stratos lets AT Protocol communities share posts with approved members. A
+**boundary** is an access group: a viewer must belong to one of a post's
+boundaries to read it. People keep their existing AT Protocol accounts.
 
 ## Key Concepts
 
@@ -11,7 +11,7 @@ visible, Stratos records have **domain boundaries** that restrict visibility.
 | **Domain Boundary**  | A service-qualified boundary identifier in `{serviceDid}/{name}` format. Records are visible only to enrolled users who share that boundary. |
 | **Enrollment**       | The process of a user registering with a Stratos service via OAuth.                                                                          |
 | **Service DID**      | The decentralized identifier for the Stratos service itself.                                                                                 |
-| **subscribeRecords** | WebSocket subscription that AppViews use to index Stratos content.                                                                           |
+| **subscribeRecords** | WebSocket updates that keep the feed generator current.                                                                                      |
 
 ## Use Cases
 
@@ -21,11 +21,13 @@ visible, Stratos records have **domain boundaries** that restrict visibility.
 
 ## Service Components
 
-| Component         | Description                                                          |
-| ----------------- | -------------------------------------------------------------------- |
-| `stratos-service` | XRPC/HTTP service — enrollment, record CRUD, sync export             |
-| `stratos-indexer` | Standalone indexer — PDS firehose + actor sync streams → PostgreSQL  |
-| AppView           | Feed query endpoints — `zone.stratos.feed.*` with boundary filtering |
+| Component            | Description                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `stratos-service`    | XRPC/HTTP service — enrollment, record CRUD, sync export                                          |
+| `stratos-feedgen-ng` | Rust feed service — stores private posts locally and serves feeds according to current membership |
+
+The TypeScript feedgen and standalone indexer are deprecated. See
+[Feed Generator](/operator/feedgen-ng) for the current feed architecture.
 
 ## Request Flow
 
