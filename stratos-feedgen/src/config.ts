@@ -2,6 +2,11 @@ import { isIP } from 'node:net'
 import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseCommaList } from '@northskysocial/stratos-core'
+import type { TrustedOriginPolicy } from '@northskysocial/stratos-core/network'
+import {
+  parsePrivateHostPolicy,
+  type PrivateHostPolicy,
+} from './space-sync/private-host-policy.js'
 
 /**
  * Configuration for the Stratos feed generator.
@@ -27,6 +32,8 @@ export interface FeedgenConfig {
   stratosServiceDid: string
   /** PLC directory URL used to resolve `did:plc:` issuers. */
   feedgenPlcUrl: string
+  /** Operator-approved private DNS origins used only by DID/PLC resolution. */
+  identityTrustedOrigins: readonly TrustedOriginPolicy[]
   /** Allow-list of `lxm` values accepted on inbound service-auth JWTs. */
   feedgenAllowedLxms: readonly string[]
   /** Storage backend selection. */
@@ -94,6 +101,8 @@ export interface FeedgenConfig {
   spaceSyncMaxRecordsPerMember: number
   /** Exact literal-loopback `http://` origins allowed for member hosts. `https://` origins are always allowed. */
   spaceSyncAllowHttpOrigins: ReadonlySet<string>
+  /** Exact member PDS HTTPS origin whose DNS answers may use configured private networks. */
+  spaceSyncPrivateHostPolicy?: PrivateHostPolicy
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
@@ -186,7 +195,8 @@ export function loadFeedgenConfig(
         requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
-    feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
+    feedgenPlcUrl: trimTrailingSlash(env['PLC_DIRECTORY'] ?? DEFAULT_PLC_URL),
+    identityTrustedOrigins: loadIdentityTrustedOrigins(env),
     feedgenAllowedLxms: DEFAULT_ALLOWED_LXMS,
     ...storage,
     boundaryCacheTtlMs: parsePositiveInt(
@@ -259,7 +269,29 @@ export function loadFeedgenConfig(
     spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
     ),
+    spaceSyncPrivateHostPolicy: parsePrivateHostPolicy(
+      env['FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN'],
+      env['FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS'],
+    ),
   }
+}
+
+function loadIdentityTrustedOrigins(
+  env: FeedgenEnv,
+): readonly TrustedOriginPolicy[] {
+  const origins = parseCommaList(env['IDENTITY_PRIVATE_ORIGINS'] ?? '')
+  const cidrs = parseCommaList(env['IDENTITY_PRIVATE_CIDRS'] ?? '')
+  if ((origins.length === 0) !== (cidrs.length === 0)) {
+    throw new Error(
+      'IDENTITY_PRIVATE_ORIGINS and IDENTITY_PRIVATE_CIDRS must be set together',
+    )
+  }
+  const plcCidrs = parseCommaList(env['PLC_DIRECTORY_PRIVATE_CIDRS'] ?? '')
+  const plcOrigin = trimTrailingSlash(env['PLC_DIRECTORY'] ?? DEFAULT_PLC_URL)
+  return [
+    ...origins.map((origin) => ({ origin, privateCidrs: cidrs })),
+    ...(plcCidrs.length ? [{ origin: plcOrigin, privateCidrs: plcCidrs }] : []),
+  ]
 }
 
 type ShadowReaderConfig = Pick<

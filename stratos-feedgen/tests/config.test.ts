@@ -321,6 +321,75 @@ describe('loadFeedgenConfig shadow reader', () => {
 })
 
 describe('loadFeedgenConfig space-sync defaults', () => {
+  it('uses the shared PLC directory setting', () => {
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        PLC_DIRECTORY: 'https://plc.private.test/',
+      }).feedgenPlcUrl,
+    ).toBe('https://plc.private.test')
+  })
+
+  it('passes explicit identity and PLC private networks to the resolver policy', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      PLC_DIRECTORY: 'https://plc.private.test',
+      PLC_DIRECTORY_PRIVATE_CIDRS: '10.42.0.0/16',
+      IDENTITY_PRIVATE_ORIGINS:
+        'https://pds-one.private.test,https://pds-two.private.test',
+      IDENTITY_PRIVATE_CIDRS: '10.43.0.0/16,172.25.111.0/24',
+    })
+    expect(cfg.identityTrustedOrigins).toEqual([
+      {
+        origin: 'https://pds-one.private.test',
+        privateCidrs: ['10.43.0.0/16', '172.25.111.0/24'],
+      },
+      {
+        origin: 'https://pds-two.private.test',
+        privateCidrs: ['10.43.0.0/16', '172.25.111.0/24'],
+      },
+      {
+        origin: 'https://plc.private.test',
+        privateCidrs: ['10.42.0.0/16'],
+      },
+    ])
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        IDENTITY_PRIVATE_ORIGINS: 'https://pds-one.private.test',
+      }),
+    ).toThrow(/IDENTITY_PRIVATE_CIDRS/)
+  })
+
+  it('validates private member-host configuration together at startup', () => {
+    const env = {
+      ...baseEnv,
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: 'https://pds.internal.test',
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '10.40.0.0/16,172.25.111.0/24',
+    }
+    expect(loadFeedgenConfig(env).spaceSyncPrivateHostPolicy).toEqual({
+      origin: 'https://pds.internal.test',
+      networks: [
+        { network: 170393600, broadcast: 170459135 },
+        { network: 2887347968, broadcast: 2887348223 },
+      ],
+    })
+    for (const bad of [
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '' },
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '10.40.0.1/16' },
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '8.8.8.0/24' },
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: 'http://pds.internal.test' },
+      {
+        FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN:
+          'https://pds.internal.test/path',
+      },
+    ]) {
+      expect(() => loadFeedgenConfig({ ...env, ...bad })).toThrow(
+        /FEEDGEN_SPACE_SYNC_PRIVATE_HOST/,
+      )
+    }
+  })
+
   it('leaves request-timeout headroom above worst-case default host resolution', () => {
     const resolverWorkers = 10
     const resolverTimeoutMs = 3_000

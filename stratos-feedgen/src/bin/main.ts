@@ -224,6 +224,7 @@ async function main(): Promise<void> {
             ...options,
             requestTimeoutMs: cfg.spaceSyncRequestTimeoutMs,
             allowHttpOrigins: cfg.spaceSyncAllowHttpOrigins,
+            privateHostPolicy: cfg.spaceSyncPrivateHostPolicy,
             maxPageBytes: getRepoOpsResponseByteLimit(
               cfg.spaceSyncPageLimit,
               cfg.spaceSyncMaxRecordBytes,

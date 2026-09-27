@@ -69,8 +69,11 @@ export function createIdResolver(cfg: FeedgenConfig): IdResolver {
   // The sweep is upkeep. It must never be the reason the process stays alive.
   sweep.unref()
 
-  return createPublicIdResolver({
-    plcUrl: cfg.feedgenPlcUrl,
-    didCache: cache,
-  })
+  return createPublicIdResolver(
+    {
+      plcUrl: cfg.feedgenPlcUrl,
+      didCache: cache,
+    },
+    cfg.identityTrustedOrigins ?? [],
+  )
 }

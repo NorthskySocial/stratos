@@ -185,34 +185,39 @@ caches, purge stale projections, and reseed actor/space sync automatically.
 See the public [Feed generator boundary catalogue guide](../docs/operator/feedgen-boundary-catalog.md)
 for migration steps, freshness settings, replay behavior, and recovery.
 
-| Env var                                       | Required    | Description                                                                     |
-| --------------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
-| `FEEDGEN_SERVICE_DID`                         | yes         | Feed generator service DID                                                      |
-| `FEEDGEN_PUBLIC_URL`                          | no          | Public base URL; derived from a `did:web` service DID when omitted              |
-| `FEEDGEN_SIGNING_KEY`                         | yes         | Private secp256k1 service-signing key                                           |
-| `STRATOS_SERVICE_URL`                         | yes         | Request base URL of the authority Stratos service                               |
-| `STRATOS_PUBLIC_URL`                          | no          | Public Stratos origin used in DPoP `htu`; defaults to `STRATOS_SERVICE_URL`     |
-| `STRATOS_SERVICE_DID`                         | yes         | DID of the authority Stratos service                                            |
-| `FEEDGEN_PLC_URL`                             | no          | PLC directory used for commit-key resolution (default `https://plc.directory`)  |
-| `FEEDGEN_STORAGE_BACKEND`                     | no          | `sqlite` (default) or `postgres`                                                |
-| `FEEDGEN_SQLITE_PATH`                         | no          | Record projection SQLite location; unset or empty uses `:memory:`               |
-| `FEEDGEN_MEMBERSHIP_SQLITE_PATH`              | conditional | Durable SQLite control DB; required for `:memory:`, else a sibling file         |
-| `FEEDGEN_POSTGRES_URL`                        | conditional | Required for the Postgres backend                                               |
-| `FEEDGEN_POSTGRES_SCHEMA`                     | no          | Postgres schema (default `public`)                                              |
-| `FEEDGEN_SUBSCRIBE_ENROLLMENTS`               | no          | Set `false` to disable enrollment reconciliation; feed reads remain unavailable |
-| `FEEDGEN_SPACE_SYNC_ENABLED`                  | no          | Enable the PDS-custody polling arm (default `true`)                             |
-| `FEEDGEN_SPACE_SYNC_INTERVAL_MS`              | no          | Target interval between jittered passes (default `30000`)                       |
-| `FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT`         | no          | Members requested per authority page, `1..1000` (default `100`)                 |
-| `FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS` | no          | Timeout for membership listing and credential mint requests (default `60000`)   |
-| `FEEDGEN_SPACE_SYNC_PAGE_LIMIT`               | no          | Ops requested per page, `1..1000` (default `1000`)                              |
-| `FEEDGEN_SPACE_SYNC_MAX_PAGES`                | no          | Pages per member per pass (default `10`)                                        |
-| `FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS`       | no          | Timeout for one foreign-host request (default `10000`)                          |
-| `FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS`         | no          | Whole-member time budget per pass (default `60000`)                             |
-| `FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY`       | no          | Concurrent member syncs (default `8`)                                           |
-| `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`         | no          | Maximum decoded record size (default `65536`)                                   |
-| `FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER`   | no          | Indexed-record cap per member and pass (default `1000`)                         |
-| `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS`         | no          | Loopback `http://` only: `localhost`, `127/8`, `[::1]`; HTTPS always allowed    |
-| `FEEDGEN_LOG_LEVEL`                           | no          | Pino level (default `info`)                                                     |
+| Env var                                       | Required    | Description                                                                                                            |
+| --------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `FEEDGEN_SERVICE_DID`                         | yes         | Feed generator service DID                                                                                             |
+| `FEEDGEN_PUBLIC_URL`                          | no          | Public base URL; derived from a `did:web` service DID when omitted                                                     |
+| `FEEDGEN_SIGNING_KEY`                         | yes         | Private secp256k1 service-signing key                                                                                  |
+| `STRATOS_SERVICE_URL`                         | yes         | Request base URL of the authority Stratos service                                                                      |
+| `STRATOS_PUBLIC_URL`                          | no          | Public Stratos origin used in DPoP `htu`; defaults to `STRATOS_SERVICE_URL`                                            |
+| `STRATOS_SERVICE_DID`                         | yes         | DID of the authority Stratos service                                                                                   |
+| `PLC_DIRECTORY`                               | no          | PLC directory used for identity and commit-key resolution (default `https://plc.directory`)                            |
+| `PLC_DIRECTORY_PRIVATE_CIDRS`                 | no          | Private CIDRs allowed only for the exact PLC directory origin; all DNS answers must be within them                     |
+| `IDENTITY_PRIVATE_ORIGINS`                    | no          | Comma-separated exact HTTPS DID origins permitted to resolve within private networks                                   |
+| `IDENTITY_PRIVATE_CIDRS`                      | conditional | Comma-separated private CIDRs shared by the configured DID origins; required with `IDENTITY_PRIVATE_ORIGINS`           |
+| `FEEDGEN_STORAGE_BACKEND`                     | no          | `sqlite` (default) or `postgres`                                                                                       |
+| `FEEDGEN_SQLITE_PATH`                         | no          | Record projection SQLite location; unset or empty uses `:memory:`                                                      |
+| `FEEDGEN_MEMBERSHIP_SQLITE_PATH`              | conditional | Durable SQLite control DB; required for `:memory:`, else a sibling file                                                |
+| `FEEDGEN_POSTGRES_URL`                        | conditional | Required for the Postgres backend                                                                                      |
+| `FEEDGEN_POSTGRES_SCHEMA`                     | no          | Postgres schema (default `public`)                                                                                     |
+| `FEEDGEN_SUBSCRIBE_ENROLLMENTS`               | no          | Set `false` to disable enrollment reconciliation; feed reads remain unavailable                                        |
+| `FEEDGEN_SPACE_SYNC_ENABLED`                  | no          | Enable the PDS-custody polling arm (default `true`)                                                                    |
+| `FEEDGEN_SPACE_SYNC_INTERVAL_MS`              | no          | Target interval between jittered passes (default `30000`)                                                              |
+| `FEEDGEN_SPACE_MEMBERSHIP_PAGE_LIMIT`         | no          | Members requested per authority page, `1..1000` (default `100`)                                                        |
+| `FEEDGEN_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS` | no          | Timeout for membership listing and credential mint requests (default `60000`)                                          |
+| `FEEDGEN_SPACE_SYNC_PAGE_LIMIT`               | no          | Ops requested per page, `1..1000` (default `1000`)                                                                     |
+| `FEEDGEN_SPACE_SYNC_MAX_PAGES`                | no          | Pages per member per pass (default `10`)                                                                               |
+| `FEEDGEN_SPACE_SYNC_REQUEST_TIMEOUT_MS`       | no          | Timeout for one foreign-host request (default `10000`)                                                                 |
+| `FEEDGEN_SPACE_SYNC_MEMBER_BUDGET_MS`         | no          | Whole-member time budget per pass (default `60000`)                                                                    |
+| `FEEDGEN_SPACE_SYNC_MEMBER_CONCURRENCY`       | no          | Concurrent member syncs (default `8`)                                                                                  |
+| `FEEDGEN_SPACE_SYNC_MAX_RECORD_BYTES`         | no          | Maximum decoded record size (default `65536`)                                                                          |
+| `FEEDGEN_SPACE_SYNC_MAX_RECORDS_PER_MEMBER`   | no          | Indexed-record cap per member and pass (default `1000`)                                                                |
+| `FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS`         | no          | Loopback `http://` only: `localhost`, `127/8`, `[::1]`; HTTPS always allowed                                           |
+| `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN`      | no          | Exact trusted HTTPS PDS origin allowed to resolve to private addresses when CIDRs are set                              |
+| `FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS`       | no          | Comma-separated private IPv4 CIDRs for that one PDS origin; all DNS answers must be usable addresses in these networks |
+| `FEEDGEN_LOG_LEVEL`                           | no          | Pino level (default `info`)                                                                                            |
 
 ### Storage durability
 
