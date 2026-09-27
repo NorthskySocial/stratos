@@ -185,7 +185,7 @@ fn record_type(record: &CborValue) -> Option<&str> {
 fn created_at(record: &CborValue) -> Option<&str> {
     map_field(record, "createdAt")
         .and_then(text_value)
-        .filter(|value| is_utc_timestamp(value))
+        .filter(|value| crate::store::is_post_sort_timestamp(value))
 }
 
 fn current_boundaries(
@@ -371,7 +371,7 @@ mod tests {
     use serde::Serialize;
     use serde_cbor::Value as CborValue;
 
-    use super::{ActorEventError, POST_COLLECTION, parse_actor_commit};
+    use super::{ActorEventError, POST_COLLECTION, created_at, parse_actor_commit};
 
     #[derive(Serialize)]
     struct Header<'a> {
@@ -447,6 +447,18 @@ mod tests {
         ["did:web:stratos.example.test/bebop".to_owned()]
             .into_iter()
             .collect()
+    }
+
+    #[test]
+    fn preserves_valid_utc_microseconds_for_feed_order() {
+        let timestamp = "1998-04-03T00:00:00.123456+00:00";
+        let post = record(timestamp, &["bebop"]);
+        assert_eq!(created_at(&post), Some(timestamp));
+        assert_eq!(created_at(&record("not-a-date", &["bebop"])), None);
+        assert_eq!(
+            created_at(&record("1998-04-03T02:00:00.123456+02:00", &["bebop"])),
+            None
+        );
     }
 
     #[test]
