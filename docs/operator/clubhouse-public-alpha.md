@@ -1,8 +1,8 @@
 # Clubhouse public-alpha room catalogue
 
-> Historical TypeScript feedgen deployment procedure. Feedgen NG uses an
+> Historical TypeScript feedgen deployment procedure. The current feed generator uses an
 > explicit feed registry and does not implement the legacy catalogue refresh
-> or `available` feed flag described below. Use [Feedgen NG](/operator/feedgen-ng)
+> or `available` feed flag described below. Use [Feed Generator](/operator/feedgen-ng)
 > for the current feed design; do not apply this page to a Rust deployment.
 
 This document defines the operator configuration boundary for Plan 024's

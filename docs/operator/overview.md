@@ -27,7 +27,7 @@ visible, Stratos records have **domain boundaries** that restrict visibility.
 | `stratos-feedgen-ng` | Rust feed service — verified actor and PDS-space ingestion, encrypted local projection, boundary-scoped feeds |
 
 The TypeScript feedgen and standalone indexer are deprecated. See
-[Feedgen NG](/operator/feedgen-ng) for the current feed architecture.
+[Feed Generator](/operator/feedgen-ng) for the current feed architecture.
 
 ## Request Flow
 

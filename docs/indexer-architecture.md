@@ -1,7 +1,7 @@
 # Stratos Indexer Architecture
 
 > Historical architecture of the deprecated `stratos-indexer`. The current
-> boundary-scoped feed design is [Feedgen NG](/operator/feedgen-ng), which does
+> boundary-scoped feed design is [Feed Generator](/operator/feedgen-ng), which does
 > not use this indexer or its AppView PostgreSQL projection.
 
 The `stratos-indexer` is a standalone service that consumes the ATProtocol PDS firehose and Stratos

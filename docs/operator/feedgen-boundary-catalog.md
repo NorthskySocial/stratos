@@ -1,8 +1,8 @@
 # Feed generator boundary catalogue
 
 > Historical TypeScript feedgen behavior. The upstream boundary-catalog refresh
-> settings below are not implemented by Feedgen NG. For the current Rust
-> design, use [Feedgen NG](/operator/feedgen-ng) and its explicit feed registry.
+> settings below are not implemented by the current feed generator. For its
+> design, use [Feed Generator](/operator/feedgen-ng) and its explicit feed registry.
 
 The feed generator reads its boundary catalogue from Stratos by default.
 Administrators manage boundary definitions in Stratos and separately grant the feed generator membership through Enrollments.

@@ -23,10 +23,10 @@ ecosystem.
 2. _The user creates private records_ within an authorized boundary. Stratos
    hosts the repo for users whose PDS lacks spaces support; a spaces-capable PDS
    hosts its own repo while Stratos remains the space authority.
-3. _Feedgen NG_ subscribes to Stratos-custody actors and polls only
+3. _The feed generator_ subscribes to Stratos-custody actors and polls only
    authority-listed PDS-custody space members. It verifies foreign commits
    before adding records to its encrypted local projection.
-4. _A viewer requests a feed_ using a service-auth JWT. Feedgen NG resolves the
+4. _A viewer requests a feed_ using a service-auth JWT. The feed generator resolves the
    viewer's Stratos enrollment and serves only posts matching its boundaries.
 
 ## Repository Packages
@@ -48,7 +48,7 @@ rollback or historical reference but are deprecated.
 For a deeper dive into the technical details of Stratos, see the following documentation:
 
 - [**Hydration Architecture**](/architecture/hydration) — How Stratos uses the source field pattern to keep data private.
-- [**Feedgen NG**](/operator/feedgen-ng) — Current feed ingestion, encrypted projection, and request authorization.
+- [**Feed Generator**](/operator/feedgen-ng) — Feed ingestion, encrypted projection, and request authorization.
 - [**Enrollment Signing**](/architecture/enrollment-signing) — How user keys and boundary attestations are managed.
 - [**Multi-Domain Enrollment**](/architecture/multi-domain-enrollment) — How users can enroll in multiple boundaries across different services.
 

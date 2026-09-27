@@ -1,7 +1,7 @@
 # Design Document: Shared Stratos Sync-Client Library
 
 > Historical design investigation of the deprecated TypeScript feedgen and
-> indexer. The current feed service is [Feedgen NG](/operator/feedgen-ng); its
+> indexer. The current feed service is the [Feed Generator](/operator/feedgen-ng); its
 > Rust actor and PDS-space sync modules do not use the proposed TypeScript
 > library described below.
 

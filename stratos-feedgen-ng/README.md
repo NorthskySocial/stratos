@@ -1,8 +1,8 @@
-# Stratos Feedgen NG
+# Stratos Feed Generator
 
-Feedgen NG is the Rust implementation of Stratos Feedgen. It maintains an
-encrypted, bounded local projection, serves authenticated boundary-scoped
-feeds, and stays closed until the authority stream has reconciled.
+The Rust feed generator maintains an encrypted, bounded local projection,
+serves authenticated boundary-scoped feeds, and stays closed until the
+authority stream has reconciled.
 
 It also refreshes authority-derived PDS-space membership and synchronizes only
 those targets. Pages are staged locally and become visible only after their
@@ -39,6 +39,16 @@ For a process, set `FEEDGEN_SERVICE_DID`, `FEEDGEN_PUBLIC_URL`,
 `FEEDGEN_PUBLIC_KEY_MULTIBASE`, `FEEDGEN_SIGNING_KEY`,
 `STRATOS_SERVICE_URL`, and `STRATOS_SERVICE_DID`. Set `STRATOS_PUBLIC_URL`
 when the authority's public endpoint differs from its private service URL.
+
+Before startup, assign `FEEDGEN_SERVICE_DID` a `did:web` under the domain
+controlled by the Stratos space authority. For example, with
+`STRATOS_SERVICE_DID=did:web:stratos.example.com`, use
+`FEEDGEN_SERVICE_DID=did:web:feeds.stratos.example.com` and
+`FEEDGEN_PUBLIC_URL=https://feeds.stratos.example.com`. Configure DNS, HTTPS,
+and routing for that host, and grant the feed DID service membership in every
+boundary it serves through Stratos Enrollments. The feed registry is not a
+membership grant. After startup, verify the DID document and an authenticated
+feed request.
 
 Set `PLC_DIRECTORY` to the HTTPS origin of a non-default PLC directory. For a
 private PLC, also set `PLC_DIRECTORY_PRIVATE_CIDRS` to a comma-separated list

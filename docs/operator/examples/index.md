@@ -7,13 +7,13 @@ supported deployments:
 | File                                       | Purpose                                                       |
 | ------------------------------------------ | ------------------------------------------------------------- |
 | `docker-compose.yml`                       | Base Stratos stack; its bundled AppView indexer is deprecated |
-| `stratos-feedgen-ng/compose.rehearsal.yml` | Constrained Feedgen NG rehearsal profile                      |
+| `stratos-feedgen-ng/compose.rehearsal.yml` | Constrained feed generator rehearsal profile                  |
 | `docker-compose.feedgen.yml`               | Deprecated TypeScript feedgen overlay, retained for rollback  |
 | `.env.example`                             | Annotated service configuration template — copy to `.env`     |
 
-For the current feed service, use the [Feedgen NG design](/operator/feedgen-ng)
-and its independently encrypted state. The legacy overlay below is not the
-Feedgen NG deployment recipe.
+For the current feed service, use the [feed generator design](/operator/feedgen-ng)
+and its independently encrypted state. The legacy overlay below is not its
+deployment recipe.
 
 ## Base Stack (`docker-compose.yml`)
 
@@ -63,10 +63,14 @@ at the `bsky` database — it is shared with the indexer's AppView.
 Blob storage is a separate choice: `local` (default) or `s3`. See
 [Blob Storage](/operator/configuration#blob-storage) for MinIO/S3 settings.
 
-## Feedgen NG rehearsal
+## Feed generator rehearsal
 
 Build the Rust image and use its constrained rehearsal profile with a separate
 encrypted state directory, private key files, and a reviewed feed registry:
+
+> Before running Compose, use a feed `did:web` under the Stratos-controlled
+> space domain and grant it membership in every feed boundary. See
+> [Deployment](/operator/deployment) for the DID, DNS, and enrollment setup.
 
 ```sh
 docker build -f stratos-feedgen-ng/Dockerfile -t stratos-feedgen-ng:rehearsal .
@@ -77,12 +81,12 @@ docker compose --env-file stratos-feedgen-ng/rehearsal.env \
 The env file contains operator-specific paths and is not checked in. The
 profile applies 1 vCPU and 512 MiB limits; confirm them inside the cgroup and
 run an authenticated feed probe before routing traffic. See
-[Feedgen NG](/operator/feedgen-ng) for the data flow and privacy controls.
+[Feed Generator](/operator/feedgen-ng) for the data flow and privacy controls.
 
 ## Legacy TypeScript Feed Generator Overlay (`docker-compose.feedgen.yml`)
 
 This section describes the deprecated TypeScript rollback path only. New feed
-deployments should follow [Feedgen NG](/operator/feedgen-ng) and its
+deployments should follow [Feed Generator](/operator/feedgen-ng) and its
 `stratos-feedgen-ng/compose.rehearsal.yml` rehearsal profile.
 
 To run the boundary-scoped feed generator alongside the service, layer the feedgen

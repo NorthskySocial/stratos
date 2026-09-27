@@ -1,8 +1,8 @@
 # Private feed attachments
 
-Feedgen NG reads Stratos-hosted attachments on demand and keeps CID-verified
-bytes in a bounded **in-memory** cache. Blob bytes are not written to its
-encrypted post projection or a separate disk cache. Repeated reads avoid an
+The feed generator reads Stratos-hosted attachments on demand and keeps
+CID-verified bytes in a bounded **in-memory** cache. Blob bytes are not written
+to its encrypted post projection or a separate disk cache. Repeated reads avoid an
 upstream download while the entry is fresh; no CDN or S3 cache is required.
 
 ## Feed response
@@ -79,7 +79,7 @@ downloads run concurrently. Entries are swept after expiry and disappear on
 process exit. This is bounded retention, not a secure-erasure guarantee for
 process memory. Existing browser object URLs still require client cleanup
 after sign-out or removal. The legacy TypeScript `FEEDGEN_BLOB_CACHE_*`
-directory and size settings do not apply to Feedgen NG.
+directory and size settings do not apply to the current feed generator.
 
 A blob exceeding the object limit returns `BlobTooLarge`. Saturated download capacity returns `BlobBusy` (503).
 An inaccessible, unattached, missing, or unsupported-custody blob returns `BlobNotFound`.

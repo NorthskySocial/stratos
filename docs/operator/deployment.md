@@ -130,13 +130,24 @@ curl https://stratos.example.com/.well-known/did.json
 curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=did:plc:abc123"
 ```
 
-## Add Feedgen NG
+## Add the Feed Generator
 
 For boundary-scoped feeds, deploy the Rust `stratos-feedgen-ng` service with
 its own DID, signing key, feed registry, and encrypted projection volume. Do
 not mount the deprecated TypeScript feedgen database as Rust state. The
-[Feedgen NG architecture](/operator/feedgen-ng) describes authority-derived
+[feed generator architecture](/operator/feedgen-ng) describes authority-derived
 membership, verified PDS-space ingestion, request authorization, retention,
-and private DNS policy. Rehearse an independent-state start and authenticated
-feed probe before changing routing; follow
+and private DNS policy.
+
+> Before startup, the feed generator's `did:web` **must be under the
+> Stratos-controlled space domain**. For example, if Stratos uses
+> `did:web:stratos.example.com`, set
+> `FEEDGEN_SERVICE_DID=did:web:feeds.stratos.example.com` and
+> `FEEDGEN_PUBLIC_URL=https://feeds.stratos.example.com`. Configure DNS,
+> HTTPS, and routing for that host. Grant the same DID service membership in
+> each feed boundary through Stratos Enrollments; a feed registry entry alone
+> grants no access. After startup, check the feed host's
+> `/.well-known/did.json` and make an authenticated feed request.
+
+Rehearse an independent-state start before changing routing; follow
 `stratos-feedgen-ng/CUTOVER.md` for comparison and rollback.

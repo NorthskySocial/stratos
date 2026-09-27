@@ -1,9 +1,9 @@
-# Feedgen NG
+# Feed Generator
 
-`stratos-feedgen-ng` is the Rust feed generator. It serves authenticated,
-boundary-scoped feeds from a bounded local SQLCipher projection. The TypeScript
-`stratos-feedgen` is deprecated and remains a rollback reference; its runtime
-settings and storage layout do not describe Feedgen NG.
+The feed generator serves authenticated, boundary-scoped feeds from a bounded,
+encrypted local projection. The current implementation is the Rust
+`stratos-feedgen-ng` package. The older TypeScript `stratos-feedgen` package is
+retained only for rollback; its settings and storage layout do not apply here.
 
 ## Data flow
 
@@ -16,11 +16,12 @@ authority space membership ──> member PDS polling ─┘            ↑
 
 The service stream and per-actor subscriptions ingest Stratos-custody records.
 For PDS custody, a membership pass asks the Stratos space authority which repos
-belong to each configured boundary. Feedgen NG polls only those members. It
-constructs seven-segment space record URIs from the trusted space and author;
-it never accepts a record-supplied boundary as permission. PDS pages are staged
-and remain invisible until the terminal commit verifies. Membership removal,
-revocation, deletion, and reconciliation invalidate derived reads.
+belong to each configured boundary. The feed generator polls only those
+members. It constructs seven-segment space record URIs from the trusted space
+and author; it never accepts a record-supplied boundary as permission. PDS
+pages are staged and remain invisible until the terminal commit verifies.
+Membership removal, revocation, deletion, and reconciliation invalidate
+derived reads.
 
 The HTTP router, feed/blob handlers, viewer authorization, identity endpoints,
 and response policy are separate `server/` modules. Storage methods are grouped
@@ -61,9 +62,9 @@ request before routing traffic.
 
 Configure one explicit feed registry source: `FEEDGEN_FEEDS_FILE`,
 `FEEDGEN_FEEDS_JSON`, or `FEEDGEN_FEEDS_YAML`. Each feed has an ID and a
-canonical Stratos boundary; the viewer's enrollment decides access. Feedgen NG
-does not implement the deprecated TypeScript upstream boundary-catalog refresh
-settings. For example, a read-only file can contain:
+canonical Stratos boundary; the viewer's enrollment decides access. The feed
+generator does not implement the deprecated TypeScript upstream
+boundary-catalog refresh settings. For example, a read-only file can contain:
 
 ```yaml
 feeds:
@@ -87,4 +88,4 @@ unapproved private addresses, redirects, and proxy bypasses are rejected.
 Use `stratos-feedgen-ng/README.md` for process variables and
 `stratos-feedgen-ng/CUTOVER.md` for independent-state rehearsal, comparison,
 switch, and rollback. Do not reuse a TypeScript projection or writer lock for
-Feedgen NG.
+the feed generator.

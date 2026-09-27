@@ -219,7 +219,7 @@ into one large module.
 | `util/worker-pool.ts`       | Thread pool for concurrent processing                                                                                                                                              |
 | `util/handle-dedup.ts`      | TTL cache that skips redundant `indexHandle` calls for recently-seen DIDs                                                                                                          |
 
-**Feed generator NG** (`stratos-feedgen-ng/src/`):
+**Feed generator** (`stratos-feedgen-ng/src/`):
 
 The standalone Rust service subscribes to Stratos-custody actors and polls only
 authority-listed PDS-custody space members. It stages foreign repo changes
@@ -228,7 +228,7 @@ cursors in a local SQLCipher projection. A viewer service-auth JWT identifies
 the requester; current authority enrollment determines readable boundaries.
 Outbound Stratos calls use feedgen-minted service-auth JWTs. The TypeScript
 `stratos-feedgen` remains available for rollback, but new design work belongs
-in Feedgen NG.
+in the Rust feed generator.
 
 | File / dir                                                            | Responsibility                                                                            |
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -321,7 +321,7 @@ Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests
 `stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run:
 `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
 
-Feedgen NG unit tests are colocated in Rust modules. Run `cargo fmt --all --check`,
+Feed generator unit tests are colocated in Rust modules. Run `cargo fmt --all --check`,
 `cargo clippy --locked -p stratos-feedgen-ng --all-targets -- -D warnings`, and
 `cargo test --locked -p stratos-feedgen-ng`. Use `test/feedgen-harness/` for
 privacy, recovery, and parity contracts. The Stryker instructions below apply

@@ -1,4 +1,4 @@
-# Feedgen NG rehearsal runbook
+# Feed generator rehearsal runbook
 
 Use this only in an operator-approved disposable environment. It prepares a
 reversible routing rehearsal; it does not authorize production traffic,
@@ -6,11 +6,14 @@ identity changes, or use of a shared projection database.
 
 ## Preconditions
 
-- The TypeScript and Rust services use the same public Feedgen DID, signing
+- The TypeScript and Rust services use the same public feed DID, signing
   identity, public URL, configured feeds, and upstream authority identity.
+- The feed DID is under the Stratos-controlled space domain and already has
+  service membership in every boundary it serves. DNS, HTTPS, and routing for
+  its `did:web` host are configured before either service starts.
 - Each runtime has its own state directory and writer lock. Never mount the
-  TypeScript database into Feedgen NG or let both runtimes open one state
-  directory.
+  TypeScript database into the Rust feed generator or let both runtimes open
+  one state directory.
 - The Rust state volume is encrypted, writable only by the runtime identity,
   and its storage/signing-key files are private non-symlinks. Backups exclude
   the projection unless separately approved.
@@ -45,9 +48,9 @@ the Rust process before collecting this evidence.
 
 1. Start the TypeScript service with its existing private state and verify a
    current authorized feed request.
-2. Start Feedgen NG with an empty encrypted state directory and its own writer
-   lock. Wait for a successful authority reconciliation and an authorized feed
-   request; `/health` alone is not readiness evidence.
+2. Start the Rust feed generator with an empty encrypted state directory and
+   its own writer lock. Wait for a successful authority reconciliation and an
+   authorized feed request; `/health` alone is not readiness evidence.
 3. Compare both services without retaining request data:
 
 ```sh
@@ -66,9 +69,9 @@ Its report contains only statuses and a bounded mismatch category.
 
 1. Quiesce and drain the TypeScript route. Do not stop its state volume or
    overwrite its cursor.
-2. Re-run an authenticated Feedgen NG probe immediately before routing to it.
-3. Atomically route the public endpoint to Feedgen NG while preserving the DID,
-   service fragment, audience, and signing identity.
+2. Re-run an authenticated Rust feed probe immediately before routing to it.
+3. Atomically route the public endpoint to the Rust feed generator while
+   preserving the DID, service fragment, audience, and signing identity.
 4. Inject or observe a boundary removal or deletion. A response prepared before
    local invalidation must not be released; a removed post must not reappear.
 5. To roll back, restore routing to TypeScript only after it has reconciled the

@@ -85,7 +85,7 @@ export default defineConfig({
             { text: 'Deployment Examples', link: '/operator/examples/' },
             { text: 'Configuration', link: '/operator/configuration' },
             {
-              text: 'Feedgen NG',
+              text: 'Feed Generator',
               link: '/operator/feedgen-ng',
             },
             {
