@@ -252,11 +252,10 @@ async fn run_connection(
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
     actor_failures.borrow_and_update();
-    let stats = actors.sync_from_store().await.map_err(|_| {
+    actors.sync_from_store().await.map_err(|_| {
         eprintln!("event=service_actor_sync_failed kind=store");
         ServiceStreamError::ReconciliationIncomplete
     })?;
-    telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
 
     loop {
         tokio::select! {
@@ -302,18 +301,13 @@ async fn run_connection(
                                     return Err(ServiceStreamError::InvalidFrame);
                                 }
                             }
-                            let stats = actors
+                            actors
                                 .sync_actor(&event.did)
                                 .await
                                 .map_err(|_| {
                                     eprintln!("event=service_stream_session_ended kind=actor_pool_error");
                                     ServiceStreamError::InvalidFrame
                                 })?;
-                            telemetry.set_actor_pool(
-                                stats.active,
-                                stats.waiting,
-                                stats.max_connections,
-                            );
                         }
                     }
                     Message::Ping(payload) => {
