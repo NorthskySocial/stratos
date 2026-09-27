@@ -9,8 +9,10 @@ pub(super) async fn ensure_viewer_authorization(
         .lifecycle
         .has_current_viewer_authorization(viewer_did, now)
     {
+        state.telemetry.record_cache("hit");
         return Ok(());
     }
+    state.telemetry.record_cache("miss");
     let Some(authority) = &state.authority else {
         return Err(FeedServiceError::AuthorizationUnavailable);
     };

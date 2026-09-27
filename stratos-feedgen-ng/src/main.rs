@@ -60,10 +60,11 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     // Feeds remain unavailable until verified reconciliation completes.
     let readiness = Arc::new(Mutex::new(FeedReadinessGate::default()));
-    let lifecycle = Arc::new(ControlLifecycle::for_authority(
+    let lifecycle = Arc::new(ControlLifecycle::for_authority_with_telemetry(
         projection,
         Arc::clone(&readiness),
         config.stratos_service_did.clone(),
+        metrics.telemetry(),
     )?);
     let resolver = Arc::new(HttpIdentityKeyResolver::new(
         Some(&config.plc_url),
@@ -121,7 +122,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         },
         Arc::clone(&lifecycle),
     )?;
-    let stream = match ServiceStream::start(
+    let stream = match ServiceStream::start_with_telemetry(
         ServiceStreamConfig {
             service_url: config.stratos_service_url.clone(),
             service_did: config.stratos_service_did.clone(),
@@ -132,6 +133,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&lifecycle),
         Arc::clone(&authority),
         Arc::clone(&actors),
+        metrics.telemetry(),
     ) {
         Ok(stream) => stream,
         Err(error) => {
@@ -156,12 +158,13 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
             }
         };
     let blob_sweeper = BlobCacheSweeper::start(blob_cache);
-    let pds_scheduler = PdsSpaceScheduler::start(
+    let pds_scheduler = PdsSpaceScheduler::start_with_telemetry(
         Arc::clone(&lifecycle),
         membership,
         synchronizer,
         feeds.list().map(|feed| feed.boundary.clone()),
         config.retention.clone(),
+        metrics.telemetry(),
     );
     let result = axum::serve(
         listener,

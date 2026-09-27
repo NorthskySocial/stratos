@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{RawQuery, State},
+    extract::{RawQuery, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -95,6 +96,10 @@ pub fn router(
             get(describe_feed),
         )
         .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            Arc::new(FeedTelemetry::disabled()),
+            record_http_request,
+        ))
 }
 
 pub fn router_with_feed(
@@ -159,7 +164,7 @@ fn router_with_feed_with_request_limit(
         request_limit,
         blobs,
         authority,
-        telemetry,
+        Arc::clone(&telemetry),
     );
     Router::new()
         .route("/health", get(feed_health))
@@ -171,6 +176,36 @@ fn router_with_feed_with_request_limit(
         .route("/xrpc/zone.stratos.feedgen.getFeed", get(get_feed))
         .route("/xrpc/zone.stratos.feedgen.getBlob", get(get_blob))
         .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            telemetry,
+            record_http_request,
+        ))
+}
+
+async fn record_http_request(
+    State(telemetry): State<Arc<FeedTelemetry>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = match request.method().as_str() {
+        "GET" => "GET",
+        "POST" => "POST",
+        "PUT" => "PUT",
+        "DELETE" => "DELETE",
+        _ => "OTHER",
+    };
+    let route = match request.uri().path() {
+        "/health" => "/health",
+        "/.well-known/did.json" => "/.well-known/did.json",
+        "/xrpc/zone.stratos.feedgen.describeFeed" => "/xrpc/zone.stratos.feedgen.describeFeed",
+        "/xrpc/zone.stratos.feedgen.getFeed" => "/xrpc/zone.stratos.feedgen.getFeed",
+        "/xrpc/zone.stratos.feedgen.getBlob" => "/xrpc/zone.stratos.feedgen.getBlob",
+        _ => "/unmatched",
+    };
+    let timer = telemetry.begin_http_request();
+    let response = next.run(request).await;
+    timer.complete(method, route, response.status().as_u16());
+    response
 }
 
 fn feed_server_state(

@@ -31,6 +31,9 @@ pub(super) async fn get_feed(
         }
         Ok(Err(error)) => {
             verify_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
             return xrpc_error(
                 StatusCode::UNAUTHORIZED,
                 error.code(),
@@ -39,6 +42,9 @@ pub(super) async fn get_feed(
         }
         Err(_) => {
             verify_timer.finish(crate::telemetry::FeedReadStageOutcome::Timeout);
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::Error, None);
             return xrpc_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "FeedNotReady",
@@ -47,6 +53,9 @@ pub(super) async fn get_feed(
         }
     };
     let Some(raw_query) = raw_query else {
+        state
+            .telemetry
+            .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
         return xrpc_error(
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
@@ -54,6 +63,9 @@ pub(super) async fn get_feed(
         );
     };
     if raw_query.len() > MAX_GET_FEED_QUERY_BYTES {
+        state
+            .telemetry
+            .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
         return xrpc_error(
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
@@ -63,6 +75,9 @@ pub(super) async fn get_feed(
     let parameters: GetFeedParameters = match serde_urlencoded::from_str(&raw_query) {
         Ok(parameters) => parameters,
         Err(_) => {
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
             return xrpc_error(
                 StatusCode::BAD_REQUEST,
                 "InvalidRequest",
@@ -76,6 +91,9 @@ pub(super) async fn get_feed(
             .as_ref()
             .is_some_and(|cursor| cursor.len() > MAX_CURSOR_BYTES)
     {
+        state
+            .telemetry
+            .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
         return xrpc_error(
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
@@ -84,6 +102,9 @@ pub(super) async fn get_feed(
     }
     let limit = parameters.limit.unwrap_or(50);
     if limit == 0 || limit > 100 {
+        state
+            .telemetry
+            .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
         return xrpc_error(
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
@@ -93,6 +114,9 @@ pub(super) async fn get_feed(
     let permit = match Arc::clone(&state.request_permits).try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::Error, None);
             return xrpc_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "FeedNotReady",
@@ -105,6 +129,9 @@ pub(super) async fn get_feed(
         .start(crate::telemetry::FeedReadStage::ViewerAuthorization);
     if let Err(error) = ensure_viewer_authorization(&state, &verified.viewer_did, now).await {
         viewer_authorization_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
+        state
+            .telemetry
+            .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
         return feed_error(error);
     }
     viewer_authorization_timer.finish(crate::telemetry::FeedReadStageOutcome::Success);
@@ -139,14 +166,26 @@ pub(super) async fn get_feed(
     match response {
         Ok(Ok(Ok(body))) => {
             projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Success);
+            let posts_returned = serde_json::from_slice::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|response| response.get("feed")?.as_array().map(Vec::len));
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::Ok, posts_returned);
             private_json(StatusCode::OK, body)
         }
         Ok(Ok(Err(error))) => {
             projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::ExpectedError, None);
             feed_error(error)
         }
         Ok(Err(_)) => {
             projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Failure);
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::Error, None);
             xrpc_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "FeedNotReady",
@@ -155,6 +194,9 @@ pub(super) async fn get_feed(
         }
         Err(_) => {
             projection_timer.finish(crate::telemetry::FeedReadStageOutcome::Timeout);
+            state
+                .telemetry
+                .record_feed_request(crate::telemetry::FeedRequestOutcome::Error, None);
             state.lifecycle.interrupt_feed_work();
             state.lifecycle.mark_unavailable();
             xrpc_error(

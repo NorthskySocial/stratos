@@ -21,6 +21,7 @@ use crate::{
     service_auth::{ServiceSigningKey, mint_service_jwt},
     service_event::parse_enrollment_event,
     store::StoreError,
+    telemetry::{FeedTelemetry, ReconciliationOutcome},
     websocket_client::authenticated_client_request,
 };
 
@@ -70,6 +71,22 @@ impl ServiceStream {
         authority: Arc<dyn AuthorityClient>,
         actors: Arc<ActorPool>,
     ) -> Result<Self, ServiceStreamError> {
+        Self::start_with_telemetry(
+            config,
+            lifecycle,
+            authority,
+            actors,
+            Arc::new(FeedTelemetry::disabled()),
+        )
+    }
+
+    pub fn start_with_telemetry(
+        config: ServiceStreamConfig,
+        lifecycle: Arc<ControlLifecycle>,
+        authority: Arc<dyn AuthorityClient>,
+        actors: Arc<ActorPool>,
+        telemetry: Arc<FeedTelemetry>,
+    ) -> Result<Self, ServiceStreamError> {
         let subscription_url = subscription_url(&config.service_url)?;
         let (shutdown, receiver) = watch::channel(false);
         let task = tokio::spawn(run_forever(
@@ -78,6 +95,7 @@ impl ServiceStream {
             Arc::clone(&lifecycle),
             authority,
             Arc::clone(&actors),
+            telemetry,
             receiver,
         ));
         Ok(Self {
@@ -109,6 +127,7 @@ async fn run_forever(
     lifecycle: Arc<ControlLifecycle>,
     authority: Arc<dyn AuthorityClient>,
     actors: Arc<ActorPool>,
+    telemetry: Arc<FeedTelemetry>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut attempt = 0_u32;
@@ -122,9 +141,12 @@ async fn run_forever(
             actors.as_ref(),
             &mut actor_failures,
             &mut shutdown,
+            telemetry.as_ref(),
         )
         .await;
         lifecycle.mark_unavailable();
+        telemetry.set_service_connected(false);
+        telemetry.set_ready(false);
         if *shutdown.borrow() {
             return;
         }
@@ -139,6 +161,7 @@ async fn run_forever(
             }
         }
         let delay = reconnect_delay(attempt);
+        telemetry.record_reconnect("service");
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
             changed = shutdown.changed() => {
@@ -150,6 +173,7 @@ async fn run_forever(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Session inputs are distinct bounded runtime adapters.
 async fn run_connection(
     config: &ServiceStreamConfig,
     subscription_url: &Url,
@@ -158,6 +182,7 @@ async fn run_connection(
     actors: &ActorPool,
     actor_failures: &mut watch::Receiver<u64>,
     shutdown: &mut watch::Receiver<bool>,
+    telemetry: &FeedTelemetry,
 ) -> Result<(), ServiceStreamError> {
     let now = OffsetDateTime::now_utc();
     let token = mint_service_jwt(
@@ -191,6 +216,8 @@ async fn run_connection(
     })?;
 
     lifecycle.session_established();
+    telemetry.set_service_connected(true);
+    let reconciliation_started = std::time::Instant::now();
     let summary = reconcile_with_shutdown(
         lifecycle,
         authority,
@@ -205,14 +232,27 @@ async fn run_connection(
         let _ = socket.close(None).await;
         return Ok(());
     };
+    telemetry.record_reconciliation(
+        if summary.errors == 0 && !summary.truncated {
+            ReconciliationOutcome::Ok
+        } else if summary.errors < summary.examined || summary.truncated {
+            ReconciliationOutcome::Partial
+        } else {
+            ReconciliationOutcome::Failed
+        },
+        reconciliation_started.elapsed(),
+    );
     if summary.errors != 0 || summary.truncated {
+        telemetry.set_ready(false);
         return Err(ServiceStreamError::ReconciliationIncomplete);
     }
     actor_failures.borrow_and_update();
-    if actors.sync_from_store().await.is_err() {
+    let stats = actors.sync_from_store().await.map_err(|_| {
         eprintln!("event=service_actor_sync_failed kind=store");
-        return Err(ServiceStreamError::ReconciliationIncomplete);
-    }
+        ServiceStreamError::ReconciliationIncomplete
+    })?;
+    telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
+    telemetry.set_ready(true);
 
     loop {
         tokio::select! {
@@ -258,13 +298,18 @@ async fn run_connection(
                                     return Err(ServiceStreamError::InvalidFrame);
                                 }
                             }
-                            actors
+                            let stats = actors
                                 .sync_actor(&event.did)
                                 .await
                                 .map_err(|_| {
                                     eprintln!("event=service_stream_session_ended kind=actor_pool_error");
                                     ServiceStreamError::InvalidFrame
                                 })?;
+                            telemetry.set_actor_pool(
+                                stats.active,
+                                stats.waiting,
+                                stats.max_connections,
+                            );
                         }
                     }
                     Message::Ping(payload) => {

@@ -75,12 +75,34 @@ The exporter runs on its own bounded background schedule (60-second interval,
 request. No public `/metrics` endpoint is served.
 
 The scope is `stratos.feedgen.ng`; the metric namespace is
-`stratos.feedgen.*` for comparison with the existing Feedgen runtime. This
-initial instrumentation records only `stratos.feedgen.read.stage.duration`
-with the fixed labels `stage` (`verify_authorization`, `viewer_authorization`,
-or `projection_serialization`) and `outcome` (`success`, `failure`, or
-`timeout`). It never includes DIDs, feed IDs, boundaries, record URIs, tokens,
-queries, or response bodies.
+`stratos.feedgen.*` for comparison with the existing Feedgen runtime. The
+Collector adds `otel_scope_name=stratos.feedgen.ng`, allowing Rust and
+TypeScript series to be selected separately without changing metric names.
+The exporter has no listener of its own: route the private Collector to its
+existing private Prometheus exporter/scrape path, never through this service.
+
+| Metric | Rust Feedgen NG behavior | TypeScript comparison |
+| --- | --- | --- |
+| `stratos.telemetry.heartbeat`, `stratos.feedgen.ready` | 60-second callback gauges, including idle processes | Same name and intent |
+| `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects` | Service-stream connection state and scheduled reconnects | Same name; actor reconnects are not separately counted because actor workers rotate intentionally |
+| `stratos.feedgen.actor_pool` | Active, waiting, and configured-capacity gauges after authoritative pool changes | Same name and labels |
+| `http.server.request.duration`, `http.server.active_requests` | Static method, route, and status dimensions for public routes | Same name and bounded dimensions |
+| `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned` | Completed projection reads; post count is decoded only from the already-produced bounded response | Same name and intent |
+| `stratos.feedgen.cache.requests` | Viewer-authorization cache hits and authority-resolution misses | Same name and intent |
+| `stratos.feedgen.index.operations` | Actor projection upserts and deletes after commit validation | Same name and intent |
+| `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes` | Authority-session reconciliation | Same name and intent |
+| `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes | Same name; Rust distinguishes deferred and rejected member results |
+
+`stratos.feedgen.shadow_feed.reads` is TypeScript-only: the Rust service is
+the production implementation and has no shadow comparison path. Process RSS
+and CPU metrics are intentionally not emitted. A portable Rust source would
+not provide a current, semantically comparable value under all supported
+deployments (Unix `getrusage` RSS is only a high-water mark), so exporting it
+would be inaccurate. Obtain container resource telemetry from the Collector or
+orchestrator instead.
+
+All attributes are fixed by code: no metric includes DIDs, feed IDs,
+boundaries, record URIs, tokens, queries, response bodies, or hostnames.
 
 ## Constrained rehearsal container
 
