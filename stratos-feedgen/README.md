@@ -1,5 +1,10 @@
 # @northskysocial/stratos-feedgen
 
+> Deprecated: this TypeScript feed generator is retained for rollback and
+> comparison. New development and deployment design target
+> [`stratos-feedgen-ng`](../stratos-feedgen-ng/README.md). The architecture and
+> configuration below describe the legacy implementation only.
+
 Standalone feed generator for Stratos. It serves boundary-scoped, hydrated
 feeds from a rebuildable local index fed by two custody-aware ingestion arms:
 Stratos actor subscriptions and bounded polling of `pds`-custody member repos.

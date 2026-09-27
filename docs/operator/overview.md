@@ -21,11 +21,13 @@ visible, Stratos records have **domain boundaries** that restrict visibility.
 
 ## Service Components
 
-| Component         | Description                                                          |
-| ----------------- | -------------------------------------------------------------------- |
-| `stratos-service` | XRPC/HTTP service — enrollment, record CRUD, sync export             |
-| `stratos-indexer` | Standalone indexer — PDS firehose + actor sync streams → PostgreSQL  |
-| AppView           | Feed query endpoints — `zone.stratos.feed.*` with boundary filtering |
+| Component            | Description                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `stratos-service`    | XRPC/HTTP service — enrollment, record CRUD, sync export                                                      |
+| `stratos-feedgen-ng` | Rust feed service — verified actor and PDS-space ingestion, encrypted local projection, boundary-scoped feeds |
+
+The TypeScript feedgen and standalone indexer are deprecated. See
+[Feedgen NG](/operator/feedgen-ng) for the current feed architecture.
 
 ## Request Flow
 

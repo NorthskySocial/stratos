@@ -20,9 +20,13 @@ import RecordCreationAnimation from '../.vitepress/theme/components/RecordCreati
 
 <RecordCreationAnimation />
 
-### AppView Indexing
+### Private feed projection
 
-<IndexerSyncAnimation />
+Feedgen NG follows Stratos actor subscriptions and authority-listed PDS space
+members. It verifies PDS terminal commits before promoting staged records to
+an encrypted, bounded SQLCipher projection. A viewer's current enrollment
+controls feed and blob reads. See [Feedgen NG](/operator/feedgen-ng) for the
+module boundaries, privacy controls, and readiness policy.
 
 ## Repository & MST Architecture
 

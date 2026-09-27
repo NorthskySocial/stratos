@@ -1,5 +1,10 @@
 # Clubhouse public-alpha room catalogue
 
+> Historical TypeScript feedgen deployment procedure. Feedgen NG uses an
+> explicit feed registry and does not implement the legacy catalogue refresh
+> or `available` feed flag described below. Use [Feedgen NG](/operator/feedgen-ng)
+> for the current feed design; do not apply this page to a Rust deployment.
+
 This document defines the operator configuration boundary for Plan 024's
 one-feed-per-room public alpha. A room is represented by one Feedgen feed ID
 and one canonical Stratos enrollment boundary. The room ID is a client-facing

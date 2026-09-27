@@ -129,3 +129,15 @@ curl https://stratos.example.com/.well-known/did.json
 # Check enrollment status
 curl "https://stratos.example.com/xrpc/zone.stratos.enrollment.status?did=did:plc:abc123"
 ```
+
+## Add Feedgen NG
+
+For boundary-scoped feeds, deploy the Rust `stratos-feedgen-ng` service with
+its own DID, signing key, feed registry, and encrypted projection volume. Do
+not mount the deprecated TypeScript feedgen database as Rust state. The
+[Feedgen NG architecture](/operator/feedgen-ng) describes authority-derived
+membership, verified PDS-space ingestion, request authorization, retention,
+and private DNS policy. Rehearse an independent-state start and authenticated
+feed probe before changing routing; follow the repository's
+[cutover runbook](https://github.com/NorthskySocial/stratos/blob/main/stratos-feedgen-ng/CUTOVER.md)
+for comparison and rollback.

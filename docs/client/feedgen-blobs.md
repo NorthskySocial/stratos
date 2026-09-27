@@ -1,9 +1,9 @@
 # Private feed attachments
 
-The feed generator reads Stratos-hosted attachments on demand and caches verified bytes on its local disk.
-Repeated reads avoid another upstream download. A CDN is not required for this benefit.
-An S3 cache is not required: the local cache has explicit byte and retention limits and can be discarded.
-The `BlobCache` interface separates storage from authorization and download integrity checks.
+Feedgen NG reads Stratos-hosted attachments on demand and keeps CID-verified
+bytes in a bounded **in-memory** cache. Blob bytes are not written to its
+encrypted post projection or a separate disk cache. Repeated reads avoid an
+upstream download while the entry is fresh; no CDN or S3 cache is required.
 
 ## Feed response
 
@@ -29,7 +29,7 @@ Clubhouse currently renders post text only and does not render attachments.
 
 ## Authenticated downloads
 
-The new Lexicon XRPC query is `zone.stratos.feedgen.getBlob` with required `uri` and `cid` parameters.
+The Lexicon XRPC query is `zone.stratos.feedgen.getBlob` with required `uri` and `cid` parameters.
 `uri` identifies the exact indexed post that references the blob, including seven-segment space record URIs.
 The request requires a viewer service-auth JWT with the feedgen audience and `lxm=zone.stratos.feedgen.getBlob`.
 A token issued for `getFeed` cannot call `getBlob`, and vice versa.
@@ -71,21 +71,15 @@ Responses use `Cache-Control: private, no-store`, `Vary: Authorization`, `nosnif
 Known passive image, video, and audio types keep their MIME type; other content is `application/octet-stream`.
 There is no public cache URL, range response, redirect, or CDN authorization bypass.
 
-Purging a post removes its blob authorization immediately; a retained cache file does not grant access.
-Cached bytes can remain on disk until eviction, expiry on access, or the next startup scan.
-The TTL is not a scheduled secure-erasure guarantee. Existing local object URLs also require client cleanup after sign-out or removal.
-Use a dedicated cache directory per feedgen process. Protect its volume as private data.
-The container image uses `/app/cache/blobs`, outside the durable control volume.
-That cache is ephemeral unless an operator mounts a separate private cache volume.
-Deleting the cache directory while the service is stopped is safe; subsequent requests refill it.
-
-| Environment variable                    | Default                | Purpose                                                             |
-| --------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
-| `FEEDGEN_BLOB_CACHE_DIRECTORY`          | `./data/feedgen-blobs` | Dedicated private disk cache                                        |
-| `FEEDGEN_BLOB_CACHE_MAX_BYTES`          | `536870912` (512 MiB)  | Total retained cache bytes; least recently read entries are evicted |
-| `FEEDGEN_BLOB_CACHE_TTL_MS`             | `3600000` (one hour)   | Maximum entry age before reuse; reads do not extend it              |
-| `FEEDGEN_BLOB_MAX_BYTES`                | `26214400` (25 MiB)    | Maximum accepted attachment size                                    |
-| `FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS` | `4`                    | Maximum simultaneous upstream downloads                             |
+Purging a post removes its blob authorization immediately. Cached bytes are
+never an access grant: every request checks the viewer and indexed post before
+returning them. The in-memory cache is limited to 16 MiB, 128 entries, a
+five-minute maximum lifetime, and 4 MiB per blob; at most two upstream
+downloads run concurrently. Entries are swept after expiry and disappear on
+process exit. This is bounded retention, not a secure-erasure guarantee for
+process memory. Existing browser object URLs still require client cleanup
+after sign-out or removal. The legacy TypeScript `FEEDGEN_BLOB_CACHE_*`
+directory and size settings do not apply to Feedgen NG.
 
 A blob exceeding the object limit returns `BlobTooLarge`. Saturated download capacity returns `BlobBusy` (503).
 An inaccessible, unattached, missing, or unsupported-custody blob returns `BlobNotFound`.

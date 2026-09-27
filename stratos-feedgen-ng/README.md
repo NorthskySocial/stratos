@@ -10,6 +10,25 @@ terminal commit verifies. Requests use `STRATOS_SERVICE_URL` for network
 reachability; `STRATOS_PUBLIC_URL`, when set, is used solely as the public DPoP
 proof target.
 
+## Architecture
+
+`main.rs` composes the runtime from authority and identity clients, custody
+sync workers, the lifecycle, and an encrypted projection. The HTTP router in
+`server.rs` delegates feed, blob, identity, viewer authorization, and private
+response handling to focused `server/` modules. `feed_service.rs` and
+`space_sync.rs` enforce read and space-target rules; `service.rs` coordinates
+projection admission and invalidation. `store.rs` defines the SQLCipher store
+and shared types; `store/` groups connection, actor, space, read, and retention
+operations. Rust traits live near the consumers that need them.
+
+Stratos-custody actors arrive through authenticated subscriptions. PDS-custody
+repos are selected from current authority membership, not record claims or
+writer discovery. Foreign pages stay unqueryable until their terminal commit
+verifies. A current viewer enrollment is required before local posts or blobs
+can be returned. The projection is bounded and rebuildable; its encrypted disk
+contents are not an independent authorization source. Blob content uses a
+bounded in-memory cache and never enters the projection.
+
 Run the current contract tests with:
 
 ```sh
