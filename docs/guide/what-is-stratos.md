@@ -64,25 +64,23 @@ When you enroll:
 
 ---
 
-## Private Data: A tale of two records
+## Where private posts live
 
-When you post something via Stratos, it is stored within the service and never written to your
-public PDS:
+Your private posts are not published as ordinary public posts. Where they are
+stored depends on your PDS:
 
-- The full post (with your actual text, attachments, and boundary label) is stored securely inside
-  Stratos.
-- Nothing about the post lands on your public PDS. Your enrollment record — published once when you
-  join — advertises your Stratos endpoint so apps know where to look.
-- When an app hydrates a post, Stratos returns it with a `source` field: a pointer that says _"the
-  real version of this lives over here, and you'll need permission to read it"_.
+- If your PDS does not support protected spaces, Stratos stores the post.
+- If your PDS supports spaces, it stores the post in a protected space on your
+  PDS. Stratos still decides who belongs to that space.
+- Your public enrollment record tells apps which Stratos service to contact.
+  Apps check access before showing a private post.
 
-This means apps can discover and route your posts through your enrollment, but the actual content
-never leaks onto the public network.
+In either case, a private post is not part of the public feed.
 
 <div class="animation-card">
   <div class="animation-label">
     <span class="step-number">3</span>
-    <span>How apps read private posts — AppView hydration</span>
+    <span>How apps read private posts</span>
   </div>
   <AppviewHydration />
 </div>
@@ -91,27 +89,24 @@ never leaks onto the public network.
 
 ## Putting It Together
 
-| Step                    | What happens                                                              |
-| ----------------------- | ------------------------------------------------------------------------- |
-| You enroll              | Your boundaries are recorded; an enrollment record lands on your PDS      |
-| You write a post        | Full content stored in Stratos; nothing is written to your PDS            |
-| Someone opens your feed | The app hydrates via Stratos, sees the source pointer, gets the full post |
-| Stratos checks          | Does the requester share your boundary? Yes → full post. No → nothing     |
-| You see your feed       | Only posts from boundaries you're in appear                               |
+| Step                    | What happens                                                               |
+| ----------------------- | -------------------------------------------------------------------------- |
+| You enroll              | Your boundaries are recorded; an enrollment record lands on your PDS       |
+| You write a post        | Stratos or a protected space on your PDS stores it                         |
+| Someone opens your feed | The app requests posts for that viewer                                     |
+| Access is checked       | Does the viewer share the post's boundary? Yes → show it. No → deny access |
+| You see your feed       | Only posts from boundaries you're in appear                                |
 
 ---
 
 ## Why This Matters
 
-- Your posts live in your namespace (`at://your-did/zone.stratos.feed.post/...`), not in a closed
-  silo.
-- You keep your identity - Stratos is an add-on layer, not a separate account.
+- You keep your AT Protocol identity. Stratos is an extra service, not a
+  separate account.
 - Access control is enforced - When your app fetches a post, Stratos validates the requester's
   actual boundary membership before returning any content — no trust is delegated to the client.
-- Attestations are for _discovery_, not enforcement - The service attestation in your enrollment
-  record is a public signal: it lets any app confirm that you are enrolled with a specific Stratos
-  service and what boundaries you were assigned at signing time. This enables offline verification
-  without hitting the live service on every request.
+- The signed enrollment record helps apps confirm which Stratos service you
+  joined. It does not grant access to posts; current membership decides that.
 
 ::: info Operators choose the rules
 A community can run its own Stratos service with its own membership criteria — fully independent of

@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Stratos
   text: Private permissioned data for ATprotocol
-  tagline: Store boundary-scoped records off the firehose, serve them through the protocol.
+  tagline: Share private posts with approved members using your AT Protocol identity.
   actions:
     - theme: brand
       text: Get Started
@@ -19,11 +19,11 @@ hero:
 features:
   - icon: 🔐
     title: Boundary Access Control
-    details: Records carry domain boundaries. A viewer can only access content when they share at least one boundary with the record.
+    details: Posts belong to access groups called boundaries. Only members of a matching group can read them.
   - icon: 🪪
     title: OAuth Enrollment
     details: Users enroll via standard ATprotocol OAuth. An enrollment record is published to their PDS for endpoint discovery.
   - icon: 🔗
-    title: Source Field Hydration
-    details: Hydrated records carry a source field pointing back to Stratos. Appviews resolve full content from Stratos with boundary checks.
+    title: Private Record Reads
+    details: Apps find the right service through enrollment records and receive full posts only after an access check.
 ---
