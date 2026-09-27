@@ -94,14 +94,14 @@ existing private Prometheus exporter/scrape path, never through this service.
 | `stratos.feedgen.index.operations` | Actor projection upserts and deletes after commit validation | Same name and intent |
 | `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes` | Authority-session reconciliation | Same name and intent |
 | `stratos.feedgen.space_sync.duration`, `stratos.feedgen.space_sync.outcomes`, `stratos.feedgen.space_sync.last_success` | Authority-listed PDS target passes and outcomes | Same name; Rust distinguishes deferred and rejected member results |
+| `process.resident_memory`, `process.cpu.time` | Linux-only current RSS bytes from `/proc/self/statm` and process CPU seconds from `CLOCK_PROCESS_CPUTIME_ID` | Matches the standard OTel runtime metric names; Collector Prometheus naming follows its configured translation |
 
 `stratos.feedgen.shadow_feed.reads` is TypeScript-only: the Rust service is
 the production implementation and has no shadow comparison path. Process RSS
-and CPU metrics are intentionally not emitted. A portable Rust source would
-not provide a current, semantically comparable value under all supported
-deployments (Unix `getrusage` RSS is only a high-water mark), so exporting it
-would be inaccurate. Obtain container resource telemetry from the Collector or
-orchestrator instead.
+and CPU metrics are emitted only on Linux. Other platforms emit no process
+resource series because a portable Rust source would not provide a current,
+semantically comparable value (`getrusage` RSS is only a high-water mark).
+Obtain portable container resource telemetry from the Collector or orchestrator.
 
 All attributes are fixed by code: no metric includes DIDs, feed IDs,
 boundaries, record URIs, tokens, queries, response bodies, or hostnames.

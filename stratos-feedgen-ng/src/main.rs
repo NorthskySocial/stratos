@@ -111,7 +111,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
         config.service_did.clone(),
         config.signing_key.clone(),
     )?);
-    let actors = ActorPool::start(
+    let actors = ActorPool::start_with_telemetry(
         ActorStreamConfig {
             service_url: config.stratos_service_url.clone(),
             service_did: config.stratos_service_did.clone(),
@@ -121,6 +121,7 @@ async fn run(config: FeedgenConfig) -> Result<(), Box<dyn std::error::Error>> {
             max_connections: config.actor_max_connections,
         },
         Arc::clone(&lifecycle),
+        metrics.telemetry(),
     )?;
     let stream = match ServiceStream::start_with_telemetry(
         ServiceStreamConfig {

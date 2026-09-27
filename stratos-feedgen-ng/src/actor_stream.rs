@@ -22,6 +22,7 @@ use crate::{
     lifecycle::{ActorFrameResult, ControlLifecycle},
     service_auth::{ServiceSigningKey, mint_service_jwt},
     store::StoreError,
+    telemetry::FeedTelemetry,
     websocket_client::authenticated_client_request,
 };
 
@@ -105,6 +106,14 @@ impl ActorPool {
         config: ActorStreamConfig,
         lifecycle: Arc<ControlLifecycle>,
     ) -> Result<Arc<Self>, ActorPoolError> {
+        Self::start_with_telemetry(config, lifecycle, Arc::new(FeedTelemetry::disabled()))
+    }
+
+    pub fn start_with_telemetry(
+        config: ActorStreamConfig,
+        lifecycle: Arc<ControlLifecycle>,
+        telemetry: Arc<FeedTelemetry>,
+    ) -> Result<Arc<Self>, ActorPoolError> {
         validate_config(&config)?;
         let (commands, receiver) = mpsc::channel(32);
         let (failures, _) = watch::channel(0_u64);
@@ -115,7 +124,9 @@ impl ActorPool {
             commands,
             manager: tokio::sync::Mutex::new(None),
         });
-        let manager = tokio::spawn(run_manager(config, lifecycle, failures, receiver));
+        let manager = tokio::spawn(run_manager(
+            config, lifecycle, failures, receiver, telemetry,
+        ));
         *pool
             .manager
             .try_lock()
@@ -244,6 +255,7 @@ async fn run_manager(
     lifecycle: Arc<ControlLifecycle>,
     failures: watch::Sender<u64>,
     mut commands: mpsc::Receiver<PoolCommand>,
+    telemetry: Arc<FeedTelemetry>,
 ) {
     let (finished, mut workers) = mpsc::unbounded_channel::<WorkerFinished>();
     let mut desired = BTreeSet::new();
@@ -263,7 +275,7 @@ async fn run_manager(
                 if active.get(&completion.did).is_some_and(|worker: &ActiveWorker| worker.id == completion.id) {
                     active.remove(&completion.did);
                 }
-                start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation);
+                start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
             }
             command = commands.recv() => {
                 let Some(command) = command else {
@@ -279,7 +291,7 @@ async fn run_manager(
                         desired = actors;
                         rotation.last_started.retain(|did, _| desired.contains(did));
                         stop_removed_workers(&active, &desired);
-                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation);
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::SetActor { did, enrolled, reply } => {
@@ -296,7 +308,7 @@ async fn run_manager(
                                 let _ = worker.shutdown.send(true);
                             }
                         }
-                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation);
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::Stats { reply } => {
@@ -339,6 +351,7 @@ fn stop_removed_workers(active: &BTreeMap<String, ActiveWorker>, desired: &BTree
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Bounded worker inputs stay explicit.
 fn start_waiting_workers(
     config: &ActorStreamConfig,
     lifecycle: &Arc<ControlLifecycle>,
@@ -347,6 +360,7 @@ fn start_waiting_workers(
     desired: &BTreeSet<String>,
     active: &mut BTreeMap<String, ActiveWorker>,
     rotation: &mut Rotation,
+    telemetry: &Arc<FeedTelemetry>,
 ) {
     while active.len() < usize::from(config.max_connections) {
         let Some(did) = next_waiting_actor(desired, active, &rotation.last_started) else {
@@ -360,9 +374,18 @@ fn start_waiting_workers(
         let config = config.clone();
         let lifecycle = Arc::clone(lifecycle);
         let failures = failures.clone();
+        let telemetry = Arc::clone(telemetry);
         let finished = finished.clone();
         tokio::spawn(async move {
-            run_actor_worker(config, lifecycle, failures, did.clone(), receiver).await;
+            run_actor_worker_with_telemetry(
+                config,
+                lifecycle,
+                failures,
+                did.clone(),
+                receiver,
+                telemetry,
+            )
+            .await;
             let _ = finished.send(WorkerFinished { did, id });
         });
     }
@@ -380,12 +403,13 @@ fn next_waiting_actor(
         .cloned()
 }
 
-async fn run_actor_worker(
+async fn run_actor_worker_with_telemetry(
     config: ActorStreamConfig,
     lifecycle: Arc<ControlLifecycle>,
     failures: watch::Sender<u64>,
     did: String,
     mut shutdown: watch::Receiver<bool>,
+    telemetry: Arc<FeedTelemetry>,
 ) {
     if actor_subscription_url(&config.service_url, &did, None).is_err() {
         return;
@@ -410,6 +434,7 @@ async fn run_actor_worker(
             return;
         }
         failures.send_modify(|count| *count = count.saturating_add(1));
+        telemetry.record_reconnect("actor");
         attempt = attempt.saturating_add(1);
         let deadline = *failure_deadline
             .get_or_insert_with(|| tokio::time::Instant::now() + MAX_FAILED_WORKER_LEASE);
@@ -588,11 +613,12 @@ mod tests {
         readiness::FeedReadinessGate,
         service::ProjectionReader,
         store::{ActorEnrollment, EncryptedStore, StorageKey},
+        telemetry::FeedTelemetry,
     };
 
     use super::{
         ActiveWorker, ActorPool, ActorPoolError, ActorStreamConfig, actor_subscription_url,
-        next_waiting_actor, reconnect_delay, retention_deadline, run_actor_worker,
+        next_waiting_actor, reconnect_delay, retention_deadline, run_actor_worker_with_telemetry,
     };
 
     #[test]
@@ -767,18 +793,21 @@ mod tests {
         };
         let (failures, _) = tokio::sync::watch::channel(0_u64);
         let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        let telemetry = Arc::new(FeedTelemetry::disabled());
         tokio::time::timeout(
             super::MAX_FAILED_WORKER_LEASE + Duration::from_secs(2),
-            run_actor_worker(
+            run_actor_worker_with_telemetry(
                 config,
                 lifecycle,
                 failures.clone(),
                 "did:plc:faye".to_owned(),
                 receiver,
+                Arc::clone(&telemetry),
             ),
         )
         .await
         .unwrap();
         assert!(*failures.borrow() > 0);
+        assert!(telemetry.actor_reconnects() > 0);
     }
 }

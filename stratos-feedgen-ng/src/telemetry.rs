@@ -10,7 +10,7 @@ use std::{
 
 use opentelemetry::{
     KeyValue,
-    metrics::{Counter, Histogram, MeterProvider, ObservableGauge, UpDownCounter},
+    metrics::{Counter, Histogram, Meter, MeterProvider, ObservableGauge, UpDownCounter},
 };
 use opentelemetry_otlp::{MetricExporter, WithExportConfig};
 use opentelemetry_sdk::{
@@ -118,6 +118,7 @@ struct RuntimeState {
     actor_waiting: AtomicU64,
     actor_capacity: AtomicU64,
     last_space_sync_success: AtomicU64,
+    actor_reconnects: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -141,6 +142,8 @@ pub struct FeedTelemetry {
     _connected: Option<ObservableGauge<u64>>,
     _actor_pool: Option<ObservableGauge<u64>>,
     _last_space_sync_success: Option<ObservableGauge<u64>>,
+    _process_rss: Option<ObservableGauge<u64>>,
+    _process_cpu: Option<ObservableGauge<f64>>,
 }
 
 impl FeedTelemetry {
@@ -164,6 +167,8 @@ impl FeedTelemetry {
             _connected: None,
             _actor_pool: None,
             _last_space_sync_success: None,
+            _process_rss: None,
+            _process_cpu: None,
         }
     }
 
@@ -321,6 +326,8 @@ impl FeedTelemetry {
                     })
                     .build(),
             ),
+            _process_rss: process_rss_gauge(&meter),
+            _process_cpu: process_cpu_gauge(&meter),
         }
     }
 
@@ -354,9 +361,16 @@ impl FeedTelemetry {
             .store(u64::from(capacity), Ordering::Relaxed);
     }
     pub fn record_reconnect(&self, kind: &'static str) {
+        if kind == "actor" {
+            self.state.actor_reconnects.fetch_add(1, Ordering::Relaxed);
+        }
         if let Some(metric) = &self.reconnects {
             metric.add(1, &[KeyValue::new("stream.kind", kind)]);
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn actor_reconnects(&self) -> u64 {
+        self.state.actor_reconnects.load(Ordering::Relaxed)
     }
     pub fn record_cache(&self, outcome: &'static str) {
         if let Some(metric) = &self.cache_requests {
@@ -539,6 +553,77 @@ fn unix_seconds() -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
+#[cfg(target_os = "linux")]
+fn process_rss_gauge(meter: &Meter) -> Option<ObservableGauge<u64>> {
+    Some(
+        meter
+            .u64_observable_gauge("process.resident_memory")
+            .with_unit("By")
+            .with_description("Current Linux process resident memory.")
+            .with_callback(|observer| {
+                if let Some(bytes) = linux_process_rss_bytes() {
+                    observer.observe(bytes, &[]);
+                }
+            })
+            .build(),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_rss_gauge(_: &Meter) -> Option<ObservableGauge<u64>> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn process_cpu_gauge(meter: &Meter) -> Option<ObservableGauge<f64>> {
+    Some(
+        meter
+            .f64_observable_gauge("process.cpu.time")
+            .with_unit("s")
+            .with_description("Current Linux process CPU time.")
+            .with_callback(|observer| {
+                if let Some(seconds) = linux_process_cpu_seconds() {
+                    observer.observe(seconds, &[]);
+                }
+            })
+            .build(),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_cpu_gauge(_: &Meter) -> Option<ObservableGauge<f64>> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_rss_bytes() -> Option<u64> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let resident_pages = parse_linux_statm_resident_pages(&statm)?;
+    let page_size = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
+    if page_size == 0 {
+        return None;
+    }
+    resident_pages.checked_mul(page_size as u64)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_statm_resident_pages(value: &str) -> Option<u64> {
+    value.split_ascii_whitespace().nth(1)?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_cpu_seconds() -> Option<f64> {
+    let mut value = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    if unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, value.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    let value = unsafe { value.assume_init() };
+    if value.tv_sec < 0 || value.tv_nsec < 0 {
+        return None;
+    }
+    Some(value.tv_sec as f64 + value.tv_nsec as f64 / 1_000_000_000.0)
+}
+
 pub struct MetricsRuntime {
     telemetry: Arc<FeedTelemetry>,
     provider: Option<SdkMeterProvider>,
@@ -612,6 +697,7 @@ mod tests {
         telemetry.record_feed_request(FeedRequestOutcome::Ok, Some(3));
         telemetry.record_cache("hit");
         telemetry.record_reconnect("service");
+        telemetry.record_reconnect("actor");
         telemetry.record_index_operations(2, 1, "ok");
         telemetry.record_reconciliation(ReconciliationOutcome::Ok, Duration::from_millis(1));
         telemetry.record_space_sync(SpaceSyncOutcome::Ok, Duration::from_millis(1), 1, 0, 0, 0);
@@ -638,6 +724,7 @@ mod tests {
         for label in [
             "/xrpc/zone.stratos.feedgen.getFeed",
             "service",
+            "actor",
             "active",
             "waiting",
             "capacity",
@@ -645,7 +732,21 @@ mod tests {
         ] {
             assert!(metrics.contains(label), "missing fixed label {label}");
         }
+        #[cfg(target_os = "linux")]
+        {
+            assert!(metrics.contains("process.resident_memory"));
+            assert!(metrics.contains("process.cpu.time"));
+        }
         assert!(!metrics.contains("did:plc:"));
         provider.shutdown().unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_linux_statm_and_reads_current_process_resources() {
+        assert_eq!(parse_linux_statm_resident_pages("100 42 0"), Some(42));
+        assert_eq!(parse_linux_statm_resident_pages("100"), None);
+        assert!(linux_process_rss_bytes().is_some());
+        assert!(linux_process_cpu_seconds().is_some());
     }
 }
