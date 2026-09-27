@@ -33,6 +33,10 @@ const MAX_ACTOR_FRAME_BYTES: usize = 32 * 1024;
 const DEFAULT_MAX_CONNECTIONS: u16 = 8;
 const MAX_TRACKED_ACTORS: usize = 4_096;
 const ENROLLMENT_PAGE_SIZE: u16 = 128;
+const IDLE_ROTATION_AFTER: Duration = Duration::from_secs(2);
+const MAX_WORKER_LEASE: Duration = Duration::from_secs(15);
+const MAX_FAILED_WORKER_LEASE: Duration = Duration::from_secs(15);
+const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Configures the fixed-resource actor subscription pool.
 #[derive(Clone)]
@@ -229,6 +233,12 @@ struct WorkerFinished {
     id: u64,
 }
 
+#[derive(Default)]
+struct Rotation {
+    last_started: BTreeMap<String, u64>,
+    next_id: u64,
+}
+
 async fn run_manager(
     config: ActorStreamConfig,
     lifecycle: Arc<ControlLifecycle>,
@@ -238,7 +248,7 @@ async fn run_manager(
     let (finished, mut workers) = mpsc::unbounded_channel::<WorkerFinished>();
     let mut desired = BTreeSet::new();
     let mut active = BTreeMap::new();
-    let mut next_id = 0_u64;
+    let mut rotation = Rotation::default();
     let mut stopping: Option<oneshot::Sender<()>> = None;
 
     loop {
@@ -253,7 +263,7 @@ async fn run_manager(
                 if active.get(&completion.did).is_some_and(|worker: &ActiveWorker| worker.id == completion.id) {
                     active.remove(&completion.did);
                 }
-                start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut next_id);
+                start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation);
             }
             command = commands.recv() => {
                 let Some(command) = command else {
@@ -267,8 +277,9 @@ async fn run_manager(
                             continue;
                         }
                         desired = actors;
+                        rotation.last_started.retain(|did, _| desired.contains(did));
                         stop_removed_workers(&active, &desired);
-                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut next_id);
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::SetActor { did, enrolled, reply } => {
@@ -280,11 +291,12 @@ async fn run_manager(
                             desired.insert(did);
                         } else {
                             desired.remove(&did);
+                            rotation.last_started.remove(&did);
                             if let Some(worker) = active.get(&did) {
                                 let _ = worker.shutdown.send(true);
                             }
                         }
-                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut next_id);
+                        start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
                     PoolCommand::Stats { reply } => {
@@ -334,18 +346,15 @@ fn start_waiting_workers(
     finished: &mpsc::UnboundedSender<WorkerFinished>,
     desired: &BTreeSet<String>,
     active: &mut BTreeMap<String, ActiveWorker>,
-    next_id: &mut u64,
+    rotation: &mut Rotation,
 ) {
     while active.len() < usize::from(config.max_connections) {
-        let Some(did) = desired
-            .iter()
-            .find(|did| !active.contains_key(*did))
-            .cloned()
-        else {
+        let Some(did) = next_waiting_actor(desired, active, &rotation.last_started) else {
             return;
         };
-        *next_id = next_id.saturating_add(1);
-        let id = *next_id;
+        rotation.next_id = rotation.next_id.saturating_add(1);
+        let id = rotation.next_id;
+        rotation.last_started.insert(did.clone(), id);
         let (shutdown, receiver) = watch::channel(false);
         active.insert(did.clone(), ActiveWorker { id, shutdown });
         let config = config.clone();
@@ -359,6 +368,18 @@ fn start_waiting_workers(
     }
 }
 
+fn next_waiting_actor(
+    desired: &BTreeSet<String>,
+    active: &BTreeMap<String, ActiveWorker>,
+    last_started: &BTreeMap<String, u64>,
+) -> Option<String> {
+    desired
+        .iter()
+        .filter(|did| !active.contains_key(*did))
+        .min_by_key(|did| last_started.get(*did).copied().unwrap_or(0))
+        .cloned()
+}
+
 async fn run_actor_worker(
     config: ActorStreamConfig,
     lifecycle: Arc<ControlLifecycle>,
@@ -370,15 +391,31 @@ async fn run_actor_worker(
         return;
     }
     let mut attempt = 0_u32;
+    let mut failure_deadline = None;
     while !*shutdown.borrow() {
-        let result = run_actor_connection(&config, &lifecycle, &did, &mut shutdown).await;
-        if *shutdown.borrow() || matches!(result, Ok(ActorFrameResult::NotEnrolled)) {
+        let result = if let Some(deadline) = failure_deadline {
+            tokio::select! {
+                result = run_actor_connection(&config, &lifecycle, &did, &mut shutdown) => result,
+                _ = tokio::time::sleep_until(deadline) => return,
+            }
+        } else {
+            run_actor_connection(&config, &lifecycle, &did, &mut shutdown).await
+        };
+        if *shutdown.borrow()
+            || matches!(
+                result,
+                Ok(ActorFrameResult::NotEnrolled | ActorFrameResult::Ignored)
+            )
+        {
             return;
         }
         failures.send_modify(|count| *count = count.saturating_add(1));
         attempt = attempt.saturating_add(1);
+        let deadline = *failure_deadline
+            .get_or_insert_with(|| tokio::time::Instant::now() + MAX_FAILED_WORKER_LEASE);
         tokio::select! {
             _ = tokio::time::sleep(reconnect_delay(attempt)) => {}
+            _ = tokio::time::sleep_until(deadline) => return,
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
@@ -430,11 +467,20 @@ async fn run_actor_connection(
     let (mut socket, _) = connection
         .map_err(|_| ActorPoolError::Stopped)?
         .map_err(|_| ActorPoolError::Stopped)?;
+    let lease_deadline = tokio::time::Instant::now() + MAX_WORKER_LEASE;
     loop {
         tokio::select! {
+            _ = tokio::time::sleep(IDLE_ROTATION_AFTER) => {
+                let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
+                return Ok(ActorFrameResult::Ignored);
+            }
+            _ = tokio::time::sleep_until(lease_deadline) => {
+                let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
+                return Ok(ActorFrameResult::Ignored);
+            }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
-                    let _ = socket.close(None).await;
+                    let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
                     return Ok(ActorFrameResult::NotEnrolled);
                 }
             }
@@ -530,6 +576,7 @@ fn retention_deadline(now: OffsetDateTime, retention: Duration) -> Result<String
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::{BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
         time::Duration,
     };
@@ -544,9 +591,36 @@ mod tests {
     };
 
     use super::{
-        ActorPool, ActorPoolError, ActorStreamConfig, actor_subscription_url, reconnect_delay,
-        retention_deadline,
+        ActiveWorker, ActorPool, ActorPoolError, ActorStreamConfig, actor_subscription_url,
+        next_waiting_actor, reconnect_delay, retention_deadline, run_actor_worker,
     };
+
+    #[test]
+    fn completed_workers_yield_to_actors_that_have_not_synced() {
+        let desired = BTreeSet::from([
+            "did:plc:a".to_owned(),
+            "did:plc:b".to_owned(),
+            "did:plc:c".to_owned(),
+        ]);
+        let mut started = BTreeMap::new();
+        let active = BTreeMap::new();
+        assert_eq!(
+            next_waiting_actor(&desired, &active, &started).as_deref(),
+            Some("did:plc:a")
+        );
+        started.insert("did:plc:a".to_owned(), 1);
+        assert_eq!(
+            next_waiting_actor(&desired, &active, &started).as_deref(),
+            Some("did:plc:b")
+        );
+        started.insert("did:plc:b".to_owned(), 2);
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        let active = BTreeMap::from([("did:plc:c".to_owned(), ActiveWorker { id: 3, shutdown })]);
+        assert_eq!(
+            next_waiting_actor(&desired, &active, &started).as_deref(),
+            Some("did:plc:a")
+        );
+    }
 
     #[test]
     fn actor_urls_preserve_the_service_base_path_and_durable_cursor() {
@@ -657,5 +731,54 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(100), pool.stop())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_worker_releases_its_slot_after_the_retry_window() {
+        let lifecycle = Arc::new(
+            ControlLifecycle::for_authority(
+                ProjectionReader::new(
+                    EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+                ),
+                Arc::new(Mutex::new(FeedReadinessGate::default())),
+                "did:web:stratos.example.test",
+            )
+            .unwrap(),
+        );
+        lifecycle
+            .reconcile_actor_enrollment(
+                "did:plc:faye",
+                "1998-04-03T00:00:00.000Z",
+                Some(ActorEnrollment {
+                    did: "did:plc:faye".to_owned(),
+                    boundaries: vec!["did:web:stratos.example.test/bebop".to_owned()],
+                    observed_at: "1998-04-03T00:00:00.000Z".to_owned(),
+                }),
+            )
+            .unwrap();
+        let config = ActorStreamConfig {
+            service_url: "http://127.0.0.1:9".to_owned(),
+            service_did: "did:web:stratos.example.test".to_owned(),
+            feedgen_did: "did:web:feedgen.example.test".to_owned(),
+            signing_key: crate::service_auth::ServiceSigningKey::from_hex(&"11".repeat(32))
+                .unwrap(),
+            retention: Duration::from_secs(60),
+            max_connections: 1,
+        };
+        let (failures, _) = tokio::sync::watch::channel(0_u64);
+        let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        tokio::time::timeout(
+            super::MAX_FAILED_WORKER_LEASE + Duration::from_secs(2),
+            run_actor_worker(
+                config,
+                lifecycle,
+                failures.clone(),
+                "did:plc:faye".to_owned(),
+                receiver,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(*failures.borrow() > 0);
     }
 }

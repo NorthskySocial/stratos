@@ -427,6 +427,12 @@ pub(crate) fn is_utc_timestamp(value: &str) -> bool {
         && decimal(&bytes[17..19]) < 60
 }
 
+pub(crate) fn is_post_sort_timestamp(value: &str) -> bool {
+    value.len() <= 40
+        && time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+            .is_ok_and(|timestamp| timestamp.offset().whole_seconds() == 0)
+}
+
 fn decimal(value: &[u8]) -> u16 {
     value
         .iter()
@@ -454,7 +460,7 @@ fn validate_actor_page(page: &ActorPage) -> Result<(), StoreError> {
             .map_err(|_| StoreError::InvalidProjectionMutation)?;
         if uri.author().as_str() != post.author_did
             || !record_belongs_to_page(&uri, page)
-            || !is_utc_timestamp(&post.sort_at)
+            || !is_post_sort_timestamp(&post.sort_at)
             || !is_utc_timestamp(&post.indexed_at)
             || !is_utc_timestamp(&post.retained_at)
             || post.boundaries.iter().any(|boundary| boundary.is_empty())

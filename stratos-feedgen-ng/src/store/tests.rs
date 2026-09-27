@@ -51,6 +51,24 @@ fn spike_post() -> ProjectionPost {
     }
 }
 
+#[test]
+fn post_order_accepts_valid_utc_microseconds() {
+    let mut store = EncryptedStore::open_memory(key(7)).unwrap();
+    let mut post = spike_post();
+    post.sort_at = "1998-04-03T00:00:00.123456+00:00".to_owned();
+    store
+        .apply_actor_page(actor_page(1, vec![post], Vec::new()))
+        .unwrap();
+    assert_eq!(
+        store
+            .list_posts_by_boundary("bebop", None, 10, "1998-04-03T00:00:01.000Z")
+            .unwrap()
+            .posts
+            .len(),
+        1
+    );
+}
+
 fn space_post() -> ProjectionPost {
     let mut post = spike_post();
     post.uri = "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you".to_string();
