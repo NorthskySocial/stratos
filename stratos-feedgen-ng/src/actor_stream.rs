@@ -275,6 +275,8 @@ async fn run_manager(
                 if active.get(&completion.did).is_some_and(|worker: &ActiveWorker| worker.id == completion.id) {
                     active.remove(&completion.did);
                 }
+                let stats = stats_for(&desired, &active, config.max_connections);
+                telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
                 start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
             }
             command = commands.recv() => {
@@ -291,6 +293,8 @@ async fn run_manager(
                         desired = actors;
                         rotation.last_started.retain(|did, _| desired.contains(did));
                         stop_removed_workers(&active, &desired);
+                        let stats = stats_for(&desired, &active, config.max_connections);
+                        telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
                         start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
@@ -308,6 +312,8 @@ async fn run_manager(
                                 let _ = worker.shutdown.send(true);
                             }
                         }
+                        let stats = stats_for(&desired, &active, config.max_connections);
+                        telemetry.set_actor_pool(stats.active, stats.waiting, stats.max_connections);
                         start_waiting_workers(&config, &lifecycle, &failures, &finished, &desired, &mut active, &mut rotation, &telemetry);
                         let _ = reply.send(Ok(stats_for(&desired, &active, config.max_connections)));
                     }
@@ -317,6 +323,7 @@ async fn run_manager(
                     PoolCommand::Stop { reply } => {
                         desired.clear();
                         stop_workers(&active);
+                        telemetry.set_actor_pool(active.len(), 0, config.max_connections);
                         stopping = Some(reply);
                     }
                 }
@@ -364,6 +371,11 @@ fn start_waiting_workers(
 ) {
     while active.len() < usize::from(config.max_connections) {
         let Some(did) = next_waiting_actor(desired, active, &rotation.last_started) else {
+            telemetry.set_actor_pool(
+                active.len(),
+                desired.len().saturating_sub(active.len()),
+                config.max_connections,
+            );
             return;
         };
         rotation.next_id = rotation.next_id.saturating_add(1);
@@ -389,6 +401,11 @@ fn start_waiting_workers(
             let _ = finished.send(WorkerFinished { did, id });
         });
     }
+    telemetry.set_actor_pool(
+        active.len(),
+        desired.len().saturating_sub(active.len()),
+        config.max_connections,
+    );
 }
 
 fn next_waiting_actor(
@@ -728,7 +745,8 @@ mod tests {
                 )
                 .unwrap();
         }
-        let pool = ActorPool::start(
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let pool = ActorPool::start_with_telemetry(
             ActorStreamConfig {
                 service_url: "http://127.0.0.1:9".to_owned(),
                 service_did: "did:web:stratos.example.test".to_owned(),
@@ -739,6 +757,7 @@ mod tests {
                 max_connections: 1,
             },
             lifecycle,
+            Arc::clone(&telemetry),
         )
         .unwrap();
         let mut failures = pool.failure_receiver();
@@ -750,6 +769,7 @@ mod tests {
                 max_connections: 1,
             }
         );
+        assert_eq!(telemetry.actor_pool_stats(), (1, 1, 1));
         tokio::time::timeout(Duration::from_secs(1), failures.changed())
             .await
             .unwrap()

@@ -196,7 +196,7 @@ pub(super) async fn get_feed(
                 .telemetry
                 .record_feed_request(crate::telemetry::FeedRequestOutcome::Error, None);
             state.lifecycle.interrupt_feed_work();
-            state.lifecycle.mark_unavailable();
+            state.lifecycle.mark_read_unavailable();
             xrpc_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "FeedNotReady",

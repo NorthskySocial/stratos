@@ -337,6 +337,18 @@ impl FeedTelemetry {
     pub fn is_ready(&self) -> bool {
         self.state.ready.load(Ordering::Relaxed)
     }
+    #[cfg(test)]
+    pub(crate) fn is_service_connected(&self) -> bool {
+        self.state.service_connected.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
+    pub(crate) fn actor_pool_stats(&self) -> (u64, u64, u64) {
+        (
+            self.state.actor_active.load(Ordering::Relaxed),
+            self.state.actor_waiting.load(Ordering::Relaxed),
+            self.state.actor_capacity.load(Ordering::Relaxed),
+        )
+    }
     pub fn mark_ready(&self) {
         self.state.ready.store(true, Ordering::Relaxed);
     }

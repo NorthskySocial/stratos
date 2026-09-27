@@ -86,10 +86,10 @@ existing private Prometheus exporter/scrape path, never through this service.
 | Metric | Rust Feedgen NG behavior | TypeScript comparison |
 | --- | --- | --- |
 | `stratos.telemetry.heartbeat`, `stratos.feedgen.ready` | 60-second callback gauges, including idle processes | Same name and intent |
-| `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects` | Service-stream connection state and scheduled reconnects | Same name; actor reconnects are not separately counted because actor workers rotate intentionally |
+| `stratos.feedgen.subscription.connected`, `stratos.feedgen.subscription.reconnects` | Service-stream WebSocket state plus service and failed actor-worker reconnects | Same name; intentional actor idle/lease rotation is not counted |
 | `stratos.feedgen.actor_pool` | Active, waiting, and configured-capacity gauges after authoritative pool changes | Same name and labels |
 | `http.server.request.duration`, `http.server.active_requests` | Static method, route, and status dimensions for public routes | Same name and bounded dimensions |
-| `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned` | Completed projection reads; post count is decoded only from the already-produced bounded response | Same name and intent |
+| `stratos.feedgen.feed.requests`, `stratos.feedgen.feed.posts_returned` | Completed projection reads; post count is carried from the bounded response before serialization | Same name and intent |
 | `stratos.feedgen.cache.requests` | Viewer-authorization cache hits and authority-resolution misses | Same name and intent |
 | `stratos.feedgen.index.operations` | Actor projection upserts and deletes after commit validation | Same name and intent |
 | `stratos.feedgen.reconciliation.duration`, `stratos.feedgen.reconciliation.outcomes` | Authority-session reconciliation | Same name and intent |

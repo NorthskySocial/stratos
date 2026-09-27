@@ -254,13 +254,23 @@ impl ControlLifecycle {
     }
 
     pub fn mark_unavailable(&self) {
+        self.close_reads();
+        self.telemetry.mark_service_disconnected();
+    }
+
+    /// Closes feed admission after a projection failure while retaining the
+    /// independent service-stream connection signal.
+    pub fn mark_read_unavailable(&self) {
+        self.close_reads();
+    }
+
+    fn close_reads(&self) {
         let _transition = self.transition.lock().expect("lifecycle lock poisoned");
         let mut readiness = self.readiness.lock().expect("readiness lock poisoned");
         let mut projection = self.projection.lock().expect("projection lock poisoned");
         readiness.mark_unavailable();
         projection.close_session();
         self.telemetry.mark_unready();
-        self.telemetry.mark_service_disconnected();
     }
 
     pub fn apply_actor_page(&self, page: ActorPage) -> Result<(), StoreError> {
@@ -823,6 +833,26 @@ mod tests {
         assert!(telemetry.is_ready());
         lifecycle.mark_unavailable();
         assert!(!telemetry.is_ready());
+    }
+
+    #[test]
+    fn read_timeout_transition_preserves_the_service_connection_gauge() {
+        let telemetry = Arc::new(FeedTelemetry::disabled());
+        let lifecycle = ControlLifecycle::for_authority_with_telemetry(
+            ProjectionReader::new(
+                EncryptedStore::open_memory(StorageKey::from_bytes([7; 32])).unwrap(),
+            ),
+            Arc::new(Mutex::new(FeedReadinessGate::default())),
+            "did:plc:spike",
+            Arc::clone(&telemetry),
+        )
+        .unwrap();
+        lifecycle.session_established();
+        lifecycle.mark_read_unavailable();
+        assert!(telemetry.is_service_connected());
+        assert!(!telemetry.is_ready());
+        lifecycle.mark_unavailable();
+        assert!(!telemetry.is_service_connected());
     }
 
     #[test]
