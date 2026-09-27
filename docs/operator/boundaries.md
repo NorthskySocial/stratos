@@ -60,7 +60,13 @@ All new admin requests use the existing HttpOnly admin session and CSRF checks. 
 
 Mutation responses return the current `boundary`; listing returns `boundaries`. The service catalog includes room metadata, listing/joinability flags, and revision, but excludes administrative member counts and application allow-lists. An inactive or ordinary user enrollment cannot use the service catalog.
 
-A feed generator consuming the service catalog can follow admin changes without a separate feed-definition file. Grant it membership explicitly through Enrollments. Catalog discovery never grants the consumer additional access; room joinability is distinct from permission to read existing content.
+Feedgen NG uses an explicit feed registry rather than the service catalogue to
+map feed IDs to boundaries. Update that registry when adding or removing a
+feed, then restart Feedgen NG and verify readiness. Grant its service identity
+membership through Enrollments; a feed definition alone grants no access.
+Room joinability is distinct from permission to read existing content. The
+`zone.stratos.sync.listBoundaries` endpoint remains available to other service
+consumers but is not Feedgen NG's feed-registry source.
 
 ## Removing a member versus suspending one
 

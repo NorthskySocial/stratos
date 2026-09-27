@@ -20,31 +20,35 @@ ecosystem.
 
 1. _A user enrolls_ with a Stratos service via OAuth. The service writes a
    `zone.stratos.actor.enrollment` record to the user's PDS.
-2. _The user creates private records_ by calling the Stratos XRPC API. Records are stored in the
-   user's per-actor repo on Stratos, not on the PDS. Nothing is written to the PDS on the record
-   write path; hydrated records carry a `source` field pointing back to Stratos.
-3. _A standalone indexer_ subscribes to the PDS firehose (to discover enrollments) and to each
-   user's `subscribeRecords` stream (to index records with their boundary metadata).
-4. _An AppView_ queries the indexed PostgreSQL tables. When a viewer requests a feed, the AppView
-   filters posts to only those whose boundaries overlap with the viewer's enrolled boundaries.
+2. _The user creates private records_ within an authorized boundary. Stratos
+   hosts the repo for users whose PDS lacks spaces support; a spaces-capable PDS
+   hosts its own repo while Stratos remains the space authority.
+3. _Feedgen NG_ subscribes to Stratos-custody actors and polls only
+   authority-listed PDS-custody space members. It verifies foreign commits
+   before adding records to its encrypted local projection.
+4. _A viewer requests a feed_ using a service-auth JWT. Feedgen NG resolves the
+   viewer's Stratos enrollment and serves only posts matching its boundaries.
 
 ## Repository Packages
 
-| Package           | Description                                                                |
-| ----------------- | -------------------------------------------------------------------------- |
-| `stratos-core`    | Domain logic, storage interfaces, schema, validation, MST commit builder   |
-| `stratos-service` | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters      |
-| `stratos-client`  | Discovery, routing, verification, and OAuth scope helpers                  |
-| `stratos-indexer` | Standalone indexer consuming PDS + Stratos streams into AppView PostgreSQL |
-| `webapp`          | [Svelte demo client](/guide/webapp) for enrollment and private posting     |
-| `lexicons`        | JSON-based lexicon definitions                                             |
+| Package              | Description                                                                 |
+| -------------------- | --------------------------------------------------------------------------- |
+| `stratos-core`       | Domain logic, storage interfaces, schema, validation, MST commit builder    |
+| `stratos-service`    | HTTP/XRPC service, OAuth enrollment, repo CRUD, sync export, adapters       |
+| `stratos-client`     | Discovery, routing, verification, and OAuth scope helpers                   |
+| `stratos-feedgen-ng` | Rust feed service with encrypted local projection and boundary-scoped reads |
+| `webapp`             | [Svelte demo client](/guide/webapp) for enrollment and private posting      |
+| `lexicons`           | JSON-based lexicon definitions                                              |
+
+The TypeScript feedgen and AppView indexer remain in the repository for
+rollback or historical reference but are deprecated.
 
 ## Architecture
 
 For a deeper dive into the technical details of Stratos, see the following documentation:
 
 - [**Hydration Architecture**](/architecture/hydration) — How Stratos uses the source field pattern to keep data private.
-- [**Indexer Architecture**](/indexer-architecture) — How the standalone indexer consumes PDS and Stratos sync streams.
+- [**Feedgen NG**](/operator/feedgen-ng) — Current feed ingestion, encrypted projection, and request authorization.
 - [**Enrollment Signing**](/architecture/enrollment-signing) — How user keys and boundary attestations are managed.
 - [**Multi-Domain Enrollment**](/architecture/multi-domain-enrollment) — How users can enroll in multiple boundaries across different services.
 
