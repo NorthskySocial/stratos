@@ -1,9 +1,8 @@
 # Private feed attachments
 
 The feed generator reads Stratos-hosted attachments on demand and keeps
-CID-verified bytes in a bounded **in-memory** cache. Blob bytes are not written
-to its encrypted post projection or a separate disk cache. Repeated reads avoid an
-upstream download while the entry is fresh; no CDN or S3 cache is required.
+CID-verified bytes in an in-memory cache. Blob bytes are not stored/cached on disk. 
+Repeated reads avoid an upstream download while the entry is fresh; no CDN or S3 cache is required.
 
 ## Feed response
 
@@ -21,7 +20,7 @@ It adds a `post.blobs` view for attachments the feed generator can serve:
 Match a view to the record attachment by CID. Do not replace the record's CID with a URL.
 Use `post.author.did` for attribution. Space record URIs start with the space authority, not the author.
 
-The cache transport currently supports **Stratos custody**. It does not discover or download blobs from arbitrary PDS hosts.
+The cache transport currently supports Stratos custody. It does not discover or download blobs from arbitrary PDS hosts.
 PDS-custody posts, and space posts without a current custody snapshot, have no feedgen blob view.
 Clients retain their existing host read path for those records. The example webapp retains its authenticated Stratos-agent path.
 Availability on that path still depends on the host's blob support; a feedgen view does not claim to add PDS blob support.
