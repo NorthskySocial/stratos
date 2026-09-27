@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sql } from 'drizzle-orm'
@@ -27,8 +35,12 @@ function sqliteConfig(recordPath: string, membershipPath: string) {
     FEEDGEN_SIGNING_KEY: 'unused-by-this-test',
     STRATOS_SERVICE_URL: 'https://stratos.bebop.test',
     STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
+    FEEDGEN_STORAGE_PROFILE: 'encrypted-volume',
     FEEDGEN_SQLITE_PATH: recordPath,
     FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+    FEEDGEN_BLOB_CACHE_DIRECTORY: `${recordPath}.blobs`,
+    FEEDGEN_PROJECTION_MAX_AGE_MS: '3600000',
+    FEEDGEN_PROJECTION_MAX_BYTES: '536870912',
   })
 }
 
@@ -132,6 +144,273 @@ describe('SQLite-specific behavior', () => {
     }
   })
 
+  it('excludes expired posts before compaction and removes them incrementally', async () => {
+    let now = Date.parse('2026-01-01T00:00:00.000Z')
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db, db, {
+      maxAgeMs: 1_000,
+      maxBytes: 10_000,
+      now: () => now,
+    })
+    try {
+      const post = {
+        uri: 'at://did:plc:kaorunagisa/zone.stratos.feed.post/1',
+        did: 'did:plc:kaorunagisa',
+        cid: 'bafyreigh2akiscaildc',
+        sortAt: '2026-01-01T00:00:00.000Z',
+        indexedAt: '2026-01-01T00:00:00.000Z',
+        record: { text: 'The song is complete.' },
+        blobRefs: [],
+        boundaries: ['nerv'],
+      }
+      await store.upsertPost(post)
+      now += 1_000
+      expect(await store.getPost(post.uri)).toBeNull()
+      expect(
+        await store.listPostsByBoundary({ boundary: 'nerv', limit: 10 }),
+      ).toEqual({ posts: [] })
+      expect((await store.compactProjection()).posts).toBe(1)
+      expect(await store.compactProjection()).toMatchObject({ posts: 0 })
+    } finally {
+      await store.close()
+    }
+  })
+
+  it('evicts the oldest retained post when the projection byte budget is exceeded', async () => {
+    let now = Date.parse('2026-01-01T00:00:00.000Z')
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db, db, {
+      maxAgeMs: 60_000,
+      maxBytes: 350,
+      now: () => now,
+    })
+    try {
+      const first = {
+        uri: 'at://did:plc:misatokatsuragi/zone.stratos.feed.post/1',
+        did: 'did:plc:misatokatsuragi',
+        cid: 'bafyreigh2akiscaildc',
+        sortAt: '2026-01-01T00:00:00.000Z',
+        indexedAt: '2026-01-01T00:00:00.000Z',
+        record: { text: 'A'.repeat(100) },
+        blobRefs: [],
+        boundaries: ['nerv'],
+      }
+      await store.upsertPost(first)
+      now += 1
+      const second = {
+        ...first,
+        uri: `${first.uri}-new`,
+        sortAt: '2026-01-01T00:01:00.000Z',
+      }
+      await store.upsertPost(second)
+      expect(await store.getPost(first.uri)).toBeNull()
+      expect(await store.getPost(second.uri)).not.toBeNull()
+    } finally {
+      await store.close()
+    }
+  })
+
+  it('queues a shared blob cache key only after its final post reference is removed', async () => {
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db, db, {
+      maxAgeMs: 60_000,
+      maxBytes: 10_000,
+      now: () => Date.parse('2026-01-01T00:00:00.000Z'),
+    })
+    const sharedBlob =
+      'bafybeigdyrzt5l3r2f4pbfxz7o4jqm3t4l2mghz5bcptv7xkz4teb5p5ba'
+    const firstUri = 'at://did:plc:misatokatsuragi/zone.stratos.feed.post/1'
+    try {
+      for (const uri of [firstUri, `${firstUri}-second`]) {
+        await store.upsertPost({
+          uri,
+          did: 'did:plc:misatokatsuragi',
+          cid: `cid-${uri}`,
+          sortAt: '2026-01-01T00:00:00.000Z',
+          indexedAt: '2026-01-01T00:00:00.000Z',
+          record: { text: 'You are late.' },
+          blobRefs: [{ cid: sharedBlob }],
+          boundaries: ['nerv'],
+        })
+      }
+      await store.deletePost(firstUri)
+      expect((await store.compactProjection()).blobCacheEntries).toBe(0)
+
+      await store.deletePost(`${firstUri}-second`)
+      const pending = await store.compactProjection()
+      expect(pending.blobCacheEntries).toBe(1)
+      expect(pending.blobCacheKeys).toHaveLength(1)
+    } finally {
+      await store.close()
+    }
+  })
+
+  it('drains cache eviction work without enabling durable projection retention', async () => {
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db)
+    try {
+      const post = {
+        uri: 'at://did:plc:misatokatsuragi/zone.stratos.feed.post/ephemeral',
+        did: 'did:plc:misatokatsuragi',
+        cid: 'bafyreigh2akiscaildc',
+        sortAt: '2026-01-01T00:00:00.000Z',
+        indexedAt: '2026-01-01T00:00:00.000Z',
+        record: { text: 'You are late.' },
+        blobRefs: [
+          {
+            cid: 'bafybeigdyrzt5l3r2f4pbfxz7o4jqm3t4l2mghz5bcptv7xkz4teb5p5ba',
+          },
+        ],
+        boundaries: ['nerv'],
+      }
+      await store.upsertPost(post)
+      await store.deletePost(post.uri)
+      const pending = await store.compactProjection()
+      expect(pending).toMatchObject({ posts: 0, blobCacheEntries: 1 })
+      await store.completeBlobCacheEvictions(pending.blobCacheKeys)
+      expect((await store.compactProjection()).blobCacheEntries).toBe(0)
+    } finally {
+      await store.close()
+    }
+  })
+
+  it('compacts an expired durable projection after a restart', async () => {
+    let now = Date.parse('2026-01-01T00:00:00.000Z')
+    const path = await makeTempDbPath()
+    const firstDb = createSqliteDb(path)
+    await migrateSqliteDb(firstDb)
+    const firstStore = new SqliteFeedgenStore(firstDb, firstDb, {
+      maxAgeMs: 1_000,
+      maxBytes: 10_000,
+      now: () => now,
+    })
+    await firstStore.upsertPost({
+      uri: 'at://did:plc:reiayanami/zone.stratos.feed.post/1',
+      did: 'did:plc:reiayanami',
+      cid: 'bafyreigh2akiscaildc',
+      sortAt: '2026-01-01T00:00:00.000Z',
+      indexedAt: '2026-01-01T00:00:00.000Z',
+      record: { text: 'I am here.' },
+      blobRefs: [
+        { cid: 'bafybeigdyrzt5l3r2f4pbfxz7o4jqm3t4l2mghz5bcptv7xkz4teb5p5ba' },
+      ],
+      boundaries: ['nerv'],
+    })
+    await firstStore.close()
+
+    now += 1_000
+    const restartedDb = createSqliteDb(path)
+    await migrateSqliteDb(restartedDb)
+    const restartedStore = new SqliteFeedgenStore(restartedDb, restartedDb, {
+      maxAgeMs: 1_000,
+      maxBytes: 10_000,
+      now: () => now,
+    })
+    let restartedClosed = false
+    try {
+      expect(
+        await restartedStore.listPostsByBoundary({
+          boundary: 'nerv',
+          limit: 10,
+        }),
+      ).toEqual({ posts: [] })
+      const firstPass = await restartedStore.compactProjection()
+      expect(firstPass.posts).toBe(1)
+      expect(firstPass.blobCacheEntries).toBe(1)
+      expect(firstPass.blobCacheKeys).toHaveLength(1)
+      await restartedStore.close()
+      restartedClosed = true
+
+      const finalDb = createSqliteDb(path)
+      await migrateSqliteDb(finalDb)
+      const finalStore = new SqliteFeedgenStore(finalDb, finalDb, {
+        maxAgeMs: 1_000,
+        maxBytes: 10_000,
+        now: () => now,
+      })
+      try {
+        const resumed = await finalStore.compactProjection()
+        expect(resumed.posts).toBe(0)
+        expect(resumed.blobCacheKeys).toEqual(firstPass.blobCacheKeys)
+        await finalStore.completeBlobCacheEvictions(resumed.blobCacheKeys)
+        expect((await finalStore.compactProjection()).blobCacheEntries).toBe(0)
+      } finally {
+        await finalStore.close()
+      }
+    } finally {
+      if (!restartedClosed) await restartedStore.close()
+    }
+  })
+
+  it('compacts stale cursors and unverified staging without an unbounded scan', async () => {
+    let now = Date.parse('2026-01-01T00:00:00.000Z')
+    const db = createSqliteDb(':memory:')
+    await migrateSqliteDb(db)
+    const store = new SqliteFeedgenStore(db, db, {
+      maxAgeMs: 1_000,
+      maxBytes: 10_000,
+      batchSize: 1,
+      now: () => now,
+    })
+    try {
+      await store.upsertCursor(
+        'did:plc:asukanoryu',
+        1,
+        '2026-01-01T00:00:00.000Z',
+      )
+      await store.upsertSpaceCursor(
+        'at://did:plc:nerv/space/zone.stratos.feed/post/did:plc:asukanoryu',
+        'did:plc:asukanoryu',
+        'next',
+        '2026-01-01T00:00:00.000Z',
+      )
+      await store.stageSpaceSyncPage({
+        spaceUri:
+          'at://did:plc:nerv/space/zone.stratos.feed/post/did:plc:asukanoryu',
+        did: 'did:plc:asukanoryu',
+        boundary: 'nerv',
+        mutations: [
+          {
+            kind: 'upsert',
+            post: {
+              uri: 'at://did:plc:asukanoryu/zone.stratos.feed.post/1',
+              did: 'did:plc:asukanoryu',
+              cid: 'bafyreigh2akiscaildc',
+              sortAt: '2026-01-01T00:00:00.000Z',
+              indexedAt: '2026-01-01T00:00:00.000Z',
+              record: { text: 'I am not a doll.' },
+              blobRefs: [],
+              boundaries: ['nerv'],
+            },
+          },
+        ],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      })
+      now += 1_000
+      const first = await store.compactProjection()
+      expect(first).toMatchObject({
+        syncCursors: 1,
+        spaceCursors: 1,
+        stagedRecords: 1,
+        pendingVerifications: 1,
+      })
+      expect(first.hasMore).toBe(false)
+      expect(await store.getCursor('did:plc:asukanoryu')).toBeNull()
+      expect(
+        await store.getSpaceCursor(
+          'at://did:plc:nerv/space/zone.stratos.feed/post/did:plc:asukanoryu',
+          'did:plc:asukanoryu',
+        ),
+      ).toBeNull()
+    } finally {
+      await store.close()
+    }
+  })
+
   it('keeps an in-memory schema after a transaction releases its connection', async () => {
     const db = createSqliteDb(':memory:')
     await migrateSqliteDb(db)
@@ -169,6 +448,48 @@ describe('SQLite-specific behavior', () => {
     )
     expect(result?.journal_mode).toBe('wal')
     db._client.close()
+  })
+
+  it('rejects an existing durable database file that is readable by other users', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    await writeFile(recordPath, '')
+    await chmod(recordPath, 0o644)
+    await expect(
+      createFeedgenStore(sqliteConfig(recordPath, membershipPath)),
+    ).rejects.toThrow(/SQLite storage file must be private/)
+  })
+
+  it('rejects an existing SQLite sidecar that is readable by other users', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    await writeFile(`${recordPath}-wal`, '')
+    await chmod(`${recordPath}-wal`, 0o644)
+    await expect(
+      createFeedgenStore(sqliteConfig(recordPath, membershipPath)),
+    ).rejects.toThrow(/SQLite storage file must be private/)
+  })
+
+  it('rejects a durable database path below a non-private directory', async () => {
+    const recordPath = join(tmpdir(), 'feedgen-public-records.sqlite')
+    const membershipPath = join(tmpdir(), 'feedgen-public-membership.sqlite')
+    await expect(
+      createFeedgenStore(sqliteConfig(recordPath, membershipPath)),
+    ).rejects.toThrow(/SQLite storage directory must be private/)
+  })
+
+  it('creates durable database files with private permissions', async () => {
+    const recordPath = await makeTempDbPath()
+    const membershipPath = await makeTempDbPath()
+    const store = await createFeedgenStore(
+      sqliteConfig(recordPath, membershipPath),
+    )
+    try {
+      expect((await stat(recordPath)).mode & 0o077).toBe(0)
+      expect((await stat(membershipPath)).mode & 0o077).toBe(0)
+    } finally {
+      await store.close()
+    }
   })
 
   it('migration is idempotent', async () => {

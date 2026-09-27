@@ -8,6 +8,7 @@ interface MockOAuthClientOptions {
   onSessionDeleted: () => void
   fetch: typeof globalThis.fetch
   handleResolver: string
+  plcDirectoryUrl?: string
   allowHttp: boolean
 }
 
@@ -111,6 +112,15 @@ describe('createBrowserAuth', () => {
           redirect_uris: ['http://127.0.0.1:3000/'],
         }),
       }),
+    )
+  })
+
+  it('uses an injected PLC directory for self-contained deployments', async () => {
+    const auth = createAuth({ plcDirectoryUrl: 'https://plc.local.test' })
+    await auth.init()
+
+    expect(options).toEqual(
+      expect.objectContaining({ plcDirectoryUrl: 'https://plc.local.test' }),
     )
   })
 

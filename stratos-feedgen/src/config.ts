@@ -2,6 +2,11 @@ import { isIP } from 'node:net'
 import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseCommaList } from '@northskysocial/stratos-core'
+import type { TrustedOriginPolicy } from '@northskysocial/stratos-core/network'
+import {
+  parsePrivateHostPolicy,
+  type PrivateHostPolicy,
+} from './space-sync/private-host-policy.js'
 
 /**
  * Configuration for the Stratos feed generator.
@@ -27,10 +32,14 @@ export interface FeedgenConfig {
   stratosServiceDid: string
   /** PLC directory URL used to resolve `did:plc:` issuers. */
   feedgenPlcUrl: string
+  /** Operator-approved private DNS origins used only by DID/PLC resolution. */
+  identityTrustedOrigins: readonly TrustedOriginPolicy[]
   /** Allow-list of `lxm` values accepted on inbound service-auth JWTs. */
   feedgenAllowedLxms: readonly string[]
   /** Storage backend selection. */
   storageBackend: StorageBackend
+  /** Controls whether the private serving projection may reach disk. */
+  storageProfile: StorageProfile
   /** SQLite location used when `storageBackend === 'sqlite'`. */
   sqlitePath?: string
   /**
@@ -46,11 +55,26 @@ export interface FeedgenConfig {
   boundaryCacheTtlMs: number
   /** Max number of viewer DIDs to cache. */
   boundaryCacheMax: number
-  blobCacheDirectory: string
+  /** Loopback-only Rust reader used for opt-in asynchronous parity checks. */
+  shadowReaderUrl?: string
+  /** Fraction of successful authorized reads duplicated to the shadow reader. */
+  shadowSampleRate: number
+  /** Maximum time a background shadow request may occupy one local slot. */
+  shadowRequestTimeoutMs: number
+  /** Maximum concurrent shadow requests. */
+  shadowMaxConcurrent: number
+  /** File-backed only for the encrypted-volume profile. */
+  blobCacheDirectory?: string
   blobCacheMaxBytes: number
   blobCacheTtlMs: number
   blobMaxBytes: number
   blobMaxConcurrentDownloads: number
+  /** Maximum durable serving-projection age, required for encrypted-volume. */
+  projectionMaxAgeMs?: number
+  /** Maximum durable serving-projection bytes, required for encrypted-volume. */
+  projectionMaxBytes?: number
+  /** Crash-sticky ownership fence for a durable projection writer. */
+  writerLockPath?: string
   /** Pino log level. */
   logLevel: string
   /** Whether the space-sync scheduler runs. See `docs/spaces/mixed-mode/MM-06-feedgen-syncer.md`. */
@@ -77,14 +101,24 @@ export interface FeedgenConfig {
   spaceSyncMaxRecordsPerMember: number
   /** Exact literal-loopback `http://` origins allowed for member hosts. `https://` origins are always allowed. */
   spaceSyncAllowHttpOrigins: ReadonlySet<string>
+  /** Exact member PDS HTTPS origin whose DNS answers may use configured private networks. */
+  spaceSyncPrivateHostPolicy?: PrivateHostPolicy
 }
 
 export type StorageBackend = 'sqlite' | 'postgres'
 
+export type StorageProfile = 'ephemeral' | 'encrypted-volume'
+
 export const DEFAULT_STORAGE_BACKEND: StorageBackend = 'sqlite'
+export const DEFAULT_STORAGE_PROFILE: StorageProfile = 'ephemeral'
 export const DEFAULT_SQLITE_PATH = ':memory:'
 export const DEFAULT_BOUNDARY_CACHE_TTL_MS = 300_000
 export const DEFAULT_BOUNDARY_CACHE_MAX = 10_000
+export const DEFAULT_SHADOW_SAMPLE_RATE = 0
+export const DEFAULT_SHADOW_REQUEST_TIMEOUT_MS = 250
+export const MAX_SHADOW_REQUEST_TIMEOUT_MS = 2_000
+export const DEFAULT_SHADOW_MAX_CONCURRENT = 2
+export const MAX_SHADOW_MAX_CONCURRENT = 4
 
 /** Lxms accepted on inbound service-auth JWTs. */
 export const DEFAULT_ALLOWED_LXMS: readonly string[] = [
@@ -121,16 +155,30 @@ export interface FeedgenEnv {
 type StorageConfig = Pick<
   FeedgenConfig,
   | 'storageBackend'
+  | 'storageProfile'
   | 'sqlitePath'
   | 'membershipSqlitePath'
   | 'postgresUrl'
   | 'postgresSchema'
+  | 'projectionMaxAgeMs'
+  | 'projectionMaxBytes'
+  | 'writerLockPath'
+>
+
+type BlobCacheConfig = Pick<
+  FeedgenConfig,
+  | 'blobCacheDirectory'
+  | 'blobCacheMaxBytes'
+  | 'blobCacheTtlMs'
+  | 'blobMaxBytes'
+  | 'blobMaxConcurrentDownloads'
 >
 
 export function loadFeedgenConfig(
   env: FeedgenEnv = process.env,
 ): FeedgenConfig {
   const storage = loadStorageConfig(env)
+  const blobCache = loadBlobCacheConfig(env, storage.storageProfile)
   const feedgenServiceDid = requireEnv(env, 'FEEDGEN_SERVICE_DID')
 
   return {
@@ -147,7 +195,8 @@ export function loadFeedgenConfig(
         requireEnv(env, 'STRATOS_SERVICE_URL'),
     ),
     stratosServiceDid: requireEnv(env, 'STRATOS_SERVICE_DID'),
-    feedgenPlcUrl: trimTrailingSlash(env['FEEDGEN_PLC_URL'] ?? DEFAULT_PLC_URL),
+    feedgenPlcUrl: trimTrailingSlash(env['PLC_DIRECTORY'] ?? DEFAULT_PLC_URL),
+    identityTrustedOrigins: loadIdentityTrustedOrigins(env),
     feedgenAllowedLxms: DEFAULT_ALLOWED_LXMS,
     ...storage,
     boundaryCacheTtlMs: parsePositiveInt(
@@ -160,29 +209,8 @@ export function loadFeedgenConfig(
       'FEEDGEN_BOUNDARY_CACHE_MAX',
       DEFAULT_BOUNDARY_CACHE_MAX,
     ),
-    blobCacheDirectory:
-      optionalEnv(env, 'FEEDGEN_BLOB_CACHE_DIRECTORY') ??
-      './data/feedgen-blobs',
-    blobCacheMaxBytes: parsePositiveInt(
-      env['FEEDGEN_BLOB_CACHE_MAX_BYTES'],
-      'FEEDGEN_BLOB_CACHE_MAX_BYTES',
-      536_870_912,
-    ),
-    blobCacheTtlMs: parsePositiveInt(
-      env['FEEDGEN_BLOB_CACHE_TTL_MS'],
-      'FEEDGEN_BLOB_CACHE_TTL_MS',
-      3_600_000,
-    ),
-    blobMaxBytes: parsePositiveInt(
-      env['FEEDGEN_BLOB_MAX_BYTES'],
-      'FEEDGEN_BLOB_MAX_BYTES',
-      26_214_400,
-    ),
-    blobMaxConcurrentDownloads: parsePositiveInt(
-      env['FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS'],
-      'FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS',
-      4,
-    ),
+    ...loadShadowReaderConfig(env),
+    ...blobCache,
     logLevel: nonEmpty(env['FEEDGEN_LOG_LEVEL']) ?? DEFAULT_LOG_LEVEL,
     spaceSyncEnabled: parseBoolean(
       env['FEEDGEN_SPACE_SYNC_ENABLED'],
@@ -241,30 +269,179 @@ export function loadFeedgenConfig(
     spaceSyncAllowHttpOrigins: parseAllowHttpOrigins(
       env['FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS'],
     ),
+    spaceSyncPrivateHostPolicy: parsePrivateHostPolicy(
+      env['FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN'],
+      env['FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS'],
+    ),
+  }
+}
+
+function loadIdentityTrustedOrigins(
+  env: FeedgenEnv,
+): readonly TrustedOriginPolicy[] {
+  const origins = parseCommaList(env['IDENTITY_PRIVATE_ORIGINS'] ?? '')
+  const cidrs = parseCommaList(env['IDENTITY_PRIVATE_CIDRS'] ?? '')
+  if ((origins.length === 0) !== (cidrs.length === 0)) {
+    throw new Error(
+      'IDENTITY_PRIVATE_ORIGINS and IDENTITY_PRIVATE_CIDRS must be set together',
+    )
+  }
+  const plcCidrs = parseCommaList(env['PLC_DIRECTORY_PRIVATE_CIDRS'] ?? '')
+  const plcOrigin = trimTrailingSlash(env['PLC_DIRECTORY'] ?? DEFAULT_PLC_URL)
+  return [
+    ...origins.map((origin) => ({ origin, privateCidrs: cidrs })),
+    ...(plcCidrs.length ? [{ origin: plcOrigin, privateCidrs: plcCidrs }] : []),
+  ]
+}
+
+type ShadowReaderConfig = Pick<
+  FeedgenConfig,
+  | 'shadowReaderUrl'
+  | 'shadowSampleRate'
+  | 'shadowRequestTimeoutMs'
+  | 'shadowMaxConcurrent'
+>
+
+function loadShadowReaderConfig(env: FeedgenEnv): ShadowReaderConfig {
+  const shadowReaderUrl = parseShadowReaderUrl(
+    optionalEnv(env, 'FEEDGEN_SHADOW_READER_URL'),
+  )
+  const shadowSampleRate = parseSampleRate(env['FEEDGEN_SHADOW_SAMPLE_RATE'])
+  if (shadowSampleRate > 0 && !shadowReaderUrl) {
+    throw new Error(
+      'FEEDGEN_SHADOW_SAMPLE_RATE requires FEEDGEN_SHADOW_READER_URL',
+    )
+  }
+  return {
+    shadowReaderUrl,
+    shadowSampleRate,
+    shadowRequestTimeoutMs: parseBoundedPositiveInt(
+      env['FEEDGEN_SHADOW_REQUEST_TIMEOUT_MS'],
+      'FEEDGEN_SHADOW_REQUEST_TIMEOUT_MS',
+      DEFAULT_SHADOW_REQUEST_TIMEOUT_MS,
+      MAX_SHADOW_REQUEST_TIMEOUT_MS,
+    ),
+    shadowMaxConcurrent: parseBoundedPositiveInt(
+      env['FEEDGEN_SHADOW_MAX_CONCURRENT'],
+      'FEEDGEN_SHADOW_MAX_CONCURRENT',
+      DEFAULT_SHADOW_MAX_CONCURRENT,
+      MAX_SHADOW_MAX_CONCURRENT,
+    ),
   }
 }
 
 function loadStorageConfig(env: FeedgenEnv): StorageConfig {
   const storageBackend = parseStorageBackend(env['FEEDGEN_STORAGE_BACKEND'])
+  const storageProfile = parseStorageProfile(env['FEEDGEN_STORAGE_PROFILE'])
   const sqlitePath = nonEmpty(env['FEEDGEN_SQLITE_PATH']) ?? DEFAULT_SQLITE_PATH
   const postgresUrl = env['FEEDGEN_POSTGRES_URL']
-  if (storageBackend === 'postgres' && !postgresUrl) {
+  if (storageBackend !== 'sqlite') {
     throw new Error(
-      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+      'FEEDGEN_STORAGE_BACKEND must be sqlite while durable Feedgen storage is volume-bound',
+    )
+  }
+  if (storageProfile === 'ephemeral' && sqlitePath !== ':memory:') {
+    throw new Error(
+      'FEEDGEN_SQLITE_PATH must be :memory: for the ephemeral storage profile',
+    )
+  }
+  if (storageProfile === 'encrypted-volume' && sqlitePath === ':memory:') {
+    throw new Error(
+      'FEEDGEN_SQLITE_PATH must be a file path for the encrypted-volume storage profile',
+    )
+  }
+  const configuredMembershipPath = nonEmpty(
+    env['FEEDGEN_MEMBERSHIP_SQLITE_PATH'],
+  )
+  const configuredWriterLockPath =
+    storageProfile === 'encrypted-volume'
+      ? resolve(
+          nonEmpty(env['FEEDGEN_WRITER_LOCK_PATH']) ??
+            `${sqlitePath}.writer-lock`,
+        )
+      : undefined
+  if (storageProfile === 'encrypted-volume' && !configuredMembershipPath) {
+    throw new Error(
+      'Missing required env var FEEDGEN_MEMBERSHIP_SQLITE_PATH for the encrypted-volume storage profile',
+    )
+  }
+  if (
+    storageProfile === 'ephemeral' &&
+    nonEmpty(env['FEEDGEN_BLOB_CACHE_DIRECTORY'])
+  ) {
+    throw new Error(
+      'FEEDGEN_BLOB_CACHE_DIRECTORY requires the encrypted-volume storage profile',
+    )
+  }
+  const membershipSqlitePath = resolveMembershipSqlitePath(
+    sqlitePath,
+    configuredMembershipPath,
+  )
+  const writerLockPath = configuredWriterLockPath
+  if (
+    writerLockPath &&
+    (canonicalSqlitePath(writerLockPath) === canonicalSqlitePath(sqlitePath) ||
+      canonicalSqlitePath(writerLockPath) ===
+        canonicalSqlitePath(membershipSqlitePath))
+  ) {
+    throw new Error(
+      'FEEDGEN_WRITER_LOCK_PATH must differ from Feedgen SQLite storage paths',
     )
   }
   return {
     storageBackend,
+    storageProfile,
     sqlitePath,
-    membershipSqlitePath:
-      storageBackend === 'sqlite'
-        ? resolveMembershipSqlitePath(
-            sqlitePath,
-            nonEmpty(env['FEEDGEN_MEMBERSHIP_SQLITE_PATH']),
-          )
-        : undefined,
+    membershipSqlitePath,
     postgresUrl,
     postgresSchema: env['FEEDGEN_POSTGRES_SCHEMA'],
+    projectionMaxAgeMs:
+      storageProfile === 'encrypted-volume'
+        ? requirePositiveInt(
+            env['FEEDGEN_PROJECTION_MAX_AGE_MS'],
+            'FEEDGEN_PROJECTION_MAX_AGE_MS',
+          )
+        : undefined,
+    projectionMaxBytes:
+      storageProfile === 'encrypted-volume'
+        ? requirePositiveInt(
+            env['FEEDGEN_PROJECTION_MAX_BYTES'],
+            'FEEDGEN_PROJECTION_MAX_BYTES',
+          )
+        : undefined,
+    writerLockPath,
+  }
+}
+
+function loadBlobCacheConfig(
+  env: FeedgenEnv,
+  storageProfile: StorageProfile,
+): BlobCacheConfig {
+  return {
+    blobCacheDirectory:
+      storageProfile === 'encrypted-volume'
+        ? requireEnv(env, 'FEEDGEN_BLOB_CACHE_DIRECTORY')
+        : undefined,
+    blobCacheMaxBytes: parsePositiveInt(
+      env['FEEDGEN_BLOB_CACHE_MAX_BYTES'],
+      'FEEDGEN_BLOB_CACHE_MAX_BYTES',
+      536_870_912,
+    ),
+    blobCacheTtlMs: parsePositiveInt(
+      env['FEEDGEN_BLOB_CACHE_TTL_MS'],
+      'FEEDGEN_BLOB_CACHE_TTL_MS',
+      3_600_000,
+    ),
+    blobMaxBytes: parsePositiveInt(
+      env['FEEDGEN_BLOB_MAX_BYTES'],
+      'FEEDGEN_BLOB_MAX_BYTES',
+      26_214_400,
+    ),
+    blobMaxConcurrentDownloads: parsePositiveInt(
+      env['FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS'],
+      'FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS',
+      4,
+    ),
   }
 }
 
@@ -302,6 +479,47 @@ export function assertDistinctSqlitePaths(
     throw new Error(
       'FEEDGEN_MEMBERSHIP_SQLITE_PATH must differ from FEEDGEN_SQLITE_PATH',
     )
+  }
+}
+
+/** Reject a durable SQLite path that an unintended local user can read. */
+export function assertPrivateSqlitePath(location: string): void {
+  const absolute = resolve(location)
+  try {
+    const entry = lstatSync(absolute)
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error(`SQLite storage path must be a regular file: ${location}`)
+    }
+    if ((entry.mode & 0o077) !== 0) {
+      throw new Error(`SQLite storage file must be private: ${location}`)
+    }
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'ENOENT') throw err
+  }
+
+  let parent = dirname(absolute)
+  for (;;) {
+    try {
+      const entry = lstatSync(parent)
+      if (entry.isSymbolicLink() || !entry.isDirectory()) {
+        throw new Error(
+          `SQLite storage parent must be a directory: ${location}`,
+        )
+      }
+      if ((entry.mode & 0o077) !== 0) {
+        throw new Error(`SQLite storage directory must be private: ${parent}`)
+      }
+      return
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      const next = dirname(parent)
+      if (next === parent) {
+        throw new Error(`SQLite storage parent does not exist: ${location}`, {
+          cause: err,
+        })
+      }
+      parent = next
+    }
   }
 }
 
@@ -361,6 +579,13 @@ function parsePositiveInt(
   return parsed
 }
 
+function requirePositiveInt(value: string | undefined, name: string): number {
+  if (value === undefined || value === '') {
+    throw new Error(`Missing required env var ${name}`)
+  }
+  return parsePositiveInt(value, name, 0)
+}
+
 function parseSpaceSyncPageLimit(value: string | undefined): number {
   return parseBoundedPositiveInt(
     value,
@@ -393,6 +618,49 @@ function parseBoolean(
   if (normalized === 'true') return true
   if (normalized === 'false') return false
   throw new Error(`Invalid ${name}: ${value} (expected 'true' or 'false')`)
+}
+
+function parseSampleRate(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_SHADOW_SAMPLE_RATE
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(
+      `Invalid FEEDGEN_SHADOW_SAMPLE_RATE: ${value} (expected a number from 0 to 1)`,
+    )
+  }
+  return parsed
+}
+
+/**
+ * The authenticated shadow reader is deliberately limited to a same-host
+ * sidecar. Forwarding user service-auth tokens to a network destination would
+ * create a new disclosure path, so a remote URL is a configuration error.
+ */
+function parseShadowReaderUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error('Invalid FEEDGEN_SHADOW_READER_URL: not a valid URL')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(
+      'Invalid FEEDGEN_SHADOW_READER_URL: expected an http:// or https:// URL',
+    )
+  }
+  if (
+    url.username !== '' ||
+    url.password !== '' ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    !isLiteralLoopbackHostname(url.hostname)
+  ) {
+    throw new Error(
+      'Invalid FEEDGEN_SHADOW_READER_URL: expected a literal loopback URL with no userinfo, query, or fragment',
+    )
+  }
+  return trimTrailingSlash(url.toString())
 }
 
 /**
@@ -441,9 +709,12 @@ function parseHttpOrigin(entry: string): string {
 }
 
 function isLoopbackHttpHostname(hostname: string): boolean {
+  return isLiteralLoopbackHostname(hostname) || hostname === 'localhost'
+}
+
+function isLiteralLoopbackHostname(hostname: string): boolean {
   const normalized = stripIpv6Brackets(hostname)
   return (
-    normalized === 'localhost' ||
     normalized === '::1' ||
     (isIP(normalized) === 4 && normalized.startsWith('127.'))
   )
@@ -460,6 +731,14 @@ function parseStorageBackend(value: string | undefined): StorageBackend {
   if (value === 'sqlite' || value === 'postgres') return value
   throw new Error(
     `Invalid FEEDGEN_STORAGE_BACKEND: ${value} (expected 'sqlite' or 'postgres')`,
+  )
+}
+
+function parseStorageProfile(value: string | undefined): StorageProfile {
+  if (value === undefined || value === '') return DEFAULT_STORAGE_PROFILE
+  if (value === 'ephemeral' || value === 'encrypted-volume') return value
+  throw new Error(
+    `Invalid FEEDGEN_STORAGE_PROFILE: ${value} (expected 'ephemeral' or 'encrypted-volume')`,
   )
 }
 

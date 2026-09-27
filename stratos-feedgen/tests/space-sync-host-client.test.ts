@@ -37,6 +37,7 @@ import {
 } from '../src/space-sync/index.js'
 import type { SpaceHostClientOptions } from '../src/space-sync/index.js'
 import { createPinnedLookup } from '../src/space-sync/host-client.js'
+import { parsePrivateHostPolicy } from '../src/space-sync/private-host-policy.js'
 
 interface CapturedRequest {
   method: string
@@ -719,6 +720,117 @@ describe('SpaceHostClient', () => {
       })
       await expect(
         client.listRepoOps({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+    })
+
+    it('allows only an operator-approved origin with private addresses inside its CIDR', async () => {
+      const privateHostPolicy = parsePrivateHostPolicy(
+        'https://spaces-pds.sandbox.test',
+        '172.25.111.0/24',
+      )
+      const fetch = async (): Promise<Response> =>
+        new Response(JSON.stringify({ commit: { seq: 1 } }))
+      const allowed = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test',
+        resolveHost: async () => ['172.25.111.132'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        allowed.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).resolves.toEqual({ seq: 1 })
+
+      const publicAnswers = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test',
+        resolveHost: async () => ['8.8.8.8'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        publicAnswers.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).resolves.toEqual({ seq: 1 })
+
+      const differentHost = await createClient({
+        hostOrigin: 'https://other.sandbox.test',
+        resolveHost: async () => ['172.25.111.132'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        differentHost.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+
+      const differentSubnet = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test',
+        resolveHost: async () => ['172.25.112.132'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        differentSubnet.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+
+      for (const address of [
+        '172.26.111.132',
+        '172.25.110.132',
+        '172.25.111.0',
+        '172.25.111.255',
+        '::1',
+      ]) {
+        const outsidePolicy = await createClient({
+          hostOrigin: 'https://spaces-pds.sandbox.test',
+          resolveHost: async () => [address],
+          fetch,
+          privateHostPolicy,
+        })
+        await expect(
+          outsidePolicy.getLatestCommit({
+            space: SPACE_URI,
+            repo: REPO_DID,
+          }),
+        ).rejects.toBeInstanceOf(PrivateHostOriginError)
+      }
+
+      const mixedAnswers = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test',
+        resolveHost: async () => ['172.25.111.132', '172.25.112.132'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        mixedAnswers.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+
+      const mixedPublicAndPrivate = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test',
+        resolveHost: async () => ['8.8.8.8', '172.25.111.132'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        mixedPublicAndPrivate.getLatestCommit({
+          space: SPACE_URI,
+          repo: REPO_DID,
+        }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+
+      const missingPolicy = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test',
+        resolveHost: async () => ['172.25.111.132'],
+        fetch,
+      })
+      await expect(
+        missingPolicy.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
+      ).rejects.toBeInstanceOf(PrivateHostOriginError)
+
+      const differentPort = await createClient({
+        hostOrigin: 'https://spaces-pds.sandbox.test:444',
+        resolveHost: async () => ['172.25.111.132'],
+        fetch,
+        privateHostPolicy,
+      })
+      await expect(
+        differentPort.getLatestCommit({ space: SPACE_URI, repo: REPO_DID }),
       ).rejects.toBeInstanceOf(PrivateHostOriginError)
     })
 

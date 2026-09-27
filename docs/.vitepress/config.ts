@@ -85,8 +85,8 @@ export default defineConfig({
             { text: 'Deployment Examples', link: '/operator/examples/' },
             { text: 'Configuration', link: '/operator/configuration' },
             {
-              text: 'Feedgen Boundary Catalogue',
-              link: '/operator/feedgen-boundary-catalog',
+              text: 'Feed Generator',
+              link: '/operator/feedgen-ng',
             },
             {
               text: 'AppView Integration',

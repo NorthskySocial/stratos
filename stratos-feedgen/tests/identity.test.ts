@@ -66,6 +66,17 @@ describe('createIdResolver', () => {
     expect(plcResolver.plcUrl).toBe(cfg.feedgenPlcUrl)
   })
 
+  it('rejects a malformed private DID origin before resolving a DID', () => {
+    expect(() =>
+      createIdResolver({
+        ...cfg,
+        identityTrustedOrigins: [
+          { origin: 'http://pds.private.test', privateCidrs: ['10.42.0.0/16'] },
+        ],
+      }),
+    ).toThrow(/HTTPS DNS origin/)
+  })
+
   it('passes the stale TTL through to the underlying MemoryCache', () => {
     const resolver = createIdResolver(cfg)
     const cache = resolver.did.cache as MemoryCache

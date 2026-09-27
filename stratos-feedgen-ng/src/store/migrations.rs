@@ -1,0 +1,374 @@
+use rusqlite::{Connection, TransactionBehavior};
+
+struct Migration {
+    version: u32,
+    sql: &'static str,
+}
+
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: r#"
+        CREATE TABLE schema_migration (
+          version INTEGER PRIMARY KEY,
+          applied_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE post (
+          uri TEXT PRIMARY KEY,
+          author_did TEXT NOT NULL,
+          cid TEXT NOT NULL,
+          sort_at TEXT NOT NULL,
+          indexed_at TEXT NOT NULL,
+          retained_at TEXT NOT NULL,
+          projection_bytes INTEGER NOT NULL CHECK (projection_bytes >= 0),
+          record_json BLOB NOT NULL,
+          blob_refs_json BLOB NOT NULL,
+          row_version INTEGER NOT NULL CHECK (row_version >= 0)
+        );
+        CREATE INDEX post_author_uri_idx ON post(author_did, uri);
+        CREATE INDEX post_feed_order_idx ON post(sort_at DESC, uri ASC);
+
+        CREATE TABLE post_boundary (
+          uri TEXT NOT NULL REFERENCES post(uri) ON DELETE CASCADE,
+          boundary TEXT NOT NULL,
+          sort_at TEXT NOT NULL,
+          PRIMARY KEY (uri, boundary)
+        ) WITHOUT ROWID;
+        CREATE INDEX post_boundary_feed_idx
+          ON post_boundary(boundary, sort_at DESC, uri ASC);
+
+        CREATE TABLE membership_baseline (
+          boundary TEXT NOT NULL,
+          did TEXT NOT NULL,
+          custody TEXT NOT NULL CHECK (custody IN ('pds', 'stratos')),
+          repo_host TEXT,
+          reconciled_at TEXT NOT NULL,
+          PRIMARY KEY (boundary, did)
+        ) WITHOUT ROWID;
+
+        CREATE TABLE projection_epoch (
+          scope TEXT PRIMARY KEY,
+          epoch INTEGER NOT NULL CHECK (epoch >= 0),
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE actor_cursor (
+          authority_did TEXT NOT NULL,
+          did TEXT NOT NULL,
+          sequence INTEGER NOT NULL CHECK (sequence >= 0),
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (authority_did, did)
+        ) WITHOUT ROWID;
+
+        CREATE TABLE space_cursor (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          cursor TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did)
+        ) WITHOUT ROWID;
+
+        CREATE TABLE space_sync_stage (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          uri TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          deleted INTEGER NOT NULL CHECK (deleted IN (0, 1)),
+          cid TEXT,
+          sort_at TEXT,
+          indexed_at TEXT,
+          record_json BLOB,
+          blob_refs_json BLOB,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did, uri)
+        ) WITHOUT ROWID;
+
+        CREATE TABLE space_sync_pending_verification (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did)
+        ) WITHOUT ROWID;
+
+        CREATE TABLE retention_metadata (
+          key TEXT PRIMARY KEY,
+          value INTEGER NOT NULL CHECK (value >= 0)
+        );
+
+        CREATE TABLE source_coverage (
+          authority_did TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          start_sequence INTEGER NOT NULL CHECK (start_sequence >= 0),
+          end_sequence INTEGER NOT NULL CHECK (end_sequence >= start_sequence),
+          verified_at TEXT NOT NULL,
+          PRIMARY KEY (authority_did, source_id, boundary, start_sequence)
+        ) WITHOUT ROWID;
+        CREATE INDEX source_coverage_boundary_idx ON source_coverage(boundary, source_id);
+
+        CREATE TABLE suppression_marker (
+          authority_did TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          uri TEXT NOT NULL,
+          sequence INTEGER NOT NULL CHECK (sequence >= 0),
+          PRIMARY KEY (authority_did, source_id, uri)
+        ) WITHOUT ROWID;
+        CREATE INDEX suppression_marker_source_sequence_idx
+          ON suppression_marker(source_id, sequence);
+    "#,
+    },
+    Migration {
+        version: 2,
+        sql: r#"
+        ALTER TABLE space_cursor ADD COLUMN boundary TEXT NOT NULL DEFAULT '';
+        ALTER TABLE space_sync_pending_verification ADD COLUMN boundary TEXT NOT NULL DEFAULT '';
+        CREATE INDEX space_cursor_boundary_idx ON space_cursor(boundary, space_uri, did);
+        CREATE INDEX space_sync_pending_verification_boundary_idx
+          ON space_sync_pending_verification(boundary, space_uri, did);
+    "#,
+    },
+    Migration {
+        version: 3,
+        sql: r#"
+        CREATE TABLE actor_enrollment (
+          did TEXT PRIMARY KEY,
+          boundaries_json BLOB NOT NULL,
+          observed_at TEXT NOT NULL,
+          enrolled INTEGER NOT NULL CHECK (enrolled IN (0, 1))
+        );
+    "#,
+    },
+    Migration {
+        version: 4,
+        sql: r#"
+        CREATE INDEX actor_enrollment_enrolled_did_idx
+          ON actor_enrollment(enrolled, did);
+    "#,
+    },
+    Migration {
+        version: 5,
+        sql: r#"
+        CREATE TABLE space_sync_stage_cursor (
+          space_uri TEXT NOT NULL,
+          did TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          cursor TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (space_uri, did)
+        ) WITHOUT ROWID;
+        CREATE INDEX space_sync_stage_cursor_boundary_idx
+          ON space_sync_stage_cursor(boundary, space_uri, did);
+
+        INSERT INTO space_sync_stage_cursor (space_uri, did, boundary, cursor, updated_at)
+          SELECT cursor.space_uri, cursor.did, cursor.boundary, cursor.cursor, cursor.updated_at
+          FROM space_cursor AS cursor
+          WHERE EXISTS (
+            SELECT 1 FROM space_sync_stage AS stage
+            WHERE stage.space_uri = cursor.space_uri AND stage.did = cursor.did
+          );
+        DELETE FROM space_cursor
+          WHERE EXISTS (
+            SELECT 1 FROM space_sync_stage AS stage
+            WHERE stage.space_uri = space_cursor.space_uri AND stage.did = space_cursor.did
+          );
+    "#,
+    },
+];
+
+pub(super) fn apply(connection: &mut Connection) -> rusqlite::Result<()> {
+    let latest_version = MIGRATIONS.last().map_or(0, |migration| migration.version);
+    for migration in MIGRATIONS {
+        let current_version: u32 =
+            connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if current_version > latest_version {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        if current_version >= migration.version {
+            continue;
+        }
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(migration.sql)?;
+        transaction.execute(
+            "INSERT INTO schema_migration (version, applied_at) VALUES (?1, unixepoch())",
+            [migration.version],
+        )?;
+        transaction.pragma_update(None, "user_version", migration.version)?;
+        transaction.commit()?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::{Migration, apply};
+
+    #[test]
+    fn initializes_the_versioned_projection_schema() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        apply(&mut connection).unwrap();
+
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        let migration_count: u32 = connection
+            .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(migration_count, 5);
+        let post_boundary_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_boundary'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(post_boundary_sql.contains("REFERENCES post(uri) ON DELETE CASCADE"));
+        let feed_index_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'post_boundary_feed_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(feed_index_sql.contains("boundary, sort_at DESC, uri ASC"));
+    }
+
+    #[test]
+    fn rolls_back_a_failed_migration_without_advancing_the_version() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        let migration = Migration {
+            version: 1,
+            sql: "CREATE TABLE temporary_projection (id INTEGER); INVALID SQL;",
+        };
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        assert!(transaction.execute_batch(migration.sql).is_err());
+        transaction.rollback().unwrap();
+
+        let table_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'temporary_projection'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(table_count, 0);
+        assert_eq!(version, 0);
+    }
+
+    #[test]
+    fn migrates_existing_space_lifecycle_rows_to_unlabelled_state() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(super::MIGRATIONS[0].sql).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migration (version, applied_at) VALUES (1, 0)",
+                [],
+            )
+            .unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, cursor, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                    "firehose:8",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+
+        apply(&mut connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT boundary FROM space_cursor", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn keeps_preexisting_staged_cursors_uncommitted_during_upgrade() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for migration in &super::MIGRATIONS[..4] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migration (version, applied_at) VALUES (?1, 0)",
+                    [migration.version],
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", migration.version)
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                    "did:web:stratos.example/bebop",
+                    "unverified",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO space_sync_stage (space_uri, did, uri, boundary, deleted, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:spikespiegel",
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop/did:plc:spikespiegel/zone.stratos.feed.post/see-you",
+                    "did:web:stratos.example/bebop",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO space_cursor (space_uri, did, boundary, cursor, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                [
+                    "at://did:web:stratos.example/space/zone.stratos.space.feed/bebop",
+                    "did:plc:faye",
+                    "did:web:stratos.example/bebop",
+                    "verified",
+                    "1998-04-03T00:00:00.000Z",
+                ],
+            )
+            .unwrap();
+
+        apply(&mut connection).unwrap();
+
+        let committed: String = connection
+            .query_row("SELECT cursor FROM space_cursor", [], |row| row.get(0))
+            .unwrap();
+        let staged: String = connection
+            .query_row("SELECT cursor FROM space_sync_stage_cursor", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(committed, "verified");
+        assert_eq!(staged, "unverified");
+    }
+
+    #[test]
+    fn rejects_a_database_from_a_newer_store_format() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.pragma_update(None, "user_version", 6).unwrap();
+
+        assert!(apply(&mut connection).is_err());
+    }
+}

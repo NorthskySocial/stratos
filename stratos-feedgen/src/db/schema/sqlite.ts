@@ -14,6 +14,8 @@ export const post = sqliteTable(
     cid: text('cid').notNull(),
     sortAt: text('sortAt').notNull(),
     indexedAt: text('indexedAt').notNull(),
+    retainedAt: text('retainedAt').notNull(),
+    projectionBytes: integer('projectionBytes').notNull(),
     recordJson: text('recordJson').notNull(),
     blobRefsJson: text('blobRefsJson').notNull(),
   },
@@ -69,6 +71,7 @@ export const spaceSyncStage = sqliteTable(
     indexedAt: text('indexedAt'),
     recordJson: text('recordJson'),
     blobRefsJson: text('blobRefsJson'),
+    updatedAt: text('updatedAt').notNull(),
   },
   (table) => [primaryKey({ columns: [table.spaceUri, table.did, table.uri] })],
 )
@@ -78,6 +81,7 @@ export const spaceSyncPendingVerification = sqliteTable(
   {
     spaceUri: text('spaceUri').notNull(),
     did: text('did').notNull(),
+    updatedAt: text('updatedAt').notNull(),
   },
   (table) => [primaryKey({ columns: [table.spaceUri, table.did] })],
 )

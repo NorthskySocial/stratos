@@ -59,6 +59,17 @@ export class BlobService {
     return this.clearing
   }
 
+  /** Remove cache entries whose source post no longer belongs to the projection. */
+  removeCacheEntries(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return Promise.resolve()
+    this.generation = Symbol()
+    this.downloads.clear()
+    this.clearing = this.clearing.then(async () => {
+      for (const key of keys) await this.options.cache.remove(key)
+    })
+    return this.clearing
+  }
+
   private assertCurrent(generation: symbol): void {
     if (generation !== this.generation)
       throw new UpstreamFailureError('Blob cache was invalidated')

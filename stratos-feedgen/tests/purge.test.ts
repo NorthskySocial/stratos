@@ -6,6 +6,7 @@ import {
   createSqliteDb,
   type FeedgenStore,
   migrateSqliteDb,
+  type ProjectionCompactionStore,
   SqliteFeedgenStore,
 } from '../src/db/index.js'
 import { Purger, type PurgeAudit } from '../src/purge/index.js'
@@ -25,15 +26,19 @@ function spaceUriFor(boundary: string): string {
   return `at://${STRATOS_DID}/space/zone.stratos.space.feed/${boundary.split('/')[1]}`
 }
 
-let store: FeedgenStore
+let store: FeedgenStore & ProjectionCompactionStore
 const tmpDirs: string[] = []
 
-async function makeStore(): Promise<FeedgenStore> {
+async function makeStore(): Promise<FeedgenStore & ProjectionCompactionStore> {
   const dir = await mkdtemp(join(tmpdir(), 'feedgen-purge-'))
   tmpDirs.push(dir)
   const db = createSqliteDb(join(dir, 'feedgen.sqlite'))
   await migrateSqliteDb(db)
-  return new SqliteFeedgenStore(db)
+  return new SqliteFeedgenStore(db, db, {
+    maxAgeMs: 60_000,
+    maxBytes: 10_000,
+    now: () => Date.parse('2024-01-01T00:00:00.000Z'),
+  })
 }
 
 function post(did: string, rkey: string, boundaries: string[]) {
@@ -173,6 +178,19 @@ describe('Purger.purgeActor (unenroll)', () => {
     })
     // FAYE still intact after the double purge.
     expect(await store.getEnrolledActor(FAYE)).not.toBeNull()
+  })
+
+  it('queues removed blob cache entries durably before deleting the actor projection', async () => {
+    await store.upsertPost(post(SPIKE, 'cached', [CREW_BOUNDARY]))
+    const purger = new Purger({ store, audit: () => {} })
+
+    await purger.purgeActor(SPIKE)
+
+    const pending = await store.compactProjection()
+    expect(pending).toMatchObject({ posts: 0, blobCacheEntries: 1 })
+    expect(pending.blobCacheKeys).toHaveLength(1)
+    await store.completeBlobCacheEvictions?.(pending.blobCacheKeys)
+    expect((await store.compactProjection()).blobCacheEntries).toBe(0)
   })
 
   it('works without an actor pool or cache (optional deps)', async () => {
@@ -340,6 +358,19 @@ describe('Purger.purgeActorBoundary (boundary shrink)', () => {
     expect(
       (await purger.purgeActorBoundary(SPIKE, BOUNTY_BOUNDARY)).posts,
     ).toBe(0)
+  })
+
+  it('queues cache removal for posts deleted by a boundary shrink', async () => {
+    await store.upsertPost(post(SPIKE, 'cached', [BOUNTY_BOUNDARY]))
+
+    await new Purger({ store, audit: () => {} }).purgeActorBoundary(
+      SPIKE,
+      BOUNTY_BOUNDARY,
+    )
+
+    const pending = await store.compactProjection()
+    expect(pending).toMatchObject({ posts: 0, blobCacheEntries: 1 })
+    expect(pending.blobCacheKeys).toHaveLength(1)
   })
 
   it('drops the cursor and staged delta after an invalid space commit', async () => {

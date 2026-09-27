@@ -747,6 +747,28 @@ describe('createShutdownHandler', () => {
     }
   })
 
+  it('releases the writer lock only after closing the projection store', async () => {
+    const events: string[] = []
+    const handler = createShutdownHandler({
+      store: {
+        close: async () => {
+          events.push('store.close')
+        },
+      },
+      writerLock: {
+        release: async () => {
+          events.push('writer-lock.release')
+        },
+      },
+      logger: nullLogger,
+      exit: vi.fn(),
+    })
+
+    await handler('SIGTERM')
+
+    expect(events).toEqual(['store.close', 'writer-lock.release'])
+  })
+
   it('installShutdownHandlers registers SIGTERM and SIGINT listeners that run the handler', async () => {
     const lines: CapturedLine[] = []
     const registered = new Map<string, (...args: unknown[]) => unknown>()

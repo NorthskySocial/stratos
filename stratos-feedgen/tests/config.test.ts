@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SQLITE_PATH,
+  DEFAULT_STORAGE_PROFILE,
   DEFAULT_SPACE_MEMBERSHIP_PAGE_LIMIT,
   DEFAULT_SPACE_MEMBERSHIP_REQUEST_TIMEOUT_MS,
   DEFAULT_SPACE_SYNC_ALLOW_HTTP_ORIGINS,
@@ -22,6 +23,9 @@ import {
   DEFAULT_SPACE_SYNC_MEMBER_CONCURRENCY,
   DEFAULT_SPACE_SYNC_PAGE_LIMIT,
   DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS,
+  DEFAULT_SHADOW_MAX_CONCURRENT,
+  DEFAULT_SHADOW_REQUEST_TIMEOUT_MS,
+  DEFAULT_SHADOW_SAMPLE_RATE,
   MAX_SPACE_MEMBERSHIP_PAGE_LIMIT,
   loadFeedgenConfig,
 } from '../src/config.js'
@@ -33,6 +37,18 @@ const baseEnv = {
   STRATOS_SERVICE_URL: 'https://stratos.bebop.test',
   STRATOS_SERVICE_DID: 'did:web:stratos.bebop.test',
   FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop-membership.sqlite',
+}
+
+function encryptedVolumeEnv(overrides: Record<string, string | undefined>) {
+  return {
+    ...baseEnv,
+    FEEDGEN_STORAGE_PROFILE: 'encrypted-volume',
+    FEEDGEN_SQLITE_PATH: '/var/lib/feedgen/records.sqlite',
+    FEEDGEN_BLOB_CACHE_DIRECTORY: '/var/lib/feedgen/blobs',
+    FEEDGEN_PROJECTION_MAX_AGE_MS: '3600000',
+    FEEDGEN_PROJECTION_MAX_BYTES: '536870912',
+    ...overrides,
+  }
 }
 
 describe('loadFeedgenConfig SQLite storage split', () => {
@@ -47,17 +63,26 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     ).toBe(':memory:')
   })
 
-  it('derives a distinct sibling database for durable membership snapshots', () => {
-    const cfg = loadFeedgenConfig({
-      ...baseEnv,
-      FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-      FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
+  it('defaults to the ephemeral profile without a disk blob cache', () => {
+    expect(DEFAULT_STORAGE_PROFILE).toBe('ephemeral')
+    expect(loadFeedgenConfig(baseEnv)).toMatchObject({
+      storageProfile: 'ephemeral',
+      sqlitePath: ':memory:',
+      blobCacheDirectory: undefined,
+      projectionMaxAgeMs: undefined,
+      projectionMaxBytes: undefined,
+      writerLockPath: undefined,
     })
+  })
 
-    expect(cfg.sqlitePath).toBe('/tmp/feedgen-bebop.sqlite')
-    expect(cfg.membershipSqlitePath).toBe(
-      '/tmp/feedgen-bebop.sqlite.membership',
-    )
+  it('requires an explicit membership database for durable projection', () => {
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: undefined,
+        }),
+      ),
+    ).toThrow(/FEEDGEN_MEMBERSHIP_SQLITE_PATH/)
   })
 
   it('keeps an explicitly configured membership database path', () => {
@@ -67,6 +92,57 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     })
 
     expect(cfg.membershipSqlitePath).toBe('/var/lib/feedgen/membership.sqlite')
+  })
+
+  it('requires every durable projection setting', () => {
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_SQLITE_PATH: ':memory:' }),
+      ),
+    ).toThrow(/FEEDGEN_SQLITE_PATH/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_BLOB_CACHE_DIRECTORY: undefined }),
+      ),
+    ).toThrow(/FEEDGEN_BLOB_CACHE_DIRECTORY/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_PROJECTION_MAX_AGE_MS: undefined }),
+      ),
+    ).toThrow(/FEEDGEN_PROJECTION_MAX_AGE_MS/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({ FEEDGEN_PROJECTION_MAX_BYTES: undefined }),
+      ),
+    ).toThrow(/FEEDGEN_PROJECTION_MAX_BYTES/)
+    expect(
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_SQLITE_PATH: '/var/lib/feedgen/records.sqlite',
+        }),
+      ),
+    ).toMatchObject({
+      storageProfile: 'encrypted-volume',
+      projectionMaxAgeMs: 3_600_000,
+      projectionMaxBytes: 536_870_912,
+      blobCacheDirectory: '/var/lib/feedgen/blobs',
+      writerLockPath: '/var/lib/feedgen/records.sqlite.writer-lock',
+    })
+  })
+
+  it('rejects disk projection configuration in the ephemeral profile', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SQLITE_PATH: '/var/lib/feedgen/records.sqlite',
+      }),
+    ).toThrow(/ephemeral storage profile/)
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_BLOB_CACHE_DIRECTORY: '/var/lib/feedgen/blobs',
+      }),
+    ).toThrow(/encrypted-volume storage profile/)
   })
 
   it('requires an explicit disk membership path for an in-memory record index', () => {
@@ -105,20 +181,40 @@ describe('loadFeedgenConfig SQLite storage split', () => {
 
   it('rejects a membership database that aliases the record database', () => {
     expect(() =>
-      loadFeedgenConfig({
-        ...baseEnv,
-        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-      }),
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+        }),
+      ),
     ).toThrow(/must differ/)
 
     expect(() =>
-      loadFeedgenConfig({
-        ...baseEnv,
-        FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
-        FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
-      }),
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_SQLITE_PATH: '/tmp/feedgen-bebop.sqlite',
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/tmp/./feedgen-bebop.sqlite',
+        }),
+      ),
     ).toThrow(/must differ/)
+  })
+
+  it('rejects a writer lock path that aliases a SQLite data path', () => {
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_WRITER_LOCK_PATH: '/var/lib/feedgen/records.sqlite',
+        }),
+      ),
+    ).toThrow(/FEEDGEN_WRITER_LOCK_PATH must differ/)
+    expect(() =>
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_MEMBERSHIP_SQLITE_PATH: '/var/lib/feedgen/membership.sqlite',
+          FEEDGEN_WRITER_LOCK_PATH: '/var/lib/feedgen/membership.sqlite',
+        }),
+      ),
+    ).toThrow(/FEEDGEN_WRITER_LOCK_PATH must differ/)
   })
 
   it('rejects a membership database symlink', () => {
@@ -128,11 +224,12 @@ describe('loadFeedgenConfig SQLite storage split', () => {
     try {
       symlinkSync(recordPath, membershipPath)
       expect(() =>
-        loadFeedgenConfig({
-          ...baseEnv,
-          FEEDGEN_SQLITE_PATH: recordPath,
-          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
-        }),
+        loadFeedgenConfig(
+          encryptedVolumeEnv({
+            FEEDGEN_SQLITE_PATH: recordPath,
+            FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+          }),
+        ),
       ).toThrow(/symbolic link/)
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -147,30 +244,152 @@ describe('loadFeedgenConfig SQLite storage split', () => {
       writeFileSync(recordPath, '')
       linkSync(recordPath, membershipPath)
       expect(() =>
-        loadFeedgenConfig({
-          ...baseEnv,
-          FEEDGEN_SQLITE_PATH: recordPath,
-          FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
-        }),
+        loadFeedgenConfig(
+          encryptedVolumeEnv({
+            FEEDGEN_SQLITE_PATH: recordPath,
+            FEEDGEN_MEMBERSHIP_SQLITE_PATH: membershipPath,
+          }),
+        ),
       ).toThrow(/must differ/)
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
   })
 
-  it('still requires a Postgres URL for the Postgres backend', () => {
+  it('rejects the non-volume-bound Postgres backend', () => {
     expect(() =>
       loadFeedgenConfig({
         ...baseEnv,
         FEEDGEN_STORAGE_BACKEND: 'postgres',
       }),
+    ).toThrow(/must be sqlite/)
+  })
+
+  it('rejects unknown storage profiles with an actionable error', () => {
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_STORAGE_PROFILE: 'disk',
+      }),
     ).toThrow(
-      'Missing required env var FEEDGEN_POSTGRES_URL for postgres backend',
+      "Invalid FEEDGEN_STORAGE_PROFILE: disk (expected 'ephemeral' or 'encrypted-volume')",
+    )
+  })
+})
+
+describe('loadFeedgenConfig shadow reader', () => {
+  it('keeps authenticated shadow reads disabled by default', () => {
+    expect(loadFeedgenConfig(baseEnv)).toMatchObject({
+      shadowReaderUrl: undefined,
+      shadowSampleRate: DEFAULT_SHADOW_SAMPLE_RATE,
+      shadowRequestTimeoutMs: DEFAULT_SHADOW_REQUEST_TIMEOUT_MS,
+      shadowMaxConcurrent: DEFAULT_SHADOW_MAX_CONCURRENT,
+    })
+  })
+
+  it('accepts an explicit loopback sidecar and bounded sampling controls', () => {
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        FEEDGEN_SHADOW_READER_URL: 'http://127.0.0.1:3001/',
+        FEEDGEN_SHADOW_SAMPLE_RATE: '0.25',
+        FEEDGEN_SHADOW_REQUEST_TIMEOUT_MS: '500',
+        FEEDGEN_SHADOW_MAX_CONCURRENT: '3',
+      }),
+    ).toMatchObject({
+      shadowReaderUrl: 'http://127.0.0.1:3001',
+      shadowSampleRate: 0.25,
+      shadowRequestTimeoutMs: 500,
+      shadowMaxConcurrent: 3,
+    })
+  })
+
+  it.each([
+    [
+      'a remote URL',
+      { FEEDGEN_SHADOW_READER_URL: 'https://shadow.example.test' },
+    ],
+    ['localhost DNS', { FEEDGEN_SHADOW_READER_URL: 'http://localhost:3001' }],
+    ['userinfo', { FEEDGEN_SHADOW_READER_URL: 'http://user@127.0.0.1:3001' }],
+    ['an invalid rate', { FEEDGEN_SHADOW_SAMPLE_RATE: '1.01' }],
+    ['a rate without a reader', { FEEDGEN_SHADOW_SAMPLE_RATE: '0.1' }],
+  ])('rejects %s', (_name, values) => {
+    expect(() => loadFeedgenConfig({ ...baseEnv, ...values })).toThrow(
+      /FEEDGEN_SHADOW/,
     )
   })
 })
 
 describe('loadFeedgenConfig space-sync defaults', () => {
+  it('uses the shared PLC directory setting', () => {
+    expect(
+      loadFeedgenConfig({
+        ...baseEnv,
+        PLC_DIRECTORY: 'https://plc.private.test/',
+      }).feedgenPlcUrl,
+    ).toBe('https://plc.private.test')
+  })
+
+  it('passes explicit identity and PLC private networks to the resolver policy', () => {
+    const cfg = loadFeedgenConfig({
+      ...baseEnv,
+      PLC_DIRECTORY: 'https://plc.private.test',
+      PLC_DIRECTORY_PRIVATE_CIDRS: '10.42.0.0/16',
+      IDENTITY_PRIVATE_ORIGINS:
+        'https://pds-one.private.test,https://pds-two.private.test',
+      IDENTITY_PRIVATE_CIDRS: '10.43.0.0/16,172.25.111.0/24',
+    })
+    expect(cfg.identityTrustedOrigins).toEqual([
+      {
+        origin: 'https://pds-one.private.test',
+        privateCidrs: ['10.43.0.0/16', '172.25.111.0/24'],
+      },
+      {
+        origin: 'https://pds-two.private.test',
+        privateCidrs: ['10.43.0.0/16', '172.25.111.0/24'],
+      },
+      {
+        origin: 'https://plc.private.test',
+        privateCidrs: ['10.42.0.0/16'],
+      },
+    ])
+    expect(() =>
+      loadFeedgenConfig({
+        ...baseEnv,
+        IDENTITY_PRIVATE_ORIGINS: 'https://pds-one.private.test',
+      }),
+    ).toThrow(/IDENTITY_PRIVATE_CIDRS/)
+  })
+
+  it('validates private member-host configuration together at startup', () => {
+    const env = {
+      ...baseEnv,
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: 'https://pds.internal.test',
+      FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '10.40.0.0/16,172.25.111.0/24',
+    }
+    expect(loadFeedgenConfig(env).spaceSyncPrivateHostPolicy).toEqual({
+      origin: 'https://pds.internal.test',
+      networks: [
+        { network: 170393600, broadcast: 170459135 },
+        { network: 2887347968, broadcast: 2887348223 },
+      ],
+    })
+    for (const bad of [
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '' },
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '10.40.0.1/16' },
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_CIDRS: '8.8.8.0/24' },
+      { FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN: 'http://pds.internal.test' },
+      {
+        FEEDGEN_SPACE_SYNC_PRIVATE_HOST_ORIGIN:
+          'https://pds.internal.test/path',
+      },
+    ]) {
+      expect(() => loadFeedgenConfig({ ...env, ...bad })).toThrow(
+        /FEEDGEN_SPACE_SYNC_PRIVATE_HOST/,
+      )
+    }
+  })
+
   it('leaves request-timeout headroom above worst-case default host resolution', () => {
     const resolverWorkers = 10
     const resolverTimeoutMs = 3_000
@@ -421,7 +640,7 @@ describe('loadFeedgenConfig FEEDGEN_SPACE_SYNC_ALLOW_HTTP_HOSTS', () => {
 describe('blob cache configuration', () => {
   it('provides bounded defaults and permits explicit limits', () => {
     expect(loadFeedgenConfig(baseEnv)).toMatchObject({
-      blobCacheDirectory: './data/feedgen-blobs',
+      blobCacheDirectory: undefined,
       blobCacheMaxBytes: 536_870_912,
       blobCacheTtlMs: 3_600_000,
       blobMaxBytes: 26_214_400,
@@ -432,14 +651,15 @@ describe('blob cache configuration', () => {
       ],
     })
     expect(
-      loadFeedgenConfig({
-        ...baseEnv,
-        FEEDGEN_BLOB_CACHE_DIRECTORY: '/tmp/bebop',
-        FEEDGEN_BLOB_CACHE_MAX_BYTES: '123',
-        FEEDGEN_BLOB_CACHE_TTL_MS: '456',
-        FEEDGEN_BLOB_MAX_BYTES: '78',
-        FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS: '9',
-      }),
+      loadFeedgenConfig(
+        encryptedVolumeEnv({
+          FEEDGEN_BLOB_CACHE_DIRECTORY: '/tmp/bebop',
+          FEEDGEN_BLOB_CACHE_MAX_BYTES: '123',
+          FEEDGEN_BLOB_CACHE_TTL_MS: '456',
+          FEEDGEN_BLOB_MAX_BYTES: '78',
+          FEEDGEN_BLOB_MAX_CONCURRENT_DOWNLOADS: '9',
+        }),
+      ),
     ).toMatchObject({
       blobCacheDirectory: '/tmp/bebop',
       blobCacheMaxBytes: 123,
@@ -459,4 +679,15 @@ describe('blob cache configuration', () => {
         `Invalid ${name}`,
       )
   })
+
+  it.each(['FEEDGEN_PROJECTION_MAX_AGE_MS', 'FEEDGEN_PROJECTION_MAX_BYTES'])(
+    'rejects non-positive durable %s',
+    (name) => {
+      for (const value of ['0', '-1', 'NaN', 'Infinity', '1.5']) {
+        expect(() =>
+          loadFeedgenConfig(encryptedVolumeEnv({ [name]: value })),
+        ).toThrow(`Invalid ${name}`)
+      }
+    },
+  )
 })

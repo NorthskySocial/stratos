@@ -14,17 +14,23 @@ The process by which a user registers with a Stratos service via OAuth. This res
 
 ### Hydration
 
-The process where a client or AppView fetches the full content of a Stratos-backed record. Because Stratos records are private and live only in the user's per-actor repo on Stratos, hydration resolves a record reference into its full content after verifying access controls, returning it with a `source` field.
+Fetching the full content of a private record after checking access. For
+Stratos-hosted records, the response includes a `source` field identifying
+the service that supplied it.
 
 ### Source Field
 
-A field returned on a hydrated record that specifies where the full record is located. It includes the `uri` of the record in Stratos, the `cid` for verification, and the `service` DID of the Stratos instance. Stratos does not write per-record stubs to the user's PDS; the `source` field is attached at hydration time.
+A field on a fetched Stratos-hosted record that identifies its record URI,
+content ID (`cid`), and Stratos service DID. Apps use it to verify where the
+record came from. It is added when the record is fetched, not published as a
+separate public post.
 
 ## Technical Terms
 
 ### Actor Store
 
-The per-user storage within Stratos that holds records, blobs, and repository metadata for a specific DID.
+Stratos storage for one user. Users whose PDS supports protected spaces keep
+their private record repository on their PDS instead.
 
 ### MST (Merkle Search Tree)
 
@@ -36,7 +42,8 @@ The decentralized identifier for the Stratos service itself (e.g., `did:web:stra
 
 ### subscribeRecords
 
-A WebSocket sync stream provided by Stratos (and the PDS) that allows indexers to receive real-time updates about record creations, updates, and deletions.
+A WebSocket stream that sends Stratos record changes to authorized services
+such as the feed generator.
 
 ### XRPC
 

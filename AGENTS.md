@@ -17,7 +17,7 @@ through `zone.stratos.actor.enrollment` records.
 | **Enrollment**     | User registration with a Stratos service via OAuth. Creates profile record on user's PDS.                                                                                                       |
 | **Hydration**      | Clients or AppViews fetch Stratos-backed records and filter by viewer boundaries.                                                                                                               |
 | **Profile Record** | `zone.stratos.actor.enrollment` - published to user's PDS for endpoint discovery and enrollment verification.                                                                                   |
-| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped WebSocket stream consumed by sync clients (the standalone `stratos-indexer` and `stratos-feedgen`).                                         |
+| **Sync Stream**    | `zone.stratos.sync.subscribeRecords` - actor-scoped WebSocket stream consumed by sync clients (the standalone `stratos-indexer`, `stratos-feedgen`, and `stratos-feedgen-ng` services).         |
 | **Custody**        | Which party holds a user's records. `stratos` = Stratos hosts the repo and signs. `pds` = the user's own spaces-capable PDS hosts the repo and the user signs.                                  |
 | **Space**          | An upstream permissioned-data container (proposal 0016). Stratos is always the space **authority**. For a `pds`-custody user it is only the authority, and the user's PDS is the repo **host**. |
 
@@ -62,8 +62,9 @@ stratos/
 ├── stratos-core/       # Domain logic, ports (interfaces)
 ├── stratos-service/    # HTTP service, adapters (implementations)
 ├── stratos-client/     # Client library (discovery, routing, verification, scopes)
-├── stratos-indexer/    # Standalone indexer that writes Stratos data into an AppView database
-├── stratos-feedgen/    # Standalone feed generator; serves boundary-scoped hydrated feeds to clients
+├── stratos-indexer/    # Deprecated AppView indexer
+├── stratos-feedgen/    # Deprecated TypeScript feed generator; rollback reference
+├── stratos-feedgen-ng/ # Rust feed generator; encrypted local projection and scoped feeds
 ├── lexicons/           # ATProto lexicon definitions
 └── docs/               # Technical documentation
 ```
@@ -123,6 +124,15 @@ stratos-service/src/features/{feature}/
 ├── adapter.ts        # Port implementation
 └── handler.ts        # XRPC handlers (if applicable)
 ```
+
+The standalone Rust `stratos-feedgen-ng` crate uses the same separation of
+responsibilities without copying the TypeScript package layout. Keep domain
+rules and validation apart from network/storage adapters, put HTTP handlers in
+`server/`, and keep storage operations grouped by concern in `store/`. Rust
+traits may live beside their consumers. Keep unit tests beside Rust modules;
+use the shared feedgen harness for cross-implementation contracts. Do not add
+boolean flag arguments or put unrelated handlers and storage operations back
+into one large module.
 
 ### Module Layout
 
@@ -209,37 +219,31 @@ stratos-service/src/features/{feature}/
 | `util/worker-pool.ts`       | Thread pool for concurrent processing                                                                                                                                              |
 | `util/handle-dedup.ts`      | TTL cache that skips redundant `indexHandle` calls for recently-seen DIDs                                                                                                          |
 
-**Feed generator** (`stratos-feedgen/src/`):
+**Feed generator** (`stratos-feedgen-ng/src/`):
 
-Standalone service that subscribes to a single upstream Stratos, indexes posts
-into a local SQLite (WAL) store, and serves boundary-scoped, hydrated feeds to
-clients. Inbound requests carry a user service-auth JWT (`iss=userDID`,
-`aud=feedgenDID`); the feedgen resolves the user DID, looks up the viewer's
-boundaries, and returns only posts the viewer may see. Outbound calls to the
-upstream Stratos (including the sync WebSocket) use a feedgen-minted service-auth
-JWT (`iss=feedgenDID`, `aud=stratosDID`).
+The standalone Rust service subscribes to Stratos-custody actors and polls only
+authority-listed PDS-custody space members. It stages foreign repo changes
+until the terminal commit verifies, then stores bounded posts, boundaries, and
+cursors in a local SQLCipher projection. A viewer service-auth JWT identifies
+the requester; current authority enrollment determines readable boundaries.
+Outbound Stratos calls use feedgen-minted service-auth JWTs. The TypeScript
+`stratos-feedgen` remains available for rollback, but new design work belongs
+in the Rust feed generator.
 
-| File / dir      | Description                                                                                                                                           |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `server.ts`     | Express app: XRPC handlers, `/health`, `/.well-known/did.json` DID document                                                                           |
-| `config.ts`     | `FeedgenConfig` interface and environment variable loading (`loadFeedgenConfig`)                                                                      |
-| `index.ts`      | Package barrel exporting the public feedgen API                                                                                                       |
-| `bin/`          | CLI entry point (`main.ts`)                                                                                                                           |
-| `api/feed/`     | `getFeed.ts`, `describeFeed.ts` XRPC handlers                                                                                                         |
-| `auth/`         | Inbound service-auth JWT verifier (`verifier.ts`, `identity.ts`)                                                                                      |
-| `subscription/` | Background sync workers: `service-stream.ts`, `actor-syncer.ts`, `actor-pool.ts`, `indexer.ts`                                                        |
-| `upstream/`     | `UpstreamStratosClient` (`client.ts`) + `mintServiceJwt` (`jwt.ts`) to the upstream Stratos                                                           |
-| `enrollment/`   | Viewer-boundary cache (`manager.ts` + TTL/LRU in `lru.ts`)                                                                                            |
-| `db/`           | Local post/boundary/cursor index (`sqlite.ts`, `postgres.ts`, `schema/`)                                                                              |
-| `feeds/`        | Feed registry and static feed config (`config.ts`, `index.ts`)                                                                                        |
-| `purge/`        | Purges a revoked/shrunk viewer's local index and boundary cache (`purger.ts`) and reconciles enrollment state against upstream (`reconcile.ts`)       |
-| `lexicon/`      | Handwritten inline copies of the `zone.stratos.feedgen.*` lexicons (`schemas.ts`), kept in source so the package has no out-of-tree file dependencies |
+| File / dir                                                            | Responsibility                                                                            |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `main.rs`, `config.rs`                                                | Process composition and validated high-level configuration                                |
+| `server.rs`, `server/`                                                | Router, feed/blob handlers, identity endpoints, response policy, and viewer authorization |
+| `authority.rs`, `identity.rs`, `space_host.rs`, `space_membership.rs` | Bounded upstream adapters and identity resolution                                         |
+| `service_stream.rs`, `actor_stream.rs`, `pds_space_sync.rs`           | Custody-specific ingestion and verified space polling                                     |
+| `membership_reconciler.rs`, `space_sync.rs`, `space_commit.rs`        | Authority membership, space URI validation, and commit verification                       |
+| `feed_service.rs`, `service.rs`, `lifecycle.rs`                       | Boundary-scoped feed reads, projection admission, and readiness transitions               |
+| `store.rs`, `store/`                                                  | SQLCipher key handling and actor, space, read, and retention storage operations           |
+| `blob_cache.rs`, `blob_service.rs`, `blob_upstream.rs`                | Bounded in-memory blob cache and authenticated upstream download                          |
 
-**Feed generator lexicons** (`lexicons/zone/stratos/feedgen/`): `getFeed`
-(authenticated), `describeFeed` (unauthenticated). Required env vars:
-`FEEDGEN_SERVICE_DID`, `FEEDGEN_SIGNING_KEY`, `STRATOS_SERVICE_URL`,
-`STRATOS_SERVICE_DID`. See `stratos-feedgen/README.md` for the full architecture
-diagram and auth-flow table.
+Feed lexicons live in `lexicons/zone/stratos/feedgen/`. See
+`stratos-feedgen-ng/README.md` for runtime configuration and
+`stratos-feedgen-ng/CUTOVER.md` for rehearsal and rollback.
 
 ### Storage Architecture
 
@@ -316,6 +320,12 @@ Use domain-specific error classes extending `StratosError`. See `stratos-core/sr
 Unit tests in `stratos-core/tests/`, integration tests in `stratos-service/tests/`, indexer tests in
 `stratos-indexer/tests/`. Uses vitest. Follow patterns in existing test files. Run:
 `pnpm exec vitest run`. When creating mock data, use names and places from popular 90s anime.
+
+Feed generator unit tests are colocated in Rust modules. Run `cargo fmt --all --check`,
+`cargo clippy --locked -p stratos-feedgen-ng --all-targets -- -D warnings`, and
+`cargo test --locked -p stratos-feedgen-ng`. Use `test/feedgen-harness/` for
+privacy, recovery, and parity contracts. The Stryker instructions below apply
+to changed TypeScript source; they are not a Rust mutation-testing command.
 
 ### Mutation testing (validating AI-generated code)
 

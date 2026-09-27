@@ -34,6 +34,7 @@ vi.mock('../src/config.js', async (importOriginal) => {
   }
 })
 vi.mock('../src/db/index.js', () => ({
+  isProjectionCompactionStore: () => false,
   createFeedgenStore: async () => ({
     listEnrolledActors: async () => [
       {

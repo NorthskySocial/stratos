@@ -9,6 +9,10 @@ import {
 } from '../config.js'
 import type { SpaceCredentialProof } from '../upstream/index.js'
 import {
+  isPrivateHostAddress,
+  type PrivateHostPolicy,
+} from './private-host-policy.js'
+import {
   InsecureHostOriginError,
   InvalidHostOriginError,
   MalformedCursorError,
@@ -47,6 +51,8 @@ export interface SpaceHostClientOptions {
    * remote plain-http connection.
    */
   allowHttpOrigins?: ReadonlySet<string>
+  /** Exact operator-controlled HTTPS origin permitted to resolve within private CIDRs. */
+  privateHostPolicy?: PrivateHostPolicy
   /** Byte cap for a `listRepoOps` page response body. */
   maxPageBytes?: number
   /** Byte cap for the decoded record value; response framing gets bounded headroom. */
@@ -117,6 +123,7 @@ export class SpaceHostClient {
   private readonly fetchImpl: typeof fetch
   private readonly requestTimeoutMs: number
   private readonly allowHttpOrigins: ReadonlySet<string>
+  private readonly privateHostPolicy?: PrivateHostPolicy
   private readonly maxPageBytes: number
   private readonly maxRecordBytes: number
   private readonly resolveHost: (
@@ -131,6 +138,7 @@ export class SpaceHostClient {
     this.requestTimeoutMs =
       opts.requestTimeoutMs ?? DEFAULT_SPACE_SYNC_REQUEST_TIMEOUT_MS
     this.allowHttpOrigins = opts.allowHttpOrigins ?? new Set()
+    this.privateHostPolicy = opts.privateHostPolicy
     this.maxPageBytes = opts.maxPageBytes ?? DEFAULT_MAX_PAGE_BYTES
     this.maxRecordBytes = getRecordResponseByteLimit(
       opts.maxRecordBytes ?? DEFAULT_SPACE_SYNC_MAX_RECORD_BYTES,
@@ -279,10 +287,16 @@ export class SpaceHostClient {
         cause: new Error('the host did not resolve to an address'),
       })
     }
-    for (const address of addresses) {
-      if (!isPublicAddress(address)) {
-        throw new PrivateHostOriginError(origin, address)
-      }
+    const privatePolicy =
+      this.privateHostPolicy?.origin === origin
+        ? this.privateHostPolicy
+        : undefined
+    const allPublic = addresses.every(isPublicAddress)
+    const allAllowedPrivate =
+      privatePolicy !== undefined &&
+      addresses.every((address) => isPrivateHostAddress(address, privatePolicy))
+    if (!allPublic && !allAllowedPrivate) {
+      throw new PrivateHostOriginError(origin, hostname)
     }
     return { origin, addresses }
   }

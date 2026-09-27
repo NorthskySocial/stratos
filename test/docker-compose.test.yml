@@ -126,7 +126,7 @@ services:
       PDS_JWT_SECRET: spaces-test-jwt-secret-do-not-use-outside-tests
       PDS_ADMIN_PASSWORD: spaces-test-admin
       PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: 3ee7e0ba1e6b6b1a8b0d8e4f7a2c9d1e5f8a3b6c9d2e5f8a1b4c7d0e3f6a9b2c
-      PDS_PLC_URL: ${STRATOS_PLC_URL:-https://plc.directory}
+      PDS_PLC_URL: ${PLC_DIRECTORY:-https://plc.directory}
       PDS_INVITE_REQUIRED: 'true'
       PDS_DEV_MODE: 'true'
       PDS_SERVICE_HANDLE_DOMAINS: .spike.test

@@ -41,6 +41,7 @@ export function createClubhouseAuth(config: ClubhouseConfig): BrowserAuth {
       : undefined,
     handleResolver:
       import.meta.env.VITE_ATPROTO_HANDLE_RESOLVER || 'https://bsky.social',
+    plcDirectoryUrl: config.plcDirectoryUrl,
     oauthProxyUrl: import.meta.env.VITE_ATPROTO_OAUTH_PROXY_URL,
     getBaseUrl: () => clubhouseBaseUrl(config),
     getClientId: () => clubhouseClientId(config),

@@ -210,7 +210,10 @@ const envSchema = z
       .transform((v) => v || undefined),
 
     // PLC directory
-    STRATOS_PLC_URL: z.string().url().default('https://plc.directory'),
+    PLC_DIRECTORY: z.string().url().default('https://plc.directory'),
+    PLC_DIRECTORY_PRIVATE_CIDRS: commaListSchema,
+    IDENTITY_PRIVATE_ORIGINS: commaListSchema,
+    IDENTITY_PRIVATE_CIDRS: commaListSchema,
 
     // Admin auth: comma-separated list of admin DIDs (OAuth-authorized operators)
     STRATOS_ADMIN_DIDS: z.string().optional(),
@@ -360,6 +363,9 @@ export interface StratosServiceConfig {
   }
   identity: {
     plcUrl: string
+    plcPrivateCidrs?: string[]
+    privateOrigins?: string[]
+    privateCidrs?: string[]
   }
   signingKeyHex?: string
   oauth: {
@@ -737,7 +743,10 @@ export function envToConfig(env: Env): StratosServiceConfig {
     roomCatalog,
     pdsSync: pdsSyncConfig(env),
     identity: {
-      plcUrl: env.STRATOS_PLC_URL,
+      plcUrl: env.PLC_DIRECTORY,
+      plcPrivateCidrs: env.PLC_DIRECTORY_PRIVATE_CIDRS,
+      privateOrigins: env.IDENTITY_PRIVATE_ORIGINS,
+      privateCidrs: env.IDENTITY_PRIVATE_CIDRS,
     },
     signingKeyHex: env.STRATOS_SIGNING_KEY_HEX,
     oauth: {

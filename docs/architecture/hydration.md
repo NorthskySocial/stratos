@@ -1,8 +1,9 @@
 # Hydration Architecture
 
-Stratos uses the _source field pattern_ to separate data storage from presentation. Full records
-with boundary content are stored in Stratos; when a record is hydrated, Stratos returns it wrapped
-with a `source` field that points back to the full record.
+This page describes records hosted by Stratos. A user with a spaces-capable
+PDS instead keeps private space records on that PDS. For Stratos-hosted
+records, an app fetches the full content only after an access check. The
+response includes a `source` field identifying the record and its service.
 
 ## Source Field Pattern
 

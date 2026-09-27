@@ -1,0 +1,36 @@
+[package]
+name = "stratos-feedgen-ng"
+version = "0.1.0"
+description = "Rust implementation of the Stratos Feedgen"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum = "0.8"
+async-trait = "0.1"
+base64 = "0.22"
+bs58 = "0.5"
+cid = "0.11"
+futures-util = "0.3"
+libc = "0.2"
+p256 = { version = "0.13", features = ["ecdsa"] }
+k256 = { version = "0.13", features = ["ecdsa"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = { version = "0.11", features = ["tags"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
+serde_yaml = "0.9.34"
+time = { version = "0.3", features = ["parsing"] }
+url = "2"
+serde_urlencoded = "0.7"
+sha2 = "0.10"
+hmac = "0.12"
+multihash = "0.19"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

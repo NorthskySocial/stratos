@@ -90,4 +90,4 @@ You've successfully:
 ## Next Steps
 
 - Explore [Boundary Visibility](../client/boundaries.md) to learn how access is restricted.
-- Learn about [Hydration](../architecture/hydration.md) to understand how these posts appear in feeds.
+- See [Feed Generator](/operator/feedgen-ng) to learn how private posts appear in feeds.

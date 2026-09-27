@@ -1,0 +1,76 @@
+# Rehearsal-only Feedgen NG profile. Run from the repository root with:
+# docker compose --env-file stratos-feedgen-ng/rehearsal.env -f stratos-feedgen-ng/compose.rehearsal.yml up
+#
+# The referenced state directory must be owned by uid:gid 65532:65532 and mode
+# 0700. Secret files must be readable only by that identity and are never
+# supplied through this compose file as environment values.
+services:
+  feedgen-ng:
+    build:
+      context: ..
+      dockerfile: stratos-feedgen-ng/Dockerfile
+    image: stratos-feedgen-ng:rehearsal
+    init: true
+    restart: 'no'
+    read_only: true
+    user: '65532:65532'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    ports:
+      - '${FEEDGEN_PORT:-3000}:3000'
+    environment:
+      FEEDGEN_PORT: '3000'
+      FEEDGEN_SERVICE_DID: '${FEEDGEN_SERVICE_DID:?set the Feedgen service DID}'
+      FEEDGEN_PUBLIC_URL: '${FEEDGEN_PUBLIC_URL:?set the Feedgen public URL}'
+      FEEDGEN_PUBLIC_KEY_MULTIBASE: '${FEEDGEN_PUBLIC_KEY_MULTIBASE:?set the Feedgen public key}'
+      FEEDGEN_SIGNING_KEY_FILE: /run/secrets/feedgen-signing-key
+      STRATOS_SERVICE_URL: '${STRATOS_SERVICE_URL:?set the Stratos service URL}'
+      STRATOS_PUBLIC_URL: '${STRATOS_PUBLIC_URL:-}'
+      STRATOS_SERVICE_DID: '${STRATOS_SERVICE_DID:?set the Stratos service DID}'
+      FEEDGEN_STORAGE_BACKEND: sqlite
+      FEEDGEN_STORAGE_PROFILE: encrypted-volume
+      FEEDGEN_SQLITE_PATH: /var/lib/feedgen/projection.sqlite
+      FEEDGEN_STORAGE_KEY_PATH: /run/secrets/feedgen-storage-key
+      FEEDGEN_WRITER_LOCK_PATH: /var/lib/feedgen/projection.sqlite.writer-lock
+      FEEDGEN_PROJECTION_MAX_AGE_MS: '${FEEDGEN_PROJECTION_MAX_AGE_MS:?set a retention duration}'
+      FEEDGEN_PROJECTION_MAX_BYTES: '${FEEDGEN_PROJECTION_MAX_BYTES:?set a retention byte limit}'
+      FEEDGEN_FEEDS_FILE: /etc/feedgen/feeds.yaml
+      FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS: '${FEEDGEN_ACTOR_SYNC_MAX_CONNECTIONS:-8}'
+      PLC_DIRECTORY: '${PLC_DIRECTORY:-https://plc.directory}'
+      PLC_DIRECTORY_PRIVATE_CIDRS: '${PLC_DIRECTORY_PRIVATE_CIDRS:-}'
+    volumes:
+      - type: bind
+        source: '${FEEDGEN_STATE_DIR:?set the protected state directory}'
+        target: /var/lib/feedgen
+        bind:
+          create_host_path: false
+      - type: bind
+        source: '${FEEDGEN_SIGNING_KEY_FILE:?set the signing key file}'
+        target: /run/secrets/feedgen-signing-key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: '${FEEDGEN_STORAGE_KEY_FILE:?set the projection key file}'
+        target: /run/secrets/feedgen-storage-key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: '${FEEDGEN_FEEDS_FILE:?set the feed catalogue file}'
+        target: /etc/feedgen/feeds.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    cpus: '1.0'
+    mem_limit: 512m
+    pids_limit: 128
+    ulimits:
+      core: 0
+      nofile:
+        soft: 1024
+        hard: 1024

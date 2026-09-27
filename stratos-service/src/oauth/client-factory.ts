@@ -9,6 +9,7 @@ import {
 } from './client.js'
 import type { StratosServiceConfig } from '../config.js'
 import { NodeOAuthClient } from '@atproto/oauth-client-node'
+import { trustedIdentityOrigins } from '../identity-resolver.js'
 
 /**
  * Build the client configuration shared by the enrollment and admin clients.
@@ -27,6 +28,8 @@ function oauthClientConfig(cfg: StratosServiceConfig): OAuthClientConfig {
     logoUri: cfg.oauth.logoUri,
     tosUri: cfg.oauth.tosUri,
     policyUri: cfg.oauth.policyUri,
+    plcDirectoryUrl: cfg.identity.plcUrl,
+    trustedOrigins: trustedIdentityOrigins(cfg),
     ...(cfg.stratos.devMode === true ? { allowHttp: true } : {}),
   }
 }

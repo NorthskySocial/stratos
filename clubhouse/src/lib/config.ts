@@ -6,6 +6,7 @@ export interface ClubhouseConfig {
   feedgenDid?: string
   publicOrigin?: string
   roomStatusEndpoint?: string
+  plcDirectoryUrl?: string
   /** Deployment-owned authority-space URIs keyed by public room ID. */
   pdsSpaceUriByRoom: Readonly<Record<string, string>>
 }
@@ -32,6 +33,7 @@ interface ClubhouseEnvironment {
   VITE_FEEDGEN_DID?: string
   VITE_CLUBHOUSE_URL?: string
   VITE_CLUBHOUSE_ROOM_STATUS_URL?: string
+  VITE_PLC_DIRECTORY?: string
   VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON?: string
 }
 
@@ -109,6 +111,7 @@ export function loadClubhouseConfig(
     feedgenDid: environment.VITE_FEEDGEN_DID,
     publicOrigin: optionalUrl(environment.VITE_CLUBHOUSE_URL),
     roomStatusEndpoint: optionalUrl(environment.VITE_CLUBHOUSE_ROOM_STATUS_URL),
+    plcDirectoryUrl: optionalUrl(environment.VITE_PLC_DIRECTORY),
     pdsSpaceUriByRoom: parseSpaceUris(
       environment.VITE_CLUBHOUSE_PDS_SPACE_URIS_JSON,
     ),
